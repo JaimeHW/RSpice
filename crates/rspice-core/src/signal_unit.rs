@@ -58,6 +58,123 @@ impl SignalUnit {
             other => format!("{other:?}").to_ascii_lowercase(),
         }
     }
+
+    /// Decibels, which the core carries as a declared custom symbol.
+    pub(crate) fn decibel() -> Self {
+        Self::Custom("dB".to_owned())
+    }
+}
+
+/// The spelling of a unit in published JSON documents.
+///
+/// One wire form, because a result document and the scalars it carries must
+/// encode a volt the same way; it lives with the vocabulary it encodes, so
+/// neither producer owns it.
+pub(crate) mod wire {
+    use super::SignalUnit;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(tag = "unit", rename_all = "snake_case", deny_unknown_fields)]
+    pub(crate) enum SignalUnitWire {
+        Volt,
+        Ampere,
+        Ohm,
+        Siemens,
+        Watt,
+        Hertz,
+        Second,
+        Degree,
+        Radian,
+        RadianPerSecond,
+        Dimensionless,
+        Logic,
+        Unspecified,
+        Custom { symbol: String },
+    }
+
+    impl From<&SignalUnit> for SignalUnitWire {
+        fn from(unit: &SignalUnit) -> Self {
+            match unit {
+                SignalUnit::Volt => Self::Volt,
+                SignalUnit::Ampere => Self::Ampere,
+                SignalUnit::Ohm => Self::Ohm,
+                SignalUnit::Siemens => Self::Siemens,
+                SignalUnit::Watt => Self::Watt,
+                SignalUnit::Hertz => Self::Hertz,
+                SignalUnit::Second => Self::Second,
+                SignalUnit::Degree => Self::Degree,
+                SignalUnit::Radian => Self::Radian,
+                SignalUnit::RadianPerSecond => Self::RadianPerSecond,
+                SignalUnit::Dimensionless => Self::Dimensionless,
+                SignalUnit::Logic => Self::Logic,
+                SignalUnit::Unspecified => Self::Unspecified,
+                SignalUnit::Custom(symbol) => Self::Custom {
+                    symbol: symbol.clone(),
+                },
+            }
+        }
+    }
+
+    impl From<SignalUnitWire> for SignalUnit {
+        fn from(unit: SignalUnitWire) -> Self {
+            match unit {
+                SignalUnitWire::Volt => Self::Volt,
+                SignalUnitWire::Ampere => Self::Ampere,
+                SignalUnitWire::Ohm => Self::Ohm,
+                SignalUnitWire::Siemens => Self::Siemens,
+                SignalUnitWire::Watt => Self::Watt,
+                SignalUnitWire::Hertz => Self::Hertz,
+                SignalUnitWire::Second => Self::Second,
+                SignalUnitWire::Degree => Self::Degree,
+                SignalUnitWire::Radian => Self::Radian,
+                SignalUnitWire::RadianPerSecond => Self::RadianPerSecond,
+                SignalUnitWire::Dimensionless => Self::Dimensionless,
+                SignalUnitWire::Logic => Self::Logic,
+                SignalUnitWire::Unspecified => Self::Unspecified,
+                SignalUnitWire::Custom { symbol } => Self::Custom(symbol),
+            }
+        }
+    }
+
+    /// `#[serde(with = ...)]` form of a required unit.
+    pub(crate) mod required {
+        use super::*;
+
+        pub(crate) fn serialize<S: Serializer>(
+            value: &SignalUnit,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            SignalUnitWire::from(value).serialize(serializer)
+        }
+
+        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<SignalUnit, D::Error> {
+            Ok(SignalUnitWire::deserialize(deserializer)?.into())
+        }
+    }
+
+    /// `#[serde(with = ...)]` form of an optional unit.
+    pub(crate) mod optional {
+        use super::*;
+
+        pub(crate) fn serialize<S: Serializer>(
+            value: &Option<SignalUnit>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            match value {
+                Some(unit) => serializer.serialize_some(&SignalUnitWire::from(unit)),
+                None => serializer.serialize_none(),
+            }
+        }
+
+        pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Option<SignalUnit>, D::Error> {
+            Ok(Option::<SignalUnitWire>::deserialize(deserializer)?.map(SignalUnit::from))
+        }
+    }
 }
 
 /// Unit of the sweep axis a `.DC` or `.STEP` card varies.

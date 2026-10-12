@@ -76,6 +76,9 @@ use crate::execution::schema::{
     SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
 };
 use crate::execution::topology::TopologyFingerprint;
+use crate::result_scalar::{
+    boolean_scalar, count_scalar, derived_metric_scalar, real_or_unbounded_scalar, real_scalar,
+};
 use crate::solver::SimulationResult;
 
 pub(super) mod quasi_periodic;
@@ -262,93 +265,9 @@ fn digital_bus_documents(
     Ok(buses.iter().map(DigitalEventBus::from).collect())
 }
 
-fn finite_scalar(
-    location: &'static str,
-    name: &str,
-    value: Value,
-) -> Result<ScalarValue, ResultDocumentError> {
-    if value.is_finite() {
-        Ok(ScalarValue::Real { value: Some(value) })
-    } else {
-        Err(source_error(
-            location,
-            format!("scalar '{name}' is {value}, which JSON cannot represent"),
-        ))
-    }
-}
-
 /// A statistic the producing result reports as `NaN` when it is undefined.
 fn defined_or_missing(value: Value) -> Option<f64> {
     value.is_finite().then_some(value)
-}
-
-fn real_scalar(
-    location: &'static str,
-    name: &str,
-    display: &str,
-    unit: SignalUnit,
-    value: Value,
-) -> Result<ResultScalar, ResultDocumentError> {
-    ResultScalar::new(
-        name,
-        display,
-        Some(unit),
-        finite_scalar(location, name, value)?,
-    )
-}
-
-/// One real scalar whose analysis may legitimately produce no finite value.
-///
-/// An ideal voltage source can have unbounded input impedance.
-/// Those are determinations, so they are recorded as such. `NaN` stays a hard
-/// projection failure: it is a defect in the producing computation, not a
-/// statement about the circuit.
-fn real_or_unbounded_scalar(
-    location: &'static str,
-    name: &str,
-    display: &str,
-    unit: SignalUnit,
-    value: Value,
-) -> Result<ResultScalar, ResultDocumentError> {
-    match ScalarUnavailability::classify(value) {
-        Some(reason) => ResultScalar::new(
-            name,
-            display,
-            Some(unit),
-            ScalarValue::Unavailable { reason },
-        ),
-        None => real_scalar(location, name, display, unit, value),
-    }
-}
-
-/// One derived curve metric, which exists only where the curve has the feature
-/// it measures — and the two ways it can be missing are different findings.
-///
-/// A transfer that never falls 3 dB below its peak has no -3 dB bandwidth, and
-/// one that never reaches unity has no 0 dB crossing: both are crossings a
-/// measured response did not make. A transfer with no finite magnitude
-/// anywhere has nothing to take a peak *over*, which is an empty domain and
-/// not a crossing at all. The caller states which of the two it found, because
-/// only the caller knows: the `None` arriving here is the same `None` either
-/// way. Both are determinations about the response, so both are recorded as
-/// such rather than reported as a zero the sweep would read as DC.
-fn derived_metric_scalar(
-    location: &'static str,
-    name: &str,
-    display: &str,
-    unit: SignalUnit,
-    absent: ScalarUnavailability,
-    value: Option<Value>,
-) -> Result<ResultScalar, ResultDocumentError> {
-    match value {
-        Some(value) => real_or_unbounded_scalar(location, name, display, unit, value),
-        None => ResultScalar::new(
-            name,
-            display,
-            Some(unit),
-            ScalarValue::Unavailable { reason: absent },
-        ),
-    }
 }
 
 /// Complex payload entries, which are always present: a payload table is not a
@@ -368,33 +287,6 @@ fn finite_complex_entries(
             }
         })
         .collect()
-}
-
-fn count_scalar(
-    name: &str,
-    display: &str,
-    value: usize,
-) -> Result<ResultScalar, ResultDocumentError> {
-    ResultScalar::new(
-        name,
-        display,
-        Some(SignalUnit::Dimensionless),
-        ScalarValue::Count {
-            value: value as u64,
-        },
-    )
-}
-
-fn boolean_scalar(
-    name: &str,
-    display: &str,
-    value: bool,
-) -> Result<ResultScalar, ResultDocumentError> {
-    ResultScalar::new(name, display, None, ScalarValue::Boolean { value })
-}
-
-fn decibel() -> SignalUnit {
-    SignalUnit::Custom("dB".to_owned())
 }
 
 fn volt_squared_per_hertz() -> SignalUnit {
@@ -1850,7 +1742,7 @@ impl AnalysisResultDocument {
         analysis: AnalysisInstanceId,
         result: &DcMatchResult,
     ) -> Result<AnalysisResultDocumentBuilder, ResultDocumentError> {
-        let scalars = Self::dc_match_scalars(result)?;
+        let scalars = result.document_scalars()?;
         // Every number below is checked by `DcMatchPayload::validate`, which
         // the builder runs before the document is handed back.
         let payload = DcMatchPayload {
@@ -1878,136 +1770,6 @@ impl AnalysisResultDocument {
             applied_correlations_process: result.applied_correlations_process,
         };
         Ok(Self::builder(analysis, ResultPayload::DcMatch(payload), 0).scalars(scalars))
-    }
-
-    /// Shared DC mismatch summary values for documents and control PRINT.
-    pub(crate) fn dc_match_scalars(
-        result: &DcMatchResult,
-    ) -> Result<Vec<ResultScalar>, ResultDocumentError> {
-        const LOCATION: &str = "DC mismatch result";
-        let unit = result.output_unit();
-        Ok(vec![
-            real_scalar(
-                LOCATION,
-                "nominal_value",
-                "Nominal value",
-                unit.clone(),
-                result.nominal_value,
-            )?,
-            real_scalar(
-                LOCATION,
-                "sigma_total",
-                "Total sigma",
-                unit.clone(),
-                result.sigma_total,
-            )?,
-            real_scalar(
-                LOCATION,
-                "sigma_mismatch",
-                "Mismatch sigma",
-                unit.clone(),
-                result.sigma_mismatch,
-            )?,
-            real_scalar(
-                LOCATION,
-                "sigma_process",
-                "Process sigma",
-                unit.clone(),
-                result.sigma_process,
-            )?,
-            // What the card asked to be quoted, so a reader does not have to
-            // recover the multiplier from the deck to interpret the row.
-            real_scalar(
-                LOCATION,
-                "quoted_sigma",
-                "Quoted sigma",
-                unit,
-                result.quoted_sigma(),
-            )?,
-        ])
-    }
-
-    /// Shared scalar determinations for documents and control expressions.
-    pub(crate) fn stability_scalars(
-        result: &StbResult,
-    ) -> Result<Vec<ResultScalar>, ResultDocumentError> {
-        const LOCATION: &str = "stability result";
-        let margins = &result.margins;
-        let margin_scalar = |name, display, unit, value| {
-            derived_metric_scalar(
-                LOCATION,
-                name,
-                display,
-                unit,
-                ScalarUnavailability::NoCrossover,
-                value,
-            )
-        };
-        Ok(vec![
-            margin_scalar(
-                "gain_margin_db",
-                "Gain margin",
-                decibel(),
-                margins.gain_margin.map(|m| m.value),
-            )?,
-            margin_scalar(
-                "gain_margin_frequency",
-                "Gain margin frequency",
-                SignalUnit::Hertz,
-                margins.gain_margin.map(|m| m.frequency),
-            )?,
-            margin_scalar(
-                "phase_margin_degrees",
-                "Phase margin",
-                SignalUnit::Degree,
-                margins.phase_margin.map(|m| m.value),
-            )?,
-            margin_scalar(
-                "phase_margin_frequency",
-                "Phase margin frequency",
-                SignalUnit::Hertz,
-                margins.phase_margin.map(|m| m.frequency),
-            )?,
-            ResultScalar::new(
-                "dc_loop_gain",
-                "DC return ratio",
-                Some(SignalUnit::Dimensionless),
-                ScalarValue::Complex {
-                    value: margins.dc_loop_gain.map(Into::into),
-                },
-            )?,
-            match margins.dc_gain_db() {
-                Some(value) => real_or_unbounded_scalar(
-                    LOCATION,
-                    "dc_loop_gain_db",
-                    "DC loop gain",
-                    decibel(),
-                    value,
-                )?,
-                None => ResultScalar::new(
-                    "dc_loop_gain_db",
-                    "DC loop gain",
-                    Some(decibel()),
-                    ScalarValue::Real { value: None },
-                )?,
-            },
-            margin_scalar(
-                "unity_gain_bandwidth",
-                "Unity gain bandwidth",
-                SignalUnit::Hertz,
-                margins.unity_gain_bandwidth(),
-            )?,
-            boolean_scalar(
-                "multiple_unity_gain_crossovers",
-                "Multiple unity-gain crossovers",
-                margins.num_crossovers > 1,
-            )?,
-            count_scalar(
-                "unity_gain_crossovers",
-                "Unity gain crossovers",
-                margins.num_crossovers,
-            )?,
-        ])
     }
 
     /// Project one `.STB` loop-gain result.
@@ -2087,7 +1849,7 @@ impl AnalysisResultDocument {
                     LOCATION,
                     "loop_gain_db",
                     "|L(jw)| dB",
-                    decibel(),
+                    SignalUnit::decibel(),
                     SignalValueType::Real,
                     point_count,
                 )?,
@@ -2112,7 +1874,7 @@ impl AnalysisResultDocument {
             )?,
         ];
 
-        let scalars = Self::stability_scalars(result)?;
+        let scalars = result.document_scalars()?;
 
         let mut nyquist = Vec::with_capacity(result.nyquist_points.len());
         for point in &result.nyquist_points {
@@ -3386,7 +3148,7 @@ impl AnalysisResultDocument {
                 LOCATION,
                 "peak_gain_db",
                 "Peak gain",
-                decibel(),
+                SignalUnit::decibel(),
                 peak_absent,
                 result.peak_gain.map(|(_, gain_db)| gain_db),
             )?,
@@ -3597,7 +3359,7 @@ impl AnalysisResultDocument {
             curve(
                 "stability_margin_db",
                 "Stability margin",
-                decibel(),
+                SignalUnit::decibel(),
                 &margin_db,
             )?,
             curve(
@@ -3649,7 +3411,7 @@ impl AnalysisResultDocument {
                     LOCATION,
                     "min_stability_margin_db",
                     "Smallest stability margin",
-                    decibel(),
+                    SignalUnit::decibel(),
                     margin,
                 )?,
                 // The margin is a minimum over the modes that are not the
@@ -3662,7 +3424,7 @@ impl AnalysisResultDocument {
                 None => ResultScalar::new(
                     "min_stability_margin_db",
                     "Smallest stability margin",
-                    Some(decibel()),
+                    Some(SignalUnit::decibel()),
                     ScalarValue::Unavailable {
                         reason: ScalarUnavailability::EmptyDomain,
                     },

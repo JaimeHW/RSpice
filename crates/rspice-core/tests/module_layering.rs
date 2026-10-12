@@ -129,6 +129,12 @@ const LAYERS: &[(&str, u32)] = &[
     // defines one, and the rename would have cost five crates a path for no
     // gain.
     ("numerics", 1),
+    // Typed per-analysis scalars. Data, like the `signal_unit` vocabulary
+    // whose units and wire spelling they carry: the analysis results that
+    // determine one, the control host that prints one and the result document
+    // that publishes one all read down into it instead of the control host
+    // reaching up into `execution`.
+    ("result_scalar", 1),
     // SIMD acceleration uses the scalar numerical definitions for exceptional
     // values, unaligned tails and convergence policy. Numerics stays independent
     // of the accelerator so native and browser fallbacks have the same meaning.

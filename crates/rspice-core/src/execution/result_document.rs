@@ -192,6 +192,9 @@ mod wire;
 use std::collections::BTreeSet;
 use std::fmt;
 
+pub use crate::result_scalar::{
+    ComplexSample, ResultScalar, ResultScalarError, ScalarUnavailability, ScalarValue,
+};
 pub use frequency_table::{FrequencyTableColumn, FrequencyTableMetadata};
 pub use quasi_periodic::{QpacPayload, QpnoisePayload, QpssPayload, QpxfPayload};
 use serde::{Deserialize, Serialize};
@@ -1775,209 +1778,12 @@ fn validity_mask<T>(samples: &[Option<T>]) -> Vec<u8> {
         .collect()
 }
 
-/// One complex sample.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct ComplexSample {
-    pub real: f64,
-    pub imaginary: f64,
-}
-
-impl ComplexSample {
-    /// Build a sample from a core complex value.
-    pub const fn new(real: f64, imaginary: f64) -> Self {
-        Self { real, imaginary }
-    }
-}
-
-impl From<num_complex::Complex64> for ComplexSample {
-    fn from(value: num_complex::Complex64) -> Self {
-        Self {
-            real: value.re,
-            imaginary: value.im,
-        }
-    }
-}
-
-impl From<ComplexSample> for num_complex::Complex64 {
-    fn from(sample: ComplexSample) -> Self {
-        Self::new(sample.real, sample.imaginary)
-    }
-}
-
 /// One digital sample: a logic state with its drive strength.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct LogicSample {
     pub state: DigitalStateTag,
     pub strength: DigitalStrengthTag,
-}
-
-//=============================================================================
-// Scalars
-//=============================================================================
-
-/// One typed per-analysis scalar, such as a stability margin or a residual.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub struct ResultScalar {
-    name: String,
-    display_name: String,
-    #[serde(with = "wire::optional_signal_unit")]
-    unit: Option<SignalUnit>,
-    value: ScalarValue,
-}
-
-impl ResultScalar {
-    /// Build one scalar, rejecting empty names and non-finite values.
-    pub fn new(
-        name: impl Into<String>,
-        display_name: impl Into<String>,
-        unit: Option<SignalUnit>,
-        value: ScalarValue,
-    ) -> Result<Self, ResultDocumentError> {
-        let name = name.into();
-        let display_name = display_name.into();
-        require_name("scalar name", &name)?;
-        require_name("scalar display name", &display_name)?;
-        let scalar = Self {
-            name: name.trim().to_ascii_lowercase(),
-            display_name: display_name.trim().to_owned(),
-            unit,
-            value,
-        };
-        scalar.validate()?;
-        Ok(scalar)
-    }
-
-    /// Canonical scalar name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Display spelling of the scalar name.
-    pub fn display_name(&self) -> &str {
-        &self.display_name
-    }
-
-    /// Unit, or `None` when the producing result declares none.
-    pub const fn unit(&self) -> Option<&SignalUnit> {
-        self.unit.as_ref()
-    }
-
-    /// The value itself.
-    pub const fn value(&self) -> &ScalarValue {
-        &self.value
-    }
-
-    fn validate(&self) -> Result<(), ResultDocumentError> {
-        require_name("scalar name", &self.name)?;
-        require_name("scalar display name", &self.display_name)?;
-        match &self.value {
-            ScalarValue::Real { value } => finite_optional("scalar", *value),
-            ScalarValue::Complex { value } => {
-                if let Some(sample) = value {
-                    finite("scalar real part", sample.real)?;
-                    finite("scalar imaginary part", sample.imaginary)?;
-                }
-                Ok(())
-            }
-            ScalarValue::Integer { .. }
-            | ScalarValue::Count { .. }
-            | ScalarValue::Boolean { .. }
-            | ScalarValue::Unavailable { .. } => Ok(()),
-            ScalarValue::Text { value } => require_name("scalar text value", value),
-        }
-    }
-}
-
-/// A typed scalar value.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "representation", rename_all = "snake_case")]
-pub enum ScalarValue {
-    Real {
-        value: Option<f64>,
-    },
-    Complex {
-        value: Option<ComplexSample>,
-    },
-    Integer {
-        value: i64,
-    },
-    Count {
-        value: u64,
-    },
-    Boolean {
-        value: bool,
-    },
-    Text {
-        value: String,
-    },
-    /// A real quantity the analysis proved has no finite value, with the
-    /// reason. A finite `ResultScalar` cannot hold `±inf`, and rounding one
-    /// down to a large number would report a margin the loop does not have.
-    Unavailable {
-        reason: ScalarUnavailability,
-    },
-}
-
-/// Why a real scalar has no finite value.
-///
-/// This is stronger than `Real { value: None }`, which says only that the
-/// producing analysis did not compute the quantity. Each variant here is a
-/// determination: the analysis ran, and the answer is not a number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ScalarUnavailability {
-    /// The quantity diverges upward, such as ideal-source input impedance.
-    PositiveInfinity,
-    /// The quantity diverges downward, such as the logarithm of measured zero gain.
-    NegativeInfinity,
-    /// The quantity is only defined at a crossover not resolved in the sampled band,
-    /// so it has no value at all rather than an infinite one.
-    NoCrossover,
-    /// The quantity aggregates over a set — a maximum, a minimum, an extremum
-    /// across a sweep or a spectrum — and that set is empty, so there is
-    /// nothing to aggregate rather than a crossing that failed to happen.
-    ///
-    /// Distinct from [`NoCrossover`](Self::NoCrossover) because the two say
-    /// different things to the reader. A missing crossover is a statement
-    /// about the shape of a response that was measured: it went somewhere,
-    /// just never through the level asked about. An empty domain says the
-    /// measurement had no applicable members at all — an autonomous Floquet
-    /// spectrum holding only its own phase mode, or a transfer with no finite
-    /// magnitude anywhere to take a peak over. Reporting the second as the
-    /// first sends the reader looking for a crossing in a set that has no
-    /// elements.
-    EmptyDomain,
-}
-
-impl ScalarUnavailability {
-    /// Classify one non-finite real value, or `None` when it is finite.
-    ///
-    /// `NaN` is deliberately not classified: it is a defect in the producing
-    /// computation, not a determination about the circuit, and the projection
-    /// must keep rejecting it.
-    pub(crate) const fn classify(value: f64) -> Option<Self> {
-        if value == f64::INFINITY {
-            Some(Self::PositiveInfinity)
-        } else if value == f64::NEG_INFINITY {
-            Some(Self::NegativeInfinity)
-        } else {
-            None
-        }
-    }
-
-    /// Stable tag used by diagnostics and frontends.
-    pub const fn tag(self) -> &'static str {
-        match self {
-            Self::PositiveInfinity => "positive_infinity",
-            Self::NegativeInfinity => "negative_infinity",
-            Self::NoCrossover => "no_crossover",
-            Self::EmptyDomain => "empty_domain",
-        }
-    }
 }
 
 //=============================================================================
@@ -2380,3 +2186,15 @@ impl fmt::Display for ResultDocumentError {
 }
 
 impl std::error::Error for ResultDocumentError {}
+
+impl From<ResultScalarError> for ResultDocumentError {
+    fn from(error: ResultScalarError) -> Self {
+        match error {
+            ResultScalarError::EmptyName { location } => Self::EmptyName { location },
+            ResultScalarError::NonFinite { location, value } => Self::NonFinite { location, value },
+            ResultScalarError::SourceResult { location, detail } => {
+                Self::SourceResult { location, detail }
+            }
+        }
+    }
+}

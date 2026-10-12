@@ -21,6 +21,7 @@ use crate::execution::schema::{
     SignalDescriptor, SignalKind, SignalOwner, SignalShape, SignalUnit, SignalValueType,
 };
 use crate::execution::topology::TopologyFingerprint;
+use crate::signal_unit::wire::SignalUnitWire;
 
 /// Generate a `serde(with)` module for a fieldless enum with stable tags.
 ///
@@ -172,105 +173,11 @@ tagged_enum_adapter!(dc_match_scope, DcMatchScope, {
 // Signal units and owners
 //=============================================================================
 
-#[derive(Serialize, Deserialize)]
-#[serde(tag = "unit", rename_all = "snake_case", deny_unknown_fields)]
-enum SignalUnitWire {
-    Volt,
-    Ampere,
-    Ohm,
-    Siemens,
-    Watt,
-    Hertz,
-    Second,
-    Degree,
-    Radian,
-    RadianPerSecond,
-    Dimensionless,
-    Logic,
-    Unspecified,
-    Custom { symbol: String },
-}
-
-impl From<&SignalUnit> for SignalUnitWire {
-    fn from(unit: &SignalUnit) -> Self {
-        match unit {
-            SignalUnit::Volt => Self::Volt,
-            SignalUnit::Ampere => Self::Ampere,
-            SignalUnit::Ohm => Self::Ohm,
-            SignalUnit::Siemens => Self::Siemens,
-            SignalUnit::Watt => Self::Watt,
-            SignalUnit::Hertz => Self::Hertz,
-            SignalUnit::Second => Self::Second,
-            SignalUnit::Degree => Self::Degree,
-            SignalUnit::Radian => Self::Radian,
-            SignalUnit::RadianPerSecond => Self::RadianPerSecond,
-            SignalUnit::Dimensionless => Self::Dimensionless,
-            SignalUnit::Logic => Self::Logic,
-            SignalUnit::Unspecified => Self::Unspecified,
-            SignalUnit::Custom(symbol) => Self::Custom {
-                symbol: symbol.clone(),
-            },
-        }
-    }
-}
-
-impl From<SignalUnitWire> for SignalUnit {
-    fn from(unit: SignalUnitWire) -> Self {
-        match unit {
-            SignalUnitWire::Volt => Self::Volt,
-            SignalUnitWire::Ampere => Self::Ampere,
-            SignalUnitWire::Ohm => Self::Ohm,
-            SignalUnitWire::Siemens => Self::Siemens,
-            SignalUnitWire::Watt => Self::Watt,
-            SignalUnitWire::Hertz => Self::Hertz,
-            SignalUnitWire::Second => Self::Second,
-            SignalUnitWire::Degree => Self::Degree,
-            SignalUnitWire::Radian => Self::Radian,
-            SignalUnitWire::RadianPerSecond => Self::RadianPerSecond,
-            SignalUnitWire::Dimensionless => Self::Dimensionless,
-            SignalUnitWire::Logic => Self::Logic,
-            SignalUnitWire::Unspecified => Self::Unspecified,
-            SignalUnitWire::Custom { symbol } => Self::Custom(symbol),
-        }
-    }
-}
-
-pub(super) mod signal_unit {
-    use super::*;
-
-    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
-        value: &SignalUnit,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        SignalUnitWire::from(value).serialize(serializer)
-    }
-
-    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<SignalUnit, D::Error> {
-        Ok(SignalUnitWire::deserialize(deserializer)?.into())
-    }
-}
-
-pub(super) mod optional_signal_unit {
-    use super::*;
-
-    pub(in crate::execution::result_document) fn serialize<S: Serializer>(
-        value: &Option<SignalUnit>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        match value {
-            Some(unit) => serializer.serialize_some(&SignalUnitWire::from(unit)),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    pub(in crate::execution::result_document) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<Option<SignalUnit>, D::Error> {
-        Ok(Option::<SignalUnitWire>::deserialize(deserializer)?.map(SignalUnit::from))
-    }
-}
+// A unit's wire form lives with the unit vocabulary, because the scalars a
+// document carries encode their units too and are defined below this layer.
+pub(super) use crate::signal_unit::wire::{
+    optional as optional_signal_unit, required as signal_unit,
+};
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "owner", rename_all = "snake_case", deny_unknown_fields)]

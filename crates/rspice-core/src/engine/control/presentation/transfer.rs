@@ -1,8 +1,8 @@
 //! Transfer scalars retain physical units and exact unbounded determinations.
 use super::*;
 use crate::analysis::TransferFunctionResult;
-use crate::execution::result_document::{ResultScalar, ScalarUnavailability, ScalarValue};
 use crate::netlist::expr::ExprError;
+use crate::result_scalar::{ResultScalar, ScalarUnavailability, ScalarValue};
 
 pub(in crate::engine::control) fn resolve_scalar(
     circuit: &ControlCircuit,

@@ -35,6 +35,11 @@ use crate::abort_signal::{AbortSignal, NoAbort};
 use crate::analysis::frequency_grid::{
     FrequencyGridError, FrequencyGridScale, frequency_point_count, generate_frequency_grid,
 };
+use crate::result_scalar::{
+    ResultScalar, ResultScalarError, ScalarUnavailability, ScalarValue, boolean_scalar,
+    count_scalar, derived_metric_scalar, real_or_unbounded_scalar,
+};
+use crate::signal_unit::SignalUnit;
 use num_complex::Complex64;
 use std::f64::consts::PI;
 use std::fmt::Write as _;
@@ -659,6 +664,88 @@ impl StbResult {
         } else {
             "ANALYSIS FAILED"
         }
+    }
+
+    /// The scalar determinations this result publishes, shared by its result
+    /// document and control-script expressions so the two cannot disagree.
+    pub(crate) fn document_scalars(&self) -> Result<Vec<ResultScalar>, ResultScalarError> {
+        const LOCATION: &str = "stability result";
+        let margins = &self.margins;
+        let margin_scalar = |name, display, unit, value| {
+            derived_metric_scalar(
+                LOCATION,
+                name,
+                display,
+                unit,
+                ScalarUnavailability::NoCrossover,
+                value,
+            )
+        };
+        Ok(vec![
+            margin_scalar(
+                "gain_margin_db",
+                "Gain margin",
+                SignalUnit::decibel(),
+                margins.gain_margin.map(|m| m.value),
+            )?,
+            margin_scalar(
+                "gain_margin_frequency",
+                "Gain margin frequency",
+                SignalUnit::Hertz,
+                margins.gain_margin.map(|m| m.frequency),
+            )?,
+            margin_scalar(
+                "phase_margin_degrees",
+                "Phase margin",
+                SignalUnit::Degree,
+                margins.phase_margin.map(|m| m.value),
+            )?,
+            margin_scalar(
+                "phase_margin_frequency",
+                "Phase margin frequency",
+                SignalUnit::Hertz,
+                margins.phase_margin.map(|m| m.frequency),
+            )?,
+            ResultScalar::new(
+                "dc_loop_gain",
+                "DC return ratio",
+                Some(SignalUnit::Dimensionless),
+                ScalarValue::Complex {
+                    value: margins.dc_loop_gain.map(Into::into),
+                },
+            )?,
+            match margins.dc_gain_db() {
+                Some(value) => real_or_unbounded_scalar(
+                    LOCATION,
+                    "dc_loop_gain_db",
+                    "DC loop gain",
+                    SignalUnit::decibel(),
+                    value,
+                )?,
+                None => ResultScalar::new(
+                    "dc_loop_gain_db",
+                    "DC loop gain",
+                    Some(SignalUnit::decibel()),
+                    ScalarValue::Real { value: None },
+                )?,
+            },
+            margin_scalar(
+                "unity_gain_bandwidth",
+                "Unity gain bandwidth",
+                SignalUnit::Hertz,
+                margins.unity_gain_bandwidth(),
+            )?,
+            boolean_scalar(
+                "multiple_unity_gain_crossovers",
+                "Multiple unity-gain crossovers",
+                margins.num_crossovers > 1,
+            )?,
+            count_scalar(
+                "unity_gain_crossovers",
+                "Unity gain crossovers",
+                margins.num_crossovers,
+            )?,
+        ])
     }
 }
 

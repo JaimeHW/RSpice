@@ -1,8 +1,8 @@
 //! STB vectors and scalar determinations share the document's physical meaning.
 use super::*;
 use crate::engine::StbAnalysisResult;
-use crate::execution::AnalysisResultDocument;
 use crate::netlist::expr::ExprError;
+use crate::result_scalar::ResultScalar;
 
 #[derive(Clone, Copy)]
 pub(super) enum StabilityColumn {
@@ -177,12 +177,14 @@ pub(super) fn printed_scalar(
             "stability scalar lost its result owner",
         ));
     };
-    let scalar = AnalysisResultDocument::stability_scalars(&result.result)
+    let scalar = result
+        .result
+        .document_scalars()
         .map_err(|error| command_error(line, error.to_string()))?
         .into_iter()
         .find(|scalar| scalar.name() == selected.id.signal)
         .ok_or_else(|| command_error(line, "stability scalar lost its document identity"))?;
-    let scalar = crate::execution::result_document::ResultScalar::new(
+    let scalar = ResultScalar::new(
         scalar.name(),
         label,
         Some(selected.unit.clone()),

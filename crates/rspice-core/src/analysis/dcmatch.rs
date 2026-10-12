@@ -25,6 +25,7 @@
 //! statistics is refused by name.
 
 use crate::Value;
+use crate::result_scalar::{ResultScalar, ResultScalarError, real_scalar};
 
 /// One statistical variable's contribution to an output's DC variance.
 #[derive(Debug, Clone, PartialEq)]
@@ -137,5 +138,51 @@ impl DcMatchResult {
     /// `sigma_multiplier * sigma_total`.
     pub fn quoted_sigma(&self) -> Value {
         self.sigma_multiplier * self.sigma_total
+    }
+
+    /// The summary scalars this result publishes, shared by its result
+    /// document and control-script PRINT so the two cannot disagree.
+    pub(crate) fn document_scalars(&self) -> Result<Vec<ResultScalar>, ResultScalarError> {
+        const LOCATION: &str = "DC mismatch result";
+        let unit = self.output_unit();
+        Ok(vec![
+            real_scalar(
+                LOCATION,
+                "nominal_value",
+                "Nominal value",
+                unit.clone(),
+                self.nominal_value,
+            )?,
+            real_scalar(
+                LOCATION,
+                "sigma_total",
+                "Total sigma",
+                unit.clone(),
+                self.sigma_total,
+            )?,
+            real_scalar(
+                LOCATION,
+                "sigma_mismatch",
+                "Mismatch sigma",
+                unit.clone(),
+                self.sigma_mismatch,
+            )?,
+            real_scalar(
+                LOCATION,
+                "sigma_process",
+                "Process sigma",
+                unit.clone(),
+                self.sigma_process,
+            )?,
+            // What the card asked to be quoted, so a reader does not have to
+            // recover the multiplier from the deck to interpret the row.
+            real_scalar(
+                LOCATION,
+                "quoted_sigma",
+                "Quoted sigma",
+                unit,
+                self.quoted_sigma(),
+            )?,
+        ])
     }
 }

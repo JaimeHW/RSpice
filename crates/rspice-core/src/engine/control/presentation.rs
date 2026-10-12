@@ -119,7 +119,7 @@ pub struct ControlScalar {
     /// Position among the print's scalar entries and vector traces.
     pub position: usize,
     pub dataset: String,
-    pub scalar: crate::execution::result_document::ResultScalar,
+    pub scalar: crate::result_scalar::ResultScalar,
 }
 
 #[derive(Clone, Copy)]

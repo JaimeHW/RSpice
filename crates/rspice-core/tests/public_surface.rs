@@ -88,8 +88,16 @@ use rspice_core::analysis::harmonic_balance::{
 // `SimulationError::instance_name` accessor, read by the CLI error payload
 // (`rspice-cli` cli/error.rs), the Python error attributes
 // (`rspice-python` errors/simulation.rs) and the typed simulation refusal
-// (`rspice-simulation` error.rs). The census is 5,659, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5659;
+// (`rspice-simulation` error.rs). The census was 5,659, with no slack.
+// Moving the result-document scalars below `engine` (so the control host
+// stops reaching up into `execution`) keeps every public name and adds two
+// statements: the re-export under `execution::result_document`, which
+// rspice-cli (compare determinations, control output, Monte Carlo waveform
+// IO), rspice-wasm (control handles and deck runners) and the engine-adapter
+// tests import through, and `ResultScalarError`, the error
+// `ResultScalar::new` returns now that the constructor cannot name a
+// result-document error. The census is 5,661, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5661;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

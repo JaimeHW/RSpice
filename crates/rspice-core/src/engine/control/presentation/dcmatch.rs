@@ -1,8 +1,8 @@
 //! DC mismatch summaries and ranked contributors retain their distinct meanings.
 use super::*;
 use crate::analysis::dcmatch::DcMatchResult;
-use crate::execution::result_document::{ResultScalar, ScalarValue};
 use crate::netlist::expr::ExprError;
+use crate::result_scalar::{ResultScalar, ScalarValue};
 
 #[derive(Clone, Copy)]
 pub(super) enum DcMatchColumn {
@@ -137,7 +137,8 @@ pub(super) fn printed_expression(
         let ControlAnalysisResult::DcMatch(result) = &first.dataset.result else {
             unreachable!()
         };
-        let scalar = crate::execution::AnalysisResultDocument::dc_match_scalars(result)
+        let scalar = result
+            .document_scalars()
             .map_err(|error| command_error(resolver.line, error.to_string()))?
             .into_iter()
             .find(|scalar| scalar.name() == first.id.signal)

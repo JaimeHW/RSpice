@@ -107,6 +107,10 @@ pub mod numerics;
 /// the device families that emit one and the circuit store that assembles the
 /// report both read down into it.
 pub mod op_label;
+/// Typed per-analysis scalars, carried by analysis results, control-script
+/// PRINT and result documents alike. Published under
+/// `execution::result_document`.
+mod result_scalar;
 /// Physical units carried by result schemas and control-expression vectors.
 mod signal_unit;
 pub mod solver;
