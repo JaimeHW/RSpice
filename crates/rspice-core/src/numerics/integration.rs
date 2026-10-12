@@ -26,8 +26,8 @@ mod companion;
 mod lte;
 mod timestep;
 
-pub(crate) use breakpoint::XYCE_BREAKPOINT_TOLERANCE;
 pub use breakpoint::{BreakpointManager, BreakpointStepPolicy};
+pub(crate) use breakpoint::{XYCE_BREAKPOINT_TOLERANCE, coincides_before};
 pub(crate) use charge::{
     BranchChargeHistory, TwoTerminalChargeHistory, integrated_charge_current,
     nonlinear_charge_companion_terms,

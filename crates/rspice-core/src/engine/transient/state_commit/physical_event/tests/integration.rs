@@ -21,6 +21,7 @@ fn integrated_event_does_not_erase_a_real_subtolerance_current_jump() {
                 phase_events: PhysicalEventOrders::FromCauses {
                     sources: &sources,
                     accepted_time: 0.0,
+                    coincidence_floor: 0.0,
                 },
             },
             &options(),
@@ -58,6 +59,7 @@ fn integration_reference_requires_unchanged_authored_forcing_and_an_integration_
                 phase_events: PhysicalEventOrders::FromCauses {
                     sources: &sources,
                     accepted_time: 0.0,
+                    coincidence_floor: 0.0,
                 },
             };
             assert!(

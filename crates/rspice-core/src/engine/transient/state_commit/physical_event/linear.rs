@@ -18,9 +18,12 @@ pub(super) fn prepare(
         ));
     }
     let startup = matches!(step.phase_events, PhysicalEventOrders::Startup(_));
+    // A source clock less than one floor before the event is processed with it
+    // (see `PhysicalEventOrders::FromCauses`); an earlier one was skipped.
     if let PhysicalEventOrders::FromCauses {
         sources,
         accepted_time,
+        coincidence_floor,
     } = &step.phase_events
         && (!accepted_time.is_finite()
             || *accepted_time < 0.0
@@ -28,7 +31,14 @@ pub(super) fn prepare(
             || (*accepted_time + step.dt != step.time && step.time - *accepted_time != step.dt)
             || sources
                 .next_after(*accepted_time, step.time)?
-                .is_some_and(|time| time < step.time))
+                .is_some_and(|time| {
+                    time < step.time
+                        && !crate::numerics::integration::coincides_before(
+                            time,
+                            step.time,
+                            *coincidence_floor,
+                        )
+                }))
     {
         return Err(failure(
             "invalid incoming interval for descriptor transition",

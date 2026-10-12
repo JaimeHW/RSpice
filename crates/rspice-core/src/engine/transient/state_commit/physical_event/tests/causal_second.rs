@@ -28,6 +28,7 @@ fn causal_event_orders_current_ramp_gains_continuous_rate_only_through_storage()
                         phase_events: PhysicalEventOrders::FromCauses {
                             sources: &sources,
                             accepted_time: 0.0,
+                            coincidence_floor: 0.0,
                         },
                     },
                     &options(),
@@ -126,6 +127,7 @@ fn causal_event_orders_delayed_corners_retain_incidence_and_constitutive_limits(
                         phase_events: PhysicalEventOrders::FromCauses {
                             sources: &sources,
                             accepted_time,
+                            coincidence_floor: 0.0,
                         },
                     },
                     &options(),
@@ -199,6 +201,7 @@ fn causal_event_orders_simultaneous_voltage_corner_limits_current_smoothing() {
                 phase_events: PhysicalEventOrders::FromCauses {
                     sources: &sources,
                     accepted_time: 0.0,
+                    coincidence_floor: 0.0,
                 },
             },
             &options(),

@@ -41,6 +41,7 @@ fn causal_event_orders_preserve_coordinates_and_accept_finite_source_currents() 
                         phase_events: PhysicalEventOrders::FromCauses {
                             sources: &sources,
                             accepted_time: 0.0,
+                            coincidence_floor: 0.0,
                         },
                     },
                     &options(),
@@ -112,6 +113,7 @@ fn causal_event_orders_keep_voltage_jumps_and_algebraic_current_feedback_at_zero
                     phase_events: PhysicalEventOrders::FromCauses {
                         sources: &sources,
                         accepted_time: 0.0,
+                        coincidence_floor: 0.0,
                     },
                 },
                 &options(),
@@ -200,6 +202,7 @@ fn causal_event_orders_use_each_tied_delay_owner_before_merging() {
                     phase_events: PhysicalEventOrders::FromCauses {
                         sources: &sources,
                         accepted_time,
+                        coincidence_floor: 0.0,
                     },
                 },
                 &options(),
@@ -225,6 +228,7 @@ fn causal_event_orders_use_each_tied_delay_owner_before_merging() {
                     phase_events: PhysicalEventOrders::FromCauses {
                         sources: &sources,
                         accepted_time,
+                        coincidence_floor: 0.0,
                     },
                 },
                 &options(),
@@ -272,6 +276,7 @@ fn causal_event_orders_use_each_tied_delay_owner_before_merging() {
                     phase_events: PhysicalEventOrders::FromCauses {
                         sources: &sources,
                         accepted_time,
+                        coincidence_floor: 0.0,
                     },
                 },
                 &options(),
@@ -311,6 +316,7 @@ fn causal_event_orders_refuse_skipped_clocks_and_an_inaccurate_continuous_limit(
                     phase_events: PhysicalEventOrders::FromCauses {
                         sources: &sources,
                         accepted_time: 0.0,
+                        coincidence_floor: 0.0,
                     },
                 },
                 &options(),
@@ -336,6 +342,7 @@ fn causal_event_orders_refuse_skipped_clocks_and_an_inaccurate_continuous_limit(
                 phase_events: PhysicalEventOrders::FromCauses {
                     sources: &sources,
                     accepted_time: 0.0,
+                    coincidence_floor: 0.0,
                 },
             },
             &options(),
@@ -370,6 +377,7 @@ fn causal_event_orders_do_not_infer_regularity_from_equal_values_at_a_gp_join() 
                 phase_events: PhysicalEventOrders::FromCauses {
                     sources: &sources,
                     accepted_time: 0.0,
+                    coincidence_floor: 0.0,
                 },
             },
             &options(),
@@ -399,6 +407,7 @@ fn causal_event_orders_preserve_history_on_resource_abort_and_clock_refusals() {
         phase_events: PhysicalEventOrders::FromCauses {
             sources: &sources,
             accepted_time: 0.0,
+            coincidence_floor: 0.0,
         },
     };
     let count = CountingAbort::new(usize::MAX);
@@ -456,6 +465,7 @@ fn causal_event_orders_do_not_reuse_waveform_continuity_for_the_dc_startup_trans
                 phase_events: PhysicalEventOrders::FromCauses {
                     sources: &sources,
                     accepted_time: 0.0,
+                    coincidence_floor: 0.0,
                 },
             },
             &options(),

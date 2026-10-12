@@ -43,6 +43,25 @@ const CONSERVATIVE_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.005;
 /// proposal.
 const XYCE_BREAKPOINT_RESTART_STEP_SCALE: Value = 0.1;
 
+/// Whether `earlier` is the instant `later`, computed another way.
+///
+/// The transient solver cannot take an interval shorter than its hard minimum
+/// step, `floor`, so two clocks less than one floor apart have no analog
+/// instant between them: they are one instant computed twice. `.tran 1n 100n`
+/// parses its stop time as `100 * 1e-9`, one ulp above the double a 10 ns
+/// clock's tenth tick converts to; a pulse corner at `25n + 0.1n` and a line
+/// arrival at `5.1n + 10n + 10n` are one ulp apart.
+///
+/// The rule every scheduler applies to such a pair is the same: whatever is
+/// owed a timepoint at `earlier` is delivered at `later`. That keeps the
+/// analog point at or after every event, which is all an event is owed, and
+/// it never leaves the solver a sub-floor sliver to step. A floor that is not
+/// a finite positive interval declares no resolution, and then only equal
+/// clocks are one instant.
+pub(crate) fn coincides_before(earlier: Value, later: Value, floor: Value) -> bool {
+    floor.is_finite() && floor > 0.0 && earlier < later && later - earlier < floor
+}
+
 /// Dialect-specific behavior for approaching and leaving breakpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BreakpointStepPolicy {
@@ -634,6 +653,28 @@ impl BreakpointManager {
 #[cfg(test)]
 mod breakpoint_manager_tests {
     use super::*;
+
+    #[test]
+    fn clocks_less_than_one_floor_apart_are_one_instant() {
+        let stop: Value = 100.0 * 1.0e-9;
+        let tick: Value = 1.0e-7;
+        assert!(coincides_before(tick, stop, 1.0e-20));
+        assert!(
+            !coincides_before(stop, tick, 1.0e-20),
+            "only an earlier clock"
+        );
+        assert!(
+            !coincides_before(stop, stop, 1.0e-20),
+            "equal clocks need no rule"
+        );
+        assert!(
+            !coincides_before(9.0e-8, stop, 1.0e-20),
+            "a floor or more apart"
+        );
+        for floor in [0.0, -1.0, Value::NAN, Value::INFINITY] {
+            assert!(!coincides_before(tick, stop, floor), "floor {floor}");
+        }
+    }
 
     #[test]
     fn limit_step_direct_hit_lands_on_breakpoint() {

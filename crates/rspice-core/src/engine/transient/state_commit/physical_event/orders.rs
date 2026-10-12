@@ -19,6 +19,12 @@ pub(in crate::engine::transient) enum PhysicalEventOrders<'a> {
     FromCauses {
         sources: &'a PhysicalSourceEvents,
         accepted_time: Value,
+        /// The solver's hard minimum step. A source or line clock less than
+        /// one floor before this event is the same instant computed another
+        /// way (`numerics::integration::coincides_before`); the scheduler
+        /// lands it here and it is processed here as a cause. Zero admits
+        /// only the event's own clock.
+        coincidence_floor: Value,
     },
 }
 
@@ -93,9 +99,16 @@ pub(super) fn classify(
     let PhysicalEventOrders::FromCauses {
         sources,
         accepted_time,
+        coincidence_floor,
     } = &step.phase_events
     else {
         unreachable!()
+    };
+    // A clock at the event, or less than one floor before it, is processed
+    // here; any earlier one in the incoming interval was skipped.
+    let lands_here = |time: Value| {
+        time == step.time
+            || crate::numerics::integration::coincides_before(time, step.time, *coincidence_floor)
     };
     if step.time == 0.0 {
         return Err(failure(
@@ -108,14 +121,6 @@ pub(super) fn classify(
         || (*accepted_time + step.dt != step.time && step.time - *accepted_time != step.dt)
     {
         return Err(failure("invalid accepted clock for physical event causes"));
-    }
-    if sources
-        .next_after(*accepted_time, step.time)?
-        .is_some_and(|t| t < step.time)
-    {
-        return Err(failure(
-            "incoming interval crossed an unprocessed physical source event",
-        ));
     }
     let mut has_cause = false;
     let mut has_unknown = false;
@@ -130,32 +135,41 @@ pub(super) fn classify(
     // and forcing when the inputs have the required derivative continuity.
     // The model and represented source audits below bound that second step.
     let mut propagated = DelayEventOrder::AtLeast(3);
-    for event in sources.at(step.time)? {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
+    let mut clock = *accepted_time;
+    while let Some(time) = sources.next_after(clock, step.time)? {
+        if !lands_here(time) {
+            return Err(failure(
+                "incoming interval crossed an unprocessed physical source event",
+            ));
         }
-        has_cause = true;
-        has_unknown |= event.order == DelayEventOrder::Unknown;
-        match event.owner {
-            PhysicalSourceOwner::Voltage(index) => {
-                if index >= circuit.voltage_sources.len() {
-                    return Err(failure("physical voltage source owner is absent"));
-                }
-                invariant &= continuous(event.order);
-                propagated = propagated.merge(event.order);
+        for event in sources.at(time)? {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
             }
-            PhysicalSourceOwner::Current(index) => {
-                let table = &circuit.current_sources;
-                if index >= table.len() {
-                    return Err(failure("physical current source owner is absent"));
+            has_cause = true;
+            has_unknown |= event.order == DelayEventOrder::Unknown;
+            match event.owner {
+                PhysicalSourceOwner::Voltage(index) => {
+                    if index >= circuit.voltage_sources.len() {
+                        return Err(failure("physical voltage source owner is absent"));
+                    }
+                    invariant &= continuous(event.order);
+                    propagated = propagated.merge(event.order);
                 }
-                let coupling =
-                    topology.current_jump_coupling(table.node_pos[index], table.node_neg[index])?;
-                invariant &= continuous(event.order)
-                    || coupling == charge_event::CurrentJumpCoupling::Cancels;
-                propagated = propagated.merge(current_order(event.order, coupling));
+                PhysicalSourceOwner::Current(index) => {
+                    let table = &circuit.current_sources;
+                    if index >= table.len() {
+                        return Err(failure("physical current source owner is absent"));
+                    }
+                    let coupling = topology
+                        .current_jump_coupling(table.node_pos[index], table.node_neg[index])?;
+                    invariant &= continuous(event.order)
+                        || coupling == charge_event::CurrentJumpCoupling::Cancels;
+                    propagated = propagated.merge(current_order(event.order, coupling));
+                }
             }
         }
+        clock = time;
     }
     bjt::arrival::visit_next(
         circuit,
@@ -190,7 +204,7 @@ pub(super) fn classify(
             .map_err(failure)?
             && time <= step.time
         {
-            if time != step.time {
+            if !lands_here(time) {
                 return Err(failure(
                     "incoming interval crossed an unprocessed transmission-line event",
                 ));

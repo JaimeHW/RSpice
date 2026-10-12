@@ -488,3 +488,80 @@ fn prescribed_capacitor_load_preserves_the_analytic_line_arrival() {
         }
     }
 }
+
+/// Xyce BUG 662's deck: a matched line driven by a pulse train. The 25.1 ns
+/// pulse corner (2.51e-8) and the arrival of the 5.1 ns corner after two line
+/// delays (2.5100000000000003e-8) are one instant computed two ways, one ulp
+/// apart under a Xyce floor of 5.6e-23 s. Landing on the first left the second
+/// unreachable ("physical source/delay event ... cannot be reached"); the two
+/// land together on the later clock, and the matched line's waves stay exact.
+#[test]
+fn a_pulse_corner_and_a_line_arrival_one_ulp_apart_land_together() {
+    use rspice_core::engine::{ConvergenceConfig, TransientStartupMode};
+    use rspice_core::numerics::integration::IntegrationMethod;
+    let deck = Netlist::parse(
+        "BUG 662\n\
+         T_T1 near 0 far 0 TD=10e-9 Z0=50\n\
+         R_R1 drive near 50\n\
+         R_R2 far 0 50\n\
+         V_V1 drive 0 PULSE(0 5 0 0.1e-9 0.1e-9 5e-9 25e-9)\n\
+         .end\n",
+    )
+    .unwrap();
+    // The Xyce suite's transient engine settings.
+    let mut convergence_config = ConvergenceConfig::robust();
+    convergence_config.voltage_reltol = 1.0e-4;
+    let engine = Engine::new(SimulationConfig {
+        max_iterations: SimulationConfig::default().max_iterations.max(1200),
+        convergence_config,
+        spice_dialect: SpiceDialect::Xyce,
+        integration_method: IntegrationMethod::Trapezoidal,
+        temperature: 300.15,
+        transient_initial_timestep: Some(1.0e-10),
+        ..SimulationConfig::default()
+    });
+    let result = engine
+        .run_tran_with_startup_mode(
+            &deck,
+            100.0e-9,
+            10.0e-9,
+            TransientStartupMode::OperatingPoint,
+        )
+        .unwrap();
+    assert_eq!(result.time.last().copied(), Some(100.0e-9));
+    let corner: f64 = 25.0e-9 + 0.1e-9;
+    assert!(result.time.contains(&corner.next_up()));
+    assert!(!result.time.contains(&corner));
+
+    // The source sees 50 ohms on each side, so the near end is half the pulse
+    // and the far end is the near end ten nanoseconds earlier.
+    let half_pulse = |time: f64| {
+        if time < 0.0 {
+            return 0.0;
+        }
+        let phase = time % 25.0e-9;
+        2.5 * if phase < 0.1e-9 {
+            phase / 0.1e-9
+        } else if phase <= 5.1e-9 {
+            1.0
+        } else if phase < 5.2e-9 {
+            (5.2e-9 - phase) / 0.1e-9
+        } else {
+            0.0
+        }
+    };
+    let near = result.try_voltage_waveform_named("near").unwrap();
+    let far = result.try_voltage_waveform_named("far").unwrap();
+    for (index, &time) in result.time.iter().enumerate() {
+        assert!(
+            (near[index] - half_pulse(time)).abs() < 1.0e-6,
+            "v(near) at {time:e}: {}",
+            near[index]
+        );
+        assert!(
+            (far[index] - half_pulse(time - 10.0e-9)).abs() < 1.0e-6,
+            "v(far) at {time:e}: {}",
+            far[index]
+        );
+    }
+}

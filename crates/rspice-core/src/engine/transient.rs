@@ -389,13 +389,54 @@ fn landed_veriloga_event_time(
 /// `always` clock's tenth tick converts to that nearest double. Landing the
 /// event on the horizon keeps the analog point at or after the event, which is
 /// all the schedule is owed, and makes the horizon the event's point: the tick
-/// is processed there and the run ends there.
+/// is processed there and the run ends there. This is
+/// [`crate::numerics::integration::coincides_before`], the rule every
+/// scheduler shares.
 fn coalesced_with_horizon(landed: Value, stop_time: Value, hard_min_dt: Value) -> Value {
-    if landed < stop_time && stop_time - landed < hard_min_dt {
+    if crate::numerics::integration::coincides_before(landed, stop_time, hard_min_dt) {
         stop_time
     } else {
         landed
     }
+}
+
+/// The clock a physical source, delay or line event lands on.
+///
+/// Physical clocks are exact, and the solver lands on each one; but two owners
+/// can compute one instant two ways. BUG 662's pulse corner at `25n + 0.1n` and
+/// its line arrival at `5.1n + 10n + 10n` are one ulp apart: landing on the
+/// first leaves the second a sliver no interval can reach. So the landing is
+/// carried, by [`crate::numerics::integration::coincides_before`], onto every
+/// later physical clock less than one floor after it, and the events it passes
+/// are processed there with it (`PhysicalEventOrders::FromCauses` judges them
+/// by the same rule).
+///
+/// `next_after` yields the earliest source or line clock strictly after its
+/// argument. A GP phase arrival is not carried past: its history is solved at
+/// its own clock and coalescing it is not qualified, so a landing that reaches
+/// one stays there.
+fn physical_event_landing(
+    earliest: Value,
+    phase_arrival: Option<Value>,
+    hard_min_dt: Value,
+    mut next_after: impl FnMut(Value) -> Result<Option<Value>, SimulationError>,
+) -> Result<Value, SimulationError> {
+    let mut landing = earliest;
+    while phase_arrival != Some(landing) {
+        let next = next_after(landing)?
+            .into_iter()
+            .chain(phase_arrival.filter(|arrival| *arrival > landing))
+            .reduce(Value::min);
+        match next {
+            Some(next)
+                if crate::numerics::integration::coincides_before(landing, next, hard_min_dt) =>
+            {
+                landing = next;
+            }
+            _ => break,
+        }
+    }
+    Ok(landing)
 }
 
 /// How many consecutive accepted points may advance by no more than the
@@ -6930,32 +6971,52 @@ impl Engine {
             if let Some(arrival) = phase_arrival {
                 arrival.ensure_reachable(&circuit, t, timestep.hard_min_dt())?;
             }
-            let source_event_time = physical_sources
-                .as_ref()
-                .map(|sources| sources.next_after(t, tstop))
-                .transpose()?
-                .flatten();
-            let mut line_arrival_time: Option<Value> = None;
-            if has_line_events {
-                for line in &circuit.tlines {
-                    if abort.is_aborted() {
-                        return Err(SimulationError::Aborted);
-                    }
-                    if let Some(arrival) = line
-                        .next_history_event_arrival_after(t)
-                        .map_err(SimulationError::Circuit)?
-                        .filter(|time| *time <= tstop)
-                    {
-                        line_arrival_time =
-                            Some(line_arrival_time.map_or(arrival, |old| old.min(arrival)));
+            let next_source_event = |after: Value| {
+                physical_sources
+                    .as_ref()
+                    .map(|sources| sources.next_after(after, tstop))
+                    .transpose()
+                    .map(Option::flatten)
+            };
+            let next_line_arrival = |after: Value| -> Result<Option<Value>, SimulationError> {
+                let mut earliest: Option<Value> = None;
+                if has_line_events {
+                    for line in &circuit.tlines {
+                        if abort.is_aborted() {
+                            return Err(SimulationError::Aborted);
+                        }
+                        if let Some(arrival) = line
+                            .next_history_event_arrival_after(after)
+                            .map_err(SimulationError::Circuit)?
+                            .filter(|time| *time <= tstop)
+                        {
+                            earliest = Some(earliest.map_or(arrival, |old| old.min(arrival)));
+                        }
                     }
                 }
-            }
+                Ok(earliest)
+            };
+            let source_event_time = next_source_event(t)?;
+            let line_arrival_time = next_line_arrival(t)?;
             let physical_event_time = source_event_time
                 .into_iter()
                 .chain(phase_arrival.map(|arrival| arrival.time))
                 .chain(line_arrival_time)
-                .reduce(Value::min);
+                .reduce(Value::min)
+                .map(|earliest| {
+                    physical_event_landing(
+                        earliest,
+                        phase_arrival.map(|arrival| arrival.time),
+                        timestep.hard_min_dt(),
+                        |after| {
+                            Ok(next_source_event(after)?
+                                .into_iter()
+                                .chain(next_line_arrival(after)?)
+                                .reduce(Value::min))
+                        },
+                    )
+                })
+                .transpose()?;
             if let Some(time) = physical_event_time.filter(|time| time - t < timestep.hard_min_dt())
             {
                 return Err(SimulationError::Circuit(format!(
@@ -10584,6 +10645,7 @@ impl Engine {
                                 phase_events: state_commit::physical_event::PhysicalEventOrders::FromCauses {
                                     sources: physical_sources.as_ref().expect("physical source owner"),
                                     accepted_time: step_started_at,
+                                    coincidence_floor: timestep.hard_min_dt(),
                                 },
                             },
                             &physical_options, physical_flux_tolerance, abort,
@@ -11185,6 +11247,7 @@ impl Engine {
                             state_commit::physical_event::PhysicalEventOrders::FromCauses {
                                 sources: physical_sources.as_ref().expect("physical source owner"),
                                 accepted_time: step_started_at,
+                                coincidence_floor: timestep.hard_min_dt(),
                             },
                     },
                     &physical_options,
@@ -13023,6 +13086,49 @@ mod tests {
         let error = landed_veriloga_event_time(grid, 1.25, 1.0, Value::NAN, NO_HORIZON)
             .expect_err("an unusable hard minimum has no instant to land on");
         assert!(error.to_string().contains("invalid solver hard minimum"));
+    }
+
+    /// BUG 662's pulse corner at 25.1 ns and its line arrival, the corner
+    /// launched at 5.1 ns and carried through two 10 ns delays, are one instant
+    /// one ulp apart (2.51e-8 against 2.5100000000000003e-8, under a Xyce
+    /// floor of 5.6e-23 s): the landing is the later clock, and a clock clear
+    /// of it, or a GP phase arrival, is not carried past.
+    #[test]
+    fn coincident_physical_clocks_land_on_the_later_one() {
+        let corner: Value = 25.0e-9 + 0.1e-9;
+        let arrival = corner.next_up();
+        assert_eq!(arrival, 2.5100000000000003e-8, "the BUG 662 pair");
+        let floor = 5.6e-23;
+        let schedule = [corner, arrival, 30.1e-9];
+        let next_after = |after: Value| Ok(schedule.iter().copied().find(|time| *time > after));
+
+        assert_eq!(
+            physical_event_landing(corner, None, floor, next_after).unwrap(),
+            arrival,
+            "the corner lands with the arrival one ulp after it"
+        );
+        assert_eq!(
+            physical_event_landing(arrival, None, floor, next_after).unwrap(),
+            arrival,
+            "a clock five nanoseconds on is its own landing"
+        );
+        assert_eq!(
+            physical_event_landing(corner, None, 0.0, next_after).unwrap(),
+            corner,
+            "no floor, no coincidence"
+        );
+        assert_eq!(
+            physical_event_landing(corner, Some(corner), floor, next_after).unwrap(),
+            corner,
+            "a phase arrival is never carried past"
+        );
+        let phase = corner.next_up();
+        assert_eq!(
+            physical_event_landing(corner, Some(phase), floor, |_| Ok(Some(arrival.next_up())))
+                .unwrap(),
+            phase,
+            "a landing reaching a phase arrival stops on it"
+        );
     }
 
     /// Ten thousand consecutive floor landings leave a round `tstop` reachable.
