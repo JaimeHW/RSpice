@@ -1903,6 +1903,10 @@ impl Engine {
     fn veriloga_noise_process_catalog(
         circuit: &CircuitData,
     ) -> Vec<crate::analysis::NoiseSourceIdentity> {
+        #[cfg_attr(
+            not(any(feature = "veriloga", feature = "veriloga-builtins-base")),
+            allow(unused_mut)
+        )]
         let mut catalog = Vec::new();
         #[cfg(feature = "veriloga")]
         let runtime_catalog =
