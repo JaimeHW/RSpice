@@ -23,6 +23,17 @@ struct HbNewtonStep {
     branch_currents: Vec<Vec<Complex64>>,
 }
 
+/// Armijo sufficient-decrease constant of the HB residual line search.
+const HB_ARMIJO_C: Value = 1e-4;
+
+/// Outcome of trying an undamped Newton step.
+enum FullNewtonStep {
+    /// The state holds the full step and its residual.
+    Accepted,
+    /// The state and residual are back at the iterate for the line search.
+    Rejected,
+}
+
 #[derive(Debug, Clone)]
 struct HbNewtonCheckpoint {
     node_voltages: Vec<Vec<Complex64>>,
@@ -987,6 +998,12 @@ impl HbSolver {
             abstol,
             source_scale,
         } = limits;
+        let line_search_limits = HbLineSearchLimits {
+            gmin,
+            source_scale,
+            reltol: tol,
+            current_abstol: abstol,
+        };
         for iter in 0..max_iter {
             if abort.is_aborted() {
                 return Err(HbError::Aborted);
@@ -1009,13 +1026,7 @@ impl HbSolver {
             // and restores quadratic convergence; the Toeplitz-only complex
             // path remains selectable for A/B comparison and for the large-
             // system Krylov fast path.
-            let correction = if self.config.use_exact_jacobian {
-                self.solve_jacobian_system_exact(state, gmin, abort)
-            } else {
-                let jacobian = self.build_full_jacobian_with_gmin(state, gmin)?;
-                self.solve_jacobian_system(&jacobian, state)
-            };
-            let delta_x = match correction {
+            let delta_x = match self.newton_correction(state, gmin, abort)? {
                 Ok(dx) => dx,
                 Err(error) if error.is_convergence_failure() => {
                     log::debug!("HB Newton correction rejected: {error}");
@@ -1024,19 +1035,22 @@ impl HbSolver {
                 Err(error) => return Err(error),
             };
 
-            // 5. Apply line search for robust convergence
-            match self.apply_line_search_with_gmin(
-                state,
-                &delta_x,
-                HbLineSearchLimits {
-                    gmin,
-                    source_scale,
-                    reltol: tol,
-                    current_abstol: abstol,
-                },
-                abort,
-            ) {
-                Ok(_) => {}
+            // 5. Take the full step when it contracts the Newton correction,
+            // otherwise apply the residual line search for robust convergence.
+            match self.full_newton_step_contraction(state, &delta_x, line_search_limits, abort) {
+                Ok(FullNewtonStep::Accepted) => {}
+                Ok(FullNewtonStep::Rejected) => {
+                    match self.apply_line_search_with_gmin(
+                        state,
+                        &delta_x,
+                        line_search_limits,
+                        abort,
+                    ) {
+                        Ok(_) => {}
+                        Err(error) if error.is_convergence_failure() => return Ok(false),
+                        Err(err) => return Err(err),
+                    }
+                }
                 Err(error) if error.is_convergence_failure() => return Ok(false),
                 Err(err) => return Err(err),
             }
@@ -1332,16 +1346,186 @@ impl HbSolver {
         } = limits;
         let initial_merit =
             state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
-        let armijo_c = 1e-4;
         let min_alpha = self.config.min_damping;
-        let vt = 0.02585; // Thermal voltage at 300K
 
         let mut alpha = self.config.damping;
         let mut best_alpha = alpha;
         let mut best_merit = f64::INFINITY;
 
+        self.ensure_newton_step_shape(delta)?;
         let x_orig = state.x.clone();
         let branch_orig = state.mna_branch_currents.clone();
+
+        while alpha >= min_alpha {
+            if abort.is_aborted() {
+                return Err(HbError::Aborted);
+            }
+            self.set_newton_trial(state, &x_orig, &branch_orig, delta, alpha);
+
+            self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+            let merit =
+                state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
+
+            if merit < initial_merit * (1.0 - HB_ARMIJO_C * alpha) {
+                return Ok(alpha);
+            }
+
+            if merit < best_merit {
+                best_merit = merit;
+                best_alpha = alpha;
+            }
+
+            alpha *= 0.5;
+        }
+
+        // Use best step found with voltage limiting
+        self.set_newton_trial(state, &x_orig, &branch_orig, delta, best_alpha);
+        self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+
+        Ok(best_alpha)
+    }
+
+    /// Try the undamped Newton step before backtracking.
+    ///
+    /// The residual certificate measures every harmonic row against its own
+    /// scale. A full step from a weakly excited state creates the mixing
+    /// products of the nonlinearity, and on a harmonic that held almost no
+    /// current those products fail the Armijo test even when the step has
+    /// landed in Newton's quadratic region. With tight tolerances the line
+    /// search then accepted only its smallest trial, and the solve crawled
+    /// at 1/64 of a step per iteration: 69 iterations for a VBIC orbit that
+    /// Xyce's full-step HB solves in four.
+    ///
+    /// A full step that fails the Armijo test is therefore also judged by
+    /// Deuflhard's natural monotonicity test: the iterate's own linearization
+    /// is solved against the endpoint's residual, and the step is taken when
+    /// that simplified correction is at most half the step, both measured row
+    /// by row against the solution tolerances at the iterate. The test is
+    /// affine covariant, so it sees through the residual's per-harmonic
+    /// scaling, and it uses the iterate's Jacobian, so an endpoint whose
+    /// devices are driven far from the linearization cannot pass by its own
+    /// steep conductances. Otherwise the iterate and its residual are
+    /// restored and the line search decides as before. A configured damping
+    /// below one keeps every step to the line search, and convergence is
+    /// still certified only by the residual rows.
+    fn full_newton_step_contraction(
+        &mut self,
+        state: &mut HbSolverState,
+        delta: &HbNewtonStep,
+        limits: HbLineSearchLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<FullNewtonStep, HbError> {
+        if self.config.damping < 1.0 {
+            return Ok(FullNewtonStep::Rejected);
+        }
+        let HbLineSearchLimits {
+            gmin,
+            source_scale,
+            reltol,
+            current_abstol,
+        } = limits;
+        if abort.is_aborted() {
+            return Err(HbError::Aborted);
+        }
+        let initial_merit =
+            state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
+        self.ensure_newton_step_shape(delta)?;
+        let x_orig = state.x.clone();
+        let branch_orig = state.mna_branch_currents.clone();
+        self.set_newton_trial(state, &x_orig, &branch_orig, delta, 1.0);
+        self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+        let merit = state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
+        if merit < initial_merit * (1.0 - HB_ARMIJO_C) {
+            return Ok(FullNewtonStep::Accepted);
+        }
+        if abort.is_aborted() {
+            return Err(HbError::Aborted);
+        }
+        // The simplified correction solves the iterate's own linearization
+        // against the endpoint residual: the state temporarily holds the
+        // iterate's coordinates beside the endpoint's residual.
+        let mut endpoint_x = x_orig;
+        let mut endpoint_branches = branch_orig;
+        std::mem::swap(&mut state.x, &mut endpoint_x);
+        std::mem::swap(&mut state.mna_branch_currents, &mut endpoint_branches);
+        let contracts = match self.newton_correction(state, gmin, abort)? {
+            Ok(simplified) => {
+                let size = self.newton_step_size(
+                    &state.x,
+                    &state.mna_branch_currents,
+                    delta,
+                    reltol,
+                    current_abstol,
+                );
+                let simplified_size = self.newton_step_size(
+                    &state.x,
+                    &state.mna_branch_currents,
+                    &simplified,
+                    reltol,
+                    current_abstol,
+                );
+                size.is_finite() && simplified_size.is_finite() && simplified_size <= 0.5 * size
+            }
+            Err(error) if error.is_convergence_failure() => false,
+            Err(error) => return Err(error),
+        };
+        if contracts {
+            std::mem::swap(&mut state.x, &mut endpoint_x);
+            std::mem::swap(&mut state.mna_branch_currents, &mut endpoint_branches);
+            return Ok(FullNewtonStep::Accepted);
+        }
+        self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
+        Ok(FullNewtonStep::Rejected)
+    }
+
+    /// Solve J * dX = -R at `state`. The outer error is a Jacobian assembly
+    /// failure; the inner result is the linear solve's.
+    fn newton_correction(
+        &mut self,
+        state: &HbSolverState,
+        gmin: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Result<HbNewtonStep, HbError>, HbError> {
+        Ok(if self.config.use_exact_jacobian {
+            self.solve_jacobian_system_exact(state, gmin, abort)
+        } else {
+            let jacobian = self.build_full_jacobian_with_gmin(state, gmin)?;
+            self.solve_jacobian_system(&jacobian, state)
+        })
+    }
+
+    /// Root-mean-square size of a Newton correction. Each node or branch row
+    /// is measured against its absolute tolerance plus `reltol` times the
+    /// row's largest coefficient at the iterate, so newly excited harmonics
+    /// share their row's scale.
+    fn newton_step_size(
+        &self,
+        node_voltages: &[Vec<Complex64>],
+        branch_currents: &[Vec<Complex64>],
+        step: &HbNewtonStep,
+        reltol: Value,
+        current_abstol: Value,
+    ) -> Value {
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for (rows, step_rows, abstol) in [
+            (node_voltages, &step.node_voltages, self.voltage_abstol),
+            (branch_currents, &step.branch_currents, current_abstol),
+        ] {
+            for (row, step_row) in rows.iter().zip(step_rows) {
+                let magnitude = row.iter().map(|value| value.norm()).fold(0.0, Value::max);
+                let tolerance = abstol + reltol * magnitude;
+                for value in step_row {
+                    let ratio = value.norm() / tolerance;
+                    sum += ratio * ratio;
+                    count += 1;
+                }
+            }
+        }
+        (sum / count.max(1) as Value).sqrt()
+    }
+
+    fn ensure_newton_step_shape(&self, delta: &HbNewtonStep) -> Result<(), HbError> {
         let harmonic_count = self.num_harmonics + 1;
         if delta.node_voltages.len() != self.num_nodes
             || delta
@@ -1358,82 +1542,42 @@ impl HbSolver {
                 "nonlinear HB line search received a malformed node/branch Newton step".to_string(),
             ));
         }
+        Ok(())
+    }
 
-        while alpha >= min_alpha {
-            if abort.is_aborted() {
-                return Err(HbError::Aborted);
-            }
-            for (node, dx_node) in delta.node_voltages.iter().enumerate() {
-                for (k, &dx) in dx_node.iter().enumerate() {
-                    if node < state.x.len() && k < state.x[node].len() {
-                        let v_old = x_orig[node][k].re;
-                        let v_new_raw = v_old + alpha * dx.re;
-
-                        // Apply PN voltage limiting to DC component only
-                        let v_new = if k == 0 && self.electrical_node(node) {
-                            limit_pn_voltage(v_old, v_new_raw, vt)
-                        } else {
-                            v_new_raw
-                        };
-
-                        // The DC coefficient of a real waveform has no
-                        // imaginary degree of freedom. Keeping a stale or
-                        // updated imaginary part here would make the line
-                        // search evaluate a state that the realified Newton
-                        // system cannot represent.
-                        let im_new = if k == 0 {
-                            0.0
-                        } else {
-                            x_orig[node][k].im + alpha * dx.im
-                        };
-                        state.x[node][k] = Complex64::new(v_new, im_new);
-                    }
-                }
-            }
-            for (branch, delta_spectrum) in delta.branch_currents.iter().enumerate() {
-                for (harmonic, &delta_current) in delta_spectrum.iter().enumerate() {
-                    let value = branch_orig[branch][harmonic] + alpha * delta_current;
-                    state.mna_branch_currents[branch][harmonic] = if harmonic == 0 {
-                        Complex64::new(value.re, 0.0)
-                    } else {
-                        value
-                    };
-                }
-            }
-
-            self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
-            let merit =
-                state.certificate_merit(reltol, current_abstol, self.voltage_abstol, false)?;
-
-            if merit < initial_merit * (1.0 - armijo_c * alpha) {
-                return Ok(alpha);
-            }
-
-            if merit < best_merit {
-                best_merit = merit;
-                best_alpha = alpha;
-            }
-
-            alpha *= 0.5;
-        }
-
-        // Use best step found with voltage limiting
+    /// Set the state `alpha` times a Newton step from the saved iterate, with
+    /// PN voltage limiting on the DC node coefficients.
+    fn set_newton_trial(
+        &self,
+        state: &mut HbSolverState,
+        x_orig: &[Vec<Complex64>],
+        branch_orig: &[Vec<Complex64>],
+        delta: &HbNewtonStep,
+        alpha: Value,
+    ) {
+        let vt = 0.02585; // Thermal voltage at 300K
         for (node, dx_node) in delta.node_voltages.iter().enumerate() {
             for (k, &dx) in dx_node.iter().enumerate() {
                 if node < state.x.len() && k < state.x[node].len() {
                     let v_old = x_orig[node][k].re;
-                    let v_new_raw = v_old + best_alpha * dx.re;
+                    let v_new_raw = v_old + alpha * dx.re;
 
+                    // Apply PN voltage limiting to DC component only
                     let v_new = if k == 0 && self.electrical_node(node) {
                         limit_pn_voltage(v_old, v_new_raw, vt)
                     } else {
                         v_new_raw
                     };
 
+                    // The DC coefficient of a real waveform has no
+                    // imaginary degree of freedom. Keeping a stale or
+                    // updated imaginary part here would make the line
+                    // search evaluate a state that the realified Newton
+                    // system cannot represent.
                     let im_new = if k == 0 {
                         0.0
                     } else {
-                        x_orig[node][k].im + best_alpha * dx.im
+                        x_orig[node][k].im + alpha * dx.im
                     };
                     state.x[node][k] = Complex64::new(v_new, im_new);
                 }
@@ -1441,7 +1585,7 @@ impl HbSolver {
         }
         for (branch, delta_spectrum) in delta.branch_currents.iter().enumerate() {
             for (harmonic, &delta_current) in delta_spectrum.iter().enumerate() {
-                let value = branch_orig[branch][harmonic] + best_alpha * delta_current;
+                let value = branch_orig[branch][harmonic] + alpha * delta_current;
                 state.mna_branch_currents[branch][harmonic] = if harmonic == 0 {
                     Complex64::new(value.re, 0.0)
                 } else {
@@ -1449,9 +1593,6 @@ impl HbSolver {
                 };
             }
         }
-        self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
-
-        Ok(best_alpha)
     }
 
     /// Add nonlinear device contributions to residual
