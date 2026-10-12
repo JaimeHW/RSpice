@@ -19141,9 +19141,23 @@ R1 out 0 1k
     XyceTestRunner::compare_dc_analysis_expression_snapshots(&baseline, &target)
         .expect("title and .PARAM/.DC representation are the only differences");
 
+    // sqrt(-2) is complex. Since b7451f4e1 the parser refuses it as a .DC
+    // operand instead of projecting it onto a real sweep value, so it never
+    // reaches the snapshot; the function case below keeps a real value.
+    match XyceTestRunner::parse_xyce_netlist(
+        &parameterized.replace("{p0}", "{sqrt(p0)}"),
+        Path::new("member.cir"),
+    ) {
+        Err(ParseError::InvalidValue(message)) => assert_eq!(
+            message,
+            "member.cir:7: Invalid argument: numeric field requires a real value; use real(), imag() or mag() explicitly"
+        ),
+        other => panic!("a complex .DC operand must fail while parsing: {other:?}"),
+    }
+
     for invalid in [
         parameterized.replace("{p0}", "{p0+p0}"),
-        parameterized.replace("{p0}", "{sqrt(p0)}"),
+        parameterized.replace("{p0}", "{abs(p0)}"),
         parameterized.replace("R1 out 0 1k", "R1 out 0 {p0}"),
         parameterized.replace("{p1}", "0"),
         parameterized.replace(".PARAM p2=5", ".PARAM p2=5\n.PARAM unused=1"),
