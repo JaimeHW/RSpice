@@ -1293,6 +1293,68 @@ fn native_soi_fd_rsh_series_resistance_matches_ngspice46_op() {
     );
 }
 
+/// In inverse mode (vds < 0) the source prime is the mode drain, so the
+/// mode-drain junction's linearization belongs on the source-prime row with
+/// its `vds` derivative on the source-prime column. A tied, forward-biased
+/// body makes that junction carry real current: every terminal current must
+/// match ngspice-46, and the device's terminal currents must sum to zero.
+#[test]
+fn native_soi_dd_inverse_mode_terminal_currents_match_ngspice46_op() {
+    // (vs, vb) -> ngspice-46 (i(vd), i(vs), i(vb)) with vd = vg = ve = 0.
+    for (vs, vb, reference) in [
+        (
+            0.2,
+            0.75,
+            [2.2702317583e-07, -1.340042575e-07, -9.301891836e-08],
+        ),
+        (
+            0.5,
+            1.0,
+            [8.3876307170e-05, -4.695612585e-05, -3.692018132e-05],
+        ),
+    ] {
+        let deck = format!(
+            "* B3SOIDD tied body in inverse mode\n\
+             vd d 0 dc 0\n\
+             vs s 0 dc {vs}\n\
+             vg g 0 dc 0\n\
+             ve e 0 dc 0\n\
+             vb b 0 dc {vb}\n\
+             m1 d g s e b n1 w=10u l=0.25u\n\
+             .option gmin=1e-25 itl1=500\n\
+             .op\n\
+             {}\n\
+             .end\n",
+            b3soidd_n1_model_card()
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let op = engine()
+            .run_dc_op(&netlist)
+            .expect("inverse-mode OP converges");
+        // Sources in deck order: vd, vs, vg, ve, vb.
+        let currents = [
+            op.branch_currents[0],
+            op.branch_currents[1],
+            op.branch_currents[4],
+        ];
+        for ((name, current), reference) in ["i(vd)", "i(vs)", "i(vb)"]
+            .iter()
+            .zip(currents)
+            .zip(reference)
+        {
+            assert!(
+                (current - reference).abs() <= 1e-8 * reference.abs(),
+                "vs={vs} vb={vb}: {name}={current:.10e} vs ngspice {reference:.10e}"
+            );
+        }
+        let total: f64 = op.branch_currents.iter().sum();
+        assert!(
+            total.abs() <= 1e-18,
+            "vs={vs} vb={vb}: terminal currents sum to {total:.3e} A"
+        );
+    }
+}
+
 #[test]
 fn native_soi_dd_rsh_series_resistance_matches_ngspice46_op() {
     let deck = "\
