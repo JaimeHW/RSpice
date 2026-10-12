@@ -72,10 +72,22 @@ pub fn prepared_configuration_veriloga_runtimes(
         let compiled_terminals = runtime
             .terminal_names()
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-        if compiled_terminals.len() != materialized.terminal_order.len()
+        // A bus pin `d[3:0]` is the module's terminals `d[3]` to `d[0]`, in
+        // the order the deck emits its conductors.
+        let declared_terminals = materialized
+            .terminal_order
+            .iter()
+            .flat_map(|terminal| {
+                rspice_design::schematic::bus::declared_vector(terminal).map_or_else(
+                    || vec![terminal.clone()],
+                    |vector| vector.members().iter().map(ToString::to_string).collect(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if compiled_terminals.len() != declared_terminals.len()
             || !compiled_terminals
                 .iter()
-                .zip(&materialized.terminal_order)
+                .zip(&declared_terminals)
                 .all(|(compiled, declared)| compiled.eq_ignore_ascii_case(declared))
         {
             return Err(PreparationError::new(
