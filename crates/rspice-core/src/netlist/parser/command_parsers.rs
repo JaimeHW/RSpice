@@ -436,7 +436,20 @@ pub(super) fn parse_four_command(
 ) -> Result<FourCard, ParseError> {
     const CARD: AnalysisCard = AnalysisCard::Four;
 
-    let fundamental = expect_value(stream, line_num, params)?;
+    // Real-value admission refuses an overflowing or complex operand without
+    // knowing which field it read; name the field here. A missing binding
+    // stays as it is, so deferred resolution can still supply it.
+    let fundamental = expect_value(stream, line_num, params).map_err(|error| match error {
+        ParseError::InvalidValue(detail) if stream.missing_numeric_parameter().is_none() => {
+            ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    ".FOUR fundamental frequency must be positive and finite: {detail}"
+                ),
+            }
+        }
+        error => error,
+    })?;
     if !fundamental.is_finite() || fundamental <= 0.0 {
         return Err(ParseError::Syntax {
             line: line_num,
