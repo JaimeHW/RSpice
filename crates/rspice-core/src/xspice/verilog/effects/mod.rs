@@ -39,7 +39,7 @@ use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalProcessId;
 use rspice_veriloga::four_state::FourStateBit;
 
-pub use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+pub(crate) use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
 use format::{FormatArgument, FormatContext, TimeFormat};
 
 /// The run options the effects read, fixed for the host's life.

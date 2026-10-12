@@ -248,14 +248,14 @@ impl Default for HdlOutputCollector {
 
 impl HdlOutputCollector {
     /// The default bound: 64 MiB of text.
-    pub const DEFAULT_MAX_BYTES: usize = 64 << 20;
+    pub(crate) const DEFAULT_MAX_BYTES: usize = 64 << 20;
 
     pub fn new() -> Self {
         Self::default()
     }
 
     /// A collector that keeps at most `max_bytes` of record text.
-    pub fn bounded(max_bytes: usize) -> Self {
+    pub(crate) fn bounded(max_bytes: usize) -> Self {
         Self {
             limit: max_bytes,
             state: Default::default(),
@@ -268,19 +268,10 @@ impl HdlOutputCollector {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Every record delivered so far, in delivery order.
-    pub fn records(&self) -> Vec<HdlOutputRecord> {
-        self.state().records.clone()
-    }
-
-    /// Take the records delivered so far. The byte bound covers the whole run.
+    /// Take the records delivered so far, in delivery order. The byte bound
+    /// covers the whole run; an overflow ends in one truncation record.
     pub fn take(&self) -> Vec<HdlOutputRecord> {
         std::mem::take(&mut self.state().records)
-    }
-
-    /// Whether the bound dropped output.
-    pub fn truncated(&self) -> bool {
-        self.state().truncated
     }
 }
 
@@ -321,8 +312,8 @@ pub enum HdlDelaySelect {
 }
 
 impl HdlDelaySelect {
-    /// The spelling `.options hdl_delay_select` and `--hdl-delay-select` take.
-    pub fn parse(spelling: &str) -> Option<Self> {
+    /// The spelling `.options hdl_delay_select` takes.
+    pub(crate) fn parse(spelling: &str) -> Option<Self> {
         Some(match spelling.to_ascii_lowercase().as_str() {
             "min" => Self::Min,
             "typ" => Self::Typ,
@@ -385,8 +376,9 @@ impl Default for HdlRunConfig {
 impl HdlRunConfig {
     /// Refuse an option set away from its default before the behaviour it
     /// selects exists (design P2 section 7, L1 row), as a typed capability
-    /// refusal whose token names the option.
-    pub fn validate(&self) -> Result<(), SimulationConfigError> {
+    /// refusal whose token names the option. [`SimulationConfig::validate`]
+    /// runs it.
+    pub(crate) fn validate(&self) -> Result<(), SimulationConfigError> {
         match self.unlanded_option() {
             Some(refusal) => Err(SimulationConfigError::UnsupportedCapability(Box::new(
                 refusal,
@@ -399,7 +391,7 @@ impl HdlRunConfig {
     /// behaviour has not landed. The run directory and unrestricted I/O are
     /// P2 lane L5's; delay selection, path delays and timing checks L6's;
     /// library maps L8's. The token says which; the text names the feature.
-    pub fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
+    fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
         let (capability, option, reason) = if self.run_directory.is_some() {
             (
                 "hdl.option.rundir",
@@ -1453,7 +1445,9 @@ mod timeint_config_tests {
             }
         );
         assert!(records[2].text.contains("9 byte bound"));
-        assert!(collector.truncated());
+        // Everything after the bound is dropped, not only the crossing record.
+        collector.emit(&hdl_record("n\n"));
+        assert!(collector.take().is_empty());
         assert_eq!(
             HdlOutputCollector::new().limit,
             HdlOutputCollector::DEFAULT_MAX_BYTES
