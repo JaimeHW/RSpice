@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-xs	tran	interp	wrong	silent-omission: lattice (O6) event net dv (producer delivered 0 nets: )
-xs	tran	native	wrong	silent-omission: lattice (O6) event net dv (producer delivered 0 nets: )
+xs	tran	interp	pass	code (O1) [12] |a−e|=2.000e0 allowed 2.000e0 (a=4.100000e2, e=4.120000e2)
+xs	tran	native	pass	code (O1) [12] |a−e|=2.000e0 allowed 2.000e0 (a=4.100000e2, e=4.120000e2)
 vams	tran	interp	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=9.9999999999999986e-10s
 vams	tran	native	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=9.9999999999999986e-10s
 xs	op	interp	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
