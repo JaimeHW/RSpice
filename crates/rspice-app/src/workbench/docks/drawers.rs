@@ -283,7 +283,7 @@ const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
         command: Command::OpenWorkspace(Workspace::Netlist),
         icon: WorkbenchIcon::Netlist,
         label: "Code & automation",
-        detail: "Netlists, Verilog-A and scripts",
+        detail: "Netlists and scripts",
     },
 ];
 

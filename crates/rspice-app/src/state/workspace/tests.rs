@@ -1952,21 +1952,21 @@ fn legacy_workspaces_restore_with_no_project_source_examples() {
 fn only_bootstrapped_projects_receive_exact_canonical_code_sources() {
     let mut libraries = LibraryManager::default();
     let workspace = ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let verilog_a = workspace
-        .content
-        .project_sources
-        .get(ProjectSourceLanguage::VerilogA)
-        .unwrap();
     let automation = workspace
         .content
         .project_sources
         .get(ProjectSourceLanguage::RSpiceAutomation)
         .unwrap();
 
-    assert_eq!(verilog_a.file_name(), "sensor_bridge.va");
-    assert_eq!(
-        verilog_a.content(),
-        "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule"
+    // A Verilog-A module is a cell view. A new project ships no demonstration
+    // module and no project-wide Verilog-A source of any kind.
+    assert!(
+        workspace
+            .content
+            .project_sources
+            .iter_bundles()
+            .all(|bundle| bundle.language() != ProjectSourceLanguage::VerilogA),
+        "a new project carries no Verilog-A bundle"
     );
     assert_eq!(automation.file_name(), "characterize.py");
     assert_eq!(

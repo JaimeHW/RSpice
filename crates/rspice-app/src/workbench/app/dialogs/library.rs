@@ -16,3 +16,4 @@ mod new_view_dialog;
 mod pending_deletions;
 mod rename_view_dialog;
 mod shared;
+mod veriloga_import;

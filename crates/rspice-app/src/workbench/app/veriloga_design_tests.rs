@@ -21,7 +21,7 @@ use crate::workbench::state::Workspace;
 const LIBRARY: &str = "behavioral";
 
 /// A library cell whose `veriloga` view owns a one-file bundle at `root`.
-fn add_veriloga_cell(
+pub(super) fn add_veriloga_cell(
     state: &mut AppState,
     cell: &str,
     root: &str,
@@ -68,27 +68,16 @@ fn module_source(module: &str, extra: &str) -> String {
     )
 }
 
-fn open_project_app() -> RSpiceApp {
+pub(super) fn open_project_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
     app
 }
 
 /// Open `reference` the way the library and the schematic do, then show it.
-fn open_in_design(state: &mut AppState, reference: &CellViewRef) {
+pub(super) fn open_in_design(state: &mut AppState, reference: &CellViewRef) {
     state.open_workspace_view(reference.clone());
     state.workbench.activate(Workspace::Design);
-}
-
-fn singleton_bundle(app: &RSpiceApp) -> Option<ProjectSourceId> {
-    app.state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-            ProjectSourceLanguage::VerilogA,
-        ))
-        .map(ProjectSourceBundle::id)
 }
 
 fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
@@ -97,7 +86,11 @@ fn editor_id(bundle_id: ProjectSourceId, logical_path: &str) -> egui::Id {
 
 /// One whole application frame: the frame loop's preparation, the chrome,
 /// the docks and the surface, and the dialogs.
-fn frame(ctx: &egui::Context, app: &mut RSpiceApp, size: egui::Vec2) -> egui::FullOutput {
+pub(super) fn frame(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    size: egui::Vec2,
+) -> egui::FullOutput {
     ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
@@ -111,7 +104,7 @@ fn frame(ctx: &egui::Context, app: &mut RSpiceApp, size: egui::Vec2) -> egui::Fu
     )
 }
 
-fn themed_context() -> egui::Context {
+pub(super) fn themed_context() -> egui::Context {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -135,7 +128,7 @@ fn shows_veriloga_editor(output: &egui::FullOutput) -> bool {
         })
 }
 
-const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
+pub(super) const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
 
 fn tab_is_dirty(app: &RSpiceApp, reference: &CellViewRef) -> bool {
     app.state
@@ -182,7 +175,16 @@ fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
-    assert!(singleton_bundle(&app).is_some_and(|singleton| singleton != bundle_id));
+    assert!(
+        app.state
+            .workspace
+            .content
+            .project_sources
+            .iter_bundles()
+            .filter(|bundle| bundle.language() == ProjectSourceLanguage::VerilogA)
+            .all(|bundle| bundle.id() == bundle_id),
+        "the view's bundle is the project's only Verilog-A source"
+    );
 
     assert!(Command::FindCodeDocument.is_enabled(&app));
     Command::FindCodeDocument.execute(&mut app);

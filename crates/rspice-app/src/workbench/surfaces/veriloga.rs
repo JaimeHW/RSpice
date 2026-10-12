@@ -1,12 +1,10 @@
 //! The Verilog-A source editor.
 //!
 //! A Verilog-A module is a view of a cell, so its editor is a Design-workspace
-//! document: [`show_in_design`] draws it there, editor only, while the
-//! inspector dock states the module's facts. Until the project-wide source
-//! workspace is retired, the Netlist workspace's Verilog-A page draws the same
-//! editor with those facts in a column of its own ([`show`]). Both hosts edit
-//! the bundle `code_workspace::active_source_owner` names, so they can never
-//! disagree about which module is in front of the reader.
+//! document: [`show_in_design`] draws it, editor only, while the inspector
+//! dock states the module's facts. It edits the bundle
+//! `code_workspace::active_source_owner` names, which is the bundle every
+//! command, dock and dialog resolves too.
 
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
@@ -16,51 +14,19 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
-use super::super::design_system::{code_workspace_heading, workspace_title_row};
+use super::super::design_system::workspace_title_row;
 use crate::workbench::documents::code_workspace::{
-    CodeDiagnosticCollection, CodeEditorLanguage, CodeWorkspacePage,
-    show_code_document_interaction_versioned,
+    CodeDiagnosticCollection, CodeEditorLanguage, show_code_document_interaction_versioned,
 };
 
-const INTERNAL_INSPECTOR_MIN_WIDTH: f32 = 270.0;
-const INTERNAL_INSPECTOR_WIDTH: f32 = 330.0;
 const EDITOR_TOOLBAR_HEIGHT: f32 = 33.0;
 const EDITOR_SCROLLBAR_INSET: f32 = 14.0;
-const TITLE_ACTION_STACK_BREAKPOINT: f32 = 680.0;
-
-fn title_actions_stack(available_width: f32) -> bool {
-    available_width <= TITLE_ACTION_STACK_BREAKPOINT
-}
-
-fn visible_workspace_rect(ui: &Ui) -> egui::Rect {
-    ui.available_rect_before_wrap()
-        .intersect(ui.clip_rect())
-        .intersect(ui.max_rect())
-}
-
-/// Which workspace is drawing the editor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Host {
-    /// The Design workspace, whose inspector dock states the module's facts.
-    Design,
-    /// The Netlist workspace's Verilog-A page, which states them itself.
-    NetlistPage,
-}
-
-/// The Netlist workspace's Verilog-A page.
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    show_hosted(ui, app, Host::NetlistPage);
-}
 
 /// A Verilog-A cell view, as the Design workspace's document.
 pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
-    show_hosted(ui, app, Host::Design);
-}
-
-fn show_hosted(ui: &mut Ui, app: &mut RSpiceApp, host: Host) {
     // Import and compile results are consumed by the frame loop, so a result
-    // that lands while neither host is on screen is still published. Only
-    // what needs this surface's pointer and context stays here.
+    // that lands while the editor is off screen is still published. Only what
+    // needs this surface's pointer and context stays here.
     handle_veriloga_file_drop(ui.ctx(), app);
     compile_dialog_window(ui.ctx(), app);
     let t = Tokens::get(ui.ctx());
@@ -78,20 +44,16 @@ fn show_hosted(ui: &mut Ui, app: &mut RSpiceApp, host: Host) {
             .map_or(default_file_name.as_str(), |source| {
                 source.document().file_name()
             });
-        // In Design the row names the module the tab holds; the compiler
-        // page's own heading is the Netlist page's.
-        let module_title = (host == Host::Design).then(|| {
-            selected
-                .as_ref()
-                .ok()
-                .and_then(|source| source.selected_module().map(str::to_owned))
-                .unwrap_or_else(|| app.state.workspace.content.active_view.cell.clone())
-        });
-        title_row(ui, app, file_name, module_title.as_deref());
+        let module = selected
+            .as_ref()
+            .ok()
+            .and_then(|source| source.selected_module().map(str::to_owned))
+            .unwrap_or_else(|| app.state.workspace.content.active_view.cell.clone());
+        title_row(ui, app, file_name, &module);
         let selected = match selected {
             Ok(selected) => selected,
             Err(error) => {
-                missing_source(ui, app, error);
+                missing_source(ui, app, &error);
                 return;
             }
         };
@@ -110,118 +72,25 @@ fn show_hosted(ui: &mut Ui, app: &mut RSpiceApp, host: Host) {
             .unwrap_or_else(|| selected.document().content())
             .to_owned();
         let diagnostics = current_diagnostics(app, &selected);
-        if host == Host::Design {
-            // The inspector dock states the module's facts, so the editor
-            // takes the whole document well at every width. A second copy of
-            // them beside or below it would only push the source off a phone.
-            let available = ui.available_rect_before_wrap();
-            let mut editor_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(available)
-                    .layout(Layout::top_down(Align::Min)),
-            );
-            code_pane(
-                &mut editor_ui,
-                app,
-                &selected,
-                &active_path,
-                &mut source,
-                &diagnostics,
-                editor_language,
-            );
-            ui.allocate_rect(available, Sense::hover());
-            return;
-        }
-        // Match the mockup's 820 px content-column breakpoint. Docked panels
-        // can narrow this surface while the outer viewport remains wide.
-        let stacked = visible_workspace_rect(ui).width() <= 820.0;
-        if stacked {
-            let pane_size = visible_workspace_rect(ui).size().max(Vec2::splat(1.0));
-            // The responsive viewport occupies the same document well on all
-            // code pages. A parent-independent identity is safe because the
-            // pages are mutually exclusive and prevents egui from treating a
-            // tab switch as an unstable scrollbar replacement.
-            ui.scope_builder(
-                egui::UiBuilder::new().id(egui::Id::new("workbench.code-workspace.stacked-scope")),
-                |ui| {
-                    ScrollArea::vertical()
-                        .id_salt("viewport")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            // A vertical ScrollArea intentionally exposes unbounded
-                            // content height and can also report a wider child before
-                            // its first sizing pass. Pin the child to the measured
-                            // workspace pane so toolbars never lay out off-screen.
-                            ui.set_width(pane_size.x);
-                            let editor_height = pane_size.y;
-                            let code_pane =
-                                ui.allocate_ui(Vec2::new(pane_size.x, editor_height), |ui| {
-                                    code_pane(
-                                        ui,
-                                        app,
-                                        &selected,
-                                        &active_path,
-                                        &mut source,
-                                        &diagnostics,
-                                        editor_language,
-                                    );
-                                });
-                            ui.painter().hline(
-                                code_pane.response.rect.x_range(),
-                                code_pane.response.rect.bottom(),
-                                Stroke::new(1.0, t.color.border),
-                            );
-                            egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
-                                ui.set_width(ui.available_width());
-                                inspector(ui, app, &selected);
-                            });
-                        });
-                },
-            );
-        } else {
-            let available = ui.available_rect_before_wrap();
-            let inspector_width = INTERNAL_INSPECTOR_WIDTH
-                .min((available.width() * 0.42).max(INTERNAL_INSPECTOR_MIN_WIDTH));
-            let editor_rect = egui::Rect::from_min_max(
-                available.min,
-                egui::pos2(available.right() - inspector_width, available.bottom()),
-            );
-            let inspector_rect = egui::Rect::from_min_max(
-                egui::pos2(editor_rect.right(), available.top()),
-                available.max,
-            );
-            ui.painter()
-                .rect_filled(inspector_rect, 0.0, t.color.bg_panel);
-            let mut editor_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(editor_rect)
-                    .layout(Layout::top_down(Align::Min)),
-            );
-            code_pane(
-                &mut editor_ui,
-                app,
-                &selected,
-                &active_path,
-                &mut source,
-                &diagnostics,
-                editor_language,
-            );
-            ui.painter().vline(
-                editor_rect.right(),
-                editor_rect.y_range(),
-                Stroke::new(1.0, t.color.border),
-            );
-            let mut inspector_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(inspector_rect)
-                    .layout(Layout::top_down(Align::Min)),
-            );
-            ScrollArea::vertical()
-                .id_salt("workbench.veriloga.inspector")
-                .auto_shrink([false, false])
-                .show(&mut inspector_ui, |ui| inspector(ui, app, &selected));
-            ui.allocate_rect(available, Sense::hover());
-        }
+        // The inspector dock states the module's facts, so the editor takes
+        // the whole document well at every width. A second copy of them beside
+        // or below it would only push the source off a phone.
+        let available = ui.available_rect_before_wrap();
+        let mut editor_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(available)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        source_editor(
+            &mut editor_ui,
+            app,
+            &selected,
+            &active_path,
+            &mut source,
+            &diagnostics,
+            editor_language,
+        );
+        ui.allocate_rect(available, Sense::hover());
     });
 }
 
@@ -577,83 +446,36 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
 }
 
-/// The row above the editor: a heading, the cross-link to the generated deck,
-/// and Compile.
+/// The row above the editor: the module the tab holds, in two short lines.
 ///
-/// With a `module` the row heads a Design document and names that module in
-/// two short lines. Without one it heads the Netlist workspace's compiler page
-/// with that page's description. The page heading describes a workspace; a
-/// Design tab is one module, and three lines of workspace copy above it cost a
-/// phone a fifth of its editor.
-fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, module: Option<&str>) {
-    let messages = app.state.ui.messages();
-    let generated_netlist = messages.text(MessageId::CodeGeneratedNetlist);
-    let (eyebrow, title, description, heading_reserve) = match module {
-        Some(module) => (
-            messages.text(MessageId::VerilogAModuleEyebrow),
-            module.to_owned(),
-            None,
-            200.0,
-        ),
-        None => (
-            messages.text(MessageId::VerilogAHeadingEyebrow),
-            messages.text(MessageId::VerilogAHeadingTitle),
-            Some(messages.text(MessageId::VerilogAHeadingDescription)),
-            280.0,
-        ),
-    };
-    let heading = |ui: &mut Ui| match description.as_deref() {
-        Some(description) => code_workspace_heading(ui, &eyebrow, &title, description),
-        None => module_heading(ui, &eyebrow, &title),
-    };
-    let full_compile_label = compile_button_label(app, file_name);
-    let actions_width = title_button_width(ui, &generated_netlist, false)
-        + 6.0
-        + title_button_width(ui, &full_compile_label, true);
-    let visible_width = visible_workspace_rect(ui).width();
-    let stack_actions =
-        title_actions_stack(visible_width) || actions_width + heading_reserve > visible_width;
+/// The toolbar owns Compile and the cross-link to the generated deck. Where it
+/// keeps only its first tools, on a phone, the row carries those two itself,
+/// under the heading.
+fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, module: &str) {
+    let eyebrow = app
+        .state
+        .ui
+        .messages()
+        .text(MessageId::VerilogAModuleEyebrow);
+    let viewport = ui.ctx().content_rect();
+    let carries_actions =
+        super::super::layout::toolbar_tool_limit(viewport.width(), viewport.height()).is_some();
     workspace_title_row(ui, |ui| {
-        // Open docks can make the workspace much narrower than the viewport.
-        // Stack against the actual row width so actions never overlap.
-        if stack_actions {
-            heading(ui);
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
-                generated_netlist_button(ui, app, width);
-                compile_button(ui, app, file_name, width, true);
-            });
-        } else {
-            let actions_width = title_button_width(ui, &generated_netlist, false)
-                + 6.0
-                + title_button_width(ui, &full_compile_label, true);
-            let heading_width = (ui.available_width() - actions_width - 12.0).max(1.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                ui.allocate_ui_with_layout(
-                    Vec2::new(heading_width, 0.0),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        // `allocate_ui_with_layout` is content-sized unless
-                        // the child claims its width. The mockup's flex-grow
-                        // heading must consume the measured remainder so the
-                        // action group stays flush right.
-                        ui.set_width(heading_width);
-                        heading(ui);
-                    },
-                );
-                ui.add_space(6.0);
-                generated_netlist_button(ui, app, 0.0);
-                compile_button(ui, app, file_name, 0.0, false);
-            });
+        module_heading(ui, &eyebrow, module);
+        if !carries_actions {
+            return;
         }
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
+            generated_netlist_button(ui, app, width);
+            compile_button(ui, app, file_name, width);
+        });
     });
 }
 
-/// The compiler page's eyebrow and title type, without its description: the
-/// module name is the whole of what a Design tab's heading has to say.
+/// The kicker and the module name: all a Design tab's heading has to say.
 fn module_heading(ui: &mut Ui, eyebrow: &str, module: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
@@ -679,52 +501,38 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         .ui
         .messages()
         .text(MessageId::CodeGeneratedNetlist);
-    let mut button = Button::new(&label);
-    if width > 0.0 {
-        button = button.min_width(width).max_width(width);
-    }
-    if button.show(ui).clicked() {
-        let _ =
-            crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
-        // A cross-link, not a page switch: from Design the deck is in another
-        // workspace, so the button goes there rather than flipping a page
-        // nobody is looking at.
-        if app.state.workbench.workspace != super::super::state::Workspace::Netlist {
-            app.state
-                .workbench
-                .activate(super::super::state::Workspace::Netlist);
-        }
+    if Button::new(&label)
+        .min_width(width)
+        .max_width(width)
+        .show(ui)
+        .clicked()
+    {
+        crate::workbench::documents::netlist_document::show_generated_deck(&mut app.state);
     }
 }
 
-fn compile_button(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, width: f32, compact: bool) {
+fn compile_button(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, width: f32) {
     use crate::workbench::commands::vocabulary::Command;
 
     let messages = app.state.ui.messages();
     let accessible_label = compile_button_label(app, file_name);
-    let label = if compact {
-        if app.state.ui.code_workspace.veriloga.pending.is_some() {
-            messages.text(MessageId::VerilogACompiling)
-        } else {
-            messages.text(MessageId::VerilogACompileModel)
-        }
+    let label = if app.state.ui.code_workspace.veriloga.pending.is_some() {
+        messages.text(MessageId::VerilogACompiling)
     } else {
-        accessible_label.clone()
+        messages.text(MessageId::VerilogACompileModel)
     };
     let compile_enabled = Command::CompileVerilogA.is_enabled(app);
-    let unavailable = messages.text(MessageId::VerilogAWorkspaceRequired);
+    let unavailable = messages.text(MessageId::VerilogACompileUnavailable);
     let button = Button::new(&label)
         .enabled(compile_enabled)
-        .accessible_label(&accessible_label);
-    let mut button = if compile_enabled {
+        .accessible_label(&accessible_label)
+        .min_width(width)
+        .max_width(width);
+    let button = if compile_enabled {
         button.accent()
     } else {
         button
     };
-    if width > 0.0 {
-        button = button.min_width(width).max_width(width);
-    }
     let response = button.show(ui);
     let response = if compile_enabled {
         response
@@ -747,45 +555,6 @@ fn compile_button_label(app: &RSpiceApp, file_name: &str) -> String {
     } else {
         messages.format(MessageId::VerilogACompileFile, &[("file_name", file_name)])
     }
-}
-
-fn title_button_width(ui: &Ui, label: &str, accent: bool) -> f32 {
-    let t = Tokens::get(ui.ctx());
-    let font = theme::sans(
-        tokens::FS_1,
-        if accent {
-            FontWeight::SemiBold
-        } else {
-            FontWeight::Regular
-        },
-    );
-    let content = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), font, t.color.text)
-        .size()
-        .x
-        + 20.0;
-    content.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 })
-}
-
-fn code_pane(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
-    active_path: &str,
-    source: &mut String,
-    diagnostics: &CodeDiagnosticCollection,
-    editor_language: CodeEditorLanguage,
-) {
-    source_editor(
-        ui,
-        app,
-        selected,
-        active_path,
-        source,
-        diagnostics,
-        editor_language,
-    );
 }
 
 fn source_editor(
@@ -1019,76 +788,16 @@ fn current_diagnostics(
     )
 }
 
-/// The Netlist page's own inspector column. The Design workspace states the
-/// same facts in its inspector dock, drawn by the same body.
-fn inspector(
-    ui: &mut Ui,
-    app: &RSpiceApp,
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
-) {
-    crate::workbench::documents::code_workspace::show_veriloga_inspector(
-        ui,
-        &app.state.ui.code_workspace.veriloga,
-        app.state.workspace.content.project.id(),
-        selected,
-        app.state.ui.messages(),
-    );
-}
-
-/// The editor has no bundle to show.
+/// The view has no bundle to show.
 ///
 /// A Verilog-A cell view without its bundle is a defect of that view, and the
-/// resolver's error names it exactly; the project-wide source workspace is not
-/// a remedy for it, so nothing here offers to create one. Only with no
-/// Verilog-A view in front does the Netlist page offer to start that
-/// workspace.
-fn missing_source(ui: &mut Ui, app: &mut RSpiceApp, error: String) {
-    let messages = app.state.ui.messages();
-    if app.state.workspace.content.active_view_type() == crate::state::ViewType::VerilogA {
-        super::super::design_system::empty_state(
-            ui,
-            super::super::design_system::WorkbenchIcon::VerilogA,
-            &messages.text(MessageId::VerilogANoSource),
-            &error,
-        );
-        return;
-    }
-    super::super::design_system::empty_state_with_actions(
+/// resolver's error names it exactly. Nothing here offers a remedy that is not
+/// one: there is no project-wide source to fall back to.
+fn missing_source(ui: &mut Ui, app: &RSpiceApp, error: &str) {
+    super::super::design_system::empty_state(
         ui,
-        super::super::design_system::WorkbenchIcon::Code,
-        &messages.text(MessageId::VerilogANoSource),
-        &messages.text(MessageId::VerilogANoSourceDescription),
-        |ui| {
-            if Button::new(&messages.text(MessageId::CodeSourceCreateWorkspace))
-                .show(ui)
-                .clicked()
-                && let Err(error) =
-                    crate::workbench::documents::code_workspace::open_source_workspace_dialog(
-                        app,
-                        crate::state::ProjectSourceLanguage::VerilogA,
-                    )
-            {
-                app.state.push_user_message(ConsoleMessage::error(error));
-            }
-            if Button::new(&messages.text(MessageId::CodeSourceImportRoot))
-                .show(ui)
-                .clicked()
-                && let Err(error) =
-                    crate::workbench::documents::code_workspace::request_veriloga_root_import(app)
-            {
-                app.state.push_user_message(ConsoleMessage::error(error));
-            }
-        },
+        super::super::design_system::WorkbenchIcon::VerilogA,
+        &app.state.ui.messages().text(MessageId::VerilogANoSource),
+        error,
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn title_actions_follow_workspace_width_not_viewport_width() {
-        assert!(title_actions_stack(TITLE_ACTION_STACK_BREAKPOINT));
-        assert!(!title_actions_stack(TITLE_ACTION_STACK_BREAKPOINT + 1.0));
-    }
 }

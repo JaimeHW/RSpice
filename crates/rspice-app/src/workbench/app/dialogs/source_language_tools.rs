@@ -71,12 +71,12 @@ const fn symbol_kind_message(kind: SourceSymbolKind) -> MessageId {
 
 /// Open the tools over the document the visible page is showing.
 pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), String> {
-    let page = code_workspace::active_code_page(
+    let language = code_workspace::active_source_language(
         app.state.workbench.workspace,
         &app.state.workspace,
         app.state.ui.code_workspace.page,
-    );
-    let language = code_workspace::page_source_language(page).ok_or_else(|| {
+    )
+    .ok_or_else(|| {
         "The netlist deck is served by its own completion and validation, not the project source index."
             .to_owned()
     })?;
@@ -104,12 +104,12 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
 }
 
 pub(crate) fn language_tools_are_available(state: &AppState) -> bool {
-    let page = code_workspace::active_code_page(
+    code_workspace::active_source_language(
         state.workbench.workspace,
         &state.workspace,
         state.ui.code_workspace.page,
-    );
-    code_workspace::page_source_language(page).is_some_and(|language| {
+    )
+    .is_some_and(|language| {
         code_workspace::active_bundle_path(&state.workspace, &state.ui.code_workspace, language)
             .is_some()
     })

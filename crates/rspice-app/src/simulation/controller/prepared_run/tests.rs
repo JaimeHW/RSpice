@@ -847,23 +847,31 @@ fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
 #[test]
 fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let mut state = AppState::default();
+    let owner = crate::state::ProjectSourceOwner::cell_view(crate::state::CellViewRef::new(
+        "behavioral",
+        "owned",
+        "veriloga",
+    ));
     state
         .workspace
         .content
-        .replace_imported_project_source(
-            crate::state::ProjectSourceLanguage::VerilogA,
-            "model.va".to_owned(),
-            "module owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n"
-                .to_owned(),
+        .insert_project_source_bundle(
+            crate::state::ProjectSourceBundle::try_new(
+                owner.clone(),
+                crate::state::ProjectSourceLanguage::VerilogA,
+                "model.va",
+                "module owned(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+                [],
+                [],
+            )
+            .expect("a valid cell-view bundle"),
         )
-        .expect("replace bootstrapped project Verilog-A source");
+        .expect("install the cell view's Verilog-A source");
     let bundle = state
         .workspace
         .content
         .project_sources
-        .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::VerilogA,
-        ))
+        .bundle_for_owner(&owner)
         .expect("installed project source bundle");
     let receipt =
         compile_project_bundle_receipt(state.workspace.content.project.id(), bundle, None)
@@ -874,9 +882,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         .workspace
         .content
         .project_sources
-        .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::VerilogA,
-        ))
+        .bundle_for_owner(&owner)
         .expect("installed project source bundle");
     let source_key = rspice_design::project_sources::project_veriloga_bundle_source_key(
         state.workspace.content.project.id(),

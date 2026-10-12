@@ -7,16 +7,17 @@
 //! is showing, and these decide what it looks like.
 
 /// The document the Code & Automation workspace currently presents.
+///
+/// Verilog-A is not one of them: a module is a cell view, edited in Design.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodeWorkspacePage {
     #[default]
     Netlist,
-    VerilogA,
     Automation,
 }
 
 impl CodeWorkspacePage {
-    pub const ALL: [Self; 3] = [Self::Netlist, Self::VerilogA, Self::Automation];
+    pub const ALL: [Self; 2] = [Self::Netlist, Self::Automation];
 }
 
 /// A project-owned source-tree transaction requested by a document navigator.

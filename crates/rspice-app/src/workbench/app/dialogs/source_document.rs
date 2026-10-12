@@ -32,16 +32,13 @@ use crate::workbench::{MessageCatalog, MessageId};
 /// Bring the lifecycle dialog up for the page that is showing.
 ///
 pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
-    let page = visible_page(state);
-    if page == code_workspace::CodeWorkspacePage::Netlist {
+    let Some(language) = visible_language(state) else {
         if !state.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
         state.ui.code_workspace.source_document_dialog = true;
         return Ok(());
-    }
-    let language = code_workspace::page_source_language(page)
-        .ok_or_else(|| "The visible Code workspace page has no source lifecycle.".to_owned())?;
+    };
     if code_workspace::active_source_bundle(&state.workspace, language).is_none() {
         return Err(format!(
             "This project owns no {} source workspace yet.",
@@ -54,19 +51,19 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 
 /// Whether the lifecycle dialog can be opened for the visible page.
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
-    let page = visible_page(state);
-    if page == code_workspace::CodeWorkspacePage::Netlist {
-        return state.project_lifecycle.is_open();
+    match visible_language(state) {
+        None => state.project_lifecycle.is_open(),
+        Some(language) => {
+            code_workspace::active_source_bundle(&state.workspace, language).is_some()
+        }
     }
-    code_workspace::page_source_language(page).is_some_and(|language| {
-        code_workspace::active_source_bundle(&state.workspace, language).is_some()
-    })
 }
 
-/// The page whose document the dialog manages: a Verilog-A cell view open in
-/// Design is the Verilog-A page's document wherever that page was left.
-fn visible_page(state: &AppState) -> code_workspace::CodeWorkspacePage {
-    code_workspace::active_code_page(
+/// The source language of the document the dialog manages: a Verilog-A cell
+/// view open in Design, else the Netlist workspace's page, where `None` is the
+/// deck.
+fn visible_language(state: &AppState) -> Option<ProjectSourceLanguage> {
+    code_workspace::active_source_language(
         state.workbench.workspace,
         &state.workspace,
         state.ui.code_workspace.page,
@@ -298,7 +295,7 @@ fn line_ending_summary(content: &str) -> MessageId {
 }
 
 fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentFacts> {
-    let language = code_workspace::page_source_language(visible_page(&app.state))?;
+    let language = visible_language(&app.state)?;
     let logical_path = code_workspace::active_bundle_path(
         &app.state.workspace,
         &app.state.ui.code_workspace,
@@ -495,7 +492,7 @@ impl RSpiceApp {
         if !self.state.ui.code_workspace.source_document_dialog {
             return;
         }
-        if visible_page(&self.state) == code_workspace::CodeWorkspacePage::Netlist {
+        if visible_language(&self.state).is_none() {
             self.render_netlist_source_document_dialog(ctx);
             return;
         }
@@ -807,26 +804,27 @@ impl RSpiceApp {
         }
     }
 
-    /// The transaction that creates a bundle for a page that has none. It is
-    /// opened straight from the empty state, so it renders whenever the draft
-    /// exists rather than waiting for the lifecycle dialog to be asked for.
+    /// The transaction that creates the Automation workspace a project has
+    /// none of. It is opened straight from the empty state, so it renders
+    /// whenever the draft exists rather than waiting for the lifecycle dialog
+    /// to be asked for.
     fn render_source_workspace_dialog(&mut self, ctx: &Context) {
         let Some(draft) = self.state.ui.code_workspace.source_workspace_dialog.clone() else {
             return;
         };
-        let automation = draft.language == ProjectSourceLanguage::RSpiceAutomation;
+        let language = ProjectSourceLanguage::RSpiceAutomation.label();
         let messages = self.state.ui.messages();
         let mut dialog = Dialog::new(
             messages.format(
                 MessageId::CodeSourceWorkspaceEyebrow,
-                &[("language", &draft.language.label().to_uppercase())],
+                &[("language", &language.to_uppercase())],
             ),
             messages.text(MessageId::CodeSourceWorkspaceTitle),
             messages.text(MessageId::CodeSourceWorkspacePrimary),
         )
         .description(messages.format(
             MessageId::CodeSourceWorkspaceDescription,
-            &[("language", draft.language.label())],
+            &[("language", language)],
         ))
         .size(DialogSize::Transaction)
         .ghost(messages.text(MessageId::CommonCancel));
@@ -852,33 +850,24 @@ impl RSpiceApp {
                             &mut edited.root_path,
                             false,
                         );
-                        if automation {
-                            property_row_input(
-                                ui,
-                                &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
-                                &mut edited.run_plan_path,
-                                false,
-                            );
-                            property_row_input(
-                                ui,
-                                &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
-                                &mut edited.environment_lock_path,
-                                false,
-                            );
-                            property_row_input(
-                                ui,
-                                &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
-                                &mut edited.permission_manifest_path,
-                                false,
-                            );
-                        } else {
-                            property_row_input(
-                                ui,
-                                &messages.text(MessageId::CodeSourceWorkspaceBuildProfilePath),
-                                &mut edited.build_profile_path,
-                                false,
-                            );
-                        }
+                        property_row_input(
+                            ui,
+                            &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
+                            &mut edited.run_plan_path,
+                            false,
+                        );
+                        property_row_input(
+                            ui,
+                            &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
+                            &mut edited.environment_lock_path,
+                            false,
+                        );
+                        property_row_input(
+                            ui,
+                            &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
+                            &mut edited.permission_manifest_path,
+                            false,
+                        );
                         property_row(
                             ui,
                             &messages.text(MessageId::CodeSourceWorkspaceBoundDeck),
@@ -896,7 +885,6 @@ impl RSpiceApp {
             .as_mut()
         {
             state.root_path = edited.root_path;
-            state.build_profile_path = edited.build_profile_path;
             state.run_plan_path = edited.run_plan_path;
             state.environment_lock_path = edited.environment_lock_path;
             state.permission_manifest_path = edited.permission_manifest_path;

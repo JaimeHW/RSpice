@@ -756,15 +756,13 @@ impl Command {
             }
             // Each of these opens a window that only the netlist page draws.
             // Availability therefore has to name the page, not just the
-            // workspace: from Verilog-A or Automation they would set a dialog
-            // open with nothing on screen, and it would then appear
-            // unprompted the moment the user came back.
-            // Find now exists on all three code pages: the netlist page has
-            // its own deck find, and the two language pages search their
-            // bundle. It was restricted to the netlist page only while the
-            // bundle search had no surface.
-            // A Verilog-A cell view in Design is the Verilog-A page's document,
-            // so the code commands follow it there.
+            // workspace: from Automation they would set a dialog open with
+            // nothing on screen, and it would then appear unprompted the
+            // moment the user came back.
+            // Find exists on every code document: the netlist page has its
+            // own deck find, and the Automation page and a Verilog-A cell view
+            // in Design search their bundle. It was restricted to the netlist
+            // page only while the bundle search had no surface.
             Self::FindCodeDocument => code_document_is_visible(state),
             Self::ValidateCodeDocument => {
                 netlist_page_is_visible(state)
@@ -772,9 +770,9 @@ impl Command {
                         != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
                     && !state.simulation.source.netlist_content.trim().is_empty()
             }
-            // Unlike its neighbours this one belongs to the two language
-            // pages, not the netlist page: it manages a project source
-            // bundle, which the deck is not.
+            // Unlike its neighbours this one belongs to the source documents,
+            // the Automation page and a Verilog-A cell view, not the netlist
+            // page: it manages a project source bundle, which the deck is not.
             Self::ManageSourceDocument => {
                 code_document_is_visible(state)
                     && crate::workbench::app::source_document_dialog_is_available(state)
@@ -2093,24 +2091,11 @@ impl Command {
                 }
             }
             Self::CompileVerilogA => {
-                use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-                // The command compiles the source in front of the reader and
-                // takes them to where its review and result are shown: a
-                // Verilog-A cell view is edited in Design, so that is where a
-                // compile of it lands, whichever workspace offered the command.
-                let on_veriloga_page = app.state.workbench.workspace == Workspace::Netlist
-                    && app.state.ui.code_workspace.page == CodeWorkspacePage::VerilogA;
-                if !on_veriloga_page {
-                    if app.state.workspace.content.active_view_type()
-                        == crate::state::ViewType::VerilogA
-                    {
-                        activate_workspace(app, Workspace::Design);
-                    } else {
-                        activate_workspace(app, Workspace::Netlist);
-                        app.state.ui.code_workspace.page = CodeWorkspacePage::VerilogA;
-                    }
-                }
+                // The command compiles the active Verilog-A cell view and
+                // takes the reader to where its review and result are shown:
+                // the view is edited in Design, so that is where a compile of
+                // it lands, whichever workspace offered the command.
+                activate_workspace(app, Workspace::Design);
                 // Navigating is not compiling. The frame loop turns the request
                 // into the review transaction on the next frame.
                 app.state.ui.code_workspace.veriloga.compile_requested = true;

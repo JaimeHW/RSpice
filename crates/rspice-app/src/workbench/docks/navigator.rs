@@ -146,14 +146,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
         // Canonical code navigator order: header, search, page tabs, outline.
-        // The outline belongs to the page: a Verilog-A module, an automation
-        // pipeline, and a SPICE deck are different objects and read
-        // differently, so none of them borrows another's tree.
+        // The outline belongs to the page: an automation pipeline and a SPICE
+        // deck are different objects and read differently, so neither borrows
+        // the other's tree.
         workspace_search(ui, app, Workspace::Netlist);
         code_workspace_pages(ui, app);
         match app.state.ui.code_workspace.page {
             CodeWorkspacePage::Netlist => netlist(ui, app),
-            CodeWorkspacePage::VerilogA => source_bundle::veriloga(ui, app),
             CodeWorkspacePage::Automation => source_bundle::automation(ui, app),
         }
         return;
@@ -229,7 +228,6 @@ fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
         // the label made the widget move whenever the label was translated.
         let name = messages.text(match page {
             CodeWorkspacePage::Netlist => crate::workbench::MessageId::CodePageNetlist,
-            CodeWorkspacePage::VerilogA => crate::workbench::MessageId::CodePageVerilogA,
             CodeWorkspacePage::Automation => crate::workbench::MessageId::CodePageAutomation,
         });
         let left = content.left() + button_width * index as f32;
@@ -311,7 +309,6 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             use crate::workbench::documents::code_workspace::CodeWorkspacePage;
             match app.state.ui.code_workspace.page {
                 CodeWorkspacePage::Netlist => "Netlist outline",
-                CodeWorkspacePage::VerilogA => "Verilog-A project",
                 CodeWorkspacePage::Automation => "Automation workspace",
             }
         }

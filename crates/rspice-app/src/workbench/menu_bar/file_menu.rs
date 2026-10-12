@@ -116,17 +116,12 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::ImportVerilogA => {
             // With a Verilog-A cell view in front, the import replaces that
             // view's root source in place, in the Design workspace that edits
-            // it. Otherwise it fills the project's Verilog-A source workspace.
+            // it. Otherwise the file becomes cell views of its own, which the
+            // import form names before any is created.
             if state.workspace.content.active_view_type() == crate::state::ViewType::VerilogA {
                 state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Design);
-            } else {
-                state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Netlist);
-                state.ui.code_workspace.page =
-                    crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
             }
             state.ui.code_workspace.veriloga.import_requested = true;
         }

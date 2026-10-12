@@ -14,6 +14,11 @@ mod materialize;
 mod open_documents;
 mod reference_preparation;
 mod schematic_buffers;
+mod veriloga_cells;
+pub(crate) use veriloga_cells::{
+    DeclaredModule, declared_cell_interface, place_veriloga_view, retire_code_workspace_veriloga,
+    survey_veriloga_file, veriloga_cell_for_module, veriloga_view,
+};
 
 // The two functions are renamed on export: bare `normalize` and
 // `collation_key` say nothing about what they normalize outside their module,

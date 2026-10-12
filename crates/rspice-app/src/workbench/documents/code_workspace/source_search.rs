@@ -141,16 +141,16 @@ pub(crate) fn open_source_search_in_bundle(
 }
 
 pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), String> {
-    match super::active_code_page(
+    match super::active_source_language(
         app.state.workbench.workspace,
         &app.state.workspace,
         app.state.ui.code_workspace.page,
     ) {
-        super::CodeWorkspacePage::Netlist => {
+        None => {
             app.state.ui.netlist.find.open = true;
             Ok(())
         }
-        super::CodeWorkspacePage::VerilogA => {
+        Some(ProjectSourceLanguage::VerilogA) => {
             let selected = super::selected_veriloga_editor_snapshot(app)?;
             let active_path = selected.active_path().to_owned();
             let bundle_id = selected.bundle_id();
@@ -161,7 +161,7 @@ pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), Strin
                 &active_path,
             )
         }
-        super::CodeWorkspacePage::Automation => {
+        Some(ProjectSourceLanguage::RSpiceAutomation) => {
             let bundle = app
                 .state
                 .workspace
@@ -799,6 +799,48 @@ fn source_line_preview(source: &str, one_based_line: usize) -> String {
 mod tests {
     use super::*;
 
+    fn veriloga_reference() -> crate::state::CellViewRef {
+        crate::state::CellViewRef::new("behavioral", "sensor_bridge", "veriloga")
+    }
+
+    fn veriloga_owner() -> ProjectSourceOwner {
+        ProjectSourceOwner::cell_view(veriloga_reference())
+    }
+
+    /// A test app with a Verilog-A cell view open over a one-file bundle.
+    fn veriloga_view_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let reference = veriloga_reference();
+        let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), "sensor_bridge".to_owned());
+        let mut cell = crate::state::Cell::new(&reference.cell);
+        cell.add_view(view);
+        let mut library = crate::state::Library::new(&reference.library);
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state
+            .workspace
+            .content
+            .project_sources
+            .insert_bundle(
+                ProjectSourceBundle::try_new(
+                    veriloga_owner(),
+                    ProjectSourceLanguage::VerilogA,
+                    "sensor_bridge.va",
+                    "module sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0;\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n",
+                    [],
+                    [],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        app.state
+            .workspace
+            .open_view(reference, crate::state::ViewType::VerilogA);
+        app
+    }
+
     #[test]
     fn comment_masking_preserves_offsets_strings_and_yaml_block_scalars() {
         let python = "value = 'not # comment'  # gain µ\ntext = \"\"\"# body\"\"\"\n";
@@ -848,16 +890,14 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn selection_scope_reports_absolute_ranges_and_replaces_only_the_capture() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let (bundle_id, root) = {
             let bundle = app
                 .state
                 .workspace
                 .content
                 .project_sources
-                .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                    ProjectSourceLanguage::VerilogA,
-                ))
+                .bundle_for_owner(&veriloga_owner())
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
@@ -906,16 +946,14 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn unicode_case_alias_is_canonicalized_before_search_state_is_published() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let (bundle_id, original_path) = {
             let bundle = app
                 .state
                 .workspace
                 .content
                 .project_sources
-                .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                    ProjectSourceLanguage::VerilogA,
-                ))
+                .bundle_for_owner(&veriloga_owner())
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
@@ -950,15 +988,13 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn replacement_rejects_stale_results_and_commits_atomically() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let active_path = app
             .state
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                ProjectSourceLanguage::VerilogA,
-            ))
+            .bundle_for_owner(&veriloga_owner())
             .unwrap()
             .root()
             .logical_path()
@@ -978,9 +1014,7 @@ mod tests {
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                ProjectSourceLanguage::VerilogA,
-            ))
+            .bundle_for_owner(&veriloga_owner())
             .unwrap();
         assert!(bundle.root().content().contains("stage_gain"));
         assert!(app.state.workspace.content.project_sources_dirty);
@@ -1011,16 +1045,14 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn replacement_can_exclude_comments_without_rewriting_them() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let (bundle_id, root) = {
             let bundle = app
                 .state
                 .workspace
                 .content
                 .project_sources
-                .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                    ProjectSourceLanguage::VerilogA,
-                ))
+                .bundle_for_owner(&veriloga_owner())
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
@@ -1059,7 +1091,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn generated_references_are_find_only_and_stale_bound() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         app.state.ui.netlist.generated_source = "XMODEL generated_reference\n".to_owned();
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
         let active_path = app
@@ -1067,9 +1099,7 @@ mod tests {
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                ProjectSourceLanguage::VerilogA,
-            ))
+            .bundle_for_owner(&veriloga_owner())
             .unwrap()
             .root()
             .logical_path()
@@ -1103,16 +1133,14 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn search_streams_the_contract_limit_but_displays_only_five_hundred_rows() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let (bundle_id, root) = {
             let bundle = app
                 .state
                 .workspace
                 .content
                 .project_sources
-                .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                    ProjectSourceLanguage::VerilogA,
-                ))
+                .bundle_for_owner(&veriloga_owner())
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
@@ -1140,16 +1168,14 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn search_accepts_exactly_fifty_thousand_and_detects_one_more() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let (bundle_id, root) = {
             let bundle = app
                 .state
                 .workspace
                 .content
                 .project_sources
-                .bundle_for_owner(&ProjectSourceOwner::code_workspace(
-                    ProjectSourceLanguage::VerilogA,
-                ))
+                .bundle_for_owner(&veriloga_owner())
                 .unwrap();
             (bundle.id(), bundle.root().logical_path().to_owned())
         };

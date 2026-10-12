@@ -7,7 +7,7 @@
 use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::simulation::plan::AnalysisKind;
-use crate::state::{ComponentType, Point};
+use crate::state::{ComponentType, Point, ViewType};
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::persistence::native::NativeProjectStorage;
 
@@ -91,28 +91,17 @@ fn browser_save_active_and_revert_preserve_exact_configuration_catalog() {
     );
 }
 
-fn ensure_veriloga_source(state: &mut AppState, content: &str) {
-    if state
+/// Rewrite the root of the project's Automation workspace, the code-workspace
+/// source every new project carries.
+fn edit_automation_source(state: &mut AppState, content: &str) {
+    state
         .workspace
         .content
-        .project_sources
-        .get(crate::state::ProjectSourceLanguage::VerilogA)
-        .is_none()
-    {
-        state
-            .workspace
-            .content
-            .project_sources
-            .insert(
-                crate::state::ProjectSourceDocument::try_new(
-                    "sensor_bridge.va",
-                    crate::state::ProjectSourceLanguage::VerilogA,
-                    content,
-                )
-                .unwrap(),
-            )
-            .unwrap();
-    }
+        .replace_project_source(
+            crate::state::ProjectSourceLanguage::RSpiceAutomation,
+            content.to_owned(),
+        )
+        .unwrap();
 }
 
 fn insert_cell_veriloga_source(
@@ -493,7 +482,7 @@ fn reverting_new_cell_configuration_removes_orphan_sources_and_restores_focus() 
 #[test]
 fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() {
     let mut state = AppState::default();
-    ensure_veriloga_source(&mut state, "module workspace_model; endmodule");
+    edit_automation_source(&mut state, "print('workspace')\n");
     let code_workspace = state.workspace.content.project_sources.clone();
     let baseline = snapshot(&state).expect("baseline");
     let (reference, source_id) = insert_cell_veriloga_source(
@@ -520,8 +509,8 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
             .workspace
             .content
             .project_sources
-            .get(crate::state::ProjectSourceLanguage::VerilogA),
-        code_workspace.get(crate::state::ProjectSourceLanguage::VerilogA)
+            .get(crate::state::ProjectSourceLanguage::RSpiceAutomation),
+        code_workspace.get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
     );
     assert!(
         state
@@ -536,16 +525,8 @@ fn reverting_new_cell_view_removes_its_source_without_touching_code_workspace() 
 #[test]
 fn code_document_overlay_copies_project_sources_atomically() {
     let mut state = AppState::default();
-    ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
     let mut target = snapshot(&state).unwrap();
-    state
-        .workspace
-        .content
-        .replace_project_source(
-            crate::state::ProjectSourceLanguage::VerilogA,
-            "module sensor_bridge; analog begin end endmodule".to_owned(),
-        )
-        .unwrap();
+    edit_automation_source(&mut state, "print('edited')\n");
     let working = snapshot(&state).unwrap();
 
     target
@@ -566,17 +547,9 @@ fn code_document_overlay_copies_project_sources_atomically() {
 #[test]
 fn code_sources_change_generated_netlist_and_execution_identity() {
     let mut state = AppState::default();
-    ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
     let before = generated_netlist_input_digest(&state).unwrap();
 
-    state
-        .workspace
-        .content
-        .replace_project_source(
-            crate::state::ProjectSourceLanguage::VerilogA,
-            "module sensor_bridge; analog begin end endmodule".to_owned(),
-        )
-        .unwrap();
+    edit_automation_source(&mut state, "print('edited')\n");
 
     assert_ne!(generated_netlist_input_digest(&state).unwrap(), before);
 }
@@ -584,21 +557,13 @@ fn code_sources_change_generated_netlist_and_execution_identity() {
 #[test]
 fn reverting_the_code_document_restores_sources_and_clears_dirty_state() {
     let mut state = AppState::default();
-    ensure_veriloga_source(&mut state, "module sensor_bridge; endmodule");
     let baseline = snapshot(&state).unwrap();
     state.project_lifecycle.authority.open_session();
     state
         .project_lifecycle
         .accept_project(baseline.clone(), None);
     state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-    state
-        .workspace
-        .content
-        .replace_project_source(
-            crate::state::ProjectSourceLanguage::VerilogA,
-            "module sensor_bridge; analog begin end endmodule".to_owned(),
-        )
-        .unwrap();
+    edit_automation_source(&mut state, "print('edited')\n");
     assert!(state.workspace.content.project_sources_dirty);
 
     revert_document(&mut state, ProjectDocumentId::NetlistSource).unwrap();

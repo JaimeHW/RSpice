@@ -454,9 +454,9 @@ fn document_is_closable(state: &AppState, document: &WorkspaceDocumentId) -> boo
 }
 
 /// The Code & Automation workspace shows one document at a time and the page
-/// decides which. Only the netlist page has a dirty bit to report: Verilog-A
-/// and Automation sources are project-owned bundles whose dirtiness belongs to
-/// the bundle, not to this tab.
+/// decides which. Only the netlist page has a dirty bit to report: Automation
+/// sources are a project-owned bundle whose dirtiness belongs to the bundle,
+/// not to this tab.
 fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
@@ -470,7 +470,6 @@ fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
         ),
         icon: match page {
             CodeWorkspacePage::Netlist => WorkbenchIcon::Netlist,
-            CodeWorkspacePage::VerilogA => WorkbenchIcon::Code,
             CodeWorkspacePage::Automation => WorkbenchIcon::Terminal,
         },
         dirty: page == CodeWorkspacePage::Netlist && state.workspace.content.netlist_source_dirty,

@@ -379,7 +379,11 @@ fn render_help_page(ui: &mut egui::Ui, query: &mut String, action: &mut Option<H
         ),
         (
             "Automation and netlists",
-            "Open owned or generated decks, compile Verilog-A, validate sources, and run reproducible workflows.",
+            "Open owned or generated decks, validate sources, and run reproducible workflows.",
+        ),
+        (
+            "Verilog-A modules",
+            "A module is a cell view: create one with New View or File > Import Verilog-A, then edit and compile it in Design.",
         ),
     ];
     for (title, detail) in topics {

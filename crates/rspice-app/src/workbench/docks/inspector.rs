@@ -343,9 +343,6 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     messages.text(MessageId::CodeInspectorNetlistTitle)
                 }
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => {
-                    messages.text(MessageId::CodeInspectorVerilogATitle)
-                }
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
                     messages.text(MessageId::CodeInspectorAutomationTitle)
                 }
@@ -2424,15 +2421,16 @@ fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     };
-    let page = messages.text(match context.page {
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
-            MessageId::CodePageNetlist
-        }
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => {
-            MessageId::CodePageVerilogA
-        }
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
-            MessageId::CodePageAutomation
+    let page = messages.text({
+        use crate::workbench::commands::code_context::CodeDocumentKind;
+        match context.document_kind {
+            CodeDocumentKind::GeneratedNetlist
+            | CodeDocumentKind::OwnedNetlist
+            | CodeDocumentKind::NetlistComparison
+            | CodeDocumentKind::NetlistRunSnapshot
+            | CodeDocumentKind::NetlistInclude => MessageId::CodePageNetlist,
+            CodeDocumentKind::VerilogA => MessageId::CodePageVerilogA,
+            CodeDocumentKind::Automation => MessageId::CodePageAutomation,
         }
     });
     let ownership = messages.text(match context.ownership {

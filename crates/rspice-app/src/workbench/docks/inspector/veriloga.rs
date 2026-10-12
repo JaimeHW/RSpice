@@ -1,10 +1,8 @@
 //! The Design inspector for a Verilog-A cell view.
 //!
 //! The module's identity, its compile status and build targets, the
-//! diagnostics of its last compile, and the ABI contract it exposes. The body
-//! is the one the Netlist page draws in its own column, so the two can never
-//! state different facts about the same bundle; in Design it lives here and
-//! the editor takes the whole document well.
+//! diagnostics of its last compile, and the ABI contract it exposes. They live
+//! here so the editor takes the whole document well.
 
 use egui::Ui;
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;

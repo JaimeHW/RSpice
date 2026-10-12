@@ -765,21 +765,25 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 /// Toolbar of an open Verilog-A cell view.
 ///
-/// The Netlist page's Verilog-A compile and source tools, plus Format, which
-/// used to be reachable only from the editor's own menu. That page's model
-/// qualification entry is not carried over: it reviews a Model Editor
-/// candidate, not this module, so here it would only ever sit disabled. A
-/// schematic's placement and transform tools have nothing to act on either.
+/// Compile and the cross-link to the generated deck, then the source tools,
+/// Format first. The toolbar owns those two actions; the editor's heading only
+/// names the module. Where the toolbar keeps only its first tools, on a phone,
+/// the heading carries Compile and the cross-link instead, and the toolbar's
+/// slots go to the source tools so nothing is offered twice. A schematic's
+/// placement and transform tools have nothing to act on here.
 fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    toolbar_text_command(
-        ui,
-        app,
-        Command::CompileVerilogA,
-        WorkbenchIcon::Run,
-        "Compile Verilog-A module",
-        layout,
-    );
-    context_separator(ui, layout);
+    if layout.toolbar_tool_limit.is_none() {
+        toolbar_text_command(
+            ui,
+            app,
+            Command::CompileVerilogA,
+            WorkbenchIcon::Run,
+            "Compile Verilog-A module",
+            layout,
+        );
+        generated_netlist_tool(ui, app, layout);
+        context_separator(ui, layout);
+    }
     veriloga_format_tool(ui, app, layout);
     toolbar_icon_command(
         ui,
@@ -802,6 +806,40 @@ fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         WorkbenchIcon::Folder,
         layout,
     );
+}
+
+/// The generated deck, in the Netlist workspace: what the design this module
+/// is placed in netlists to.
+fn generated_netlist_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    if !take_projected_tool_slot(ui, layout) {
+        return;
+    }
+    let label = app
+        .state
+        .ui
+        .messages()
+        .text(crate::workbench::MessageId::CodeGeneratedNetlist);
+    let response = if layout.toolbar_labels {
+        labeled_icon_button_sized(
+            ui,
+            WorkbenchIcon::Netlist,
+            &label,
+            false,
+            explicit_label_width(&label),
+            layout.toolbar_control_height,
+        )
+    } else {
+        icon_button(
+            ui,
+            WorkbenchIcon::Netlist,
+            &label,
+            false,
+            toolbar_icon_button_size(layout),
+        )
+    };
+    if response.clicked() {
+        crate::workbench::documents::netlist_document::show_generated_deck(&mut app.state);
+    }
 }
 
 /// Format the source the editor is showing.
@@ -1320,7 +1358,7 @@ fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
 }
 
-/// The Code & Automation workspace hosts three different documents, so its
+/// The Code & Automation workspace hosts two different documents, so its
 /// toolbar is chosen by the visible page.
 ///
 /// Find is deliberately absent: the editor's own toolbar sits directly under
@@ -1333,26 +1371,6 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
     match app.state.ui.code_workspace.page {
         CodeWorkspacePage::Netlist => netlist_page_tools(ui, app, layout),
-        CodeWorkspacePage::VerilogA => {
-            toolbar_text_command(
-                ui,
-                app,
-                Command::CompileVerilogA,
-                WorkbenchIcon::Run,
-                "Compile Verilog-A project",
-                layout,
-            );
-            context_separator(ui, layout);
-            toolbar_text_command(
-                ui,
-                app,
-                Command::ModelRunQualificationTests,
-                WorkbenchIcon::Models,
-                "Open model qualification",
-                layout,
-            );
-            source_page_tools(ui, app, layout);
-        }
         CodeWorkspacePage::Automation => {
             toolbar_text_command(
                 ui,
@@ -1368,9 +1386,8 @@ fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_icon_command(ui, app, Command::RunSimulation, WorkbenchIcon::Run, layout);
 }
 
-/// The three tools every bundle-backed source page shares: navigate the index,
-/// manage the document, search the closure. Both language pages carry the same
-/// group in the same order, so it is written once.
+/// The Automation page's source tools: navigate the index, manage the
+/// document, search the closure.
 fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     context_separator(ui, layout);
     toolbar_icon_command(

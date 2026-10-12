@@ -119,6 +119,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut goto_project_location = None;
     let mut toggled = None;
     let mut open_include = None;
+    let mut open_in_design = None;
     let mut use_section = None;
     // A section rewrite edits the authored card, so a generated or snapshot
     // document offers the choice and states why it cannot take it rather than
@@ -211,6 +212,42 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     Some(&messages.text(netlist_dependency_status(&app.state))),
                 );
                 for row in &projection.include_rows {
+                    // A `.veriloga` card naming a cell view's module is that
+                    // view's source: the row names the view and opens its tab
+                    // in Design, the one place a module is edited.
+                    if let Some(reference) =
+                        crate::workbench::documents::code_workspace::veriloga_dependency_view(
+                            &app.state.workspace,
+                            &row.label,
+                        )
+                    {
+                        let action = messages.text(MessageId::VerilogAOpenInDesign);
+                        // Named the way its Design tab is, so the 312 px dock
+                        // keeps the view's name beside the action.
+                        let label = format!("{} \u{00b7} {}", reference.cell, reference.view);
+                        let response = netlist_outline_row(
+                            ui,
+                            OutlineRowVisual {
+                                label: &label,
+                                meta: Some(&action),
+                                meta_tone: Some(Tokens::get(ui.ctx()).color.accent),
+                                icon: Some(WorkbenchIcon::VerilogA),
+                                shape: NetlistOutlineRowShape::Leaf,
+                                selected: row.contains_line(active_line),
+                                enabled: true,
+                                height,
+                            },
+                        )
+                        .on_hover_text(format!(
+                            "{action}: {}\n{}",
+                            reference.display_path(),
+                            row.label
+                        ));
+                        if response.clicked() {
+                            open_in_design = Some(reference);
+                        }
+                        continue;
+                    }
                     let mut response = netlist_outline_row(
                         ui,
                         OutlineRowVisual {
@@ -487,6 +524,12 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                 .state
                 .push_user_message(crate::diagnostics::ConsoleMessage::warning(error)),
         }
+    }
+    if let Some(reference) = open_in_design {
+        app.state.open_workspace_view(reference);
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
     }
     if let Some(requested) = open_include {
         let dependency = active_canonical_netlist_document(&app.state)

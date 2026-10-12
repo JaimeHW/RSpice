@@ -1198,6 +1198,18 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
 /// Select the immutable generated primary without deleting or changing an
 /// owned source or generated-diff document. This is an explicit document
 /// transition; navigating among Code workspace pages must not call it.
+/// Take the reader to the generated deck from another workspace: its page in
+/// the Netlist workspace, with the generated primary in front.
+pub(crate) fn show_generated_deck(state: &mut AppState) {
+    let _ = open_generated_primary(state);
+    state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+    if state.workbench.workspace != crate::workbench::state::Workspace::Netlist {
+        state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Netlist);
+    }
+}
+
 pub fn open_generated_primary(state: &mut AppState) -> bool {
     if state.ui.netlist.generated_document.is_none()
         || state.ui.netlist.generated_source.trim().is_empty()

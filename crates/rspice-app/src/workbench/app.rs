@@ -891,6 +891,7 @@ impl RSpiceApp {
         self.process_model_browser_dialog(ctx);
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
+        self.render_veriloga_import_dialog(ctx);
         self.process_copy_cell_dialog(ctx);
         self.process_rename_cell_dialog(ctx);
         self.process_library_deletion_review_dialog(ctx);
@@ -1454,6 +1455,9 @@ mod gesture_tests;
 mod veriloga_design_tests;
 
 #[cfg(test)]
+mod veriloga_cell_source_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::product::ProcessCorner;
@@ -1899,28 +1903,35 @@ mod tests {
     }
 
     #[test]
-    fn unreferenced_code_workspace_veriloga_never_blocks_schematic_run_readiness() {
+    fn unreferenced_veriloga_source_never_blocks_schematic_run_readiness() {
         let mut state = runnable_state();
         state
             .workspace
             .content
             .project_sources
-            .insert(
-                crate::state::ProjectSourceDocument::try_new(
-                    "unreferenced.va",
+            .insert_bundle(
+                crate::state::ProjectSourceBundle::try_new(
+                    crate::state::ProjectSourceOwner::cell_view(CellViewRef::new(
+                        "behavioral",
+                        "unreferenced",
+                        "veriloga",
+                    )),
                     crate::state::ProjectSourceLanguage::VerilogA,
+                    "unreferenced.va",
                     "module unreferenced; endmodule\n",
+                    [],
+                    [],
                 )
                 .expect("valid unreferenced source"),
             )
-            .expect("unique Code Workspace source");
+            .expect("unique cell-view source");
         assert!(
             state
                 .workspace
                 .content
                 .project_sources
-                .get(crate::state::ProjectSourceLanguage::VerilogA)
-                .is_some()
+                .iter_bundles()
+                .any(|bundle| bundle.language() == crate::state::ProjectSourceLanguage::VerilogA)
         );
         state.ui.code_workspace.veriloga.receipt = None;
 

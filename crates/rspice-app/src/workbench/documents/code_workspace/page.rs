@@ -31,16 +31,14 @@ pub struct CodeSourceFileDialogState {
     pub error: Option<String>,
 }
 
-/// Transaction used only when a project does not yet own the selected Code
-/// Workspace source bundle. It captures the project identity at open time and
-/// carries portable logical paths rather than giving starter filenames any
-/// semantic authority.
+/// Transaction used only when a project does not yet own its Automation
+/// workspace bundle. It captures the project identity at open time and carries
+/// portable logical paths rather than giving starter filenames any semantic
+/// authority.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeSourceWorkspaceDialogState {
     pub project_id: ProjectId,
-    pub language: ProjectSourceLanguage,
     pub root_path: String,
-    pub build_profile_path: String,
     pub run_plan_path: String,
     pub environment_lock_path: String,
     pub permission_manifest_path: String,
@@ -210,11 +208,11 @@ pub struct VerilogAWorkbenchState {
     /// replacement behavior.
     pub import_target: Option<VerilogAImportTarget>,
     pub root_import_target: Option<VerilogARootImportTarget>,
+    /// File > Import's form for a file read with no Verilog-A view in front,
+    /// which becomes cell views of its own.
+    pub import_form: Option<VerilogAImportFormState>,
     /// Selected source document in the model-project navigator.
     pub selected_file: Option<VerilogAFileSelection>,
-    /// Explicit module selection for multi-file Code Workspace bundles. Cell
-    /// views continue to use their governed `veriloga.module` metadata.
-    pub selected_module: String,
     pub pending: Option<PendingVerilogACompile>,
     pub receipt: Option<VerilogACompileReceipt>,
     pub last_failure: Arc<super::CodeDiagnosticCollection>,
@@ -230,9 +228,10 @@ pub struct VerilogAImportTarget {
     pub importer_path: String,
 }
 
-/// Root-source replacement/creation authority captured before an asynchronous
-/// native or browser picker opens. `None` bundle identity means the exact
-/// project had no Code Workspace Verilog-A bundle at request time.
+/// Root-source import authority captured before an asynchronous native or
+/// browser picker opens: the exact bundle of the Verilog-A view in front,
+/// whose root the file replaces, or `None` when no Verilog-A view was in
+/// front and the file becomes cell views of its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerilogARootImportTarget {
     pub project_id: crate::product::ProjectId,
@@ -241,6 +240,20 @@ pub struct VerilogARootImportTarget {
         u64,
         crate::product::ContentDigest,
     )>,
+}
+
+/// A Verilog-A file read for File > Import that becomes cell views: one per
+/// top module, in `library`, each owning a bundle of the file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerilogAImportFormState {
+    pub project_id: ProjectId,
+    pub file_name: String,
+    pub contents: String,
+    /// The library the cells go to. Only a writable library is offered.
+    pub library: String,
+    /// The top modules the file declares, or the front end's refusal.
+    pub modules: Result<Vec<crate::state::workspace::DeclaredModule>, String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -797,9 +810,11 @@ mod tests {
     ) -> PreparedVerilogARuntime {
         let project_id = crate::product::ProjectId::new();
         let bundle = crate::state::ProjectSourceBundle::try_new(
-            crate::state::ProjectSourceOwner::code_workspace(
-                crate::state::ProjectSourceLanguage::VerilogA,
-            ),
+            crate::state::ProjectSourceOwner::cell_view(crate::state::CellViewRef::new(
+                "behavioral",
+                module_name,
+                "veriloga",
+            )),
             crate::state::ProjectSourceLanguage::VerilogA,
             file_name,
             format!(
@@ -819,20 +834,25 @@ mod tests {
     }
 
     #[test]
-    fn edited_singleton_bundle_keeps_stable_identity_for_receipt_and_runtime() {
+    fn an_edited_bundle_keeps_stable_identity_for_receipt_and_runtime() {
         let project_id = crate::product::ProjectId::new();
-        let mut registry = crate::state::ProjectSourceRegistry::try_from_documents([
-            crate::state::ProjectSourceDocument::try_new(
-                "stable.va",
+        let owner = crate::state::ProjectSourceOwner::cell_view(crate::state::CellViewRef::new(
+            "behavioral",
+            "stable",
+            "veriloga",
+        ));
+        let mut registry = crate::state::ProjectSourceRegistry::try_from_bundles([
+            crate::state::ProjectSourceBundle::try_new(
+                owner.clone(),
                 crate::state::ProjectSourceLanguage::VerilogA,
+                "stable.va",
                 "module stable(p, n); inout p, n; electrical p, n; endmodule\n",
+                [],
+                [],
             )
             .unwrap(),
         ])
         .unwrap();
-        let owner = crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::VerilogA,
-        );
         let stable_id = registry.bundle_for_owner(&owner).unwrap().id();
         registry
             .replace_bundle_file_content(

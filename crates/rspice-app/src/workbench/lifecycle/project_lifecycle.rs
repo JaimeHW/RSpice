@@ -43,8 +43,8 @@ use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
 #[cfg(target_arch = "wasm32")]
 use crate::product::ContentDigest;
+use crate::state::CellViewRef;
 use crate::state::project_snapshot::SnapshotSessionCapture;
-use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
 use rspice_project::{ProjectWorkingSet, SnapshotContent};
 
@@ -201,19 +201,6 @@ pub(crate) fn operation_in_progress(state: &AppState) -> bool {
 }
 
 pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {
-    if state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-        && state.workspace.content.active_view_type() == ViewType::VerilogA
-        && state
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
-                state.workspace.content.active_view.clone(),
-            ))
-            .is_some()
-    {
-        return ProjectDocumentId::CellView(state.workspace.content.active_view.clone());
-    }
     registry::active_document(
         state.workbench.workspace,
         &state.workspace.content.active_view,

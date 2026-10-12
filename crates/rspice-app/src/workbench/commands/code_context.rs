@@ -45,7 +45,6 @@ pub(crate) struct CodeCommandCapabilities {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodeCommandContext {
     pub project_id: ProjectId,
-    pub page: CodeWorkspacePage,
     pub document_kind: CodeDocumentKind,
     pub ownership: CodeDocumentOwnership,
     pub document_identity: String,
@@ -66,9 +65,6 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
     match app.state.workbench.workspace {
         Workspace::Netlist => match app.state.ui.code_workspace.page {
             CodeWorkspacePage::Netlist => resolve_netlist(app),
-            CodeWorkspacePage::VerilogA => {
-                resolve_project_source(app, ProjectSourceLanguage::VerilogA)
-            }
             CodeWorkspacePage::Automation => {
                 resolve_project_source(app, ProjectSourceLanguage::RSpiceAutomation)
             }
@@ -89,27 +85,18 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
 ///
 /// A Verilog-A cell view is a design document, so while one is the active
 /// Design document it is compiled from any workspace — the Models toolbar and
-/// menu included — and the command takes the reader to it. Elsewhere only the
-/// Netlist workspace's Verilog-A page has a source to compile.
+/// menu included — and the command takes the reader to it. With no Verilog-A
+/// view active there is nothing to compile.
 #[must_use]
 pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandContext> {
-    if app.state.workbench.safe_mode.project_read_only() {
-        return None;
-    }
-    let context = if app.state.workbench.workspace == Workspace::Netlist {
-        resolve(app)?
-    } else if app.state.project_lifecycle.is_open()
-        && app.state.workspace.content.active_view_type() == crate::state::ViewType::VerilogA
-    {
-        resolve_project_source(app, ProjectSourceLanguage::VerilogA)?
-    } else {
-        return None;
-    };
-    if context.document_kind != CodeDocumentKind::VerilogA
+    if app.state.workbench.safe_mode.project_read_only()
+        || !app.state.project_lifecycle.is_open()
+        || app.state.workspace.content.active_view_type() != crate::state::ViewType::VerilogA
         || app.state.ui.code_workspace.veriloga.pending.is_some()
     {
         return None;
     }
+    let context = resolve_project_source(app, ProjectSourceLanguage::VerilogA)?;
     let selected =
         crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot(app).ok()?;
     app.state
@@ -127,7 +114,6 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
     };
 
     let state = &app.state;
-    let page = CodeWorkspacePage::Netlist;
     let project_id = state.workspace.content.project.id();
     let active = state.ui.netlist.active_document;
     if let Some(dependency) = active_dependency(state) {
@@ -164,7 +150,6 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
         };
         return Some(CodeCommandContext {
             project_id,
-            page,
             document_kind: CodeDocumentKind::NetlistInclude,
             ownership: if owned {
                 CodeDocumentOwnership::ProjectOwned
@@ -284,7 +269,6 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
         && !state.workbench.safe_mode.project_read_only();
     Some(CodeCommandContext {
         project_id,
-        page,
         document_kind,
         ownership,
         document_identity,
@@ -318,10 +302,6 @@ fn resolve_project_source(
     language: ProjectSourceLanguage,
 ) -> Option<CodeCommandContext> {
     let state = &app.state;
-    let page = match language {
-        ProjectSourceLanguage::VerilogA => CodeWorkspacePage::VerilogA,
-        ProjectSourceLanguage::RSpiceAutomation => CodeWorkspacePage::Automation,
-    };
     let selected_veriloga = (language == ProjectSourceLanguage::VerilogA)
         .then(|| {
             crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot(app).ok()
@@ -376,7 +356,6 @@ fn resolve_project_source(
     let project_writable = !state.workbench.safe_mode.project_read_only();
     Some(CodeCommandContext {
         project_id: state.workspace.content.project.id(),
-        page,
         document_kind: match language {
             ProjectSourceLanguage::VerilogA => CodeDocumentKind::VerilogA,
             ProjectSourceLanguage::RSpiceAutomation => CodeDocumentKind::Automation,

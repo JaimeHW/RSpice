@@ -83,8 +83,21 @@ impl ProjectSnapshot {
                 .or_default()
                 .is_dirty = true;
         }
+        let mut file = decoded.file;
+        // Every project reaches the application through here, so this is
+        // where the retired project-wide Verilog-A bundle becomes a cell
+        // view. What it created is reported with the load's other repairs.
+        if let Some(notice) = super::workspace::retire_code_workspace_veriloga(
+            &mut file.workspace,
+            &mut file.libraries,
+        ) {
+            file.workspace_migration_warning = Some(match file.workspace_migration_warning {
+                Some(repairs) => format!("{repairs} {notice}"),
+                None => notice,
+            });
+        }
         Self {
-            file: decoded.file,
+            file,
             workspace_session,
         }
     }

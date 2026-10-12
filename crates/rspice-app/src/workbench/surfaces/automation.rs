@@ -86,10 +86,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     if Button::new(&messages.text(MessageId::CodeSourceCreateWorkspace))
                         .show(ui)
                         .clicked()
-                        && let Err(error) = crate::workbench::documents::code_workspace::open_source_workspace_dialog(
-                            app,
-                            ProjectSourceLanguage::RSpiceAutomation,
-                        )
+                        && let Err(error) =
+                            crate::workbench::documents::code_workspace::open_source_workspace_dialog(app)
                     {
                         app.state.push_user_message(ConsoleMessage::error(error));
                     }

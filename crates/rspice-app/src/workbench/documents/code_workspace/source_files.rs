@@ -52,10 +52,12 @@ pub(crate) fn source_file_mutation_block_reason(
     }
 }
 
-pub(crate) fn open_source_workspace_dialog(
-    app: &mut RSpiceApp,
-    language: ProjectSourceLanguage,
-) -> Result<(), String> {
+/// Open the transaction that creates the project's Automation workspace.
+///
+/// Automation is the one project-wide source workspace: a Verilog-A source is
+/// a cell view, created with its cell.
+pub(crate) fn open_source_workspace_dialog(app: &mut RSpiceApp) -> Result<(), String> {
+    let language = ProjectSourceLanguage::RSpiceAutomation;
     if let Some(reason) = source_file_mutation_block_reason(app, language) {
         return Err(reason.to_owned());
     }
@@ -84,13 +86,7 @@ pub(crate) fn open_source_workspace_dialog(
     app.state.ui.code_workspace.source_workspace_dialog =
         Some(super::CodeSourceWorkspaceDialogState {
             project_id: app.state.workspace.content.project.id(),
-            language,
-            root_path: match language {
-                ProjectSourceLanguage::VerilogA => "model.va",
-                ProjectSourceLanguage::RSpiceAutomation => "automation.py",
-            }
-            .to_owned(),
-            build_profile_path: "veriloga-build.toml".to_owned(),
+            root_path: "automation.py".to_owned(),
             run_plan_path: "runplan.yaml".to_owned(),
             environment_lock_path: "environment.lock".to_owned(),
             permission_manifest_path: "permissions.toml".to_owned(),
@@ -108,7 +104,8 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
         .source_workspace_dialog
         .clone()
         .ok_or_else(|| "No source-workspace transaction is open.".to_owned())?;
-    if let Some(reason) = source_file_mutation_block_reason(app, draft.language) {
+    let language = ProjectSourceLanguage::RSpiceAutomation;
+    if let Some(reason) = source_file_mutation_block_reason(app, language) {
         return Err(reason.to_owned());
     }
     if draft.project_id != app.state.workspace.content.project.id() {
@@ -117,7 +114,7 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
                 .to_owned(),
         );
     }
-    let owner = ProjectSourceOwner::code_workspace(draft.language);
+    let owner = ProjectSourceOwner::code_workspace(language);
     if app
         .state
         .workspace
@@ -130,125 +127,28 @@ pub(crate) fn commit_source_workspace_dialog(app: &mut RSpiceApp) -> Result<Stri
             .to_owned());
     }
 
-    let bundle = match draft.language {
-        ProjectSourceLanguage::VerilogA => {
-            new_veriloga_workspace_bundle(&draft.root_path, &draft.build_profile_path)?
-        }
-        ProjectSourceLanguage::RSpiceAutomation => new_automation_workspace_bundle(&draft)?,
-    };
+    let bundle = new_automation_workspace_bundle(&draft)?;
     let root_path = bundle.root().logical_path().to_owned();
-    let bundle_id = bundle.id();
     app.state
         .workspace
         .content
         .insert_project_source_bundle(bundle)
         .map_err(|error| error.to_string())?;
-    match draft.language {
-        ProjectSourceLanguage::VerilogA => {
-            app.state.ui.code_workspace.veriloga = Default::default();
-            app.state.ui.code_workspace.veriloga.selected_file = Some(VerilogAFileSelection {
-                bundle_id,
-                logical_path: root_path.clone(),
-            });
-        }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            app.state.ui.code_workspace.automation = Default::default();
-            app.state.ui.code_workspace.automation.selected_file = Some(root_path.clone());
-        }
-    }
+    app.state.ui.code_workspace.automation = Default::default();
+    app.state.ui.code_workspace.automation.selected_file = Some(root_path.clone());
     app.state.ui.code_workspace.source_workspace_dialog = None;
     let message = format!(
         "Created a project-owned {} source workspace rooted at '{root_path}'.",
-        draft.language.label()
+        language.label()
     );
     app.state
         .push_user_message(ConsoleMessage::info(message.clone()));
     Ok(message)
 }
 
-fn new_veriloga_workspace_bundle(
-    root_path: &str,
-    build_profile_path: &str,
-) -> Result<ProjectSourceBundle, String> {
-    let root_path = root_path.trim();
-    let build_profile_path = build_profile_path.trim();
-    if crate::state::project_source_paths_equal(root_path, build_profile_path) {
-        return Err(
-            "The root source and Verilog-A build profile must use distinct project paths."
-                .to_owned(),
-        );
-    }
-    let module = verilog_a_module_name(root_path);
-    let source = format!(
-        "`include \"constants.vams\"\n`include \"disciplines.vams\"\n\nmodule {module}(p, n);\n    inout p, n;\n    electrical p, n;\n\n    analog begin\n    end\nendmodule\n"
-    );
-    new_veriloga_workspace_bundle_with_source(root_path, source, build_profile_path, &module)
-}
-
-pub(super) fn new_imported_veriloga_workspace_bundle(
-    root_path: &str,
-    source: String,
-) -> Result<ProjectSourceBundle, String> {
-    let module = verilog_a_module_name(root_path);
-    let mut profile = super::veriloga_profile::VerilogABuildProfile::starter(&module);
-    // Imported source is arbitrary project content. The file stem is useful
-    // as a package label, but it is not evidence of the declared module. An
-    // empty entry list lets the compiler select exactly one declared module
-    // and requires an explicit project choice for multi-module sources.
-    profile.entry_modules.clear();
-    let profile = profile.to_toml().map_err(|error| error.to_string())?;
-    ProjectSourceBundle::try_new_with_roles(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
-        root_path,
-        source,
-        [
-            ProjectSourceFile::try_new(".rspice/veriloga-build.toml", profile)
-                .map_err(|error| error.to_string())?,
-        ],
-        [
-            ProjectSourceDependency::try_new(root_path, ".rspice/veriloga-build.toml")
-                .map_err(|error| error.to_string())?,
-        ],
-        [ProjectSourceRoleBinding::try_new(
-            ".rspice/veriloga-build.toml",
-            ProjectSourceRole::VerilogABuildProfile,
-        )
-        .map_err(|error| error.to_string())?],
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn new_veriloga_workspace_bundle_with_source(
-    root_path: &str,
-    source: String,
-    build_profile_path: &str,
-    module: &str,
-) -> Result<ProjectSourceBundle, String> {
-    let profile = super::veriloga_profile::VerilogABuildProfile::starter(module)
-        .to_toml()
-        .map_err(|error| error.to_string())?;
-    ProjectSourceBundle::try_new_with_roles(
-        ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-        ProjectSourceLanguage::VerilogA,
-        root_path,
-        source,
-        [ProjectSourceFile::try_new(build_profile_path, profile)
-            .map_err(|error| error.to_string())?],
-        [
-            ProjectSourceDependency::try_new(root_path, build_profile_path)
-                .map_err(|error| error.to_string())?,
-        ],
-        [ProjectSourceRoleBinding::try_new(
-            build_profile_path,
-            ProjectSourceRole::VerilogABuildProfile,
-        )
-        .map_err(|error| error.to_string())?],
-    )
-    .map_err(|error| error.to_string())
-}
-
-fn verilog_a_module_name(root_path: &str) -> String {
+/// A module name for a qualification record that has no module of its own,
+/// derived from the root file's stem.
+pub(super) fn verilog_a_module_name_for_profile(root_path: &str) -> String {
     let stem = root_path
         .rsplit('/')
         .next()
@@ -270,10 +170,6 @@ fn verilog_a_module_name(root_path: &str) -> String {
         module.insert_str(0, "model_");
     }
     module
-}
-
-pub(super) fn verilog_a_module_name_for_profile(root_path: &str) -> String {
-    verilog_a_module_name(root_path)
 }
 
 fn new_automation_workspace_bundle(
@@ -472,9 +368,9 @@ pub(crate) fn source_document_is_editable(
     source_bundle_document_is_editable(app, language, bundle_id, logical_path)
 }
 
-/// Resolve edit authority for an exact source bundle. Verilog-A bundles may
-/// belong either to the singleton Code workspace or to a first-class cell
-/// view; Automation remains confined to its singleton project workspace.
+/// Resolve edit authority for an exact source bundle. A Verilog-A bundle
+/// belongs to its cell view; Automation remains confined to its singleton
+/// project workspace.
 pub(crate) fn source_bundle_document_is_editable(
     app: &RSpiceApp,
     language: ProjectSourceLanguage,
@@ -1289,15 +1185,52 @@ mod tests {
         }
     }
 
+    fn veriloga_reference() -> crate::state::CellViewRef {
+        crate::state::CellViewRef::new("behavioral", "gain", "veriloga")
+    }
+
+    /// A test app with the Verilog-A view `behavioral/gain/veriloga` open
+    /// over a one-file bundle.
+    fn veriloga_view_app() -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let reference = veriloga_reference();
+        let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), "gain".to_owned());
+        let mut cell = crate::state::Cell::new(&reference.cell);
+        cell.add_view(view);
+        let mut library = crate::state::Library::new(&reference.library);
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state
+            .workspace
+            .content
+            .project_sources
+            .insert_bundle(
+                ProjectSourceBundle::try_new(
+                    ProjectSourceOwner::cell_view(reference.clone()),
+                    ProjectSourceLanguage::VerilogA,
+                    "gain.va",
+                    "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+                    [],
+                    [],
+                )
+                .expect("a valid cell-view bundle"),
+            )
+            .expect("one bundle per cell view");
+        app.state
+            .workspace
+            .open_view(reference, crate::state::ViewType::VerilogA);
+        app
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn verilog_a_bundle(app: &RSpiceApp) -> &crate::state::ProjectSourceBundle {
         app.state
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&crate::state::ProjectSourceOwner::code_workspace(
-                ProjectSourceLanguage::VerilogA,
-            ))
+            .bundle_for_owner(&ProjectSourceOwner::cell_view(veriloga_reference()))
             .expect("the test project has a Verilog-A bundle")
     }
 
@@ -1305,13 +1238,6 @@ mod tests {
     fn duplicate_names_preserve_directory_and_extension() {
         assert_eq!(duplicate_file_name("models/gain.va"), "models/gain_copy.va");
         assert_eq!(duplicate_file_name("README"), "README_copy");
-    }
-
-    #[test]
-    fn workspace_creation_rejects_unicode_case_alias_paths() {
-        let error = new_veriloga_workspace_bundle("Models/étage.va", "MODELS/ÉTAGE.VA")
-            .expect_err("one logical path cannot own both root and profile roles");
-        assert!(error.contains("must use distinct project paths"), "{error}");
     }
 
     #[test]
@@ -1438,7 +1364,7 @@ mod tests {
 
     #[test]
     fn editor_authority_rejects_closed_read_only_and_governed_sources() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let automation_owner =
             ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
         let automation = app
@@ -1457,7 +1383,7 @@ mod tests {
             .next()
             .expect("managed environment lock")
             .to_owned();
-        let verilog_owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+        let verilog_owner = ProjectSourceOwner::cell_view(veriloga_reference());
         let verilog_root = app
             .state
             .workspace
@@ -1663,7 +1589,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_file_actions_are_persisted_transactionally() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         app.state.workspace.content.mark_project_sources_clean();
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
 
@@ -1759,7 +1685,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_file_commit_rejects_a_stale_bundle_transaction() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
         let bundle_id = verilog_a_bundle(&app).id();
         let before = verilog_a_bundle(&app).closure_digest();
@@ -1790,7 +1716,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_history_restores_the_exact_bundle_as_a_new_revision() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let bundle_id = verilog_a_bundle(&app).id();
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
         let original = verilog_a_bundle(&app).root().content().to_owned();
@@ -1817,7 +1743,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn source_history_restore_rejects_a_newer_source_closure() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let bundle_id = verilog_a_bundle(&app).id();
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
         app.state
@@ -1851,7 +1777,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn bundle_root_delete_is_rejected_before_a_dialog_opens() {
-        let mut app = RSpiceApp::test_instance();
+        let mut app = veriloga_view_app();
         let root = verilog_a_bundle(&app).root().logical_path().to_owned();
         let error = open_source_file_dialog(
             &mut app,
@@ -2074,7 +2000,7 @@ mod tests {
             .remove_project_source(ProjectSourceLanguage::RSpiceAutomation);
         app.state.workspace.content.mark_project_sources_clean();
 
-        open_source_workspace_dialog(&mut app, ProjectSourceLanguage::RSpiceAutomation).unwrap();
+        open_source_workspace_dialog(&mut app).unwrap();
         let draft = app
             .state
             .ui

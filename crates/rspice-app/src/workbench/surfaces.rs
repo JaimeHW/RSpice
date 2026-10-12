@@ -77,9 +77,6 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     netlist::show_prepared(ui, app)
                 }
-                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA => {
-                    veriloga::show(ui, app)
-                }
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation => {
                     automation::show(ui, app)
                 }

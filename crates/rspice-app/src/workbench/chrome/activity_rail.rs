@@ -183,8 +183,8 @@ const fn activity_workspace_label(workspace: Workspace) -> &'static str {
         Workspace::Results => "Results",
         Workspace::Verify => "Verification",
         Workspace::Models => "Models and PDKs",
-        // The workspace name the mockup registry gives it; the three pages
-        // inside it stay Netlist, Verilog-A and Automation.
+        // The workspace name the mockup registry gives it; the two pages
+        // inside it stay Netlist and Automation.
         Workspace::Netlist => "Netlist & Script Editor",
     }
 }

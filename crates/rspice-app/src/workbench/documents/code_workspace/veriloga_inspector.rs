@@ -1,12 +1,11 @@
 //! What the compiler knows about the Verilog-A source in front of the reader.
 //!
-//! The Design workspace's inspector dock and the Netlist page's own inspector
-//! column state the same facts about the same bundle, so they draw this one
-//! body. It sits below the docks and the surfaces because both reach it and
-//! neither may reach the other. Everything here is derived from the exact
-//! compile receipt or failure whose token matches the selected bundle: a
-//! receipt from another cell view, or from an earlier revision of this one,
-//! never reads as current.
+//! The Design workspace's inspector dock draws this body, and the editor reads
+//! its compile status and diagnostics from here too, so it sits below both the
+//! docks and the surfaces. Everything here is derived from the exact compile
+//! receipt or failure whose token matches the selected bundle: a receipt from
+//! another cell view, or from an earlier revision of this one, never reads as
+//! current.
 
 use std::sync::Arc;
 

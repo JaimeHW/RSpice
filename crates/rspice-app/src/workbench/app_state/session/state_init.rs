@@ -78,20 +78,6 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         .canvas_grid_size();
     if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
-            crate::state::ProjectSourceLanguage::VerilogA,
-        ),
-    ) {
-        ui.code_workspace.veriloga.receipt = Some(
-            crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
-                workspace.content.project.id(),
-                bundle,
-                None,
-            )
-            .expect("the canonical bootstrapped Verilog-A source must compile"),
-        );
-    }
-    if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
-        &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::RSpiceAutomation,
         ),
     ) {
@@ -278,6 +264,9 @@ mod tests {
             "static startup parsing must not impersonate managed-CPython validation"
         );
         assert!(state.ui.code_workspace.automation.manifest.is_some());
-        assert!(state.ui.code_workspace.veriloga.receipt.is_some());
+        assert!(
+            state.ui.code_workspace.veriloga.receipt.is_none(),
+            "a new project has no Verilog-A source, so startup compiles none"
+        );
     }
 }

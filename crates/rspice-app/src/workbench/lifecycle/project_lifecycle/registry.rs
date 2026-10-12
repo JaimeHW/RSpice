@@ -375,35 +375,23 @@ mod tests {
     #[test]
     fn code_sources_participate_in_the_code_document_digest() {
         let mut state = AppState::default();
-        if state
-            .workspace
-            .content
-            .project_sources
-            .get(crate::state::ProjectSourceLanguage::VerilogA)
-            .is_none()
-        {
+        assert!(
             state
                 .workspace
                 .content
                 .project_sources
-                .insert(
-                    crate::state::ProjectSourceDocument::try_new(
-                        "sensor_bridge.va",
-                        crate::state::ProjectSourceLanguage::VerilogA,
-                        "module sensor_bridge; endmodule",
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
-        }
+                .get(crate::state::ProjectSourceLanguage::RSpiceAutomation)
+                .is_some(),
+            "a new project carries its Automation workspace"
+        );
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
 
         state
             .workspace
             .content
             .replace_project_source(
-                crate::state::ProjectSourceLanguage::VerilogA,
-                "module sensor_bridge; analog begin end endmodule".to_owned(),
+                crate::state::ProjectSourceLanguage::RSpiceAutomation,
+                "print('edited')\n".to_owned(),
             )
             .unwrap();
         let current = super::super::snapshot(&state).expect("edited snapshot");

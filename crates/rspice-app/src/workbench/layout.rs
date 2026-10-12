@@ -195,13 +195,7 @@ impl LayoutSpec {
             // The mockup retains labeled tools above its 820 px compact-shell
             // cutoff; only the compact toolbar projects icons alone.
             toolbar_labels: viewport_width > 820.0 && !short_landscape,
-            toolbar_tool_limit: if viewport_width <= 560.0 {
-                Some(2)
-            } else if short_landscape {
-                Some(3)
-            } else {
-                None
-            },
+            toolbar_tool_limit: toolbar_tool_limit(viewport_width, viewport_height),
             show_pvt_selector: viewport_width > 820.0 && !short_landscape,
             // The canonical run-configuration summary is present only when
             // both workstation docks fit (the mockup removes it at 1260 px).
@@ -249,6 +243,20 @@ impl LayoutSpec {
             console_max_height,
             console_height,
         }
+    }
+}
+
+/// How many context tools the toolbar keeps at this viewport, or `None` when
+/// it shows them all. A surface whose actions live in the toolbar reads this
+/// to know when it has to carry them itself.
+pub(crate) fn toolbar_tool_limit(viewport_width: f32, viewport_height: f32) -> Option<usize> {
+    let short_landscape = viewport_width <= 900.0 && viewport_height <= 500.0;
+    if viewport_width <= 560.0 {
+        Some(2)
+    } else if short_landscape {
+        Some(3)
+    } else {
+        None
     }
 }
 

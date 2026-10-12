@@ -20,7 +20,8 @@ use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
     TargetQualification, VerilogACompileDialogState, VerilogACompileOutcome,
-    VerilogACompileReceipt, VerilogAFileSelection, VerilogAQualificationHistoryRow,
+    VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState,
+    VerilogAQualificationHistoryRow,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -36,10 +37,9 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// The exact project-owned Verilog-A closure selected by the current editor.
-/// The bundle is the one [`super::active_source_owner`] names: the active
-/// cell view's while that view is a Verilog-A view, else the Code Workspace
-/// singleton.
+/// The exact project-owned Verilog-A closure selected by the current editor:
+/// the bundle the active Verilog-A cell view owns, and the module that view
+/// binds.
 #[derive(Debug, Clone)]
 pub(crate) struct SelectedVerilogASource {
     pub(super) bundle: ProjectSourceBundle,
@@ -97,28 +97,22 @@ impl SelectedVerilogASource {
 }
 
 pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
-    let owner = super::active_source_owner(&app.state.workspace, ProjectSourceLanguage::VerilogA);
-    let selected_module = match &owner {
-        ProjectSourceOwner::CellView { reference } => Some(
-            crate::state::workspace::project_veriloga_binding_for_view(
-                &app.state.workspace,
-                &app.state.library_manager,
-                reference,
-            )?
-            .selected_module()
-            .to_owned(),
-        ),
-        ProjectSourceOwner::CodeWorkspace { .. } => {
-            let selected_module = app
-                .state
-                .ui
-                .code_workspace
-                .veriloga
-                .selected_module
-                .trim()
-                .to_owned();
-            (!selected_module.is_empty()).then_some(selected_module)
-        }
+    let no_view = || "Open a Verilog-A cell view to work on its source.".to_owned();
+    let owner = super::active_source_owner(&app.state.workspace, ProjectSourceLanguage::VerilogA)
+        .ok_or_else(no_view)?;
+    let ProjectSourceOwner::CellView { reference } = &owner else {
+        return Err(no_view());
+    };
+    // A view that names no module yet is still its author's to edit: a source
+    // migrated before it parsed has no module to name until it does.
+    let selected_module = match crate::state::workspace::project_veriloga_binding_for_view(
+        &app.state.workspace,
+        &app.state.library_manager,
+        reference,
+    ) {
+        Ok(binding) => Some(binding.selected_module().to_owned()),
+        Err(_) if view_names_no_module(app, reference) => None,
+        Err(error) => return Err(error),
     };
     let bundle = app
         .state
@@ -126,14 +120,11 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
         .content
         .project_sources
         .bundle_for_owner(&owner)
-        .ok_or_else(|| match owner {
-            ProjectSourceOwner::CellView { reference } => format!(
+        .ok_or_else(|| {
+            format!(
                 "{} has no project-owned Verilog-A source bundle.",
                 reference.display_path()
-            ),
-            ProjectSourceOwner::CodeWorkspace { .. } => {
-                "This project has no Code Workspace Verilog-A source bundle.".to_owned()
-            }
+            )
         })?
         .clone();
     bundle
@@ -143,6 +134,23 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
         bundle,
         selected_module,
     })
+}
+
+/// Whether the Verilog-A view at `reference` exists and states no module.
+fn view_names_no_module(app: &RSpiceApp, reference: &crate::state::CellViewRef) -> bool {
+    app.state
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| Some((cell, cell.get_view(&reference.view)?)))
+        .is_some_and(|(cell, view)| {
+            view.view_type == ViewType::VerilogA
+                && crate::state::workspace::metadata_value(
+                    [&view.metadata, &cell.metadata],
+                    &["veriloga.module", "netlist.module"],
+                )
+                .is_none()
+        })
 }
 
 pub(crate) fn selected_veriloga_editor_snapshot(
@@ -353,74 +361,27 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
         ));
         return;
     }
-    match root_target.bundle_identity {
-        Some((bundle_id, revision, digest)) => {
-            let current = app
-                .state
-                .workspace
-                .content
-                .project_sources
-                .get_bundle(bundle_id)
-                .is_some_and(|bundle| {
-                    bundle.revision().get() == revision && bundle.closure_digest() == digest
-                });
-            if !current {
-                app.state.push_user_message(ConsoleMessage::error(
-                    "Verilog-A import was discarded because the exact source bundle changed while the picker was open.",
-                ));
-                return;
-            }
-        }
-        None => {
-            let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
-            if app
-                .state
-                .workspace
-                .content
-                .project_sources
-                .bundle_for_owner(&owner)
-                .is_some()
-            {
-                app.state.push_user_message(ConsoleMessage::error(
-                    "Verilog-A import was discarded because a source workspace was created while the picker was open.",
-                ));
-                return;
-            }
-            let result =
-                super::source_files::new_imported_veriloga_workspace_bundle(&file_name, contents)
-                    .and_then(|bundle| {
-                        app.state
-                            .workspace
-                            .content
-                            .insert_project_source_bundle(bundle)
-                            .map_err(|error| error.to_string())
-                    });
-            match result {
-                Ok(_) => {
-                    app.state.ui.code_workspace.veriloga = Default::default();
-                    if let Some(bundle) = app
-                        .state
-                        .workspace
-                        .content
-                        .project_sources
-                        .bundle_for_owner(&owner)
-                    {
-                        app.state.ui.code_workspace.veriloga.selected_file =
-                            Some(super::VerilogAFileSelection {
-                                bundle_id: bundle.id(),
-                                logical_path: bundle.root().logical_path().to_owned(),
-                            });
-                    }
-                    app.state.push_user_message(ConsoleMessage::info(format!(
-                        "Imported project-owned Verilog-A source {file_name}; compile is required."
-                    )));
-                }
-                Err(error) => app.state.push_user_message(ConsoleMessage::error(format!(
-                    "Verilog-A import failed: {error}"
-                ))),
-            }
-            return;
-        }
+    let Some((bundle_id, revision, digest)) = root_target.bundle_identity else {
+        // With no Verilog-A view in front the file becomes cell views of its
+        // own; the import form says which, and where, before any is made.
+        app.state.ui.code_workspace.veriloga.import_form =
+            Some(VerilogAImportFormState::read(app, file_name, contents));
+        return;
+    };
+    let current = app
+        .state
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(bundle_id)
+        .is_some_and(|bundle| {
+            bundle.revision().get() == revision && bundle.closure_digest() == digest
+        });
+    if !current {
+        app.state.push_user_message(ConsoleMessage::error(
+            "Verilog-A import was discarded because the exact source bundle changed while the picker was open.",
+        ));
+        return;
     }
     let selected = match selected_veriloga_source(app) {
         Ok(selected) => selected,
@@ -431,33 +392,12 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
             return;
         }
     };
-    let cell_view_owned = matches!(
-        selected.bundle().owner(),
-        ProjectSourceOwner::CellView { .. }
-    );
-    let result = if cell_view_owned {
-        replace_selected_veriloga_source(app, &selected, contents)
-    } else {
-        app.state
-            .workspace
-            .content
-            .replace_imported_project_source(
-                ProjectSourceLanguage::VerilogA,
-                file_name.clone(),
-                contents,
-            )
-            .map_err(|error| error.to_string())
-    };
-    match result {
+    match replace_selected_veriloga_source(app, &selected, contents) {
         Ok(true) => {
             app.state.ui.code_workspace.veriloga = Default::default();
             app.state.push_user_message(ConsoleMessage::info(format!(
-                "Imported project-owned Verilog-A source {file_name}{}; compile is required.",
-                if cell_view_owned {
-                    format!(" into {}", selected.document().logical_path())
-                } else {
-                    String::new()
-                }
+                "Imported project-owned Verilog-A source {file_name} into {}; compile is required.",
+                selected.document().logical_path()
             )));
         }
         Ok(false) => app.state.push_user_message(ConsoleMessage::info(format!(
@@ -483,29 +423,41 @@ fn current_root_import_target(app: &RSpiceApp) -> super::VerilogARootImportTarge
     }
 }
 
-pub(crate) fn request_veriloga_root_import(app: &mut RSpiceApp) -> Result<(), String> {
-    if let Some(reason) =
-        super::source_file_mutation_block_reason(app, ProjectSourceLanguage::VerilogA)
-    {
-        return Err(reason.to_owned());
+impl VerilogAImportFormState {
+    /// The form for `contents`, read once: the top modules the file declares,
+    /// and the library the active design lives in, when it may be written.
+    fn read(app: &RSpiceApp, file_name: String, contents: String) -> Self {
+        let modules = crate::state::workspace::survey_veriloga_file(&file_name, &contents)
+            .map(|survey| survey.tops);
+        let writable = writable_libraries(&app.state.library_manager);
+        let library = [
+            &app.state.workspace.content.active_view.library,
+            &app.state.workspace.content.project.root_library,
+        ]
+        .into_iter()
+        .find(|library| writable.contains(*library))
+        .or_else(|| writable.first())
+        .cloned()
+        .unwrap_or_default();
+        Self {
+            project_id: app.state.workspace.content.project.id(),
+            file_name,
+            contents,
+            library,
+            modules,
+            error: None,
+        }
     }
-    if app.state.ui.code_workspace.veriloga.import_requested
-        || app.state.ui.code_workspace.veriloga.pending.is_some()
-    {
-        return Err("A Verilog-A import or compile transaction is already active.".to_owned());
-    }
-    if app.state.workspace.content.active_view_type() == ViewType::VerilogA
-        && selected_veriloga_source(app).is_err()
-    {
-        return Err(
-            "The active Verilog-A cell view has no source owner. Create or repair that cell view from its library owner before importing into it."
-                .to_owned(),
-        );
-    }
-    app.state.ui.code_workspace.veriloga.root_import_target = Some(current_root_import_target(app));
-    app.state.ui.code_workspace.veriloga.import_target = None;
-    app.state.ui.code_workspace.veriloga.import_requested = true;
-    Ok(())
+}
+
+/// The libraries a cell can be created in, by name.
+pub(crate) fn writable_libraries(libraries: &crate::state::LibraryManager) -> Vec<String> {
+    libraries
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| !library.read_only)
+        .map(|library| library.name.clone())
+        .collect()
 }
 
 pub(crate) fn import_dropped_veriloga_source(
@@ -1412,46 +1364,91 @@ mod tests {
         );
     }
 
-    fn ensure_legacy_source(app: &mut RSpiceApp) {
-        let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+    /// A `behavioral/<cell>/veriloga` view binding `module`, owning a
+    /// one-file bundle at `root` that holds `source`.
+    fn add_module_view(
+        app: &mut RSpiceApp,
+        cell_name: &str,
+        root: &str,
+        module: &str,
+        source: &str,
+    ) -> CellViewRef {
         if app
             .state
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
+            .library_manager
+            .get_library("behavioral")
             .is_none()
         {
             app.state
-                .workspace
-                .content
-                .project_sources
-                .insert(
-                    ProjectSourceDocument::try_new(
-                        "legacy.va",
-                        ProjectSourceLanguage::VerilogA,
-                        "module legacy; endmodule\n",
-                    )
-                    .unwrap(),
-                )
-                .unwrap();
+                .library_manager
+                .add_library(Library::new("behavioral"));
         }
+        let reference = CellViewRef::new("behavioral", cell_name, "veriloga");
+        let mut view = View::new("veriloga", ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), module.to_owned());
+        view.metadata
+            .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
+        let library = app
+            .state
+            .library_manager
+            .get_library_mut("behavioral")
+            .unwrap();
+        let mut cell = Cell::new(cell_name);
+        cell.add_view(view);
+        library.add_cell(cell);
+        let bundle = ProjectSourceBundle::try_new(
+            ProjectSourceOwner::cell_view(reference.clone()),
+            ProjectSourceLanguage::VerilogA,
+            root,
+            source,
+            [],
+            [],
+        )
+        .unwrap();
+        app.state
+            .workspace
+            .content
+            .project_sources
+            .insert_bundle(bundle)
+            .unwrap();
+        reference
+    }
+
+    /// A test app whose open Verilog-A view binds `module` over exactly
+    /// `source`.
+    fn module_source_with(module: &str, source: &str) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        let reference = add_module_view(&mut app, "legacy", "legacy.va", module, source);
+        app.state.workspace.open_view(reference, ViewType::VerilogA);
+        app
+    }
+
+    fn portless_module() -> RSpiceApp {
+        module_source_with("legacy", "module legacy; endmodule\n")
     }
 
     #[test]
     fn compile_review_migrates_legacy_defaults_to_a_persisted_role() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
+        let mut app = portless_module();
 
         open_veriloga_compile_dialog(&mut app).unwrap();
 
-        let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
+        let bundle_id = app
+            .state
+            .ui
+            .code_workspace
+            .veriloga
+            .compile_dialog
+            .as_ref()
+            .unwrap()
+            .bundle_id;
         let bundle = app
             .state
             .workspace
             .content
             .project_sources
-            .bundle_for_owner(&owner)
+            .get_bundle(bundle_id)
             .unwrap();
         let profile_path = bundle
             .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
@@ -1475,8 +1472,7 @@ mod tests {
 
     #[test]
     fn compile_review_rejects_a_profile_changed_after_review() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
+        let mut app = portless_module();
         open_veriloga_compile_dialog(&mut app).unwrap();
         let dialog = app
             .state
@@ -1514,8 +1510,7 @@ mod tests {
 
     #[test]
     fn qualification_history_is_append_only_without_changing_source_identity() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
+        let mut app = portless_module();
         open_veriloga_compile_dialog(&mut app).unwrap();
         let selected = selected_veriloga_source(&app).unwrap();
         let token = selected.token(app.state.workspace.content.project.id());
@@ -1556,66 +1551,54 @@ mod tests {
     }
 
     fn add_cell_bundle(app: &mut RSpiceApp, cell_name: &str) -> CellViewRef {
-        if app
-            .state
-            .library_manager
-            .get_library("behavioral")
-            .is_none()
-        {
-            app.state
-                .library_manager
-                .add_library(Library::new("behavioral"));
-        }
-        let reference = CellViewRef::new("behavioral", cell_name, "veriloga");
-        let mut view = View::new("veriloga", ViewType::VerilogA);
-        view.metadata
-            .insert("veriloga.module".to_owned(), "shared_model".to_owned());
-        view.metadata
-            .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
-        let library = app
-            .state
-            .library_manager
-            .get_library_mut("behavioral")
-            .unwrap();
-        let mut cell = Cell::new(cell_name);
-        cell.add_view(view);
-        library.add_cell(cell);
-        let bundle = ProjectSourceBundle::try_new(
-            ProjectSourceOwner::cell_view(reference.clone()),
-            ProjectSourceLanguage::VerilogA,
+        add_module_view(
+            app,
+            cell_name,
             "shared.va",
+            "shared_model",
             "module shared_model(p, n); inout p, n; electrical p, n; endmodule\n",
-            [],
-            [],
         )
-        .unwrap();
+    }
+
+    /// Every Verilog-A source is a cell view's. A project-wide bundle still in
+    /// a registry is never the source in front of the reader: with no
+    /// Verilog-A view open there is none, and with one open it is that view's.
+    #[test]
+    fn only_the_open_veriloga_view_selects_a_source() {
+        let mut app = RSpiceApp::test_instance();
         app.state
             .workspace
             .content
             .project_sources
-            .insert_bundle(bundle)
+            .insert(
+                ProjectSourceDocument::try_new(
+                    "legacy.va",
+                    ProjectSourceLanguage::VerilogA,
+                    "module legacy; endmodule\n",
+                )
+                .unwrap(),
+            )
             .unwrap();
-        reference
-    }
 
-    #[test]
-    fn non_veriloga_workspace_view_preserves_legacy_singleton_selection() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
+        let error =
+            selected_veriloga_source(&app).expect_err("a project-wide bundle is not a selection");
+        assert!(error.contains("Open a Verilog-A cell view"), "{error}");
 
+        let reference = add_cell_bundle(&mut app, "owned");
+        app.state
+            .workspace
+            .open_view(reference.clone(), ViewType::VerilogA);
         let selected = selected_veriloga_source(&app).unwrap();
-
         assert_eq!(
             selected.bundle().owner(),
-            &ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA)
+            &ProjectSourceOwner::cell_view(reference)
         );
-        assert!(selected.selected_module().is_none());
+        assert_eq!(selected.selected_module(), Some("shared_model"));
     }
 
     #[test]
     fn dropped_veriloga_source_reuses_the_exact_import_transition() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
+        let mut app = portless_module();
         let selected = selected_veriloga_source(&app).unwrap();
         let bundle_id = selected.bundle().id();
         let before = selected.bundle().revision().get();
@@ -1635,59 +1618,52 @@ mod tests {
         assert_eq!(bundle.root().content(), source);
     }
 
+    /// With no Verilog-A view in front, an imported file is read into the
+    /// import form, which names its modules; nothing is created until the form
+    /// is committed, and there is no project-wide bundle to fill any more.
     #[test]
-    fn root_import_initializes_an_empty_code_workspace_without_demo_identity() {
+    fn a_root_import_with_no_veriloga_view_reads_the_file_into_the_import_form() {
         let mut app = RSpiceApp::test_instance();
-        app.state
-            .workspace
-            .content
-            .remove_project_source(ProjectSourceLanguage::VerilogA);
+        let sources_before = app.state.workspace.content.project_sources.clone();
         let source = "module actual_model(p, n); inout p, n; electrical p, n; endmodule\n";
 
-        request_veriloga_root_import(&mut app).unwrap();
+        app.state.ui.code_workspace.veriloga.import_requested = true;
         apply_import(
             &mut app,
             "behavioral/presentation_name.va".to_owned(),
             source.to_owned(),
         );
 
-        let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA);
-        let bundle = app
+        let form = app
             .state
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .expect("root import creates the missing source workspace");
+            .ui
+            .code_workspace
+            .veriloga
+            .import_form
+            .as_ref()
+            .expect("the file is read into the import form");
+        assert_eq!(form.file_name, "behavioral/presentation_name.va");
         assert_eq!(
-            bundle.root().logical_path(),
-            "behavioral/presentation_name.va"
+            form.modules,
+            Ok(vec![crate::state::workspace::DeclaredModule {
+                name: "actual_model".to_owned(),
+                ports: vec!["p".to_owned(), "n".to_owned()],
+            }])
         );
-        assert_eq!(bundle.root().content(), source);
-        let resolved = crate::workbench::documents::code_workspace::veriloga_profile::resolve_veriloga_build_profile(bundle).unwrap();
-        assert!(resolved.profile.entry_modules.is_empty());
-        compile_project_bundle_receipt(app.state.workspace.content.project.id(), bundle, None)
-            .expect("a single imported module compiles without filename inference");
-        assert!(app.state.workspace.content.project_sources_dirty);
-        assert!(
-            app.state
-                .ui
-                .code_workspace
-                .veriloga
-                .root_import_target
-                .is_none()
-        );
+        assert_eq!(app.state.workspace.content.project_sources, sources_before);
+        assert!(!app.state.ui.code_workspace.veriloga.import_requested);
     }
 
     #[test]
     fn root_import_rejects_a_bundle_changed_while_the_picker_is_open() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
+        let mut app = portless_module();
         let selected = selected_veriloga_source(&app).unwrap();
         let bundle_id = selected.bundle().id();
         let root = selected.document().logical_path().to_owned();
 
-        request_veriloga_root_import(&mut app).unwrap();
+        app.state.ui.code_workspace.veriloga.root_import_target =
+            Some(current_root_import_target(&app));
+        app.state.ui.code_workspace.veriloga.import_requested = true;
         app.state
             .workspace
             .content
@@ -1766,22 +1742,14 @@ mod tests {
     }
 
     #[test]
-    fn code_workspace_multifile_bundle_compiles_with_explicit_root_module() {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
+    fn a_multifile_bundle_compiles_with_its_views_module() {
+        let mut app = module_source_with(
+            "legacy",
+            "module legacy(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n",
+        );
         let selected = selected_veriloga_source(&app).unwrap();
         let bundle_id = selected.bundle().id();
         let root_path = selected.document().logical_path().to_owned();
-        app.state
-            .workspace
-            .content.project_sources
-            .replace_bundle_file_content(
-                bundle_id,
-                &root_path,
-                "module legacy(p, n); inout p, n; electrical p, n; analog I(p,n) <+ V(p,n); endmodule\n"
-                    .to_owned(),
-            )
-            .unwrap();
         add_bundle_file(
             &mut app,
             bundle_id,
@@ -1790,7 +1758,6 @@ mod tests {
             "`define SCALE 1\n".to_owned(),
         )
         .unwrap();
-        app.state.ui.code_workspace.veriloga.selected_module = "legacy".to_owned();
 
         let selected = selected_veriloga_source(&app).unwrap();
         assert_eq!(selected.selected_module(), Some("legacy"));
@@ -1802,27 +1769,9 @@ mod tests {
         }
     }
 
-    /// A test app whose legacy Verilog-A bundle holds exactly `source`, with
-    /// `module` selected as its root.
-    fn legacy_source_with(module: &str, source: &str) -> RSpiceApp {
-        let mut app = RSpiceApp::test_instance();
-        ensure_legacy_source(&mut app);
-        let selected = selected_veriloga_source(&app).unwrap();
-        let bundle_id = selected.bundle().id();
-        let root_path = selected.document().logical_path().to_owned();
-        app.state
-            .workspace
-            .content
-            .project_sources
-            .replace_bundle_file_content(bundle_id, &root_path, source.to_owned())
-            .unwrap();
-        app.state.ui.code_workspace.veriloga.selected_module = module.to_owned();
-        app
-    }
-
     #[test]
     fn a_compile_carrying_warnings_publishes_its_receipt_and_never_reads_as_failed() {
-        let mut app = legacy_source_with(
+        let mut app = module_source_with(
             "legacy",
             "module legacy(p, n);\n  inout p, n; electrical p, n;\n  analog begin\n    $display(\"trace\");\n    I(p, n) <+ V(p, n);\n  end\nendmodule\n",
         );
@@ -1891,7 +1840,7 @@ mod tests {
         // so what still carries this code is an `endgenerate` with no region
         // open. What the test is about is unchanged: a parse refusal reaches
         // the editor with its compiler code, severity, and line.
-        let app = legacy_source_with(
+        let app = module_source_with(
             "legacy",
             "module legacy(p, n);\n  inout p, n; electrical p, n;\n  endgenerate\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
         );

@@ -31,16 +31,10 @@ impl ProjectWorkspace {
 
     /// Create a new default project and ensure its editable top cell exists in
     /// the shared library manager.
+    ///
+    /// A Verilog-A module is a cell view, so a new project carries no
+    /// Verilog-A source of its own until its author creates or imports one.
     pub fn new_bootstrapped(libraries: &mut LibraryManager) -> Self {
-        let verilog_a = crate::state::ProjectSourceBundle::try_new(
-            crate::state::ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-            ProjectSourceLanguage::VerilogA,
-                "sensor_bridge.va",
-                "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule",
-            [],
-            [],
-        )
-        .expect("the built-in Verilog-A example is valid");
         let automation = crate::state::ProjectSourceBundle::try_new_with_roles(
             crate::state::ProjectSourceOwner::code_workspace(
                 ProjectSourceLanguage::RSpiceAutomation,
@@ -106,14 +100,10 @@ impl ProjectWorkspace {
             ],
         )
         .expect("the built-in Automation workspace is valid");
-        let mut project_sources = ProjectSourceRegistry::try_from_bundles([verilog_a, automation])
-            .expect("the bootstrapped Code source registry is valid");
-        // The canonical Verilog-A fixture is compiled during bootstrap. Python
-        // Automation is intentionally left unvalidated: only the exact
+        // Python Automation is intentionally left unvalidated: only the exact
         // packaged CPython worker may create that receipt.
-        project_sources
-            .mark_validated(ProjectSourceLanguage::VerilogA)
-            .expect("the built-in Verilog-A identity is valid");
+        let project_sources = ProjectSourceRegistry::try_from_bundles([automation])
+            .expect("the bootstrapped Code source registry is valid");
         let mut workspace = Self::default();
         workspace.content.project_sources = project_sources;
         workspace.ensure_library_model(libraries);
