@@ -27,19 +27,20 @@ today = "refused:P3.2"
 # The averaged model (design "O6 averaged") is an ngspice deck, so it is
 # captured as an O1 reference (oracle/vdig.tran.ngspice.cir).
 # Budgets are about five times the slower route's measured case time (tran
-# 2.8 s, mc-tran 1.7 s; ckpt refuses today, sized as two tran runs).
+# 6.1 s native, mc-tran 4.4 s native; ckpt refuses today, sized as a tran
+# run plus a resumed half).
 [[analysis]]
 id = "tran"
 variants = ["vdig", "vams", "p3"]
 oracles = ["O6", "O2", "O1"]
-timeout_s = 15
+timeout_s = 35
 phase = "P2"
 
 [[analysis]]
 id = "ckpt"
 variants = ["vdig", "vams"]
 oracles = ["O6", "O2"]
-timeout_s = 30
+timeout_s = 40
 checkpoint_at = [4e-4]
 phase = "P8"
 
@@ -47,5 +48,5 @@ phase = "P8"
 id = "mc-tran"
 variants = ["vdig", "vams"]
 oracles = ["O6", "O2"]
-timeout_s = 15
+timeout_s = 25
 phase = "P8"

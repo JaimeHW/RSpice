@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-555	tran	interp	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=6.035e-7 allowed 2.000e-6
-555	tran	native	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=6.035e-7 allowed 2.000e-6
+555	tran	interp	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=4.635e-7 allowed 2.000e-6
+555	tran	native	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=4.635e-7 allowed 2.000e-6
 adc	tran	interp	refused	compile_refusal; label="net/adc.v"; instance=adc.v form=structured; token-form=structured; analysis-form=location; site=net/adc.v
 adc	tran	native	refused	compile_refusal; label="net/adc.v"; instance=adc.v form=structured; token-form=structured; analysis-form=location; site=net/adc.v
 adc_nd	tran	interp	wrong	adccode (O2) [1] |a−e|=3.000e0 allowed 0.000e0 (a=0.000000e0, e=3.000000e0)
