@@ -2203,23 +2203,27 @@ endmodule
         .expect("scalar model used to probe executable gate");
     scalar_model.source_digest = artifact.metadata.source_digest.clone();
 
+    // c4803e791 gave parameter arrays an executable ABI and replaced the
+    // blanket "array-valued executable ABI" refusal with a storage-metadata
+    // contract: a model that compiled `coefficients` as a scalar must still
+    // be refused against an artifact that declares it an array.
     let qualification_error =
         rspice_veriloga::wasm_jit::qualify_model_plan(&scalar_model, &artifact)
-            .expect_err("wasm qualification must reject parameter arrays");
+            .expect_err("wasm qualification must reject a scalar model of a parameter array");
     assert!(
         qualification_error
             .to_string()
-            .contains("array-valued executable ABI"),
+            .contains("array storage metadata does not match compiled parameter metadata"),
         "unexpected qualification error: {qualification_error}"
     );
 
     let emission_error =
         rspice_veriloga::wasm_jit::compile_model_value_module(&scalar_model, &artifact)
-            .expect_err("wasm emission must reject parameter arrays");
+            .expect_err("wasm emission must reject a scalar model of a parameter array");
     assert!(
         emission_error
             .to_string()
-            .contains("array-valued executable ABI"),
+            .contains("array storage metadata does not match compiled parameter metadata"),
         "unexpected emission error: {emission_error}"
     );
 }
@@ -2268,11 +2272,25 @@ endmodule
         bound,
         HirExprKind::Identifier { name } if name == &width.name
     ));
+    // `width` sizes `taps`' storage. Since c4803e791 parameter-array bounds
+    // size checked storage, which (c6adb4c1d) binds the parameters they read
+    // to elaboration, and 6d476b5dc specializes an elaboration-bound child input
+    // before flattening: its override is fixed to the elaborated value rather
+    // than left as a symbolic read of `selected_width`. The parent input is
+    // bound too, so changing it goes through source specialization.
     let width_override = width.default_expr.as_ref().expect("child width override");
     assert!(matches!(
         &artifact.hir.expressions[usize::from(width_override.id)].kind,
-        HirExprKind::Identifier { name } if name == "selected_width"
+        HirExprKind::Number { value, .. } if *value == 3.0
     ));
+    assert_eq!(width.elaboration_value, Some(3.0));
+    let selected_width = artifact
+        .hir
+        .parameters
+        .iter()
+        .find(|parameter| parameter.name == "selected_width")
+        .expect("parent width parameter");
+    assert_eq!(selected_width.elaboration_value, Some(3.0));
     let taps_override = taps.default_expr.as_ref().expect("child array override");
     assert!(matches!(
         &artifact.hir.expressions[usize::from(taps_override.id)].kind,

@@ -1382,23 +1382,29 @@ fn integer_parameter_array_elements_obey_scalar_integer_contract() {
 
 #[test]
 fn parameter_array_uses_do_not_acquire_scalar_semantics() {
-    for (expression, expected) in [
-        (
-            "taps * V(p, n)",
-            "parameter array 'taps' cannot be used as a scalar expression",
-        ),
-        (
-            "taps[0] * V(p, n)",
-            "indexed access to parameter array 'taps'",
-        ),
-    ] {
-        let error = analyze(&module_src(&format!(
-            "parameter real taps[0:0] = '{{1.0}};\nanalog I(p, n) <+ {expression};"
-        )))
-        .expect_err("parameter array use must remain fail-closed")
-        .to_string();
-        assert!(error.contains(expected), "unexpected diagnostic: {error}");
-    }
+    let error = analyze(&module_src(
+        "parameter real taps[0:0] = '{1.0};\nanalog I(p, n) <+ taps * V(p, n);",
+    ))
+    .expect_err("a whole parameter array is not a scalar operand")
+    .to_string();
+    assert!(
+        error.contains("parameter array 'taps' cannot be used as a scalar expression"),
+        "unexpected diagnostic: {error}"
+    );
+
+    // c4803e791 gave numeric parameter arrays executable element storage, so
+    // the indexed-access refusal this test used to expect is gone. An indexed
+    // read must reach the element cell, never a scalar named after the array.
+    let module = analyze_one(&module_src(
+        "parameter real taps[0:0] = '{1.0};\nanalog I(p, n) <+ taps[0] * V(p, n);",
+    ));
+    assert!(module.arrays.contains_key("taps"));
+    assert!(!module.variables.iter().any(|variable| variable.name == "taps"));
+    assert!(matches!(
+        &module.contributions[0].expression,
+        Expression::Binary(binary)
+            if matches!(&*binary.left, Expression::Identifier(read) if read.name == "taps[0]")
+    ));
 }
 
 #[test]
