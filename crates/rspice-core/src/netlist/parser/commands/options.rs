@@ -470,6 +470,51 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         "CONNECTRULES",
                     )?);
                 }
+                // Design P2 section 4.4: the HDL random root seed.
+                (None, "HDLSEED" | "HDL_SEED") => {
+                    let value = expect_u64_literal(stream, line_num, "HDLSEED")?;
+                    options.hdl_seed =
+                        Some(u32::try_from(value).map_err(|_| ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "HDLSEED must be an unsigned 32-bit integer, found {value}"
+                            ),
+                        })?);
+                }
+                // Section 4.3: plusargs, after the command line's.
+                (None, "HDL_PLUSARGS") => {
+                    let value = parse_restart_string_option(stream, line_num, "HDL_PLUSARGS")?;
+                    options.hdl_plusargs =
+                        Some(value.split_whitespace().map(str::to_string).collect());
+                }
+                (None, "HDL_RUNDIR") => {
+                    options.hdl_rundir =
+                        Some(parse_restart_string_option(stream, line_num, "HDL_RUNDIR")?);
+                }
+                (None, "HDL_DELAY_SELECT") => {
+                    let selection = match &stream.peek().kind {
+                        TokenKind::Ident(word) => crate::config::HdlDelaySelect::parse(word),
+                        _ => None,
+                    }
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: "HDL_DELAY_SELECT expects MIN, TYP or MAX".to_owned(),
+                    })?;
+                    stream.advance();
+                    options.hdl_delay_select = Some(selection);
+                }
+                (None, "HDL_PATH_DELAYS") => {
+                    options.hdl_path_delays =
+                        Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+                }
+                (None, "HDL_TIMING_CHECKS") => {
+                    options.hdl_timing_checks =
+                        Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+                }
+                (None, "HDL_LIBMAP") => {
+                    options.hdl_libmap =
+                        Some(parse_restart_string_option(stream, line_num, "HDL_LIBMAP")?);
+                }
                 (None, "CONNECTRULES_SOURCE") => {
                     options.connect_rules_source = Some(parse_restart_string_option(
                         stream,

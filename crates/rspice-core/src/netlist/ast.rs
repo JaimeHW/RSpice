@@ -4764,6 +4764,21 @@ pub struct SimulationOptions {
     /// 0 = default transport, 1 = default inertial,
     /// 2 = force transport, 3 = force inertial.
     pub digital_delay_type: Option<i64>,
+    /// `.OPTIONS HDLSEED=<u32>`: the HDL design-global `$random` seed and the
+    /// root of every process's `$urandom` stream (design P2 section 4.4).
+    pub hdl_seed: Option<u32>,
+    /// `.OPTIONS HDL_PLUSARGS='+A=1 +B'`: plusargs after the command line's.
+    pub hdl_plusargs: Option<Vec<String>>,
+    /// `.OPTIONS HDL_RUNDIR="dir"`: where relative HDL file paths resolve.
+    pub hdl_rundir: Option<String>,
+    /// `.OPTIONS HDL_DELAY_SELECT=MIN|TYP|MAX`.
+    pub hdl_delay_select: Option<crate::config::HdlDelaySelect>,
+    /// `.OPTIONS HDL_PATH_DELAYS=YES|NO`.
+    pub hdl_path_delays: Option<bool>,
+    /// `.OPTIONS HDL_TIMING_CHECKS=YES|NO`.
+    pub hdl_timing_checks: Option<bool>,
+    /// `.OPTIONS HDL_LIBMAP="lib.map"`.
+    pub hdl_libmap: Option<String>,
     /// Ngspice `esave` event-output policy for XSPICE digital traces.
     /// `None` keeps the default of recording every event net; `.save`
     /// selects analog outputs only and never limits event nets.
@@ -5050,6 +5065,27 @@ impl SimulationOptions {
         }
         if other.digital_delay_type.is_some() {
             self.digital_delay_type = other.digital_delay_type;
+        }
+        if other.hdl_seed.is_some() {
+            self.hdl_seed = other.hdl_seed;
+        }
+        if other.hdl_plusargs.is_some() {
+            self.hdl_plusargs = other.hdl_plusargs.clone();
+        }
+        if other.hdl_rundir.is_some() {
+            self.hdl_rundir = other.hdl_rundir.clone();
+        }
+        if other.hdl_delay_select.is_some() {
+            self.hdl_delay_select = other.hdl_delay_select;
+        }
+        if other.hdl_path_delays.is_some() {
+            self.hdl_path_delays = other.hdl_path_delays;
+        }
+        if other.hdl_timing_checks.is_some() {
+            self.hdl_timing_checks = other.hdl_timing_checks;
+        }
+        if other.hdl_libmap.is_some() {
+            self.hdl_libmap = other.hdl_libmap.clone();
         }
         if other.xspice_event_trace_save.is_some() {
             self.xspice_event_trace_save = other.xspice_event_trace_save.clone();

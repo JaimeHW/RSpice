@@ -504,8 +504,42 @@ pub fn resolve_simulation_config(
     if resolved.convergence_config.junction_gmin_target > resolved.convergence_config.gmin_initial {
         resolved.convergence_config.gmin_initial = resolved.convergence_config.junction_gmin_target;
     }
+    if let Some(opts) = netlist_options {
+        resolve_hdl_options(&mut resolved.hdl, opts);
+    }
 
     resolved
+}
+
+/// The deck's HDL options (design P2 section 4.3) under the front end's:
+/// the deck's plusargs follow the command line's, so the first match is the
+/// command line's, and a command-line run directory or delay selection wins.
+fn resolve_hdl_options(hdl: &mut crate::config::HdlRunConfig, options: &NetlistSimulationOptions) {
+    if let Some(seed) = options.hdl_seed {
+        hdl.seed = seed;
+    }
+    if let Some(plusargs) = &options.hdl_plusargs {
+        hdl.plusargs.extend(plusargs.iter().cloned());
+    }
+    if hdl.run_directory.is_none()
+        && let Some(directory) = &options.hdl_rundir
+    {
+        hdl.run_directory = Some(directory.into());
+    }
+    if hdl.delay_select == crate::config::HdlDelaySelect::Typ
+        && let Some(selection) = options.hdl_delay_select
+    {
+        hdl.delay_select = selection;
+    }
+    if let Some(enabled) = options.hdl_path_delays {
+        hdl.path_delays = enabled;
+    }
+    if let Some(enabled) = options.hdl_timing_checks {
+        hdl.timing_checks = enabled;
+    }
+    if let Some(map) = &options.hdl_libmap {
+        hdl.library_map = Some(map.into());
+    }
 }
 
 #[cfg(test)]
@@ -1294,5 +1328,58 @@ mod tests {
             resolved.convergence_config.nonlinear_continuation,
             Some(NonlinearContinuationMode::SimultaneousSourceStep)
         );
+    }
+
+    /// Design P2 sections 4.3 and 4.4: every HDL `.options` key parses and
+    /// resolves over the caller's base; the command line's plusargs come
+    /// first, and its run directory and delay selection are not replaced.
+    #[test]
+    fn hdl_options_parse_and_resolve_after_the_command_line() {
+        use crate::config::HdlDelaySelect;
+        let netlist = crate::Netlist::parse(
+            "* hdl options\nR1 a 0 1k\n\
+             .options hdlseed=7 hdl_plusargs='+A=1 +B' hdl_delay_select=max\n\
+             .options hdl_path_delays=0 hdl_timing_checks=0 hdl_rundir=\"run\" hdl_libmap=\"lib.map\"\n\
+             .end\n",
+        )
+        .expect("the HDL options parse");
+        let deck = resolve_simulation_config(
+            &SimulationConfig::default(),
+            Some(&netlist.options),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(deck.hdl.seed, 7);
+        assert_eq!(deck.hdl.plusargs, ["+A=1", "+B"]);
+        assert_eq!(deck.hdl.delay_select, HdlDelaySelect::Max);
+        assert!(!deck.hdl.path_delays && !deck.hdl.timing_checks);
+        assert_eq!(
+            deck.hdl.run_directory.as_deref(),
+            Some(std::path::Path::new("run"))
+        );
+        assert_eq!(
+            deck.hdl.library_map.as_deref(),
+            Some(std::path::Path::new("lib.map"))
+        );
+
+        let mut base = SimulationConfig::default();
+        base.hdl.plusargs = vec!["+A=2".into()];
+        base.hdl.run_directory = Some("cli".into());
+        base.hdl.delay_select = HdlDelaySelect::Min;
+        let resolved = resolve_simulation_config(
+            &base,
+            Some(&netlist.options),
+            &SimulationConfigOverrides::default(),
+        );
+        assert_eq!(resolved.hdl.plusargs, ["+A=2", "+A=1", "+B"]);
+        assert_eq!(
+            resolved.hdl.run_directory.as_deref(),
+            Some(std::path::Path::new("cli"))
+        );
+        assert_eq!(resolved.hdl.delay_select, HdlDelaySelect::Min);
+
+        let error = crate::Netlist::parse("* bad\nR1 a 0 1k\n.options hdlseed=4294967296\n.end\n")
+            .expect_err("the seed is 32-bit")
+            .to_string();
+        assert!(error.contains("HDLSEED"), "{error}");
     }
 }

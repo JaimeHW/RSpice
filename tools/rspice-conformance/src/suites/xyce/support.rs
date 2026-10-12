@@ -2535,6 +2535,13 @@ impl XyceTestRunner {
             bypass_abstol,
             restart,
             transient_noise,
+            hdl_seed,
+            hdl_plusargs,
+            hdl_rundir,
+            hdl_delay_select,
+            hdl_path_delays,
+            hdl_timing_checks,
+            hdl_libmap,
             scale: _,
         } = options;
         spice_dialect.is_none()
@@ -2634,6 +2641,14 @@ impl XyceTestRunner {
             && bypass_abstol.is_none()
             && restart.is_none()
             && hb_num_frequencies.is_empty()
+            // HDL run options steer a Verilog design's run.
+            && hdl_seed.is_none()
+            && hdl_plusargs.is_none()
+            && hdl_rundir.is_none()
+            && hdl_delay_select.is_none()
+            && hdl_path_delays.is_none()
+            && hdl_timing_checks.is_none()
+            && hdl_libmap.is_none()
     }
 
     pub(super) fn analytic_rc_options_match(
