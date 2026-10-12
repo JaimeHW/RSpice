@@ -70,14 +70,29 @@ fn fixed_clamped_and_initial_delays_have_no_mixed_action() {
     assert!(evaluation.apply_mixed_derivative(f64::NAN, 0.0).is_err());
 }
 
+/// `2^exponent` for a subnormal exponent, built from its bit pattern.
+///
+/// `powi` does not promise an exact result here. Where it lowers to libgcc's
+/// `__powidf2` (Linux), a negative exponent forms `2^1071`, overflows to
+/// infinity and returns `1 / inf = 0`, which turned the delay below into a
+/// zero `td`; the Windows lowering happens to return the exact subnormal.
+fn subnormal_power_of_two(exponent: i32) -> f64 {
+    assert!(
+        (-1074..-1022).contains(&exponent),
+        "2^{exponent} is not subnormal"
+    );
+    f64::from_bits(1_u64 << (exponent + 1074))
+}
+
 #[test]
 fn mixed_action_retains_a_representable_result_when_the_coefficient_overflows() {
     let mut buffer = DelayBuffer::new(0);
     buffer
-        .eval(0.0, 0.0, 2.0_f64.powi(-1071), Some(1.0))
+        .eval(0.0, 0.0, subnormal_power_of_two(-1071), Some(1.0))
         .unwrap();
     buffer.commit().unwrap();
-    let interval = 2.0_f64.powi(-1070);
+    let interval = subnormal_power_of_two(-1070);
+    assert!(interval > 0.0);
     assert!((1.0 / interval).is_infinite());
     let evaluation = buffer
         .eval_with_coefficients(interval, 0.0, interval / 2.0, Some(1.0))
