@@ -1,5 +1,5 @@
 # variant	analysis	route	outcome	detail
-base	step-tran	interp	fail	simulation: CircuitError: Circuit error: cannot integrate to mandatory time 1.0000000000000001e-7s from 9.9999999999999995e-8s: interval 1.3234889800848443e-23s cannot satisfy model minimum 9.9999999999999995e-21s, maximum 1.0000000000000001e-9s and current bound 1.
-base	step-tran	native	fail	simulation: CircuitError: Circuit error: cannot integrate to mandatory time 1.0000000000000001e-7s from 9.9999999999999995e-8s: interval 1.3234889800848443e-23s cannot satisfy model minimum 9.9999999999999995e-21s, maximum 1.0000000000000001e-9s and current bound 1.
-base	mc-tran	interp	fail	simulation: CircuitError: Circuit error: cannot integrate to mandatory time 1.0000000000000001e-7s from 9.9999999999999995e-8s: interval 1.3234889800848443e-23s cannot satisfy model minimum 9.9999999999999995e-21s, maximum 1.0000000000000001e-9s and current bound 1.
-base	mc-tran	native	fail	simulation: CircuitError: Circuit error: cannot integrate to mandatory time 1.0000000000000001e-7s from 9.9999999999999995e-8s: interval 1.3234889800848443e-23s cannot satisfy model minimum 9.9999999999999995e-21s, maximum 1.0000000000000001e-9s and current bound 1.
+base	step-tran	interp	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.000000e-3, e=-2.000000e-3)
+base	step-tran	native	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.000000e-3, e=-2.000000e-3)
+base	mc-tran	interp	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.072789e-3, e=-2.072789e-3)
+base	mc-tran	native	pass	ivp (O6) trial 0: [0] |a−e|=1.000e-15 allowed 1.000e-9 (a=-2.072789e-3, e=-2.072789e-3)

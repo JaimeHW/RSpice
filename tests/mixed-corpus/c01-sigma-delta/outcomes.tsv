@@ -3,15 +3,15 @@ xs	tran	interp	fail	solver: solver: Solver error: transient engine returned dupl
 xs	tran	native	fail	solver: solver: Solver error: transient engine returned duplicate waveform identities
 vams	tran	interp	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=9.9999999999999986e-10s
 vams	tran	native	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=9.9999999999999986e-10s
-xs	op	interp	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
-xs	op	native	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
-vams	op	interp	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
-vams	op	native	fail	solver: solver: Solver error: DC operating point returned duplicate signal identities
-xs	ac	interp	fail	solver: solver: Solver error: AC engine returned duplicate signal identities
-xs	ac	native	fail	solver: solver: Solver error: AC engine returned duplicate signal identities
-vams	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xq form=prose; token-form=prose; analysis-form=prose
-vams	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xq form=prose; token-form=prose; analysis-form=prose
-xs	trnoise	interp	fail	solver: solver: Solver error: transient engine returned duplicate waveform identities
+xs	op	interp	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
+xs	op	native	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
+vams	op	interp	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
+vams	op	native	pass	opdiff (O6) [0] |a−e|=2.500e-1 allowed 1.000e1 (a=9.999975e4, e=1.000000e5)
+xs	ac	interp	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
+xs	ac	native	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
+vams	ac	interp	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
+vams	ac	native	pass	acint (O6) [0] Δ=-6.262e-6 dB, 6.489e-5° allowed 1e-2 dB, 1e-1°
+xs	trnoise	interp	pass	var (O6) var over 49 samples: 1.044218e0 in [7.330000e-1, 3.970000e0]
 xs	trnoise	native	fail	solver: solver: Solver error: transient engine returned duplicate waveform identities
 vams	trnoise	interp	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=3.9999999999999994e-9s
 vams	trnoise	native	fail	simulation: simulation: Circuit error: mixed candidate voltage projection did not settle at t=3.9999999999999994e-9s
