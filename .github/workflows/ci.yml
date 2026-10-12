@@ -173,8 +173,10 @@ jobs:
           --test capability_refusals
           --test connect_module_insertion
           --test mixed_bit_aliases
+          --test sensitivity_source_waveforms
           --test spectre_analog_statements
           --test transient_checkpoint
+          --test transient_events_at_stop_time
           --test transient_noise_veriloga
           --test veriloga_ac
           --test veriloga_connect_source_closure
@@ -349,8 +351,10 @@ jobs:
           --test capability_refusals
           --test connect_module_insertion
           --test mixed_bit_aliases
+          --test sensitivity_source_waveforms
           --test spectre_analog_statements
           --test transient_checkpoint
+          --test transient_events_at_stop_time
           --test transient_noise_veriloga
           --test veriloga_ac
           --test veriloga_connect_source_closure
