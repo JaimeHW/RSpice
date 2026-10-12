@@ -1,0 +1,9 @@
+* C3 d_cosim examples, variant adc_nd (adc.v without its $display line), tran
+.verilog "../net/adc_nd.v" adc
+.include ../net/adc.shared
+.include ../net/adc_observe.cir
+* 13 conversions (upstream runs 25 over 250 us), so the case runs in seconds.
+* The stop time sits between clock edges: stopping on one (130 us) fails
+* with a missed XSPICE breakpoint (reported separately).
+.tran 100n 129.75u
+.end

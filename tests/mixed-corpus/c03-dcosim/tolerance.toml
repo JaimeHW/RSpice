@@ -1,0 +1,225 @@
+schema = "rspice-mixed-tolerance/1"
+# The XSPICE inverters of the adc wiring delay by 1 ps; the Verilog timescales
+# are 1us/100ns (555, delay, pwm) and 100ns/100ns (adc).
+time_precision = 1e-12
+
+# --- 555 -------------------------------------------------------------------
+# Rising crossings of v(output) at 6 V. The reset pulses (0, 51, 102, 153 ms)
+# cut a charge phase short; each window starts just after a reset, so every
+# interval it averages is a whole undisturbed cycle.
+
+[[q]]
+id = "T555a"
+analysis = "tran"
+variants = ["555"]
+kind = "period"
+signal = "v(output)"
+level = 6.0
+window = [5.11e-2, 1.019e-1]
+oracle = "O6"
+expect = "c03::t555"
+abs = 3e-4
+why = "charge 20k·1u·ln2 + discharge 10k·1u·ln((8−Vsat)/(4−Vsat)); 0.3 ms covers the saturation voltage of the default npn"
+
+[[q]]
+id = "T555b"
+analysis = "tran"
+variants = ["555"]
+kind = "period"
+signal = "v(output)"
+level = 6.0
+window = [1.021e-1, 1.529e-1]
+oracle = "O6"
+expect = "c03::t555"
+abs = 3e-4
+why = "as T555a, between the 102 ms and 153 ms resets"
+
+[[q]]
+id = "T555c"
+analysis = "tran"
+variants = ["555"]
+kind = "period"
+signal = "v(output)"
+level = 6.0
+window = [1.531e-1, 2.0e-1]
+oracle = "O6"
+expect = "c03::t555"
+abs = 3e-4
+why = "as T555a, after the 153 ms reset"
+
+[[q]]
+id = "T555a"
+analysis = "tran"
+variants = ["555"]
+kind = "period"
+signal = "v(output)"
+level = 6.0
+window = [5.11e-2, 1.019e-1]
+oracle = "O2"
+ref = "ref/555.tran.O2.out"
+rel = 0.005
+why = "the same circuit with the same converter levels in both simulators"
+
+[[q]]
+id = "T555b"
+analysis = "tran"
+variants = ["555"]
+kind = "period"
+signal = "v(output)"
+level = 6.0
+window = [1.021e-1, 1.529e-1]
+oracle = "O2"
+ref = "ref/555.tran.O2.out"
+rel = 0.005
+why = "the same circuit with the same converter levels in both simulators"
+
+[[q]]
+id = "T555c"
+analysis = "tran"
+variants = ["555"]
+kind = "period"
+signal = "v(output)"
+level = 6.0
+window = [1.531e-1, 2.0e-1]
+oracle = "O2"
+ref = "ref/555.tran.O2.out"
+rel = 0.005
+why = "the same circuit with the same converter levels in both simulators"
+
+[[q]]
+id = "q555"
+analysis = "tran"
+variants = ["555"]
+kind = "events"
+nets = ["x555.xverilog.q__event_0", "x555.xverilog.qbar__event_0"]
+window = [1e-5, 0.2]
+oracle = "O2"
+ref = "ref/555.tran.O2.out"
+edge_abs = 2e-6
+why = "timescale 1us/100ns quantizes both; the oracle deck's TMAX 1 us bounds ngspice's adc_bridge edge dating; the start-up X settles before 10 us"
+
+# --- delay -----------------------------------------------------------------
+
+[[q]]
+id = "johnson"
+analysis = "tran"
+variants = ["delay", "delay_v2005"]
+kind = "events"
+nets = ["d4", "d3", "d2", "d1", "d0"]
+window = [0.0, 9.95e-5]
+lattice = { t0 = 1e-6, period = 1e-6 }
+oracle = "O6"
+expect = "c03::johnson"
+edge_abs = 1e-12
+why = "pure digital: a 5-bit Johnson counter stepping every 1 us exactly; the window stops short of the edge at the run's last instant"
+
+[[q]]
+id = "johnson"
+analysis = "tran"
+variants = ["delay", "delay_v2005"]
+kind = "events"
+nets = ["d4", "d3", "d2", "d1", "d0"]
+window = [0.0, 9.95e-5]
+oracle = "O2"
+ref = { delay = "ref/delay.tran.O2.out", delay_v2005 = "ref/delay.tran.O2.out" }
+edge_abs = 2e-12
+why = "pure digital, identical source in Icarus: 1 ps precision plus d_cosim's irreducible 1 ps output delay (its minimum)"
+
+# --- adc -------------------------------------------------------------------
+# Codes on d5..d0 (the XSPICE inverters of Result) at the rise of valid_d,
+# 10 ns after Valid, so the last bit decision is included.
+
+[[q]]
+id = "adccode"
+analysis = "tran"
+variants = ["adc", "adc_nd"]
+kind = "codes"
+nets = ["d5", "d4", "d3", "d2", "d1", "d0"]
+strobe = "valid_d"
+oracle = "O6"
+expect = "c03::adccode"
+abs = 1.0
+why = "N = floor(64·v(input)/vcc) at the Sample fall, ±1 for comparator and charge-sharing error at a threshold"
+
+[[q]]
+id = "adccode"
+analysis = "tran"
+variants = ["adc", "adc_nd"]
+kind = "codes"
+nets = ["d5", "d4", "d3", "d2", "d1", "d0"]
+strobe = "valid_d"
+exclude = [
+  { window = [4.74e-5, 4.76e-5], why = "conversion 4: 64·vin/vcc = 12.073, a bit decision within 0.1 LSB (5 mV) of its threshold" },
+  { window = [5.74e-5, 5.76e-5], why = "conversion 5: 14.982, within 0.1 LSB of a threshold" },
+]
+oracle = "O2"
+ref = { adc = "ref/adc.tran.O2.out", adc_nd = "ref/adc.tran.O2.out" }
+abs = 0.0
+why = "same circuit and digital; decisions further than 0.1 LSB (1.5 × RELTOL·vcc) from a threshold are exact"
+
+# --- pwm -------------------------------------------------------------------
+
+# Cycles = Samples = 100 (deck X-card): a 100 us PWM period carrying a 10 ms
+# sine. The expectation is the RC's exact response to the PWM edges the
+# Verilog produces, so it holds every sample, ripple included.
+[[q]]
+id = "pwmsine"
+analysis = "tran"
+variants = ["pwm"]
+kind = "interp_at"
+signal = "v(smooth)"
+times = { start = 1e-3, step = 1e-3, count = 50 }
+oracle = "O6"
+expect = "c03::pwmsine"
+abs = 1e-4
+why = "exact piecewise-exponential RC response (τ = 100.02k·1u) to the PWM waveform; 100 uV is three 1 us ticks of pulse width"
+
+[[q]]
+id = "pwmsine"
+analysis = "tran"
+variants = ["pwm"]
+kind = "interp_at"
+signal = "v(smooth)"
+times = { start = 1e-3, step = 1e-3, count = 50 }
+oracle = "O2"
+ref = "ref/pwm.tran.O2.out"
+abs = 1e-4
+why = "identical PWM edges on the 1 us tick and the same RC; only integration error differs"
+
+# --- op: the D-A t=0 state of each initial block --------------------------
+# 555 is astable: its coupled t=0 fixed point does not exist (Q=0 discharges
+# the timing capacitor, which triggers Q=1, which charges it past threshold),
+# so no operating-point value is comparable and the cell carries no quantity.
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["adc", "adc_nd"]
+kind = "op"
+signals = ["v(d5)", "v(d4)", "v(d3)", "v(d2)", "v(d1)", "v(d0)"]
+oracle = "O6"
+expect = "c03::adcop"
+abs = 1e-3
+why = "Result = 0 from the initial block; the inverters put every d at vcc"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["delay", "delay_v2005"]
+kind = "op"
+signals = ["v(d4)", "v(d3)", "v(d2)", "v(d1)", "v(d0)"]
+oracle = "O6"
+expect = "c03::delayop"
+abs = 1e-3
+why = "out = 0 from the initial block"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["pwm"]
+kind = "op"
+signals = ["v(out)", "v(smooth)"]
+oracle = "O6"
+expect = "c03::pwmop"
+abs = 1e-3
+why = "out = 0 from the initial block"

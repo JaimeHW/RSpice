@@ -1,0 +1,20 @@
+* C3 d_cosim examples, variant pwm, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* Upstream icarus_verilog/pwm.cir; its control block is replaced by the card.
+* build.txt overrides pwm.v's Cycles and Samples to 100, as the RSpice deck's
+* X-card does. The output RSpice converts with a built-in D/A gets an explicit
+* dac_bridge 0/vcc (X at vcc/2), 1 ps edges, behind 20 ohm; d_cosim's output
+* delay is its 1 ps minimum (default 1 ns).
+
+adut null [ d_out ] pwm_sin
+.model pwm_sin d_cosim simulation="ivlng" sim_args = [ "pwm" ] delay=1e-12
+aout [d_out] [out_h] dac_vcc
+.model dac_vcc dac_bridge(out_low = 0 out_high = 3.3 out_undef = 1.65
++ t_rise = 1e-12 t_fall = 1e-12)
+rout out_h out 20
+
+r1 out smooth 100k
+c1 smooth 0 1u
+
+.tran 10u 50m
+.save v(smooth)
+.end

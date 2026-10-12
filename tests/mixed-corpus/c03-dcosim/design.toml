@@ -1,0 +1,57 @@
+schema = "rspice-mixed-design/1"
+id = "C3"
+title = "ngspice d_cosim examples run natively"
+exit_phases = ["P2"]
+dialect = "best-available"
+features = []
+
+# The upstream Verilog of ngspice-46 examples/xspice/verilator, unedited. adc,
+# delay and pwm use constructs the digital front end refuses until P2 lane L1
+# (design-p2 §3); each flips by itself when L1 lands.
+[[variant]]
+name = "555"
+families = ["spice", "xspice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "adc"
+families = ["spice", "xspice", "vams-digital"]
+today = "parse:P2.3"
+
+[[variant]]
+name = "delay"
+families = ["vams-digital"]
+today = "parse:P2.1"
+
+[[variant]]
+name = "pwm"
+families = ["spice", "vams-digital"]
+today = "parse:P2.1"
+
+# Today-runnable rewrites (design §3 C3): adc.v without its $display line, and
+# delay.v in 1364-2005 spelling (`out = out << 1;`, `endmodule` without `;`).
+[[variant]]
+name = "adc_nd"
+families = ["spice", "xspice", "vams-digital"]
+today = "runs"
+
+[[variant]]
+name = "delay_v2005"
+families = ["vams-digital"]
+today = "runs"
+
+# Budgets are about five times the slower route's measured case time
+# (tran: adc_nd 31 s interp, 16 s native; op: 555 2.5 s).
+[[analysis]]
+id = "tran"
+variants = ["555", "adc", "adc_nd", "delay", "delay_v2005", "pwm"]
+oracles = ["O2", "O6"]
+timeout_s = 150
+phase = "P2"
+
+[[analysis]]
+id = "op"
+variants = ["555", "adc", "adc_nd", "delay", "delay_v2005", "pwm"]
+oracles = ["O2", "O6"]
+timeout_s = 15
+phase = "P2"

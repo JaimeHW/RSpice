@@ -1,0 +1,16 @@
+* C3 d_cosim examples, variants delay and delay_v2005, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* Upstream icarus_verilog/delay.cir; its control block is replaced by the card.
+* The outputs drive nothing analog, so no bridge is needed for the events.
+* d_cosim's output delay is its 1 ps minimum (default 1 ns): the Verilog
+* itself puts each step on the microsecond.
+* rspice-events: d4 d3 d2 d1 d0
+
+adut null [ d4 d3 d2 d1 d0 ] ring
+.model ring d_cosim simulation="ivlng" sim_args = [ "delay" ] delay=1e-12
+
+* ngspice writes no rawfile for a circuit without an analog node.
+vkeep keep 0 0
+rkeep keep 0 1k
+
+.tran 20u 100u
+.end

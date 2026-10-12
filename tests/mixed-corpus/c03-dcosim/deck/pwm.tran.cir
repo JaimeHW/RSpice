@@ -1,0 +1,10 @@
+* C3 d_cosim examples, variant pwm, tran
+* pwm.v is unedited; its Cycles and Samples parameters (both 1000 upstream:
+* a 1 ms PWM period, a 1 s sine, 2 s of 1 us ticks) are overridden to 100 so
+* the case covers five sine periods in 50 ms. The circuit is upstream's RC.
+.verilog "../net/pwm.v" pwm
+.include ../net/pwm.cir
+.param vcc=3.3
+xdut out pwm cycles=100 samples=100
+.tran 10u 50m
+.end

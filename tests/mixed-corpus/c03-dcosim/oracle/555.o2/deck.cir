@@ -1,0 +1,59 @@
+* C3 d_cosim examples, variant 555, tran: O2 (ngspice-46 + d_cosim + Icarus) oracle deck
+* Upstream icarus_verilog/555.cir with verilator/555.shared inlined. The
+* d_cosim ports RSpice converts with built-in converters get explicit bridges
+* at the same levels and timing: reset through an adc_bridge at vcc/2, Q and
+* Qbar through a dac_bridge 0/vcc (X at vcc/2), 1 ps edges, behind 20 ohm (the
+* built-in D/A steps). d_cosim's output delay is its 1 ps minimum (default
+* 1 ns). The bridged digital nodes are named as RSpice names its converter
+* event nets, so the event traces compare by name. TMAX 0.1 us bounds the
+* adc_bridge edge dating (event-time quantity) and resolves the comparators'
+* ±0.1 mV unknown band, which the timing capacitor crosses in about 0.5 us:
+* with a coarser step ngspice sometimes steps over it and loses the X a
+* rising Q passes through (TMAX 1 us lost three of them).
+* rspice-events: x555.xverilog.q__event_0 x555.xverilog.qbar__event_0
+
+.model vlog_ff d_cosim simulation="ivlng" sim_args=["555"] delay=1e-12
+
+.subckt NE555 trigger threshold reset control output discharge vcc ground
+
+r1 vcc control 5k
+r2 control trigger_ref 5k
+r3 trigger_ref ground 5k
+
+.model comparator adc_bridge(in_low = -0.0001 in_high = 0.0001)
+athresh_comparator [%vd threshold control] [over_threshold] comparator
+atrigger_comparator [%vd trigger_ref trigger] [under_trigger] comparator
+
+averilog [ under_trigger over_threshold xverilog.reset__event_0 ] [ xverilog.q__event_0 xverilog.qbar__event_0 ] vlog_ff
+
+abridge_reset [reset] [xverilog.reset__event_0] adc_half
+.model adc_half adc_bridge(in_low = 6 in_high = 6)
+abridge_q [xverilog.q__event_0 xverilog.qbar__event_0] [q_h qbar_h] dac_vcc
+.model dac_vcc dac_bridge(out_low = 0 out_high = 12 out_undef = 6
++ t_rise = 1e-12 t_fall = 1e-12)
+rq q_h output 20
+rqbar qbar_h qbar 20
+
+rbase qbar discharge_base 10k
+qdischarge discharge discharge_base ground npn_transistor
+.model npn_transistor npn
+
+.ends ; Ends subcircuit NE555
+
+.param vcc=12
+
+X555 trigger_threshold trigger_threshold reset control output discharge vcc 0 ne555
+
+r1 vcc discharge 10k
+r2 discharge trigger_threshold 10k
+Ct trigger_threshold 0 1uF ic=0
+
+rload output 0 1k
+
+Vcc vcc 0 {vcc}
+
+Vpulse reset 0 PULSE {vcc} 0.2 0 1u 1u 2u 51m
+
+.tran 10u 200m 0 0.1u uic
+.save v(output) v(trigger_threshold)
+.end

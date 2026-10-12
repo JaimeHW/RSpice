@@ -1,0 +1,6 @@
+* C3 adc observer (RSpice-authored): `valid` delayed by 10 ns, so a code read
+* on d5..d0 at the strobe sees the last bit decision, which Result takes at
+* the same clock edge that raises Done/Valid. An XSPICE input on `valid` makes
+* it an event net shared with the Verilog port (no converter is inserted).
+avalid_d valid valid_d dly10n
+.model dly10n d_buffer(rise_delay = 10n fall_delay = 10n)

@@ -1,0 +1,25 @@
+# variant	analysis	route	outcome	detail
+555	tran	interp	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=6.035e-7 allowed 2.000e-6
+555	tran	native	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=6.035e-7 allowed 2.000e-6
+adc	tran	interp	refused	compile_refusal; label="net/adc.v"; instance=adc.v form=structured; token-form=structured; analysis-form=location; site=net/adc.v
+adc	tran	native	refused	compile_refusal; label="net/adc.v"; instance=adc.v form=structured; token-form=structured; analysis-form=location; site=net/adc.v
+adc_nd	tran	interp	wrong	adccode (O2) [1] |a−e|=3.000e0 allowed 0.000e0 (a=0.000000e0, e=3.000000e0)
+adc_nd	tran	native	wrong	adccode (O2) [1] |a−e|=3.000e0 allowed 0.000e0 (a=0.000000e0, e=3.000000e0)
+delay	tran	interp	refused	compile_refusal; label="net/delay.v"; instance=delay.v form=structured; token-form=structured; analysis-form=location; site=net/delay.v
+delay	tran	native	refused	compile_refusal; label="net/delay.v"; instance=delay.v form=structured; token-form=structured; analysis-form=location; site=net/delay.v
+delay_v2005	tran	interp	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 off the lattice, allowed 1.000e-12
+delay_v2005	tran	native	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 off the lattice, allowed 1.000e-12
+pwm	tran	interp	refused	compile_refusal; label="net/pwm.v"; instance=pwm.v form=structured; token-form=structured; analysis-form=location; site=net/pwm.v
+pwm	tran	native	refused	compile_refusal; label="net/pwm.v"; instance=pwm.v form=structured; token-form=structured; analysis-form=location; site=net/pwm.v
+555	op	interp	fail	convergence: convergence: Convergence failed after 1500 iterations: Newton-Raphson iteration limit exceeded
+555	op	native	fail	convergence: convergence: Convergence failed after 1500 iterations: Newton-Raphson iteration limit exceeded
+adc	op	interp	refused	compile_refusal; label="net/adc.v"; instance=adc.v form=structured; token-form=structured; analysis-form=location; site=net/adc.v
+adc	op	native	refused	compile_refusal; label="net/adc.v"; instance=adc.v form=structured; token-form=structured; analysis-form=location; site=net/adc.v
+adc_nd	op	interp	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+adc_nd	op	native	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)
+delay	op	interp	refused	compile_refusal; label="net/delay.v"; instance=delay.v form=structured; token-form=structured; analysis-form=location; site=net/delay.v
+delay	op	native	refused	compile_refusal; label="net/delay.v"; instance=delay.v form=structured; token-form=structured; analysis-form=location; site=net/delay.v
+delay_v2005	op	interp	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=0.000000e0, e=0.000000e0)
+delay_v2005	op	native	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=0.000000e0, e=0.000000e0)
+pwm	op	interp	refused	compile_refusal; label="net/pwm.v"; instance=pwm.v form=structured; token-form=structured; analysis-form=location; site=net/pwm.v
+pwm	op	native	refused	compile_refusal; label="net/pwm.v"; instance=pwm.v form=structured; token-form=structured; analysis-form=location; site=net/pwm.v

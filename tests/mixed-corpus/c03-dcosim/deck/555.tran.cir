@@ -1,0 +1,5 @@
+* C3 d_cosim examples, variant 555, tran
+.verilog "../net/555.v" vl555
+.include ../net/555.shared
+.tran 10u 200m uic
+.end

@@ -1,0 +1,7 @@
+* C3 d_cosim examples, variant pwm, op
+.verilog "../net/pwm.v" pwm
+.include ../net/pwm.cir
+.param vcc=3.3
+xdut out pwm cycles=100 samples=100
+.op
+.end

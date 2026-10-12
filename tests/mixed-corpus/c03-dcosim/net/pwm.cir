@@ -1,0 +1,6 @@
+* Waveform generation by PWM in Verilog
+* (the d_cosim instance becomes the decks' X-card, which carries the
+* parameter overrides)
+
+r1 out smooth 100k
+c1 smooth 0 1u
