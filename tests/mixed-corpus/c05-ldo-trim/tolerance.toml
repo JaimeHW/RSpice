@@ -1,0 +1,364 @@
+schema = "rspice-mixed-tolerance/1"
+# spi_trim.v: `timescale 1ns/1ps.
+time_precision = 1e-12
+
+# ---- op ------------------------------------------------------------------
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["mx"]
+kind = "op"
+signals = ["v(vout)", "v(og)", "v(fb)", "i(vin)"]
+oracle = "O5"
+abs = 1e-5
+rel = 1e-5
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["mx"]
+kind = "op"
+signals = ["v(vout)", "v(og)", "v(fb)", "i(vin)"]
+oracle = "O5-O1"
+ref = "ref/mx.op.O5-O1.out"
+abs = 1e-3
+rel = 1e-3
+why = "same BSIM4 4.8.2 equations"
+
+[[q]]
+id = "op"
+analysis = "op"
+variants = ["mx"]
+kind = "op"
+signals = ["v(vout)", "v(og)", "v(fb)", "i(vin)"]
+oracle = "O5-O4"
+ref = "ref/mx.op.O5-O4.out"
+abs = 3e-3
+rel = 3e-3
+why = "Xyce BSIM4 version differs"
+
+# ---- dc ------------------------------------------------------------------
+
+[[q]]
+id = "line"
+analysis = "dc-line"
+variants = ["mx"]
+kind = "dc_curve"
+signal = "v(vout)"
+times = { start = 1.4, step = 0.02, count = 31 }
+oracle = "O5"
+abs = 1e-5
+rel = 1e-5
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "line"
+analysis = "dc-line"
+variants = ["mx"]
+kind = "dc_curve"
+signal = "v(vout)"
+times = { start = 1.4, step = 0.02, count = 31 }
+oracle = "O5-O1"
+ref = "ref/mx.dc-line.O5-O1.out"
+abs = 1e-3
+rel = 1e-3
+why = "as op: same BSIM4 4.8.2 equations"
+
+[[q]]
+id = "line"
+analysis = "dc-line"
+variants = ["mx"]
+kind = "dc_curve"
+signal = "v(vout)"
+times = { start = 1.4, step = 0.02, count = 31 }
+oracle = "O5-O4"
+ref = "ref/mx.dc-line.O5-O4.out"
+abs = 3e-3
+rel = 3e-3
+why = "as op: Xyce BSIM4 version differs"
+
+[[q]]
+id = "load"
+analysis = "dc-load"
+variants = ["mx"]
+kind = "dc_curve"
+signal = "v(vout)"
+times = { start = 0.0, step = 5e-4, count = 41 }
+oracle = "O5"
+abs = 1e-5
+rel = 1e-5
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "load"
+analysis = "dc-load"
+variants = ["mx"]
+kind = "dc_curve"
+signal = "v(vout)"
+times = { start = 0.0, step = 5e-4, count = 41 }
+oracle = "O5-O1"
+ref = "ref/mx.dc-load.O5-O1.out"
+abs = 1e-3
+rel = 1e-3
+why = "as op: same BSIM4 4.8.2 equations"
+
+[[q]]
+id = "load"
+analysis = "dc-load"
+variants = ["mx"]
+kind = "dc_curve"
+signal = "v(vout)"
+times = { start = 0.0, step = 5e-4, count = 41 }
+oracle = "O5-O4"
+ref = "ref/mx.dc-load.O5-O4.out"
+abs = 3e-3
+rel = 3e-3
+why = "as op: Xyce BSIM4 version differs"
+
+# ---- ac (PSRR) -----------------------------------------------------------
+
+[[q]]
+id = "psrr"
+analysis = "ac"
+variants = ["mx"]
+kind = "ac"
+signal = "v(vout)"
+points = [10.0, 1e3, 1e5, 1e7]
+oracle = "O5"
+abs_db = 1e-4
+abs_deg = 1e-3
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "psrr"
+analysis = "ac"
+variants = ["mx"]
+kind = "ac"
+signal = "v(vout)"
+points = [10.0, 1e3, 1e5, 1e7]
+oracle = "O5-O1"
+ref = "ref/mx.ac.O5-O1.out"
+abs_db = 0.1
+abs_deg = 1.0
+why = "same BSIM4 4.8.2 small-signal model"
+
+[[q]]
+id = "psrr"
+analysis = "ac"
+variants = ["mx"]
+kind = "ac"
+signal = "v(vout)"
+points = [10.0, 1e3, 1e5, 1e7]
+oracle = "O5-O4"
+ref = "ref/mx.ac.O5-O4.out"
+abs_db = 0.2
+abs_deg = 2.0
+why = "Xyce BSIM4 version differs"
+
+# ---- stb -----------------------------------------------------------------
+
+[[q]]
+id = "margins.pm"
+analysis = "stb"
+variants = ["mx"]
+kind = "stb"
+params = ["pm"]
+oracle = "O5"
+abs = 0.01
+why = "§2.10 for the margins: phase margin to 0.01°"
+
+[[q]]
+id = "margins.gm"
+analysis = "stb"
+variants = ["mx"]
+kind = "stb"
+params = ["gm"]
+oracle = "O5"
+abs = 0.01
+why = "§2.10 for the margins: gain margin to 0.01 dB"
+
+[[q]]
+id = "margins.ugf"
+analysis = "stb"
+variants = ["mx"]
+kind = "stb"
+params = ["ugf"]
+oracle = "O5"
+rel = 1e-4
+why = "§2.10 for the margins: unity-gain frequency to 1e-4"
+
+[[q]]
+id = "margins.pm"
+analysis = "stb"
+variants = ["mx"]
+kind = "stb"
+params = ["pm"]
+oracle = "O5-O1"
+ref = "ref/mx.stb.O5-O1.out"
+abs = 1.0
+why = "Tian two-injection loop gain in ngspice against RSpice's .STB"
+
+[[q]]
+id = "margins.gm"
+analysis = "stb"
+variants = ["mx"]
+kind = "stb"
+params = ["gm"]
+oracle = "O5-O1"
+ref = "ref/mx.stb.O5-O1.out"
+abs = 0.5
+why = "Tian two-injection loop gain in ngspice against RSpice's .STB"
+
+[[q]]
+id = "margins.ugf"
+analysis = "stb"
+variants = ["mx"]
+kind = "stb"
+params = ["ugf"]
+oracle = "O5-O1"
+ref = "ref/mx.stb.O5-O1.out"
+rel = 0.02
+why = "Tian two-injection loop gain in ngspice against RSpice's .STB"
+
+# ---- noise ---------------------------------------------------------------
+
+[[q]]
+id = "vn"
+analysis = "noise"
+variants = ["mx"]
+kind = "noise"
+points = [100.0, 1e4, 1e6]
+oracle = "O5"
+rel = 1e-4
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "vn"
+analysis = "noise"
+variants = ["mx"]
+kind = "noise"
+points = [100.0, 1e4, 1e6]
+oracle = "O5-O1"
+ref = "ref/mx.noise.O5-O1.out"
+rel = 0.05
+why = "BSIM4 noise-model defaults"
+
+[[q]]
+id = "vn"
+analysis = "noise"
+variants = ["mx"]
+kind = "noise"
+points = [100.0, 1e4, 1e6]
+oracle = "O5-O4"
+ref = "ref/mx.noise.O5-O4.out"
+rel = 0.10
+why = "Xyce BSIM4 version and noise defaults differ"
+
+# ---- tf ------------------------------------------------------------------
+
+[[q]]
+id = "tf"
+analysis = "tf"
+variants = ["mx"]
+kind = "tf"
+oracle = "O5"
+abs = 1e-5
+rel = 1e-5
+why = "§2.10: same equations and solver"
+
+[[q]]
+id = "tf"
+analysis = "tf"
+variants = ["mx"]
+kind = "tf"
+oracle = "O5-O1"
+ref = "ref/mx.tf.O5-O1.out"
+rel = 1e-3
+why = "same BSIM4 4.8.2 small-signal model"
+
+# ---- sens ----------------------------------------------------------------
+
+[[q]]
+id = "sens"
+analysis = "sens"
+variants = ["mx"]
+kind = "sens"
+params = ["rtop", "rb0", "rload", "vref", "vin"]
+oracle = "O5"
+abs = 1e-12
+rel = 1e-5
+why = "§2.10: same equations and solver (abs scaled to sensitivities, not node voltages)"
+
+[[q]]
+id = "sens"
+analysis = "sens"
+variants = ["mx"]
+kind = "sens"
+params = ["rtop", "rb0", "rload", "vref", "vin"]
+oracle = "O5-O1"
+ref = "ref/mx.sens.O5-O1.out"
+rel = 1e-2
+why = "ngspice perturbation accuracy"
+
+# ---- pz ------------------------------------------------------------------
+
+[[q]]
+id = "pz"
+analysis = "pz"
+variants = ["mx"]
+kind = "pz"
+smax = 6.283185307179586e8
+oracle = "O5"
+rel = 1e-6
+why = "same equations and solver; roots below 2π·100 MHz"
+
+[[q]]
+id = "pz"
+analysis = "pz"
+variants = ["mx"]
+kind = "pz"
+smax = 6.283185307179586e8
+oracle = "O5-O1"
+ref = "ref/mx.pz.O5-O1.out"
+rel = 1e-2
+why = "ngspice pole-zero accuracy; roots below 2π·100 MHz"
+
+# ---- tran ----------------------------------------------------------------
+
+[[q]]
+id = "step.min"
+analysis = "tran"
+variants = ["mx"]
+kind = "min"
+signal = "v(vout)"
+window = [2.0e-4, 2.3e-4]
+oracle = "O5-O1"
+ref = "ref/mx.tran.O5-O1.out"
+abs = 2e-3
+why = "load-step undershoot: same loop, same models, code 0 until 405 µs"
+
+[[q]]
+id = "step.mean"
+analysis = "tran"
+variants = ["mx"]
+kind = "mean"
+signal = "v(vout)"
+window = [2.8e-4, 3.0e-4]
+oracle = "O5-O1"
+ref = "ref/mx.tran.O5-O1.out"
+abs = 1e-3
+why = "loaded regulation at code 0"
+
+[[q]]
+id = "trim"
+analysis = "tran"
+variants = ["mx"]
+kind = "mean"
+signal = "v(vout)"
+window = [5.5e-4, 6.0e-4]
+oracle = "O5-O1"
+ref = "ref/c15.op.O5-O1.out"
+abs = 1e-3
+why = "settled ~50 µs after csn latches code 15; against the code-15 twin's operating point"

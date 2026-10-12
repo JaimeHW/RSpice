@@ -1,0 +1,21 @@
+# variant	analysis	route	outcome	detail
+mx	op	interp	wrong	op (O5-O4) [1] |a−e|=5.861e-2 allowed 6.783e-3 (a=1.202269e0, e=1.260880e0)
+mx	op	native	wrong	op (O5-O4) [1] |a−e|=5.861e-2 allowed 6.783e-3 (a=1.202269e0, e=1.260880e0)
+mx	dc-line	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	dc-line	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	dc-load	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	dc-load	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	stb	interp	refused	analysis.mixed_signal.discrete_state; label="stb analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	stb	native	refused	analysis.mixed_signal.discrete_state; label="stb analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	noise	interp	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	noise	native	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	tf	interp	wrong	misnamed-analysis: analysis.mixed_signal.discrete_state; label="ac analysis" on a tf card
+mx	tf	native	wrong	misnamed-analysis: analysis.mixed_signal.discrete_state; label="ac analysis" on a tf card
+mx	sens	interp	fail	simulation: simulation: Circuit error: Sensitivity parameter 'ILOAD' could not resolve a derivative: trial failures do not establish a parameter boundary, estimates disagree, or distinct finite coordinates are exhausted (possible discontinuity or insufficient nume
+mx	sens	native	fail	simulation: simulation: Circuit error: Sensitivity parameter 'ILOAD' could not resolve a derivative: trial failures do not establish a parameter boundary, estimates disagree, or distinct finite coordinates are exhausted (possible discontinuity or insufficient nume
+mx	pz	interp	refused	analysis.mixed_signal.discrete_state; label="pole-zero analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	pz	native	refused	analysis.mixed_signal.discrete_state; label="pole-zero analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	tran	interp	pass	trim (O5-O1) [0] |a−e|=4.109e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
+mx	tran	native	pass	trim (O5-O1) [0] |a−e|=4.109e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)

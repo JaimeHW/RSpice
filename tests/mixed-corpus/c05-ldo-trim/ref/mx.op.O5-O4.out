@@ -1,0 +1,8 @@
+# RSPICE-XYCE-ORACLE 2
+# xyce: XyceNF Release 7.10.0
+# executable-sha256: e1f572cd2406bc04b8fbbddba85931346e6ab2b5f0750563848fcabecb10dfe1
+# input-blake3: 34c4bc4a7fa92f09436fdaa63717fa7ff48acd2312588dcb5a2adf71433ae63f
+# analysis: op
+Index op i(vin) v(fb) v(og) v(vout)
+0 0 -0.0115804397 0.495953711 1.26088038 1.15451344
+# end-analysis

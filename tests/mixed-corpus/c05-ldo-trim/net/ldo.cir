@@ -1,0 +1,6 @@
+* C5 LDO harness (RSpice-authored): supply and load step.
+vin vin 0 1.8 ac 1
+rload vout 0 100
+iload vout 0 pwl(0 0 200u 0 201u 10m 300u 10m 301u 0)
+cout vout co 1u
+resr co 0 0.1

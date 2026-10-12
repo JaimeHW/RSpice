@@ -1,0 +1,12 @@
+* C5 serial trim load (RSpice-authored): csn falls at 400 us, four sclk
+* pulses (rising at 401..404 us) shift in sdi = 1, csn rises at 405 us and
+* latches code 15. The trim register is net/spi_trim.v; its outputs reach
+* the ladder switches through built-in D/A converters at vcc.
+.param vcc=1.8
+vcsn csn 0 pwl(0 1.8 400u 1.8 400.01u 0 405u 0 405.01u 1.8)
+vsdi sdi 0 pwl(0 0 400u 0 400.01u 1.8)
+vsclk sclk 0 pwl(0 0 401u 0 401.01u 1.8 401.5u 1.8 401.51u 0
++ 402u 0 402.01u 1.8 402.5u 1.8 402.51u 0
++ 403u 0 403.01u 1.8 403.5u 1.8 403.51u 0
++ 404u 0 404.01u 1.8 404.5u 1.8 404.51u 0)
+xtrim sclk sdi csn tr3 tr2 tr1 tr0 spi_trim

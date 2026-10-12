@@ -1,0 +1,9 @@
+* C5 LDO with a serially loaded trim DAC, variant mx, dc-load
+.include ../net/models-bsim4.cir
+.include ../net/ldo_body.inc
+.include ../net/ldo.cir
+.include ../net/esd.cir
+.include ../net/spi.cir
+.hdl "../net/spi_trim.v"
+.dc iload 0 20m 0.5m
+.end

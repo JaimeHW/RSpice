@@ -1,0 +1,8 @@
+# RSPICE-NGSPICE-ORACLE 2
+# ngspice: ngspice-46 : Circuit level simulation program
+# executable-sha256: 86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453
+# input-blake3: 28b95756c9eb98bc8687ce2f2652f550672478d0d495a79d250a38a256d8fa47
+# analysis: tf
+Index scalar gain zin zout
+0 0 0.004247540200880582 23013.779665347494 1.8034909521519453
+# end-analysis

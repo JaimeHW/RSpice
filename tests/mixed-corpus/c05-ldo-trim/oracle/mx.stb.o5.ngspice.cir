@@ -1,0 +1,31 @@
+* C5 LDO, variant mx, stb: O5-O1 (ngspice-46) Tian loop gain at vprobe (og -> og2)
+* The O5 circuit (oracle/mx.o5.cir) with the trim bits held at code 0 behind 20 ohm.
+* The ESD junction is ngspice's JUNCAP200 OSDI build with the same AB/LS/LG.
+.include ../net/models-bsim4.cir
+.include ../net/ldo_body.inc
+.include ../net/ldo.cir
+njesd 0 vout jc200 ab=1e-9 ls=1.3e-4 lg=0
+.model jc200 juncap200
+vtr3 tr3_h 0 0
+rtr3 tr3_h tr3 20
+vtr2 tr2_h 0 0
+rtr2 tr2_h tr2 20
+vtr1 tr1_h 0 0
+rtr1 tr1_h tr1 20
+vtr0 tr0_h 0 0
+rtr0 tr0_h tr0 20
+* Tian current injection into the driving side of the break (dc 0: inert at the operating point)
+iprobe 0 og dc 0 ac 0
+* rspice-control-begin
+* pre_osdi {ngspice_lib}/juncap200.osdi
+* alter vprobe acmag=1
+* alter iprobe acmag=0
+* ac dec 10 10 100meg
+* let vx1 = v(og)
+* let ix1 = i(vprobe)
+* alter vprobe acmag=0
+* alter iprobe acmag=1
+* ac dec 10 10 100meg
+* let loopgain = -1/(1 - 1/(2*(ac1.ix1*v(og) - ac1.vx1*i(vprobe)) + ac1.vx1 + i(vprobe)))
+* rspice-control-end
+.end

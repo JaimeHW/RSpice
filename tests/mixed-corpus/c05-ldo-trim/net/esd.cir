@@ -1,0 +1,4 @@
+* C5 ESD junction on vout (RSpice-authored): the generated JUNCAP200
+* (feature veriloga-model-juncap200), reverse biased. The ngspice and Xyce
+* oracle decks state the same junction in their own syntax.
+xjesd 0 vout JUNCAP200 AB=1e-9 LS=1.3e-4 LG=0

@@ -1,0 +1,21 @@
+* C5 LDO, variant mx, noise: O5-O4 (Xyce 7.10) held-digital oracle deck
+* The O5 circuit (oracle/mx.o5.cir) at code 0 in Xyce syntax: BSIM4 LEVEL 54
+* (oracle/models-bsim4.xyce.inc), the body with VSWITCH switches
+* (oracle/ldo_body.xyce.inc), and the ESD junction as JUNCAP200 (D level=200).
+* The input source sets only the input-referred spectrum; the output noise is the same with vin.
+.include models-bsim4.xyce.inc
+.include ldo_body.xyce.inc
+.include ../net/ldo.cir
+djesd 0 vout djmod AB=1e-9 LS=1.3e-4 LG=0
+.model djmod D level=200
+vtr3 tr3_h 0 0
+rtr3 tr3_h tr3 20
+vtr2 tr2_h 0 0
+rtr2 tr2_h tr2 20
+vtr1 tr1_h 0 0
+rtr1 tr1_h tr1 20
+vtr0 tr0_h 0 0
+rtr0 tr0_h tr0 20
+.noise v(vout) vin dec 10 10 10meg
+.print noise format=std onoise
+.end

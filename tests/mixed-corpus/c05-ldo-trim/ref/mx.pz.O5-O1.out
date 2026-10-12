@@ -1,0 +1,5 @@
+# RSPICE-NGSPICE-ORACLE 2
+# ngspice: ngspice-46 : Circuit level simulation program
+# executable-sha256: 86c9ea5f645ca919e305639fa7bdb522355364c424d14e197f1ade617feb3453
+# input-blake3: 4904d77fe202c38b161a137426b01558631973b583081e20804f7e59f59a9175
+# oracle-refused: ngspice Warning: Pole-zero iteration limit reached; giving up after 396 trials
