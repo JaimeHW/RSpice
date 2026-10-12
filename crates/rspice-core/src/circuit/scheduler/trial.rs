@@ -565,11 +565,19 @@ impl Trial<'_> {
         &self,
         minimum_timestep: Value,
     ) -> Result<Option<Value>, SimulationError> {
+        // A circuit fact, for the reason `digital_feedback` is one: the drive
+        // that stepped at the accepted point and the A/D bridge whose crossing
+        // it carried can belong to two instances on one deck node.
+        let opened_on_drive_step = self
+            .hosts
+            .iter()
+            .any(MixedSignalHost::accepted_point_stepped_a_drive);
         let mut earliest: Option<Value> = None;
         for host in self.hosts.iter() {
-            if let Some(target) =
-                named(host, host.trial_boundary_refinement_time(minimum_timestep))?
-            {
+            if let Some(target) = named(
+                host,
+                host.boundary_refinement_time(minimum_timestep, opened_on_drive_step),
+            )? {
                 earliest = Some(earliest.map_or(target, |current: Value| current.min(target)));
             }
         }

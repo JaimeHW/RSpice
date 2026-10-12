@@ -3277,9 +3277,37 @@ impl MixedSignalHost {
     ///
     /// The window below is [`endpoint_root_window`], which is the one place it
     /// is derived.
+    ///
+    /// # An interval that opens on a drive step
+    ///
+    /// A D/A drive the accepted point stepped acts from the first instant after
+    /// it, so the analog solution leaves that point from a right limit no
+    /// accepted sample holds — [`Self::accepted_point_stepped_a_drive`]. A
+    /// crossing on such an interval is interpolated from the left limit, and
+    /// the chord then puts a crossing the step caused at its first instant
+    /// somewhere inside the interval; refining towards it re-solves a shorter
+    /// interval whose chord does the same, halving towards the accepted point
+    /// one rejected solve at a time until the floor stops it. So the first
+    /// question asked of such a crossing is the one that separates the two
+    /// cases: land one minimum step past the accepted point. A crossing the
+    /// step caused is already there and is the endpoint's own; one the circuit
+    /// causes later is not, and the next interval interpolates it from a sample
+    /// that is the right limit. This standalone entry answers for this
+    /// instance's own drives; the circuit asks for every instance at once.
     pub fn trial_boundary_refinement_time(
         &self,
         minimum_timestep: f64,
+    ) -> Result<Option<f64>, MixedSignalError> {
+        self.boundary_refinement_time(minimum_timestep, self.accepted_point_stepped_a_drive())
+    }
+
+    /// [`Self::trial_boundary_refinement_time`], with whether any drive in the
+    /// circuit stepped at the accepted point supplied by the caller: one
+    /// instance's D/A bridge and another's A/D bridge can share a deck node.
+    pub(crate) fn boundary_refinement_time(
+        &self,
+        minimum_timestep: f64,
+        opened_on_drive_step: bool,
     ) -> Result<Option<f64>, MixedSignalError> {
         let Some(trial) = self.trial.as_ref() else {
             return Ok(None);
@@ -3320,7 +3348,11 @@ impl MixedSignalHost {
             }
             // Land on the entering side of a representable root, as the analog
             // cross operator does. Never quantize this physical solve to HDL ticks.
-            let target = crossing.max(start).next_up().max(first_allowed);
+            let target = if opened_on_drive_step {
+                first_allowed
+            } else {
+                crossing.max(start).next_up().max(first_allowed)
+            };
             if target >= time {
                 continue;
             }
@@ -4281,6 +4313,39 @@ impl MixedSignalHost {
             }
             ports.push(entry);
         }
+    }
+
+    /// Whether the accepted point stepped a digital-to-analog drive: a D/A
+    /// bridge or a converted output port whose bit moved there.
+    ///
+    /// A drive moved at a timepoint changes the analog problem from the first
+    /// instant after it (`stamp_dac_bridges`, and the shared converter's own
+    /// ramp), so the solution accepted there is the left limit and the interval
+    /// leaving it starts from a right limit no accepted sample holds. An A/D
+    /// crossing found on that interval cannot be interpolated from the accepted
+    /// sample: the step the drive took is inside the chord, and the chord dates
+    /// a crossing the drive caused at its first instant somewhere in the middle
+    /// of the interval — a root the refinement would then walk towards the
+    /// accepted point one halving at a time. See
+    /// [`Self::trial_boundary_refinement_time`].
+    ///
+    /// Read from the accepted histories: their two newest values are the bit
+    /// before and after the accepted point.
+    pub(crate) fn accepted_point_stepped_a_drive(&self) -> bool {
+        let stepped = |entry: &BoundaryNetHistory| {
+            entry.filled >= 2 && (entry.recent ^ (entry.recent >> 2)) & 0b11 != 0
+        };
+        self.state.dac_history.iter().any(stepped)
+            || self
+                .event_ports
+                .iter()
+                .zip(&self.state.port_history)
+                .any(|(port, entry)| {
+                    port.direction
+                        == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
+                        && port.converted_bit().is_some()
+                        && stepped(entry)
+                })
     }
 
     /// The diagnostic for a boundary that has moved at every accepted timepoint
