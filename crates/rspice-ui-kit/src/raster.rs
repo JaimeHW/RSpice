@@ -293,6 +293,12 @@ fn render_at_pointer(
     mut pass: impl FnMut(&mut egui::Ui, Color32),
 ) -> Canvas {
     let ctx = egui::Context::default();
+    // egui otherwise takes the operating system from the compiling target,
+    // and surfaces read it into what they paint (a shortcut keycap says
+    // "Cmd K" on macOS and "Ctrl K" elsewhere). A render must come out the
+    // same on every machine, so it is always taken on Linux, the host CI
+    // checks the reviewed baselines on; Windows paints identically.
+    ctx.set_os(egui::os::OperatingSystem::Nix);
     theme.apply(&ctx);
     if pointer.is_some() {
         ctx.all_styles_mut(|style| {
@@ -562,6 +568,25 @@ fn a_painted_rect_covers_its_own_pixels_and_nothing_else() {
     assert!(
         outside.iter().all(|pixel| *pixel == canvas.background()),
         "something painted below the rect"
+    );
+}
+
+/// A surface that paints the host's own vocabulary — a shortcut keycap reads
+/// "Cmd K" on macOS — would otherwise fingerprint differently per machine.
+#[test]
+fn every_render_is_taken_on_the_same_host() {
+    let mut hosts = Vec::new();
+    let size = egui::vec2(8.0, 8.0);
+    let _ = render(size, |ui, _| hosts.push(ui.ctx().os()));
+    let _ = render_with_pointer(size, egui::pos2(1.0, 1.0), |ui, _| {
+        hosts.push(ui.ctx().os());
+    });
+    assert!(!hosts.is_empty());
+    assert!(
+        hosts
+            .iter()
+            .all(|host| *host == egui::os::OperatingSystem::Nix),
+        "{hosts:?}"
     );
 }
 
