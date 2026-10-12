@@ -442,6 +442,11 @@ impl<'a> XspiceDigitalParticipant<'a> {
     /// `[time - timestep, time]`, so that difference is the interval the
     /// stepper chose, and there is no earlier instant for an event to have
     /// been landed on.
+    ///
+    /// The same floor closes the other end: a reachable event less than one
+    /// floor before the timepoint the stepper did land on is that timepoint
+    /// (`numerics::integration::coincides_before`), and `settle_active`
+    /// delivers it there too.
     fn event_was_reachable(&self, due: Value) -> bool {
         let floor = self.circuit.scheduler.analog_step_floor();
         !floor.is_finite() || floor <= 0.0 || due - (self.time - self.timestep) >= floor
@@ -546,10 +551,19 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                 ));
             }
             // See `Self::event_was_reachable`: only an event the stepper had a
-            // legal interval to and skipped anyway is a lost breakpoint.
+            // legal interval to and skipped anyway is a lost breakpoint. One
+            // less than a floor before this timepoint was not skipped: it is
+            // this instant computed another way (a clock edge summed period by
+            // period against a `.tran` stop time on the same edge), so it is
+            // delivered here, by the rule every scheduler shares.
             if let Some(due) = self.circuit.scheduler.xspice_event_queue.next_event_time()
                 && due < physical
                 && self.event_was_reachable(due)
+                && !crate::numerics::integration::coincides_before(
+                    due,
+                    physical,
+                    self.circuit.scheduler.analog_step_floor(),
+                )
                 && !(self.interpolating && physical - due <= self.interpolation_endpoint_window)
             {
                 return Err(external_error(format!(

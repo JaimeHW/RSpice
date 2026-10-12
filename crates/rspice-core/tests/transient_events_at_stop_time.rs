@@ -248,6 +248,66 @@ fn an_xspice_event_at_the_stop_time_is_processed_there() {
     );
 }
 
+/// A digital module that toggles `q` on every change of `clk`.
+#[cfg(feature = "veriloga")]
+const EDGE_FOLLOWER: &str = "`timescale 1ns/1ps\n\
+     module follow(clk, q); input clk; wire clk; output q; reg q;\n\
+     \x20 initial q = 0;\n\
+     \x20 always @(clk) q = ~q;\n\
+     endmodule\n";
+
+/// A `d_osc` clock edge on the stop time, read by a digital module.
+///
+/// The oscillator sums its half period edge by edge, so at 1 MHz its 260th
+/// edge is `1.2999999999999991e-4`, three ulps below the `130u` the `.tran`
+/// card parses; the solver's floor is far wider. The stepper lands on the stop
+/// time, and the shared net's Active work there must take the edge as its own
+/// instant rather than refuse it as a breakpoint the stepper skipped
+/// ("missed XSPICE breakpoint at 1.2999999999999991e-4s").
+#[cfg(feature = "veriloga")]
+#[test]
+fn a_shared_xspice_clock_edge_at_the_stop_time_is_processed_there() {
+    let scratch = Scratch::new("xspice_shared_stop_edge");
+    let module = scratch.write("follow.v", EDGE_FOLLOWER);
+    let netlist = Netlist::parse(&format!(
+        "* d_osc edge at the stop time, shared with a digital module\n\
+         .hdl \"{}\"\n\
+         vctl ctl 0 0.5\n\
+         a_osc ctl clk osc\n\
+         .model osc d_osc (cntl_array=[0 1] freq_array=[1meg 1meg])\n\
+         x1 clk q follow\n\
+         rq q 0 10k\n\
+         .tran 1u 130u\n\
+         .end\n",
+        module.display().to_string().replace('\\', "/")
+    ))
+    .expect("deck parses");
+    let (stop, _) = tran_window(&netlist);
+    let mut edge = 0.0_f64;
+    for _ in 0..260 {
+        edge += 0.5e-6;
+    }
+    assert!(
+        edge < stop && edge.next_up().next_up().next_up() == stop,
+        "the 260th edge {edge:e} is three ulps below the stop time {stop:e}"
+    );
+
+    let result = run(&netlist);
+    assert_ends_at_stop(&result, stop);
+    let clk = digital_trace(&result, "clk");
+    assert_eq!(
+        clk.len(),
+        261,
+        "the opening level and 260 edges, the last at the stop time: {:?}",
+        &clk[clk.len().saturating_sub(3)..]
+    );
+    let (time, _) = clk.last().expect("clk has samples");
+    assert!(
+        (time - stop).abs() <= 1.0e-12,
+        "clk's last edge is the stop time: {time:e}"
+    );
+}
+
 #[test]
 fn a_pulse_corner_at_the_stop_time_is_reached_exactly() {
     // A 10 ns period: the tenth rising edge's corner is the stop time,

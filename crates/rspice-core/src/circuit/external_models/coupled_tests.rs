@@ -884,6 +884,10 @@ endmodule
 /// same rule against the same floor, and pins it the same way, in
 /// `xspice::verilog::mixed`'s
 /// `only_an_activation_with_an_interval_to_it_is_a_missed_breakpoint`.
+///
+/// The third case is the other end of the same floor: a reachable event the
+/// stepper landed less than one floor after is that landing, computed another
+/// way (`numerics::integration::coincides_before`), and is delivered there.
 #[test]
 fn only_a_code_model_event_with_an_interval_to_it_is_a_missed_breakpoint() {
     let (mut digital, mut circuit, bindings, accepted, due) = a_pending_coupled_event();
@@ -892,7 +896,9 @@ fn only_a_code_model_event_with_an_interval_to_it_is_a_missed_breakpoint() {
         interval > 0.0,
         "the queued event must be ahead of the accepted point, {due:e}s against {accepted:e}s"
     );
-    let past = due + 0.1e-12;
+    // More than a floor past it: the stepper skipped an instant it could have
+    // landed on.
+    let past = due + 0.75 * interval;
 
     circuit.set_analog_step_floor(interval * 0.5);
     let error = digital
@@ -931,6 +937,25 @@ fn only_a_code_model_event_with_an_interval_to_it_is_a_missed_breakpoint() {
         "and it is delivered rather than left in the queue: the HDL half reads what the code \
          model published"
     );
+
+    let (mut digital, mut circuit, bindings, accepted, due) = a_pending_coupled_event();
+    let past = due + 0.1e-12;
+    let floor = (due - accepted) * 0.5;
+    assert!(past - due < floor && due - accepted >= floor);
+    circuit.set_analog_step_floor(floor);
+    digital
+        .force_many_from_analog_with(
+            &[],
+            1002,
+            past,
+            &mut routed_participant(&mut circuit, &bindings, past, past - accepted),
+        )
+        .expect("a reachable event less than one floor before the landing is that landing");
+    assert_eq!(
+        circuit.scheduler.xspice_event_values.digital_event_times[&2], past,
+        "delivered at the timepoint it coincides with"
+    );
+    assert_eq!(bit(&digital, "bus"), "0");
 }
 
 struct RoutedVector {
