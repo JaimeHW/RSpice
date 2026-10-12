@@ -1009,20 +1009,33 @@ fn localparam_becomes_computed_variable() {
 
 #[test]
 fn dimensioned_localparam_fails_closed_instead_of_becoming_a_scalar() {
+    // 1658bfb80 gave localparam arrays element storage, so the refusal this
+    // test used to expect ("array-valued localparam storage and indexing are
+    // not implemented") is gone. A concatenation is still not an array
+    // default: that spelling fails closed on the declaration.
     let error = analyze(&module_src(
         r#"
             localparam real taps[0:1] = {1.0, 2.0};
             analog I(p, n) <+ taps[0] * V(p, n);
             "#,
     ))
-    .expect_err("dimensioned localparam storage is not implemented");
+    .expect_err("a concatenation is not a localparam array default");
 
     let message = error.to_string();
     assert!(
-        message.contains("localparam array 'taps'")
-            && message.contains("array-valued localparam storage and indexing are not implemented"),
+        message.contains("'taps'") && message.contains("expected constant assignment pattern"),
         "unexpected diagnostic: {message}"
     );
+
+    // The assignment-pattern spelling becomes element storage, never a scalar.
+    let module = analyze_one(&module_src(
+        r#"
+            localparam real taps[0:1] = '{1.0, 2.0};
+            analog I(p, n) <+ taps[0] * V(p, n);
+            "#,
+    ));
+    assert_eq!(module.arrays["taps"].len, 2);
+    assert!(!module.variables.iter().any(|variable| variable.name == "taps"));
 }
 
 #[test]
