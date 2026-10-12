@@ -24,6 +24,9 @@ const REACTION_DELAY_NS: f64 = 3.0;
 /// deck declares none.
 const DEFAULT_SUPPLY: f64 = 3.3;
 
+/// The value `REAL_PORT_MODULE` assigns to its `wreal` output.
+const REAL_PORT_VALUE: f64 = 1.5;
+
 fn expect_refusal(outcome: Result<impl Sized, String>, what: &str) -> String {
     match outcome {
         Ok(_) => panic!("{what} must be refused rather than answered"),
@@ -179,7 +182,7 @@ fn a_real_net_with_two_drivers_is_refused() {
 #[test]
 fn a_real_valued_module_port_is_not_a_discipline_boundary() {
     let case = ams::case("a_real_valued_module_port_is_not_a_discipline_boundary");
-    assert_eq!(case.verdict, Verdict::BoundedByImplementation);
+    assert_eq!(case.verdict, Verdict::Conforms);
 
     let model = ams::ModelFile::new("real_port", ams::REAL_PORT_MODULE);
     let deck = format!(
@@ -193,11 +196,18 @@ fn a_real_valued_module_port_is_not_a_discipline_boundary() {
          .end\n",
         model.deck_path()
     );
-    let error = expect_refusal(
-        ams::run_deck(&deck, 40.0e-9, 1.0e-9),
-        "a `wreal` port bridged onto a circuit node",
+    let result = ams::run_deck(&deck, 40.0e-9, 1.0e-9).expect("the `wreal` port is carried");
+    let level = result
+        .try_voltage_waveform_named("lvl")
+        .expect("the port's circuit node is recorded");
+    assert!(
+        !level.is_empty()
+            && level
+                .iter()
+                .all(|&volts| (volts - REAL_PORT_VALUE).abs() <= 1.0e-12),
+        "the `wreal` port must hold its node at the assigned {REAL_PORT_VALUE} V, not at a \
+         logic level: {level:?}"
     );
-    assert_names(&error, case, &["x1", "level", "wreal"]);
 }
 
 // ===========================================================================

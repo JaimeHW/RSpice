@@ -166,12 +166,13 @@ pub const CASES: &[ClauseCase] = &[
         requirement: "a real-valued port carries a real number, not a discipline's potential \
                       and flow",
         derivation: "An X-card connects a module port to a circuit node, and a circuit node \
-                     carries a potential. A `wreal` port therefore has no A/D or D/A bridge to \
-                     be given: bridging it would mean choosing an arbitrary volts-per-unit \
-                     scale the design never stated. Refused by name — and the refusal is a \
-                     bound rather than conformance, because the clause permits the port and \
-                     this route does not carry it.",
-        verdict: Verdict::BoundedByImplementation,
+                     carries a potential. A `wreal` port has no discipline, so no connect \
+                     module, logic threshold or supply applies to it: what reaches the node \
+                     is the real number itself, which RSpice converts to a potential at one \
+                     volt per unit. A module assigning 1.5 therefore holds the node at 1.5 V \
+                     at every accepted timepoint, where a D/A boundary could only give 0 V or \
+                     the 3.3 V supply.",
+        verdict: Verdict::Conforms,
     },
     ClauseCase {
         clause: "LRM 2.4 7.3.1",
