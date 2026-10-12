@@ -20,14 +20,17 @@ use rspice_veriloga::canonical_ir::digital_value::{FourStateValue, ShiftOp};
 use rspice_veriloga::canonical_ir::{BlockId, CanonicalIrArtifact};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
+// The analog terminals are named `hi` and `lo` so that no fixture's digital
+// variable redeclares one: a `reg` that shares an electrical port's name is a
+// register with a continuous discipline, which the compiler refuses.
 fn digital_module(section: &str) -> String {
     format!(
-        "module dut(p, n);\n\
-         \x20   inout p, n;\n\
-         \x20   electrical p, n;\n\
+        "module dut(hi, lo);\n\
+         \x20   inout hi, lo;\n\
+         \x20   electrical hi, lo;\n\
          \x20   real gain;\n\
          {section}\n\
-         \x20   analog I(p, n) <+ gain * V(p, n);\n\
+         \x20   analog I(hi, lo) <+ gain * V(hi, lo);\n\
          endmodule\n"
     )
 }
