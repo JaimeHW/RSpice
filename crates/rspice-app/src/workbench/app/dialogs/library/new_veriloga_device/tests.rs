@@ -50,10 +50,29 @@ fn root_source(app: &RSpiceApp, reference: &CellViewRef) -> String {
         .to_owned()
 }
 
+/// The lines under Cell name and under Ports, as the form draws them.
+fn lines(app: &RSpiceApp) -> (Line, Line) {
+    let messages = app.state.ui.messages();
+    (
+        cell_line(&app.state, &messages),
+        ports_line(&app.state.dialogs.new_veriloga_device.ports, &messages),
+    )
+}
+
+/// A cell name the library already holds is refused under Cell name, where
+/// the module line stood, and the Ports line keeps saying what it says.
 #[test]
-fn a_cell_name_the_library_already_holds_is_refused_in_the_form() {
-    let mut app = app_with_draft("taken", "");
-    assert_eq!(refusal(&app), "behavioral already has a cell named taken.");
+fn a_cell_name_the_library_already_holds_is_refused_under_its_field() {
+    let mut app = app_with_draft("taken", "inp:in out:out");
+    let refused = "behavioral already has a cell named taken.";
+    assert_eq!(refusal(&app), refused);
+    assert_eq!(
+        lines(&app),
+        (
+            Line::Error(refused.to_owned()),
+            Line::Derived("2 ports · symbol generated from them".to_owned())
+        )
+    );
     // The same cell under another case is the same canonical identity.
     app.state.dialogs.new_veriloga_device.name = "TAKEN".to_owned();
     assert_eq!(refusal(&app), "behavioral already has a cell named TAKEN.");
@@ -62,40 +81,42 @@ fn a_cell_name_the_library_already_holds_is_refused_in_the_form() {
     assert!(app.commit_new_veriloga_device().is_err());
     assert_eq!(app.state.workspace.content.project.revision(), revision);
 
-    // A name the module could not be named after is refused too.
+    // A cell name is letters, digits and underscores; one the module cannot
+    // carry as it is names a module made from it.
+    app.state.dialogs.new_veriloga_device.name = "amp-v2".to_owned();
+    assert_eq!(refusal(&app), "Letters, digits and underscores only.");
     app.state.dialogs.new_veriloga_device.name = "2stage".to_owned();
-    assert!(refusal(&app).starts_with("A cell name starts with a letter"));
+    assert_eq!(lines(&app).0, Line::Derived("module _2stage".to_owned()));
     app.state.dialogs.new_veriloga_device.name = String::new();
     assert_eq!(draft(&app.state), Draft::Empty);
+    assert_eq!(lines(&app).0, Line::Blank);
 }
 
+/// A port entry the codec cannot read is refused under Ports, naming the
+/// entry, where the port count stood; the module line stays.
 #[test]
-fn a_port_entry_the_codec_cannot_read_is_refused_in_the_form() {
+fn a_port_entry_the_codec_cannot_read_is_refused_under_its_field() {
     for (ports, expected) in [
         (
             "inp:in out:sideways",
-            "out:sideways: sideways is not a direction; use in, out or inout.",
+            "out:sideways: sideways is not in, out or inout.",
         ),
-        (
-            "inp:",
-            "inp:: name a direction after the colon: in, out or inout.",
-        ),
-        (
-            "vdd:supply",
-            "vdd:supply: a Verilog-A port is in, out or inout.",
-        ),
-        (
-            "9x:in",
-            "9x:in: a port is a name such as inp, or a bus such as d[7:0].",
-        ),
-        (
-            "a<3:0>",
-            "a<3:0>: a port is a name such as inp, or a bus such as d[7:0].",
-        ),
+        ("inp:", "inp:: give a direction after the colon."),
+        ("vdd:supply", "vdd:supply: a port is in, out or inout."),
+        ("9x:in", "9x:in: not a port name or a bus like d[7:0]."),
+        ("a<3:0>", "a<3:0>: not a port name or a bus like d[7:0]."),
         ("out:out OUT:in", "OUT is listed twice."),
     ] {
         let app = app_with_draft("amp", ports);
         assert_eq!(refusal(&app), expected, "{ports}");
+        assert_eq!(
+            lines(&app),
+            (
+                Line::Derived("module amp".to_owned()),
+                Line::Error(expected.to_owned())
+            ),
+            "{ports}"
+        );
     }
 
     let app = app_with_draft("dac", "d[7:0]:in clk:input out:output vdd");
@@ -281,8 +302,8 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
 fn a_device_typed_without_ports_starts_a_module_that_declares_none() {
     let mut app = app_with_draft("blank", "  ");
     assert_eq!(
-        ports_line("  ", &app.state.ui.messages()).as_deref(),
-        Some("no ports · the compiled module defines them")
+        ports_line("  ", &app.state.ui.messages()),
+        Line::Derived("no ports · the compiled module defines them".to_owned())
     );
 
     let reference = app
@@ -306,6 +327,74 @@ fn a_device_typed_without_ports_starts_a_module_that_declares_none() {
             .pins
             .is_empty()
     );
+}
+
+/// Each field's refusal takes the place of its line, so the form is one size
+/// and its footer in one place whether the draft is empty, valid or refused.
+/// It reserves no status band: only a failure of the create itself, which
+/// belongs to no field, adds a status line.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn nothing_moves_while_the_draft_is_typed() {
+    use crate::ui::tokens::Mode;
+    use crate::ui::widgets::painted_runs::{PaintedRuns, painted_runs};
+
+    let screen = egui::vec2(1024.0, 640.0);
+    let paint = |name: &str, ports: &str, error: Option<&str>| {
+        let mut app = app_with_draft(name, ports);
+        app.state.dialogs.new_veriloga_device.error = error.map(str::to_owned);
+        painted_runs(screen, Mode::Dark, 3, |ctx| {
+            app.render_new_veriloga_device_form(ctx);
+        })
+    };
+    let primary = |painted: &PaintedRuns| painted.rect_of("Create").expect("the primary");
+    let empty = paint("", "", None);
+    let filled = paint("opamp", "inp:in out:out", None);
+    let duplicate = paint("taken", "inp:in out:out", None);
+    let bad_port = paint("opamp", "inp:in out:sideways", None);
+    for (draft, painted) in [
+        ("filled", &filled),
+        ("duplicate", &duplicate),
+        ("bad port", &bad_port),
+    ] {
+        assert_eq!(painted.surface, empty.surface, "{draft}");
+        assert_eq!(primary(painted), primary(&empty), "{draft}");
+    }
+
+    // A refusal stands where the line it replaces stood: under its field, at
+    // the control column, not in the label column.
+    for (line, refusal, refused) in [
+        (
+            "module opamp",
+            "behavioral already has a cell named taken.",
+            &duplicate,
+        ),
+        (
+            "2 ports \u{b7} symbol generated from them",
+            "out:sideways: sideways is not in, out or inout.",
+            &bad_port,
+        ),
+    ] {
+        let line = filled.rect_of(line).expect("the derived line");
+        let refusal = refused.rect_of(refusal).expect("the refusal");
+        assert!(
+            (refusal.left() - line.left()).abs() < 0.5,
+            "{refusal:?} {line:?}"
+        );
+        assert!(
+            (refusal.center().y - line.center().y).abs() < 0.5,
+            "{refusal:?} {line:?}"
+        );
+    }
+
+    // A failed create is the only thing that grows the form.
+    let failed = paint(
+        "opamp",
+        "inp:in out:out",
+        Some("The project is open read-only."),
+    );
+    assert!(failed.surface.height() > filled.surface.height());
+    assert!(failed.rect_of("The project is open read-only.").is_some());
 }
 
 /// The form opens on the library holding the active design when it can be

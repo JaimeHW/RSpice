@@ -2,10 +2,17 @@
 //!
 //! The form asks three questions — which library, what the cell is called,
 //! and which ports the module starts with — and states what the answers make:
-//! the module's name, and how many ports its generated symbol starts with.
-//! The ports are a starting point only. Once the module compiles, the module
-//! defines them, so the field is optional, and a module typed with none
-//! declares none: nothing is invented in its place.
+//! the module's name, which is the cell's own wherever a module can carry
+//! it, and how many ports its generated symbol starts with. The ports are a
+//! starting point only. Once the module compiles, the module defines them, so
+//! the field is optional, and a module typed with none declares none: nothing
+//! is invented in its place.
+//!
+//! Each field states what it declares, or why it is refused, in the one line
+//! under it, which is always there; so nothing moves while the reader types,
+//! and the form reserves no status band. The status line is left for a
+//! failure that belongs to no field: a library that cannot be written, or a
+//! create that the project refused.
 //!
 //! Nothing is created unless all of it is. The cell, its `veriloga` view, the
 //! view's source bundle and the generated `symbol` view are made on copies of
@@ -24,7 +31,7 @@ use egui::Context;
 use rspice_design::symbol::generated::{PortEntryError, parse_port_entry};
 
 use super::new_view_dialog::{
-    is_verilog_identifier, starter_veriloga_source, verilog_module_name, verilog_port_declaration,
+    starter_veriloga_source, verilog_module_name, verilog_port_declaration,
 };
 use super::{RSpiceApp, VERILOGA_LIBRARY_NAME};
 use crate::diagnostics::ConsoleMessage;
@@ -33,7 +40,7 @@ use crate::state::{
     Cell, CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
     ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry, View, ViewType,
 };
-use crate::ui::widgets::{CommandForm, DialogChoice};
+use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::dialogs::state::NewVerilogADeviceFormState;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{
@@ -89,12 +96,31 @@ fn draft(state: &AppState) -> Draft {
     if !writable_libraries(&state.library_manager).contains(&form.library) {
         return Draft::Refused(messages.text(MessageId::VerilogADeviceNoLibrary));
     }
+    match typed_cell(state, &messages) {
+        None => Draft::Empty,
+        Some(Err(refusal)) => Draft::Refused(refusal),
+        Some(Ok(cell)) => match typed_ports(&form.ports, &messages) {
+            Ok(ports) => Draft::Ready { cell, ports },
+            Err(refusal) => Draft::Refused(refusal),
+        },
+    }
+}
+
+/// The cell the Cell name field names: none yet, one the library can take,
+/// or why it cannot. A cell name is letters, digits and underscores, as New
+/// Cell's is; the module it is named after is made from it by
+/// [`verilog_module_name`].
+fn typed_cell(state: &AppState, messages: &MessageCatalog) -> Option<Result<String, String>> {
+    let form = &state.dialogs.new_veriloga_device;
     let cell = form.name.trim();
     if cell.is_empty() {
-        return Draft::Empty;
+        return None;
     }
-    if !is_verilog_identifier(cell) {
-        return Draft::Refused(messages.text(MessageId::VerilogADeviceCellInvalid));
+    if !cell
+        .chars()
+        .all(|character| character.is_alphanumeric() || character == '_')
+    {
+        return Some(Err(messages.text(MessageId::VerilogADeviceCellInvalid)));
     }
     let requested = crate::state::canonical_cell_view_owner_key(&form.library, cell, "");
     let taken = state
@@ -107,18 +133,12 @@ fn draft(state: &AppState) -> Draft {
             })
         });
     if taken {
-        return Draft::Refused(messages.format(
+        return Some(Err(messages.format(
             MessageId::VerilogADeviceCellExists,
             &[("library", &form.library), ("cell", cell)],
-        ));
+        )));
     }
-    match typed_ports(&form.ports, &messages) {
-        Ok(ports) => Draft::Ready {
-            cell: cell.to_owned(),
-            ports,
-        },
-        Err(refusal) => Draft::Refused(refusal),
-    }
+    Some(Ok(cell.to_owned()))
 }
 
 /// The ports the field declares, in the order typed, read by the one ports
@@ -156,28 +176,51 @@ fn typed_ports(typed: &str, messages: &MessageCatalog) -> Result<Vec<PortSpec>, 
     Ok(ports)
 }
 
-/// The line under Cell name: the module the cell's view will declare.
-fn module_line(name: &str, messages: &MessageCatalog) -> Option<String> {
-    let name = name.trim();
-    is_verilog_identifier(name).then(|| {
-        messages.format(
-            MessageId::VerilogADeviceModule,
-            &[("module", &verilog_module_name(name))],
-        )
-    })
+/// What one field's line says, owned for the frame it is drawn in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Line {
+    Blank,
+    Derived(String),
+    Error(String),
 }
 
-/// The line under Ports: how many the generated symbol starts with.
-fn ports_line(typed: &str, messages: &MessageCatalog) -> Option<String> {
-    let ports = typed_ports(typed, messages).ok()?;
-    Some(match ports.len() {
-        0 => messages.text(MessageId::VerilogADeviceNoPorts),
-        1 => messages.text(MessageId::VerilogADeviceOnePort),
-        count => messages.format(
-            MessageId::VerilogADevicePortCount,
-            &[("count", &count.to_string())],
-        ),
-    })
+impl Line {
+    fn field_line(&self) -> FieldLine<'_> {
+        match self {
+            Self::Blank => FieldLine::Blank,
+            Self::Derived(text) => FieldLine::Derived(text),
+            Self::Error(text) => FieldLine::Error(text),
+        }
+    }
+}
+
+/// The line under Cell name: the module the cell's view will declare, or why
+/// the name is refused.
+fn cell_line(state: &AppState, messages: &MessageCatalog) -> Line {
+    match typed_cell(state, messages) {
+        None => Line::Blank,
+        Some(Err(refusal)) => Line::Error(refusal),
+        Some(Ok(cell)) => Line::Derived(messages.format(
+            MessageId::VerilogADeviceModule,
+            &[("module", &verilog_module_name(&cell))],
+        )),
+    }
+}
+
+/// The line under Ports: how many the generated symbol starts with, or the
+/// entry that is refused.
+fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
+    match typed_ports(typed, messages) {
+        Err(refusal) => Line::Error(refusal),
+        Ok(ports) => Line::Derived(match ports.len() {
+            0 => messages.text(MessageId::VerilogADeviceNoPorts),
+            1 => messages.text(MessageId::VerilogADeviceOnePort),
+            count => messages.format(
+                MessageId::VerilogADevicePortCount,
+                &[("count", &count.to_string())],
+            ),
+        }),
+    }
 }
 
 /// Give the cell at `reference` a `veriloga` view holding a starter module
@@ -256,11 +299,14 @@ impl RSpiceApp {
         let libraries = writable_libraries(&self.state.library_manager);
         let current = draft(&self.state);
         let form = &self.state.dialogs.new_veriloga_device;
-        let refusal = form.error.clone().or(match &current {
-            Draft::Refused(message) => Some(message.clone()),
-            Draft::Empty | Draft::Ready { .. } => None,
+        // A refusal about a field stands under that field. The status line
+        // holds only what belongs to none: no library to write, or a create
+        // the project refused.
+        let status = form.error.clone().or_else(|| {
+            (!libraries.contains(&form.library))
+                .then(|| messages.text(MessageId::VerilogADeviceNoLibrary))
         });
-        let module = module_line(&form.name, &messages);
+        let cell = cell_line(&self.state, &messages);
         let ports = ports_line(&form.ports, &messages);
         let title = messages.text(MessageId::VerilogADeviceTitle);
         let primary = messages.text(MessageId::VerilogADevicePrimary);
@@ -279,11 +325,12 @@ impl RSpiceApp {
             .describe(&description)
             .primary_enabled(matches!(current, Draft::Ready { .. }) && form.error.is_none())
             .fields_enabled(!libraries.is_empty())
-            .status(match refusal.as_deref() {
+            .status(match status.as_deref() {
                 Some(message) => Err(message),
                 None => Ok(None),
             })
             .status_lines(2)
+            .status_fixed_at_open()
             .show(ctx, |rows| {
                 picked = rows.select(
                     &library_label,
@@ -292,13 +339,9 @@ impl RSpiceApp {
                     &libraries,
                 );
                 rows.text(&cell_label, name_id, &mut form.name, "");
-                if let Some(line) = module.as_deref() {
-                    rows.derived(line);
-                }
+                rows.field_line(Some(name_id), cell.field_line());
                 rows.text(&ports_label, ports_id, &mut form.ports, &ports_hint);
-                if let Some(line) = ports.as_deref() {
-                    rows.derived(line);
-                }
+                rows.field_line(Some(ports_id), ports.field_line());
                 Some(name_id)
             });
         if let Some(index) = picked
@@ -314,12 +357,15 @@ impl RSpiceApp {
         }
         match choice {
             // Revalidate the post-edit frame: Enter must never create a cell
-            // the same frame's keystroke just made invalid.
-            DialogChoice::Primary => {
+            // the same frame's keystroke just made invalid. A draft refusal is
+            // already under its field; only a failure of the create itself
+            // reaches the status line.
+            DialogChoice::Primary if matches!(draft(&self.state), Draft::Ready { .. }) => {
                 if let Err(error) = self.commit_new_veriloga_device() {
                     self.state.dialogs.new_veriloga_device.error = Some(error);
                 }
             }
+            DialogChoice::Primary => {}
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.dialogs.new_veriloga_device = NewVerilogADeviceFormState::default();
             }
