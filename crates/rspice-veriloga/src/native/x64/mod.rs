@@ -4243,7 +4243,14 @@ endmodule
     #[test]
     fn canonical_logical_range_helpers_reject_overflow_without_wraparound() {
         let model = compiled_model_with_variables(0);
-        let error = super::ranges_overlap(&model, "x", i64::MAX - 1, 2, 0, 1)
+        // 53d18d920 made the exclusive end i64::MAX + 1 legal, so a range
+        // whose last element is i64::MAX is representable and must be kept.
+        assert!(
+            !super::ranges_overlap(&model, "x", i64::MAX - 1, 2, 0, 1)
+                .expect("a range ending exactly at i64::MAX is valid")
+        );
+        // One element further cannot be addressed and must not wrap around.
+        let error = super::ranges_overlap(&model, "x", i64::MAX, 2, 0, 1)
             .expect_err("overflowing canonical range must hard-fail");
         let message = error.to_string();
         assert!(
@@ -4297,19 +4304,29 @@ endmodule
             .expect("fixture has x array metadata");
         array.lower = i64::MAX;
         array.len = 2;
-        let artifact = rebuild_canonical_artifact(artifact);
 
-        let error = compile_model_with_canonical_ir(&model, &artifact)
-            .expect_err("overflowing canonical indexed-assignment range must hard-fail");
-        let message = error.to_string();
+        // Since 53d18d920 HIR validation refuses an array whose logical index
+        // range overflows i64, so such an artifact can no longer be built and
+        // handed to the native compiler: the refusal happens at the canonical
+        // boundary, before any backend. The native helpers keep their own
+        // overflow checks (canonical_logical_range_helpers_reject_overflow_*).
+        let CanonicalIrArtifact {
+            metadata, hir, mir, ..
+        } = artifact;
+        let diagnostics = CanonicalIrArtifact::from_parts(metadata, hir, mir)
+            .expect_err("an overflowing canonical array range must not form an artifact");
         assert!(
-            message.contains("logical range"),
-            "unexpected error: {message}"
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("logical index range overflows i64")),
+            "unexpected diagnostics: {diagnostics:?}"
         );
-        assert!(
-            message.contains("no interpreter fallback"),
-            "canonical range overflow must preserve hard-JIT contract: {message}"
-        );
+        // The untouched fixture is an ordinary native model, so the refusal
+        // above is the overflow's and nothing else's.
+        let valid = compiler
+            .compile_canonical_ir(source)
+            .expect("compile canonical IR");
+        compile_model_with_canonical_ir(&model, &valid).expect("in-range fixture compiles");
     }
 
     #[test]
