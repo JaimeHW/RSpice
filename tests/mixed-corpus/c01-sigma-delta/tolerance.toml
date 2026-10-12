@@ -113,9 +113,9 @@ kind = "stat"
 stat = "var"
 over = "samples"
 of = { kind = "held_at", signal = "v(adaclout)", times = { start = 1.5e-4, step = 1e-4, count = 49 }, scale = 1024.0 }
-interval = [0.72, 3.3]
+interval = [0.733, 3.97]
 oracle = "O6"
-why = "250²·σ²·NT/Tw = 1.25 (+ ≤ 4/3 quantization); χ² 99%, 48 df"
+why = "250²·σ²·NT/Tw = 1.25 (+ ≤ 4/3 quantization), so the true variance lies in [1.25, 2.583] codes²; the 49-window sample variance has 48 df, so at χ² 99% per tail it lies in [1.25·χ²(0.01,48)/48, 2.583·χ²(0.99,48)/48] = [1.25·28.177/48, 2.583·73.683/48] = [0.7338, 3.9656], rounded outward (manager ruling; the design's [0.72, 3.3] did not follow from this rationale)"
 
 [[q]]
 id = "var"
