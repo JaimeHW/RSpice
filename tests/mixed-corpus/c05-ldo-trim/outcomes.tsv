@@ -3,14 +3,14 @@ mx	op	interp	pass	op.iin (O5-O4) [0] |a−e|=3.444e-5 allowed 6.474e-5 (a=-1.154
 mx	op	native	pass	op.iin (O5-O4) [0] |a−e|=3.444e-5 allowed 6.474e-5 (a=-1.154600e-2, e=-1.158044e-2)
 mx	dc-line	interp	pass	line (O5-O4) [0] |a−e|=6.212e-3 allowed 6.448e-3 (a=1.143244e0, e=1.149455e0)
 mx	dc-line	native	pass	line (O5-O4) [0] |a−e|=6.212e-3 allowed 6.448e-3 (a=1.143244e0, e=1.149455e0)
-mx	dc-load	interp	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
-mx	dc-load	native	refused	analysis.mixed_signal.discrete_state; label="dc sweep"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	dc-load	interp	wrong	load (O5-O4) [40] |a−e|=1.236e-2 allowed 6.394e-3 (a=1.119019e0, e=1.131378e0)
+mx	dc-load	native	wrong	load (O5-O4) [40] |a−e|=1.236e-2 allowed 6.394e-3 (a=1.119019e0, e=1.131378e0)
 mx	ac	interp	fail	oracle-error: psrr (O5-O4) oracle side: absent: v(vout) (producer delivered 2 signals: v(vi(vout)), v(vr(vout)))
 mx	ac	native	fail	oracle-error: psrr (O5-O4) oracle side: absent: v(vout) (producer delivered 2 signals: v(vi(vout)), v(vr(vout)))
-mx	stb	interp	refused	analysis.mixed_signal.discrete_state; label="stb analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
-mx	stb	native	refused	analysis.mixed_signal.discrete_state; label="stb analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
-mx	noise	interp	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
-mx	noise	native	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xtrim form=prose; token-form=prose; analysis-form=prose
+mx	stb	interp	wrong	margins.gm (O5-O1) [0] |a−e|=inf allowed NaN (a=8.475355e1, e=inf)
+mx	stb	native	wrong	margins.gm (O5-O1) [0] |a−e|=inf allowed NaN (a=8.475355e1, e=inf)
+mx	noise	interp	wrong	vn (O5-O4) [2] |a−e|=6.693e-18 allowed 1.005e-35 (a=6.693329e-18, e=1.004627e-34)
+mx	noise	native	wrong	vn (O5-O4) [2] |a−e|=6.693e-18 allowed 1.005e-35 (a=6.693329e-18, e=1.004627e-34)
 mx	tf	interp	pass	tf (O5) [1] |a−e|=1.478e-5 allowed 2.301e-1 (a=2.301378e4, e=2.301378e4)
 mx	tf	native	pass	tf (O5) [1] |a−e|=1.478e-5 allowed 2.301e-1 (a=2.301378e4, e=2.301378e4)
 mx	sens	interp	pass	sens (O5-O1) [1] |a−e|=8.678e-12 allowed 8.582e-8 (a=-8.582326e-6, e=-8.582317e-6)

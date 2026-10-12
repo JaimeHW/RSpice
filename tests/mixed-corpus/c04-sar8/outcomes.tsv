@@ -13,8 +13,8 @@ ports	ac	interp	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB
 ports	ac	native	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
 full	noise	interp	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
 full	noise	native	refused	compile_refusal; label="net/sar8_full.v"; instance=sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v
-ports	noise	interp	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
-ports	noise	native	refused	analysis.mixed_signal.discrete_state; label="noise analysis"; instance=xsar form=prose; token-form=prose; analysis-form=prose
+ports	noise	interp	wrong	nz (O5-O1) [0] |a−e|=8.288e-15 allowed 9.946e-17 (a=1.657575e-15, e=9.945640e-15)
+ports	noise	native	wrong	nz (O5-O1) [0] |a−e|=8.288e-15 allowed 9.946e-17 (a=1.657575e-15, e=9.945640e-15)
 full	mc-tran	interp	refused	compile_refusal; label="net/sar8_full.v:17"; instance=net/sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v:17
 full	mc-tran	native	refused	compile_refusal; label="net/sar8_full.v:17"; instance=net/sar8_full.v form=structured; token-form=structured; analysis-form=location; site=net/sar8_full.v:17
 ports	mc-tran	interp	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]
