@@ -70,18 +70,61 @@ fn find_opens_the_window_the_visible_code_page_owns() {
     );
 }
 
-/// Navigating to the Verilog-A page is not compiling it. The stage's Compile
+/// Navigating to the Verilog-A editor is not compiling it. The stage's Compile
 /// button dispatches this command, so an execute that only switched pages made
 /// the button a no-op on the page it lives on.
+///
+/// A Verilog-A cell view is edited in Design, so Compile — offered from the
+/// Models toolbar here — takes the reader to that document and requests the
+/// compile of its bundle. The Netlist page the command used to open is left
+/// as it was.
 #[test]
 fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
+    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
     let mut app = RSpiceApp::test_instance();
+    let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
+    let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+    view.metadata
+        .insert("veriloga.module".to_owned(), "gain".to_owned());
+    let mut cell = crate::state::Cell::new("gain");
+    cell.add_view(view);
+    let mut library = crate::state::Library::new("behavioral");
+    library.add_cell(cell);
+    app.state.library_manager.add_library(library);
+    app.state
+        .workspace
+        .content
+        .project_sources
+        .insert_bundle(
+            crate::state::ProjectSourceBundle::try_new(
+                crate::state::ProjectSourceOwner::cell_view(reference.clone()),
+                crate::state::ProjectSourceLanguage::VerilogA,
+                "gain.va",
+                "module gain(p, n); inout p, n; electrical p, n; endmodule\n",
+                [],
+                [],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    app.state.open_workspace_view(reference.clone());
+    app.state.workbench.activate(Workspace::Models);
+    let page_before = app.state.ui.code_workspace.page;
+
+    assert!(
+        Command::CompileVerilogA.is_enabled(&app),
+        "the Models toolbar's Compile reaches the Verilog-A document in front"
+    );
     Command::CompileVerilogA.execute(&mut app);
 
-    assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+    assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(
-        app.state.ui.code_workspace.page,
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA
+        app.state.workbench.current_route().surface_id(),
+        crate::workbench::SurfaceId::Design
     );
+    assert_eq!(app.state.workspace.content.active_view, reference);
+    assert_eq!(app.state.ui.code_workspace.page, page_before);
+    assert_ne!(page_before, CodeWorkspacePage::VerilogA);
     assert!(app.state.ui.code_workspace.veriloga.compile_requested);
 }

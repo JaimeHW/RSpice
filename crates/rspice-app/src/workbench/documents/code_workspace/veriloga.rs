@@ -37,9 +37,9 @@ thread_local! {
 }
 
 /// The exact project-owned Verilog-A closure selected by the current editor.
-/// Cell-view ownership takes precedence only while that Verilog-A view is the
-/// active design document; every other context retains the original Code
-/// Workspace singleton.
+/// The bundle is the one [`super::active_source_owner`] names: the active
+/// cell view's while that view is a Verilog-A view, else the Code Workspace
+/// singleton.
 #[derive(Debug, Clone)]
 pub(crate) struct SelectedVerilogASource {
     pub(super) bundle: ProjectSourceBundle,
@@ -97,18 +97,18 @@ impl SelectedVerilogASource {
 }
 
 pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
-    let (owner, selected_module) =
-        if app.state.workspace.content.active_view_type() == ViewType::VerilogA {
-            let reference = app.state.workspace.content.active_view.clone();
-            let module = crate::state::workspace::project_veriloga_binding_for_view(
+    let owner = super::active_source_owner(&app.state.workspace, ProjectSourceLanguage::VerilogA);
+    let selected_module = match &owner {
+        ProjectSourceOwner::CellView { reference } => Some(
+            crate::state::workspace::project_veriloga_binding_for_view(
                 &app.state.workspace,
                 &app.state.library_manager,
-                &reference,
+                reference,
             )?
             .selected_module()
-            .to_owned();
-            (ProjectSourceOwner::cell_view(reference), Some(module))
-        } else {
+            .to_owned(),
+        ),
+        ProjectSourceOwner::CodeWorkspace { .. } => {
             let selected_module = app
                 .state
                 .ui
@@ -117,11 +117,9 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
                 .selected_module
                 .trim()
                 .to_owned();
-            (
-                ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
-                (!selected_module.is_empty()).then_some(selected_module),
-            )
-        };
+            (!selected_module.is_empty()).then_some(selected_module)
+        }
+    };
     let bundle = app
         .state
         .workspace
@@ -589,17 +587,49 @@ fn add_bundle_file(
             bundle_id,
             logical_path,
         });
-        invalidate_veriloga_evidence(app);
+        invalidate_veriloga_evidence(app, bundle_id);
     }
     Ok(changed)
 }
 
-pub(crate) fn invalidate_veriloga_evidence(app: &mut RSpiceApp) {
-    app.state.workspace.content.project_sources_dirty = true;
+/// Record that `bundle_id` changed: compile evidence for it is void, the
+/// project has unsaved source, and the cell view that owns the bundle — whose
+/// document the bundle is part of — says so on its tab.
+///
+/// A save clears the tab the way it clears a schematic's: the lifecycle
+/// registry fingerprints a cell view's bundle as part of that view's document,
+/// so publishing the bundle publishes the view and the registry marks it
+/// clean.
+pub(crate) fn invalidate_veriloga_evidence(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
+    mark_bundle_unsaved(app, bundle_id);
     cancel_veriloga_compile(app);
     app.state.ui.code_workspace.veriloga.receipt = None;
     Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
     app.state.ui.code_workspace.veriloga.last_failure_token = None;
+}
+
+/// The persisted bundle changed: the project has unsaved source, and so does
+/// the cell view that owns the bundle, whose tab says so.
+fn mark_bundle_unsaved(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
+    app.state.workspace.content.project_sources_dirty = true;
+    let owner = app
+        .state
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(bundle_id)
+        .map(|bundle| bundle.owner().clone());
+    if let Some(ProjectSourceOwner::CellView { reference }) = owner
+        && let Some(open) = app
+            .state
+            .workspace
+            .content
+            .open_views
+            .iter_mut()
+            .find(|open| open.reference == reference)
+    {
+        open.dirty = true;
+    }
 }
 
 /// Replace the selected root's exact UTF-8 bytes only when the same bundle
@@ -635,7 +665,7 @@ pub(crate) fn replace_selected_veriloga_file(
         .replace_bundle_file_content(current.bundle().id(), logical_path, contents)
         .map_err(|error| error.to_string())?;
     if changed {
-        invalidate_veriloga_evidence(app);
+        invalidate_veriloga_evidence(app, current.bundle().id());
     }
     Ok(changed)
 }
@@ -816,7 +846,7 @@ fn persist_legacy_build_profile(
             ProjectSourceRole::VerilogABuildProfile,
         )
         .map_err(|error| error.to_string())?;
-    invalidate_veriloga_evidence(app);
+    invalidate_veriloga_evidence(app, selected.bundle().id());
     app.state.push_user_message(ConsoleMessage::info(format!(
         "Persisted the legacy Verilog-A compiler defaults as project build profile '{path}'."
     )));
@@ -895,8 +925,25 @@ pub(crate) fn cancel_veriloga_compile(app: &mut RSpiceApp) {
     app.state.ui.code_workspace.veriloga.pending = None;
 }
 
+/// Turn a Compile command into its review transaction.
+///
+/// The command records intent; opening the review needs only the project, so
+/// the frame loop consumes it before any surface draws. The review dialog is
+/// drawn by whichever host is showing the editor, and the command has already
+/// taken the reader there.
+pub fn consume_veriloga_compile_request(app: &mut RSpiceApp) {
+    if std::mem::take(&mut app.state.ui.code_workspace.veriloga.compile_requested)
+        && let Err(error) = open_veriloga_compile_dialog(app)
+    {
+        app.state.push_user_message(ConsoleMessage::error(error));
+    }
+}
+
 /// Poll a pending compile and publish it only when its revision and digest
 /// still identify the exact visible project source.
+///
+/// The frame loop runs this every frame, so a result is published whether or
+/// not an editor host is on screen when it lands.
 pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
     let Some(pending) = app.state.ui.code_workspace.veriloga.pending.clone() else {
         return;
@@ -1172,11 +1219,16 @@ fn record_veriloga_qualification(
         error_count,
         warning_count,
     };
-    app.state
+    let sequence = app
+        .state
         .workspace
         .content
         .append_project_source_qualification(token.bundle_id, record)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    // The qualification history is persisted with the bundle, so recording
+    // an attempt is a change to the owning cell view's document.
+    mark_bundle_unsaved(app, token.bundle_id);
+    Ok(sequence)
 }
 
 const fn runtime_readiness_label(readiness: RuntimeTargetReadiness) -> &'static str {

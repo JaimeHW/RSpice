@@ -192,12 +192,51 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        app.state.ui.code_workspace.page = match language {
-            ProjectSourceLanguage::RSpiceAutomation => CodeWorkspacePage::Automation,
-            ProjectSourceLanguage::VerilogA => CodeWorkspacePage::VerilogA,
+        // Automation is edited on its Netlist-workspace page; a Verilog-A
+        // module is a cell view, edited in Design.
+        let owner = match language {
+            ProjectSourceLanguage::RSpiceAutomation => {
+                app.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Netlist);
+                app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+                crate::state::ProjectSourceOwner::code_workspace(language)
+            }
+            ProjectSourceLanguage::VerilogA => {
+                let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
+                let mut view =
+                    crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+                view.metadata
+                    .insert("veriloga.module".to_owned(), "gain".to_owned());
+                let mut cell = crate::state::Cell::new("gain");
+                cell.add_view(view);
+                let mut library = crate::state::Library::new("behavioral");
+                library.add_cell(cell);
+                app.state.library_manager.add_library(library);
+                let owner = crate::state::ProjectSourceOwner::cell_view(reference.clone());
+                app.state
+                    .workspace
+                    .content
+                    .project_sources
+                    .insert_bundle(
+                        crate::state::ProjectSourceBundle::try_new(
+                            owner.clone(),
+                            language,
+                            "gain.va",
+                            "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\n",
+                            [],
+                            [],
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                app.state.open_workspace_view(reference);
+                app.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                owner
+            }
         };
-        let owner = crate::state::ProjectSourceOwner::code_workspace(language);
         let bundle = app
             .state
             .workspace
@@ -276,6 +315,11 @@ mod tests {
             .as_ref()
             .expect("bundle search opened from the editor shortcut");
         assert_eq!(search.query, "import", "{language:?} opening query");
+        assert_eq!(
+            search.bundle_id,
+            bundle.id(),
+            "{language:?} search binds the bundle the editor is showing"
+        );
         assert_eq!(search.bundle_revision, bundle.revision().get());
         assert!(code_workspace::source_search_results(&app, search).is_ok());
     }

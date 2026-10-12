@@ -12,7 +12,7 @@
 
 use super::*;
 
-use crate::state::{ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRole};
+use crate::state::{ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::documents::code_workspace::{
     SourceOutlineRow, VerilogAFileSelection, document_outline,
 };
@@ -63,14 +63,7 @@ struct BundleRow {
 }
 
 fn bundle_rows(app: &RSpiceApp, language: ProjectSourceLanguage) -> Vec<BundleRow> {
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let Some(bundle) = app
-        .state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-    else {
+    let Some(bundle) = active_bundle(app, language) else {
         return Vec::new();
     };
     let root = bundle.root();
@@ -122,6 +115,18 @@ const fn role_message(role: Option<ProjectSourceRole>) -> MessageId {
     }
 }
 
+/// The bundle this rail lists: the one every editor host and command resolves,
+/// so the rail can never offer the files of a bundle the editor is not showing.
+fn active_bundle(
+    app: &RSpiceApp,
+    language: ProjectSourceLanguage,
+) -> Option<&crate::state::ProjectSourceBundle> {
+    crate::workbench::documents::code_workspace::active_source_bundle(
+        &app.state.workspace,
+        language,
+    )
+}
+
 fn active_path(app: &RSpiceApp, language: ProjectSourceLanguage) -> Option<String> {
     crate::workbench::documents::code_workspace::active_bundle_path(
         &app.state.workspace,
@@ -131,14 +136,7 @@ fn active_path(app: &RSpiceApp, language: ProjectSourceLanguage) -> Option<Strin
 }
 
 fn select(app: &mut RSpiceApp, language: ProjectSourceLanguage, logical_path: &str) {
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let Some(bundle_id) = app
-        .state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .map(crate::state::ProjectSourceBundle::id)
+    let Some(bundle_id) = active_bundle(app, language).map(crate::state::ProjectSourceBundle::id)
     else {
         return;
     };
@@ -166,18 +164,21 @@ fn show_rail(
     let messages = app.state.ui.messages();
     let mut selected = None;
     let mut requested_line = None;
-    let outline = active
-        .as_deref()
-        .map(|path| {
-            document_outline(
-                app.state.workspace.content.project.id(),
-                &app.state.workspace.content.project_sources,
-                &mut app.state.ui.code_workspace.source_index_cache,
-                language,
-                path,
-            )
-        })
-        .unwrap_or_default();
+    let outline = match (
+        active.as_deref(),
+        crate::workbench::documents::code_workspace::active_source_bundle(
+            &app.state.workspace,
+            language,
+        ),
+    ) {
+        (Some(path), Some(bundle)) => document_outline(
+            app.state.workspace.content.project.id(),
+            bundle,
+            &mut app.state.ui.code_workspace.source_index_cache,
+            path,
+        ),
+        _ => Vec::new(),
+    };
 
     ScrollArea::vertical()
         .id_salt(id_salt)
@@ -286,14 +287,7 @@ fn code_editor_id(
     language: ProjectSourceLanguage,
     active_path: &str,
 ) -> Option<egui::Id> {
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let bundle_id = app
-        .state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .map(crate::state::ProjectSourceBundle::id)?;
+    let bundle_id = active_bundle(app, language).map(crate::state::ProjectSourceBundle::id)?;
     Some(
         crate::workbench::documents::code_workspace::source_editor_id(
             language,

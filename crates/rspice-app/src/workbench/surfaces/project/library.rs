@@ -795,8 +795,10 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
         }
         LibraryIntent::OpenView(reference, view_type) => {
             app.state.open_workspace_view(reference);
+            // Source views are cell views too: Design shows a Verilog-A
+            // module's editor and states what a SPICE or Verilog view is
+            // bound to.
             let workspace = match view_type {
-                ViewType::Verilog | ViewType::VerilogA | ViewType::Spice => Workspace::Netlist,
                 ViewType::Config => {
                     app.state.workbench.project_page = ProjectPage::Configuration;
                     Workspace::Project
@@ -1308,20 +1310,31 @@ mod tests {
         assert!(manager.current_view().is_some());
     }
 
+    /// Source views are cell views: opening one lands in Design, which edits a
+    /// Verilog-A module and states what a SPICE or Verilog view is bound to.
+    /// The Netlist workspace they used to open shows the project's deck,
+    /// which is not the view that was asked for.
     #[test]
-    fn source_views_route_to_the_netlist_workspace() {
+    fn source_views_route_to_the_design_workspace() {
         assert_eq!(icon_for_view(ViewType::VerilogA), WorkbenchIcon::Code);
         assert_eq!(icon_for_view(ViewType::Spice), WorkbenchIcon::Code);
         assert_eq!(icon_for_view(ViewType::Config), WorkbenchIcon::Sliders);
 
-        let mut app = RSpiceApp::test_instance();
-        let reference = app.state.workspace.content.active_view.clone();
-        apply_library_intent(
-            &egui::Context::default(),
-            &mut app,
-            LibraryIntent::OpenView(reference, ViewType::Spice),
-        );
-        assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
+        for view_type in [ViewType::Spice, ViewType::Verilog, ViewType::VerilogA] {
+            let mut app = RSpiceApp::test_instance();
+            app.state.workbench.activate(Workspace::Models);
+            let reference = app.state.workspace.content.active_view.clone();
+            apply_library_intent(
+                &egui::Context::default(),
+                &mut app,
+                LibraryIntent::OpenView(reference, view_type),
+            );
+            assert_eq!(
+                app.state.workbench.workspace,
+                Workspace::Design,
+                "{view_type:?} opens as a Design document"
+            );
+        }
     }
 
     #[test]

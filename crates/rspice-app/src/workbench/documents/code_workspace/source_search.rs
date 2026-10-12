@@ -50,15 +50,9 @@ pub(crate) fn open_source_search(
     language: ProjectSourceLanguage,
     active_path: &str,
 ) -> Result<(), String> {
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let bundle = app
-        .state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
+    let bundle_id = super::active_source_bundle(&app.state.workspace, language)
+        .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    let bundle_id = bundle.id();
     open_source_search_in_bundle(app, language, bundle_id, active_path)
 }
 
@@ -93,7 +87,7 @@ pub(crate) fn open_source_search_in_bundle(
         .ui
         .code_workspace
         .source_selections
-        .get(&(language, active_path.clone()))
+        .get(&(bundle.id(), active_path.clone()))
         .copied()
         .filter(|(start, end)| start < end);
     if app
@@ -147,7 +141,11 @@ pub(crate) fn open_source_search_in_bundle(
 }
 
 pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), String> {
-    match app.state.ui.code_workspace.page {
+    match super::active_code_page(
+        app.state.workbench.workspace,
+        &app.state.workspace,
+        app.state.ui.code_workspace.page,
+    ) {
         super::CodeWorkspacePage::Netlist => {
             app.state.ui.netlist.find.open = true;
             Ok(())
@@ -348,7 +346,9 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
         .replace_project_source_bundle_files_transactionally(search.bundle_id, replacements)
         .map_err(|error| error.to_string())?;
     match search.language {
-        ProjectSourceLanguage::VerilogA => super::veriloga::invalidate_veriloga_evidence(app),
+        ProjectSourceLanguage::VerilogA => {
+            super::veriloga::invalidate_veriloga_evidence(app, search.bundle_id);
+        }
         ProjectSourceLanguage::RSpiceAutomation => {
             super::automation::invalidate_automation_evidence(app);
         }
@@ -443,8 +443,8 @@ fn search_documents<'a>(
                 CodeSourceSearchScope::OpenDocuments => {
                     crate::state::project_source_paths_equal(logical_path, &search.active_path)
                         || app.state.ui.code_workspace.source_carets.keys().any(
-                            |(language, path)| {
-                                *language == search.language
+                            |(bundle_id, path)| {
+                                *bundle_id == search.bundle_id
                                     && crate::state::project_source_paths_equal(path, logical_path)
                             },
                         )
@@ -874,7 +874,7 @@ mod tests {
             .ui
             .code_workspace
             .source_selections
-            .insert((ProjectSourceLanguage::VerilogA, root.clone()), (6, 10));
+            .insert((bundle_id, root.clone()), (6, 10));
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
         {
             let search = app.state.ui.code_workspace.source_search.as_mut().unwrap();

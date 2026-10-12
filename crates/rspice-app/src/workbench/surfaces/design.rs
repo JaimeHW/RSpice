@@ -23,11 +23,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     occurrence_scope_banner(ui, app);
     let content_rect = ui.available_rect_before_wrap();
-    let canvas_document = matches!(
-        app.state.workspace.content.active_view_type(),
-        ViewType::Schematic | ViewType::Testbench
-    );
-    match app.state.workspace.content.active_view_type() {
+    let view_type = app.state.workspace.content.active_view_type();
+    let canvas_document = matches!(view_type, ViewType::Schematic | ViewType::Testbench);
+    match view_type {
         ViewType::Schematic | ViewType::Testbench => {
             crate::schematic::view::render_schematic_view(
                 ui,
@@ -38,10 +36,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         ViewType::Symbol => crate::schematic::symbol_editor::show(ui, &mut app.state),
         ViewType::Layout => layout_editor::show(ui, app),
-        ViewType::Spice | ViewType::Verilog | ViewType::VerilogA => source_document(ui, app),
+        ViewType::VerilogA => super::veriloga::show_in_design(ui, app),
+        ViewType::Spice | ViewType::Verilog => source_reference_document(ui, app, view_type),
         view_type => unsupported_document(ui, app, view_type),
     }
-    breadcrumb(ui.ctx(), &mut app.state, content_rect);
+    // A Verilog-A view is a document, not a drawing: it is no level of a
+    // descent, and its own heading and the navigator's path already name it.
+    // A crumb floating over the source would only cover the first line.
+    if view_type != ViewType::VerilogA {
+        breadcrumb(ui.ctx(), &mut app.state, content_rect);
+    }
     if canvas_document
         && app.state.workbench.current_route().surface_id() == super::super::SurfaceId::Design
     {
@@ -457,37 +461,46 @@ fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
         });
 }
 
-fn source_document(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    let reference = app.state.workspace.content.active_view.clone();
-    let contents = app
+/// A SPICE or Verilog view, which names a source by reference.
+///
+/// Neither language can own a project source bundle — only Verilog-A can — so
+/// there is no project text to edit here. The view's text lives in the file it
+/// is bound to and is read when the design is netlisted; the page says that,
+/// and which file, rather than pointing at another workspace that could not
+/// show it either.
+fn source_reference_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
+    let reference = &app.state.workspace.content.active_view;
+    let bound_file = app
         .state
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
         .and_then(|cell| cell.get_view(&reference.view))
-        .and_then(|view| view.metadata.get("source"))
-        .cloned()
-        .unwrap_or_default();
-    if contents.is_empty() {
-        empty_state(
-            ui,
-            super::super::design_system::WorkbenchIcon::Netlist,
-            "No source text stored",
-            "Import or compile this behavioral view from the Models workspace.",
-        );
-        return;
-    }
-    let mut display = contents;
-    egui::Frame::new().fill(t.color.canvas_bg).show(ui, |ui| {
-        ui.add_sized(
-            ui.available_size(),
-            egui::TextEdit::multiline(&mut display)
-                .font(egui::TextStyle::Monospace)
-                .code_editor()
-                .interactive(false),
-        );
-    });
+        .and_then(|view| view.file_path.as_deref());
+    let description = bound_file.map_or_else(
+        || {
+            format!(
+                "{} has no source file bound to it.",
+                reference.display_path()
+            )
+        },
+        |path| {
+            format!(
+                "{} is bound to {}. Its text is read from that file when the design is netlisted; the project does not hold an editable copy.",
+                reference.display_path(),
+                path.display()
+            )
+        },
+    );
+    empty_state(
+        ui,
+        match view_type {
+            ViewType::Spice => super::super::design_system::WorkbenchIcon::Netlist,
+            _ => super::super::design_system::WorkbenchIcon::Code,
+        },
+        &format!("{} view", view_type.display_name()),
+        &description,
+    );
 }
 
 fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {

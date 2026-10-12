@@ -356,7 +356,20 @@ impl RSpiceApp {
                 self.state.ascend_workspace_level();
             }
             ShortcutCommand::FindInDesign => {
-                if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
+                if crate::workbench::documents::code_workspace::design_hosts_veriloga(
+                    self.state.workbench.workspace,
+                    &self.state.workspace,
+                ) {
+                    // A Verilog-A cell view has no instances or nets to find;
+                    // Ctrl+F searches its source bundle instead.
+                    if let Err(error) =
+                        crate::workbench::documents::code_workspace::open_active_source_search(self)
+                    {
+                        self.state.push_user_message(ConsoleMessage::warning(error));
+                    }
+                } else if self.state.workbench.workspace
+                    == crate::workbench::state::Workspace::Netlist
+                {
                     self.state.ui.netlist.find.open = true;
                 } else {
                     self.state

@@ -9,9 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use crate::product::{ContentDigest, ProjectId};
-use crate::state::{
-    ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage, ProjectSourceOwner,
-};
+use crate::state::{ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage};
 use crate::workbench::RSpiceApp;
 
 const MAX_INDEX_BYTES: usize = 16 * 1024 * 1024;
@@ -177,14 +175,9 @@ pub(crate) fn open_language_tools(
     active_path: &str,
     caret_char_index: usize,
 ) -> Result<(), String> {
-    let bundle = app
-        .state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&ProjectSourceOwner::code_workspace(language))
+    let bundle_id = super::active_source_bundle(&app.state.workspace, language)
+        .map(ProjectSourceBundle::id)
         .ok_or_else(|| format!("The {} source bundle no longer exists.", language.label()))?;
-    let bundle_id = bundle.id();
     open_language_tools_in_bundle(app, language, bundle_id, active_path, caret_char_index)
 }
 
@@ -259,7 +252,9 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         .replace_project_source_bundle_files_transactionally(state.index.bundle_id, replacements)
         .map_err(|error| error.to_string())?;
     match state.index.language {
-        ProjectSourceLanguage::VerilogA => super::veriloga::invalidate_veriloga_evidence(app),
+        ProjectSourceLanguage::VerilogA => {
+            super::veriloga::invalidate_veriloga_evidence(app, state.index.bundle_id);
+        }
         ProjectSourceLanguage::RSpiceAutomation => {
             super::automation::invalidate_automation_evidence(app);
         }
@@ -400,7 +395,9 @@ fn replace_one_language_document(
         .replace_project_source_bundle_file(state.index.bundle_id, logical_path, replacement)
         .map_err(|error| error.to_string())?;
     match state.index.language {
-        ProjectSourceLanguage::VerilogA => super::veriloga::invalidate_veriloga_evidence(app),
+        ProjectSourceLanguage::VerilogA => {
+            super::veriloga::invalidate_veriloga_evidence(app, state.index.bundle_id);
+        }
         ProjectSourceLanguage::RSpiceAutomation => {
             super::automation::invalidate_automation_evidence(app);
         }
@@ -1583,39 +1580,26 @@ pub(crate) struct SourceIndexCache {
 ///
 /// An index that cannot be built — a closure past the navigation size bound —
 /// yields no rows rather than a partial outline, because a short outline and a
-/// complete one look identical to the reader.
+/// complete one look identical to the reader. Nor does it fall back to the
+/// index of whichever bundle was cached before: two cell views can share a
+/// logical path, and the outline of one is not the outline of the other.
 pub(crate) fn document_outline(
     project_id: ProjectId,
-    sources: &crate::state::ProjectSourceRegistry,
+    bundle: &ProjectSourceBundle,
     cache: &mut Option<SourceIndexCache>,
-    language: ProjectSourceLanguage,
     logical_path: &str,
 ) -> Vec<SourceOutlineRow> {
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let refreshed = {
-        let Some(bundle) = sources.bundle_for_owner(&owner) else {
-            return Vec::new();
-        };
-        let current = cache.as_ref().is_some_and(|cache| {
-            cache.bundle_id == bundle.id() && cache.closure_digest == bundle.closure_digest()
-        });
-        if current {
-            None
-        } else {
-            // A closure past the navigation size bound yields no outline
-            // rather than a partial one: a short outline and a complete one
-            // look identical to the reader.
-            LanguageServiceIndex::build(project_id, bundle)
-                .ok()
-                .map(|index| SourceIndexCache {
-                    bundle_id: bundle.id(),
-                    closure_digest: bundle.closure_digest(),
-                    index,
-                })
-        }
-    };
-    if let Some(refreshed) = refreshed {
-        *cache = Some(refreshed);
+    let current = cache.as_ref().is_some_and(|cache| {
+        cache.bundle_id == bundle.id() && cache.closure_digest == bundle.closure_digest()
+    });
+    if !current {
+        *cache = LanguageServiceIndex::build(project_id, bundle)
+            .ok()
+            .map(|index| SourceIndexCache {
+                bundle_id: bundle.id(),
+                closure_digest: bundle.closure_digest(),
+                index,
+            });
     }
     cache
         .as_ref()

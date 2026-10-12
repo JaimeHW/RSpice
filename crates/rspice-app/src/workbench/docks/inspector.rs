@@ -10,6 +10,7 @@ mod simulation;
 /// and a review that only ever opened one of them would not see them disagree.
 pub(super) mod stimulus;
 mod symbol;
+mod veriloga;
 
 #[cfg(test)]
 use rspice_ui_kit::panels::inspector::INSPECTOR_SECTION_PADDING;
@@ -255,6 +256,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                         == crate::state::ViewType::Symbol =>
                 {
                     symbol::show(ui, &mut app.state);
+                }
+                // A Verilog-A module is inspected for what it compiles to,
+                // not for a schematic selection it does not have.
+                Workspace::Design
+                    if app.state.workspace.content.active_view_type()
+                        == crate::state::ViewType::VerilogA =>
+                {
+                    veriloga::show(ui, app);
                 }
                 Workspace::Design => design::show(ui, app),
                 Workspace::Simulate => simulation::simulate(ui, app),
@@ -648,8 +657,9 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
         && let Some((reference, view_type)) = open_target.as_ref()
     {
         app.state.open_workspace_view(reference.clone());
+        // Source views are cell views too: Design shows a Verilog-A module's
+        // editor and states what a SPICE or Verilog view is bound to.
         let workspace = match view_type {
-            ViewType::Verilog | ViewType::VerilogA | ViewType::Spice => Workspace::Netlist,
             ViewType::Config => {
                 app.state.workbench.project_page = ProjectPage::Configuration;
                 Workspace::Project

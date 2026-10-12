@@ -814,16 +814,10 @@ fn code_pane(
         interaction
     }).inner;
     app.state.ui.code_workspace.source_carets.insert(
-        (
-            ProjectSourceLanguage::RSpiceAutomation,
-            selected_path.to_owned(),
-        ),
+        (bundle.id(), selected_path.to_owned()),
         interaction.cursor_char_index,
     );
-    let selection_key = (
-        ProjectSourceLanguage::RSpiceAutomation,
-        selected_path.to_owned(),
-    );
+    let selection_key = (bundle.id(), selected_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
         app.state
             .ui

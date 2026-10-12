@@ -13,6 +13,7 @@ mod page;
 mod source_files;
 mod source_search;
 mod veriloga;
+mod veriloga_inspector;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
 
 pub use super::{CodeSourceFileAction, CodeWorkspacePage};
@@ -35,7 +36,7 @@ pub use editor::{
 pub(crate) use language_services::{
     CodeLanguageToolsState, LanguageToolView, SourceCodeAction, SourceIndexCache, SourceOutlineRow,
     SourceSymbol, SourceSymbolKind, commit_language_code_action, commit_language_completion,
-    commit_language_rename, document_outline, open_language_tools,
+    commit_language_rename, document_outline, open_language_tools, open_language_tools_in_bundle,
 };
 pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
@@ -57,15 +58,78 @@ pub(crate) use source_files::{
 };
 pub(crate) use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
-    open_active_source_search, open_source_search, source_search_query_id, source_search_results,
+    open_active_source_search, open_source_search, open_source_search_in_bundle,
+    source_search_query_id, source_search_results,
 };
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, commit_veriloga_compile_dialog,
     compile_project_bundle_receipt, compile_project_bundle_virtual_for_provenance,
-    import_dropped_veriloga_source, open_veriloga_compile_dialog, replace_selected_veriloga_file,
-    request_veriloga_root_import, selected_veriloga_editor_snapshot, selected_veriloga_source,
+    import_dropped_veriloga_source, replace_selected_veriloga_file, request_veriloga_root_import,
+    selected_veriloga_editor_snapshot, selected_veriloga_source,
 };
-pub use veriloga::{poll_veriloga_compile, poll_veriloga_import};
+pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
+pub(crate) use veriloga_inspector::{
+    show_veriloga_inspector, veriloga_compile_status, veriloga_diagnostics,
+};
+
+/// Who owns the source bundle a language's editor is showing.
+///
+/// One owner for one fact, read by every host, command, dialog, and dock. A
+/// Verilog-A cell view is a design document: while it is the active one, its
+/// own bundle is the Verilog-A source in front of the reader — in the Design
+/// workspace that hosts it and on the Netlist page alike — so the two hosts
+/// can never edit, search, format, or compile different bundles. Otherwise a
+/// language falls back to the project's code-workspace bundle.
+pub(crate) fn active_source_owner(
+    workspace: &crate::state::ProjectWorkspace,
+    language: crate::state::ProjectSourceLanguage,
+) -> crate::state::ProjectSourceOwner {
+    if language == crate::state::ProjectSourceLanguage::VerilogA
+        && workspace.content.active_view_type() == crate::state::ViewType::VerilogA
+    {
+        crate::state::ProjectSourceOwner::cell_view(workspace.content.active_view.clone())
+    } else {
+        crate::state::ProjectSourceOwner::code_workspace(language)
+    }
+}
+
+/// The bundle [`active_source_owner`] names, when the project holds one.
+pub(crate) fn active_source_bundle(
+    workspace: &crate::state::ProjectWorkspace,
+    language: crate::state::ProjectSourceLanguage,
+) -> Option<&crate::state::ProjectSourceBundle> {
+    workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&active_source_owner(workspace, language))
+}
+
+/// Whether the Design workspace is showing a Verilog-A cell view, which is
+/// where that view's editor lives.
+pub(crate) fn design_hosts_veriloga(
+    shown: crate::workbench::state::Workspace,
+    workspace: &crate::state::ProjectWorkspace,
+) -> bool {
+    shown == crate::workbench::state::Workspace::Design
+        && workspace.content.active_view_type() == crate::state::ViewType::VerilogA
+}
+
+/// The code page that commands, dialogs, and labels act on.
+///
+/// A Verilog-A cell view in the Design workspace is the Verilog-A page's
+/// document, whatever the Netlist workspace last showed; everywhere else it is
+/// the page the Netlist workspace has selected.
+pub(crate) fn active_code_page(
+    shown: crate::workbench::state::Workspace,
+    workspace: &crate::state::ProjectWorkspace,
+    page: CodeWorkspacePage,
+) -> CodeWorkspacePage {
+    if design_hosts_veriloga(shown, workspace) {
+        CodeWorkspacePage::VerilogA
+    } else {
+        page
+    }
+}
 
 /// The document the Code & Automation workspace is showing right now.
 ///
@@ -82,19 +146,16 @@ pub(crate) fn active_document_label(
         CodeWorkspacePage::Netlist => netlist_document_label(workspace),
         CodeWorkspacePage::VerilogA => source_bundle_document_label(
             workspace,
+            code,
             messages,
             crate::state::ProjectSourceLanguage::VerilogA,
-            code.veriloga
-                .selected_file
-                .as_ref()
-                .map(|selection| selection.logical_path.as_str()),
             crate::workbench::MessageId::VerilogASourceDefault,
         ),
         CodeWorkspacePage::Automation => source_bundle_document_label(
             workspace,
+            code,
             messages,
             crate::state::ProjectSourceLanguage::RSpiceAutomation,
-            code.automation.selected_file.as_deref(),
             crate::workbench::MessageId::CodePageAutomation,
         ),
     }
@@ -119,29 +180,32 @@ pub(crate) const fn page_source_language(
 /// Selection is optional state: a page that has never had a file chosen shows
 /// the bundle root. The navigator, the document well, and the lifecycle dialog
 /// must agree on which file that is, so they all read it here.
+///
+/// A Verilog-A selection names its bundle, so a file chosen in one cell view
+/// is never read as the selection of another that happens to share the path.
 pub(crate) fn active_bundle_path(
     workspace: &crate::state::ProjectWorkspace,
     code: &CodeWorkspaceRuntimeState,
     language: crate::state::ProjectSourceLanguage,
 ) -> Option<String> {
+    let bundle = active_source_bundle(workspace, language);
     let explicit = match language {
         crate::state::ProjectSourceLanguage::VerilogA => code
             .veriloga
             .selected_file
             .as_ref()
+            .filter(|selection| {
+                bundle.is_some_and(|bundle| {
+                    selection.bundle_id == bundle.id()
+                        && bundle.contains_file(&selection.logical_path)
+                })
+            })
             .map(|selection| selection.logical_path.clone()),
         crate::state::ProjectSourceLanguage::RSpiceAutomation => {
             code.automation.selected_file.clone()
         }
     };
-    explicit.or_else(|| {
-        let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-        workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .map(|bundle| bundle.root().logical_path().to_owned())
-    })
+    explicit.or_else(|| bundle.map(|bundle| bundle.root().logical_path().to_owned()))
 }
 
 /// The id the document well gives the editor showing this bundle file.
@@ -190,16 +254,12 @@ fn netlist_document_label(workspace: &crate::state::ProjectWorkspace) -> String 
 /// no bundle at all the page is named after itself.
 fn source_bundle_document_label(
     workspace: &crate::state::ProjectWorkspace,
+    code: &CodeWorkspaceRuntimeState,
     messages: crate::workbench::MessageCatalog,
     language: crate::state::ProjectSourceLanguage,
-    selected: Option<&str>,
     fallback: crate::workbench::MessageId,
 ) -> String {
-    let owner = crate::state::ProjectSourceOwner::code_workspace(language);
-    let bundle = workspace.content.project_sources.bundle_for_owner(&owner);
-    selected
-        .map(str::to_owned)
-        .or_else(|| bundle.map(|bundle| bundle.root().logical_path().to_owned()))
+    active_bundle_path(workspace, code, language)
         .map(|path| {
             path.rsplit('/')
                 .next()
@@ -263,6 +323,31 @@ mod tests {
             active_document_label(&workspace, &code, messages()),
             "top_override.sp",
             "the Verilog-A page must never be named after the SPICE deck"
+        );
+
+        // A Verilog-A cell view in front is that page's document: the label
+        // names the file of the bundle the view owns, which is the bundle the
+        // Design workspace is editing.
+        let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
+        workspace
+            .content
+            .project_sources
+            .insert_bundle(
+                crate::state::ProjectSourceBundle::try_new(
+                    crate::state::ProjectSourceOwner::cell_view(reference.clone()),
+                    crate::state::ProjectSourceLanguage::VerilogA,
+                    "models/gain_cell.va",
+                    "module gain_cell(p, n); inout p, n; electrical p, n; endmodule\n",
+                    [],
+                    [],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        workspace.open_view(reference, crate::state::ViewType::VerilogA);
+        assert_eq!(
+            active_document_label(&workspace, &code, messages()),
+            "gain_cell.va"
         );
     }
 

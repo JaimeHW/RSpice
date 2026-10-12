@@ -275,7 +275,10 @@ fn cell_veriloga_view_and_source_are_one_lifecycle_document() {
             reference.clone(),
             crate::state::ViewType::VerilogA,
         ));
-    state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
+    // A Verilog-A view is edited as a Design document.
+    state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Design);
     let baseline = snapshot(&state).expect("baseline");
     state.project_lifecycle.authority.open_session();
     state

@@ -559,12 +559,11 @@ impl RSpiceApp {
         self.state
             .publish_project_library_mutation(project_mutation);
         self.state.dialogs.new_view_error = None;
+        // The new view is a cell view, so it opens as a Design document.
         self.state.open_workspace_view(reference);
         self.state
             .workbench
-            .activate(crate::workbench::state::Workspace::Netlist);
-        self.state.ui.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
+            .activate(crate::workbench::state::Workspace::Design);
         self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
         self.state.push_user_message(ConsoleMessage::info(format!(
             "Created Verilog-A view '{view_name}' for cell '{cell}' and opened its project-owned source."
@@ -1278,11 +1277,13 @@ mod tests {
         assert_eq!(app.state.workspace.content.active_view, reference);
         assert_eq!(
             app.state.workbench.workspace,
-            crate::workbench::state::Workspace::Netlist
+            crate::workbench::state::Workspace::Design,
+            "a new Verilog-A view opens as a Design document"
         );
         assert_eq!(
-            app.state.ui.code_workspace.page,
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA
+            app.state.workbench.current_route().surface_id(),
+            crate::workbench::SurfaceId::Design,
+            "reached through navigation, not by writing the workspace"
         );
         let selected =
             crate::workbench::documents::code_workspace::selected_veriloga_source(&app).unwrap();

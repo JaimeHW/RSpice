@@ -557,6 +557,11 @@ impl RSpiceApp {
         // Neither was driven from anywhere, so a requested import stayed
         // pending forever and blocked every later one.
         crate::workbench::documents::code_workspace::poll_veriloga_import(self);
+        // A Verilog-A compile is published here for the same reason: its
+        // result belongs to the bundle, not to whichever editor host happens
+        // to be on screen when the worker answers.
+        crate::workbench::documents::code_workspace::poll_veriloga_compile(self);
+        crate::workbench::documents::code_workspace::consume_veriloga_compile_request(self);
         crate::workbench::documents::code_workspace::poll_automation_source_import(self);
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
         crate::workbench::documents::code_workspace::settle_pending_python_execute(self);
@@ -1444,6 +1449,9 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 
 #[cfg(test)]
 mod gesture_tests;
+
+#[cfg(test)]
+mod veriloga_design_tests;
 
 #[cfg(test)]
 mod tests {

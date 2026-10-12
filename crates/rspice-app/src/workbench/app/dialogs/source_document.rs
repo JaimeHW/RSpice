@@ -14,7 +14,7 @@
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
 
 use crate::diagnostics::ConsoleMessage;
-use crate::state::{ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner};
+use crate::state::{ProjectSourceBundle, ProjectSourceLanguage};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -32,7 +32,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 /// Bring the lifecycle dialog up for the page that is showing.
 ///
 pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), String> {
-    let page = state.ui.code_workspace.page;
+    let page = visible_page(state);
     if page == code_workspace::CodeWorkspacePage::Netlist {
         if !state.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
@@ -42,14 +42,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
     }
     let language = code_workspace::page_source_language(page)
         .ok_or_else(|| "The visible Code workspace page has no source lifecycle.".to_owned())?;
-    let owner = ProjectSourceOwner::code_workspace(language);
-    if state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)
-        .is_none()
-    {
+    if code_workspace::active_source_bundle(&state.workspace, language).is_none() {
         return Err(format!(
             "This project owns no {} source workspace yet.",
             language.label()
@@ -61,18 +54,23 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 
 /// Whether the lifecycle dialog can be opened for the visible page.
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
-    if state.ui.code_workspace.page == code_workspace::CodeWorkspacePage::Netlist {
+    let page = visible_page(state);
+    if page == code_workspace::CodeWorkspacePage::Netlist {
         return state.project_lifecycle.is_open();
     }
-    code_workspace::page_source_language(state.ui.code_workspace.page).is_some_and(|language| {
-        let owner = ProjectSourceOwner::code_workspace(language);
-        state
-            .workspace
-            .content
-            .project_sources
-            .bundle_for_owner(&owner)
-            .is_some()
+    code_workspace::page_source_language(page).is_some_and(|language| {
+        code_workspace::active_source_bundle(&state.workspace, language).is_some()
     })
+}
+
+/// The page whose document the dialog manages: a Verilog-A cell view open in
+/// Design is the Verilog-A page's document wherever that page was left.
+fn visible_page(state: &AppState) -> code_workspace::CodeWorkspacePage {
+    code_workspace::active_code_page(
+        state.workbench.workspace,
+        &state.workspace,
+        state.ui.code_workspace.page,
+    )
 }
 
 /// What the dialog states about the visible document.
@@ -300,19 +298,13 @@ fn line_ending_summary(content: &str) -> MessageId {
 }
 
 fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentFacts> {
-    let language = code_workspace::page_source_language(app.state.ui.code_workspace.page)?;
+    let language = code_workspace::page_source_language(visible_page(&app.state))?;
     let logical_path = code_workspace::active_bundle_path(
         &app.state.workspace,
         &app.state.ui.code_workspace,
         language,
     )?;
-    let owner = ProjectSourceOwner::code_workspace(language);
-    let bundle = app
-        .state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&owner)?;
+    let bundle = code_workspace::active_source_bundle(&app.state.workspace, language)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
     let identity = bundle.document_id(&logical_path).map_or_else(
         || messages.text(MessageId::CodeSourceIdentityNotRetained),
@@ -503,7 +495,7 @@ impl RSpiceApp {
         if !self.state.ui.code_workspace.source_document_dialog {
             return;
         }
-        if self.state.ui.code_workspace.page == code_workspace::CodeWorkspacePage::Netlist {
+        if visible_page(&self.state) == code_workspace::CodeWorkspacePage::Netlist {
             self.render_netlist_source_document_dialog(ctx);
             return;
         }
@@ -2061,7 +2053,7 @@ fn revision_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::ProjectDescriptor;
+    use crate::state::{ProjectDescriptor, ProjectSourceOwner};
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
     use rspice_simulation::netlist_preparation::IncludeSearchChain;
     use std::path::{Path, PathBuf};

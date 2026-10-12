@@ -243,9 +243,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                         }
                         ComponentModelSourceTarget::VerilogA(reference) => {
                             app.state.open_workspace_view(reference.clone());
-                            app.state.ui.code_workspace.page =
-                                crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
-                            app.state.workbench.activate(Workspace::Netlist);
+                            app.state.workbench.activate(Workspace::Design);
                         }
                     }
                 }

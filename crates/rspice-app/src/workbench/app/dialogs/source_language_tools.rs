@@ -71,11 +71,18 @@ const fn symbol_kind_message(kind: SourceSymbolKind) -> MessageId {
 
 /// Open the tools over the document the visible page is showing.
 pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), String> {
-    let page = app.state.ui.code_workspace.page;
+    let page = code_workspace::active_code_page(
+        app.state.workbench.workspace,
+        &app.state.workspace,
+        app.state.ui.code_workspace.page,
+    );
     let language = code_workspace::page_source_language(page).ok_or_else(|| {
         "The netlist deck is served by its own completion and validation, not the project source index."
             .to_owned()
     })?;
+    let bundle_id = code_workspace::active_source_bundle(&app.state.workspace, language)
+        .map(crate::state::ProjectSourceBundle::id)
+        .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let logical_path = code_workspace::active_bundle_path(
         &app.state.workspace,
         &app.state.ui.code_workspace,
@@ -90,14 +97,19 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
         .ui
         .code_workspace
         .source_carets
-        .get(&(language, logical_path.clone()))
+        .get(&(bundle_id, logical_path.clone()))
         .copied()
         .unwrap_or(0);
-    code_workspace::open_language_tools(app, language, &logical_path, caret)
+    code_workspace::open_language_tools_in_bundle(app, language, bundle_id, &logical_path, caret)
 }
 
 pub(crate) fn language_tools_are_available(state: &AppState) -> bool {
-    code_workspace::page_source_language(state.ui.code_workspace.page).is_some_and(|language| {
+    let page = code_workspace::active_code_page(
+        state.workbench.workspace,
+        &state.workspace,
+        state.ui.code_workspace.page,
+    );
+    code_workspace::page_source_language(page).is_some_and(|language| {
         code_workspace::active_bundle_path(&state.workspace, &state.ui.code_workspace, language)
             .is_some()
     })
@@ -830,9 +842,41 @@ mod tests {
         use crate::workbench::commands::vocabulary::Command;
 
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        app.state.ui.code_workspace.page = CodeWorkspacePage::VerilogA;
+        // A Verilog-A cell view open in Design: the place Compile is offered.
+        let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
+        let mut view = crate::state::View::new("veriloga", crate::state::ViewType::VerilogA);
+        view.metadata
+            .insert("veriloga.module".to_owned(), "gain".to_owned());
+        let mut cell = crate::state::Cell::new("gain");
+        cell.add_view(view);
+        let mut library = crate::state::Library::new("behavioral");
+        library.add_cell(cell);
+        app.state.library_manager.add_library(library);
+        app.state
+            .workspace
+            .content
+            .project_sources
+            .insert_bundle(
+                crate::state::ProjectSourceBundle::try_new(
+                    crate::state::ProjectSourceOwner::cell_view(reference.clone()),
+                    crate::state::ProjectSourceLanguage::VerilogA,
+                    "gain.va",
+                    "module gain(p, n); inout p, n; electrical p, n; endmodule\n",
+                    [],
+                    [],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        app.state.open_workspace_view(reference);
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
         let enabled_before = Command::CompileVerilogA.is_enabled(&app);
+        assert!(
+            enabled_before,
+            "a writable project compiles the Verilog-A cell view in front"
+        );
 
         app.state.workbench.safe_mode.active = true;
         app.state.workbench.safe_mode.applied.open_project_read_only = true;

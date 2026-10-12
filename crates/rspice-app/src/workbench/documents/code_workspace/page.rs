@@ -734,9 +734,12 @@ pub struct CodeWorkspaceRuntimeState {
     /// so the source navigators can run every frame without re-parsing the
     /// bundle on each one.
     pub(crate) source_index_cache: Option<super::SourceIndexCache>,
-    pub source_carets: std::collections::BTreeMap<(ProjectSourceLanguage, String), usize>,
-    pub source_selections:
-        std::collections::BTreeMap<(ProjectSourceLanguage, String), (usize, usize)>,
+    /// Where each open source document's caret and selection were last
+    /// reported, keyed by the bundle and the logical path inside it. Two cell
+    /// views may each own a `model.va`; keying by language and path made them
+    /// overwrite one another's place.
+    pub source_carets: std::collections::BTreeMap<(ProjectSourceId, String), usize>,
+    pub source_selections: std::collections::BTreeMap<(ProjectSourceId, String), (usize, usize)>,
     pub veriloga: VerilogAWorkbenchState,
     pub automation: AutomationWorkbenchState,
     /// Directory typed into the include-search-path row of the source

@@ -763,7 +763,9 @@ impl Command {
             // its own deck find, and the two language pages search their
             // bundle. It was restricted to the netlist page only while the
             // bundle search had no surface.
-            Self::FindCodeDocument => state.workbench.workspace == Workspace::Netlist,
+            // A Verilog-A cell view in Design is the Verilog-A page's document,
+            // so the code commands follow it there.
+            Self::FindCodeDocument => code_document_is_visible(state),
             Self::ValidateCodeDocument => {
                 netlist_page_is_visible(state)
                     && state.ui.netlist.active_document
@@ -774,11 +776,11 @@ impl Command {
             // pages, not the netlist page: it manages a project source
             // bundle, which the deck is not.
             Self::ManageSourceDocument => {
-                state.workbench.workspace == Workspace::Netlist
+                code_document_is_visible(state)
                     && crate::workbench::app::source_document_dialog_is_available(state)
             }
             Self::SourceLanguageTools => {
-                state.workbench.workspace == Workspace::Netlist
+                code_document_is_visible(state)
                     && crate::workbench::app::language_tools_are_available(state)
             }
             // This gate was written for the compile command and never
@@ -1220,6 +1222,13 @@ impl Command {
             Self::FindInDesign => {
                 if netlist_page_is_visible(&app.state) {
                     app.state.ui.netlist.find.open = true;
+                } else if crate::workbench::documents::code_workspace::design_hosts_veriloga(
+                    app.state.workbench.workspace,
+                    &app.state.workspace,
+                ) {
+                    // A Verilog-A cell view has no instances or nets to find;
+                    // Find searches its source bundle instead.
+                    Self::FindCodeDocument.execute(app);
                 } else {
                     activate_workspace(app, Workspace::Design);
                     app.state.workbench.navigator_visible = true;
@@ -2084,13 +2093,26 @@ impl Command {
                 }
             }
             Self::CompileVerilogA => {
-                activate_workspace(app, Workspace::Netlist);
-                app.state.ui.code_workspace.page =
-                    crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
-                // Navigating to the page is not compiling. The surface owns
-                // the compile transaction because opening its review dialog
-                // needs an egui context, so the request is left for it to
-                // consume on the next frame.
+                use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
+                // The command compiles the source in front of the reader and
+                // takes them to where its review and result are shown: a
+                // Verilog-A cell view is edited in Design, so that is where a
+                // compile of it lands, whichever workspace offered the command.
+                let on_veriloga_page = app.state.workbench.workspace == Workspace::Netlist
+                    && app.state.ui.code_workspace.page == CodeWorkspacePage::VerilogA;
+                if !on_veriloga_page {
+                    if app.state.workspace.content.active_view_type()
+                        == crate::state::ViewType::VerilogA
+                    {
+                        activate_workspace(app, Workspace::Design);
+                    } else {
+                        activate_workspace(app, Workspace::Netlist);
+                        app.state.ui.code_workspace.page = CodeWorkspacePage::VerilogA;
+                    }
+                }
+                // Navigating is not compiling. The frame loop turns the request
+                // into the review transaction on the next frame.
                 app.state.ui.code_workspace.veriloga.compile_requested = true;
             }
             Self::AutomationConsole => {

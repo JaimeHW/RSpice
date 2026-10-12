@@ -290,15 +290,21 @@ fn schematic_and_exact_veriloga_instance_double_click_destinations_are_distinct(
         select_double_click_action(&state, Some(PointerTarget::Component(42)), false),
         SelectDoubleClickAction::OpenVerilogA(42)
     );
+    use crate::workbench::{SurfaceId, state::Workspace};
+    // Start in another workspace, so landing in Design is the open's doing
+    // rather than where the test began.
+    state.workbench.activate(Workspace::Netlist);
     assert!(state.open_veriloga_source_for_component(42));
     assert_eq!(state.workspace.content.active_view, veriloga_reference);
     assert_eq!(
         state.workbench.workspace,
-        crate::workbench::state::Workspace::Netlist
+        Workspace::Design,
+        "a Verilog-A master opens as a Design document"
     );
     assert_eq!(
-        state.ui.code_workspace.page,
-        crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA
+        state.workbench.current_route().surface_id(),
+        SurfaceId::Design,
+        "reached through navigation, not by writing the workspace"
     );
 }
 

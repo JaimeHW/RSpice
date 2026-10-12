@@ -1,4 +1,12 @@
-//! Mockup-defined Verilog-A compiler workspace.
+//! The Verilog-A source editor.
+//!
+//! A Verilog-A module is a view of a cell, so its editor is a Design-workspace
+//! document: [`show_in_design`] draws it there, editor only, while the
+//! inspector dock states the module's facts. Until the project-wide source
+//! workspace is retired, the Netlist workspace's Verilog-A page draws the same
+//! editor with those facts in a column of its own ([`show`]). Both hosts edit
+//! the bundle `code_workspace::active_source_owner` names, so they can never
+//! disagree about which module is in front of the reader.
 
 use egui::{Align, Layout, ScrollArea, Sense, Stroke, Ui, Vec2};
 
@@ -8,13 +16,10 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
-use super::super::design_system::{
-    StatusMark, code_inspector_property_list, code_inspector_section, code_workspace_heading,
-    property_row, property_row_status, property_row_toned, workspace_title_row,
-};
+use super::super::design_system::{code_workspace_heading, workspace_title_row};
 use crate::workbench::documents::code_workspace::{
-    CodeDiagnosticCollection, CodeEditorLanguage, CodeEditorSeverity, CodeWorkspacePage,
-    TargetQualification, show_code_document_interaction_versioned,
+    CodeDiagnosticCollection, CodeEditorLanguage, CodeWorkspacePage,
+    show_code_document_interaction_versioned,
 };
 
 const INTERNAL_INSPECTOR_MIN_WIDTH: f32 = 270.0;
@@ -33,16 +38,30 @@ fn visible_workspace_rect(ui: &Ui) -> egui::Rect {
         .intersect(ui.max_rect())
 }
 
+/// Which workspace is drawing the editor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Host {
+    /// The Design workspace, whose inspector dock states the module's facts.
+    Design,
+    /// The Netlist workspace's Verilog-A page, which states them itself.
+    NetlistPage,
+}
+
+/// The Netlist workspace's Verilog-A page.
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    show_hosted(ui, app, Host::NetlistPage);
+}
+
+/// A Verilog-A cell view, as the Design workspace's document.
+pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
+    show_hosted(ui, app, Host::Design);
+}
+
+fn show_hosted(ui: &mut Ui, app: &mut RSpiceApp, host: Host) {
+    // Import and compile results are consumed by the frame loop, so a result
+    // that lands while neither host is on screen is still published. Only
+    // what needs this surface's pointer and context stays here.
     handle_veriloga_file_drop(ui.ctx(), app);
-    crate::workbench::documents::code_workspace::poll_veriloga_import(app);
-    crate::workbench::documents::code_workspace::poll_veriloga_compile(app);
-    if std::mem::take(&mut app.state.ui.code_workspace.veriloga.compile_requested)
-        && let Err(error) =
-            crate::workbench::documents::code_workspace::open_veriloga_compile_dialog(app)
-    {
-        app.state.push_user_message(ConsoleMessage::error(error));
-    }
     compile_dialog_window(ui.ctx(), app);
     let t = Tokens::get(ui.ctx());
     let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(app);
@@ -59,43 +78,20 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .map_or(default_file_name.as_str(), |source| {
                 source.document().file_name()
             });
-        title_row(ui, app, file_name);
+        // In Design the row names the module the tab holds; the compiler
+        // page's own heading is the Netlist page's.
+        let module_title = (host == Host::Design).then(|| {
+            selected
+                .as_ref()
+                .ok()
+                .and_then(|source| source.selected_module().map(str::to_owned))
+                .unwrap_or_else(|| app.state.workspace.content.active_view.cell.clone())
+        });
+        title_row(ui, app, file_name, module_title.as_deref());
         let selected = match selected {
             Ok(selected) => selected,
             Err(error) => {
-                let messages = app.state.ui.messages();
-                let description = if app.state.workspace.content.active_view_type()
-                    == crate::state::ViewType::VerilogA
-                {
-                    error
-                } else {
-                    messages.text(MessageId::VerilogANoSourceDescription)
-                };
-                super::super::design_system::empty_state_with_actions(
-                    ui,
-                    super::super::design_system::WorkbenchIcon::Code,
-                    &messages.text(MessageId::VerilogANoSource),
-                    &description,
-                    |ui| {
-                        if Button::new(&messages.text(MessageId::CodeSourceCreateWorkspace))
-                            .show(ui)
-                            .clicked()
-                            && let Err(error) = crate::workbench::documents::code_workspace::open_source_workspace_dialog(
-                                app,
-                                crate::state::ProjectSourceLanguage::VerilogA,
-                            )
-                        {
-                            app.state.push_user_message(ConsoleMessage::error(error));
-                        }
-                        if Button::new(&messages.text(MessageId::CodeSourceImportRoot))
-                            .show(ui)
-                            .clicked()
-                            && let Err(error) = crate::workbench::documents::code_workspace::request_veriloga_root_import(app)
-                        {
-                            app.state.push_user_message(ConsoleMessage::error(error));
-                        }
-                    },
-                );
+                missing_source(ui, app, error);
                 return;
             }
         };
@@ -114,6 +110,28 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .unwrap_or_else(|| selected.document().content())
             .to_owned();
         let diagnostics = current_diagnostics(app, &selected);
+        if host == Host::Design {
+            // The inspector dock states the module's facts, so the editor
+            // takes the whole document well at every width. A second copy of
+            // them beside or below it would only push the source off a phone.
+            let available = ui.available_rect_before_wrap();
+            let mut editor_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(available)
+                    .layout(Layout::top_down(Align::Min)),
+            );
+            code_pane(
+                &mut editor_ui,
+                app,
+                &selected,
+                &active_path,
+                &mut source,
+                &diagnostics,
+                editor_language,
+            );
+            ui.allocate_rect(available, Sense::hover());
+            return;
+        }
         // Match the mockup's 820 px content-column breakpoint. Docked panels
         // can narrow this surface while the outer viewport remains wide.
         let stacked = visible_workspace_rect(ui).width() <= 820.0;
@@ -559,23 +577,47 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
 }
 
-fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str) {
+/// The row above the editor: a heading, the cross-link to the generated deck,
+/// and Compile.
+///
+/// With a `module` the row heads a Design document and names that module in
+/// two short lines. Without one it heads the Netlist workspace's compiler page
+/// with that page's description. The page heading describes a workspace; a
+/// Design tab is one module, and three lines of workspace copy above it cost a
+/// phone a fifth of its editor.
+fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, module: Option<&str>) {
     let messages = app.state.ui.messages();
     let generated_netlist = messages.text(MessageId::CodeGeneratedNetlist);
-    let eyebrow = messages.text(MessageId::VerilogAHeadingEyebrow);
-    let title = messages.text(MessageId::VerilogAHeadingTitle);
-    let description = messages.text(MessageId::VerilogAHeadingDescription);
+    let (eyebrow, title, description, heading_reserve) = match module {
+        Some(module) => (
+            messages.text(MessageId::VerilogAModuleEyebrow),
+            module.to_owned(),
+            None,
+            200.0,
+        ),
+        None => (
+            messages.text(MessageId::VerilogAHeadingEyebrow),
+            messages.text(MessageId::VerilogAHeadingTitle),
+            Some(messages.text(MessageId::VerilogAHeadingDescription)),
+            280.0,
+        ),
+    };
+    let heading = |ui: &mut Ui| match description.as_deref() {
+        Some(description) => code_workspace_heading(ui, &eyebrow, &title, description),
+        None => module_heading(ui, &eyebrow, &title),
+    };
     let full_compile_label = compile_button_label(app, file_name);
     let actions_width = title_button_width(ui, &generated_netlist, false)
         + 6.0
         + title_button_width(ui, &full_compile_label, true);
     let visible_width = visible_workspace_rect(ui).width();
-    let stack_actions = title_actions_stack(visible_width) || actions_width + 280.0 > visible_width;
+    let stack_actions =
+        title_actions_stack(visible_width) || actions_width + heading_reserve > visible_width;
     workspace_title_row(ui, |ui| {
         // Open docks can make the workspace much narrower than the viewport.
         // Stack against the actual row width so actions never overlap.
         if stack_actions {
-            code_workspace_heading(ui, &eyebrow, &title, &description);
+            heading(ui);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -599,7 +641,7 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str) {
                         // heading must consume the measured remainder so the
                         // action group stays flush right.
                         ui.set_width(heading_width);
-                        code_workspace_heading(ui, &eyebrow, &title, &description);
+                        heading(ui);
                     },
                 );
                 ui.add_space(6.0);
@@ -608,6 +650,27 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str) {
             });
         }
     });
+}
+
+/// The compiler page's eyebrow and title type, without its description: the
+/// module name is the whole of what a Design tab's heading has to say.
+fn module_heading(ui: &mut Ui, eyebrow: &str, module: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(eyebrow.to_uppercase())
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .extra_letter_spacing(0.09 * tokens::FS_0)
+            .color(t.color.text_faint),
+    );
+    ui.add_space(3.0);
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(module)
+                .font(theme::mono(15.0, FontWeight::SemiBold))
+                .color(t.color.text),
+        )
+        .truncate(),
+    );
 }
 
 fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
@@ -624,6 +687,14 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
         let _ =
             crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
         app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+        // A cross-link, not a page switch: from Design the deck is in another
+        // workspace, so the button goes there rather than flipping a page
+        // nobody is looking at.
+        if app.state.workbench.workspace != super::super::state::Workspace::Netlist {
+            app.state
+                .workbench
+                .activate(super::super::state::Workspace::Netlist);
+        }
     }
 }
 
@@ -732,8 +803,13 @@ fn source_editor(
         selected.bundle().id(),
         active_path,
     ));
+    // A coarse pointer raises the Editor menu to the touch target; the strip
+    // grows with it rather than letting the menu hang into the source.
     let (toolbar, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), EDITOR_TOOLBAR_HEIGHT),
+        Vec2::new(
+            ui.available_width(),
+            EDITOR_TOOLBAR_HEIGHT.max(t.metrics.ctl_h),
+        ),
         Sense::hover(),
     );
     ui.painter().rect_filled(toolbar, 0.0, t.color.bg_panel);
@@ -746,42 +822,14 @@ fn source_editor(
         egui::pos2(toolbar.left() + 8.0, toolbar.top()),
         egui::pos2(toolbar.right() - 8.0, toolbar.bottom()),
     );
-    let compiling = app.state.ui.code_workspace.veriloga.pending.is_some();
-    // A pass carrying advisories is still a pass: the words say so, and the
-    // tone says Diagnostics still has something to read.
-    let receipt_advisories = current_receipt(app, selected).map(|receipt| {
-        let summary = receipt.diagnostics.summary();
-        summary.total().saturating_sub(summary.errors)
-    });
     let messages = app.state.ui.messages();
-    let (status, color) = if compiling {
-        (
-            messages.text(MessageId::VerilogAStatusCompiling),
-            t.color.info,
-        )
-    } else {
-        match receipt_advisories {
-            None => (
-                messages.text(MessageId::VerilogAStatusModified),
-                t.color.warn,
-            ),
-            Some(0) => (messages.text(MessageId::VerilogAStatusPass), t.color.ok),
-            Some(advisories) => {
-                let count = advisories.to_string();
-                (
-                    messages.format(
-                        if advisories == 1 {
-                            MessageId::VerilogAStatusPassAdvisorySingular
-                        } else {
-                            MessageId::VerilogAStatusPassAdvisories
-                        },
-                        &[("count", &count)],
-                    ),
-                    t.color.warn,
-                )
-            }
-        }
-    };
+    let (status, color) = crate::workbench::documents::code_workspace::veriloga_compile_status(
+        &app.state.ui.code_workspace.veriloga,
+        app.state.workspace.content.project.id(),
+        selected,
+        messages,
+        &t,
+    );
     let status_galley =
         ui.painter()
             .layout_no_wrap(status, theme::mono(tokens::FS_0, FontWeight::Medium), color);
@@ -876,17 +924,15 @@ fn source_editor(
             interaction
         })
         .inner;
+    // Every request below names the bundle this editor is showing, never a
+    // language-wide default: Find, Format and the language tools must act on
+    // the cell view in front of the reader.
+    let bundle_id = selected.bundle().id();
     app.state.ui.code_workspace.source_carets.insert(
-        (
-            crate::state::ProjectSourceLanguage::VerilogA,
-            active_path.to_owned(),
-        ),
+        (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,
     );
-    let selection_key = (
-        crate::state::ProjectSourceLanguage::VerilogA,
-        active_path.to_owned(),
-    );
+    let selection_key = (bundle_id, active_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
         app.state
             .ui
@@ -903,9 +949,10 @@ fn source_editor(
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,
     ) {
-        match crate::workbench::documents::code_workspace::open_language_tools(
+        match crate::workbench::documents::code_workspace::open_language_tools_in_bundle(
             app,
             crate::state::ProjectSourceLanguage::VerilogA,
+            bundle_id,
             active_path,
             interaction.cursor_char_index,
         ) {
@@ -928,23 +975,29 @@ fn source_editor(
     }
     if crate::workbench::documents::text_editor_commands::take_source_language_tools_request(
         ui, editor_id,
-    ) && let Err(error) = crate::workbench::documents::code_workspace::open_language_tools(
-        app,
-        crate::state::ProjectSourceLanguage::VerilogA,
-        active_path,
-        interaction.cursor_char_index,
-    ) {
+    ) && let Err(error) =
+        crate::workbench::documents::code_workspace::open_language_tools_in_bundle(
+            app,
+            crate::state::ProjectSourceLanguage::VerilogA,
+            bundle_id,
+            active_path,
+            interaction.cursor_char_index,
+        )
+    {
         app.state
             .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
     }
     drop(preceding_input);
     if let Some(input) = search_input {
         // Bind the search to source revisions and selection after preceding edits.
-        if let Err(error) = crate::workbench::documents::code_workspace::open_source_search(
-            app,
-            crate::state::ProjectSourceLanguage::VerilogA,
-            active_path,
-        ) {
+        if let Err(error) =
+            crate::workbench::documents::code_workspace::open_source_search_in_bundle(
+                app,
+                crate::state::ProjectSourceLanguage::VerilogA,
+                bundle_id,
+                active_path,
+            )
+        {
             app.state
                 .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
         }
@@ -959,309 +1012,73 @@ fn current_diagnostics(
     app: &RSpiceApp,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) -> std::sync::Arc<CodeDiagnosticCollection> {
-    let state = &app.state.ui.code_workspace.veriloga;
-    current_receipt(app, selected)
-        .map(|receipt| std::sync::Arc::clone(&receipt.diagnostics))
-        .unwrap_or_else(|| {
-            state
-                .last_failure_token
-                .filter(|token| {
-                    selected.matches_token(app.state.workspace.content.project.id(), *token)
-                })
-                .map_or_else(
-                    || std::sync::Arc::new(CodeDiagnosticCollection::default()),
-                    |_| std::sync::Arc::clone(&state.last_failure),
-                )
-        })
+    crate::workbench::documents::code_workspace::veriloga_diagnostics(
+        &app.state.ui.code_workspace.veriloga,
+        app.state.workspace.content.project.id(),
+        selected,
+    )
 }
 
-fn current_receipt<'a>(
-    app: &'a RSpiceApp,
-    selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
-) -> Option<&'a crate::workbench::documents::code_workspace::VerilogACompileReceipt> {
-    app.state
-        .ui
-        .code_workspace
-        .veriloga
-        .receipt
-        .as_ref()
-        .filter(|receipt| {
-            selected.matches_token(
-                app.state.workspace.content.project.id(),
-                receipt.compilation.token(),
-            )
-        })
-}
-
+/// The Netlist page's own inspector column. The Design workspace states the
+/// same facts in its inspector dock, drawn by the same body.
 fn inspector(
     ui: &mut Ui,
     app: &RSpiceApp,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) {
-    let t = Tokens::get(ui.ctx());
-    let messages = app.state.ui.messages();
-    ui.set_width(ui.available_width());
-    code_inspector_section(
+    crate::workbench::documents::code_workspace::show_veriloga_inspector(
         ui,
-        &messages.text(MessageId::VerilogABuildTargets),
-        None,
-        |ui| {
-            code_inspector_property_list(ui, |ui| {
-                if let Some(receipt) = current_receipt(app, selected) {
-                    property_row_status(
-                        ui,
-                        &messages.text(MessageId::VerilogASemanticIr),
-                        &messages.text(MessageId::VerilogACanonical),
-                        t.color.ok,
-                        StatusMark::Success,
-                    );
-                    if receipt.bytecode_available {
-                        property_row_status(
-                            ui,
-                            &messages.text(MessageId::VerilogABytecodeVm),
-                            &messages.text(MessageId::VerilogAAvailable),
-                            t.color.ok,
-                            StatusMark::Success,
-                        );
-                    } else {
-                        property_row_status(
-                            ui,
-                            &messages.text(MessageId::VerilogABytecodeVm),
-                            &messages.text(MessageId::VerilogAUnavailable),
-                            t.color.err,
-                            StatusMark::Failure,
-                        );
-                    }
-                    target_row(
-                        ui,
-                        &messages.text(MessageId::VerilogANativeJit),
-                        &receipt.native_jit,
-                        messages,
-                    );
-                    target_row(
-                        ui,
-                        &messages.text(MessageId::VerilogAWasmInterpreter),
-                        &receipt.wasm_interpreter,
-                        messages,
-                    );
-                    target_row(
-                        ui,
-                        &messages.text(MessageId::VerilogAGeneratedRust),
-                        &receipt.generated_rust,
-                        messages,
-                    );
-                } else {
-                    let required = messages.text(MessageId::VerilogACompileRequired);
-                    for label in [
-                        MessageId::VerilogASemanticIr,
-                        MessageId::VerilogABytecodeVm,
-                        MessageId::VerilogANativeJit,
-                        MessageId::VerilogAWasmInterpreter,
-                        MessageId::VerilogAGeneratedRust,
-                    ] {
-                        property_row(ui, &messages.text(label), &required);
-                    }
-                }
-            });
-        },
+        &app.state.ui.code_workspace.veriloga,
+        app.state.workspace.content.project.id(),
+        selected,
+        app.state.ui.messages(),
     );
+}
 
-    let diagnostics = current_diagnostics(app, selected);
-    let diagnostic_summary = diagnostics.summary();
-    let error_count = diagnostic_summary.errors;
-    let advisory_count = diagnostic_summary.total().saturating_sub(error_count);
-    let diagnostic_status = if error_count > 0 {
-        let count = error_count.to_string();
-        messages.format(
-            if error_count == 1 {
-                MessageId::VerilogAErrorSingular
-            } else {
-                MessageId::VerilogAErrors
-            },
-            &[("count", &count)],
-        )
-    } else if advisory_count > 0 {
-        let count = advisory_count.to_string();
-        messages.format(
-            if advisory_count == 1 {
-                MessageId::VerilogAAdvisorySingular
-            } else {
-                MessageId::VerilogAAdvisories
-            },
-            &[("count", &count)],
-        )
-    } else {
-        messages.text(MessageId::VerilogAClean)
-    };
-    let diagnostic_tone = if error_count > 0 {
-        t.color.err
-    } else if advisory_count > 0 {
-        t.color.warn
-    } else {
-        t.color.ok
-    };
-    code_inspector_section(
+/// The editor has no bundle to show.
+///
+/// A Verilog-A cell view without its bundle is a defect of that view, and the
+/// resolver's error names it exactly; the project-wide source workspace is not
+/// a remedy for it, so nothing here offers to create one. Only with no
+/// Verilog-A view in front does the Netlist page offer to start that
+/// workspace.
+fn missing_source(ui: &mut Ui, app: &mut RSpiceApp, error: String) {
+    let messages = app.state.ui.messages();
+    if app.state.workspace.content.active_view_type() == crate::state::ViewType::VerilogA {
+        super::super::design_system::empty_state(
+            ui,
+            super::super::design_system::WorkbenchIcon::VerilogA,
+            &messages.text(MessageId::VerilogANoSource),
+            &error,
+        );
+        return;
+    }
+    super::super::design_system::empty_state_with_actions(
         ui,
-        &messages.text(MessageId::VerilogADiagnostics),
-        Some((&diagnostic_status, diagnostic_tone)),
+        super::super::design_system::WorkbenchIcon::Code,
+        &messages.text(MessageId::VerilogANoSource),
+        &messages.text(MessageId::VerilogANoSourceDescription),
         |ui| {
-            if diagnostics.is_empty() {
-                muted_row(ui, &messages.text(MessageId::VerilogANoDiagnostics));
-            } else {
-                const INSPECTOR_DIAGNOSTIC_PREVIEW: usize = 50;
-                for diagnostic in diagnostics.iter().take(INSPECTOR_DIAGNOSTIC_PREVIEW) {
-                    diagnostic_row(ui, diagnostic);
-                }
-                if diagnostics.len() > INSPECTOR_DIAGNOSTIC_PREVIEW {
-                    let remaining = (diagnostics.len() - INSPECTOR_DIAGNOSTIC_PREVIEW).to_string();
-                    muted_row(
-                        ui,
-                        &messages
-                            .format(MessageId::VerilogADiagnosticsMore, &[("count", &remaining)]),
-                    );
-                }
+            if Button::new(&messages.text(MessageId::CodeSourceCreateWorkspace))
+                .show(ui)
+                .clicked()
+                && let Err(error) =
+                    crate::workbench::documents::code_workspace::open_source_workspace_dialog(
+                        app,
+                        crate::state::ProjectSourceLanguage::VerilogA,
+                    )
+            {
+                app.state.push_user_message(ConsoleMessage::error(error));
+            }
+            if Button::new(&messages.text(MessageId::CodeSourceImportRoot))
+                .show(ui)
+                .clicked()
+                && let Err(error) =
+                    crate::workbench::documents::code_workspace::request_veriloga_root_import(app)
+            {
+                app.state.push_user_message(ConsoleMessage::error(error));
             }
         },
-    );
-
-    code_inspector_section(
-        ui,
-        &messages.text(MessageId::VerilogAAbiContract),
-        None,
-        |ui| {
-            code_inspector_property_list(ui, |ui| {
-                if let Some(receipt) = current_receipt(app, selected) {
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::VerilogAAnalogPorts),
-                        &receipt.analog_ports.to_string(),
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::VerilogANoiseSources),
-                        &receipt.noise_sources.to_string(),
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::VerilogAStateVariables),
-                        &receipt.state_variables.to_string(),
-                    );
-                } else {
-                    property_row(ui, &messages.text(MessageId::VerilogAAnalogPorts), "—");
-                    property_row(ui, &messages.text(MessageId::VerilogANoiseSources), "—");
-                    property_row(ui, &messages.text(MessageId::VerilogAStateVariables), "—");
-                }
-            });
-        },
-    );
-}
-
-fn target_row(ui: &mut Ui, label: &str, target: &TargetQualification, messages: MessageCatalog) {
-    let t = Tokens::get(ui.ctx());
-    let (value, tone, mark) = match target {
-        TargetQualification::Available => (
-            messages.text(MessageId::VerilogAAvailable),
-            t.color.ok,
-            Some(StatusMark::Success),
-        ),
-        TargetQualification::Preview => (
-            messages.text(MessageId::VerilogAPreview),
-            t.color.warn,
-            Some(StatusMark::Warning),
-        ),
-        TargetQualification::QualificationOnly => (
-            messages.text(MessageId::VerilogAQualificationOnly),
-            t.color.text,
-            None,
-        ),
-        TargetQualification::Unsupported(reason) => (
-            messages.format(MessageId::VerilogAUnsupported, &[("reason", reason)]),
-            t.color.err,
-            Some(StatusMark::Failure),
-        ),
-        TargetQualification::Failed(reason) => (
-            messages.format(MessageId::VerilogAFailed, &[("reason", reason)]),
-            t.color.err,
-            Some(StatusMark::Failure),
-        ),
-    };
-    if let Some(mark) = mark {
-        property_row_status(ui, label, &value, tone, mark);
-    } else {
-        property_row_toned(ui, label, &value, tone);
-    }
-}
-
-fn muted_row(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(9, 8))
-        .show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
-}
-
-fn diagnostic_row(
-    ui: &mut Ui,
-    diagnostic: &crate::workbench::documents::code_workspace::CodeEditorDiagnostic,
-) {
-    let t = Tokens::get(ui.ctx());
-    let tone = match diagnostic.severity {
-        CodeEditorSeverity::Hint => t.color.info,
-        CodeEditorSeverity::Info => t.color.info,
-        CodeEditorSeverity::Warning => t.color.warn,
-        CodeEditorSeverity::Error => t.color.err,
-    };
-    let shown = egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(9, 8))
-        .show(ui, |ui| {
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 7.0;
-                let (icon, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-                super::super::design_system::WorkbenchIcon::Warning.paint(ui.painter(), icon, tone);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 3.0;
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(diagnostic.message.as_ref())
-                                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                                .color(t.color.text),
-                        )
-                        .wrap(),
-                    );
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(diagnostic.detail.as_ref())
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        )
-                        .wrap(),
-                    );
-                    // The producer's code closes the row on its own baseline.
-                    // A code is identity, not prose: sharing a line with the
-                    // message or the detail would squeeze whichever of them
-                    // the reader actually came for.
-                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
-                        ui.label(
-                            egui::RichText::new(diagnostic.code())
-                                .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
-                    });
-                });
-            });
-        });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
     );
 }
 

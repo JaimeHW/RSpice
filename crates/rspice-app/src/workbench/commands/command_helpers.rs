@@ -40,6 +40,17 @@ pub(super) fn netlist_page_is_visible(state: &crate::workbench::AppState) -> boo
             == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
 }
 
+/// Whether a code document is the thing on screen: one of the Netlist
+/// workspace's pages, or a Verilog-A cell view the Design workspace is
+/// showing.
+pub(super) fn code_document_is_visible(state: &crate::workbench::AppState) -> bool {
+    state.workbench.workspace == Workspace::Netlist
+        || crate::workbench::documents::code_workspace::design_hosts_veriloga(
+            state.workbench.workspace,
+            &state.workspace,
+        )
+}
+
 pub(super) fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
     app.state.workbench.activate(workspace);
 }

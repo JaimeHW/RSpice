@@ -2009,10 +2009,11 @@ impl AppState {
         let Some(reference) = self.veriloga_source_for_component(component_id) else {
             return false;
         };
+        // The module is a view of the cell, so it opens as a Design document
+        // beside the schematic it was reached from.
         self.open_workspace_view(reference);
-        self.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        self.ui.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::VerilogA;
+        self.workbench
+            .activate(crate::workbench::state::Workspace::Design);
         true
     }
 

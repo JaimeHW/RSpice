@@ -1,4 +1,5 @@
-//! Exact command context for the Netlist & Script Editor workspace.
+//! Exact command context for the code documents: the Netlist & Script Editor
+//! workspace's pages, and Verilog-A cell views in the Design workspace.
 //!
 //! Menus, shortcuts, the command palette, and direct toolbar dispatch must
 //! resolve the same project/document authority. The resolver deliberately
@@ -55,27 +56,55 @@ pub(crate) struct CodeCommandContext {
     pub platform: CommandPlatform,
 }
 
+/// The code document in front of the reader: the Netlist workspace's visible
+/// page, or a Verilog-A cell view the Design workspace is showing.
 #[must_use]
 pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
-    if app.state.workbench.workspace != Workspace::Netlist || !app.state.project_lifecycle.is_open()
-    {
+    if !app.state.project_lifecycle.is_open() {
         return None;
     }
-    match app.state.ui.code_workspace.page {
-        CodeWorkspacePage::Netlist => resolve_netlist(app),
-        CodeWorkspacePage::VerilogA => resolve_project_source(app, ProjectSourceLanguage::VerilogA),
-        CodeWorkspacePage::Automation => {
-            resolve_project_source(app, ProjectSourceLanguage::RSpiceAutomation)
+    match app.state.workbench.workspace {
+        Workspace::Netlist => match app.state.ui.code_workspace.page {
+            CodeWorkspacePage::Netlist => resolve_netlist(app),
+            CodeWorkspacePage::VerilogA => {
+                resolve_project_source(app, ProjectSourceLanguage::VerilogA)
+            }
+            CodeWorkspacePage::Automation => {
+                resolve_project_source(app, ProjectSourceLanguage::RSpiceAutomation)
+            }
+        },
+        workspace
+            if crate::workbench::documents::code_workspace::design_hosts_veriloga(
+                workspace,
+                &app.state.workspace,
+            ) =>
+        {
+            resolve_project_source(app, ProjectSourceLanguage::VerilogA)
         }
+        _ => None,
     }
 }
 
+/// What Compile would compile, wherever it is offered from.
+///
+/// A Verilog-A cell view is a design document, so while one is the active
+/// Design document it is compiled from any workspace — the Models toolbar and
+/// menu included — and the command takes the reader to it. Elsewhere only the
+/// Netlist workspace's Verilog-A page has a source to compile.
 #[must_use]
 pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandContext> {
     if app.state.workbench.safe_mode.project_read_only() {
         return None;
     }
-    let context = resolve(app)?;
+    let context = if app.state.workbench.workspace == Workspace::Netlist {
+        resolve(app)?
+    } else if app.state.project_lifecycle.is_open()
+        && app.state.workspace.content.active_view_type() == crate::state::ViewType::VerilogA
+    {
+        resolve_project_source(app, ProjectSourceLanguage::VerilogA)?
+    } else {
+        return None;
+    };
     if context.document_kind != CodeDocumentKind::VerilogA
         || app.state.ui.code_workspace.veriloga.pending.is_some()
     {
