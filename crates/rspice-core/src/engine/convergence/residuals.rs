@@ -407,6 +407,25 @@ impl Engine {
         }
     }
 
+    /// Absolute tolerance of each matrix row in its own physical quantity:
+    /// amperes on KCL rows, volts on branch constraints, and an indirect
+    /// equation's declared tolerance.
+    fn direct_row_abstol<'a>(&'a self, circuit: &'a CircuitData) -> impl Fn(usize) -> Value + 'a {
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let equation_abstols = self.equation_abstols(circuit);
+        move |row| {
+            #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+            if let Ok(index) = equation_abstols.binary_search_by_key(&row, |&(row, _)| row) {
+                return equation_abstols[index].1;
+            }
+            if row < circuit.num_nodes() {
+                self.current_abstol()
+            } else {
+                self.voltage_abstol()
+            }
+        }
+    }
+
     pub(in crate::engine) fn direct_operating_point_residual_norm(
         &self,
         circuit: &CircuitData,
@@ -415,25 +434,46 @@ impl Engine {
         correction_rhs: &[Value],
     ) -> Option<Value> {
         let rounding_point = Self::operating_point_rounding_point(circuit, solution);
-        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
-        let equation_abstols = self.equation_abstols(circuit);
         matrix
             .scaled_explicit_residual_inf_norm_by_row(
                 correction_rhs,
                 &rounding_point,
                 self.residual_reltol(),
-                |row| {
-                    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
-                    if let Ok(index) = equation_abstols.binary_search_by_key(&row, |&(row, _)| row)
-                    {
-                        return equation_abstols[index].1;
-                    }
-                    if row < circuit.num_nodes() {
-                        self.current_abstol()
-                    } else {
-                        self.voltage_abstol()
-                    }
-                },
+                self.direct_row_abstol(circuit),
+            )
+            .ok()
+            .filter(|norm| norm.is_finite())
+    }
+
+    /// Norm of a transient direct correction against the SPICE per-row
+    /// criterion `|r_i| <= RELTOL * (row current scale) + ABSTOL`.
+    ///
+    /// `correction` is `b - A*x` of the transient system stamped as
+    /// (`matrix`, `rhs`) at `solution`, assembled directly so the capacitor
+    /// and promoted-BJT currents are not recovered from large affine
+    /// products. The row scale is the one the affine form's residual test
+    /// uses for the same system, `max(|A*x|, |b|)`, so the two forms accept
+    /// the same candidates and differ only in how exactly they measure the
+    /// residual. [`Self::direct_operating_point_residual_norm`] instead holds
+    /// every row to `ABSTOL` plus a rounding floor, however large the
+    /// currents through it.
+    pub(in crate::engine) fn direct_transient_residual_norm(
+        &self,
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+        correction: &[Value],
+    ) -> Option<Value> {
+        let rounding_point = Self::operating_point_rounding_point(circuit, solution);
+        matrix
+            .scaled_direct_residual_inf_norm_by_row(
+                correction,
+                solution,
+                &rounding_point,
+                rhs,
+                self.residual_reltol(),
+                self.direct_row_abstol(circuit),
             )
             .ok()
             .filter(|norm| norm.is_finite())

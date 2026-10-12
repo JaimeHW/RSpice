@@ -1355,26 +1355,22 @@ impl Engine {
     }
 
     /// Whether the transient Newton solves for corrections against directly
-    /// assembled physical currents. Promoted BJTs always do. A centered
-    /// linear capacitor does too, except beside B3SOI: the direct form is
-    /// accepted on an absolute KCL residual, and the B3SOI DD/FD/PD stamps
-    /// settle at about 1e-9 A on their own rows, so such decks keep the
-    /// affine form and its row-relative residual test.
+    /// assembled physical currents. Promoted BJTs always do, and so does a
+    /// centered linear capacitor.
     pub(super) fn requires_transient_correction_form(
         circuit: &crate::circuit::CircuitData,
     ) -> bool {
         Self::requires_vbic_correction_form(circuit)
-            || (!circuit.has_b3soi_devices()
-                && circuit
-                    .capacitors
-                    .stamps
-                    .iter()
-                    .enumerate()
-                    .any(|(index, stamp)| {
-                        circuit.capacitors.ic_branch_indices[index].is_none()
-                            && circuit.capacitors.value_expression(index).is_none()
-                            && stamp.pp.row != stamp.nn.row
-                    }))
+            || circuit
+                .capacitors
+                .stamps
+                .iter()
+                .enumerate()
+                .any(|(index, stamp)| {
+                    circuit.capacitors.ic_branch_indices[index].is_none()
+                        && circuit.capacitors.value_expression(index).is_none()
+                        && stamp.pp.row != stamp.nn.row
+                })
     }
 
     /// Test the nonlinear residual with the active transient solver's native
@@ -1426,6 +1422,8 @@ impl Engine {
     /// Convergence of the directly assembled correction. Core constitutive
     /// rows retain their branch floor and independent affine backward-error
     /// check, while the global norm uses physical capacitor and BJT currents.
+    /// Native and ngspice modes scale each row as the affine residual test
+    /// does, relative to the row's own currents.
     pub(super) fn transient_direct_residual_converged(
         &self,
         circuit: &crate::circuit::CircuitData,
@@ -1436,7 +1434,7 @@ impl Engine {
     ) -> bool {
         if self.config.spice_dialect != SpiceDialect::Xyce {
             return self
-                .direct_operating_point_residual_norm(circuit, matrix, solution, correction)
+                .direct_transient_residual_norm(circuit, matrix, solution, rhs, correction)
                 .is_some_and(|norm| norm <= 1.0);
         }
         if circuit.xyce_core_trial_invalid()

@@ -228,10 +228,11 @@ impl Engine {
                     direct.then_some(&mut correction_rhs),
                 )?;
                 let base_merit = if direct {
-                    self.direct_operating_point_residual_norm(
+                    self.direct_transient_residual_norm(
                         circuit,
                         matrix,
                         &iterate,
+                        rhs,
                         &correction_rhs,
                     )
                 } else {
@@ -263,10 +264,11 @@ impl Engine {
                         direct.then_some(&mut correction_rhs),
                     )?;
                     let trial_merit = if direct {
-                        self.direct_operating_point_residual_norm(
+                        self.direct_transient_residual_norm(
                             circuit,
                             matrix,
                             &trial,
+                            rhs,
                             &correction_rhs,
                         )
                     } else {
