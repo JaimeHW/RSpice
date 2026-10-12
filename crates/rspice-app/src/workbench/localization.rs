@@ -1295,6 +1295,7 @@ mod tests {
             "docks/navigator/source_bundle.rs",
             // A Verilog-A cell view's Design docks and the inspector body
             // they share with the Netlist page.
+            "docks/navigator/veriloga.rs",
             "docks/inspector/veriloga.rs",
             "documents/code_workspace/veriloga_inspector.rs",
             "app/dialogs/source_find.rs",

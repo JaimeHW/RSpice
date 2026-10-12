@@ -43,7 +43,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 }
 
-fn hierarchy_path(ui: &mut Ui, reference: &crate::state::CellViewRef) {
+/// The `/ library / cell / view` line a cellview navigator opens with. Shared
+/// with the Verilog-A navigator, whose document is a cellview the same way.
+pub(super) fn hierarchy_path(ui: &mut Ui, reference: &crate::state::CellViewRef) {
     let t = Tokens::get(ui.ctx());
     let frame = egui::Frame::new()
         .fill(t.color.bg_inset)

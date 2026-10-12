@@ -7,6 +7,7 @@ mod netlist;
 mod rail;
 mod source_bundle;
 mod stimulus;
+mod veriloga;
 
 use netlist::*;
 
@@ -162,6 +163,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         // an ordered pin contract instead of a hierarchy of instances.
         Workspace::Design if app.state.workspace.content.active_view_type() == ViewType::Symbol => {
             symbol::show(ui, app);
+        }
+        Workspace::Design
+            if app.state.workspace.content.active_view_type() == ViewType::VerilogA =>
+        {
+            veriloga::show(ui, app);
         }
         Workspace::Design => design::show(ui, app),
         // The data browser leads with its tab band and owns the search below

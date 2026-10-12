@@ -484,6 +484,11 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         Workspace::Design if app.state.workspace.content.active_view_type() == ViewType::Symbol => {
             symbol_tools(ui, app, layout);
         }
+        Workspace::Design
+            if app.state.workspace.content.active_view_type() == ViewType::VerilogA =>
+        {
+            veriloga_tools(ui, app, layout);
+        }
         Workspace::Design => design_tools(ui, app, layout),
         Workspace::Simulate => simulation_tools(ui, app, layout),
         Workspace::Stimulus => stimulus_tools(ui, app, layout),
@@ -756,6 +761,91 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         "Save symbol",
         layout,
     );
+}
+
+/// Toolbar of an open Verilog-A cell view.
+///
+/// The Netlist page's Verilog-A compile and source tools, plus Format, which
+/// used to be reachable only from the editor's own menu. That page's model
+/// qualification entry is not carried over: it reviews a Model Editor
+/// candidate, not this module, so here it would only ever sit disabled. A
+/// schematic's placement and transform tools have nothing to act on either.
+fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
+    toolbar_text_command(
+        ui,
+        app,
+        Command::CompileVerilogA,
+        WorkbenchIcon::Run,
+        "Compile Verilog-A module",
+        layout,
+    );
+    context_separator(ui, layout);
+    veriloga_format_tool(ui, app, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::FindCodeDocument,
+        WorkbenchIcon::Search,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::SourceLanguageTools,
+        WorkbenchIcon::Target,
+        layout,
+    );
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::ManageSourceDocument,
+        WorkbenchIcon::Folder,
+        layout,
+    );
+}
+
+/// Format the source the editor is showing.
+///
+/// Formatting is the editor's own transaction — it is parse-gated and lands
+/// as a reviewable document action — so the tool hands the request to the
+/// visible editor rather than rewriting text itself. Offered only when that
+/// file may be edited.
+fn veriloga_format_tool(ui: &mut egui::Ui, app: &RSpiceApp, layout: LayoutSpec) {
+    use crate::workbench::documents::code_workspace;
+
+    if !take_projected_tool_slot(ui, layout) {
+        return;
+    }
+    let language = crate::state::ProjectSourceLanguage::VerilogA;
+    let editor = code_workspace::selected_veriloga_editor_snapshot(app)
+        .ok()
+        .filter(|snapshot| {
+            code_workspace::source_bundle_document_is_editable(
+                app,
+                language,
+                snapshot.bundle_id(),
+                snapshot.active_path(),
+            )
+        })
+        .map(|snapshot| {
+            code_workspace::source_editor_id(language, snapshot.bundle_id(), snapshot.active_path())
+        });
+    let response = ui
+        .add_enabled_ui(editor.is_some(), |ui| {
+            icon_button(
+                ui,
+                WorkbenchIcon::Format,
+                "Format document",
+                false,
+                toolbar_icon_button_size(layout),
+            )
+        })
+        .inner;
+    if response.clicked()
+        && let Some(editor) = editor
+    {
+        crate::workbench::documents::text_editor_commands::queue_format_document(ui.ctx(), editor);
+    }
 }
 
 fn symbol_toggle(

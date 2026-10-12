@@ -51,10 +51,10 @@ pub use page::{
 pub(crate) use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
     commit_source_workspace_dialog, import_dropped_automation_source, open_source_file_dialog,
-    open_source_history, open_source_workspace_dialog, poll_automation_source_import,
-    request_automation_source_import, source_bundle_contains_document,
-    source_bundle_document_is_editable, source_document_is_editable,
-    source_file_mutation_block_reason,
+    open_source_file_dialog_in_bundle, open_source_history, open_source_workspace_dialog,
+    poll_automation_source_import, request_automation_source_import,
+    source_bundle_contains_document, source_bundle_document_is_editable,
+    source_document_is_editable, source_file_mutation_block_reason,
 };
 pub(crate) use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
