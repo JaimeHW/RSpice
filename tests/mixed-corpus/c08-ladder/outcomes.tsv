@@ -9,5 +9,5 @@ sv	tran	interp	refused	compile_refusal; label="net/biquad_sv.sv"; instance=biqua
 sv	tran	native	refused	compile_refusal; label="net/biquad_sv.sv"; instance=biquad_sv.sv form=structured; token-form=structured; analysis-form=location; site=net/biquad_sv.sv
 tr	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xtb form=prose; token-form=prose; analysis-form=prose
 tr	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xtb form=prose; token-form=prose; analysis-form=prose
-va	ac	interp	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xtb form=prose; token-form=prose; analysis-form=prose
-va	ac	native	refused	analysis.mixed_signal.discrete_state; label="ac analysis"; instance=xtb form=prose; token-form=prose; analysis-form=prose
+va	ac	interp	fail	convergence: convergence: Convergence failed after 500 iterations: Newton-Raphson iteration limit exceeded
+va	ac	native	fail	convergence: convergence: Convergence failed after 500 iterations: Newton-Raphson iteration limit exceeded
