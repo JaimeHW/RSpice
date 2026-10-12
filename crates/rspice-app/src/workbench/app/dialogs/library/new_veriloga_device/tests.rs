@@ -271,7 +271,7 @@ fn a_device_typed_without_ports_starts_a_module_that_declares_none() {
     let mut app = app_with_draft("blank", "  ");
     assert_eq!(
         ports_line("  ", &app.state.ui.messages()).as_deref(),
-        Some("no ports yet · the module defines them when it compiles")
+        Some("no ports · the compiled module defines them")
     );
 
     let reference = app
