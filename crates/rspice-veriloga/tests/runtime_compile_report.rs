@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use rspice_veriloga::{
     CompileDiagnosticPhase, CompileDiagnosticSeverity, CompileError, CompileSourcePosition,
     CompilerOptions, PhaseTiming, PipelineControl, PipelineMetrics, PipelinePhase,
-    RuntimeArtifactIntegrityError, RuntimeQualificationOptions, RuntimeTarget,
-    RuntimeTargetMaturity, RuntimeTargetReadiness, VerilogACompiler, compile_diagnostics,
+    RuntimeAbiParameterValue, RuntimeArtifactIntegrityError, RuntimeQualificationOptions,
+    RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetReadiness, VerilogACompiler,
+    compile_diagnostics,
 };
 
 const SENSOR_BRIDGE_SOURCE: &str = "`include \"constants.vams\"\nmodule sensor_bridge(out, inp, inn);\n  parameter real gain = 100.0 from (0:inf);\n  analog V(out) <+ gain * (V(inp)-V(inn));\nendmodule\n";
@@ -338,7 +339,10 @@ fn exact_workbench_sample_compiles_to_coherent_runtime_artifacts() {
     );
     assert_eq!(report.abi.parameters.len(), 1);
     assert_eq!(report.abi.parameters[0].name.as_str(), "gain");
-    assert_eq!(report.abi.parameters[0].default, Some(100.0));
+    assert_eq!(
+        report.abi.parameters[0].default,
+        Some(RuntimeAbiParameterValue::Real(100.0))
+    );
     assert_eq!(report.abi.noise_source_count, 0);
     assert_eq!(report.abi.state_variable_count, 0);
     assert_eq!(report.abi.internal_node_count, 0);

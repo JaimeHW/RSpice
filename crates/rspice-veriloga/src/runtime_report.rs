@@ -12,13 +12,18 @@ use smol_str::SmolStr;
 use thiserror::Error;
 
 use crate::ast::PortDirection;
-use crate::canonical_ir::{CanonicalIrArtifact, CanonicalValueType, HirExprKind};
+use crate::canonical_ir::{
+    CanonicalIrArtifact, CanonicalValueType, HirExprKind, HirExprRef, HirModel, HirParamRange,
+    HirParameter,
+};
 use crate::codegen::CompiledModel;
+use crate::disciplines::Domain;
 use crate::error::CompileError;
 use crate::generated_source::GeneratedRustDevice;
 use crate::metrics::PipelineMetrics;
 #[cfg(feature = "rust-codegen")]
 use crate::rust_backend::{RustTranspileOptions, RustTranspiler};
+use crate::semantic::VectorBounds;
 use crate::source::Span;
 
 /// The complete, mutually consistent output of an in-memory runtime compile.
@@ -327,7 +332,13 @@ impl RuntimeCompileReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeAbiSummary {
     pub module_name: SmolStr,
+    /// Scalar terminals in binding order. A vector port contributes one
+    /// terminal per lane, most significant first; the runtime binds an
+    /// instance's nodes to this list.
     pub analog_ports: Vec<RuntimeAbiPort>,
+    /// The module header's ports as declared, in declaration order, each
+    /// naming its lanes in [`Self::analog_ports`].
+    pub formal_ports: Vec<RuntimeAbiFormalPort>,
     pub parameters: Vec<RuntimeAbiParameter>,
     /// Exact packed values fixed by elaboration; recompile to change these.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -343,10 +354,10 @@ pub struct RuntimeAbiSummary {
 
 impl RuntimeAbiSummary {
     fn from_artifact(artifact: &CanonicalIrArtifact) -> Self {
+        let hir = &artifact.hir;
         Self {
-            module_name: artifact.hir.module_name.clone(),
-            analog_ports: artifact
-                .hir
+            module_name: hir.module_name.clone(),
+            analog_ports: hir
                 .ports
                 .iter()
                 .map(|port| RuntimeAbiPort {
@@ -357,8 +368,24 @@ impl RuntimeAbiSummary {
                     flow_nature: port.nature_flow.clone(),
                 })
                 .collect(),
-            parameters: artifact
-                .hir
+            // HIR validation gives every formal port a first lane that names
+            // a terminal, so nothing is dropped from a validated artifact.
+            formal_ports: hir
+                .formal_ports
+                .iter()
+                .filter_map(|port| {
+                    let first = hir.ports.get(usize::from(*port.lanes.first()?))?;
+                    Some(RuntimeAbiFormalPort {
+                        name: port.name.clone(),
+                        direction: first.direction,
+                        discipline: first.discipline.clone(),
+                        domain: port.domain,
+                        range: port.range,
+                        lanes: port.lanes.iter().copied().map(usize::from).collect(),
+                    })
+                })
+                .collect(),
+            parameters: hir
                 .parameters
                 .iter()
                 .filter(|parameter| parameter.is_public)
@@ -366,7 +393,13 @@ impl RuntimeAbiSummary {
                     name: parameter.name.clone(),
                     scope: parameter.scope,
                     value_type: parameter.value_type,
-                    default: parameter.default,
+                    default: RuntimeAbiParameterValue::constant_default(hir, parameter),
+                    range: parameter
+                        .range
+                        .as_ref()
+                        .and_then(RuntimeAbiParameterRange::from_hir),
+                    units: parameter.units.clone(),
+                    description: parameter.description.clone(),
                     elaboration_value: parameter.elaboration_value,
                     elaboration_given: parameter.elaboration_given,
                     aliases: parameter.aliases.clone(),
@@ -407,6 +440,7 @@ impl RuntimeAbiSummary {
     }
 }
 
+/// One scalar terminal the runtime binds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeAbiPort {
     pub name: SmolStr,
@@ -416,17 +450,201 @@ pub struct RuntimeAbiPort {
     pub flow_nature: Option<SmolStr>,
 }
 
+/// One port of the module header, as declared.
+///
+/// `inout [7:0] d` is one formal port of width eight whose lanes are the
+/// terminals `d[7]` through `d[0]`. A discrete-discipline vector is the
+/// exception: its bits travel as one digital signal, so it has one lane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeAbiFormalPort {
+    pub name: SmolStr,
+    pub direction: PortDirection,
+    /// Name of the port's discipline, such as `electrical` or `logic`.
+    pub discipline: SmolStr,
+    pub domain: Domain,
+    /// Declared `[msb:lsb]`, exactly as written (`[0:7]` stays ascending);
+    /// `None` for a scalar.
+    pub range: Option<VectorBounds>,
+    /// Indices into [`RuntimeAbiSummary::analog_ports`], most significant
+    /// first.
+    pub lanes: Vec<usize>,
+}
+
+/// One instance- or model-settable parameter.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RuntimeAbiParameter {
     pub name: SmolStr,
     pub scope: crate::semantic::ParameterScope,
     pub value_type: CanonicalValueType,
-    pub default: Option<f64>,
+    /// The declared default when it is a compile-time constant. `None` when
+    /// the default is computed from other parameters, per instance, or the
+    /// parameter is an array.
+    pub default: Option<RuntimeAbiParameterValue>,
+    /// The values the model accepts; `None` when it accepts any value.
+    pub range: Option<RuntimeAbiParameterRange>,
+    /// The declaration's `units` attribute.
+    pub units: Option<SmolStr>,
+    /// The declaration's `desc` attribute.
+    pub description: Option<SmolStr>,
     #[serde(default)]
     pub elaboration_value: Option<f64>,
     #[serde(default)]
     pub elaboration_given: Option<bool>,
     pub aliases: Vec<SmolStr>,
+}
+
+/// A constant parameter value, typed as the parameter is declared.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RuntimeAbiParameterValue {
+    Real(#[serde(with = "crate::json_float")] f64),
+    Integer(i64),
+    String(SmolStr),
+}
+
+impl RuntimeAbiParameterValue {
+    /// The value of a real or integer default; `None` for a string.
+    pub fn numeric(&self) -> Option<f64> {
+        match self {
+            Self::Real(value) => Some(*value),
+            Self::Integer(value) => Some(*value as f64),
+            Self::String(_) => None,
+        }
+    }
+
+    fn constant_default(hir: &HirModel, parameter: &HirParameter) -> Option<Self> {
+        match parameter.value_type {
+            // A string default never folds to a number; a literal is the
+            // only constant form it has.
+            CanonicalValueType::String => {
+                let default = parameter.default_expr.as_ref()?;
+                match &hir.expressions.get(usize::from(default.id))?.kind {
+                    HirExprKind::StringLiteral { value } => Some(Self::String(value.clone())),
+                    _ => None,
+                }
+            }
+            // Integer defaults are folded to integral values before lowering.
+            CanonicalValueType::Integer => parameter.default.map(|value| {
+                if value.fract() == 0.0 && value.abs() <= i64::MAX as f64 {
+                    Self::Integer(value as i64)
+                } else {
+                    Self::Real(value)
+                }
+            }),
+            _ => parameter.default.map(Self::Real),
+        }
+    }
+}
+
+/// The values a parameter accepts: one `from` interval and its `exclude`
+/// clauses. Bounds that name other parameters are reported as they read in
+/// the source; the compiled model checks them once an instance's values are
+/// known.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeAbiParameterRange {
+    pub lower: RuntimeAbiRangeBound,
+    pub upper: RuntimeAbiRangeBound,
+    /// Values the parameter may not take: the constants first, then those
+    /// that depend on other parameters.
+    pub exclude: Vec<RuntimeAbiRangeValue>,
+}
+
+/// One end of a `from` interval.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RuntimeAbiRangeBound {
+    /// `-inf` or `inf`: no limit on this side.
+    Unbounded,
+    /// `[` or `]`: the bound itself is accepted.
+    Inclusive(RuntimeAbiRangeValue),
+    /// `(` or `)`: the bound itself is refused.
+    Exclusive(RuntimeAbiRangeValue),
+}
+
+/// A range bound or excluded value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum RuntimeAbiRangeValue {
+    /// Folded at compile time; a property editor can enforce it.
+    Constant(#[serde(with = "crate::json_float")] f64),
+    /// Depends on other parameters, given as its source text; known only
+    /// once an instance's parameters are.
+    Dependent(SmolStr),
+}
+
+impl RuntimeAbiParameterRange {
+    fn from_hir(range: &HirParamRange) -> Option<Self> {
+        // A dependent bound's text is recorded at compile time; one lowered
+        // without its source still has to read as dependent, not as absent.
+        let bound = |constant: Option<f64>,
+                     parameter: Option<&SmolStr>,
+                     expression: Option<&HirExprRef>,
+                     text: Option<&SmolStr>,
+                     exclusive: bool| {
+            let value = match constant {
+                Some(value) => RuntimeAbiRangeValue::Constant(value),
+                None => match text
+                    .or(parameter)
+                    .or(expression.map(|expression| &expression.kind))
+                {
+                    Some(text) => RuntimeAbiRangeValue::Dependent(text.clone()),
+                    None => return RuntimeAbiRangeBound::Unbounded,
+                },
+            };
+            if exclusive {
+                RuntimeAbiRangeBound::Exclusive(value)
+            } else {
+                RuntimeAbiRangeBound::Inclusive(value)
+            }
+        };
+        let lower = bound(
+            range.min,
+            range.min_parameter.as_ref(),
+            range.min_expression.as_ref(),
+            range.min_text.as_ref(),
+            range.min_exclusive,
+        );
+        let upper = bound(
+            range.max,
+            range.max_parameter.as_ref(),
+            range.max_expression.as_ref(),
+            range.max_text.as_ref(),
+            range.max_exclusive,
+        );
+        let exclude: Vec<_> = range
+            .exclude
+            .iter()
+            .copied()
+            .map(RuntimeAbiRangeValue::Constant)
+            .chain(
+                range
+                    .exclude_parameters
+                    .iter()
+                    .cloned()
+                    .map(RuntimeAbiRangeValue::Dependent),
+            )
+            .chain(
+                range
+                    .exclude_expressions
+                    .iter()
+                    .enumerate()
+                    .map(|(index, expression)| {
+                        RuntimeAbiRangeValue::Dependent(
+                            range
+                                .exclude_texts
+                                .get(index)
+                                .unwrap_or(&expression.kind)
+                                .clone(),
+                        )
+                    }),
+            )
+            .collect();
+        let unconstrained = lower == RuntimeAbiRangeBound::Unbounded
+            && upper == RuntimeAbiRangeBound::Unbounded
+            && exclude.is_empty();
+        (!unconstrained).then_some(Self {
+            lower,
+            upper,
+            exclude,
+        })
+    }
 }
 
 /// Runtime/compiler targets represented by the behavioral-model workbench.
@@ -1116,4 +1334,298 @@ fn source_position(source: &str, offset: u32) -> Option<CompileSourcePosition> {
         .ok()?
         .checked_add(1)?;
     Some(CompileSourcePosition { line, column })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::semantic::ParameterScope;
+
+    /// One module carrying every port shape and range shape the ABI reports.
+    const ABI_SURFACE: &str = r#"
+module abi_surface(sense, out, d, a, mode);
+  input sense;
+  output out;
+  inout [3:0] d;
+  input [0:1] a;
+  input [1:0] mode;
+  electrical sense, out;
+  electrical [3:0] d;
+  electrical [0:1] a;
+  logic mode;
+  (* desc="Transconductance", units="S", type="instance" *)
+  parameter real gain = 2.5 from (0:inf);
+  parameter real r = 1000 from [1:1e6];
+  parameter real vt = 0.5 from (0:1);
+  parameter real tc = 0 from [-1:1);
+  parameter real offs = 0 from (-inf:0];
+  parameter real k = 2 from [0:inf) exclude 1;
+  parameter real wmin = 1e-6 from (0:inf);
+  parameter real w = 2e-6 from [wmin:inf) exclude 2*wmin;
+  parameter real l = 1e-6 from (0:2*w];
+  parameter real lmax = 4*w;
+  parameter integer stages = 3 from [1:8];
+  analog begin
+    I(out) <+ gain * V(sense) + (mode[0] ? vt : offs) + tc + k * l * lmax * stages;
+    I(d[3], d[0]) <+ V(d[3], d[0]) / r;
+    I(a[0], a[1]) <+ V(a[0], a[1]) / r;
+  end
+endmodule
+"#;
+
+    fn compile() -> RuntimeCompileReport {
+        crate::VerilogACompiler::new(crate::CompilerOptions {
+            enable_ams: true,
+            ..crate::CompilerOptions::default()
+        })
+        .compile_runtime(ABI_SURFACE, Some("abi_surface"))
+        .expect("the ABI surface module compiles")
+    }
+
+    fn parameter<'a>(abi: &'a RuntimeAbiSummary, name: &str) -> &'a RuntimeAbiParameter {
+        abi.parameters
+            .iter()
+            .find(|parameter| parameter.name == name)
+            .unwrap_or_else(|| panic!("parameter '{name}' is in the ABI"))
+    }
+
+    fn constant(value: f64) -> RuntimeAbiRangeValue {
+        RuntimeAbiRangeValue::Constant(value)
+    }
+
+    fn dependent(text: &str) -> RuntimeAbiRangeValue {
+        RuntimeAbiRangeValue::Dependent(text.into())
+    }
+
+    fn range(
+        lower: RuntimeAbiRangeBound,
+        upper: RuntimeAbiRangeBound,
+        exclude: Vec<RuntimeAbiRangeValue>,
+    ) -> Option<RuntimeAbiParameterRange> {
+        Some(RuntimeAbiParameterRange {
+            lower,
+            upper,
+            exclude,
+        })
+    }
+
+    #[test]
+    fn abi_groups_lanes_into_the_declared_formal_ports() {
+        let report = compile();
+        let abi = &report.abi;
+        let lanes: Vec<_> = abi
+            .analog_ports
+            .iter()
+            .map(|port| (port.name.as_str(), port.direction))
+            .collect();
+        assert_eq!(
+            lanes,
+            [
+                ("sense", PortDirection::Input),
+                ("out", PortDirection::Output),
+                ("d[3]", PortDirection::Inout),
+                ("d[2]", PortDirection::Inout),
+                ("d[1]", PortDirection::Inout),
+                ("d[0]", PortDirection::Inout),
+                ("a[0]", PortDirection::Input),
+                ("a[1]", PortDirection::Input),
+                ("mode", PortDirection::Input),
+            ]
+        );
+
+        let formal = |name: &str,
+                      direction: PortDirection,
+                      discipline: &str,
+                      domain: Domain,
+                      range: Option<(i64, i64)>,
+                      lanes: &[usize]| RuntimeAbiFormalPort {
+            name: name.into(),
+            direction,
+            discipline: discipline.into(),
+            domain,
+            range: range.map(|(msb, lsb)| VectorBounds { msb, lsb }),
+            lanes: lanes.to_vec(),
+        };
+        assert_eq!(
+            abi.formal_ports,
+            [
+                formal(
+                    "sense",
+                    PortDirection::Input,
+                    "electrical",
+                    Domain::Continuous,
+                    None,
+                    &[0]
+                ),
+                formal(
+                    "out",
+                    PortDirection::Output,
+                    "electrical",
+                    Domain::Continuous,
+                    None,
+                    &[1]
+                ),
+                formal(
+                    "d",
+                    PortDirection::Inout,
+                    "electrical",
+                    Domain::Continuous,
+                    Some((3, 0)),
+                    &[2, 3, 4, 5]
+                ),
+                // Ascending as written; lanes still run from the left bound.
+                formal(
+                    "a",
+                    PortDirection::Input,
+                    "electrical",
+                    Domain::Continuous,
+                    Some((0, 1)),
+                    &[6, 7]
+                ),
+                // A discrete vector is one terminal carrying the whole signal.
+                formal(
+                    "mode",
+                    PortDirection::Input,
+                    "logic",
+                    Domain::Discrete,
+                    Some((1, 0)),
+                    &[8]
+                ),
+            ]
+        );
+        report.validate_integrity().expect("the report is coherent");
+    }
+
+    #[test]
+    fn abi_reports_parameter_defaults_ranges_and_attributes() {
+        use RuntimeAbiRangeBound::{Exclusive, Inclusive, Unbounded};
+        let report = compile();
+        let abi = &report.abi;
+
+        let gain = parameter(abi, "gain");
+        assert_eq!(gain.scope, ParameterScope::Instance);
+        assert_eq!(gain.value_type, CanonicalValueType::Real);
+        assert_eq!(gain.default, Some(RuntimeAbiParameterValue::Real(2.5)));
+        assert_eq!(gain.units.as_deref(), Some("S"));
+        assert_eq!(gain.description.as_deref(), Some("Transconductance"));
+        assert_eq!(
+            gain.range,
+            range(Exclusive(constant(0.0)), Unbounded, vec![])
+        );
+
+        let r = parameter(abi, "r");
+        assert_eq!(r.scope, ParameterScope::Model);
+        assert_eq!((r.units.as_deref(), r.description.as_deref()), (None, None));
+        assert_eq!(
+            r.range,
+            range(Inclusive(constant(1.0)), Inclusive(constant(1e6)), vec![])
+        );
+        assert_eq!(
+            parameter(abi, "vt").range,
+            range(Exclusive(constant(0.0)), Exclusive(constant(1.0)), vec![])
+        );
+        assert_eq!(
+            parameter(abi, "tc").range,
+            range(Inclusive(constant(-1.0)), Exclusive(constant(1.0)), vec![])
+        );
+        assert_eq!(
+            parameter(abi, "offs").range,
+            range(Unbounded, Inclusive(constant(0.0)), vec![])
+        );
+        assert_eq!(
+            parameter(abi, "k").range,
+            range(Inclusive(constant(0.0)), Unbounded, vec![constant(1.0)])
+        );
+
+        // Bounds that name other parameters read as written and are marked
+        // dependent: a property editor cannot check them on its own.
+        let w = parameter(abi, "w");
+        assert_eq!(w.default, Some(RuntimeAbiParameterValue::Real(2e-6)));
+        assert_eq!(
+            w.range,
+            range(
+                Inclusive(dependent("wmin")),
+                Unbounded,
+                vec![dependent("2*wmin")]
+            )
+        );
+        assert_eq!(
+            parameter(abi, "l").range,
+            range(
+                Exclusive(constant(0.0)),
+                Inclusive(dependent("2*w")),
+                vec![]
+            )
+        );
+        let lmax = parameter(abi, "lmax");
+        assert_eq!((&lmax.default, &lmax.range), (&None, &None));
+
+        let stages = parameter(abi, "stages");
+        assert_eq!(stages.value_type, CanonicalValueType::Integer);
+        assert_eq!(stages.default, Some(RuntimeAbiParameterValue::Integer(3)));
+        assert_eq!(
+            stages.range,
+            range(Inclusive(constant(1.0)), Inclusive(constant(8.0)), vec![])
+        );
+    }
+
+    /// The bytecode generator cannot lower a string literal ("String literals
+    /// in expressions"), and a string parameter's default is one, so a module
+    /// that declares one never reaches a runtime report yet. The ABI is
+    /// derived from the canonical artifact, where the default survives.
+    #[test]
+    fn abi_types_a_string_default_from_the_canonical_artifact() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir_module(
+                r#"
+module labelled(p, n);
+  inout p, n;
+  electrical p, n;
+  (* desc="Process corner" *) parameter string corner = "typ";
+  analog I(p, n) <+ V(p, n);
+endmodule
+"#,
+                Some("labelled"),
+            )
+            .expect("a string parameter lowers to canonical IR");
+        let abi = RuntimeAbiSummary::from_artifact(&artifact);
+        let corner = parameter(&abi, "corner");
+        assert_eq!(corner.value_type, CanonicalValueType::String);
+        assert_eq!(
+            corner.default,
+            Some(RuntimeAbiParameterValue::String("typ".into()))
+        );
+        assert_eq!(corner.description.as_deref(), Some("Process corner"));
+        assert_eq!(corner.range, None);
+    }
+
+    #[test]
+    fn abi_survives_transport_and_is_rechecked_against_its_artifact() {
+        let report = compile();
+        let encoded = serde_json::to_string(&report.abi).expect("encode the ABI");
+        let decoded: RuntimeAbiSummary = serde_json::from_str(&encoded).expect("decode the ABI");
+        assert_eq!(decoded, report.abi);
+
+        // The ABI is derived from the canonical artifact, so a doctored ABI
+        // and a doctored formal-port table are both refused.
+        let mut forged = report.clone();
+        forged.abi.formal_ports[2].lanes.pop();
+        assert_eq!(
+            forged.validate_integrity(),
+            Err(RuntimeArtifactIntegrityError::AbiSurfaceMismatch)
+        );
+        let mut orphaned = report.clone();
+        orphaned.canonical_ir.hir.formal_ports[2].lanes.pop();
+        let Err(RuntimeArtifactIntegrityError::InvalidCanonicalIr { diagnostics }) =
+            orphaned.validate_integrity()
+        else {
+            panic!("a terminal outside every formal port must be refused");
+        };
+        assert!(
+            diagnostics
+                .iter()
+                .any(|message| message.contains("'d[0]' belongs to no formal port")),
+            "{diagnostics:?}"
+        );
+    }
 }

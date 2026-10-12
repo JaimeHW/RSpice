@@ -175,10 +175,11 @@ pub use preprocessor::{
 pub use runtime_report::{
     BackendQualificationError, CompileDiagnostic, CompileDiagnosticPhase,
     CompileDiagnosticSeverity, CompileDiagnosticSpan, CompileSourcePosition,
-    InterpreterFallbackPolicy, RuntimeAbiParameter, RuntimeAbiPort, RuntimeAbiSummary,
-    RuntimeArtifactIntegrityError, RuntimeCompileReport, RuntimeQualificationOptions,
-    RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetQualification, RuntimeTargetQualifications,
-    RuntimeTargetReadiness, compile_diagnostics,
+    InterpreterFallbackPolicy, RuntimeAbiFormalPort, RuntimeAbiParameter, RuntimeAbiParameterRange,
+    RuntimeAbiParameterValue, RuntimeAbiPort, RuntimeAbiRangeBound, RuntimeAbiRangeValue,
+    RuntimeAbiSummary, RuntimeArtifactIntegrityError, RuntimeCompileReport,
+    RuntimeQualificationOptions, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetQualification,
+    RuntimeTargetQualifications, RuntimeTargetReadiness, compile_diagnostics,
 };
 pub use semantic::{ParameterScope, SemanticAnalyzer};
 pub use source::{SourceId, SourceMap, Span};

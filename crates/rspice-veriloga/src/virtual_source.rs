@@ -828,7 +828,15 @@ pub(crate) fn runtime_contract_identity(
     for parameter in &runtime.abi.parameters {
         hasher.field(parameter.name.as_bytes());
         hasher.byte(canonical_value_type_tag(parameter.value_type));
-        match parameter.default {
+        // The numeric default keeps the spelling it had before defaults were
+        // typed, so issued identities stay valid. Everything the typed ABI
+        // added — string defaults, ranges, units, formal ports — is a
+        // function of the source digests hashed above.
+        match parameter
+            .default
+            .as_ref()
+            .and_then(crate::RuntimeAbiParameterValue::numeric)
+        {
             Some(value) => {
                 hasher.byte(1);
                 hasher.field(&value.to_bits().to_le_bytes());
