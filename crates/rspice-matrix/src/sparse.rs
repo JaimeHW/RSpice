@@ -2244,6 +2244,85 @@ impl StaticMatrix {
         Ok(())
     }
 
+    /// Scale a directly assembled residual by the row scale of the affine
+    /// system it was assembled with.
+    ///
+    /// `residual` is `b - A*x` for the stamped matrix `self` and right-hand
+    /// side `rhs`, evaluated directly rather than by subtracting the affine
+    /// products. Each row is normalized by
+    /// `abstol + rounding floor + reltol * max(|A*x|, |b|)`, the row scale
+    /// [`Self::scaled_residual_inf_norm_by_row`] applies to `A*x - b`, so
+    /// only the numerator differs: a small residual the affine difference
+    /// would round away is still measured, against the same tolerance. The
+    /// rounding floor is taken at `rounding_point`, as in
+    /// [`Self::scaled_explicit_residual_inf_norm_by_row`].
+    pub fn scaled_direct_residual_inf_norm_by_row<F>(
+        &self,
+        residual: &[Value],
+        solution: &[Value],
+        rounding_point: &[Value],
+        rhs: &[Value],
+        reltol: Value,
+        mut row_abstol: F,
+    ) -> Result<Value, SolverError>
+    where
+        F: FnMut(usize) -> Value,
+    {
+        self.check_stamping_error()?;
+        if residual.len() != self.nrows
+            || rhs.len() != self.nrows
+            || solution.len() != self.ncols
+            || rounding_point.len() != self.ncols
+        {
+            return Err(SolverError::InvalidCircuit(
+                "Direct residual dimensions do not match the matrix".into(),
+            ));
+        }
+        if residual
+            .iter()
+            .chain(solution)
+            .chain(rounding_point)
+            .any(|value| !value.is_finite())
+        {
+            return Ok(Value::INFINITY);
+        }
+        let reltol = if reltol.is_finite() && reltol > 0.0 {
+            reltol
+        } else {
+            1e-3
+        };
+        let mut norm: Value = 0.0;
+        for (row, (&value, &row_rhs)) in residual.iter().zip(rhs).enumerate() {
+            let mut row_ax = 0.0;
+            let mut gross = 0.0;
+            for position in self.residual_layout.row_ptr[row]..self.residual_layout.row_ptr[row + 1]
+            {
+                let coefficient = self.values[self.residual_layout.csc_idx[position]];
+                let column = self.residual_layout.col_idx[position];
+                row_ax += coefficient * solution[column];
+                gross += (coefficient * rounding_point[column]).abs();
+            }
+            if !row_ax.is_finite() || !row_rhs.is_finite() {
+                return Ok(Value::INFINITY);
+            }
+            let noise_floor = self.residual_rounding_floor(row, rounding_point, gross);
+            if !noise_floor.is_finite() {
+                return Ok(Value::INFINITY);
+            }
+            let abstol = row_abstol(row);
+            let abstol = if abstol.is_finite() && abstol >= 0.0 {
+                abstol
+            } else {
+                1e-12
+            };
+            if value != 0.0 {
+                let scale = abstol + noise_floor + reltol * row_ax.abs().max(row_rhs.abs());
+                norm = norm.max(value.abs() / scale.max(abstol));
+            }
+        }
+        Ok(norm)
+    }
+
     /// Compute the unscaled infinity norm of `A*x-b` without allocating.
     ///
     /// See [`Self::scaled_explicit_residual_inf_norm_by_row`] when the physical
@@ -6866,6 +6945,74 @@ mod tests {
                 .unwrap(),
             0.0
         );
+    }
+
+    #[test]
+    fn direct_residual_scaling_uses_the_affine_row_scale() {
+        // One KCL row whose net linearized current and Norton source are both
+        // about 1 mA, carrying a 0.4 nA physical residual.
+        let matrix = StaticMatrix::from_triplets(1, 1, &[(0, 0, 1e-3)]).unwrap();
+        let solution = [1.0];
+        let residual = -4e-10;
+        let rhs = [1e-3 + residual];
+        let affine = matrix
+            .scaled_residual_inf_norm_by_row(&solution, &rhs, 1e-3, |_| 1e-12)
+            .unwrap();
+        let direct = matrix
+            .scaled_direct_residual_inf_norm_by_row(
+                &[residual],
+                &solution,
+                &solution,
+                &rhs,
+                1e-3,
+                |_| 1e-12,
+            )
+            .unwrap();
+        assert!(
+            (direct - affine).abs() <= 1e-9 * affine,
+            "only the numerator may differ: direct {direct}, affine {affine}"
+        );
+        assert!(direct < 1.0, "reltol * 1 mA tolerates 0.4 nA: {direct}");
+        let absolute = matrix
+            .scaled_explicit_residual_inf_norm_by_row(&[residual], &solution, 1e-3, |_| 1e-12)
+            .unwrap();
+        assert!(
+            absolute > 1.0,
+            "the absolute explicit scale rejects it: {absolute}"
+        );
+
+        // A residual the affine difference rounds away is still measured.
+        let large = StaticMatrix::from_triplets(1, 1, &[(0, 0, 1e3)]).unwrap();
+        let rhs = [1e3];
+        assert_eq!(
+            large
+                .scaled_residual_inf_norm_by_row(&solution, &rhs, 1e-3, |_| 1e-12)
+                .unwrap(),
+            0.0
+        );
+        let lost = large
+            .scaled_direct_residual_inf_norm_by_row(
+                &[1e-9],
+                &solution,
+                &solution,
+                &rhs,
+                1e-3,
+                |_| 1e-12,
+            )
+            .unwrap();
+        assert!(lost > 0.0 && lost < 1.0, "{lost}");
+
+        assert!(matches!(
+            matrix.scaled_direct_residual_inf_norm_by_row(
+                &[0.0, 0.0],
+                &solution,
+                &solution,
+                &[0.0],
+                1e-3,
+                |_| 1e-12
+            ),
+            Err(SolverError::InvalidCircuit(_))
+        ));
     }
 
     #[test]
