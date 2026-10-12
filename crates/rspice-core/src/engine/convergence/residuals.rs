@@ -497,29 +497,11 @@ impl Engine {
         }
 
         let snapshot = circuit.nonlinear_state_snapshot();
-        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let node_count = circuit.num_nodes().min(size);
         let mut polished_solution = None;
         let accepted = matrix.with_probe_values(|probe, rhs| {
-            Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
-            circuit.stamp_dc_direct(probe, rhs);
-            let mut correction_rhs = Vec::new();
             if self
-                .try_stamp_operating_point_newton_system(
-                    circuit,
-                    probe,
-                    rhs,
-                    OperatingPointProbe {
-                        solution,
-                        time: 0.0,
-                        analysis: crate::xspice::AnalysisType::DcOp,
-                        junction_gmin: self.effective_device_junction_gmin(
-                            self.config.convergence_config.gmin_target,
-                        ),
-                    },
-                    true,
-                    &mut correction_rhs,
-                )
+                .stamp_dc_static_probe_system(circuit, probe, rhs, solution)
                 .is_err()
             {
                 return false;
@@ -563,6 +545,91 @@ impl Engine {
         circuit.restore_nonlinear_state(snapshot);
 
         if accepted { polished_solution } else { None }
+    }
+
+    /// Assemble the operating-point Newton system at `solution` into a probe
+    /// matrix: the global nodal conditioning, the linear DC stamps, and every
+    /// device linearized exactly at `solution` (a static probe: no junction
+    /// limiting, and a mixed host's discrete state held).
+    fn stamp_dc_static_probe_system(
+        &self,
+        circuit: &mut CircuitData,
+        probe: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
+        circuit.stamp_dc_direct(probe, rhs);
+        let mut correction_rhs = Vec::new();
+        self.try_stamp_operating_point_newton_system(
+            circuit,
+            probe,
+            rhs,
+            OperatingPointProbe {
+                solution,
+                time: 0.0,
+                analysis: crate::xspice::AnalysisType::DcOp,
+                junction_gmin: self
+                    .effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+            },
+            true,
+            &mut correction_rhs,
+        )
+    }
+
+    /// Differentiate a converged operating point along excitation directions.
+    ///
+    /// A parameter that enters the DC equations only through their excitation
+    /// (an independent source's DC value) moves the solution along
+    /// `J(x*)^-1 d`, where `d` is the excitation's derivative with respect to
+    /// it and `J(x*)` the Jacobian of the equations the operating point
+    /// solved, assembled at `solution` exactly as the fixed-point polish
+    /// assembles it. That tangent is exact: no re-solve is involved, so it
+    /// carries none of a perturbed operating point's convergence error, which
+    /// on a high-gain loop exceeds the response a finite difference measures.
+    /// The circuit's operating-point state is left as it was.
+    pub(in crate::engine) fn dc_operating_point_tangents(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        directions: &[Vec<Value>],
+    ) -> Result<Vec<Vec<Value>>, SimulationError> {
+        let size = circuit.matrix_size();
+        if solution.len() != size
+            || solution.iter().any(|value| !value.is_finite())
+            || directions.iter().any(|direction| direction.len() != size)
+        {
+            return Err(SimulationError::Circuit(format!(
+                "operating-point tangent needs a finite solution and directions of the {size} unknown(s)"
+            )));
+        }
+        let snapshot = circuit.nonlinear_state_snapshot();
+        let tangents = matrix.with_probe_values(|probe, rhs| {
+            self.stamp_dc_static_probe_system(circuit, probe, rhs, solution)?;
+            let denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
+            directions
+                .iter()
+                .map(|direction| {
+                    let mut tangent = Vec::with_capacity(size);
+                    Self::solve_dc_linearization_system(
+                        probe,
+                        direction,
+                        denominator_floors.as_deref(),
+                        &mut tangent,
+                    )?;
+                    if tangent.iter().any(|value| !value.is_finite()) {
+                        return Err(SimulationError::Circuit(
+                            "operating-point tangent is not finite".to_owned(),
+                        ));
+                    }
+                    Ok(tangent)
+                })
+                .collect::<Result<Vec<_>, SimulationError>>()
+        });
+        circuit.restore_nonlinear_state(snapshot);
+        tangents
     }
 
     pub(in crate::engine::convergence) fn residual_probe_fixed_point_converged(

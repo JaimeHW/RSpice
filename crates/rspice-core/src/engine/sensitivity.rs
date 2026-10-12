@@ -2810,6 +2810,104 @@ impl Engine {
         }
     }
 
+    /// Exact operating-point tangents for independent-source DC rows, keyed by
+    /// target row.
+    ///
+    /// The row's variable is the value the operating point gives the source:
+    /// its DC value, or for a waveform without one the `t = 0` value `.op`
+    /// takes (PULSE `V1`, SIN `VO + VA sin(PHASE)`, the first PWL point, zero
+    /// for SFFM, AM and TRNOISE, and so on). Whatever the waveform kind, that
+    /// value enters the DC equations only as the source's excitation: the
+    /// branch row of a voltage source, and the two node rows of a current
+    /// source (`I` leaves `n+` and enters `n-`). Its tangent is therefore one
+    /// solve with the converged Jacobian along that excitation, which holds
+    /// any mixed host's discrete state as the operating point left it.
+    ///
+    /// A finite difference of re-solved operating points cannot stand in for
+    /// it: each re-solve carries the Newton iteration's convergence error, and
+    /// on a high-gain loop (an LDO's output against its load current) the
+    /// response to a resolvable step is buried under it, so the refinement
+    /// never reaches agreement. A source the elaborated circuit does not hold
+    /// under its own name keeps the finite-difference row.
+    fn dc_source_tangents(
+        engine: &Engine,
+        circuit: &mut CircuitData,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: &[Value],
+        sources: &[(usize, &crate::netlist::Element)],
+    ) -> Result<HashMap<usize, Vec<Value>>, SimulationError> {
+        if sources.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let size = circuit.matrix_size();
+        let mut rows = Vec::with_capacity(sources.len());
+        let mut directions = Vec::with_capacity(sources.len());
+        for &(row, element) in sources {
+            let mut direction = vec![0.0; size];
+            match element.kind {
+                ElementKind::VoltageSource(_) => {
+                    let Some(index) = circuit
+                        .voltage_sources
+                        .names
+                        .iter()
+                        .position(|name| name.eq_ignore_ascii_case(&element.name))
+                    else {
+                        continue;
+                    };
+                    let branch = circuit
+                        .get_branch_matrix_index(circuit.voltage_sources.branch_indices[index]);
+                    direction[branch - 1] = 1.0;
+                }
+                ElementKind::CurrentSource(_) => {
+                    let Some(index) = circuit.current_sources.index_by_name(&element.name) else {
+                        continue;
+                    };
+                    let positive = circuit.current_sources.node_pos[index];
+                    let negative = circuit.current_sources.node_neg[index];
+                    if positive != negative {
+                        if let Some(row) = positive.checked_sub(1) {
+                            direction[row] -= 1.0;
+                        }
+                        if let Some(row) = negative.checked_sub(1) {
+                            direction[row] += 1.0;
+                        }
+                    }
+                }
+                _ => continue,
+            }
+            rows.push(row);
+            directions.push(direction);
+        }
+        let tangents =
+            engine.dc_operating_point_tangents(circuit, matrix, solution, &directions)?;
+        Ok(rows.into_iter().zip(tangents).collect())
+    }
+
+    /// The output's derivative along an operating-point tangent, read through
+    /// the nominal result's public layout (node voltages, then public branch
+    /// currents, as `populate_public_dc_solution` publishes the solution).
+    fn dc_tangent_output_value(
+        nominal: &SimulationResult,
+        tangent: &[Value],
+        output: &AcSensitivityOutput,
+    ) -> Result<Value, SimulationError> {
+        let node_count = nominal.node_voltages.len().saturating_sub(1);
+        let branch_count = nominal.branch_currents.len();
+        if tangent.len() < node_count + branch_count {
+            return Err(SimulationError::Circuit(format!(
+                "operating-point tangent has {} value(s), fewer than the {} public unknown(s)",
+                tangent.len(),
+                node_count + branch_count
+            )));
+        }
+        let mut view = SimulationResult::new(node_count, branch_count);
+        view.node_voltages[1..].copy_from_slice(&tangent[..node_count]);
+        view.branch_currents
+            .copy_from_slice(&tangent[node_count..node_count + branch_count]);
+        view.branch_names.clone_from(&nominal.branch_names);
+        Self::dc_sensitivity_output_value(&view, output)
+    }
+
     fn dc_sensitivity_target_active(target: &AcSensitivityTarget) -> bool {
         !matches!(
             target.location,
@@ -2849,8 +2947,10 @@ impl Engine {
     /// model variable and no design parameter. `PARAM:a` is the TOTAL
     /// derivative — every parameter defined from `a` moves with it.
     /// Method: design parameters and eligible R/L/C value fields on a qualified
-    /// linear deck use physical derivatives and a transpose solve; every other row
-    /// is a Richardson-extrapolated three-point stencil accepted only on 1e-4
+    /// linear deck use physical derivatives and a transpose solve; an
+    /// independent source's DC value, for every waveform kind, is the exact
+    /// tangent of the nominal operating point; every other row is a
+    /// Richardson-extrapolated three-point stencil accepted only on 1e-4
     /// relative agreement of four independent fits, else refused by name.
     pub fn run_sensitivity_dc_complete(
         &self,
@@ -2895,7 +2995,34 @@ impl Engine {
         let nominal = progress.stage(0.1, 0.2);
         let abort: &dyn AbortSignal = &nominal;
 
-        let nominal_result = self.run_dc_op_with_abort(&flat, abort)?;
+        // An independent source's DC value enters the operating-point
+        // equations only through their excitation, so its row is the exact
+        // tangent of the nominal solve rather than a finite difference of
+        // re-solves (see `dc_source_tangents`).
+        let source_rows = targets
+            .iter()
+            .enumerate()
+            .filter_map(|(row, target)| match target.location {
+                AcSensitivityLocation::SourceDc { element_index } => {
+                    Some((row, &flat.elements[element_index]))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut source_tangents = HashMap::new();
+        let nominal_result = if source_rows.is_empty() {
+            self.run_dc_op_with_abort(&flat, abort)?
+        } else {
+            self.run_dc_op_with_linearization_and_abort(
+                &flat,
+                &mut |engine, circuit, matrix, solution| {
+                    source_tangents =
+                        Self::dc_source_tangents(engine, circuit, matrix, solution, &source_rows)?;
+                    Ok(())
+                },
+                abort,
+            )?
+        };
         let nominal_output = Self::dc_sensitivity_output_value(&nominal_result, &output)?;
 
         let output_name = Self::sensitivity_output_name(&output, |node| {
@@ -2926,6 +3053,8 @@ impl Engine {
                     )?
                     .derivative[0]
                         .re
+                } else if let Some(tangent) = source_tangents.get(&index) {
+                    Self::dc_tangent_output_value(&nominal_result, tangent, &output)?
                 } else if let Some(derivative) =
                     self.linear_device_sensitivity(&flat, &output, &target, None, &mut runs, abort)?
                 {

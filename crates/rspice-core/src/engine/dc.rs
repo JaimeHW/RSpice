@@ -18,6 +18,17 @@ pub use result::{DcSweepAxis, DcSweepResult};
 const DC_SWEEP_CONTINUATION_MAX_SUBDIVISIONS: usize = 128;
 const DC_SWEEP_RESULT_PREALLOC_LIMIT: usize = 4096;
 
+/// Work run against a converged operating point before it is accepted: the
+/// resolved engine, the circuit and matrix that solved it, and the complete
+/// solution. It must leave the circuit's operating-point state as it found it.
+pub(in crate::engine) type DcOperatingPointLinearization<'a> =
+    &'a mut dyn FnMut(
+        &Engine,
+        &mut CircuitData,
+        &mut StaticMatrix,
+        &[Value],
+    ) -> Result<(), SimulationError>;
+
 /// One converged operating point together with the solver state that produced
 /// it.
 pub(in crate::engine) struct DcOperatingPointState {
@@ -960,9 +971,29 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
         self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(
-            netlist, startup, lifecycle, abort,
+            netlist, startup, lifecycle, None, abort,
         )
         .map(|state| (state.result, state.report))
+        .map_err(SimulationError::into_exhausted_circuit_error)
+    }
+
+    /// [`Self::run_dc_op_with_abort`], with `linearize` run against the
+    /// converged circuit before the point is accepted. A circuit with no
+    /// unknowns has nothing to linearize, and `linearize` is not run.
+    pub(in crate::engine) fn run_dc_op_with_linearization_and_abort(
+        &self,
+        netlist: &Netlist,
+        linearize: DcOperatingPointLinearization<'_>,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
+        self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(
+            netlist,
+            DcOpStartup::Automatic { use_hints: true },
+            None,
+            Some(linearize),
+            abort,
+        )
+        .map(|state| state.result)
         .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
@@ -980,8 +1011,10 @@ impl Engine {
         startup: DcOpStartup<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<DcOperatingPointState, SimulationError> {
-        self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(netlist, startup, None, abort)
-            .map_err(SimulationError::into_exhausted_circuit_error)
+        self.solved_dc_op_with_startup_and_lifecycle_report_and_abort(
+            netlist, startup, None, None, abort,
+        )
+        .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
     fn solved_dc_op_with_startup_and_lifecycle_report_and_abort(
@@ -989,6 +1022,7 @@ impl Engine {
         netlist: &Netlist,
         startup: DcOpStartup<'_>,
         mut lifecycle: Option<&mut DcSweepLifecycle>,
+        linearize: Option<DcOperatingPointLinearization<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<DcOperatingPointState, SimulationError> {
         let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
@@ -1150,6 +1184,9 @@ impl Engine {
             return Err(SimulationError::Circuit(format!(
                 "XSPICE evaluation failed: {message}"
             )));
+        }
+        if let Some(linearize) = linearize {
+            linearize(&engine, &mut circuit, &mut matrix, &solution)?;
         }
 
         let solution = if let Some(state) = lifecycle.as_mut() {
