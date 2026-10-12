@@ -80,6 +80,9 @@ fn validate_parameter_scalar_metadata(index: usize, value: f64) -> Result<(), St
 	let Some(&name) = PARAMETER_DISPLAY_NAMES.get(index) else {
 		return Err(format!("generated parameter index {} is out of range", index));
 	};
+	if PARAMETER_ARRAY_FLAGS[index] && value.to_bits() != 0.0f64.to_bits() {
+		return Err(format!("parameter '{}' has array identity metadata, not a scalar value", name));
+	}
 	validate_finite_parameter(name, value)?;
 	if PARAMETER_INTEGER_FLAGS[index] && value.fract() != 0.0 {
 		return Err(format!("parameter '{}' must be an integer, got {}", name, value));
@@ -268,6 +271,14 @@ const PARAMETER_EXCLUDED_REFERENCES: [&[usize]; 160] = [
 	&[], &[], &[], &[], &[], &[], &[], &[],
 	&[], &[], &[], &[], &[], &[], &[], &[],
 	&[], &[], &[], &[], &[], &[], &[], &[],
+];
+
+const PARAMETER_ARRAY_FLAGS: [bool; 160] = [
+	false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
+	false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
+	false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
+	false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
+	false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
 ];
 
 const PARAMETER_INTEGER_FLAGS: [bool; 160] = [
@@ -638,7 +649,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 2;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = false;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "3d03567ae373fc8be40100c06a27f47800bda0de6e706f9771635909a5b0acd1";
+	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "867055070f4632e9dd5fa01ece4fc9aab0260b5aba932eb4c90ee821f5b156c4";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
 	pub fn new(nodes: &[usize]) -> Self {
@@ -896,6 +907,7 @@ impl Instance {
 			let Some(index) = parameter_index_for_name(lower.as_str()) else {
 				return Err(format!("unknown parameter '{}' for generated Verilog-A model 'bjt505t_va'", assignment.name));
 			};
+			if PARAMETER_ARRAY_FLAGS[index] { return Err(format!("parameter '{}' is an array; assign a complete array through source specialization", PARAMETER_DISPLAY_NAMES[index])); }
 			let value = if PARAMETER_INTEGER_FLAGS[index] { f64::from(integer::real_to_integer(assignment.value).map_err(|error| format!("parameter '{}': {}", PARAMETER_DISPLAY_NAMES[index], error))?) } else { assignment.value };
 			validate_parameter_scalar_metadata(index, value)?;
 			let is_model = PARAMETER_MODEL_FLAGS[index];
