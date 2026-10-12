@@ -514,12 +514,7 @@ pub(super) fn check_noise_abort(abort: &dyn AbortSignal) -> Result<(), Simulatio
     }
 }
 
-/// Causal Kasdin convolution with horizon-independent operation order.
-/// Every source/target pair belongs to one dyadic interval: the source lies
-/// in its left half and the target in its right half. At that midpoint the
-/// left inputs are complete, so their contributions can be added once. Block
-/// sizes depend only on the midpoint, never on the requested output length.
-/// This costs O(n log^2 n), retains O(n) storage and preserves exact prefixes.
+/// Causal Kasdin fractional integration of white Gaussian noise.
 ///
 /// `kernel_limit` truncates the impulse response after that many taps, which
 /// is how a lowest represented frequency is imposed: the untruncated
@@ -536,7 +531,6 @@ pub(super) fn kasdin_one_over_f(
     rng: &mut SplitMix64,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Value>, SimulationError> {
-    use rustfft::{FftPlanner, num_complex::Complex};
     check_noise_abort(abort)?;
     if n == 0 {
         return Ok(Vec::new());
@@ -553,6 +547,47 @@ pub(super) fn kasdin_one_over_f(
             0.0
         };
     }
+    filtered_white_noise(n, &h, amplitude, rng, abort)
+}
+
+/// `n` samples of white Gaussian noise of standard deviation `amplitude`,
+/// drawn from `rng` in order and passed through the causal FIR `kernel`:
+/// `y[t] = sum_j kernel[j] * w[t - j]`, with the input zero before `t = 0`.
+///
+/// The convolution has a horizon-independent operation order. Every
+/// source/target pair belongs to one dyadic interval: the source lies in its
+/// left half and the target in its right half. At that midpoint the left
+/// inputs are complete, so their contributions can be added once. Block sizes
+/// depend only on the midpoint, never on the requested output length. This
+/// costs O(n log^2 n), retains O(n) storage and preserves exact prefixes, so a
+/// longer record of the same stream begins with the shorter one.
+///
+/// Taps past the end of `taps` are zero.
+pub(super) fn filtered_white_noise(
+    n: usize,
+    taps: &[Value],
+    amplitude: Value,
+    rng: &mut SplitMix64,
+    abort: &dyn AbortSignal,
+) -> Result<Vec<Value>, SimulationError> {
+    use rustfft::{FftPlanner, num_complex::Complex};
+    check_noise_abort(abort)?;
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    let size = n.next_power_of_two();
+    let padded;
+    let h: &[Value] = if taps.len() >= size {
+        &taps[..size]
+    } else {
+        padded = {
+            let mut extended = Vec::with_capacity(size);
+            extended.extend_from_slice(taps);
+            extended.resize(size, 0.0);
+            extended
+        };
+        &padded
+    };
     let mut white = Vec::with_capacity(n);
     for index in 0..n {
         if index.is_multiple_of(512) {
@@ -621,11 +656,14 @@ pub(super) fn kasdin_one_over_f(
             result[target] += work[target - left].re * scale;
         }
     }
+    // The zero-lag tap. Kasdin's is exactly one, which leaves its records
+    // bit-identical to adding the input itself.
+    let direct = h[0];
     for (index, (value, diagonal)) in result.iter_mut().zip(white).enumerate() {
         if index.is_multiple_of(512) {
             check_noise_abort(abort)?;
         }
-        *value += diagonal;
+        *value += direct * diagonal;
     }
     Ok(result)
 }

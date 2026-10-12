@@ -84,7 +84,9 @@ use super::noise::{
 };
 use crate::abort_signal::AbortSignal;
 use crate::analysis::noise::{NoiseSource, NoiseSourceIdentity, NoiseSourceType};
-use crate::circuit::device_noise::{InjectedNoiseSource, NoiseTrain, TransientDeviceNoise};
+use crate::circuit::device_noise::{
+    InjectedNoiseSource, NoiseInjection, NoiseTrain, TransientDeviceNoise,
+};
 use crate::config::SpiceDialect;
 use crate::engine::{Engine, SimulationError, UnsupportedCapabilityError};
 use crate::identity::AnalysisKind;
@@ -92,13 +94,13 @@ use crate::netlist::TransientNoiseConfig;
 use crate::numerics::fnv1a;
 use crate::{CircuitData, Value};
 
-/// Total materialized `1/f^ef` samples one run may hold, across every source.
+/// Total materialized samples one run may hold, across every source.
 ///
-/// A flat mechanism costs no memory at all, so this bounds only the flicker
-/// trains: 16M values is 128 MB, past which a deck should raise `NOISEFMAX`'s
-/// reciprocal or shorten the run rather than have the simulator quietly take
-/// the machine.
-const MAX_TOTAL_FLICKER_SAMPLES: usize = 1 << 24;
+/// A flat mechanism costs no memory at all, so this bounds the materialized
+/// trains, warm-ups included: 16M values is 128 MB, past which a deck should
+/// raise `NOISEFMAX`'s reciprocal or shorten the run rather than have the
+/// simulator quietly take the machine.
+const MAX_TOTAL_MATERIALIZED_SAMPLES: usize = 1 << 24;
 
 /// The largest `1/f^ef` exponent the fractional integrator represents.
 ///
@@ -494,7 +496,7 @@ impl Engine {
         let run_seed = config.seed.or(options_seed).unwrap_or(DEFAULT_NOISE_SEED);
         let mut injected = Vec::new();
         let mut entries = Vec::new();
-        let mut flicker_budget = MAX_TOTAL_FLICKER_SAMPLES;
+        let mut materialized_budget = MAX_TOTAL_MATERIALIZED_SAMPLES;
         let mut ordinals: HashMap<(String, Option<String>, NoiseSourceType), usize> =
             HashMap::new();
         for (position, source) in collected.elementary.iter().enumerate() {
@@ -536,20 +538,19 @@ impl Engine {
                         sample_count,
                         config.fmin.unwrap_or(1.0 / tstop),
                         seed,
-                        &mut flicker_budget,
+                        &mut materialized_budget,
                         identity,
                         abort,
                     )?;
-                    NoiseTrain::PowerLaw {
+                    NoiseTrain::Materialized {
                         samples: Arc::new(samples),
                     }
                 }
             };
             injected.push(InjectedNoiseSource {
-                node_pos: source.node_pos,
-                node_neg: source.node_neg,
                 train,
                 amplitude: 0.0,
+                injections: vec![NoiseInjection::unit(source.node_pos, source.node_neg)],
             });
             entries.push(AmplitudeEntry {
                 identity: identity.clone(),
@@ -665,9 +666,9 @@ impl Engine {
             })?;
         if total > *budget {
             return Err(SimulationError::Circuit(format!(
-                "transient noise flicker trains exceed the {MAX_TOTAL_FLICKER_SAMPLES}-sample \
-                 budget at source '{}'. Raise NOISEFMIN, lower NOISEFMAX, or shorten the \
-                 transient.",
+                "transient noise materialized trains exceed the \
+                 {MAX_TOTAL_MATERIALIZED_SAMPLES}-sample budget at source '{}'. Raise NOISEFMIN, \
+                 lower NOISEFMAX, or shorten the transient.",
                 describe(identity)
             )));
         }

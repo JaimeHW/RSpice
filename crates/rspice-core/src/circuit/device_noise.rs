@@ -64,25 +64,53 @@ pub(crate) enum NoiseTrain {
     /// Frequency-flat: a standard normal draw per sample, addressed by index,
     /// so a flat source costs no memory whatever the run's length.
     Flat { stream_seed: u64 },
-    /// `1/f^ef`: a precomputed Kasdin fractional-integration sequence whose
-    /// unit coefficient is one at 1 Hz. It cannot be addressed without the
-    /// samples before it, so it is materialized once.
-    PowerLaw { samples: Arc<Vec<Value>> },
+    /// A shaped unit process — a `1/f^ef` Kasdin fractional-integration
+    /// sequence whose unit coefficient is one at 1 Hz. It cannot be addressed
+    /// without the samples before it, so it is materialized once, and it is
+    /// never changed afterwards.
+    Materialized { samples: Arc<Vec<Value>> },
 }
 
-/// One device-noise mechanism injected between two solution rows.
-#[derive(Clone)]
-pub(crate) struct InjectedNoiseSource {
+/// One place a source's current enters the circuit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct NoiseInjection {
     /// Solution row the current is injected into, one-based; zero is ground.
     pub(crate) node_pos: usize,
     /// Solution row the current is drawn from, one-based; zero is ground.
     pub(crate) node_neg: usize,
+    /// The share of the source's current this injection carries.
+    pub(crate) gain: Value,
+}
+
+impl NoiseInjection {
+    /// A whole current between two rows: the shape of every native device
+    /// mechanism.
+    pub(crate) fn unit(node_pos: usize, node_neg: usize) -> Self {
+        Self {
+            node_pos,
+            node_neg,
+            gain: 1.0,
+        }
+    }
+}
+
+/// One noise process: a unit train, scaled by one amplitude and injected at
+/// every place its value reaches the circuit.
+///
+/// A native mechanism is one current between two rows. A Verilog-A noise
+/// function whose value reaches several equations is one process with several
+/// injections, all driven by the same train, which is what makes them
+/// coherent.
+#[derive(Clone)]
+pub(crate) struct InjectedNoiseSource {
     /// The unit-density process this source scales.
     pub(crate) train: NoiseTrain,
     /// Complete multiplier applied to the unit process, refreshed from the
     /// solution at every accepted step: `NOISESCALE · sqrt(S·fmax)` for a flat
     /// source and `NOISESCALE · sqrt(A)` for a `A/f^ef` source.
     pub(crate) amplitude: Value,
+    /// Where the scaled process is injected, each with its own gain.
+    pub(crate) injections: Vec<NoiseInjection>,
 }
 
 /// The injection plan for one transient run.
@@ -104,14 +132,14 @@ impl std::fmt::Debug for TransientDeviceNoise {
         let materialized = self
             .sources
             .iter()
-            .filter(|source| matches!(source.train, NoiseTrain::PowerLaw { .. }))
+            .filter(|source| matches!(source.train, NoiseTrain::Materialized { .. }))
             .count();
         formatter
             .debug_struct("TransientDeviceNoise")
             .field("nt", &self.nt)
             .field("sample_count", &self.sample_count)
             .field("sources", &self.sources.len())
-            .field("power_law_sources", &materialized)
+            .field("materialized_sources", &materialized)
             .finish()
     }
 }
@@ -186,12 +214,12 @@ impl TransientDeviceNoise {
     fn unit_sample(source: &InjectedNoiseSource, index: usize) -> Value {
         match &source.train {
             NoiseTrain::Flat { stream_seed } => standard_normal_at(*stream_seed, index as u64),
-            NoiseTrain::PowerLaw { samples } => samples.get(index).copied().unwrap_or(0.0),
+            NoiseTrain::Materialized { samples } => samples.get(index).copied().unwrap_or(0.0),
         }
     }
 
-    /// The injected current of one source at `time`, in amperes. Zero outside
-    /// the run's noise window.
+    /// The scaled current of one source at `time`, in amperes, before any
+    /// injection gain. Zero outside the run's noise window.
     ///
     /// The run itself never needs one source in isolation — it stamps them all
     /// together — so this exists for the oracle tests, which read one
@@ -217,22 +245,28 @@ impl TransientDeviceNoise {
             return;
         };
         for source in &self.sources {
-            if source.node_pos == source.node_neg {
-                continue;
-            }
             let value = source.amplitude * Self::unit_sample(source, sample);
             if value == 0.0 {
                 continue;
             }
-            if source.node_pos > 0
-                && let Some(slot) = rhs.get_mut(source.node_pos - 1)
-            {
-                *slot -= value;
-            }
-            if source.node_neg > 0
-                && let Some(slot) = rhs.get_mut(source.node_neg - 1)
-            {
-                *slot += value;
+            for injection in &source.injections {
+                if injection.node_pos == injection.node_neg {
+                    continue;
+                }
+                let current = value * injection.gain;
+                if current == 0.0 {
+                    continue;
+                }
+                if injection.node_pos > 0
+                    && let Some(slot) = rhs.get_mut(injection.node_pos - 1)
+                {
+                    *slot -= current;
+                }
+                if injection.node_neg > 0
+                    && let Some(slot) = rhs.get_mut(injection.node_neg - 1)
+                {
+                    *slot += current;
+                }
             }
         }
     }
@@ -311,10 +345,9 @@ mod tests {
             nt,
             samples,
             vec![InjectedNoiseSource {
-                node_pos: 1,
-                node_neg: 0,
                 train: NoiseTrain::Flat { stream_seed: 7 },
                 amplitude,
+                injections: vec![NoiseInjection::unit(1, 0)],
             }],
         )
     }
@@ -362,10 +395,9 @@ mod tests {
             1.0e-9,
             4,
             vec![InjectedNoiseSource {
-                node_pos: 1,
-                node_neg: 1,
                 train: NoiseTrain::Flat { stream_seed: 3 },
                 amplitude: 1.0,
+                injections: vec![NoiseInjection::unit(1, 1)],
             }],
         );
         let mut rhs = vec![0.0; 2];
@@ -379,17 +411,47 @@ mod tests {
             1.0e-9,
             4,
             vec![InjectedNoiseSource {
-                node_pos: 1,
-                node_neg: 2,
-                train: NoiseTrain::PowerLaw {
+                train: NoiseTrain::Materialized {
                     samples: Arc::new(vec![2.0, 0.0, 0.0, 0.0]),
                 },
                 amplitude: 3.0,
+                injections: vec![NoiseInjection::unit(1, 2)],
             }],
         );
         let mut rhs = vec![0.0; 2];
         plan.stamp_transient_rhs(&mut rhs, 1.0e-9);
         assert_eq!(rhs, vec![-6.0, 6.0]);
+    }
+
+    /// One process reaching two equations drives both from one draw, each
+    /// scaled by its own gain: the injections are coherent by construction.
+    #[test]
+    fn a_process_drives_every_injection_from_one_draw() {
+        let plan = TransientDeviceNoise::new(
+            1.0e-9,
+            4,
+            vec![InjectedNoiseSource {
+                train: NoiseTrain::Materialized {
+                    samples: Arc::new(vec![0.5, 0.0, 0.0, 0.0]),
+                },
+                amplitude: 2.0,
+                injections: vec![
+                    NoiseInjection {
+                        node_pos: 1,
+                        node_neg: 0,
+                        gain: 1.0,
+                    },
+                    NoiseInjection {
+                        node_pos: 2,
+                        node_neg: 3,
+                        gain: -2.0,
+                    },
+                ],
+            }],
+        );
+        let mut rhs = vec![0.0; 3];
+        plan.stamp_transient_rhs(&mut rhs, 1.0e-9);
+        assert_eq!(rhs, vec![-1.0, 2.0, -2.0]);
     }
 
     #[test]
