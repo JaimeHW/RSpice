@@ -728,13 +728,12 @@ fn m_reaches_a_mixed_instance_through_a_subcircuit_wrapper() {
 /// excursion. The classification used to name XSPICE event-driven code models
 /// and nothing else.
 ///
-/// A mixed Verilog-AMS instance is not one of those, and the first assertion
-/// here is what makes that concrete rather than a claim about internals: an
-/// XSPICE `dac_bridge` auto-bridge instance is what an *analog* Verilog-A
-/// boundary net gets, while a mixed module's discrete port is bridged on the
-/// host itself, so this deck reaches the recovery path reporting no XSPICE
-/// event-driven device at all even though every volt on its load comes from a
-/// digital edge.
+/// A mixed Verilog-AMS output reaches that classification through its own
+/// converter. Since 02921aeeb a discrete output is not stamped by the host: it
+/// is an event port behind a shared `__rspice_mixed_dac` code model, which is
+/// an XSPICE event-driven device, and the first assertion pins that this is
+/// what puts every volt a digital edge drives onto the load on the
+/// event-driven side of the guards.
 ///
 /// The control for the run comparison is the same deck with one inert `DC 0`
 /// source added on a disconnected node. That source moves nothing and predicts
@@ -782,10 +781,10 @@ endmodule
         .build_circuit(&Netlist::parse(&guarded).unwrap())
         .unwrap();
     assert!(
-        !built.has_xspice_event_driven_devices(),
-        "a mixed module's discrete port is bridged on its host, so the XSPICE \
-         event-driven classification cannot be what puts this deck on the \
-         event-driven side of the recovery guards"
+        built.has_xspice_event_driven_devices(),
+        "a mixed module's discrete output is bridged by an XSPICE event-driven \
+         converter, so the deck is on the event-driven side of the recovery guards \
+         by that classification"
     );
 
     let run = |deck: &str, label: &str| {
