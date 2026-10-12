@@ -14747,7 +14747,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 39] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 41] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -14787,6 +14787,8 @@ mod tests {
         (53, 13),
         (54, 13),
         (55, 13),
+        (56, 13),
+        (57, 13),
     ];
 
     #[cfg(feature = "veriloga")]
