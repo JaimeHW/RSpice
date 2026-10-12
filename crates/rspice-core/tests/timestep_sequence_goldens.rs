@@ -13,8 +13,8 @@
 //! diode fixture uses platform math (`f64::sin`, `exp`, and `powf`), whose
 //! precision Rust does not promise across platforms or compilation settings:
 //! <https://doc.rust-lang.org/std/primitive.f64.html#method.sin>.
-//! Its cross-build comparison admits at most 2 ULP in time and 256 ULP in step
-//! size, with exact point count and point-for-point ordering. The standing
+//! Its cross-build comparison admits at most 32 ULP in time and 16384 ULP in
+//! step size, with exact point count and point-for-point ordering. The standing
 //! `capture_is_stable_across_runs` test still requires bit-identical sequences
 //! within each build, including the diode fixture and instrumented builds.
 //!
@@ -80,11 +80,16 @@ const NUMERIC_ENV_OVERRIDES: [&str; 3] = ["RSPICE_SOLVER", "RSPICE_PIVREL", "RSP
 ///
 /// GitHub run 34166331794 compared all 195 diode points: maximum differences
 /// were 1 ULP in time and 156 ULP in step, with the waveform oracle passing.
-/// An earlier instrumented build differed by 2 and 17 ULP. These are the
-/// smallest power-of-two ceilings covering that evidence. Linear fixtures
+/// An earlier instrumented build differed by 2 and 17 ULP. faaf0e809's
+/// centered capacitor currents feed the rounding of each accepted current into
+/// the LTE estimate, which widened the spread: GitHub run 38209050169 (Linux,
+/// at 0ddf7cf7a, against the Windows-blessed 0c1249efc fixture) compared all
+/// 195 points with maximum differences of 19 ULP in time and 12288 ULP in
+/// step (about 3e-12 relative), the waveform oracle again passing. These are
+/// the smallest power-of-two ceilings covering that evidence. Linear fixtures
 /// receive no allowance; changing a fixture still requires the protocol above.
-const NONLINEAR_TIME_MAX_ULPS: u64 = 2;
-const NONLINEAR_STEP_MAX_ULPS: u64 = 256;
+const NONLINEAR_TIME_MAX_ULPS: u64 = 32;
+const NONLINEAR_STEP_MAX_ULPS: u64 = 16384;
 
 /// One pure-analog transient deck whose accepted step sequence is pinned.
 struct GoldenDeck {
@@ -512,6 +517,26 @@ fn nonlinear_roundoff_allowance_is_narrow_and_deck_specific() {
             assert!(!steps_match(deck, golden, linux));
         }
     }
+
+    // Run 38209050169's first drifting point (18) against the 0c1249efc
+    // fixture: 3 ULP in time already exceeds the earlier 2-ULP ceiling.
+    let blessed = AcceptedStep {
+        time_bits: 0x3eb9_091c_d3ca_77fe,
+        step_bits: 0x3e8a_b164_968c_98c5,
+    };
+    let linux_centered = AcceptedStep {
+        time_bits: 0x3eb9_091c_d3ca_7801,
+        step_bits: 0x3e8a_b164_968c_98d5,
+    };
+    assert_eq!(
+        nonnegative_finite_ulp_distance(blessed.time_bits, linux_centered.time_bits),
+        Some(3)
+    );
+    assert_eq!(
+        nonnegative_finite_ulp_distance(blessed.step_bits, linux_centered.step_bits),
+        Some(16)
+    );
+    assert!(steps_match(&DIODE_RECTIFIER, blessed, linux_centered));
 
     for outside in [
         AcceptedStep {
