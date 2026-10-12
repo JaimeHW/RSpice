@@ -1,11 +1,17 @@
 //! `run`: every selected cell in a child process, compared and classified,
 //! then held against (or recorded into) `outcomes.tsv`. Also `capture`, the
 //! maintenance command that (re)captures checked-in oracle references.
+//!
+//! Cells run concurrently, at most `--jobs` children at a time. Reports and
+//! records are assembled in declared order whatever the completion order, so
+//! `outcomes.tsv` and the summary do not depend on N.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use super::case::{CaseResult, Observation};
@@ -31,6 +37,31 @@ pub struct RunOptions {
     pub bin: PathBuf,
     /// Where children write their result files.
     pub work: PathBuf,
+    /// The most cells running at once; 0 means [`default_jobs`].
+    pub jobs: usize,
+}
+
+impl RunOptions {
+    pub fn jobs(&self) -> usize {
+        if self.jobs == 0 {
+            default_jobs()
+        } else {
+            self.jobs
+        }
+    }
+}
+
+/// The default `--jobs`: a quarter of the hardware threads, between 2 and 8.
+///
+/// Measured on the 28-thread, 31.7 GB development box (2026-10-12): a Monte
+/// Carlo cell runs its trials in parallel, about one core per trial (C4 ports
+/// mc-tran 9.8 cores and 0.50 GB, C2 xs mc-tran 8.0 cores and 0.64 GB); every
+/// other cell is one core and at most 72 MB. Slowest first starts the two long
+/// MC cells together, so N children want about 2 × 9 + (N − 2) cores: 23 of
+/// 28 at N = 7, leaving room for the other work on the box, in under 2 GB.
+pub fn default_jobs() -> usize {
+    let threads = std::thread::available_parallelism().map_or(1, usize::from);
+    (threads / 4).clamp(2, 8)
 }
 
 /// One classified cell.
@@ -69,23 +100,41 @@ pub fn selected_designs(designs: &[String]) -> Result<Vec<Design>, String> {
     Ok(selected)
 }
 
+/// One selected cell: its design (an index into the selection) and budget.
+#[derive(Debug, Clone)]
+struct Task {
+    design: usize,
+    variant: String,
+    analysis: String,
+    timeout_s: u64,
+}
+
 /// Run the selected cells and ratchet or record their outcomes.
+///
+/// Every selected cell of every selected design goes on one queue that
+/// [`RunOptions::jobs`] workers drain, each running one cell (its `case`
+/// child, then any O5 child or O3 replay) at a time. A design is ratcheted or
+/// recorded as soon as its last cell finishes, from its cells in declared
+/// order.
 pub fn run(options: &RunOptions) -> Result<Vec<DesignReport>, String> {
     fs::create_dir_all(&options.work).map_err(|error| error.to_string())?;
-    let mut reports = Vec::new();
-    for design in selected_designs(&options.designs)? {
-        let mut findings = integrity(&design);
+    let designs = selected_designs(&options.designs)?;
+    let mut reports: Vec<Option<DesignReport>> = Vec::with_capacity(designs.len());
+    let mut tasks = Vec::new();
+    let mut pending = vec![0usize; designs.len()];
+    for (index, design) in designs.iter().enumerate() {
+        let mut findings = integrity(design);
         findings.retain(|finding| !finding.contains("outcomes.tsv"));
         if !findings.is_empty() {
-            reports.push(DesignReport {
+            reports.push(Some(DesignReport {
                 design: design.id().to_owned(),
                 cells: Vec::new(),
                 drift: Vec::new(),
                 findings,
-            });
+            }));
             continue;
         }
-        let mut cells = Vec::new();
+        reports.push(None);
         for (variant, analysis) in design.cells() {
             if options
                 .variant
@@ -102,65 +151,181 @@ pub fn run(options: &RunOptions) -> Result<Vec<DesignReport>, String> {
             if entry.extended && !options.extended {
                 continue;
             }
-            let started = Instant::now();
-            let budget = Duration::from_secs(entry.timeout_s);
-            let end = match missing_feature(&design) {
-                Some(feature) => CaseEnd::Completed(Box::new(
-                    CaseResult::new(Route::compiled().token(), "none").failed(
-                        super::case::ErrorRecord {
-                            category: "harness".into(),
-                            code: Some("no-feature".into()),
-                            detail: format!("this build lacks rspice-core feature {feature}"),
-                            display: format!("no-feature: {feature}"),
-                            ..Default::default()
-                        },
-                    ),
-                )),
-                None => run_child(options, &design, &variant, &analysis, false, budget),
-            };
-            let (classification, dispatch, route) =
-                evaluate_cell(options, &design, &variant, &analysis, &end, budget);
-            eprintln!(
-                "mixed-corpus: {} {variant} {analysis} {route}: {} — {} ({:.1} s, {dispatch})",
-                design.id(),
-                classification.outcome,
-                classification.detail,
-                started.elapsed().as_secs_f64()
-            );
-            cells.push(CellReport {
-                design: design.id().to_owned(),
-                row: Row {
-                    variant,
-                    analysis,
-                    route,
-                    outcome: classification.outcome,
-                    detail: classification.detail,
-                },
-                dispatch,
-                elapsed_s: started.elapsed().as_secs_f64(),
+            pending[index] += 1;
+            tasks.push(Task {
+                design: index,
+                variant,
+                analysis,
+                timeout_s: entry.timeout_s,
             });
         }
-        let path = design.dir.join("outcomes.tsv");
-        let recorded = match fs::read_to_string(&path) {
-            Ok(text) => outcomes::parse(&text)?,
-            Err(_) => Vec::new(),
-        };
-        let observed: Vec<Row> = cells.iter().map(|cell| cell.row.clone()).collect();
-        let drift = if options.record {
-            let merged = outcomes::record(&recorded, &observed, &design.cells());
-            fs::write(&path, outcomes::render(&merged)).map_err(|error| error.to_string())?;
-            Vec::new()
-        } else {
-            outcomes::ratchet(&recorded, &observed)
-        };
-        reports.push(DesignReport {
-            design: design.id().to_owned(),
-            cells,
-            drift,
-            findings: Vec::new(),
-        });
     }
-    Ok(reports)
+    // A design none of whose cells is selected is held (or re-rendered) now.
+    for (index, design) in designs.iter().enumerate() {
+        if reports[index].is_none() && pending[index] == 0 {
+            reports[index] = Some(finish(options, design, Vec::new())?);
+        }
+    }
+    let order: Vec<usize> = (0..tasks.len()).collect();
+    let mut assembly = Assembly {
+        pending,
+        finished: vec![Vec::new(); designs.len()],
+    };
+    execute(
+        &tasks,
+        &order,
+        options.jobs(),
+        |task| run_cell(options, &designs[task.design], task),
+        |index, cell| {
+            let design = tasks[index].design;
+            if let Some(cells) = assembly.complete(design, index, cell) {
+                reports[design] = Some(finish(options, &designs[design], cells)?);
+            }
+            Ok(())
+        },
+    )?;
+    Ok(reports
+        .into_iter()
+        .map(|report| report.expect("every design finished"))
+        .collect())
+}
+
+/// Finished cells, held per design until its last one is in.
+struct Assembly {
+    /// Cells still running or queued, per design.
+    pending: Vec<usize>,
+    /// Finished cells with their task index, in completion order.
+    finished: Vec<Vec<(usize, CellReport)>>,
+}
+
+impl Assembly {
+    /// Take one finished cell; when it is its design's last, release all of
+    /// that design's cells in declared (task) order.
+    fn complete(
+        &mut self,
+        design: usize,
+        index: usize,
+        cell: CellReport,
+    ) -> Option<Vec<CellReport>> {
+        self.finished[design].push((index, cell));
+        self.pending[design] -= 1;
+        if self.pending[design] > 0 {
+            return None;
+        }
+        let mut cells = std::mem::take(&mut self.finished[design]);
+        cells.sort_by_key(|(index, _)| *index);
+        Some(cells.into_iter().map(|(_, cell)| cell).collect())
+    }
+}
+
+/// Ratchet `cells` against the design's `outcomes.tsv`, or record them into
+/// it.
+fn finish(
+    options: &RunOptions,
+    design: &Design,
+    cells: Vec<CellReport>,
+) -> Result<DesignReport, String> {
+    let path = design.dir.join("outcomes.tsv");
+    let recorded = match fs::read_to_string(&path) {
+        Ok(text) => outcomes::parse(&text)?,
+        Err(_) => Vec::new(),
+    };
+    let observed: Vec<Row> = cells.iter().map(|cell| cell.row.clone()).collect();
+    let drift = if options.record {
+        let merged = outcomes::record(&recorded, &observed, &design.cells());
+        fs::write(&path, outcomes::render(&merged)).map_err(|error| error.to_string())?;
+        Vec::new()
+    } else {
+        outcomes::ratchet(&recorded, &observed)
+    };
+    Ok(DesignReport {
+        design: design.id().to_owned(),
+        cells,
+        drift,
+        findings: Vec::new(),
+    })
+}
+
+/// Run one cell, classify it, and print its line as soon as it is done.
+fn run_cell(options: &RunOptions, design: &Design, task: &Task) -> CellReport {
+    let (variant, analysis) = (task.variant.as_str(), task.analysis.as_str());
+    let started = Instant::now();
+    let budget = Duration::from_secs(task.timeout_s);
+    let end = match missing_feature(design) {
+        Some(feature) => CaseEnd::Completed(Box::new(
+            CaseResult::new(Route::compiled().token(), "none").failed(super::case::ErrorRecord {
+                category: "harness".into(),
+                code: Some("no-feature".into()),
+                detail: format!("this build lacks rspice-core feature {feature}"),
+                display: format!("no-feature: {feature}"),
+                ..Default::default()
+            }),
+        )),
+        None => run_child(options, design, variant, analysis, false, budget),
+    };
+    let (classification, dispatch, route) =
+        evaluate_cell(options, design, variant, analysis, &end, budget);
+    let detail = classification.detail;
+    let elapsed_s = started.elapsed().as_secs_f64();
+    eprintln!(
+        "mixed-corpus: {} {variant} {analysis} {route}: {} — {detail} ({elapsed_s:.1} s, {dispatch})",
+        design.id(),
+        classification.outcome,
+    );
+    CellReport {
+        design: design.id().to_owned(),
+        row: Row {
+            variant: variant.to_owned(),
+            analysis: analysis.to_owned(),
+            route,
+            outcome: classification.outcome,
+            detail,
+        },
+        dispatch,
+        elapsed_s,
+    }
+}
+
+/// Run `work` on every task, `jobs` at a time, taking tasks in `order`, and
+/// hand each result to `done` on this thread as it completes. An error from
+/// `done` stops workers taking new tasks; the ones running finish first.
+fn execute<T: Sync, R: Send>(
+    tasks: &[T],
+    order: &[usize],
+    jobs: usize,
+    work: impl Fn(&T) -> R + Sync,
+    mut done: impl FnMut(usize, R) -> Result<(), String>,
+) -> Result<(), String> {
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    let (sender, receiver) = mpsc::channel();
+    std::thread::scope(|scope| {
+        for _ in 0..jobs.max(1).min(order.len()) {
+            let sender = sender.clone();
+            let (next, stop, work) = (&next, &stop, &work);
+            scope.spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    let Some(&index) = order.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                        break;
+                    };
+                    if sender.send((index, work(&tasks[index]))).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(sender);
+        let mut outcome = Ok(());
+        for (index, result) in receiver {
+            if outcome.is_ok()
+                && let Err(error) = done(index, result)
+            {
+                stop.store(true, Ordering::Relaxed);
+                outcome = Err(error);
+            }
+        }
+        outcome
+    })
 }
 
 /// The first `design.toml` feature this build did not compile, if any. Each
@@ -193,6 +358,18 @@ fn missing_feature(design: &Design) -> Option<String> {
         .cloned()
 }
 
+/// A cell's result file. Unique per cell, so concurrent children never share
+/// one: design slugs are unique directory names, and `.` separates the
+/// fields because no variant or analysis id contains one (their decks are
+/// named `<variant>.<analysis>.cir`). Each runner process has its own `work`.
+fn work_file(work: &Path, design: &Design, variant: &str, analysis: &str, o5: bool) -> PathBuf {
+    work.join(format!(
+        "{}.{variant}.{analysis}{}.json",
+        design.slug,
+        if o5 { ".o5" } else { "" }
+    ))
+}
+
 /// Spawn the case child (or the external producer) and wait for its result.
 fn run_child(
     options: &RunOptions,
@@ -202,11 +379,7 @@ fn run_child(
     o5: bool,
     budget: Duration,
 ) -> CaseEnd {
-    let out = options.work.join(format!(
-        "{}-{variant}-{analysis}{}.json",
-        design.slug,
-        if o5 { "-o5" } else { "" }
-    ));
+    let out = work_file(&options.work, design, variant, analysis, o5);
     let _ = fs::remove_file(&out);
     let mut command = match (&options.producer, o5) {
         (Some(producer), false) => {
@@ -988,6 +1161,123 @@ mod tests {
             "corpus integrity:\n{}",
             findings.join("\n")
         );
+    }
+
+    #[test]
+    fn every_cell_has_its_own_work_file() {
+        let work = Path::new("work");
+        let mut seen = BTreeSet::new();
+        for design in selected_designs(&[]).expect("corpus loads") {
+            for (variant, analysis) in design.cells() {
+                assert!(
+                    !variant.contains('.') && !analysis.contains('.'),
+                    "{}: {variant} {analysis}",
+                    design.slug
+                );
+                for o5 in [false, true] {
+                    let path = work_file(work, &design, &variant, &analysis, o5);
+                    assert!(seen.insert(path.clone()), "{} is shared", path.display());
+                }
+            }
+        }
+    }
+
+    fn task(design: usize, variant: &str, timeout_s: u64) -> Task {
+        Task {
+            design,
+            variant: variant.to_owned(),
+            analysis: "tran".to_owned(),
+            timeout_s,
+        }
+    }
+
+    /// Run fake cells through the real queue and assembly at `jobs`; each
+    /// design's rendered table, and the peak number running at once.
+    fn assemble(tasks: &[Task], designs: usize, jobs: usize) -> (Vec<String>, usize) {
+        let running = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let mut assembly = Assembly {
+            pending: (0..designs)
+                .map(|design| tasks.iter().filter(|task| task.design == design).count())
+                .collect(),
+            finished: vec![Vec::new(); designs],
+        };
+        let mut tables = vec![String::new(); designs];
+        // Declared order, so the earliest cells, which run longest, finish last.
+        let order: Vec<usize> = (0..tasks.len()).collect();
+        execute(
+            tasks,
+            &order,
+            jobs,
+            |task| {
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(task.timeout_s));
+                running.fetch_sub(1, Ordering::SeqCst);
+                CellReport {
+                    design: format!("D{}", task.design),
+                    row: Row {
+                        variant: task.variant.clone(),
+                        analysis: task.analysis.clone(),
+                        route: Route::Interp,
+                        outcome: Outcome::Pass,
+                        detail: format!("{} ms", task.timeout_s),
+                    },
+                    dispatch: "simulation".into(),
+                    elapsed_s: 0.0,
+                }
+            },
+            |index, cell| {
+                let design = tasks[index].design;
+                if let Some(cells) = assembly.complete(design, index, cell) {
+                    let rows: Vec<Row> = cells.into_iter().map(|cell| cell.row).collect();
+                    tables[design] = outcomes::render(&rows);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        (tables, peak.load(Ordering::SeqCst))
+    }
+
+    #[test]
+    fn reports_are_identical_for_any_job_count() {
+        let tasks: Vec<Task> = (0..12)
+            .map(|index| task(index % 3, &format!("v{index}"), 2 * (12 - index as u64)))
+            .collect();
+        let (serial, peak) = assemble(&tasks, 3, 1);
+        assert_eq!(peak, 1);
+        assert!(
+            serial[0].contains("v0\ttran\tinterp\tpass\t24 ms\nv3\t"),
+            "{}",
+            serial[0]
+        );
+        for jobs in [2, 5, 16] {
+            let (parallel, peak) = assemble(&tasks, 3, jobs);
+            assert_eq!(parallel, serial, "jobs {jobs}");
+            assert!(peak > 1 && peak <= jobs, "jobs {jobs}: peak {peak}");
+        }
+    }
+
+    #[test]
+    fn an_assembly_error_stops_the_queue() {
+        let tasks: Vec<Task> = (0..20)
+            .map(|index| task(0, &format!("v{index}"), 20))
+            .collect();
+        let order: Vec<usize> = (0..tasks.len()).collect();
+        let started = AtomicUsize::new(0);
+        let outcome = execute(
+            &tasks,
+            &order,
+            2,
+            |task| {
+                started.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(task.timeout_s));
+            },
+            |_, ()| Err("lock timed out".to_owned()),
+        );
+        assert_eq!(outcome, Err("lock timed out".to_owned()));
+        assert!(started.load(Ordering::SeqCst) <= 4, "{started:?}");
     }
 
     #[test]

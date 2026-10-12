@@ -2,13 +2,15 @@
 //!
 //! ```text
 //! rspice-mixed-corpus run [--design C1,C5] [--variant v] [--analysis a] [--record] [--extended]
-//!                         [--producer "<cmd>"] [--expect-route interp|native]
+//!                         [--producer "<cmd>"] [--expect-route interp|native] [--jobs N]
 //! rspice-mixed-corpus case <design-dir> <variant> <analysis> <out.json> [--budget-s N] [--o5]
 //! rspice-mixed-corpus capture --oracle O1|O4|O2|O5-O1|O5-O4 [--design C1] [--update]
-//! rspice-mixed-corpus probe a|b|c [--record]
+//! rspice-mixed-corpus probe a|b|c [--record] [--jobs N]
 //! ```
 //!
 //! The route is the build: `--features veriloga-native` is the native route.
+//! `--jobs` is the most cells running at once; the default is
+//! `runner::default_jobs()`.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,6 +47,8 @@ enum Commands {
         producer: Option<String>,
         #[arg(long)]
         expect_route: Option<String>,
+        #[arg(long, value_parser = job_count)]
+        jobs: Option<usize>,
     },
     /// Run one case in this process and write case-result.json.
     Case {
@@ -71,7 +75,17 @@ enum Commands {
         which: String,
         #[arg(long)]
         record: bool,
+        #[arg(long, value_parser = job_count)]
+        jobs: Option<usize>,
     },
+}
+
+/// `--jobs`: a positive count.
+fn job_count(text: &str) -> Result<usize, String> {
+    match text.parse::<usize>() {
+        Ok(0) | Err(_) => Err(format!("{text} is not a positive job count")),
+        Ok(count) => Ok(count),
+    }
 }
 
 fn main() -> ExitCode {
@@ -114,6 +128,7 @@ fn run() -> Result<ExitCode, String> {
             extended,
             producer,
             expect_route,
+            jobs,
         } => {
             check_route(expect_route.as_deref())?;
             run_corpus(runner::RunOptions {
@@ -123,10 +138,15 @@ fn run() -> Result<ExitCode, String> {
                 record,
                 extended,
                 producer,
+                jobs: jobs.unwrap_or_default(),
                 ..options()?
             })
         }
-        Commands::Probe { which, record } => {
+        Commands::Probe {
+            which,
+            record,
+            jobs,
+        } => {
             let id = match which.as_str() {
                 "a" => "P06a",
                 "b" => "P06b",
@@ -137,6 +157,7 @@ fn run() -> Result<ExitCode, String> {
                 designs: vec![id.to_owned()],
                 record,
                 extended: true,
+                jobs: jobs.unwrap_or_default(),
                 ..options()?
             })
         }
@@ -189,8 +210,19 @@ fn options() -> Result<runner::RunOptions, String> {
 }
 
 fn run_corpus(options: runner::RunOptions) -> Result<ExitCode, String> {
+    let started = std::time::Instant::now();
     let reports = runner::run(&options)?;
     let _ = std::fs::remove_dir_all(&options.work);
+    // On stderr with the per-cell lines; stdout is the same for any --jobs.
+    eprintln!(
+        "mixed-corpus: {} cells, --jobs {}, {:.1} s",
+        reports
+            .iter()
+            .map(|report| report.cells.len())
+            .sum::<usize>(),
+        options.jobs(),
+        started.elapsed().as_secs_f64()
+    );
     let mut failed = false;
     for report in &reports {
         let rows: Vec<_> = report.cells.iter().map(|cell| cell.row.clone()).collect();

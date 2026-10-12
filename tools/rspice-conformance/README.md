@@ -160,4 +160,10 @@ cargo run --release -p rspice-conformance --features veriloga-native --bin rspic
 Release is not optional advice: these suites run thousands of decks, and the
 debug profile costs five to ten times as much on the IR passes.
 
+`rspice-mixed-corpus run` takes `--jobs N`, the most cells running at once;
+the default is a quarter of the hardware threads, between 2 and 8, because a
+Monte Carlo cell already runs its trials in parallel. Reports and
+`outcomes.tsv` are assembled in declared order, so they are the same for any
+N.
+
 Licensed under the [RSpice Personal Use License](../../LICENSE).
