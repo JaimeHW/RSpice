@@ -90,6 +90,12 @@ pub enum WorkbenchIcon {
     Layers,
     Component,
     Code,
+    /// A Verilog-A module: code brackets around one cycle of a wave, the
+    /// analog behaviour the source describes. Distinct from [`Self::Code`]
+    /// so a module's document tab never reads as a netlist or a script.
+    VerilogA,
+    /// Format a source document: ragged lines brought to one indentation.
+    Format,
     Terminal,
     Compare,
     Info,
@@ -519,6 +525,30 @@ impl WorkbenchIcon {
                 line(&[(8.0, 5.0), (2.0, 12.0), (8.0, 19.0)]);
                 line(&[(16.0, 5.0), (22.0, 12.0), (16.0, 19.0)]);
                 line(&[(14.0, 3.0), (10.0, 21.0)]);
+            }
+            Self::VerilogA => {
+                line(&[(6.5, 6.0), (2.0, 12.0), (6.5, 18.0)]);
+                line(&[(17.5, 6.0), (22.0, 12.0), (17.5, 18.0)]);
+                // One full sine period between the brackets, shallow and wide
+                // enough to stay a wave rather than a zigzag at a 14 px tab.
+                painter.add(Shape::line(
+                    (0..=24)
+                        .map(|step| {
+                            let phase = step as f32 / 24.0;
+                            p(
+                                6.5 + 11.0 * phase,
+                                12.0 - 3.0 * (std::f32::consts::TAU * phase).sin(),
+                            )
+                        })
+                        .collect(),
+                    stroke,
+                ));
+            }
+            Self::Format => {
+                line(&[(4.0, 6.0), (20.0, 6.0)]);
+                line(&[(9.0, 10.0), (20.0, 10.0)]);
+                line(&[(9.0, 14.0), (20.0, 14.0)]);
+                line(&[(4.0, 18.0), (16.0, 18.0)]);
             }
             Self::Terminal => {
                 line(&[(4.0, 6.0), (9.0, 11.0), (4.0, 16.0)]);
