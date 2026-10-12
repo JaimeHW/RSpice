@@ -626,9 +626,8 @@ fn printer_capability_selection_is_validated_and_plan_authenticated() {
         Length::from_micrometres(100_000),
     )
     .unwrap();
-    let native_setup = |resolution_dpi| {
-        let mut setup = HardcopySetup::default();
-        setup.render = RenderSetup::try_new(
+    let native_setup = |resolution_dpi| HardcopySetup {
+        render: RenderSetup::try_new(
             RenderTarget::SystemPrinter {
                 printer_id: "engineering-printer-04".to_owned(),
                 job: PrinterJobSettings::try_new(
@@ -649,8 +648,8 @@ fn printer_capability_selection_is_validated_and_plan_authenticated() {
             FontPolicy::new(true, false),
             true,
         )
-        .unwrap();
-        setup
+        .unwrap(),
+        ..Default::default()
     };
     let high_resolution =
         HardcopyPlan::compile_with_id(plan_id, source(), native_setup(1_200), extent).unwrap();
@@ -937,19 +936,21 @@ fn success_receipt_rejects_wrong_page_count_or_format() {
 
 #[test]
 fn native_spool_acceptance_is_truthful_and_device_bound() {
-    let mut setup = HardcopySetup::default();
-    setup.render = RenderSetup::try_new(
-        RenderTarget::SystemPrinter {
-            printer_id: "engineering-printer-04".to_owned(),
-            job: printer_job(),
-        },
-        OutputFormat::NativePrinter,
-        ColorMapping::PrintSafeEngineeringPalette,
-        BackgroundMode::White,
-        FontPolicy::new(true, false),
-        true,
-    )
-    .unwrap();
+    let setup = HardcopySetup {
+        render: RenderSetup::try_new(
+            RenderTarget::SystemPrinter {
+                printer_id: "engineering-printer-04".to_owned(),
+                job: printer_job(),
+            },
+            OutputFormat::NativePrinter,
+            ColorMapping::PrintSafeEngineeringPalette,
+            BackgroundMode::White,
+            FontPolicy::new(true, false),
+            true,
+        )
+        .unwrap(),
+        ..Default::default()
+    };
     let plan = HardcopyPlan::compile(
         source(),
         setup,
@@ -991,16 +992,18 @@ fn native_spool_acceptance_is_truthful_and_device_bound() {
 
 #[test]
 fn browser_print_handoff_is_distinct_from_artifact_export() {
-    let mut setup = HardcopySetup::default();
-    setup.render = RenderSetup::try_new(
-        RenderTarget::BrowserPrintDialog,
-        OutputFormat::BrowserPrintDocument,
-        ColorMapping::PrintSafeEngineeringPalette,
-        BackgroundMode::White,
-        FontPolicy::new(true, true),
-        true,
-    )
-    .unwrap();
+    let setup = HardcopySetup {
+        render: RenderSetup::try_new(
+            RenderTarget::BrowserPrintDialog,
+            OutputFormat::BrowserPrintDocument,
+            ColorMapping::PrintSafeEngineeringPalette,
+            BackgroundMode::White,
+            FontPolicy::new(true, true),
+            true,
+        )
+        .unwrap(),
+        ..Default::default()
+    };
     let plan = HardcopyPlan::compile(
         source(),
         setup,
