@@ -858,6 +858,7 @@ impl<'a> RunContext<'a> {
                 step,
                 sweep2,
                 mode,
+                restart,
             } => basic::run_dc_sweep(
                 self,
                 source,
@@ -866,6 +867,7 @@ impl<'a> RunContext<'a> {
                     stop: *stop,
                     step: *step,
                     mode: mode.clone(),
+                    restart: *restart,
                 },
                 sweep2.as_ref(),
             )?,

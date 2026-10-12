@@ -243,12 +243,14 @@ pub(crate) fn run_directive(
             step,
             mode,
             sweep2,
+            restart,
         } => {
             let primary = DcSweepSpec {
                 start: *start,
                 stop: *stop,
                 step: *step,
                 mode: mode.clone(),
+                restart: *restart,
             };
             let points = engine.run_dc_sweep2_spec_with_report_and_abort(
                 netlist,

@@ -56,6 +56,7 @@ fn xyce_dc_upgrade_sweep_modes_parse_and_generate_points() {
             stop: list.stop,
             step: list.step,
             mode: list.mode.clone(),
+            restart: false,
         }
         .points(),
         vec![-17.0, 12.0, 188.0, 5.0]
@@ -68,6 +69,7 @@ fn xyce_dc_upgrade_sweep_modes_parse_and_generate_points() {
             stop: list_prefix.stop,
             step: list_prefix.step,
             mode: list_prefix.mode,
+            restart: false,
         }
         .points(),
         vec![-17.0, 12.0, 188.0, 5.0]
@@ -85,6 +87,7 @@ fn xyce_dc_upgrade_sweep_modes_parse_and_generate_points() {
         stop: dec.stop,
         step: dec.step,
         mode: dec.mode,
+        restart: false,
     }
     .points();
     assert_eq!(dec_points.len(), 13);
@@ -98,6 +101,7 @@ fn xyce_dc_upgrade_sweep_modes_parse_and_generate_points() {
             stop: dec_suffix.stop,
             step: dec_suffix.step,
             mode: dec_suffix.mode,
+            restart: false,
         }
         .points()
         .len(),
@@ -116,6 +120,7 @@ fn xyce_dc_upgrade_sweep_modes_parse_and_generate_points() {
         stop: oct.stop,
         step: oct.step,
         mode: oct.mode,
+        restart: false,
     }
     .points();
     assert_eq!(oct_points.len(), 28);
@@ -129,6 +134,7 @@ fn xyce_dc_upgrade_sweep_modes_parse_and_generate_points() {
             stop: oct_suffix.stop,
             step: oct_suffix.step,
             mode: oct_suffix.mode,
+            restart: false,
         }
         .points()
         .len(),

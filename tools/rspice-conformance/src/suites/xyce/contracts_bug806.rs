@@ -611,6 +611,7 @@ impl XyceTestRunner {
                         step,
                         mode: DcSweepMode::Linear,
                         sweep2: None,
+                        ..
                     }] if source.eq_ignore_ascii_case("VT1")
                         && start.to_bits() == 10.0f64.to_bits()
                         && stop.to_bits() == 15.0f64.to_bits()
@@ -642,6 +643,7 @@ impl XyceTestRunner {
                         step,
                         mode: DcSweepMode::Linear,
                         sweep2: Some(second),
+                        ..
                     }] if source.eq_ignore_ascii_case("R1:R")
                         && start.to_bits() == 8.0f64.to_bits()
                         && stop.to_bits() == 12.0f64.to_bits()

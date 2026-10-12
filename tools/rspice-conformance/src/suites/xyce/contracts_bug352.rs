@@ -395,6 +395,7 @@ impl XyceTestRunner {
             step,
             mode: DcSweepMode::Linear,
             sweep2: None,
+            ..
         } if source.eq_ignore_ascii_case("VIN")
             && start.to_bits() == 0.0f64.to_bits()
             && stop.to_bits() == 5.0f64.to_bits()

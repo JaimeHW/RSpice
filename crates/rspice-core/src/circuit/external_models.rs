@@ -310,6 +310,10 @@ pub(crate) struct VerilogADcAcceptedStateCarrier {
     runtime: Vec<RuntimeVerilogADcAcceptedState>,
     #[cfg(feature = "veriloga-builtins-base")]
     generated: Vec<GeneratedVerilogADcAcceptedState>,
+    /// The held equilibrium of the mixed modules, installed after the rebuilt
+    /// circuit starts digital execution rather than with the analog state.
+    #[cfg(feature = "veriloga")]
+    mixed: Option<super::mixed_signal::MixedEquilibriumImage>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -3763,7 +3767,28 @@ impl CircuitData {
             }
         }
 
+        #[cfg(feature = "veriloga")]
+        {
+            carrier.mixed = self.mixed_equilibrium_image()?;
+        }
+
         Ok(carrier)
+    }
+
+    /// Install the held mixed-module equilibrium a DC sweep carried from its
+    /// previous point, after this rebuilt circuit started digital execution.
+    ///
+    /// Returns the instance whose digital elaboration differs from the
+    /// carried one, in which case this point keeps its fresh initialization.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn restore_mixed_dc_accepted_state(
+        &mut self,
+        carrier: &VerilogADcAcceptedStateCarrier,
+    ) -> Result<Option<String>, String> {
+        match &carrier.mixed {
+            Some(image) => self.adopt_mixed_equilibrium_image(image),
+            None => Ok(None),
+        }
     }
 
     /// Restore accepted Verilog-A history into a freshly rebuilt DC circuit.
@@ -4066,6 +4091,7 @@ impl CircuitData {
                 .mixed_digital_coordinator
                 .as_ref()
                 .map(|digital| digital.fresh());
+            self.scheduler.clear_equilibrium_commit();
         }
         #[cfg(feature = "veriloga-builtins-base")]
         {

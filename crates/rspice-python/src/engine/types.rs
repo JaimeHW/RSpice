@@ -90,12 +90,7 @@ impl PyDcSweep {
         let spec = match normalized.as_str() {
             "linear" | "lin" => {
                 let (start, stop, step) = require_linear_bounds(start, stop, step)?;
-                DcSweepSpec {
-                    start,
-                    stop,
-                    step,
-                    mode: DcSweepMode::Linear,
-                }
+                DcSweepSpec::linear(start, stop, step)
             }
             "list" => {
                 let values = values
@@ -122,6 +117,7 @@ impl PyDcSweep {
                     stop,
                     step: 0.0,
                     mode: DcSweepMode::List(values),
+                    restart: false,
                 }
             }
             "dec" | "decade" | "oct" | "octave" => {
@@ -146,6 +142,7 @@ impl PyDcSweep {
                     stop,
                     step: 0.0,
                     mode,
+                    restart: false,
                 }
             }
             other => {

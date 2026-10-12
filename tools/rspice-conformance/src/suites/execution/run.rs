@@ -588,6 +588,7 @@ fn execute_dc_sweep(
         step,
         mode,
         sweep2,
+        restart,
     } = analysis
     else {
         return Err(SimulationError::Circuit(
@@ -599,6 +600,7 @@ fn execute_dc_sweep(
         stop: *stop,
         step: *step,
         mode: mode.clone(),
+        restart: *restart,
     };
     engine
         .run_dc_sweep2_spec_with_report_and_abort(netlist, source, &primary, sweep2.as_ref(), abort)

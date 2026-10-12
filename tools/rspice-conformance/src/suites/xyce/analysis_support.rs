@@ -4098,6 +4098,7 @@ MN1 OUT IN GND GND GND CMOSN w=4u  l=0.15u  AS=6p AD=6p PS=7u PD=7u ic=20000,100
                 step,
                 mode,
                 sweep2,
+                ..
             } = analysis
             else {
                 continue;

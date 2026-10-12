@@ -488,6 +488,7 @@ fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, St
             step,
             sweep2,
             mode,
+            ..
         } => {
             if let Some(second) = sweep2 {
                 return Ok(CornerBaseMode::DcSweepNested {
@@ -765,6 +766,7 @@ fn command_to_queue_item(
             step,
             sweep2,
             mode,
+            ..
         } => {
             let (source2, start2, stop2, step2) = match sweep2 {
                 Some(second) => (

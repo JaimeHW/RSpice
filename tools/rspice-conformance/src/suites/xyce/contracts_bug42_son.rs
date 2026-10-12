@@ -665,6 +665,7 @@ impl XyceTestRunner {
             step,
             mode,
             sweep2,
+            ..
         } = &netlist.analyses[0]
         else {
             return Err(format!("{LABEL} .INC lost its DC analysis"));

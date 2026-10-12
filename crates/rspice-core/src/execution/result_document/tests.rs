@@ -3059,6 +3059,7 @@ fn a_nested_dc_sweep_publishes_every_authored_sweep_variable() {
         step,
         mode,
         sweep2: Some(outer),
+        restart,
     } = command
     else {
         panic!("the .DC card must carry an outer sweep");
@@ -3068,6 +3069,7 @@ fn a_nested_dc_sweep_publishes_every_authored_sweep_variable() {
         stop: *stop,
         step: *step,
         mode: mode.clone(),
+        restart: *restart,
     };
     let points = engine
         .run_dc_sweep2_spec_with_report_and_abort(&netlist, source, &primary, Some(outer), &NoAbort)

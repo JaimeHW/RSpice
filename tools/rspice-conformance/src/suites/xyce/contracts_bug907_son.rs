@@ -565,7 +565,7 @@ impl XyceTestRunner {
                 "{LABEL} owner lost deferred selected-LIB representation"
             ));
         }
-        if !matches!(&netlist.analyses[0], AnalysisCommand::Dc { source, start, stop, step, mode: DcSweepMode::Linear, sweep2: None }
+        if !matches!(&netlist.analyses[0], AnalysisCommand::Dc { source, start, stop, step, mode: DcSweepMode::Linear, sweep2: None, .. }
             if source.eq_ignore_ascii_case("VG") && start.to_bits() == 0.0f64.to_bits()
                 && stop.to_bits() == 1.8f64.to_bits() && step.to_bits() == 0.01f64.to_bits())
         {

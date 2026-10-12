@@ -291,6 +291,7 @@ impl PyEngine {
                 step,
                 mode: DcSweepMode::Linear,
                 sweep2: None,
+                restart: false,
             },
         )?
         .dc
@@ -355,6 +356,7 @@ impl PyEngine {
                     step: outer.spec.step,
                     mode: outer.spec.mode.clone(),
                 }),
+                restart: sweep.spec.restart,
             },
         )?
         .dc

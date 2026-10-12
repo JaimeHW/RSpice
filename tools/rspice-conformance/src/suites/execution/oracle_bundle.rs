@@ -31,6 +31,7 @@ pub(super) fn analysis_key(analysis: &AnalysisCommand) -> Result<Option<String>,
             step,
             mode,
             sweep2,
+            ..
         } => {
             if *mode != DcSweepMode::Linear
                 || sweep2

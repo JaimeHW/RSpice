@@ -87,6 +87,14 @@ struct DcSweepLifecycle {
     sweep_value: Value,
     pending_finish: Option<crate::ModelFinish>,
     finished: bool,
+    /// What the rebuilt-circuit points vary, as a re-initialization warning
+    /// names it: the swept parameter, `TEMP`, or the outer source.
+    sweep_label: String,
+    /// `RESTART=YES`: every point is an independent operating point.
+    restart: bool,
+    /// Threshold findings of the held equilibria, aggregated per converter as
+    /// its first point, the number of points and the first finding (S5(c)).
+    threshold_findings: std::collections::BTreeMap<String, (Value, usize, String)>,
 }
 
 impl DcSweepLifecycle {
@@ -103,7 +111,63 @@ impl DcSweepLifecycle {
             sweep_value: 0.0,
             pending_finish: None,
             finished: false,
+            sweep_label: String::new(),
+            restart: false,
+            threshold_findings: std::collections::BTreeMap::new(),
         })
+    }
+
+    /// Start the discrete half of this point's circuit and give it the
+    /// previous point's held equilibrium (S6, S8).
+    ///
+    /// A continued point's circuit is rebuilt, so its modules queued their
+    /// analog initialization calls again; those were delivered at the sweep's
+    /// first point and are discarded. The carried equilibrium is installed iff
+    /// the rebuilt digital structure is the carried one; otherwise this point
+    /// keeps the LRM §8.4.1 initialization it just ran, and says so.
+    #[cfg(feature = "veriloga")]
+    fn start_mixed_point(&self, circuit: &mut CircuitData) -> Result<(), SimulationError> {
+        if self.next_public_point != 0 {
+            circuit
+                .discard_mixed_initial_analog_tasks()
+                .map_err(SimulationError::Circuit)?;
+        }
+        circuit.start_mixed_digital_execution()?;
+        if let Some(state) = &self.accepted_state
+            && let Some(instance) = circuit
+                .restore_mixed_dc_accepted_state(state)
+                .map_err(SimulationError::Circuit)?
+        {
+            log::warn!(
+                "[mixed.dc] {} = {} changes the digital elaboration of '{instance}'; discrete \
+                 state re-initialized at this point",
+                if self.sweep_label.is_empty() {
+                    "the swept value"
+                } else {
+                    self.sweep_label.as_str()
+                },
+                self.sweep_value,
+            );
+        }
+        Ok(())
+    }
+
+    fn note_threshold_findings(&mut self, findings: Vec<(String, String)>) {
+        for (converter, finding) in findings {
+            self.threshold_findings
+                .entry(converter)
+                .and_modify(|(_, points, _)| *points += 1)
+                .or_insert((self.sweep_value, 1, finding));
+        }
+    }
+
+    fn report_threshold_findings(&self) {
+        for (first, points, finding) in self.threshold_findings.values() {
+            log::warn!(
+                "[mixed.threshold] DC sweep: {finding} (first at sweep value {first:e}; \
+                 {points} point(s))"
+            );
+        }
     }
 
     fn flags(&self) -> Result<(bool, bool), SimulationError> {
@@ -173,6 +237,7 @@ impl DcSweepLifecycle {
     }
 
     fn ensure_complete(&self) -> Result<(), SimulationError> {
+        self.report_threshold_findings();
         if !self.finished && self.next_public_point != self.total_public_points {
             return Err(SimulationError::Circuit(format!(
                 "DC sweep lifecycle accepted {} public point(s), expected {}",
@@ -1017,6 +1082,38 @@ impl Engine {
         .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
+    /// A circuit built and prepared as a plain operating point prepares one,
+    /// with its matrix linked, but not solved.
+    ///
+    /// For assembling the operating-point equations of a slightly different
+    /// deck at a solution another circuit converged to (the `.sens` residual
+    /// tangents). The preparation is the operating point's own sequence, so a
+    /// mixed host runs its initial blocks and holds the state they leave,
+    /// which the static probe then settles at the given solution exactly as
+    /// the converged circuit's final assembly settled it.
+    pub(in crate::engine) fn prepared_dc_probe_circuit(
+        &self,
+        netlist: &Netlist,
+        abort: &dyn AbortSignal,
+    ) -> Result<(CircuitData, StaticMatrix), SimulationError> {
+        let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
+        let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
+        Self::ensure_model_run_active(abort)?;
+        let mut circuit = self.build_circuit_with_abort(netlist, abort)?;
+        circuit
+            .begin_veriloga_equilibrium_analysis(0)
+            .map_err(SimulationError::Circuit)?;
+        Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
+        #[cfg(feature = "veriloga")]
+        circuit.start_mixed_digital_execution()?;
+        circuit
+            .prepare_veriloga_equilibrium_analysis_point(0, true, true)
+            .map_err(SimulationError::Circuit)?;
+        let matrix = self.build_matrix(&circuit)?;
+        circuit.link_indices(&matrix);
+        Ok((circuit, matrix))
+    }
+
     fn solved_dc_op_with_startup_and_lifecycle_report_and_abort(
         &self,
         netlist: &Netlist,
@@ -1058,14 +1155,13 @@ impl Engine {
         }
         .map_err(SimulationError::Circuit)?;
         let (analysis_initial_step, analysis_final_step) = if let Some(state) = &lifecycle {
-            // A sweep asks for a discrete state re-settled at every point, and
-            // a transient interleave produces no such state. `run_dc_sweep*`
-            // refuses a mixed deck before a lifecycle exists; this is that
-            // refusal's second line, on the per-point entry itself.
-            Self::ensure_no_mixed_signal_analysis(&circuit, "DC sweep")?;
+            Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Dc)?;
             state.restore_rebuilt_point_start(&mut circuit, abort)?;
+            #[cfg(feature = "veriloga")]
+            state.start_mixed_point(&mut circuit)?;
             state.flags()?
         } else {
+            Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Op)?;
             Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
             // A mixed deck's operating point is the transient's t = 0 startup
             // with the advance removed, and this is that startup: the same call
@@ -1201,6 +1297,18 @@ impl Engine {
         } else {
             solution
         };
+        // The converged point is the held equilibrium (S1): kept, so a sweep's
+        // next point starts from it, and checked for converter inputs sitting
+        // on a decision boundary (S5(c)).
+        let findings = engine.hold_equilibrium(&mut circuit, &solution)?;
+        match lifecycle.as_mut() {
+            Some(state) => state.note_threshold_findings(findings),
+            None => {
+                for (_, finding) in findings {
+                    log::warn!("[mixed.threshold] operating point: {finding}");
+                }
+            }
+        }
 
         // Build result
         let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
@@ -1337,6 +1445,8 @@ impl Engine {
             })?;
         engine.ensure_analysis_points(total_point_count)?;
         let mut lifecycle = DcSweepLifecycle::new(total_point_count)?;
+        lifecycle.restart = primary.restart;
+        lifecycle.sweep_label = sweep2.source.clone();
 
         let outer_is_temp = sweep2.source.eq_ignore_ascii_case("TEMP")
             || sweep2.source.eq_ignore_ascii_case("TEMPER");
@@ -1497,6 +1607,7 @@ impl Engine {
             ));
         }
         let mut lifecycle = DcSweepLifecycle::new(sweep_points.len())?;
+        lifecycle.restart = spec.restart;
         let results = self.run_dc_sweep_points_with_lifecycle_and_abort(
             netlist,
             source_name,
@@ -1517,8 +1628,18 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
+        if lifecycle.restart {
+            return self.run_dc_restart_points(
+                netlist,
+                source_name,
+                sweep_points,
+                lifecycle,
+                abort,
+            );
+        }
 
         if source_name.eq_ignore_ascii_case("TEMP") || source_name.eq_ignore_ascii_case("TEMPER") {
+            lifecycle.sweep_label = "TEMP".to_owned();
             let mut results =
                 Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
             let mut retained_values = 0usize;
@@ -1591,6 +1712,7 @@ impl Engine {
         // rather than once per point after the fact.
         Self::refuse_authored_event_only_dc_voltages(netlist, &circuit, OutputAnalysisKind::Dc)?;
 
+        Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Dc)?;
         if lifecycle.next_public_point == 0 {
             circuit.begin_veriloga_dc_analysis()
         } else {
@@ -1598,8 +1720,12 @@ impl Engine {
         }
         .map_err(SimulationError::Circuit)?;
         lifecycle.restore_rebuilt_point_start(&mut circuit, abort)?;
+        // One start per sweep: every point after it continues from the
+        // previous point's held equilibrium (S6). A continued two-source sweep
+        // also takes the outer point's last equilibrium into this circuit.
+        #[cfg(feature = "veriloga")]
+        lifecycle.start_mixed_point(&mut circuit)?;
 
-        Self::ensure_no_mixed_signal_analysis(&circuit, "DC sweep")?;
         if circuit.matrix_size() == 0 {
             engine.ensure_result_shape(sweep_points.len(), 2)?;
             let mut results = Vec::with_capacity(sweep_points.len());
@@ -1813,6 +1939,10 @@ impl Engine {
                     lifecycle,
                     abort,
                 )?;
+                // The point's held equilibrium, which the next point starts
+                // from (S6).
+                let findings = engine.hold_equilibrium(&mut circuit, &solution)?;
+                lifecycle.note_threshold_findings(findings);
 
                 // Build result
                 let mut result = SimulationResult::new(circuit.num_nodes(), circuit.num_branches());
@@ -1855,6 +1985,78 @@ impl Engine {
         sweep_result.map_err(SimulationError::into_exhausted_circuit_error)
     }
 
+    /// `RESTART=YES`: every point is exactly the operating point a standalone
+    /// `.op` solves on the deck with the swept value applied — initialization
+    /// re-run, no analog seed, no carried discrete or Verilog-A state.
+    fn run_dc_restart_points(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        sweep_points: &[Value],
+        lifecycle: &mut DcSweepLifecycle,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        let is_temp =
+            source_name.eq_ignore_ascii_case("TEMP") || source_name.eq_ignore_ascii_case("TEMPER");
+        let parameter = if Self::netlist_has_numeric_parameter(netlist, source_name) {
+            Some(source_name.to_owned())
+        } else {
+            canonical_device_parameter_sweep_source(netlist, source_name)
+        };
+        let mut results =
+            Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
+        let mut retained_values = 0usize;
+        for &sweep_value in sweep_points {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let swept = if is_temp {
+                let mut swept = netlist.clone();
+                swept.options.temp = Some(sweep_value);
+                swept.params.set("TEMP", sweep_value);
+                swept.params.set("TEMPER", sweep_value);
+                swept.params.set(
+                    "VT",
+                    crate::constants::thermal_voltage(crate::constants::celsius_to_kelvin(
+                        sweep_value,
+                    )),
+                );
+                swept
+            } else if let Some(parameter) = &parameter {
+                Self::create_perturbed_netlist_with_limits_and_abort(
+                    netlist,
+                    parameter,
+                    sweep_value,
+                    self.config.resource_limits,
+                    abort,
+                )?
+                .0
+            } else {
+                let mut swept = netlist.clone();
+                Self::override_independent_source_dc(&mut swept, source_name, sweep_value)?;
+                swept
+            };
+            lifecycle.sweep_value = sweep_value;
+            let (result, device_op_report) = self
+                .run_dc_op_with_startup_and_lifecycle_report_and_abort(
+                    &swept,
+                    DcOpStartup::Automatic { use_hints: true },
+                    None,
+                    abort,
+                )?;
+            lifecycle.next_public_point += 1;
+            let point = DcSweepPointResult {
+                sweep_value,
+                result,
+                device_op_report,
+            };
+            retained_values = retained_values.saturating_add(dc_sweep_point_value_count(&point));
+            self.ensure_result_values(retained_values)?;
+            results.push(point);
+        }
+        Ok(results)
+    }
+
     fn run_dc_parameter_sweep_spec_with_report_and_abort(
         &self,
         netlist: &Netlist,
@@ -1863,6 +2065,7 @@ impl Engine {
         lifecycle: &mut DcSweepLifecycle,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<DcSweepPointResult>, SimulationError> {
+        lifecycle.sweep_label = format!("parameter '{param_name}'");
         let mut results =
             Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
         let mut any_binding = false;

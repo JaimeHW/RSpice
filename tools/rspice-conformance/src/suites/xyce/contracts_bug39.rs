@@ -817,6 +817,7 @@ impl XyceTestRunner {
                     step,
                     mode: DcSweepMode::Linear,
                     sweep2: None,
+                    ..
                 },
             ] if source.eq_ignore_ascii_case("I1")
                 && start.to_bits() == (-1.0_f64).to_bits()

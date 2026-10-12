@@ -458,6 +458,7 @@ impl XyceTestRunner {
                     step,
                     mode: DcSweepMode::Linear,
                     sweep2: None,
+                    ..
                 } if source.eq_ignore_ascii_case(expected_source)
                     && start.to_bits() == expected_start.to_bits()
                     && stop.to_bits() == expected_stop.to_bits()

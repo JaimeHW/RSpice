@@ -211,6 +211,7 @@ fn analysis_request(
                     stop: *stop,
                     step: *step,
                     mode: mode.clone(),
+                    restart: false,
                 },
                 limits,
             )?;

@@ -238,7 +238,7 @@ impl XyceTestRunner {
         }
         if !matches!(
             &netlist.analyses[0],
-            AnalysisCommand::Dc { source, start, stop, step, mode: DcSweepMode::Linear, sweep2: None }
+            AnalysisCommand::Dc { source, start, stop, step, mode: DcSweepMode::Linear, sweep2: None, .. }
                 if source.eq_ignore_ascii_case("V1")
                     && start.to_bits() == 1.0f64.to_bits()
                     && stop.to_bits() == 1.0f64.to_bits()

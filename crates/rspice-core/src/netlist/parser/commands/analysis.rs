@@ -193,25 +193,29 @@ impl ParsedAnalysisCard {
 
                 // Optional second (outer) source: .DC V1 a b s V2 a2 b2 s2
                 skip_commas(stream);
-                let sweep2 = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
-                    let (source2, spec2) = parse_dc_sweep_spec(stream, line_num, params)?;
-                    push_xyce_inconsistent_dc_sweep_warning(
-                        params,
-                        diagnostics,
-                        origin,
-                        &source2,
-                        &spec2,
-                    );
-                    Some(crate::netlist::DcSecondSweep {
-                        source: source2,
-                        start: spec2.start,
-                        stop: spec2.stop,
-                        step: spec2.step,
-                        mode: spec2.mode,
-                    })
-                } else {
-                    None
-                };
+                let mut restart = take_dc_restart_option(stream, line_num, None)?;
+                let sweep2 =
+                    if restart.is_none() && matches!(stream.peek().kind, TokenKind::Ident(_)) {
+                        let (source2, spec2) = parse_dc_sweep_spec(stream, line_num, params)?;
+                        push_xyce_inconsistent_dc_sweep_warning(
+                            params,
+                            diagnostics,
+                            origin,
+                            &source2,
+                            &spec2,
+                        );
+                        Some(crate::netlist::DcSecondSweep {
+                            source: source2,
+                            start: spec2.start,
+                            stop: spec2.stop,
+                            step: spec2.step,
+                            mode: spec2.mode,
+                        })
+                    } else {
+                        None
+                    };
+                skip_commas(stream);
+                restart = take_dc_restart_option(stream, line_num, restart)?;
 
                 analysis = Some(AnalysisCommand::Dc {
                     source,
@@ -220,6 +224,7 @@ impl ParsedAnalysisCard {
                     step: spec.step,
                     mode: spec.mode,
                     sweep2,
+                    restart: restart.unwrap_or(false),
                 });
             }
             AnalysisHead::Ac => {
@@ -466,9 +471,68 @@ impl ParsedAnalysisCard {
     }
 }
 
+/// Read `.DC`'s `RESTART=YES|NO` when it is the next token pair.
+///
+/// `previous` is a value an earlier position of the same card already read; a
+/// second spelling of the keyword is refused rather than one silently winning.
+fn take_dc_restart_option(
+    stream: &mut TokenStream,
+    line_num: usize,
+    previous: Option<bool>,
+) -> Result<Option<bool>, ParseError> {
+    let is_restart = matches!(
+        &stream.peek().kind,
+        TokenKind::Ident(word) if word.eq_ignore_ascii_case("RESTART")
+    ) && stream.peek_n(1).kind == TokenKind::Equals;
+    if !is_restart {
+        return Ok(previous);
+    }
+    if previous.is_some() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: ".DC accepts RESTART= at most once".to_string(),
+        });
+    }
+    stream.advance();
+    stream.advance();
+    let value = match &stream.peek().kind {
+        TokenKind::Ident(word) if word.eq_ignore_ascii_case("YES") => true,
+        TokenKind::Ident(word) if word.eq_ignore_ascii_case("NO") => false,
+        TokenKind::Number(value) if *value == 1.0 => true,
+        TokenKind::Number(value) if *value == 0.0 => false,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".DC RESTART= must be YES or NO".to_string(),
+            });
+        }
+    };
+    stream.advance();
+    Ok(Some(value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dc_restart(line: &str) -> Result<bool, ParseError> {
+        let mut state = ParseState::new();
+        parse(&mut state, line)?;
+        match state.analyses.last() {
+            Some(AnalysisCommand::Dc { restart, .. }) => Ok(*restart),
+            other => panic!("expected a .DC card, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn dc_restart_parses_after_either_sweep_and_defaults_to_carry() {
+        assert!(!dc_restart(".dc v1 0 1 0.1").unwrap());
+        assert!(dc_restart(".dc v1 0 1 0.1 restart=yes").unwrap());
+        assert!(!dc_restart(".dc v1 0 1 0.1 RESTART=NO").unwrap());
+        assert!(dc_restart(".dc v1 0 1 0.1 v2 0 2 1 RESTART=YES").unwrap());
+        assert!(dc_restart(".dc v1 0 1 0.1 restart=yes restart=no").is_err());
+        assert!(dc_restart(".dc v1 0 1 0.1 restart=maybe").is_err());
+    }
 
     fn parse(state: &mut ParseState, line: &str) -> Result<(), ParseError> {
         let mut stream = TokenStream::new(tokenize(line).unwrap());

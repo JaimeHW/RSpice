@@ -12613,6 +12613,7 @@ impl XyceDcSweepDimension {
             stop: self.stop,
             step: self.step,
             mode: self.mode.clone(),
+            restart: false,
         }
     }
 
@@ -12634,6 +12635,7 @@ impl XyceDcSweep {
             stop: self.stop,
             step: self.step,
             mode: self.mode.clone(),
+            restart: false,
         }
     }
 }

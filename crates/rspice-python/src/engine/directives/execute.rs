@@ -61,6 +61,7 @@ pub(super) fn execute(
             step,
             mode,
             sweep2,
+            restart,
         } => {
             let engine = py_engine.engine_for_netlist(&netlist.inner);
             let primary = DcSweepSpec {
@@ -68,6 +69,7 @@ pub(super) fn execute(
                 stop: *stop,
                 step: *step,
                 mode: mode.clone(),
+                restart: *restart,
             };
             let results = run_interruptible(py, &py_engine.active_runs, |abort| {
                 engine.run_dc_sweep2_spec_with_report_and_abort(

@@ -336,12 +336,14 @@ impl ControlCircuit {
                 step,
                 mode,
                 sweep2,
+                restart,
             } => {
                 let spec = crate::netlist::DcSweepSpec {
                     start: *start,
                     stop: *stop,
                     step: *step,
                     mode: mode.clone(),
+                    restart: *restart,
                 };
                 let result = bounded
                     .run_dc_analysis_with_abort(&netlist, source, &spec, sweep2.as_ref(), abort)

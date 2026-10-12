@@ -6077,17 +6077,17 @@ mod tests {
                     step,
                     mode,
                     sweep2: None,
+                    ..
                 },
             ] = netlist.analyses.as_slice()
             else {
                 panic!("{statement} lost its sole DC analysis")
             };
             assert_eq!(source, "V1");
+            let spec = crate::netlist::DcSweepSpec::linear(*start, *stop, *step);
             let spec = crate::netlist::DcSweepSpec {
-                start: *start,
-                stop: *stop,
-                step: *step,
                 mode: mode.clone(),
+                ..spec
             };
             assert_eq!(spec.points(), vec![100.0]);
             let [diagnostic] = netlist.diagnostics.as_slice() else {

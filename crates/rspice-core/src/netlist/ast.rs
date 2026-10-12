@@ -1228,6 +1228,7 @@ impl DcSecondSweep {
             stop: self.stop,
             step: self.step,
             mode: self.mode.clone(),
+            restart: false,
         }
     }
 }
@@ -1252,6 +1253,11 @@ pub struct DcSweepSpec {
     pub stop: Value,
     pub step: Value,
     pub mode: DcSweepMode,
+    /// `RESTART=YES`: every point is an independent operating point, solved
+    /// afresh from the deck's initial state. The default (`NO`) continues
+    /// each point from the previous one's accepted state, analog seed and
+    /// held discrete state alike, so hysteresis follows sweep order.
+    pub restart: bool,
 }
 
 impl DcSweepSpec {
@@ -1261,6 +1267,7 @@ impl DcSweepSpec {
             stop,
             step,
             mode: DcSweepMode::Linear,
+            restart: false,
         }
     }
 
@@ -1272,6 +1279,7 @@ impl DcSweepSpec {
             stop,
             step: 0.0,
             mode: DcSweepMode::List(values),
+            restart: false,
         }
     }
 
@@ -1281,6 +1289,7 @@ impl DcSweepSpec {
             stop,
             step: points_per_decade as Value,
             mode: DcSweepMode::Decade { points_per_decade },
+            restart: false,
         }
     }
 
@@ -1290,6 +1299,7 @@ impl DcSweepSpec {
             stop,
             step: points_per_octave as Value,
             mode: DcSweepMode::Octave { points_per_octave },
+            restart: false,
         }
     }
 
@@ -2227,6 +2237,7 @@ pub enum AnalysisCommand {
     Op,
 
     /// DC sweep: .DC source start stop step [source2 start2 stop2 step2]
+    /// [RESTART=YES|NO]
     Dc {
         source: String,
         start: Value,
@@ -2236,6 +2247,9 @@ pub enum AnalysisCommand {
         /// Optional second (outer) sweep source: the first source sweeps
         /// fully at every value of this one, ngspice-style.
         sweep2: Option<DcSecondSweep>,
+        /// `RESTART=YES`: every point is an independent operating point; see
+        /// [`DcSweepSpec::restart`].
+        restart: bool,
     },
 
     /// AC analysis: .AC DEC|LIN|OCT np fstart fstop

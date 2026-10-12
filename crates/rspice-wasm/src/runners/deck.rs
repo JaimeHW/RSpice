@@ -314,12 +314,14 @@ fn execute_analysis(
             step,
             mode,
             sweep2,
+            restart,
         } => {
             let spec = DcSweepSpec {
                 start: *start,
                 stop: *stop,
                 step: *step,
                 mode: mode.clone(),
+                restart: *restart,
             };
             let result = engine
                 .run_dc_analysis_with_abort(netlist, source, &spec, sweep2.as_ref(), abort)

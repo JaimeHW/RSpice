@@ -6917,6 +6917,7 @@ fn dc_primary_segment_starts(netlist: &Netlist, point_count: usize) -> Vec<usize
             stop: *stop,
             step: *step,
             mode: mode.clone(),
+            restart: false,
         }
         .points()
         .len();

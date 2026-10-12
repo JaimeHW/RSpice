@@ -67,6 +67,7 @@ pub(crate) fn describe_analysis(analysis: &AnalysisCommand) -> String {
             step,
             mode,
             sweep2,
+            ..
         } => describe_dc_analysis(source, *start, *stop, *step, mode, sweep2.as_ref()),
         AnalysisCommand::Ac {
             variation,

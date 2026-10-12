@@ -45,6 +45,7 @@ fn direct(
         step,
         mode,
         sweep2,
+        restart,
     } = analysis
     else {
         panic!("DC")
@@ -58,6 +59,7 @@ fn direct(
                 stop: *stop,
                 step: *step,
                 mode: mode.clone(),
+                restart: *restart,
             },
             sweep2.as_ref(),
             &NoAbort,
