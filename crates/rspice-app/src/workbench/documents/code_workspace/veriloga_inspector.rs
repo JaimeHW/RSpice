@@ -21,9 +21,11 @@ use crate::workbench::design_system::{
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
+use rspice_design::library::metadata::{CellParameter, ParameterValueType};
+
 use super::page::VerilogAWorkbenchState;
 use super::veriloga_interface::{
-    VerilogACellSymbol, VerilogAInterfaceOutcome, VerilogASymbolDrift,
+    VerilogACellSymbol, VerilogAInterfaceOutcome, VerilogASymbolDrift, compiled_parameters,
 };
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource,
@@ -155,8 +157,260 @@ pub(crate) fn show_veriloga_inspector(
         messages,
         &t,
     );
+    parameters_section(ui, receipt, messages, &t);
     abi_section(ui, receipt, messages);
     action
+}
+
+/// Height of one row of the parameter table, and of its column captions.
+const PARAMETER_ROW_H: f32 = 22.0;
+const PARAMETER_CAPTION_H: f32 = 20.0;
+/// Gap between two columns of the parameter table.
+const PARAMETER_COLUMN_GAP: f32 = 8.0;
+/// Inset of the table from the section's edges, matching the property rows'.
+const PARAMETER_TABLE_PAD: f32 = 10.0;
+/// Space above the captions and below the last row.
+const PARAMETER_TABLE_INSET_Y: f32 = 6.0;
+
+/// The parameters an instance of the compiled module takes, one dense row
+/// each: name, type, default, range and units, with the module's description
+/// of the parameter on hover. These are exactly what the compile writes as the
+/// view's parameter contract, so the table and an instance's property sheet
+/// cannot disagree.
+fn parameters_section(
+    ui: &mut Ui,
+    receipt: Option<&VerilogACompileReceipt>,
+    messages: MessageCatalog,
+    t: &Tokens,
+) {
+    let parameters = receipt.map(|receipt| compiled_parameters(&receipt.compilation.report().abi));
+    let required = messages.text(MessageId::VerilogACompileRequired);
+    let count = parameters
+        .as_ref()
+        .map(|parameters| parameters.len().to_string());
+    let status = match count.as_deref() {
+        Some(count) => (count, t.color.text_dim),
+        None => (required.as_str(), t.color.warn),
+    };
+    code_inspector_section(
+        ui,
+        &messages.text(MessageId::VerilogAParameters),
+        Some(status),
+        |ui| match parameters.as_deref() {
+            None => muted_row(ui, &messages.text(MessageId::VerilogAParametersNotCompiled)),
+            Some([]) => muted_row(ui, &messages.text(MessageId::VerilogANoParameters)),
+            Some(parameters) => parameter_table(ui, parameters, messages, t),
+        },
+    );
+}
+
+/// One parameter's cells, as the table shows them.
+struct ParameterCells {
+    name: String,
+    kind: String,
+    default: String,
+    range: String,
+    units: String,
+    description: Option<String>,
+}
+
+impl ParameterCells {
+    fn of(parameter: &CellParameter, messages: MessageCatalog) -> Self {
+        let declaration = parameter.declaration.as_ref();
+        let kind = match declaration.map(|declaration| declaration.value_type) {
+            Some(ParameterValueType::Integer) => MessageId::VerilogAParameterTypeInteger,
+            Some(ParameterValueType::String) => MessageId::VerilogAParameterTypeString,
+            _ => MessageId::VerilogAParameterTypeReal,
+        };
+        // In a narrow column the interval reads without its `from`.
+        let range = declaration
+            .and_then(|declaration| declaration.range.as_ref())
+            .map(|range| {
+                let text = range.source_text();
+                text.strip_prefix("from ")
+                    .map_or(text.clone(), str::to_owned)
+            })
+            .unwrap_or_else(|| messages.text(MessageId::VerilogAParameterAnyValue));
+        Self {
+            name: parameter.name.clone(),
+            kind: messages.text(kind),
+            default: parameter
+                .default_value
+                .clone()
+                .unwrap_or_else(|| messages.text(MessageId::VerilogAParameterComputed)),
+            range,
+            units: declaration
+                .and_then(|declaration| declaration.units.clone())
+                .unwrap_or_default(),
+            description: declaration
+                .and_then(|declaration| declaration.description.clone())
+                .filter(|description| !description.trim().is_empty()),
+        }
+    }
+
+    fn columns(&self) -> [&str; 5] {
+        [
+            &self.name,
+            &self.kind,
+            &self.default,
+            &self.range,
+            &self.units,
+        ]
+    }
+}
+
+/// Narrowest a column is narrowed to before the next one gives way.
+const PARAMETER_COLUMN_MIN_W: f32 = 36.0;
+
+/// Column widths for a table `available` wide: each column as wide as its
+/// widest cell and the spare width to the range. When the cells do not fit,
+/// the range gives way first, since its full text is on hover; then the
+/// default, the name, and the type, each no narrower than a few characters.
+fn parameter_column_widths(natural: [f32; 5], available: f32) -> [f32; 5] {
+    let room = (available - PARAMETER_COLUMN_GAP * 4.0).max(0.0);
+    let mut widths = natural;
+    let total: f32 = natural.iter().sum();
+    if total <= room {
+        widths[3] += room - total;
+        return widths;
+    }
+    let mut excess = total - room;
+    for column in [3, 2, 0, 1] {
+        let give = (widths[column] - PARAMETER_COLUMN_MIN_W)
+            .max(0.0)
+            .min(excess);
+        widths[column] -= give;
+        excess -= give;
+    }
+    widths
+}
+
+fn parameter_table(
+    ui: &mut Ui,
+    parameters: &[CellParameter],
+    messages: MessageCatalog,
+    t: &Tokens,
+) {
+    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let sans = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let caption = theme::sans(tokens::FS_MICRO, FontWeight::Medium);
+    let cells = parameters
+        .iter()
+        .map(|parameter| ParameterCells::of(parameter, messages))
+        .collect::<Vec<_>>();
+    let captions = [
+        MessageId::VerilogAParameterName,
+        MessageId::VerilogAParameterType,
+        MessageId::VerilogAParameterDefault,
+        MessageId::VerilogAParameterRange,
+        MessageId::VerilogAParameterUnits,
+    ]
+    .map(|id| messages.text(id).to_uppercase());
+    // Units are painted in the sans face: the mono face has no `Ω`.
+    let font_of = |column: usize| if column == 4 { &sans } else { &mono };
+    let measure = |text: &str, font: &egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), t.color.text)
+            .size()
+            .x
+    };
+    let mut natural = [0.0_f32; 5];
+    for (column, width) in natural.iter_mut().enumerate() {
+        *width = cells
+            .iter()
+            .map(|row| measure(row.columns()[column], font_of(column)))
+            .fold(measure(&captions[column], &caption), f32::max);
+    }
+    let width = ui.available_width();
+    let widths = parameter_column_widths(natural, width - 2.0 * PARAMETER_TABLE_PAD);
+    let lefts = {
+        let mut left = PARAMETER_TABLE_PAD;
+        widths.map(|width| {
+            let start = left;
+            left += width + PARAMETER_COLUMN_GAP;
+            start
+        })
+    };
+    let paint_cells = |ui: &Ui,
+                       rect: egui::Rect,
+                       texts: [&str; 5],
+                       fonts: [&egui::FontId; 5],
+                       colors: [Color32; 5]| {
+        for column in 0..5 {
+            let cell = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + lefts[column], rect.top()),
+                Vec2::new(widths[column], rect.height()),
+            );
+            let shown = crate::workbench::design_system::elide_text(
+                ui,
+                texts[column],
+                fonts[column],
+                cell.width(),
+            );
+            ui.painter().with_clip_rect(cell).text(
+                egui::pos2(cell.left(), cell.center().y),
+                egui::Align2::LEFT_CENTER,
+                shown,
+                fonts[column].clone(),
+                colors[column],
+            );
+        }
+    };
+
+    ui.add_space(PARAMETER_TABLE_INSET_Y);
+    let (header, _) = ui.allocate_exact_size(Vec2::new(width, PARAMETER_CAPTION_H), Sense::hover());
+    paint_cells(
+        ui,
+        header,
+        [
+            &captions[0],
+            &captions[1],
+            &captions[2],
+            &captions[3],
+            &captions[4],
+        ],
+        [&caption; 5],
+        [t.color.text_faint; 5],
+    );
+    for row in &cells {
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(width, PARAMETER_ROW_H), Sense::hover());
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        }
+        paint_cells(
+            ui,
+            rect,
+            row.columns(),
+            [&mono, &mono, &mono, &mono, &sans],
+            [
+                t.color.text,
+                t.color.text_dim,
+                t.color.text_dim,
+                t.color.text_dim,
+                t.color.text_dim,
+            ],
+        );
+        let summary = [
+            row.kind.as_str(),
+            row.default.as_str(),
+            row.range.as_str(),
+            row.units.as_str(),
+        ]
+        .into_iter()
+        .filter(|cell| !cell.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+        let spoken = format!("{}: {summary}", row.name);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, spoken.clone())
+        });
+        let _ = response.on_hover_text(match row.description.as_deref() {
+            Some(description) => format!("{spoken}\n{description}"),
+            None => spoken.clone(),
+        });
+    }
+    ui.add_space(PARAMETER_TABLE_INSET_Y);
 }
 
 fn module_section(
@@ -482,17 +736,16 @@ fn abi_section(ui: &mut Ui, receipt: Option<&VerilogACompileReceipt>, messages: 
                 // Counts exist only for a module that compiled. Before that a
                 // dash, not a zero: an uncompiled module has no contract yet,
                 // which is different from a contract with nothing in it.
+                // The parameters have a section of their own above.
                 let counts = receipt.map(|receipt| {
                     [
                         receipt.analog_ports,
-                        receipt.compilation.report().abi.parameters.len(),
                         receipt.noise_sources,
                         receipt.state_variables,
                     ]
                 });
                 for (index, label) in [
                     MessageId::VerilogAAnalogPorts,
-                    MessageId::VerilogAParameters,
                     MessageId::VerilogANoiseSources,
                     MessageId::VerilogAStateVariables,
                 ]
@@ -611,4 +864,27 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
         shown.response.rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A table that fits gives its spare width to the range; one that does
+    /// not narrows the range first, and a parameter's name last but one.
+    #[test]
+    fn the_range_gives_way_before_the_name_does() {
+        let natural = [40.0, 46.0, 53.0, 105.0, 28.0];
+        let gaps = PARAMETER_COLUMN_GAP * 4.0;
+        let roomy = parameter_column_widths(natural, 300.0 + gaps);
+        assert_eq!(roomy, [40.0, 46.0, 53.0, 133.0, 28.0]);
+
+        let tight = parameter_column_widths(natural, 258.0 + gaps);
+        assert_eq!(tight, [40.0, 46.0, 53.0, 91.0, 28.0]);
+
+        // Range, default and name each down to a few characters, and the
+        // last two points from the type.
+        let cramped = parameter_column_widths(natural, 180.0 + gaps);
+        assert_eq!(cramped, [36.0, 44.0, 36.0, 36.0, 28.0]);
+    }
 }
