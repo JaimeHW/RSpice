@@ -6001,6 +6001,20 @@ impl XyceTestRunner {
         let points = netlist
             .frequency_data_table_points(table_name)
             .map_err(|error| format!("{analysis} {error}"))?;
+        // RSpice's shared table contract admits a 0 Hz AC row (a1c4c165a).
+        // Xyce does not: AC::doInit and NOISE::doInit refuse every
+        // FREQ/HERTZ value <= 0 (N_ANP_AC.C:775-782, N_ANP_NOISE.C:590-596).
+        if let Some((row, point)) = points
+            .iter()
+            .enumerate()
+            .find(|(_, point)| point.frequency <= 0.0)
+        {
+            return Err(format!(
+                "{analysis} table '{table_name}' row {} frequency must be positive and finite, got {}",
+                row + 1,
+                point.frequency
+            ));
+        }
         Ok(points
             .into_iter()
             .map(|point| XyceFrequencyDataPoint {
