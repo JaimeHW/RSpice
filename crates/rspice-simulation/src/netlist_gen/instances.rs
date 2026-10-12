@@ -957,7 +957,7 @@ impl<'a> NetlistGenerator<'a> {
                 rspice_design::schematic::component::InstanceMultiplicity::RESERVED_GUIDANCE
             ));
         }
-        if binding.parameter_order.is_empty() {
+        if !binding.parameters_declared() {
             if !component.params.trim().is_empty() {
                 self.warnings.push(format!(
                     "Cell instance '{}' passes its parameters through unchecked: {}/{} declares no parameter contract",
@@ -1534,7 +1534,8 @@ pub(super) fn model_bound_instance_params(
             .any(|allowed| allowed.eq_ignore_ascii_case(key))
         {
             return Err(format!(
-                "parameter `{key}` is not declared by the symbol form"
+                "parameter `{key}` is not declared by {}/{}",
+                binding.library, binding.cell
             ));
         }
         if value.is_empty()
@@ -1852,6 +1853,38 @@ mod cell_instance_parameter_tests {
             "{:?}",
             silent.warnings
         );
+    }
+
+    /// A module that declares no parameter accepts none: an override left
+    /// from before its last parameter was removed is refused, not emitted.
+    #[test]
+    fn a_cell_declaring_an_empty_contract_refuses_every_parameter() {
+        let generate_declared = |params: &str| {
+            let mut binding = amp_binding(&[]);
+            binding.declare_parameters(Some(Vec::new()));
+            let mut component = Component::new(1, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(binding)
+                .with_name_value("X1", "amp");
+            component.params = params.to_owned();
+            let mut schematic = Schematic::default();
+            schematic.document_mut_for_test().components.push(component);
+            generate_netlist(&schematic)
+        };
+
+        let refused = generate_declared("gain=2");
+        assert!(
+            refused.netlist.lines().all(|line| !line.starts_with("X1 ")),
+            "{}",
+            refused.netlist
+        );
+        let error = refused.errors.join("\n");
+        assert!(
+            error.contains("parameter `gain` is not declared by work/amp"),
+            "{error}"
+        );
+
+        let bare = instance_line(&generate_declared(""));
+        assert!(bare.ends_with(" amp"), "{bare}");
     }
 }
 
