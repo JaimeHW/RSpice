@@ -1180,6 +1180,35 @@ impl Netlist {
         self.ast_overlay.terminal_current_probes.push(probe);
     }
 
+    /// Ordinal, among this deck's authored `.TRAN` cards, of the transient
+    /// every `.FFT` card post-processes.
+    pub(crate) const FFT_TRANSIENT_ORDINAL: usize = 0;
+
+    /// Which authored transient each `.FOUR` card post-processes, as a
+    /// zero-based ordinal among this deck's `.TRAN` cards, in `.FOUR` card
+    /// order.
+    ///
+    /// A `.FOUR` card reads the transient authored before it; one written
+    /// above the first `.TRAN`, where the directive is commonly written, reads
+    /// the first. An ordinal names a transient only when the deck authors
+    /// one, and the planner refuses the cards otherwise.
+    ///
+    /// This is the one statement of the binding: the deck planner mints
+    /// post-process identities from it, and the control-script host selects
+    /// with it the cards each authored transient it runs carries.
+    pub(crate) fn fourier_transient_ordinals(&self) -> Vec<usize> {
+        let mut seen_transients = 0usize;
+        let mut ordinals = Vec::new();
+        for command in &self.analyses {
+            match command {
+                AnalysisCommand::Tran { .. } => seen_transients += 1,
+                AnalysisCommand::Four { .. } => ordinals.push(seen_transients.saturating_sub(1)),
+                _ => {}
+            }
+        }
+        ordinals
+    }
+
     /// Retained root input, including parameter values materialized by a study.
     pub(crate) fn retained_source_bytes(&self) -> usize {
         self.ast_overlay.parameters.iter().fold(

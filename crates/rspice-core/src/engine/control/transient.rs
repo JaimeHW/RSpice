@@ -1,6 +1,5 @@
 //! Caller-owned transient execution within the shared ordered control host.
 use super::*;
-use crate::execution::{DeckPlan, DeckPlanError, PostProcessSource};
 use crate::identity::AnalysisInstanceId;
 
 impl ControlCircuit {
@@ -98,12 +97,18 @@ fn default_transient(
         .map_err(|error| simulation_error(line, error))
 }
 
+/// The single-analysis netlist a command runs, carrying the authored `.FOUR`
+/// and `.FFT` cards a transient post-processes.
+///
+/// An authored transient (one `run` executes) carries only the cards the deck
+/// binds to it, by the rule `Netlist` states; the host plans their identities
+/// from this netlist. A transient the script itself issues has no authored
+/// position, so it carries every card.
 pub(super) fn analysis_netlist(
     source: &Netlist,
     analysis: &AnalysisCommand,
     authored_index: Option<usize>,
     line: usize,
-    limits: &crate::ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Netlist, ControlExecutionError> {
     let mut netlist = source.clone();
@@ -113,44 +118,46 @@ pub(super) fn analysis_netlist(
     if !matches!(analysis, AnalysisCommand::Tran { .. }) {
         return Ok(netlist);
     }
-    let selected = if let Some(index) = authored_index {
-        let plan =
-            DeckPlan::from_netlist_with_abort(source, limits, abort).map_err(
-                |error| match error {
-                    DeckPlanError::Aborted => simulation_error(line, SimulationError::Aborted),
-                    DeckPlanError::ResourceLimit(error) => simulation_error(line, error.into()),
-                    error => command_error(line, error.to_string()).into(),
-                },
-            )?;
-        let parent = plan
-            .authored_analyses(source)
-            .nth(index)
-            .and_then(|(_, id)| id)
-            .ok_or_else(|| command_error(line, "authored transient has no planned identity"))?;
-        Some(
-            plan.post_process_analyses()
-                .iter()
-                .filter(|post| post.parent() == parent)
-                .map(|post| post.source().clone())
-                .collect::<Vec<_>>(),
-        )
-    } else {
-        None
+    if abort.is_aborted() {
+        return Err(simulation_error(line, SimulationError::Aborted));
+    }
+    // Ordinal of the authored transient among the deck's `.TRAN` cards.
+    let selected = match authored_index {
+        Some(index) => {
+            if !matches!(
+                source.analyses.get(index),
+                Some(AnalysisCommand::Tran { .. })
+            ) {
+                return Err(
+                    command_error(line, "authored transient has no planned identity").into(),
+                );
+            }
+            Some(
+                source
+                    .analyses
+                    .iter()
+                    .take(index)
+                    .filter(|card| matches!(card, AnalysisCommand::Tran { .. }))
+                    .count(),
+            )
+        }
+        None => None,
     };
+    let fourier_transients = source.fourier_transient_ordinals();
     for (card_index, card) in source
         .analyses
         .iter()
         .filter(|card| matches!(card, AnalysisCommand::Four { .. }))
         .enumerate()
     {
-        if selected.as_ref().is_none_or(|posts| posts.iter().any(|post| matches!(post, PostProcessSource::FourierOperand { card_index: index, .. } if *index == card_index))) {
+        if selected.is_none_or(|ordinal| fourier_transients.get(card_index) == Some(&ordinal)) {
             netlist.analyses.push(card.clone());
         }
     }
-    for (card_index, card) in source.fft_analyses.iter().enumerate() {
-        if selected.as_ref().is_none_or(|posts| posts.iter().any(|post| matches!(post, PostProcessSource::Fft { card_index: index } if *index == card_index))) {
-            netlist.fft_analyses.push(card.clone());
-        }
+    if selected.is_none_or(|ordinal| ordinal == Netlist::FFT_TRANSIENT_ORDINAL) {
+        netlist
+            .fft_analyses
+            .extend(source.fft_analyses.iter().cloned());
     }
     Ok(netlist)
 }

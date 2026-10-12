@@ -1468,34 +1468,20 @@ fn plan_post_processes(
     if transients.is_empty() && netlist.control_script.is_some() {
         return Ok(Vec::new());
     }
-    let first_transient = |card: &'static str| -> Result<AnalysisInstanceId, DeckPlanError> {
-        transients
-            .first()
-            .copied()
-            .ok_or(DeckPlanError::MissingUpstreamAnalysis {
-                card,
-                required: "a completed authored .TRAN to post-process",
-            })
-    };
-
-    // The transient a `.FOUR` card follows, by authored position. Cards above
-    // the deck's `.TRAN` line attach to the first transient.
-    let mut preceding_transient: Vec<Option<AnalysisInstanceId>> =
-        Vec::with_capacity(four_operands.len());
-    let mut seen_transients = 0usize;
-    for command in &netlist.analyses {
-        match command {
-            AnalysisCommand::Tran { .. } => seen_transients += 1,
-            AnalysisCommand::Four { .. } => {
-                preceding_transient.push(
-                    seen_transients
-                        .checked_sub(1)
-                        .and_then(|index| transients.get(index).copied()),
-                );
-            }
-            _ => {}
-        }
-    }
+    // The authored transient a card reads is the deck's rule, stated once on
+    // `Netlist`; planning only maps that ordinal onto a planned identity.
+    let bound_transient =
+        |card: &'static str, ordinal: Option<usize>| -> Result<AnalysisInstanceId, DeckPlanError> {
+            ordinal
+                .and_then(|ordinal| transients.get(ordinal))
+                .or_else(|| transients.first())
+                .copied()
+                .ok_or(DeckPlanError::MissingUpstreamAnalysis {
+                    card,
+                    required: "a completed authored .TRAN to post-process",
+                })
+        };
+    let fourier_transients = netlist.fourier_transient_ordinals();
 
     let mut requests = Vec::new();
     let mut sources = Vec::new();
@@ -1526,10 +1512,7 @@ fn plan_post_processes(
                 required: "at least one output operand",
             });
         }
-        let parent = match preceding_transient.get(card_index).copied().flatten() {
-            Some(id) => id,
-            None => first_transient(".FOUR")?,
-        };
+        let parent = bound_transient(".FOUR", fourier_transients.get(card_index).copied())?;
         let outputs = netlist
             .analyses
             .iter()
@@ -1553,7 +1536,7 @@ fn plan_post_processes(
     }
 
     if !netlist.fft_analyses.is_empty() {
-        let parent = first_transient(".FFT")?;
+        let parent = bound_transient(".FFT", Some(crate::netlist::Netlist::FFT_TRANSIENT_ORDINAL))?;
         for card_index in 0..netlist.fft_analyses.len() {
             if abort.is_aborted() {
                 return Err(DeckPlanError::Aborted);

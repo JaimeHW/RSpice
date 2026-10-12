@@ -310,14 +310,8 @@ impl ControlCircuit {
             .map_err(|_| command_error(line, "analysis identity ordinal overflow"))?;
         let analysis_id = crate::identity::AnalysisInstanceId::new(identity_kind, identity_ordinal);
         let name = format!("{kind}{ordinal}");
-        let netlist = transient::analysis_netlist(
-            &self.netlist,
-            &analysis,
-            authored_index,
-            line,
-            &bounded.config().resource_limits,
-            abort,
-        )?;
+        let netlist =
+            transient::analysis_netlist(&self.netlist, &analysis, authored_index, line, abort)?;
         let mut device_op_report = None;
         let (kind, result, count) = match &analysis {
             AnalysisCommand::Op => {
