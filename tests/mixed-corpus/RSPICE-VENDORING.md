@@ -131,8 +131,9 @@ decks.
 
 RSpice-authored throughout: the register (`net/sar8.v`), the testbench and
 register in one file (`net/sar8_full.v`), the Verilog-A comparator
-(`net/cmp_va.va`), the capacitor DAC and switches (`net/sar_analog.cir`), the
-sequencer wiring (`net/sar_ports.cir`, `net/sar_full.cir`), and every oracle
+(`net/cmp_va.va`), the capacitor DAC and switches (`net/sar_analog.cir`), its
+values (`net/caps_nominal.cir`, and `net/caps_mc.cir` with the Monte Carlo
+mismatch draws the mc-tran decks include), the sequencer wiring (`net/sar_ports.cir`, `net/sar_full.cir`), and every oracle
 deck. `net/vin_codes.cir` and `net/vin_ramp.cir` are generated from the
 formulas in their headers (mid-code inputs `(S_k + 0.5)/256 V`; two ramps
 `(127 + (k - 4)/16)/256 V` and `(128 + (k - 4)/16)/256 V`, k = 0..7).

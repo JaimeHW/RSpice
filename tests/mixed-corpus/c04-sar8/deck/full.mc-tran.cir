@@ -2,17 +2,7 @@
 .hdl "../net/sar8_full.v" module=tb_sar
 .hdl "../net/sar8_full.v" module=sar8
 .hdl "../net/cmp_va.va"
-* capacitor mismatch: C_k = n_k Cu (1 + e_k), e_k gaussian with sigma
-* 0.005/sqrt(n_k) (each unit capacitor 0.5 %), n_k = 2^k; the dummy is nominal
-.param c7v={2.56p*(1+agauss(0,4.4194174e-4,1))}
-.param c6v={1.28p*(1+agauss(0,6.25e-4,1))}
-.param c5v={640f*(1+agauss(0,8.8388348e-4,1))}
-.param c4v={320f*(1+agauss(0,1.25e-3,1))}
-.param c3v={160f*(1+agauss(0,1.7677670e-3,1))}
-.param c2v={80f*(1+agauss(0,2.5e-3,1))}
-.param c1v={40f*(1+agauss(0,3.5355339e-3,1))}
-.param c0v={20f*(1+agauss(0,5e-3,1))}
-.param cdv=20f
+.include ../net/caps_mc.cir
 .include ../net/sar_analog.cir
 .include ../net/vin_ramp.cir
 .include ../net/sar_full.cir
