@@ -12,10 +12,21 @@ use crate::numerics::integration::CompanionCoefficients;
 use crate::{Complex64, Value};
 use std::any::Any;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 use std::vec::Drain;
+
+/// The context's name-keyed maps hash with Fx rather than SipHash.
+///
+/// Every port, parameter and state lookup a code model makes goes through one
+/// of these maps by name, several per model call and several calls per Newton
+/// iterate, and SipHash of those short names was a measurable share of every
+/// hybrid model's evaluation. The keys are names the netlist and the model
+/// contract supply, the maps are private to this context, and nothing reads
+/// them in iteration order (the checkpoint codec sorts by name), so the hasher
+/// changes no result.
+type HashMap<K, V> = rustc_hash::FxHashMap<K, V>;
+type HashSet<T> = rustc_hash::FxHashSet<T>;
 
 #[cfg(any(feature = "veriloga", test))]
 pub(crate) mod checkpoint;

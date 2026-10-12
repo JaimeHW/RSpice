@@ -896,7 +896,9 @@ pub struct XspiceInstance {
     /// Port connections (indexed by port spec order)
     connections: CopyOnWrite<Vec<PortConnection>>,
     /// Port name to index mapping
-    port_indices: CopyOnWrite<HashMap<String, usize>>,
+    /// Fx-hashed like the context's own name-keyed maps: stamping looks every
+    /// control port up here by name at each Newton iterate.
+    port_indices: CopyOnWrite<rustc_hash::FxHashMap<String, usize>>,
     /// Execution context
     context: CmContext,
     /// Optional MNA branch variable per port (for voltage-type outputs)
@@ -1079,7 +1081,7 @@ impl XspiceInstance {
         }
 
         // Build port index map
-        let mut port_indices = HashMap::new();
+        let mut port_indices = rustc_hash::FxHashMap::default();
         for (i, port) in ports.iter().enumerate() {
             port_indices.insert(port.name.clone(), i);
         }
