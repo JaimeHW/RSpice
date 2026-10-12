@@ -748,6 +748,24 @@ impl<'a> ExprParser<'a> {
 
         // Check for function call
         if self.consume('(') {
+            // A two-letter `I<lead>` name is also a legal `.FUNC` name, so
+            // `ID(2)` or `IC(a+1)` must keep their argument expressions. A
+            // bare device name, or a list the ordinary grammar rejects (a
+            // hierarchical `X1:Q1` or wildcard reference), is a raw probe.
+            if is_lead_current_call_name(&name) {
+                let arguments_start = self.pos;
+                match self.parse_call_arguments() {
+                    Ok(args)
+                        if !is_bare_probe_reference(
+                            &self.input[arguments_start..self.pos - ')'.len_utf8()],
+                        ) =>
+                    {
+                        return Ok(Expr::FnCall { name, args });
+                    }
+                    Err(error) if self.aborted => return Err(error),
+                    _ => self.pos = arguments_start,
+                }
+            }
             if is_raw_probe_accessor(&name)
                 || (self.control_vectors
                     && name
@@ -785,28 +803,7 @@ impl<'a> ExprParser<'a> {
                 }
                 return Ok(Expr::FnCall { name, args });
             }
-            let mut args = Vec::new();
-
-            self.skip_ws();
-            if !self.check(')') {
-                args.push(self.parse_ternary()?);
-
-                loop {
-                    self.skip_ws();
-                    if self.consume(',') {
-                        self.skip_ws();
-                        args.push(self.parse_ternary()?);
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            self.skip_ws();
-            if !self.consume(')') {
-                return Err(ExprError::MissingCloseParen);
-            }
-
+            let args = self.parse_call_arguments()?;
             Ok(Expr::FnCall { name, args })
         } else {
             match name.as_str() {
@@ -817,6 +814,32 @@ impl<'a> ExprParser<'a> {
                 _ => Ok(Expr::Param(name)),
             }
         }
+    }
+
+    /// Parse ordinary call arguments after `(`, through the closing `)`.
+    fn parse_call_arguments(&mut self) -> Result<Vec<Expr>, ExprError> {
+        let mut args = Vec::new();
+
+        self.skip_ws();
+        if !self.check(')') {
+            args.push(self.parse_ternary()?);
+
+            loop {
+                self.skip_ws();
+                if self.consume(',') {
+                    self.skip_ws();
+                    args.push(self.parse_ternary()?);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.skip_ws();
+        if !self.consume(')') {
+            return Err(ExprError::MissingCloseParen);
+        }
+        Ok(args)
     }
 }
 
@@ -829,22 +852,38 @@ fn is_expr_ident_continue(c: char) -> bool {
 }
 
 fn is_raw_probe_accessor(name: &str) -> bool {
-    (name != "IF" && crate::netlist::is_device_lead_current_accessor(name))
-        || matches!(
-            name,
-            "N" | "V"
-                | "VM"
-                | "VR"
-                | "VI"
-                | "VP"
-                | "VDB"
-                | "I"
-                | "IM"
-                | "IR"
-                | "II"
-                | "IP"
-                | "IDB"
-                | "DNO"
-                | "DNI"
-        )
+    is_lead_current_call_name(name) || is_classic_probe_accessor(name)
+}
+
+/// Device lead-current names (`IC`, `ID`, ...) outside the classic probe set.
+/// They are raw probes only when an ordinary call cannot parse them.
+fn is_lead_current_call_name(name: &str) -> bool {
+    name != "IF"
+        && crate::netlist::is_device_lead_current_accessor(name)
+        && !is_classic_probe_accessor(name)
+}
+
+fn is_bare_probe_reference(text: &str) -> bool {
+    let mut chars = text.trim().chars();
+    chars.next().is_some_and(is_expr_ident_start) && chars.all(is_expr_ident_continue)
+}
+
+fn is_classic_probe_accessor(name: &str) -> bool {
+    matches!(
+        name,
+        "N" | "V"
+            | "VM"
+            | "VR"
+            | "VI"
+            | "VP"
+            | "VDB"
+            | "I"
+            | "IM"
+            | "IR"
+            | "II"
+            | "IP"
+            | "IDB"
+            | "DNO"
+            | "DNI"
+    )
 }

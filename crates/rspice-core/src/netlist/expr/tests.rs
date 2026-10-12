@@ -98,6 +98,36 @@ fn nested_curly_grouping_is_canonical_and_reports_its_delimiter() {
     ));
 }
 
+#[test]
+fn lead_current_named_user_functions_keep_their_argument_expressions() {
+    let mut ctx = ParamContext::new();
+    ctx.define_function("ID", vec!["X".into()], "X+1");
+    ctx.define_function("IC", vec!["X".into(), "Y".into()], "X*Y");
+    ctx.set("A", 2.0);
+    assert_eq!(eval_with(&ctx, "ID(2)"), 3.0);
+    assert_eq!(eval_with(&ctx, "ID(A+1)"), 4.0);
+    assert_eq!(eval_with(&ctx, "ID(A)"), 3.0);
+    assert_eq!(eval_with(&ctx, "IC(-A, ID(.5))"), -3.0);
+
+    // Device references keep the raw lead-current probe grammar.
+    for (expression, device) in [
+        ("IC(Q1)", "Q1"),
+        ("IC(X1:Q1)", "X1:Q1"),
+        ("ID( x1.m2 )", "X1.M2"),
+        ("IS(*)", "*"),
+    ] {
+        match parse_expression(expression).expect("lead-current probe parses") {
+            Expr::FnCall { args, .. } => {
+                assert!(
+                    matches!(args.as_slice(), [Expr::Param(name)] if name == device),
+                    "{expression} must keep its device reference: {args:?}"
+                );
+            }
+            other => panic!("{expression} must parse as a probe call: {other:?}"),
+        }
+    }
+}
+
 fn eval_with(ctx: &ParamContext, input: &str) -> Value {
     eval_expression(input, ctx).unwrap_or_else(|e| panic!("eval `{input}` failed: {e}"))
 }
