@@ -27,10 +27,21 @@ const LIBRARY: &str = "behavioral";
 /// A writable library cell `cell` whose `veriloga` view owns `source`, and
 /// states the names-only interface New View used to write.
 fn add_module_cell(state: &mut AppState, cell: &str, module: &str, source: &str) -> CellViewRef {
-    if state.library_manager.get_library(LIBRARY).is_none() {
-        state.library_manager.add_library(Library::new(LIBRARY));
+    add_module_cell_in(state, LIBRARY, cell, module, source)
+}
+
+/// [`add_module_cell`] in `library`, which is created if it is missing.
+fn add_module_cell_in(
+    state: &mut AppState,
+    library: &str,
+    cell: &str,
+    module: &str,
+    source: &str,
+) -> CellViewRef {
+    if state.library_manager.get_library(library).is_none() {
+        state.library_manager.add_library(Library::new(library));
     }
-    let reference = CellViewRef::new(LIBRARY, cell, "veriloga");
+    let reference = CellViewRef::new(library, cell, "veriloga");
     let mut view = View::new("veriloga", ViewType::VerilogA);
     view.metadata
         .insert("veriloga.module".to_owned(), module.to_owned());
@@ -40,8 +51,8 @@ fn add_module_cell(state: &mut AppState, cell: &str, module: &str, source: &str)
     library_cell.add_view(view);
     state
         .library_manager
-        .get_library_mut(LIBRARY)
-        .expect("the behavioral library")
+        .get_library_mut(library)
+        .expect("the library")
         .add_cell(library_cell);
     let bundle = ProjectSourceBundle::try_new(
         ProjectSourceOwner::cell_view(reference.clone()),
@@ -241,6 +252,11 @@ const VECTOR_MODULE: &str = "module vec(d, p, n);\n  inout [3:0] d;\n  inout p, 
 /// `reference` placed in the top schematic with the interface its view
 /// states, the way the library shelf places one.
 fn place_configured_instance(state: &mut AppState, reference: &CellViewRef) -> u64 {
+    place_configured_instance_at(state, reference, Point::new(20, 20))
+}
+
+/// [`place_configured_instance`] at `at`.
+fn place_configured_instance_at(state: &mut AppState, reference: &CellViewRef, at: Point) -> u64 {
     let ports = rspice_design::library::metadata::metadata_ports(
         &state
             .library_manager
@@ -256,9 +272,7 @@ fn place_configured_instance(state: &mut AppState, reference: &CellViewRef) -> u
     let mut binding =
         LibraryCellInstance::new(&reference.library, &reference.cell, &reference.view);
     binding.bind_interface(&ports);
-    let id = state
-        .schematic
-        .add_library_cell_component(Point::new(20, 20), binding);
+    let id = state.schematic.add_library_cell_component(at, binding);
     if state
         .workspace
         .content
@@ -386,6 +400,97 @@ fn a_continuous_vector_is_one_bus_pin_whose_conductors_are_the_modules_terminals
         .filter_map(|token| token.rsplit_once('#').map(|(_, bit)| bit))
         .collect::<Vec<_>>();
     assert_eq!(bits, ["3", "2", "1", "0"], "{line}");
+}
+
+/// A module is named after its cell, so two libraries can each hold a cell
+/// `amp` whose module is `amp`. Placed in one design, each instance binds its
+/// own view's module: the deck names a project module by the bundle that owns
+/// it, never by the name the two share, and each bundle's source is read once
+/// under its own key.
+#[test]
+fn same_named_cells_in_two_libraries_each_bind_their_own_module() {
+    let mut app = open_project_app();
+    let mut placed = Vec::new();
+    for (library, gain) in [("analog_a", "1m"), ("analog_b", "2m")] {
+        let reference = add_module_cell_in(
+            &mut app.state,
+            library,
+            "amp",
+            "amp",
+            &format!(
+                "module amp(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ {gain} * V(p, n);\nendmodule\n"
+            ),
+        );
+        open_in_design(&mut app.state, &reference);
+        compile_and_publish(&mut app);
+        placed.push(reference);
+    }
+    let mut instances = Vec::new();
+    for (reference, at) in placed.iter().zip([Point::new(20, 20), Point::new(200, 20)]) {
+        let id = place_configured_instance_at(&mut app.state, reference, at);
+        instances.push((reference.clone(), id));
+    }
+
+    let deck = configured_deck(&app).expect("both instances netlist and their runtimes prepare");
+
+    let bindings = instances
+        .iter()
+        .map(|(reference, id)| {
+            let binding = crate::state::workspace::project_veriloga_binding_for_view(
+                &app.state.workspace,
+                &app.state.library_manager,
+                reference,
+            )
+            .expect("the view owns its module");
+            let name = app
+                .state
+                .schematic
+                .document()
+                .components
+                .iter()
+                .find(|component| component.id == *id)
+                .expect("the placed instance")
+                .spice_instance_name();
+            (binding, name)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(bindings[0].0.selected_module(), "amp");
+    assert_eq!(bindings[1].0.selected_module(), "amp");
+    assert!(
+        !bindings[0]
+            .0
+            .netlist_alias()
+            .eq_ignore_ascii_case(bindings[1].0.netlist_alias()),
+        "two bundles' modules are two names in the deck"
+    );
+    for (binding, name) in &bindings {
+        let lines = deck
+            .lines()
+            .filter(|line| {
+                !line.trim_start().starts_with(['.', '*'])
+                    && line
+                        .split_whitespace()
+                        .any(|token| token.eq_ignore_ascii_case(binding.netlist_alias()))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            lines.len(),
+            1,
+            "one instance binds {name}'s module:\n{deck}"
+        );
+        assert!(
+            lines[0]
+                .split_whitespace()
+                .next()
+                .is_some_and(|token| token.eq_ignore_ascii_case(name)),
+            "{name} binds its own view's module:\n{deck}"
+        );
+        assert_eq!(
+            deck.matches(binding.source_key()).count(),
+            1,
+            "each bundle's source is read once, under its own key:\n{deck}"
+        );
+    }
 }
 
 /// A discrete vector's bits travel as one digital signal: one pin, `Logic`,
