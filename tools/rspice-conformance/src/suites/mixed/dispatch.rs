@@ -1137,6 +1137,7 @@ fn engine_case(request: &CaseRequest<'_>, kind: &str, origin: &Path, source: &st
             &engine,
             &netlist,
             source,
+            origin,
             stop,
             internal_max,
             startup,
@@ -1246,10 +1247,34 @@ fn record_parameters(netlist: &rspice_core::Netlist, observation: &mut Observati
     }
 }
 
+/// Statistical functions a deck may state its Monte Carlo variation with.
+const STATISTICAL_FUNCTIONS: [&str; 5] = ["agauss(", "aunif(", "gauss(", "unif(", "limit("];
+
+/// Whether the deck, with every file it includes, states a statistical
+/// function outside comments. An include that cannot be resolved is an
+/// error, not "no statistics".
+pub fn deck_states_statistics(source: &str, origin: &Path) -> Result<bool, String> {
+    let directory = origin.parent().unwrap_or(Path::new("."));
+    let expanded = rspice_core::netlist::IncludeProcessor::new(directory)
+        .expand_content(source, origin)
+        .map_err(|error| error.to_string())?;
+    Ok(expanded.lines().any(|line| {
+        let code = line.split(['$', ';']).next().unwrap_or_default().trim();
+        !code.starts_with('*') && {
+            let lower = code.to_ascii_lowercase();
+            STATISTICAL_FUNCTIONS
+                .iter()
+                .any(|function| lower.contains(function))
+        }
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn monte_carlo(
     engine: &rspice_core::Engine,
     netlist: &rspice_core::Netlist,
     source: &str,
+    origin: &Path,
     stop: f64,
     max_step: f64,
     startup: rspice_core::engine::TransientStartupMode,
@@ -1265,14 +1290,23 @@ fn monte_carlo(
     let mut study =
         MonteCarloStudyConfig::new(card.runs, card.seed.unwrap_or(1), vec!["trial".into()]);
     study.first_trial = card.first_trial;
-    // The corpus decks state their variation as agauss/aunif expressions; a
-    // deck with none is perturbed as the card's tolerance says.
-    let lower = source.to_ascii_lowercase();
-    let statistical = ["agauss(", "aunif(", "gauss(", "unif(", "limit("]
-        .iter()
-        .any(|function| lower.contains(function));
+    // The corpus decks state their variation as agauss/aunif expressions,
+    // in the deck or in a file it includes. A deck that states none and whose
+    // card names no parameter would have every `.param` perturbed by the
+    // card's default spread (a supply `vcc` included); that is refused, never
+    // run as if it were the design's variation.
+    let statistical = deck_states_statistics(source, origin).map_err(|error| {
+        harness_error(format!(
+            "the deck's includes could not be resolved to find its statistics: {error}"
+        ))
+    })?;
     if statistical {
         study.variation_source = MonteCarloVariationSource::DeckStatistics;
+    } else if card.params.is_empty() {
+        return Err(harness_error(
+            "the .mc card names no parameter and neither the deck nor any file it includes states a statistical function (agauss, aunif, gauss, unif, limit); refusing to perturb every .param",
+        )
+        .into());
     } else {
         study.distribution = match card.distribution {
             rspice_core::netlist::MonteCarloDistribution::Gaussian => {
@@ -1425,6 +1459,33 @@ mod tests {
     }
 
     #[test]
+    fn monte_carlo_statistics_are_found_in_included_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let origin = dir.path().join("deck.cir");
+        std::fs::write(
+            dir.path().join("caps_mc.cir"),
+            "* draws\n.param c0v={20f*(1+agauss(0,5e-3,1))}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("caps_nominal.cir"),
+            "* agauss( in a comment is not a statistic\n.param c0v=20f vcc=1.8\n",
+        )
+        .unwrap();
+        let deck =
+            |include: &str| format!("t\n.include {include}\n.mc 4 seed 3\n.tran 1n 1u\n.end\n");
+        assert_eq!(
+            deck_states_statistics(&deck("caps_mc.cir"), &origin),
+            Ok(true)
+        );
+        assert_eq!(
+            deck_states_statistics(&deck("caps_nominal.cir"), &origin),
+            Ok(false)
+        );
+        assert!(deck_states_statistics(&deck("missing.cir"), &origin).is_err());
+    }
+
+    #[test]
     fn one_file_named_by_two_directives_seals_two_runtimes() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
@@ -1433,8 +1494,7 @@ mod tests {
              module dut(c, q);\n  input c;\n  output q;\n  reg q;\n  initial q = 1'b0;\n  always @(posedge c) q <= ~q;\nendmodule\n",
         )
         .unwrap();
-        let circuit =
-            "t\n.hdl \"pair.v\" module=tb\n.hdl \"pair.v\" module=dut\nxtb c tb\nxdut c q dut\n.end\n";
+        let circuit = "t\n.hdl \"pair.v\" module=tb\n.hdl \"pair.v\" module=dut\nxtb c tb\nxdut c q dut\n.end\n";
         let (rewritten, runtimes) =
             seal_hdl(circuit, &dir.path().join("deck.cir"), "cxx").expect("two runtimes seal");
         let keys: Vec<&str> = runtimes
