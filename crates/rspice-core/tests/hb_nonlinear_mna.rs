@@ -185,10 +185,13 @@ D1 out 0 DMOD
         .find(|branch| branch.device_name.eq_ignore_ascii_case("VDRIVE"))
         .expect("exact HB retains the ideal-source branch current");
 
-    // Independent Xyce Level-1 oracle: omitted NBV defaults to 1, and the low
-    // IBV above leaves the matched knee at the authored 5 V.
+    // Independent Xyce Level-1 oracle: Model::processParams replaces an
+    // omitted NBV with N (N_DEV_Diode.C, `if (!given("NBV")) NBV=N;`), the
+    // breakdown branch is -IS*exp(-(BV+Vd)/(NBV*Vt)), and the low IBV above
+    // (below IS*BV/Vt) leaves the matched knee at the authored 5 V.
     let xyce_vt: f64 = (1.3806226e-23 / 1.6021918e-19) * 300.15;
-    let expected_source_current = 1.0e-6 * (0.1 / xyce_vt).exp();
+    let nbv = 1.48;
+    let expected_source_current = 1.0e-6 * (0.1 / (nbv * xyce_vt)).exp();
     let actual_source_current = source.coefficients[0].re;
     assert!(
         (actual_source_current - expected_source_current).abs()
