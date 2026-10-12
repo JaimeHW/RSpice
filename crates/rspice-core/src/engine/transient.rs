@@ -6326,6 +6326,9 @@ impl Engine {
         // ladder the audit measured after every digital edge. Restarting from
         // this instead is the policy a native source breakpoint already gets.
         let mut veriloga_refinement_approach_step: Option<Value> = None;
+        // Consecutive re-chases of a landed root that fell back onto its
+        // landing; see `VERILOGA_ROOT_STAGNATION_FRACTION`.
+        let mut stagnant_root_landings = 0_usize;
         // Xyce's OneStep/Gear12 `nef_` counts every rejected attempt, including
         // Newton failures and LTE failures, and is reset only after a point is
         // accepted.  Keep that integration-state counter separate from the
@@ -6340,6 +6343,12 @@ impl Engine {
         // Xyce starts at order 1; native Gear2 returns to order 2 after restart.
         const MAX_RETRIES: usize = 200; // Maximum recovery retries per timepoint
         const MAX_VERILOGA_EVENT_REFINEMENTS: usize = 64;
+        // A landed chase whose next root falls nearer its landed point than
+        // this share of the attempted interval, more than
+        // `VERILOGA_ROOT_STAGNATION_LANDINGS` times in a row, is stagnating,
+        // and the bracket is halved instead of landing again.
+        const VERILOGA_ROOT_STAGNATION_FRACTION: Value = 1.0e-3;
+        const VERILOGA_ROOT_STAGNATION_LANDINGS: usize = 4;
         const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
@@ -7835,6 +7844,44 @@ impl Engine {
                                 return Err(SimulationError::Circuit(format!(
                                     "Verilog-A event refinement target {target} is not strictly inside transient interval ({accepted_time}, {candidate_time})"
                                 )));
+                            }
+                            // A chase that has already landed (its approach
+                            // step is recorded) and whose next chord root keeps
+                            // falling back onto the point it landed on is regula
+                            // falsi stagnating on a curved crossing: each
+                            // landing reads the old side by roundoff, the
+                            // interrupted proposal restores the same far
+                            // endpoint, and the chord moves by a sliver -- C4's
+                            // comparator settling through vcc/2 advanced 0.4 fs
+                            // per landed point. Once that has repeated, halve
+                            // the bracket instead of landing; an ordinary
+                            // shorter attempt either holds the root, whose chord
+                            // is then taken over the shorter interval, or
+                            // advances half the interval. A single close root
+                            // after a landing -- the next edge of a fast
+                            // digital pattern -- is landed as before.
+                            let interval = candidate_time - accepted_time;
+                            let half = 0.5 * interval;
+                            let stagnating = veriloga_refinement_approach_step.is_some()
+                                && refinement_dt <= interval * VERILOGA_ROOT_STAGNATION_FRACTION;
+                            stagnant_root_landings = if stagnating {
+                                stagnant_root_landings.saturating_add(1)
+                            } else {
+                                0
+                            };
+                            if stagnant_root_landings > VERILOGA_ROOT_STAGNATION_LANDINGS
+                                && half > timestep.hard_min_dt()
+                            {
+                                self.record_convergence(|quality| {
+                                    quality.record_timestep_reduction()
+                                });
+                                trap_order = Self::trapezoidal_order_after_timestep_control_reject(
+                                    step_trap_order,
+                                );
+                                timestep.force_step(half);
+                                restore_rejected_transient_nonlinear_state!();
+                                total_middle_nanos += $phase_start.elapsed().as_nanos();
+                                continue;
                             }
                             veriloga_event_refinement_count =
                                 veriloga_event_refinement_count.saturating_add(1);
@@ -10400,6 +10447,7 @@ impl Engine {
                         // A step that is not one of the chase's own landings
                         // ends it, whether or not it hit a breakpoint.
                         veriloga_refinement_approach_step = None;
+                        stagnant_root_landings = 0;
                     }
 
                     bjt::arrival::validate_clock(has_exact_transient_history, step_time, t)?;
@@ -11695,6 +11743,7 @@ impl Engine {
                 // whether or not it hit a breakpoint: a chase that resolved
                 // its root away from one must not raise a later restart.
                 veriloga_refinement_approach_step = None;
+                stagnant_root_landings = 0;
             }
             if locked_grid.is_none()
                 && !physical_event
