@@ -6,8 +6,12 @@
 //! one route's outcomes under the other's name. `RSPICE_MIXED_EXTENDED=1`
 //! includes the extended analyses. Any cell that regressed, or improved
 //! without being re-recorded, fails the test.
+//!
+//! The runner runs the cells concurrently at its default `--jobs`;
+//! `RSPICE_MIXED_JOBS=N` overrides it.
 
 use std::process::Command;
+use std::time::Instant;
 
 use rspice_conformance::suites::mixed::Route;
 
@@ -29,13 +33,21 @@ fn every_mixed_corpus_cell_matches_its_recorded_outcome() {
     if std::env::var("RSPICE_MIXED_EXTENDED").is_ok_and(|value| value == "1") {
         command.arg("--extended");
     }
+    if let Ok(jobs) = std::env::var("RSPICE_MIXED_JOBS") {
+        command.arg("--jobs").arg(jobs);
+    }
+    let started = Instant::now();
     let output = command.output().expect("spawn rspice-mixed-corpus");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    println!("{stdout}");
+    // The per-cell lines (with each cell's time), then the summary.
+    println!("{}", String::from_utf8_lossy(&output.stderr));
+    println!("{}", String::from_utf8_lossy(&output.stdout));
+    println!(
+        "mixed corpus: {:.1} s wall",
+        started.elapsed().as_secs_f64()
+    );
     assert!(
         output.status.success(),
-        "mixed corpus drifted from outcomes.tsv ({}):\n{stdout}\n{stderr}",
+        "mixed corpus drifted from outcomes.tsv ({}); the cells and the drift are printed above",
         output.status
     );
 }
