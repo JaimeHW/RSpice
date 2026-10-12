@@ -1,7 +1,7 @@
 //! Analog input thresholds that require a physical mixed-signal timepoint.
 
-use crate::Value;
 use super::DigitalState;
+use crate::Value;
 
 /// The decision law associated with an analog input's two thresholds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

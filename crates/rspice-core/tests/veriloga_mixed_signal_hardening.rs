@@ -534,7 +534,9 @@ fn assert_mixed_persisted_restart(deck: &str, signal: &str) {
         "rspice_mixed_restart_{}_{sequence}.chk",
         std::process::id()
     ));
-    saved.save_with_encoding(&path, TransientCheckpointEncoding::Packed).unwrap();
+    saved
+        .save_with_encoding(&path, TransientCheckpointEncoding::Packed)
+        .unwrap();
     let loaded = TransientCheckpoint::load(&path);
     std::fs::remove_file(&path).unwrap();
     let restored = loaded.unwrap();

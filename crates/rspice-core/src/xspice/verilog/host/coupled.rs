@@ -3,7 +3,7 @@
 //! this interface neither launches a second simulator nor promotes an HDL region.
 #[cfg(test)]
 use super::super::store::DigitalBitChange;
-use super::super::store::{ExternalBitDriverId, ExternalRealDriverId, ExternalNetChange};
+use super::super::store::{ExternalBitDriverId, ExternalNetChange, ExternalRealDriverId};
 use super::*;
 
 /// One external Active wave. Return true while external work remains, even if

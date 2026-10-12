@@ -283,8 +283,7 @@ impl HbSolver {
                         let voltage = |node: usize| {
                             node.checked_sub(1).map_or(0.0, |column| solution[column])
                         };
-                        *charge =
-                            capacitance * (voltage(capacitor.pos) - voltage(capacitor.neg));
+                        *charge = capacitance * (voltage(capacitor.pos) - voltage(capacitor.neg));
                     }
                 }
                 let positive = self.lead_phasors(&current, &charge)?;

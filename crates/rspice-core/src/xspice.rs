@@ -115,9 +115,9 @@ pub use external::{
     DigitalCosimStep, DigitalProcessRuntime, DigitalProcessRuntimeFactory, DigitalProcessSpec,
     set_digital_cosim_runtime_factory, set_digital_process_runtime_factory,
 };
-pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
 #[cfg(feature = "veriloga")]
 pub(crate) use instance::checkpoint as instance_checkpoint;
+pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
 pub(crate) use instance::{
     CodeModelVectorParams, EventInputKind, SharedXspiceInstance, XspiceEventInputs,
     XspiceInstanceCheckpoint,

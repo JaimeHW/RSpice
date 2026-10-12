@@ -45,7 +45,10 @@ const UNTYPED: &[&str] = &["SimulationError::Circuit(", "SimulationError::Netlis
 fn seam_modules() -> Vec<(&'static str, &'static str)> {
     vec![
         ("mixed_modules.rs", include_str!("mixed_modules.rs")),
-        ("veriloga_instances.rs", include_str!("veriloga_instances.rs")),
+        (
+            "veriloga_instances.rs",
+            include_str!("veriloga_instances.rs"),
+        ),
         ("connect_modules.rs", include_str!("connect_modules.rs")),
         ("veriloga_sources.rs", include_str!("veriloga_sources.rs")),
         ("veriloga_cache.rs", include_str!("veriloga_cache.rs")),

@@ -743,7 +743,9 @@ use crate::circuit::XspiceCompanionPolicy;
 use state::TransientDeviceHistories;
 pub(in crate::engine) use state::{ReactiveHistorySeed, TransientCompanionStamp};
 mod xyce_dae;
-use state::{AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges};
+use state::{
+    AcceptedJunctionHistoryRestart, MosfetCompanionBranchTerms, MosfetGateCompanionCharges,
+};
 mod state_advanced_mos;
 mod state_commit;
 mod state_recovery;
@@ -4309,7 +4311,9 @@ impl Engine {
                         checkpoint,
                     };
                     observer(&point)?;
-                    final_checkpoint_retention.is_retained().then_some(point.checkpoint)
+                    final_checkpoint_retention
+                        .is_retained()
+                        .then_some(point.checkpoint)
                 } else if final_checkpoint_retention.is_retained() {
                     scheduled_checkpoints.extend(scheduled_checkpoint_times.iter().map(
                         |&nominal_time| ScheduledTransientCheckpoint {
@@ -5976,7 +5980,8 @@ impl Engine {
         let has_line_events =
             charge_event::circuit::PreparedEventCircuit::supports_scalar_line_events(&circuit)
                 && bjt_history.weil_phase.iter().all(Option::is_none);
-        let physical_sources = if bjt_history.phase.iter().any(Option::is_some) || has_line_events
+        let physical_sources = if bjt_history.phase.iter().any(Option::is_some)
+            || has_line_events
             || has_linear_events
         {
             Some(Self::collect_physical_source_events(

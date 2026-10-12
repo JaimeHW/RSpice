@@ -1,7 +1,7 @@
 #![cfg(feature = "veriloga")]
 //! Selected connection bodies execute in the same circuit as HDL and XSPICE.
-use rspice_core::{Engine, Netlist};
 use rspice_core::engine::TransientResult;
+use rspice_core::{Engine, Netlist};
 
 struct Source(std::path::PathBuf);
 impl Source {
@@ -256,11 +256,13 @@ endconnectrules
             let override_deck=Netlist::parse(&format!(
                 "* external configuration re-elaborates internal connections\nX1 p m top\nRp p 0 1k\nRm m 0 1k\n.va \"{}\" top module=top\n.va \"{}\" replacement\n.options connectrules=replacement\n.end\n", source.path(),foreign.path(),
             )).unwrap();
-            let overridden = Engine::default().run_tran(&override_deck, 2.5e-9, 50e-12).unwrap();
-            assert!((voltage(&overridden, "p", 1.5e-9)-7.0).abs()<1e-7);
-            assert!((voltage(&overridden, "m", 1.5e-9)-1.0/1.1).abs()<1e-7);
+            let overridden = Engine::default()
+                .run_tran(&override_deck, 2.5e-9, 50e-12)
+                .unwrap();
+            assert!((voltage(&overridden, "p", 1.5e-9) - 7.0).abs() < 1e-7);
+            assert!((voltage(&overridden, "m", 1.5e-9) - 1.0 / 1.1).abs() < 1e-7);
             let restored = Engine::default().run_tran(&deck, 2.5e-9, 50e-12).unwrap();
-            assert!((voltage(&restored, "p", 1.5e-9)-high).abs()<1e-7);
+            assert!((voltage(&restored, "p", 1.5e-9) - high).abs() < 1e-7);
         }
     }
 }
@@ -583,7 +585,6 @@ endconnectrules
     }
 }
 
-
 #[test]
 fn configured_hierarchy_replays_library_and_block_after_transport_and_specialization() {
     use rspice_veriloga::{CompilerOptions, NoPipelineControl, VerilogACompiler};
@@ -753,7 +754,6 @@ connectrules chosen; connect drive; endconnectrules
         );
     }
 }
-
 
 const CONFIGURED_DEVICE: &str = r#"
 module source(q);
@@ -940,7 +940,6 @@ fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
     }
 }
 
-
 #[test]
 fn selected_bus_lanes_preserve_grouping_loading_and_adc_driver_bits() {
     for (mode, expected) in [("merged", 0.5), ("split", 0.75)] {
@@ -1083,7 +1082,6 @@ endconnectrules
         );
     }
 }
-
 
 #[test]
 fn whole_physical_vectors_preserve_lane_order_and_mixed_converter_loading() {
@@ -1679,7 +1677,6 @@ endmodule
     }
 }
 
-
 #[test]
 fn computed_mixed_inputs_preserve_expression_widths_replication_and_loading() {
     for (mode, first_load, repeated_load) in [("merged", 1.5, 1.5), ("split", 1.0, 0.6)] {
@@ -1997,7 +1994,6 @@ Rr r 0 1k
     }
 }
 
-
 #[test]
 fn real_net_array_elements_share_resolved_drivers_through_hierarchy() {
     let model = r#"
@@ -2143,7 +2139,6 @@ connectrules chosen; connect feedback merged; endconnectrules
     assert!((voltage(&result, "p", 1.75e-9) - 2.4).abs() < 1e-5);
 }
 
-
 #[test]
 fn inline_real_net_disciplines_select_the_correct_loaded_converters() {
     let model = r#"
@@ -2210,7 +2205,6 @@ connectrules chosen; connect low_gain; connect high_gain; endconnectrules
     }
 }
 
-
 #[test]
 fn real_bus_ranges_resolve_original_drivers_under_loaded_analog_connections() {
     let model = r#"
@@ -2273,7 +2267,6 @@ connectrules chosen; connect dac; endconnectrules
     }
 }
 
-
 #[test]
 fn multidimensional_physical_arrays_share_loaded_branches_and_sampled_values() {
     let source = Source::new(
@@ -2331,7 +2324,6 @@ connectrules chosen; connect dac; endconnectrules
         }
     }
 }
-
 
 #[test]
 fn promoted_wire_hierarchies_keep_real_values_and_select_loaded_real_converters() {
@@ -2399,7 +2391,6 @@ connectrules chosen; connect dac; endconnectrules
         }
     }
 }
-
 
 #[test]
 fn real_concatenations_preserve_loaded_lanes_and_repeated_input_driver_identity() {
@@ -2742,7 +2733,6 @@ endmodule
     }
 }
 
-
 #[test]
 fn generated_mixed_bodies_keep_local_state_and_branch_loading_independent() {
     let source = Source::new(
@@ -2796,7 +2786,6 @@ endmodule
         }
     }
 }
-
 
 #[test]
 fn nested_generated_analog_bodies_follow_elaboration_order() {
@@ -3030,7 +3019,6 @@ endmodule
     }
 }
 
-
 #[test]
 fn foreign_physical_storage_preserves_nested_loading_and_port_currents() {
     let source = Source::new(
@@ -3114,7 +3102,6 @@ endmodule
         );
     }
 }
-
 
 #[test]
 fn foreign_explicit_branches_preserve_sources_direction_derivatives_and_boundaries() {

@@ -382,10 +382,7 @@ fn prepared_event_circuit_checks_storage_budget_and_auxiliary_capacitor_ownershi
     let failure = PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort)
         .err()
         .unwrap();
-    assert!(
-        failure.to_string().contains("multiple owners"),
-        "{failure}"
-    );
+    assert!(failure.to_string().contains("multiple owners"), "{failure}");
     circuit.capacitors.ic_branch_indices[0] = None;
     circuit.capacitors.capacitances.clear();
     let failure = PreparedEventCircuit::for_finite_voltages(&circuit, 1e-20, &options, &NoAbort)

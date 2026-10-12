@@ -79,8 +79,8 @@
 //! already holds produces no transition, which is what stops a level-sensitive
 //! `@*` process from re-triggering itself forever.
 
-mod traces;
 pub(crate) mod checkpoint;
+mod traces;
 pub(crate) use traces::TraceSource;
 mod bindings;
 use bindings::ConnectedBits;

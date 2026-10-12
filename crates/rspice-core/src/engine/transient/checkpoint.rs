@@ -45,8 +45,8 @@ mod behavioral;
 mod bsim3;
 mod bsim4;
 mod capacitor_sdt;
-mod mosfet;
 mod mixed;
+mod mosfet;
 #[cfg(test)]
 mod record_limit_tests;
 mod solver_state;
@@ -74,7 +74,9 @@ use crate::device::veriloga_builtins::{
     GeneratedVerilogAAcceptedStateShapeIdentity, GeneratedVerilogAInstanceCheckpoint,
     GeneratedVerilogAPersistentState,
 };
-use crate::device::{TransmissionLine, TransmissionLineCheckpoint, XyceTeamResistanceNoiseCheckpoint};
+use crate::device::{
+    TransmissionLine, TransmissionLineCheckpoint, XyceTeamResistanceNoiseCheckpoint,
+};
 use crate::engine::{
     OutputCommitError, OutputCommitPhase, PersistenceIncompatibleError, SimulationConfig,
 };
@@ -6715,8 +6717,10 @@ impl TransientCheckpoint {
             .map(|instance| format!("{}({})", instance.name, instance.model_name()))
             .collect();
         #[cfg(feature = "veriloga")]
-        let mixed_runtime_image = circuit.has_mixed_signal_hosts()
-            .then(|| mixed::Image::capture(circuit, time)).transpose()?;
+        let mixed_runtime_image = circuit
+            .has_mixed_signal_hosts()
+            .then(|| mixed::Image::capture(circuit, time))
+            .transpose()?;
         #[cfg(not(feature = "veriloga"))]
         let mixed_runtime_image: Option<mixed::Image> = None;
         let xspice_resume_blockers = if mixed_runtime_image.is_some() {
@@ -6724,11 +6728,12 @@ impl TransientCheckpoint {
         } else {
             circuit.xspice_checkpoint_resume_blockers()
         };
-        let xspice_instance_states = if mixed_runtime_image.is_none() && xspice_resume_blockers.is_empty() {
-            circuit.xspice_checkpoint_instance_states()
-        } else {
-            Vec::new()
-        };
+        let xspice_instance_states =
+            if mixed_runtime_image.is_none() && xspice_resume_blockers.is_empty() {
+                circuit.xspice_checkpoint_instance_states()
+            } else {
+                Vec::new()
+            };
         if !xspice_resume_blockers.is_empty() {
             log::warn!(
                 "transient checkpoint at t={time:.6e}: XSPICE code-model \
@@ -7034,8 +7039,11 @@ impl TransientCheckpoint {
             .validate_accepted_history(self.behavioral_states.as_deref(), self.time)?;
         capacitor_sdt::validate_target(circuit, self.capacitor_sdt_states.as_deref())?;
         #[cfg(feature = "veriloga")]
-        let restored_mixed = self.mixed_runtime_image.as_ref()
-            .map(|image| image.prepare(circuit, self.time)).transpose()?;
+        let restored_mixed = self
+            .mixed_runtime_image
+            .as_ref()
+            .map(|image| image.prepare(circuit, self.time))
+            .transpose()?;
         if self.mixed_runtime_image.is_none() {
             circuit.validate_xspice_checkpoint_instance_states(&self.xspice_instance_states)?;
         }
@@ -7330,7 +7338,9 @@ impl TransientCheckpoint {
         )?;
         circuit.tlines = restored_tlines;
         #[cfg(feature = "veriloga")]
-        if let Some(restored) = restored_mixed { restored.install(circuit); }
+        if let Some(restored) = restored_mixed {
+            restored.install(circuit);
+        }
         Ok(())
     }
 
@@ -12145,10 +12155,16 @@ mod tests {
         while let Some(line) = lines.next() {
             if version < mixed::FORMAT_VERSION && line.starts_with("mixed_runtime_image ") {
                 if line == "mixed_runtime_image 1" {
-                    let bytes = parse_count_header(lines.next().unwrap(), "mixed_runtime_bytes").unwrap();
+                    let bytes =
+                        parse_count_header(lines.next().unwrap(), "mixed_runtime_bytes").unwrap();
                     let mut consumed = 0;
                     while consumed < bytes {
-                        consumed += lines.next().unwrap().strip_prefix("mixed_runtime ").unwrap().len();
+                        consumed += lines
+                            .next()
+                            .unwrap()
+                            .strip_prefix("mixed_runtime ")
+                            .unwrap()
+                            .len();
                     }
                     assert_eq!(consumed, bytes);
                 }

@@ -249,5 +249,8 @@ endconnectrules
     .expect("write the connect library");
 
     let waveform = transient_waveform(&deck(&path), "dout");
-    assert!(waveform.iter().all(|(_, voltage)| voltage.abs() < 1e-8), "an empty body must not acquire a built-in driver: {waveform:?}");
+    assert!(
+        waveform.iter().all(|(_, voltage)| voltage.abs() < 1e-8),
+        "an empty body must not acquire a built-in driver: {waveform:?}"
+    );
 }

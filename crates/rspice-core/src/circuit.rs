@@ -52,9 +52,9 @@ pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
 #[cfg(feature = "veriloga")]
-mod mixed_signal;
-#[cfg(feature = "veriloga")]
 pub(crate) mod mixed_checkpoint;
+#[cfg(feature = "veriloga")]
+mod mixed_signal;
 mod net_kind;
 mod scheduler;
 pub(crate) use scheduler::{Activation, ActivationLanes};

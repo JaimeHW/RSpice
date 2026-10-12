@@ -379,7 +379,10 @@ impl DesignConnectRules {
         let same_selection = match artifact.connections.configuration() {
             Some(configuration) => {
                 Some(configuration.library().preprocessed_source()) == self.source.as_deref()
-                    && self.table.blocks().first()
+                    && self
+                        .table
+                        .blocks()
+                        .first()
                         .is_some_and(|block| block.name == configuration.block())
             }
             None => artifact.connections.source() == self.source.as_deref(),

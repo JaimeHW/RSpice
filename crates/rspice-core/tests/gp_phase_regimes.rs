@@ -16,20 +16,20 @@ use rspice_core::{Engine, GpTransientPhaseModel, Netlist, SimulationConfig, Spic
 
 #[path = "gp_phase_regimes/behavioral.rs"]
 mod behavioral;
-#[path = "gp_phase_regimes/charge.rs"]
-mod charge;
 #[path = "gp_phase_regimes/capacitor_ic.rs"]
 mod capacitor_ic;
+#[path = "gp_phase_regimes/charge.rs"]
+mod charge;
 #[path = "gp_phase_regimes/controlled.rs"]
 mod controlled;
 #[path = "gp_phase_regimes/coverage_gaps.rs"]
 mod coverage_gaps;
 #[path = "gp_phase_regimes/current_controlled.rs"]
 mod current_controlled;
-#[path = "gp_phase_regimes/magnetic.rs"]
-mod magnetic;
 #[path = "gp_phase_regimes/diodes.rs"]
 mod diodes;
+#[path = "gp_phase_regimes/magnetic.rs"]
+mod magnetic;
 #[path = "gp_phase_regimes/nodal_voltage.rs"]
 mod nodal_voltage;
 #[path = "gp_phase_regimes/private_nodes.rs"]

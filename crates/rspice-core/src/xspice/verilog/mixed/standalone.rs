@@ -1,8 +1,8 @@
 //! A one-instance adapter to the circuit's shared event coordinator.
 //! The coordinator owns every process and observer; the host remains its analog
 //! participant and signal view. No observer or scheduling semantics live here.
-use super::*;
 use super::super::host::{DigitalActiveExchange, DigitalActiveParticipant};
+use super::*;
 use crate::abort_signal::AbortSignal;
 use std::collections::VecDeque;
 

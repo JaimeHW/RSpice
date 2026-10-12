@@ -754,7 +754,10 @@ fn prescribed_capacitance_differentiates_product_charge_and_resumes() {
                                 );
                             }
                             if power == 1 {
-                                eprintln!("original constant-voltage case: final I(C)={:e} A, max error={max_error:e} A", capacitor.last().unwrap());
+                                eprintln!(
+                                    "original constant-voltage case: final I(C)={:e} A, max error={max_error:e} A",
+                                    capacitor.last().unwrap()
+                                );
                             }
                             assert!(samples > 100);
                             assert!(

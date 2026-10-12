@@ -8483,10 +8483,8 @@ impl Engine {
                                 abort,
                             )?;
                             if let Some(artifact) = prepared.canonical_ir.as_deref() {
-                                design_connect_rules.validate_hierarchical_context(
-                                    artifact,
-                                    &element.name,
-                                )?;
+                                design_connect_rules
+                                    .validate_hierarchical_context(artifact, &element.name)?;
                             }
                             if mixed_modules::try_build_mixed_signal_instance(
                                 &mut circuit,

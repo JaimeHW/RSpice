@@ -90,13 +90,13 @@ use crate::xspice::event_scheduler::{SchedulerLimits, TimeResolution};
 
 use host::DigitalHost;
 pub use host::DigitalRunError;
+pub(crate) use mixed::checkpoint as participant_checkpoint;
+pub(crate) use mixed::coordinator_checkpoint;
 pub(crate) use mixed::{
     BoundaryBitSource, BoundaryBus, CandidateLedger, MixedDigitalCoordinator,
     PreparedMixedAcceptance, SharedTrialCursor,
 };
 pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
-pub(crate) use mixed::checkpoint as participant_checkpoint;
-pub(crate) use mixed::coordinator_checkpoint;
 
 /// What one tick of the digital host's clock is, and why it is not read from
 /// the source.

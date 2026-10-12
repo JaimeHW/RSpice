@@ -592,8 +592,8 @@ fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn linear_actions_survive_live_delivery_compression_and_packed_restart() {
     use rspice_core::engine::{
-        TransientCheckpoint, TransientCheckpointEncoding, TransientStartupMode, SpiceDialect,
-        CompressionConfig,
+        CompressionConfig, SpiceDialect, TransientCheckpoint, TransientCheckpointEncoding,
+        TransientStartupMode,
     };
     use rspice_core::numerics::integration::IntegrationMethod;
     #[derive(Default)]
@@ -617,9 +617,18 @@ fn linear_actions_survive_live_delivery_compression_and_packed_restart() {
         }
     }
     for (text, startup) in [
-        ("CCVS retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n", TransientStartupMode::OperatingPoint),
-        ("Capacitor IC retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p IC=0\nH1 out 0 V1 3\nC2 out 0 5p IC=0\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n", TransientStartupMode::Uic),
-        ("Current-driven retained actions\nI1 0 out PWL(0 0 1n 0 1n 1m 2n 1m 2n 0 4n 0)\nR1 out winding 10\nL1 winding 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n", TransientStartupMode::OperatingPoint),
+        (
+            "CCVS retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p\nH1 out 0 V1 3\nC2 out 0 5p\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
+            TransientStartupMode::OperatingPoint,
+        ),
+        (
+            "Capacitor IC retained actions\nV1 in 0 PWL(0 0 1n 0 1n 1 2n 1 2n 0 4n 0)\nC1 in 0 2p IC=0\nH1 out 0 V1 3\nC2 out 0 5p IC=0\nR2 out 0 10\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
+            TransientStartupMode::Uic,
+        ),
+        (
+            "Current-driven retained actions\nI1 0 out PWL(0 0 1n 0 1n 1m 2n 1m 2n 0 4n 0)\nR1 out winding 10\nL1 winding 0 5n\n.options GMIN=0 RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 CHGTOL=1e-27\n.save all\n.end\n",
+            TransientStartupMode::OperatingPoint,
+        ),
     ] {
         let deck = Netlist::parse(text).unwrap();
         for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
@@ -897,7 +906,7 @@ fn cccs_driven_winding_retains_current_impulse_and_voltage_derivative() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn current_driven_winding_startup_keeps_authored_flux_and_regular_source_slopes() {
-    use rspice_core::engine::{TransientStartupMode, SpiceDialect};
+    use rspice_core::engine::{SpiceDialect, TransientStartupMode};
     use rspice_core::numerics::integration::IntegrationMethod;
     for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
         for method in [
