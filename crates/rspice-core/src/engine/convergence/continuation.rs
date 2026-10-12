@@ -415,7 +415,11 @@ impl Engine {
 
         let mut pseudo = PseudoTransient::new();
         let mut damping_state = NewtonDampingState::default();
-        let pseudo_iterations = self.continuation_iteration_budget(12, 16);
+        // Each stage is one backward-Euler pseudo step anchored by its
+        // pseudo-capacitance. A stage the DC Newton limit cannot converge is
+        // a step that is too long, and halving it is the remedy; a larger
+        // budget only multiplied the cost of every rejected stage.
+        let pseudo_iterations = self.continuation_iteration_budget(1, 16);
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
         let mut correction_rhs = Vec::new();
