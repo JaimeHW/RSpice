@@ -31,7 +31,7 @@ use crate::schematic::component_type::ComponentType;
 use crate::schematic::device_catalog::validate_builtin_xspice_binding;
 use crate::schematic::document::SchematicDocument;
 use crate::schematic::generated_veriloga_catalog::validate_generated_veriloga_binding;
-use crate::schematic::port::{PortDirection, PortSpec};
+use crate::schematic::port::PortSpec;
 use rspice_app_types::hierarchy_path::{HierarchyPathError, InstancePath, InstancePathPattern};
 use rspice_app_types::product::{ContentDigest, ProjectId};
 use rspice_design_model::cell_view::{CellViewRef, DEFAULT_SCHEMATIC_VIEW};

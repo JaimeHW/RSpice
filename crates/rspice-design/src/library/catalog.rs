@@ -182,11 +182,16 @@ impl LibraryCatalog {
             .get(view_name)
             .ok_or_else(|| format!("missing view '{view_name}'"))?
             .clone();
-        let generated_symbol = view_name.eq_ignore_ascii_case("schematic").then(|| {
+        // The generated symbol travels with the view that defines the cell's
+        // ports: the schematic, or with none, the Verilog-A module.
+        let defines_ports = view_name.eq_ignore_ascii_case("schematic")
+            || super::metadata::module_interface_view(source_cell)
+                .is_some_and(|view| view.name == view_name);
+        let generated_symbol = defines_ports.then(|| {
             source_cell
                 .views
-                .get("symbol")
-                .filter(|view| view.metadata.contains_key("generated"))
+                .get(crate::symbol::generated::GENERATED_SYMBOL_VIEW)
+                .filter(|view| crate::symbol::generated::is_generated_symbol(view))
                 .cloned()
         });
 
@@ -228,5 +233,51 @@ impl LibraryCatalog {
 
         self.revision = source.revision;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::{Cell, View, ViewType};
+    use crate::symbol::generated::{GENERATED_SYMBOL_VIEW, store_generated_symbol};
+    use rspice_design_model::port::{PortDirection, PortSpec};
+
+    /// Saving a Verilog-A tab alone writes the symbol its compile generated,
+    /// the way saving a schematic writes the symbol its ports generated.
+    #[test]
+    fn a_saved_veriloga_view_carries_the_symbol_its_module_generated() {
+        let mut symbol = View::new(GENERATED_SYMBOL_VIEW, ViewType::Symbol);
+        store_generated_symbol(
+            &mut symbol,
+            &[PortSpec {
+                name: "p".to_owned(),
+                direction: PortDirection::InOut,
+            }],
+            |_| None,
+        )
+        .expect("the symbol stores");
+        let mut cell = Cell::new("gain");
+        cell.add_view(View::new("veriloga", ViewType::VerilogA));
+        cell.add_view(symbol);
+        let mut library = Library::new("behavioral");
+        library.add_cell(cell);
+        let mut working = LibraryCatalog::default();
+        working.add_library(library);
+        let mut accepted = LibraryCatalog::default();
+
+        accepted
+            .overlay_cell_view_document_from_snapshot(&working, "behavioral", "gain", "veriloga")
+            .expect("the overlay applies");
+
+        let saved = accepted
+            .get_library("behavioral")
+            .and_then(|library| library.get_cell("gain"))
+            .expect("the cell is saved");
+        assert!(saved.get_view("veriloga").is_some());
+        assert!(
+            saved.get_view(GENERATED_SYMBOL_VIEW).is_some(),
+            "the generated symbol is saved with the module that defines it"
+        );
     }
 }

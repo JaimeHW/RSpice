@@ -61,19 +61,24 @@ pub fn materialize_authoritative_source_binding(
                 )
             })?
     };
-    let terminal_order = metadata_terminal_names(&view.metadata)
-        .or_else(|| metadata_terminal_names(&cell.metadata))
+    let ports = metadata_terminal_ports(&view.metadata)
+        .or_else(|| metadata_terminal_ports(&cell.metadata))
         .ok_or_else(|| {
             format!(
                 "authoritative source view {}/{}/{} has no terminal contract",
                 library.name, cell.name, view.name
             )
         })?;
+    let terminal_order = ports
+        .iter()
+        .map(|port| port.name.as_str())
+        .collect::<Vec<_>>();
     if !placed.terminal_order.is_empty()
         && !same_terminal_contract(&placed.terminal_order, &terminal_order)
     {
         return Err(format!(
-            "placed interface for {}/{} is incompatible with authoritative source view '{}'",
+            "placed interface for {}/{} is incompatible with authoritative source view '{}'; \
+             select the instance and run \"Update instance interface\"",
             placed.library, placed.cell, view.name
         ));
     }
@@ -117,13 +122,6 @@ pub fn materialize_authoritative_source_binding(
         &["netlist.parameter_order"],
     )
     .unwrap_or_default();
-    let ports = terminal_order
-        .into_iter()
-        .map(|name| PortSpec {
-            name,
-            direction: PortDirection::InOut,
-        })
-        .collect::<Vec<_>>();
     materialized.bind_interface(&ports);
     Ok(materialized)
 }
@@ -198,21 +196,13 @@ pub fn project_veriloga_binding_for_view(
     })
 }
 
-pub(super) fn metadata_terminal_names(metadata: &HashMap<String, String>) -> Option<Vec<String>> {
-    let encoded = metadata
-        .get("netlist.ports")
-        .or_else(|| metadata.get("netlist.terminals"))
-        .or_else(|| metadata.get("veriloga.ports"))?;
-    let names = serde_json::from_str::<Vec<String>>(encoded).unwrap_or_else(|_| {
-        encoded
-            .split([',', ' ', '\t', '\n'])
-            .filter_map(|name| {
-                let name = name.trim();
-                (!name.is_empty()).then(|| name.to_owned())
-            })
-            .collect()
-    });
-    (!names.is_empty()).then_some(names)
+/// The terminal contract a source view or its cell states, in order, with
+/// each port's direction where the contract states one.
+pub(super) fn metadata_terminal_ports(metadata: &HashMap<String, String>) -> Option<Vec<PortSpec>> {
+    let ports = crate::library::metadata::decode_port_list(
+        crate::library::metadata::metadata_port_list(metadata)?,
+    );
+    (!ports.is_empty()).then_some(ports)
 }
 
 /// The first value any of these metadata maps states for any of these keys.
