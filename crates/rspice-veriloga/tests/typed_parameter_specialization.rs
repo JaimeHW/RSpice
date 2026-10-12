@@ -1663,9 +1663,22 @@ endmodule
             Some("empty"),
         )
         .unwrap();
+    // Since a9d68bb3f a module with instances or a generate template retains
+    // its source in the connection context, not in `parameter_source`, so
+    // losing the retained source means losing both.
     let mut damaged = empty.canonical_ir.clone();
     damaged.parameter_source = None;
-    assert!(damaged.validate().is_err());
+    damaged.connections = rspice_veriloga::canonical_ir::CanonicalConnectionContext::None;
+    damaged.connection_identity = [0; 32];
+    let diagnostics = damaged
+        .validate()
+        .expect_err("an elaboration-bound artifact without its source is damaged");
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("require retained parameter source")),
+        "{diagnostics:?}"
+    );
     let mut empty_device = make_device(&empty);
     assert!(
         empty_device
