@@ -18,7 +18,8 @@ struct CachedResults {
     history: RunHistoryRevision,
     decks: ExecutedDeckArchive,
     imported_checkpoints: crate::state::MonteCarloCheckpointLibrary,
-    imported_transient_checkpoints: rspice_results::transient_checkpoint::TransientCheckpointLibrary,
+    imported_transient_checkpoints:
+        rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     next_run_id: u64,
     retained_dataset_limit: Option<usize>,
     active_run_idx: Option<usize>,

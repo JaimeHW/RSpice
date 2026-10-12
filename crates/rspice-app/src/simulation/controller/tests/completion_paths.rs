@@ -1380,7 +1380,9 @@ fn live_transient_accumulator_keeps_a_change_compressed_event_history() {
 
 #[test]
 fn live_transient_accumulator_keeps_event_times_and_stops_at_delivery_gaps() {
-    use rspice_simulation::live_transient::{TransientDigitalEventSample, TransientRealEventSample};
+    use rspice_simulation::live_transient::{
+        TransientDigitalEventSample, TransientRealEventSample,
+    };
     let message = TransientSampleDelta {
         time: 1.0,
         event_delivery_complete: true,
