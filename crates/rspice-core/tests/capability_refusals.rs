@@ -175,18 +175,19 @@ fn xyce_y_device_families_are_refused_by_the_grammar_with_their_span() {
 
 #[test]
 fn a_checkpoint_request_this_deck_cannot_satisfy_is_refused_before_the_run() {
-    // A classic MOSFET accumulates accepted integration state that the
-    // checkpoint format does not carry, so asking for a checkpoint is a
+    // A voltage-controlled switch accumulates accepted hysteresis state that
+    // the checkpoint format does not carry, so asking for a checkpoint is a
     // capability gap — not a bad deck, which is why the same deck must still
     // run. The refusal comes before any solver work: the only consumer of a
     // checkpoint is a resume, so there is nothing to be gained by solving to
     // tstop first and refusing then.
     let netlist = parse(
         "checkpoint capability\n\
-         VD d 0 1\n\
-         VG g 0 1.5\n\
-         M1 d g 0 0 NM W=1u L=1u\n\
-         .model NM NMOS(LEVEL=1 VTO=0.5 KP=100u)\n\
+         V1 in 0 1\n\
+         VC c 0 1\n\
+         S1 in out c 0 SW1\n\
+         R1 out 0 1k\n\
+         .model SW1 SW(VT=0.5 VH=0.1 RON=1 ROFF=1meg)\n\
          .end\n",
     );
     let error = Engine::default()
@@ -199,7 +200,7 @@ fn a_checkpoint_request_this_deck_cannot_satisfy_is_refused_before_the_run() {
     assert!(
         error
             .to_string()
-            .contains("classic MOSFET accepted transient integration history is not checkpointed"),
+            .contains("voltage-controlled switch accepted hysteresis state is not checkpointed"),
         "the refusal must name the state owner that blocks the checkpoint: {error}"
     );
 
