@@ -326,6 +326,263 @@ fn switch_state_for_normalized_control(state: Value) -> SwitchState {
 }
 
 //=============================================================================
+// Accepted transient checkpoint state
+//=============================================================================
+
+/// The switch family an accepted checkpoint row belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwitchCheckpointKind {
+    /// A voltage-controlled `S` switch.
+    Voltage,
+    /// A current-controlled `W` switch.
+    Current,
+}
+
+impl SwitchCheckpointKind {
+    pub(crate) const fn tag(self) -> &'static str {
+        match self {
+            Self::Voltage => "v",
+            Self::Current => "i",
+        }
+    }
+
+    pub(crate) fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "v" => Some(Self::Voltage),
+            "i" => Some(Self::Current),
+            _ => None,
+        }
+    }
+}
+
+/// Accepted transient state of one voltage- or current-controlled switch:
+/// every field a later step reads that the netlist does not fix. That is the
+/// hysteresis state and band, the resistance pair the convergence test
+/// compares, the control derivative the Xyce curve stamps, the curve's
+/// committed and pending hysteresis sides, and the one-shot initial-load
+/// phase.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct AcceptedSwitchCheckpoint {
+    pub(crate) instance_name: String,
+    pub(crate) kind: SwitchCheckpointKind,
+    /// `[current_resistance, prev_resistance, d(conductance)/d(control),
+    /// curve last state]`; the last is zero for a switch without a Xyce curve.
+    pub(crate) values: [Value; 4],
+    /// `[state, prev_state, in_hysteresis_band, initial_load_started,
+    /// initial_load_pending, curve_present, transition_hold, pending_side,
+    /// departing_on, off_departure_bridge_count, pending_departing_on,
+    /// pending_off_departure_bridge_count]`. States are 0 off, 1 on,
+    /// 2 transitioning; sides 0 none, 1 off, 2 on; the rest booleans or the
+    /// bridge counts 0..=2. The curve codes are zero when no curve is present.
+    pub(crate) codes: [u8; 12],
+}
+
+impl AcceptedSwitchCheckpoint {
+    /// Range and finiteness checks that need no target circuit.
+    pub(crate) fn validate_numeric_state(&self) -> Result<(), String> {
+        let [
+            current_resistance,
+            prev_resistance,
+            control_derivative,
+            last_state,
+        ] = self.values;
+        let ranges: [u8; 12] = [2, 2, 1, 1, 1, 1, 2, 2, 1, 2, 1, 2];
+        if self.instance_name.is_empty()
+            || self.instance_name.chars().any(char::is_whitespace)
+            || [current_resistance, prev_resistance]
+                .iter()
+                .any(|resistance| !resistance.is_finite() || *resistance <= 0.0)
+            || !control_derivative.is_finite()
+            || !last_state.is_finite()
+            || self.codes.iter().zip(ranges).any(|(code, max)| *code > max)
+            || (self.codes[4] == 1 && self.codes[3] == 0)
+        {
+            return Err(format!(
+                "switch '{}' accepted state has invalid values",
+                self.instance_name
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The mutable runtime both switch families carry.
+#[derive(Debug, Clone, Copy)]
+struct SwitchRuntime {
+    state: SwitchState,
+    prev_state: SwitchState,
+    in_hysteresis_band: bool,
+    current_resistance: Value,
+    prev_resistance: Value,
+    control_derivative: Value,
+    initial_load_started: bool,
+    initial_load_pending: bool,
+    curve: Option<XyceSwitchCurve>,
+}
+
+fn encode_switch_state(state: SwitchState) -> u8 {
+    match state {
+        SwitchState::Off => 0,
+        SwitchState::On => 1,
+        SwitchState::Transitioning => 2,
+    }
+}
+
+fn decode_switch_state(code: u8) -> Option<SwitchState> {
+    match code {
+        0 => Some(SwitchState::Off),
+        1 => Some(SwitchState::On),
+        2 => Some(SwitchState::Transitioning),
+        _ => None,
+    }
+}
+
+fn encode_hysteresis_side(side: Option<XyceSwitchHysteresisSide>) -> u8 {
+    match side {
+        None => 0,
+        Some(XyceSwitchHysteresisSide::Off) => 1,
+        Some(XyceSwitchHysteresisSide::On) => 2,
+    }
+}
+
+fn decode_hysteresis_side(code: u8) -> Option<Option<XyceSwitchHysteresisSide>> {
+    match code {
+        0 => Some(None),
+        1 => Some(Some(XyceSwitchHysteresisSide::Off)),
+        2 => Some(Some(XyceSwitchHysteresisSide::On)),
+        _ => None,
+    }
+}
+
+impl SwitchRuntime {
+    fn checkpoint(&self, name: &str, kind: SwitchCheckpointKind) -> AcceptedSwitchCheckpoint {
+        let curve = self.curve.as_ref();
+        AcceptedSwitchCheckpoint {
+            instance_name: name.to_owned(),
+            kind,
+            values: [
+                self.current_resistance,
+                self.prev_resistance,
+                self.control_derivative,
+                curve.map_or(0.0, |curve| curve.last_state),
+            ],
+            codes: [
+                encode_switch_state(self.state),
+                encode_switch_state(self.prev_state),
+                u8::from(self.in_hysteresis_band),
+                u8::from(self.initial_load_started),
+                u8::from(self.initial_load_pending),
+                u8::from(curve.is_some()),
+                curve.map_or(0, |curve| encode_hysteresis_side(curve.transition_hold)),
+                curve.map_or(0, |curve| encode_hysteresis_side(curve.pending_side)),
+                curve.map_or(0, |curve| u8::from(curve.departing_on)),
+                curve.map_or(0, |curve| curve.off_departure_bridge_count),
+                curve.map_or(0, |curve| u8::from(curve.pending_departing_on)),
+                curve.map_or(0, |curve| curve.pending_off_departure_bridge_count),
+            ],
+        }
+    }
+
+    /// The runtime `checkpoint` describes, on top of this one's model-owned
+    /// curve parameters, or why the row cannot belong to this switch.
+    fn restored(
+        &self,
+        name: &str,
+        kind: SwitchCheckpointKind,
+        checkpoint: &AcceptedSwitchCheckpoint,
+    ) -> Result<Self, String> {
+        if checkpoint.instance_name != name {
+            return Err(format!(
+                "switch instance mismatch: captured '{}', circuit has '{name}'",
+                checkpoint.instance_name
+            ));
+        }
+        if checkpoint.kind != kind {
+            return Err(format!(
+                "switch '{name}' family mismatch: captured '{}', circuit has '{}'",
+                checkpoint.kind.tag(),
+                kind.tag()
+            ));
+        }
+        checkpoint.validate_numeric_state()?;
+        let invalid = || format!("switch '{name}' accepted state has invalid values");
+        let [
+            current_resistance,
+            prev_resistance,
+            control_derivative,
+            last_state,
+        ] = checkpoint.values;
+        let [
+            state,
+            prev_state,
+            in_band,
+            load_started,
+            load_pending,
+            curve_present,
+            transition_hold,
+            pending_side,
+            departing_on,
+            bridge_count,
+            pending_departing_on,
+            pending_bridge_count,
+        ] = checkpoint.codes;
+        let flag = |code: u8| match code {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        };
+        let bridge = |code: u8| (code <= 2).then_some(code);
+        let curve = match (self.curve, flag(curve_present).ok_or_else(invalid)?) {
+            (Some(mut curve), true) => {
+                curve.last_state = last_state;
+                curve.transition_hold =
+                    decode_hysteresis_side(transition_hold).ok_or_else(invalid)?;
+                curve.pending_side = decode_hysteresis_side(pending_side).ok_or_else(invalid)?;
+                curve.departing_on = flag(departing_on).ok_or_else(invalid)?;
+                curve.off_departure_bridge_count = bridge(bridge_count).ok_or_else(invalid)?;
+                curve.pending_departing_on = flag(pending_departing_on).ok_or_else(invalid)?;
+                curve.pending_off_departure_bridge_count =
+                    bridge(pending_bridge_count).ok_or_else(invalid)?;
+                Some(curve)
+            }
+            (None, false) => {
+                if last_state.to_bits() != 0
+                    || [
+                        transition_hold,
+                        pending_side,
+                        departing_on,
+                        bridge_count,
+                        pending_departing_on,
+                        pending_bridge_count,
+                    ]
+                    .iter()
+                    .any(|code| *code != 0)
+                {
+                    return Err(invalid());
+                }
+                None
+            }
+            _ => {
+                return Err(format!(
+                    "switch '{name}' piecewise-curve presence does not match the circuit's model"
+                ));
+            }
+        };
+        Ok(Self {
+            state: decode_switch_state(state).ok_or_else(invalid)?,
+            prev_state: decode_switch_state(prev_state).ok_or_else(invalid)?,
+            in_hysteresis_band: flag(in_band).ok_or_else(invalid)?,
+            current_resistance,
+            prev_resistance,
+            control_derivative,
+            initial_load_started: flag(load_started).ok_or_else(invalid)?,
+            initial_load_pending: flag(load_pending).ok_or_else(invalid)?,
+            curve,
+        })
+    }
+}
+
+//=============================================================================
 // Voltage-Controlled Switch
 //=============================================================================
 
@@ -584,6 +841,56 @@ impl VoltageSwitch {
         };
         self.control_sensitivity(voltage(self.ctrl_pos) - voltage(self.ctrl_neg))
             .0
+    }
+
+    fn runtime(&self) -> SwitchRuntime {
+        SwitchRuntime {
+            state: self.state,
+            prev_state: self.prev_state,
+            in_hysteresis_band: self.in_hysteresis_band,
+            current_resistance: self.current_resistance,
+            prev_resistance: self.prev_resistance,
+            control_derivative: self.current_dg_dcontrol,
+            initial_load_started: self.initial_load_started,
+            initial_load_pending: self.initial_load_pending,
+            curve: self.xyce_curve,
+        }
+    }
+
+    /// This switch's accepted transient state, for a checkpoint.
+    pub(crate) fn accepted_checkpoint(&self) -> AcceptedSwitchCheckpoint {
+        self.runtime()
+            .checkpoint(&self.name, SwitchCheckpointKind::Voltage)
+    }
+
+    /// Whether `checkpoint` is this switch's state, without restoring it.
+    pub(crate) fn validate_accepted_checkpoint(
+        &self,
+        checkpoint: &AcceptedSwitchCheckpoint,
+    ) -> Result<(), String> {
+        self.runtime()
+            .restored(&self.name, SwitchCheckpointKind::Voltage, checkpoint)
+            .map(drop)
+    }
+
+    /// Restore the accepted transient state a checkpoint captured.
+    pub(crate) fn restore_accepted_checkpoint(
+        &mut self,
+        checkpoint: &AcceptedSwitchCheckpoint,
+    ) -> Result<(), String> {
+        let runtime =
+            self.runtime()
+                .restored(&self.name, SwitchCheckpointKind::Voltage, checkpoint)?;
+        self.state = runtime.state;
+        self.prev_state = runtime.prev_state;
+        self.in_hysteresis_band = runtime.in_hysteresis_band;
+        self.current_resistance = runtime.current_resistance;
+        self.prev_resistance = runtime.prev_resistance;
+        self.current_dg_dcontrol = runtime.control_derivative;
+        self.initial_load_started = runtime.initial_load_started;
+        self.initial_load_pending = runtime.initial_load_pending;
+        self.xyce_curve = runtime.curve;
+        Ok(())
     }
 
     /// Whether every scalar needed by the ordinary and exact-HB memoryless
@@ -1145,6 +1452,56 @@ impl CurrentSwitch {
             _ => 0.0,
         };
         self.control_sensitivity(ictrl).0
+    }
+
+    fn runtime(&self) -> SwitchRuntime {
+        SwitchRuntime {
+            state: self.state,
+            prev_state: self.prev_state,
+            in_hysteresis_band: self.in_hysteresis_band,
+            current_resistance: self.current_resistance,
+            prev_resistance: self.prev_resistance,
+            control_derivative: self.current_dg_dictrl,
+            initial_load_started: self.initial_load_started,
+            initial_load_pending: self.initial_load_pending,
+            curve: self.xyce_curve,
+        }
+    }
+
+    /// This switch's accepted transient state, for a checkpoint.
+    pub(crate) fn accepted_checkpoint(&self) -> AcceptedSwitchCheckpoint {
+        self.runtime()
+            .checkpoint(&self.name, SwitchCheckpointKind::Current)
+    }
+
+    /// Whether `checkpoint` is this switch's state, without restoring it.
+    pub(crate) fn validate_accepted_checkpoint(
+        &self,
+        checkpoint: &AcceptedSwitchCheckpoint,
+    ) -> Result<(), String> {
+        self.runtime()
+            .restored(&self.name, SwitchCheckpointKind::Current, checkpoint)
+            .map(drop)
+    }
+
+    /// Restore the accepted transient state a checkpoint captured.
+    pub(crate) fn restore_accepted_checkpoint(
+        &mut self,
+        checkpoint: &AcceptedSwitchCheckpoint,
+    ) -> Result<(), String> {
+        let runtime =
+            self.runtime()
+                .restored(&self.name, SwitchCheckpointKind::Current, checkpoint)?;
+        self.state = runtime.state;
+        self.prev_state = runtime.prev_state;
+        self.in_hysteresis_band = runtime.in_hysteresis_band;
+        self.current_resistance = runtime.current_resistance;
+        self.prev_resistance = runtime.prev_resistance;
+        self.current_dg_dictrl = runtime.control_derivative;
+        self.initial_load_started = runtime.initial_load_started;
+        self.initial_load_pending = runtime.initial_load_pending;
+        self.xyce_curve = runtime.curve;
+        Ok(())
     }
 
     /// Commit hysteresis-side state after an accepted transient timestep.

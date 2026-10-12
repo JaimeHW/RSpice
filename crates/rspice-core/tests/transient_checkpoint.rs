@@ -995,6 +995,71 @@ fn xyce_generic_switch_store_history_round_trips_across_resume() {
     }
 }
 
+/// A switch's hysteresis is history: inside its band it conducts or not
+/// according to the side it last left. The checkpoint falls at 151 ns, where
+/// every control sits inside its band on the way down from the ON side, so
+/// a resume that rebuilt the switches from their cards would open them. The
+/// resumed segment must instead repeat the unsegmented run bit for bit: the
+/// native threshold law of `S1` and `W1`, and the Xyce piecewise curve with
+/// committed hysteresis sides of `S2`.
+#[test]
+fn switch_checkpoints_resume_mid_hysteresis_bit_identically() {
+    const DECK: &str = "\
+* switch hysteresis checkpoint
+vc c 0 sin(0 1 10meg)
+v1 in 0 1
+r1 in out 1k
+c1 out 0 1p
+s1 out 0 c 0 swnative
+r2 in out2 1k
+c2 out2 0 1p
+s2 out2 0 c 0 swcurve
+vci ci 0 sin(0 1 10meg)
+rci ci x 1k
+vsense x 0 0
+r3 in out3 1k
+c3 out3 0 1p
+w1 out3 0 vsense cswnative
+.model swnative sw (vt=0 vh=0.5 ron=10 roff=1meg)
+.model swcurve sw (on=0.5 off=-0.5 onh=0.2 offh=-0.2 ron=10 roff=1meg)
+.model cswnative csw (it=0 ih=0.5m ron=10 roff=1meg smooth=1u)
+.tran 1n 300n
+.end
+";
+    const SPLIT: f64 = 151.0e-9;
+    let full = assert_scheduled_deck_resumes_exactly(
+        "switch hysteresis",
+        DECK,
+        300.0e-9,
+        SPLIT,
+        1.0e-9,
+        SimulationConfig::default(),
+    );
+    // The seam is inside the band with the threshold-law switches held ON
+    // from the peak at 125 ns, so the history is what decides their state
+    // there; the curve switch is mid-transition on its ON side.
+    let control = interpolate(
+        &full.time,
+        full.try_voltage_waveform_named("c").unwrap(),
+        SPLIT,
+    );
+    assert!(
+        control.abs() < 0.2,
+        "the seam must sit inside every hysteresis band, control is {control}"
+    );
+    for node in ["out", "out3"] {
+        let held = interpolate(
+            &full.time,
+            full.try_voltage_waveform_named(node).unwrap(),
+            SPLIT,
+        );
+        assert!(
+            held < 0.05,
+            "{node}: the switch must still conduct at the seam, v={held}"
+        );
+    }
+}
+
 #[test]
 fn segmented_run_continues_the_unsegmented_trajectory() {
     let netlist = Netlist::parse(DECK).expect("deck parses");
@@ -1820,8 +1885,8 @@ a_dac [d] [out] dac
 .model src d_source (input_file=\"{uri}\")
 .model dac dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)
 rload out 0 1k
-s1 out 0 out 0 switchmod
-.model switchmod sw (ron=1 roff=1meg vt=0.5 vh=0.1)
+m1 out out 0 0 vd
+.model vd vdmos (vto=1 kp=0.1)
 .tran 100p 2n
 .end
 "
@@ -1857,10 +1922,16 @@ s1 out 0 out 0 switchmod
         blockers.iter().any(|blocker| {
             blocker.source
                 == rspice_core::engine::TransientCheckpointBlockerSource::IntegrationRuntime
-                && blocker.message.contains("voltage-controlled switch")
+                && blocker.message.contains("VDMOS")
         }),
-        "a switch's accepted hysteresis is owned by the integration runtime: {blockers:?}"
+        "a VDMOS's accepted history is owned by the integration runtime: {blockers:?}"
     );
+    for blocker in blockers {
+        assert!(
+            blocker.instance.is_some(),
+            "every blocker of this deck names the instance that holds it: {blocker:?}"
+        );
+    }
 }
 
 #[cfg(feature = "veriloga-model-diode-cmc")]

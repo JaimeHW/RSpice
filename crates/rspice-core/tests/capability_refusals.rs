@@ -212,19 +212,19 @@ fn xyce_y_device_families_are_refused_by_the_grammar_with_their_span() {
 
 #[test]
 fn a_checkpoint_request_this_deck_cannot_satisfy_is_refused_before_the_run() {
-    // A voltage-controlled switch accumulates accepted hysteresis state that
-    // the checkpoint format does not carry, so asking for a checkpoint is a
-    // capability gap — not a bad deck, which is why the same deck must still
-    // run. The refusal comes before any solver work: the only consumer of a
-    // checkpoint is a resume, so there is nothing to be gained by solving to
-    // tstop first and refusing then.
+    // A VDMOS accumulates accepted integration history that the checkpoint
+    // format does not carry, so asking for a checkpoint is a capability gap —
+    // not a bad deck, which is why the same deck must still run. The refusal
+    // comes before any solver work: the only consumer of a checkpoint is a
+    // resume, so there is nothing to be gained by solving to tstop first and
+    // refusing then.
     let netlist = parse(
         "checkpoint capability\n\
-         V1 in 0 1\n\
-         VC c 0 1\n\
-         S1 in out c 0 SW1\n\
-         R1 out 0 1k\n\
-         .model SW1 SW(VT=0.5 VH=0.1 RON=1 ROFF=1meg)\n\
+         V1 in 0 5\n\
+         VG g 0 4\n\
+         R1 in d 10\n\
+         M1 d g 0 0 VD\n\
+         .model VD VDMOS (VTO=2 KP=0.5)\n\
          .end\n",
     );
     let error = Engine::default()
@@ -237,8 +237,21 @@ fn a_checkpoint_request_this_deck_cannot_satisfy_is_refused_before_the_run() {
     assert!(
         error
             .to_string()
-            .contains("voltage-controlled switch accepted hysteresis state is not checkpointed"),
+            .contains("VDMOS accepted transient integration history is not checkpointed"),
         "the refusal must name the state owner that blocks the checkpoint: {error}"
+    );
+    let SimulationError::UnsupportedCapability(refusal) = &error else {
+        panic!("a checkpoint refusal is a capability refusal: {error}");
+    };
+    assert_eq!(
+        refusal.instance.as_deref().map(str::to_ascii_lowercase),
+        Some("m1".to_owned()),
+        "the refusal names the blocking instance as a typed field"
+    );
+    assert_eq!(
+        refusal.analysis_kind,
+        Some(rspice_core::identity::AnalysisKind::Tran),
+        "the refusal names the transient it declines"
     );
 
     Engine::default()

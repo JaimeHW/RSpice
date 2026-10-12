@@ -76,6 +76,7 @@ pub(crate) use memristor_team::{
 };
 pub use sources::{CurrentSource, VoltageSource};
 pub use stamp_error::{NonFiniteTrialError, StampError};
+pub(crate) use switch::{AcceptedSwitchCheckpoint, SwitchCheckpointKind};
 pub use switch::{CurrentSwitch, GenericSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
 pub use transmission_line::TransmissionLine;

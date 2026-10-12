@@ -1250,8 +1250,9 @@ endmodule
     let (prefix, _) = text
         .split_once("runtime_veriloga_state_available ")
         .expect("current checkpoint contains runtime Verilog-A provenance");
-    // Format 57 closes the image with the mixed-runtime section, after the
-    // runtime Verilog-A states; keep it so only the model state is absent.
+    // The mixed-runtime section (format 57) and the switch section (format
+    // 59) close the image, after the runtime Verilog-A states; keep them so
+    // only the model state is absent.
     let (_, mixed_runtime) = text
         .rsplit_once("\nmixed_runtime_image ")
         .expect("current checkpoint closes with its mixed-runtime section");

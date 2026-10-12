@@ -3718,63 +3718,10 @@ impl Engine {
             return (Vec::new(), Vec::new());
         }
 
-        fn block_if_present(blockers: &mut Vec<String>, present: bool, description: &'static str) {
-            if present {
-                blockers.push(description.to_string());
-            }
-        }
-
-        let mut blockers = Vec::new();
-        block_if_present(
-            &mut blockers,
-            !circuit.vdmoses.is_empty(),
-            "VDMOS accepted transient integration history is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            circuit.has_b3soi_devices(),
-            "B3SOI DD/FD/PD accepted transient integration history is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            !circuit.ekv26s.is_empty(),
-            "EKV2.6 accepted transient integration history is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            !circuit.ekv3s.is_empty(),
-            "EKV3 accepted limiter and bypass state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            circuit.resistors.thermal.iter().any(Option::is_some),
-            "thermal resistor accepted temperature state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            !circuit.multi_winding_transformers.is_empty(),
-            "multi-winding transformer accepted integration state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            !circuit.jiles_atherton_inductors.is_empty(),
-            "Jiles-Atherton accepted magnetic state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            !circuit.xyce_core_groups.is_empty(),
-            "Xyce nonlinear-core accepted magnetic state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            !circuit.vswitches.is_empty(),
-            "voltage-controlled switch accepted hysteresis state is not checkpointed",
-        );
-        block_if_present(
-            &mut blockers,
-            !circuit.iswitches.is_empty(),
-            "current-controlled switch accepted hysteresis state is not checkpointed",
-        );
+        let blockers = Self::integration_runtime_resume_blocker_owners(circuit)
+            .into_iter()
+            .map(|(message, _)| message.to_string())
+            .collect();
         // The mixed image owns both the HDL design and all code-model state.
         // Native models must explicitly declare a portable context contract.
         #[cfg(feature = "veriloga")]
@@ -3786,6 +3733,89 @@ impl Engine {
         #[cfg(not(feature = "veriloga"))]
         let extension = circuit.xspice_checkpoint_resume_blockers();
         (blockers, extension)
+    }
+
+    /// The device families whose accepted-step state the integration runtime
+    /// does not checkpoint yet, each with the first instance that holds it, in
+    /// the order their messages are stored.
+    fn integration_runtime_resume_blocker_owners(
+        circuit: &crate::circuit::CircuitData,
+    ) -> Vec<(&'static str, String)> {
+        let thermal_resistor = circuit
+            .resistors
+            .thermal
+            .iter()
+            .position(Option::is_some)
+            .map(|index| {
+                circuit
+                    .resistors
+                    .names
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| format!("R{}", index + 1))
+            });
+        let b3soi = circuit
+            .b3soi
+            .devices
+            .first()
+            .map(|device| device.name.clone())
+            .or_else(|| circuit.b3soi_fd.devices.first().map(|d| d.name.clone()))
+            .or_else(|| circuit.b3soi_pd.devices.first().map(|d| d.name.clone()));
+        let jiles_atherton = circuit.jiles_atherton_inductors.first().map(|binding| {
+            circuit
+                .inductors
+                .names
+                .get(binding.inductor_index)
+                .cloned()
+                .unwrap_or_else(|| format!("L{}", binding.inductor_index + 1))
+        });
+        let xyce_core = circuit.xyce_core_groups.first().map(|group| {
+            group
+                .core_output_name
+                .rsplit_once('!')
+                .map_or(group.core_output_name.as_str(), |(_, name)| name)
+                .to_owned()
+        });
+        [
+            (
+                "VDMOS accepted transient integration history is not checkpointed",
+                circuit.vdmoses.devices.first().map(|d| d.name.clone()),
+            ),
+            (
+                "B3SOI DD/FD/PD accepted transient integration history is not checkpointed",
+                b3soi,
+            ),
+            (
+                "EKV2.6 accepted transient integration history is not checkpointed",
+                circuit.ekv26s.devices.first().map(|d| d.name.clone()),
+            ),
+            (
+                "EKV3 accepted limiter and bypass state is not checkpointed",
+                circuit.ekv3s.devices.first().map(|d| d.name.clone()),
+            ),
+            (
+                "thermal resistor accepted temperature state is not checkpointed",
+                thermal_resistor,
+            ),
+            (
+                "multi-winding transformer accepted integration state is not checkpointed",
+                circuit
+                    .multi_winding_transformers
+                    .first()
+                    .map(|binding| binding.device.name.clone()),
+            ),
+            (
+                "Jiles-Atherton accepted magnetic state is not checkpointed",
+                jiles_atherton,
+            ),
+            (
+                "Xyce nonlinear-core accepted magnetic state is not checkpointed",
+                xyce_core,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(message, instance)| instance.map(|instance| (message, instance)))
+        .collect()
     }
 
     /// Inspect one elaborated circuit for every state owner that can prove a
@@ -3813,8 +3843,14 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let mut blockers = Vec::new();
-        let mut push = |source, message| {
-            blockers.push(TransientCheckpointBlocker::new(source, message));
+        // Each message is reported once, under one source, with the instance
+        // it is about whenever an instance owns it, so a refusal can name it.
+        let mut push = |source, message: String, instance: Option<&str>| {
+            let blocker = TransientCheckpointBlocker::new(source, message);
+            blockers.push(match instance {
+                Some(instance) => blocker.for_instance(instance),
+                None => blocker,
+            });
         };
 
         for (index, line) in circuit.tlines.iter().enumerate() {
@@ -3822,7 +3858,11 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             if let Err(message) = line.checkpoint_state() {
-                push(TransientCheckpointBlockerSource::TransmissionLine, message);
+                push(
+                    TransientCheckpointBlockerSource::TransmissionLine,
+                    message,
+                    Some(&line.name),
+                );
             }
         }
         for (index, line) in circuit.coupled_tlines.iter().enumerate() {
@@ -3835,15 +3875,37 @@ impl Engine {
                     "coupled transmission line '{}': convolution history is not checkpointable",
                     line.name
                 ),
+                Some(&line.name),
             );
         }
 
-        let native = circuit.capture_accepted_native_nonlinear_checkpoint_states();
-        for message in native.resume_blockers {
-            push(
-                TransientCheckpointBlockerSource::NativeNonlinearState,
-                message,
-            );
+        // The native accepted-state capture, device by device, in its order.
+        for diode in &circuit.diodes.devices {
+            if let Err(message) = diode.accepted_nonlinear_checkpoint() {
+                push(
+                    TransientCheckpointBlockerSource::NativeNonlinearState,
+                    message,
+                    Some(&diode.name),
+                );
+            }
+        }
+        for jfet in &circuit.jfets {
+            if let Err(message) = jfet.accepted_nonlinear_checkpoint() {
+                push(
+                    TransientCheckpointBlockerSource::NativeNonlinearState,
+                    message,
+                    Some(&jfet.name),
+                );
+            }
+        }
+        for bjt in &circuit.bjts.devices {
+            if let Err(message) = bjt.accepted_nonlinear_checkpoint() {
+                push(
+                    TransientCheckpointBlockerSource::NativeNonlinearState,
+                    message,
+                    Some(&bjt.name),
+                );
+            }
         }
         for (index, bjt) in circuit.bjts.devices.iter().enumerate() {
             if index.is_multiple_of(64) && abort.is_aborted() {
@@ -3858,32 +3920,57 @@ impl Engine {
                         "BJT '{}' transient history is not checkpointable; its runtime requires a legacy Gummel-Poon or promoted VBIC history contract",
                         bjt.name
                     ),
+                    Some(&bjt.name),
                 );
             }
         }
 
         if let Err(message) = circuit.generated_veriloga_checkpoint_states() {
-            push(TransientCheckpointBlockerSource::ExtensionState, message);
+            push(
+                TransientCheckpointBlockerSource::ExtensionState,
+                message,
+                None,
+            );
         }
         #[cfg(feature = "veriloga")]
         if let Err(message) = circuit.runtime_veriloga_checkpoint_states() {
-            push(TransientCheckpointBlockerSource::ExtensionState, message);
+            push(
+                TransientCheckpointBlockerSource::ExtensionState,
+                message,
+                None,
+            );
         }
 
-        // One interval, because this asks what a checkpoint taken after any
-        // accepted step would carry. The split form is what keeps the XSPICE
-        // and mixed-host messages from being reported twice: they are part of
-        // the accepted-runtime inventory the checkpoint stores, and they are
-        // extension state, not integration state.
-        let (integration_blockers, extension_blockers) =
-            Self::exact_integration_runtime_resume_blockers_by_owner(circuit, 1);
-        for message in extension_blockers {
-            push(TransientCheckpointBlockerSource::ExtensionState, message);
+        // What a checkpoint taken after any accepted step would carry. The
+        // XSPICE and mixed-host messages are part of the accepted-runtime
+        // inventory the checkpoint stores, but they are extension state, not
+        // integration state, so they are reported here under that one source
+        // (the inventory `exact_integration_runtime_resume_blockers_by_owner`
+        // stores is the same split).
+        #[cfg(feature = "veriloga")]
+        let mixed = circuit.has_mixed_signal_hosts();
+        for instance in &circuit.xspice_instances {
+            #[cfg(feature = "veriloga")]
+            let message = if mixed {
+                instance.runtime_checkpoint_resume_blocker()
+            } else {
+                instance.checkpoint_resume_blocker()
+            };
+            #[cfg(not(feature = "veriloga"))]
+            let message = instance.checkpoint_resume_blocker();
+            if let Some(message) = message {
+                push(
+                    TransientCheckpointBlockerSource::ExtensionState,
+                    message,
+                    Some(&instance.name),
+                );
+            }
         }
-        for message in integration_blockers {
+        for (message, instance) in Self::integration_runtime_resume_blocker_owners(circuit) {
             push(
                 TransientCheckpointBlockerSource::IntegrationRuntime,
-                message,
+                message.to_owned(),
+                Some(&instance),
             );
         }
         if abort.is_aborted() {
@@ -4346,14 +4433,19 @@ impl Engine {
             // produce: a capability refusal, not a malformed circuit, and one
             // a frontend reports against the roadmap rather than back at the
             // author.
-            Self::admitted_transient_checkpoint_capability_for_circuit(&circuit, abort)?
-                .require_resumable()
-                .map_err(|detail| {
-                    SimulationError::unsupported_capability(
-                        "analysis.tran.checkpoint_capability",
-                        detail,
-                    )
-                })?;
+            let capability =
+                Self::admitted_transient_checkpoint_capability_for_circuit(&circuit, abort)?;
+            capability.require_resumable().map_err(|detail| {
+                let refusal = crate::engine::UnsupportedCapabilityError::new(
+                    "analysis.tran.checkpoint_capability",
+                    detail,
+                )
+                .for_analysis_kind(crate::identity::AnalysisKind::Tran);
+                SimulationError::from(match capability.blocking_instance() {
+                    Some(instance) => refusal.for_instance(instance),
+                    None => refusal,
+                })
+            })?;
         }
         if circuit.num_nodes() == 0
             && circuit.num_branches() == 0

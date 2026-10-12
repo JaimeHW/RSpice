@@ -50,6 +50,7 @@ mod mosfet;
 #[cfg(test)]
 mod record_limit_tests;
 mod solver_state;
+mod switch;
 use crate::device::behavioral::BehavioralAcceptedState;
 
 use crate::Value;
@@ -208,7 +209,12 @@ fn checkpoint_operation_result<T>(
 /// Version 55 retains both limits and one-sided slopes of scalar-line events.
 /// Version 56 retains expression-capacitor charge increments before rounding Q.
 /// Version 57 retains the unified accepted mixed-runtime image.
-const FORMAT_VERSION: u32 = mixed::FORMAT_VERSION;
+/// Version 58 carries version 2 HDL host images in that mixed-runtime image.
+/// Version 59 retains accepted voltage- and current-controlled switch state.
+const FORMAT_VERSION: u32 = switch::FORMAT_VERSION;
+// The newest section's format is the file format; the sections before it
+// were added in order.
+const _: () = assert!(mixed::FORMAT_VERSION < FORMAT_VERSION);
 const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
 const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
@@ -368,6 +374,10 @@ pub(crate) const MIXED_SIGNAL_ACCEPTED_STATE_BLOCKER: &str =
 pub struct TransientCheckpointBlocker {
     pub source: TransientCheckpointBlockerSource,
     pub message: String,
+    /// The deck instance whose state blocks the checkpoint, when the owner is
+    /// one: the first instance of a blocked family, or the instance a
+    /// per-instance message is about.
+    pub instance: Option<String>,
 }
 
 impl TransientCheckpointBlocker {
@@ -378,7 +388,14 @@ impl TransientCheckpointBlocker {
         Self {
             source,
             message: message.into(),
+            instance: None,
         }
+    }
+
+    #[must_use]
+    pub(crate) fn for_instance(mut self, instance: impl Into<String>) -> Self {
+        self.instance = Some(instance.into());
+        self
     }
 }
 
@@ -407,6 +424,13 @@ impl TransientCheckpointCapability {
     /// Complete deterministic blocker inventory.
     pub fn blockers(&self) -> &[TransientCheckpointBlocker] {
         &self.blockers
+    }
+
+    /// The first instance the inventory names, which a refusal reports.
+    pub(crate) fn blocking_instance(&self) -> Option<&str> {
+        self.blockers
+            .iter()
+            .find_map(|blocker| blocker.instance.as_deref())
     }
 
     /// Reject an incomplete image with the complete deterministic blocker list.
@@ -649,6 +673,8 @@ pub struct TransientCheckpoint {
     xyce_memristor_resistance_stores: Vec<Value>,
     xyce_team_resistance_noise_states: Vec<XyceTeamResistanceNoiseCheckpoint>,
     generic_switch_stores: Vec<[Value; 4]>,
+    /// Absent in files older than format 59, which never recorded it.
+    switch_states: Option<Vec<crate::device::AcceptedSwitchCheckpoint>>,
     behavioral_states: Option<Vec<BehavioralAcceptedState>>,
     capacitor_sdt_states: Option<Vec<capacitor_sdt::State>>,
     accepted_nonlinear_state_available: bool,
@@ -5811,6 +5837,7 @@ impl TransientCheckpoint {
         }
         behavioral::validate(self.behavioral_states.as_deref(), self.time, &mut budget)?;
         capacitor_sdt::validate(self.capacitor_sdt_states.as_deref(), self.time, &mut budget)?;
+        switch::validate(self.switch_states.as_deref())?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -6841,6 +6868,7 @@ impl TransientCheckpoint {
             xyce_team_resistance_noise_states: circuit
                 .capture_xyce_team_resistance_noise_checkpoints(),
             generic_switch_stores: circuit.generic_switch_transient_store_snapshots(),
+            switch_states: Some(switch::capture(circuit)),
             behavioral_states: Some(circuit.behavioral_sources.accepted_history()),
             capacitor_sdt_states: Some(capacitor_sdt::capture(circuit)),
             accepted_nonlinear_state_available: true,
@@ -7247,6 +7275,7 @@ impl TransientCheckpoint {
                     .to_string(),
             );
         }
+        switch::validate_target(circuit, self.switch_states.as_deref())?;
         // All state families are validated before the first mutation. The
         // restore calls below repeat their local validation defensively, but
         // cannot fail after this point without a violated internal invariant.
@@ -7320,6 +7349,7 @@ impl TransientCheckpoint {
             binding.resistance_store = resistance;
         }
         circuit.restore_generic_switch_transient_store_snapshots(&self.generic_switch_stores);
+        switch::restore(circuit, self.switch_states.as_deref())?;
         circuit
             .behavioral_sources
             .restore_accepted_history(self.behavioral_states.as_deref(), self.time)?;
@@ -8057,6 +8087,7 @@ impl TransientCheckpoint {
         if let Some(image) = &self.mixed_runtime_image {
             count = count.saturating_add(image.retained_values());
         }
+        count = count.saturating_add(switch::retained_values(self.switch_states.as_deref()));
         for instance in &self.xspice_instance_states {
             count = count
                 .saturating_add(2)
@@ -8835,6 +8866,7 @@ impl TransientCheckpoint {
         #[cfg(not(feature = "veriloga"))]
         out.push_str("runtime_veriloga_states 0\n");
         mixed::write(&mut out, self.mixed_runtime_image.as_ref(), abort)?;
+        switch::write(&mut out, self.switch_states.as_deref(), abort)?;
         check_checkpoint_abort(abort)?;
         Ok(out)
     }
@@ -9677,6 +9709,7 @@ impl TransientCheckpoint {
             }
         }
         let mixed_runtime_image = mixed::read(lines, version, budget)?;
+        let switch_states = switch::read(lines, version, budget)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -9722,6 +9755,7 @@ impl TransientCheckpoint {
             xyce_memristor_resistance_stores,
             xyce_team_resistance_noise_states,
             generic_switch_stores,
+            switch_states,
             behavioral_states,
             capacitor_sdt_states,
             accepted_nonlinear_state_available,
@@ -11895,6 +11929,20 @@ mod tests {
             xyce_memristor_resistance_stores: Vec::new(),
             xyce_team_resistance_noise_states: Vec::new(),
             generic_switch_stores: vec![[-0.25, 0.125, 0.375, f64::MIN_POSITIVE]],
+            switch_states: Some(vec![
+                crate::device::AcceptedSwitchCheckpoint {
+                    instance_name: "scheck".to_string(),
+                    kind: crate::device::SwitchCheckpointKind::Voltage,
+                    values: [1.0e6, 2.5, -0.0, 0.0],
+                    codes: [1, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                },
+                crate::device::AcceptedSwitchCheckpoint {
+                    instance_name: "wcheck".to_string(),
+                    kind: crate::device::SwitchCheckpointKind::Current,
+                    values: [10.0, 1.0e12, 3.5e-4, 0.625],
+                    codes: [2, 1, 0, 1, 0, 1, 2, 1, 1, 2, 0, 1],
+                },
+            ]),
             behavioral_states: Some(Vec::new()),
             capacitor_sdt_states: Some(Vec::new()),
             accepted_nonlinear_state_available: true,
@@ -12153,6 +12201,9 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < switch::FORMAT_VERSION && line.starts_with("accepted_switch_") {
+                continue;
+            }
             if version < mixed::FORMAT_VERSION && line.starts_with("mixed_runtime_image ") {
                 if line == "mixed_runtime_image 1" {
                     let bytes =
@@ -14763,7 +14814,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 42] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 43] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -14806,6 +14857,7 @@ mod tests {
         (56, 13),
         (57, 13),
         (58, 13),
+        (59, 13),
     ];
 
     #[cfg(feature = "veriloga")]
