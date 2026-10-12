@@ -378,7 +378,11 @@ const WORKFLOW_HEADER_TEXT_MIN_HEIGHT: f32 = 33.0;
 /// The single measure of lead a title-first header uses above the title,
 /// between the two lines, and below the subtitle.
 const TITLE_FIRST_HEADER_LEAD: f32 = 9.0;
-const WORKFLOW_HEADER_HORIZONTAL_MARGIN: i8 = 15;
+/// The header shares the body's and the footer's side inset, so a title, the
+/// rows under it and the footer's verbs start on one left edge and the close
+/// target ends on the right edge the primary ends on. At 15 the title sat
+/// 3 pt inside everything below it.
+const WORKFLOW_HEADER_HORIZONTAL_MARGIN: i8 = WORKFLOW_FOOTER_HORIZONTAL_MARGIN;
 const WORKFLOW_FOOTER_HORIZONTAL_MARGIN: i8 = 12;
 const WORKFLOW_FOOTER_VERTICAL_MARGIN: i8 = 10;
 /// Inset above and below a single row of touch-height footer actions.
