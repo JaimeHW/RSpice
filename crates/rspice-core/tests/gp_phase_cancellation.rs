@@ -48,8 +48,11 @@ impl AbortSignal for CancelAfterSamples {
     }
 }
 
+/// Cancellation, reuse and continuation are exact at any accuracy target.
+/// RELTOL=1e-5 keeps the exact-delay phase history adaptive without holding
+/// it to the sub-picosecond steps RELTOL=1e-7 demands.
 fn netlist() -> Netlist {
-    Netlist::parse("GP accepted-work cancellation\nVC c 0 2\nVB b 0 DC .6 SIN(.6 .005 1G)\nQ1 c b 0 qm\n.model qm NPN IS=1e-16 BF=100 BR=1 TF=1n PTF=21 RB=100 RBM=20 IRB=1e-5 RE=1 RC=2\n.options RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 GMIN=0\n.end\n").unwrap()
+    Netlist::parse("GP accepted-work cancellation\nVC c 0 2\nVB b 0 DC .6 SIN(.6 .005 1G)\nQ1 c b 0 qm\n.model qm NPN IS=1e-16 BF=100 BR=1 TF=1n PTF=21 RB=100 RBM=20 IRB=1e-5 RE=1 RC=2\n.options RELTOL=1e-5 ABSTOL=1e-16 VNTOL=1e-10 GMIN=0\n.end\n").unwrap()
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

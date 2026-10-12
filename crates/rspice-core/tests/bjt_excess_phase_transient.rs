@@ -46,8 +46,11 @@ fn gp_phase_runs_both_polarities_models_dialects_and_startup_modes() {
                 for phase in ["90", "21"] {
                     for kind in ["NPN", "PNP"] {
                         let sign = if kind == "PNP" { "-" } else { "" };
+                        // Completion and finite waveforms hold at any accuracy
+                        // target. RELTOL=1e-5 keeps the exact-delay history
+                        // adaptive with a fraction of RELTOL=1e-7's steps.
                         let text = format!(
-                            "GP transient phase\nVC c 0 {sign}2\nVB b 0 DC {sign}.7 SIN({sign}.7 {sign}1u 1G)\nQ1 c b 0 model\n.model model {kind} IS=1e-16 BF=100 BR=1 TF=1n PTF={phase} {private}\n.options RELTOL=1e-7 ABSTOL=1e-16 VNTOL=1e-10 GMIN=0\n.end\n"
+                            "GP transient phase\nVC c 0 {sign}2\nVB b 0 DC {sign}.7 SIN({sign}.7 {sign}1u 1G)\nQ1 c b 0 model\n.model model {kind} IS=1e-16 BF=100 BR=1 TF=1n PTF={phase} {private}\n.options RELTOL=1e-5 ABSTOL=1e-16 VNTOL=1e-10 GMIN=0\n.end\n"
                         );
                         let source = Netlist::parse(&text).unwrap();
                         for startup in [
