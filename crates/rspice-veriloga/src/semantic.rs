@@ -1751,7 +1751,14 @@ impl SemanticAnalyzer {
 
             if param.param_type == ParamType::Integer
                 && !default_depends_on_parameters
-                && let Some(default) = declared_default_value.map(ConstantValue::as_f64)
+                && let Some(default) = param
+                    .default
+                    .as_ref()
+                    .filter(|_| !is_parameter_array)
+                    .and_then(|expression| {
+                        self.real_operand_of_integer_default(param, expression, module)
+                    })
+                    .or_else(|| declared_default_value.map(ConstantValue::as_f64))
                 && real_to_integer(default).is_err()
             {
                 self.record_error_at(
@@ -6850,6 +6857,33 @@ impl SemanticAnalyzer {
             let folded = self.fold_real_parameter_operands(parameter, expression, module);
             self.normalize_integer_expression(folded.as_ref().unwrap_or(expression))
         }
+    }
+
+    /// The real value an explicitly `integer` parameter's closed default
+    /// converts from, when that default is real-typed.
+    ///
+    /// The typed constant evaluator returns the default already assigned at
+    /// 32 bits. That is the value an integral default (`8'd255+8'd1`) has, but
+    /// a real default converts by rounding, and one that rounds outside the
+    /// signed 32-bit range is refused like the runtime `real_to_integer`
+    /// conversion refuses it, never wrapped into a different integer.
+    fn real_operand_of_integer_default(
+        &self,
+        parameter: &ParameterDecl,
+        expression: &Expression,
+        module: &Module,
+    ) -> Option<f64> {
+        if parameter.param_type != ParamType::Integer
+            || !matches!(self.infer_type(expression), Ok(ValueType::Real))
+        {
+            return None;
+        }
+        let folded = self.fold_real_parameter_operands(parameter, expression, module);
+        let normalized = self
+            .normalize_integer_expression(folded.as_ref().unwrap_or(expression))
+            .ok()?;
+        self.eval_const_value(&normalized)
+            .map(ConstantValue::as_f64)
     }
 
     /// Parameter/default coercion does not perform executable lowering, but
