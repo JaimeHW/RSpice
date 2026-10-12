@@ -197,6 +197,8 @@ pub struct DialogState {
     pub new_cell_create_symbol: bool,
     /// Create testbench view for new cell
     pub new_cell_create_testbench: bool,
+    /// Create a Verilog-A view, and the symbol its module generates
+    pub new_cell_create_veriloga: bool,
     /// New Cell validation error message
     pub new_cell_error: Option<String>,
     /// Exact library catalog revision captured when New Cell opened.

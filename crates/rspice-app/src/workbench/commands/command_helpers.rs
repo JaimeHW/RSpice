@@ -363,6 +363,7 @@ pub(super) fn open_new_cell_dialog(app: &mut RSpiceApp) {
     dialogs.new_cell_create_schematic = true;
     dialogs.new_cell_create_symbol = false;
     dialogs.new_cell_create_testbench = false;
+    dialogs.new_cell_create_veriloga = false;
     dialogs.new_cell_error = None;
     dialogs.new_cell_library_revision = library_revision;
     dialogs.new_cell_dialog = true;

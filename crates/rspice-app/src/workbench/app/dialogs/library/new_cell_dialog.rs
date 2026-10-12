@@ -99,6 +99,7 @@ impl RSpiceApp {
                 switch_row(ui, "Schematic", &mut dialogs.new_cell_create_schematic);
                 switch_row(ui, "Symbol", &mut dialogs.new_cell_create_symbol);
                 switch_row(ui, "Testbench", &mut dialogs.new_cell_create_testbench);
+                switch_row(ui, "Verilog-A", &mut dialogs.new_cell_create_veriloga);
 
                 if let Some(error) = dialogs.new_cell_error.clone() {
                     ui.add_space(6.0);
@@ -134,6 +135,7 @@ impl RSpiceApp {
             self.state.dialogs.new_cell_create_schematic = true;
             self.state.dialogs.new_cell_create_symbol = false;
             self.state.dialogs.new_cell_create_testbench = false;
+            self.state.dialogs.new_cell_create_veriloga = false;
         }
     }
 
@@ -200,6 +202,35 @@ impl RSpiceApp {
             cell.add_view(View::new("testbench", ViewType::Testbench));
         }
 
+        // Every view is made on copies, the Verilog-A view's source and
+        // compiled interface included, so a refusal anywhere creates nothing.
+        let mut candidate_libraries = self.state.library_manager.clone();
+        let Some(mut candidate_library) = candidate_libraries.edit_library(&library) else {
+            self.state.dialogs.new_cell_error = Some(format!("Library '{}' not found", library));
+            return outcome;
+        };
+        candidate_library.add_cell(cell);
+        let veriloga =
+            crate::state::CellViewRef::new(&library, &name, crate::state::workspace::VERILOGA_VIEW);
+        let seeded_veriloga = if self.state.dialogs.new_cell_create_veriloga {
+            let mut candidate_sources = self.state.workspace.content.project_sources.clone();
+            match super::new_veriloga_device::seed_veriloga_view(
+                &self.state,
+                &mut candidate_libraries,
+                &mut candidate_sources,
+                &veriloga,
+                &[],
+            ) {
+                Ok(receipt) => Some((candidate_sources, receipt)),
+                Err(error) => {
+                    self.state.dialogs.new_cell_error = Some(error);
+                    return outcome;
+                }
+            }
+        } else {
+            None
+        };
+
         let project_mutation = match self.state.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateCell {
                 library: library.clone(),
@@ -213,8 +244,13 @@ impl RSpiceApp {
             }
         };
         let seeded_schematic = self.state.new_schematic_document();
-        if let Some(mut lib) = self.state.library_manager.edit_library(&library) {
-            lib.add_cell(cell);
+        {
+            self.state.library_manager = candidate_libraries;
+            let receipt = seeded_veriloga.map(|(sources, receipt)| {
+                self.state.workspace.content.project_sources = sources;
+                self.state.workspace.content.project_sources_dirty = true;
+                receipt
+            });
             for view_name in [
                 self.state
                     .dialogs
@@ -239,8 +275,12 @@ impl RSpiceApp {
                 "Created cell '{}' in library '{}'",
                 name, library
             )));
+            // A schematic defines the cell's ports, so it opens first; a
+            // Verilog-A view without one is the module to write next.
             let view_to_open = if self.state.dialogs.new_cell_create_schematic {
                 Some("schematic")
+            } else if receipt.is_some() {
+                Some(veriloga.view.as_str())
             } else if self.state.dialogs.new_cell_create_symbol {
                 Some("symbol")
             } else if self.state.dialogs.new_cell_create_testbench {
@@ -256,11 +296,17 @@ impl RSpiceApp {
                         view,
                     ));
             }
+            if let Some(receipt) = receipt
+                && self.state.workspace.content.active_view == veriloga
+            {
+                self.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Design);
+                self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
+            }
             self.state.dialogs.new_cell_error = None;
             outcome.close = true;
             outcome.persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
-        } else {
-            self.state.dialogs.new_cell_error = Some(format!("Library '{}' not found", library));
         }
 
         outcome
@@ -414,6 +460,70 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["IN"]
         );
+    }
+
+    /// The Verilog-A switch makes the view New Verilog-A device… makes, by
+    /// the same path: a starter module, its source, and the symbol its
+    /// compile generates, in the one cell transaction.
+    #[test]
+    fn new_cell_verilog_a_switch_creates_the_module_view_and_its_generated_symbol() {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .library_manager
+            .add_library(Library::new("behavioral"));
+        app.state.dialogs.new_cell_library = "behavioral".to_owned();
+        app.state.dialogs.new_cell_name = "comparator".to_owned();
+        app.state.dialogs.new_cell_create_schematic = false;
+        app.state.dialogs.new_cell_create_veriloga = true;
+        app.state.dialogs.new_cell_library_revision = app.state.library_manager.revision();
+        let project_revision_before = app.state.workspace.content.project.revision().get();
+
+        let outcome = app.handle_new_cell_create_action();
+
+        assert!(outcome.close, "{:?}", app.state.dialogs.new_cell_error);
+        assert_eq!(
+            app.state.workspace.content.project.revision().get(),
+            project_revision_before + 1
+        );
+        let reference = CellViewRef::new("behavioral", "comparator", "veriloga");
+        let cell = app
+            .state
+            .library_manager
+            .get_library("behavioral")
+            .and_then(|library| library.get_cell("comparator"))
+            .expect("the created cell");
+        let veriloga = cell.get_view("veriloga").expect("the Verilog-A view");
+        assert_eq!(
+            veriloga.metadata.get("veriloga.module").map(String::as_str),
+            Some("rspice_comparator_va")
+        );
+        assert_eq!(
+            veriloga.metadata.get("veriloga.ports").map(String::as_str),
+            Some("[]")
+        );
+        let symbol = cell.get_view("symbol").expect("the generated symbol");
+        assert!(rspice_design::symbol::generated::is_generated_symbol(
+            symbol
+        ));
+        assert!(
+            app.state
+                .workspace
+                .content
+                .project_sources
+                .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+                    reference.clone()
+                ))
+                .is_some_and(|bundle| bundle
+                    .root()
+                    .content()
+                    .contains("module rspice_comparator_va;"))
+        );
+        assert_eq!(app.state.workspace.content.active_view, reference);
+        assert_eq!(
+            app.state.workbench.workspace,
+            crate::workbench::state::Workspace::Design
+        );
+        assert!(app.state.ui.code_workspace.veriloga.receipt.is_some());
     }
 
     #[test]
