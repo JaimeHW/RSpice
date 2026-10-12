@@ -308,6 +308,100 @@ fn prune_transient_history(
     }
 }
 
+/// Bit-for-bit equality, so a skipped write stores exactly what is already
+/// there: `-0.0` over `0.0`, or one NaN payload over another, is still a write.
+trait SameBits {
+    fn same_bits(&self, other: &Self) -> bool;
+}
+
+impl SameBits for Value {
+    #[inline]
+    fn same_bits(&self, other: &Self) -> bool {
+        self.to_bits() == other.to_bits()
+    }
+}
+
+impl SameBits for Option<Value> {
+    #[inline]
+    fn same_bits(&self, other: &Self) -> bool {
+        self.map(Value::to_bits) == other.map(Value::to_bits)
+    }
+}
+
+impl SameBits for DigitalValue {
+    #[inline]
+    fn same_bits(&self, other: &Self) -> bool {
+        self == other
+    }
+}
+
+impl SameBits for AnalogValue {
+    #[inline]
+    fn same_bits(&self, other: &Self) -> bool {
+        self.value.same_bits(&other.value)
+            && self.prev_value.same_bits(&other.prev_value)
+            && self.partial.same_bits(&other.partial)
+    }
+}
+
+impl SameBits for AnalogTransition {
+    #[inline]
+    fn same_bits(&self, other: &Self) -> bool {
+        self.state == other.state
+            && self.event_time.same_bits(&other.event_time)
+            && self.transition_start.same_bits(&other.transition_start)
+            && self.transition_end.same_bits(&other.transition_end)
+    }
+}
+
+impl SameBits for Option<AnalogTransition> {
+    #[inline]
+    fn same_bits(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Some(a), Some(b)) => a.same_bits(b),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
+
+/// The first element `value_at` would change in `values`, or `None` when the
+/// refill would store exactly what `values` already holds.
+///
+/// The per-call port setters run for every evaluated instance at every Newton
+/// iterate, and their maps are copy-on-write: a mutable borrow copies a map a
+/// rollback image or the evaluation backup still shares, whether or not the
+/// write changes anything. Asking first keeps a refill that changes nothing
+/// off that path. `value_at` is called once per index, in order, exactly as
+/// [`refill_vec_from_fn`] calls it, so the caller resumes from the returned
+/// index with the value already computed for it.
+fn first_changed_element<T: SameBits, F>(
+    values: &[T],
+    value_count: usize,
+    value_at: &mut F,
+) -> Option<(usize, T)>
+where
+    F: FnMut(usize) -> T,
+{
+    debug_assert_eq!(values.len(), value_count);
+    (0..value_count).find_map(|index| {
+        let value = value_at(index);
+        (!value.same_bits(&values[index])).then_some((index, value))
+    })
+}
+
+/// Finish a refill [`first_changed_element`] found to change something.
+fn finish_refill_from<T, F>(values: &mut [T], first: (usize, T), mut value_at: F)
+where
+    F: FnMut(usize) -> T,
+{
+    let (start, value) = first;
+    values[start] = value;
+    for (index, slot) in values.iter_mut().enumerate().skip(start + 1) {
+        *slot = value_at(index);
+    }
+}
+
 fn context_allocation_error(
     context: &str,
     len: usize,
@@ -897,6 +991,11 @@ impl CmContext {
     /// Set analog input by name
     pub fn set_input_analog(&mut self, name: &str, value: Value) {
         let value = AnalogValue::new(value);
+        if let Some(InputValue::Analog(existing)) = self.inputs.get(name)
+            && existing.same_bits(&value)
+        {
+            return;
+        }
         match self.inputs.get_mut(name) {
             Some(InputValue::Analog(existing)) => *existing = value,
             Some(existing) => *existing = InputValue::Analog(value),
@@ -916,6 +1015,11 @@ impl CmContext {
 
     /// Set digital input by name
     pub fn set_input_digital(&mut self, name: &str, value: DigitalValue) {
+        if let Some(InputValue::Digital(existing)) = self.inputs.get(name)
+            && *existing == value
+        {
+            return;
+        }
         match self.inputs.get_mut(name) {
             Some(InputValue::Digital(existing)) => *existing = value,
             Some(existing) => *existing = InputValue::Digital(value),
@@ -928,6 +1032,11 @@ impl CmContext {
 
     /// Set real input by name
     pub fn set_input_real(&mut self, name: &str, value: Value) {
+        if let Some(InputValue::Real(existing)) = self.inputs.get(name)
+            && existing.same_bits(&value)
+        {
+            return;
+        }
         match self.inputs.get_mut(name) {
             Some(InputValue::Real(existing)) => *existing = value,
             Some(existing) => *existing = InputValue::Real(value),
@@ -940,6 +1049,13 @@ impl CmContext {
 
     /// Set ngspice-style total event-node load for a scalar port.
     pub(crate) fn set_port_total_load(&mut self, name: &str, value: Value) {
+        if self
+            .port_total_loads
+            .get(name)
+            .is_some_and(|existing| existing.same_bits(&value))
+        {
+            return;
+        }
         match self.port_total_loads.get_mut(name) {
             Some(existing) => *existing = value,
             None => {
@@ -953,11 +1069,21 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        value_at: F,
+        mut value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> Value,
     {
+        if let Some(values) = self.port_vector_total_loads.get(name)
+            && values.len() == value_count
+        {
+            if let Some(first) = first_changed_element(values, value_count, &mut value_at)
+                && let Some(values) = self.port_vector_total_loads.get_mut(name)
+            {
+                finish_refill_from(values, first, value_at);
+            }
+            return Ok(());
+        }
         match self.port_vector_total_loads.get_mut(name) {
             Some(values) => {
                 refill_vec_from_fn("port vector total loads", values, value_count, value_at)?;
@@ -976,11 +1102,21 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        value_at: F,
+        mut value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> AnalogValue,
     {
+        if let Some(InputValue::AnalogVector(values)) = self.inputs.get(name)
+            && values.len() == value_count
+        {
+            if let Some(first) = first_changed_element(values, value_count, &mut value_at)
+                && let Some(InputValue::AnalogVector(values)) = self.inputs.get_mut(name)
+            {
+                finish_refill_from(values, first, value_at);
+            }
+            return Ok(());
+        }
         match self.inputs.get_mut(name) {
             Some(InputValue::AnalogVector(values)) => {
                 refill_vec_from_fn("analog vector input", values, value_count, value_at)?;
@@ -1004,6 +1140,19 @@ impl CmContext {
         name: &str,
         transitions: Vec<Option<AnalogTransition>>,
     ) {
+        if self
+            .input_analog_vector_transitions
+            .get(name)
+            .is_some_and(|existing| {
+                existing.len() == transitions.len()
+                    && existing
+                        .iter()
+                        .zip(&transitions)
+                        .all(|(existing, new)| existing.same_bits(new))
+            })
+        {
+            return;
+        }
         self.input_analog_vector_transitions
             .insert(name.to_string(), transitions);
     }
@@ -1013,11 +1162,21 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        value_at: F,
+        mut value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> DigitalValue,
     {
+        if let Some(InputValue::DigitalVector(values)) = self.inputs.get(name)
+            && values.len() == value_count
+        {
+            if let Some(first) = first_changed_element(values, value_count, &mut value_at)
+                && let Some(InputValue::DigitalVector(values)) = self.inputs.get_mut(name)
+            {
+                finish_refill_from(values, first, value_at);
+            }
+            return Ok(());
+        }
         match self.inputs.get_mut(name) {
             Some(InputValue::DigitalVector(values)) => {
                 refill_vec_from_fn("digital vector input", values, value_count, value_at)?;
@@ -1040,11 +1199,21 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        value_at: F,
+        mut value_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> Value,
     {
+        if let Some(InputValue::RealVector(values)) = self.inputs.get(name)
+            && values.len() == value_count
+        {
+            if let Some(first) = first_changed_element(values, value_count, &mut value_at)
+                && let Some(InputValue::RealVector(values)) = self.inputs.get_mut(name)
+            {
+                finish_refill_from(values, first, value_at);
+            }
+            return Ok(());
+        }
         match self.inputs.get_mut(name) {
             Some(InputValue::RealVector(values)) => {
                 refill_vec_from_fn("real vector input", values, value_count, value_at)?;
@@ -1123,6 +1292,13 @@ impl CmContext {
 
     /// Set last event time for a scalar digital input.
     pub fn set_input_digital_event_time(&mut self, name: &str, time: Value) {
+        if self
+            .input_event_times
+            .get(name)
+            .is_some_and(|existing| existing.same_bits(&time))
+        {
+            return;
+        }
         match self.input_event_times.get_mut(name) {
             Some(existing) => *existing = time,
             None => {
@@ -1150,11 +1326,21 @@ impl CmContext {
         &mut self,
         name: &str,
         value_count: usize,
-        time_at: F,
+        mut time_at: F,
     ) -> CmResult<()>
     where
         F: FnMut(usize) -> Option<Value>,
     {
+        if let Some(times) = self.input_vector_event_times.get(name)
+            && times.len() == value_count
+        {
+            if let Some(first) = first_changed_element(times, value_count, &mut time_at)
+                && let Some(times) = self.input_vector_event_times.get_mut(name)
+            {
+                finish_refill_from(times, first, time_at);
+            }
+            return Ok(());
+        }
         match self.input_vector_event_times.get_mut(name) {
             Some(times) => {
                 refill_vec_from_fn("digital vector event times", times, value_count, time_at)?;
@@ -1170,6 +1356,13 @@ impl CmContext {
 
     /// Set last event time for a scalar real input.
     pub fn set_input_real_event_time(&mut self, name: &str, time: Value) {
+        if self
+            .input_event_times
+            .get(name)
+            .is_some_and(|existing| existing.same_bits(&time))
+        {
+            return;
+        }
         match self.input_event_times.get_mut(name) {
             Some(existing) => *existing = time,
             None => {
@@ -1330,6 +1523,17 @@ impl CmContext {
 
     /// Set analog output value
     pub fn set_output(&mut self, name: &str, value: Value) {
+        match self.outputs.get(name) {
+            // Shifting `value` into `prev_value` and storing `value` again
+            // writes nothing when both already hold it.
+            Some(OutputValue::Analog(a))
+                if a.value.same_bits(&value) && a.prev_value.same_bits(&value) =>
+            {
+                return;
+            }
+            Some(OutputValue::Analog(_)) | None => {}
+            Some(_) => return,
+        }
         match self.outputs.get_mut(name) {
             Some(OutputValue::Analog(a)) => {
                 a.prev_value = a.value;
@@ -1347,11 +1551,22 @@ impl CmContext {
 
     /// Set analog output with partial derivative
     pub fn set_output_with_partial(&mut self, name: &str, value: Value, partial: Value) {
-        let out = self
-            .outputs
-            .entry(name.to_string())
-            .or_insert_with(OutputValue::analog);
-        if let OutputValue::Analog(a) = out {
+        match self.outputs.get(name) {
+            Some(OutputValue::Analog(a))
+                if a.value.same_bits(&value)
+                    && a.prev_value.same_bits(&value)
+                    && a.partial.same_bits(&partial) =>
+            {
+                return;
+            }
+            Some(OutputValue::Analog(_)) => {}
+            // A port of another kind keeps its value, as before.
+            Some(_) => return,
+            None => {
+                self.outputs.insert(name.to_string(), OutputValue::analog());
+            }
+        }
+        if let Some(OutputValue::Analog(a)) = self.outputs.get_mut(name) {
             a.prev_value = a.value;
             a.value = value;
             a.partial = partial;
@@ -1493,6 +1708,24 @@ impl CmContext {
         partial: Value,
     ) -> CmResult<()> {
         let width = self.port_width(name).max(index + 1);
+        let unchanged = |a: &AnalogValue| {
+            a.value.same_bits(&value)
+                && a.prev_value.same_bits(&value)
+                && a.partial.same_bits(&partial)
+        };
+        match self.outputs.get(name) {
+            Some(OutputValue::AnalogVector(existing))
+                if existing.len() == width && existing.get(index).is_some_and(unchanged) =>
+            {
+                return Ok(());
+            }
+            Some(OutputValue::Analog(existing))
+                if index == 0 && width == 1 && unchanged(existing) =>
+            {
+                return Ok(());
+            }
+            _ => {}
+        }
         if !self.outputs.contains_key(name) {
             self.outputs.insert(
                 name.to_string(),
@@ -1520,11 +1753,14 @@ impl CmContext {
 
     /// Set digital output value (schedules event)
     pub fn set_output_digital(&mut self, name: &str, value: DigitalValue, delay: Value) {
-        match self.outputs.get_mut(name) {
-            Some(output) => *output = OutputValue::Digital(value),
-            None => {
-                self.outputs
-                    .insert(name.to_string(), OutputValue::Digital(value));
+        if !matches!(self.outputs.get(name), Some(OutputValue::Digital(existing)) if *existing == value)
+        {
+            match self.outputs.get_mut(name) {
+                Some(output) => *output = OutputValue::Digital(value),
+                None => {
+                    self.outputs
+                        .insert(name.to_string(), OutputValue::Digital(value));
+                }
             }
         }
         self.push_pending_digital_event(name, value, delay);
@@ -1532,11 +1768,14 @@ impl CmContext {
 
     /// Set real output value (schedules event)
     pub fn set_output_real(&mut self, name: &str, value: Value, delay: Value) {
-        match self.outputs.get_mut(name) {
-            Some(output) => *output = OutputValue::Real(value),
-            None => {
-                self.outputs
-                    .insert(name.to_string(), OutputValue::Real(value));
+        if !matches!(self.outputs.get(name), Some(OutputValue::Real(existing)) if existing.same_bits(&value))
+        {
+            match self.outputs.get_mut(name) {
+                Some(output) => *output = OutputValue::Real(value),
+                None => {
+                    self.outputs
+                        .insert(name.to_string(), OutputValue::Real(value));
+                }
             }
         }
         self.push_pending_real_event(name, value, delay);
@@ -2534,7 +2773,9 @@ impl CmContext {
         self.rhs.clear();
         self.static_stamps.clear();
         self.static_rhs.clear();
-        self.output_analog_transitions.clear();
+        if !self.output_analog_transitions.is_empty() {
+            self.output_analog_transitions.clear();
+        }
     }
 
     //-------------------------------------------------------------------------

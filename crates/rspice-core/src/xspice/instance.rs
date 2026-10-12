@@ -2127,8 +2127,14 @@ impl XspiceInstance {
         match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
             Ok(Ok(())) => {
                 if track_event_input_signature && phase != EvaluationPhase::RollbackableProbe {
-                    self.last_event_input_signature =
-                        Some(self.event_input_signature_scratch.clone());
+                    // Reuse the recorded signature's buffer.
+                    match &mut self.last_event_input_signature {
+                        Some(last) => last.clone_from(&self.event_input_signature_scratch),
+                        None => {
+                            self.last_event_input_signature =
+                                Some(self.event_input_signature_scratch.clone());
+                        }
+                    }
                     self.event_inputs_dirty = false;
                 }
                 Ok(())
