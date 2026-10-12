@@ -3,7 +3,7 @@
 //! Recognized SW/CSW parameters must be evaluated natively from model-card
 //! expressions or rejected. They must not disappear into default switch values.
 
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 use std::sync::Arc;
 
@@ -219,4 +219,143 @@ fn string_vswitch_model_parameter_fails_closed() {
         message.contains("RON") && message.contains("non-numeric"),
         "error should identify non-numeric switch RON: {message}"
     );
+}
+
+/// An OFF voltage switch and an OFF current switch, each into 1 MΩ, with
+/// the model cards `models` and an optional options line. The leak through
+/// each open switch is `1M/(1M + ROFF)`. The controls sit far below every
+/// threshold, so the native law's smooth transition contributes nothing.
+fn open_switch_leak(
+    dialect: SpiceDialect,
+    models: &str,
+    options: &str,
+) -> Result<[f64; 2], String> {
+    let deck = format!(
+        "* default switch off resistance\n\
+         v1 in 0 1\n\
+         s1 in a c 0 sw1\n\
+         r1 a 0 1meg\n\
+         vc c 0 -10\n\
+         w1 in b vsense csw1\n\
+         r2 b 0 1meg\n\
+         is 0 x dc -1\n\
+         vsense x 0 0\n\
+         {models}\n\
+         {options}\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let op = Engine::new(SimulationConfig {
+        spice_dialect: dialect,
+        ..Default::default()
+    })
+    .run_dc_op(&netlist)
+    .map_err(|error| error.to_string())?;
+    let voltage = |node: &str| {
+        let index = op
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("node {node} missing from {:?}", op.node_names));
+        op.node_voltages[index]
+    };
+    Ok([voltage("a"), voltage("b")])
+}
+
+fn assert_leak(label: &str, leaks: [f64; 2], roff: f64) {
+    let expected = 1.0e6 / (1.0e6 + roff);
+    for (switch, leak) in ["S", "W"].into_iter().zip(leaks) {
+        let relative = (leak - expected).abs() / expected;
+        assert!(
+            relative <= 1.0e-6,
+            "{label} {switch}: open-switch leak {leak:.12e}, ROFF={roff:e} gives {expected:.12e}"
+        );
+    }
+}
+
+/// ngspice gives a SPICE3 `SW`/`CSW` card that names no `ROFF` the circuit
+/// GMIN as its off conductance (`sw/swdefs.h:65`, `csw/cswdefs.h:66`). The
+/// ngspice-46 leaks of this deck are 9.999990000010001e-07 at the default
+/// GMIN and 9.990009990009990e-04 with `.OPTIONS GMIN=1e-9`. The native
+/// dialect reads SPICE3 cards the same way.
+#[test]
+fn spice3_switch_cards_are_off_at_one_over_gmin() {
+    let models = ".model sw1 sw vt=0.5\n.model csw1 csw it=0.5m";
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let label = format!("{dialect:?}");
+        assert_leak(
+            &label,
+            open_switch_leak(dialect, models, "").expect("default GMIN deck solves"),
+            1.0e12,
+        );
+        assert_leak(
+            &format!("{label} GMIN=1e-9"),
+            open_switch_leak(dialect, models, ".options gmin=1e-9")
+                .expect("raised GMIN deck solves"),
+            1.0e9,
+        );
+        let refusal = open_switch_leak(dialect, models, ".options gmin=0")
+            .expect_err("GMIN=0 leaves a SPICE3 card no finite off resistance");
+        assert!(
+            refusal.contains("ROFF") && refusal.contains("GMIN"),
+            "{label}: the refusal names the missing ROFF and the GMIN it would come from: {refusal}"
+        );
+        // An explicit ROFF is the card's own, whatever GMIN says.
+        assert_leak(
+            &format!("{label} explicit ROFF"),
+            open_switch_leak(
+                dialect,
+                ".model sw1 sw vt=0.5 roff=1meg\n.model csw1 csw it=0.5m roff=1meg",
+                ".options gmin=0",
+            )
+            .expect("an explicit ROFF needs no GMIN"),
+            1.0e6,
+        );
+    }
+}
+
+/// Xyce's switch defaults `ROFF` to 1 MΩ (`N_DEV_SW.C:89`).
+#[test]
+fn xyce_switch_cards_are_off_at_one_megohm() {
+    assert_leak(
+        "Xyce",
+        open_switch_leak(
+            SpiceDialect::Xyce,
+            ".model sw1 vswitch (von=1 voff=0)\n.model csw1 iswitch (ion=1m ioff=0)",
+            "",
+        )
+        .expect("Xyce deck solves"),
+        1.0e6,
+    );
+}
+
+/// ngspice reads a PSpice `VSWITCH`/`ISWITCH` card through its PSpice
+/// translation (`frontend/inpcompat.c`): the threshold form becomes a SPICE3
+/// card with `roff=1.0e12`, the `VON`/`VOFF` form a code model with
+/// `r_off=1.0e6`.
+#[test]
+fn pspice_switch_cards_take_ngspice_s_translation_defaults() {
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::BestAvailable] {
+        let label = format!("{dialect:?}");
+        assert_leak(
+            &format!("{label} threshold form"),
+            open_switch_leak(
+                dialect,
+                ".model sw1 vswitch vt=0.5\n.model csw1 iswitch it=0.5m",
+                "",
+            )
+            .expect("threshold-form deck solves"),
+            1.0e12,
+        );
+        assert_leak(
+            &format!("{label} on/off form"),
+            open_switch_leak(
+                dialect,
+                ".model sw1 vswitch von=1 voff=0\n.model csw1 iswitch ion=1m ioff=0",
+                "",
+            )
+            .expect("on/off-form deck solves"),
+            1.0e6,
+        );
+    }
 }

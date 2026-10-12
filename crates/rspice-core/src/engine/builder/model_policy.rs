@@ -1375,6 +1375,62 @@ pub(super) const VSWITCH_MODEL_PARAMS: &[&str] = &[
 pub(super) const ISWITCH_MODEL_PARAMS: &[&str] = &[
     "IT", "IH", "ION", "IOFF", "IHON", "IHOFF", "ON", "OFF", "ONH", "OFFH", "RON", "ROFF", "SMOOTH",
 ];
+
+/// Give a voltage- or current-controlled switch card that names no `ROFF`
+/// the off resistance its dialect's reference simulator gives it.
+///
+/// * Xyce: 1 MΩ for every switch family (`N_DEV_SW.C:89`,
+///   `addPar("ROFF", 1.0e6, …)`).
+/// * ngspice, and the native dialect, which reads SPICE3 switch cards as
+///   ngspice does: a SPICE3 `SW`/`CSW` card is off at the circuit GMIN,
+///   `#define SW_OFF_CONDUCTANCE ckt->CKTgmin` (`sw/swdefs.h:65`,
+///   `csw/cswdefs.h:66`, installed by `swsetup.c`/`cswsetup.c` when `ROFF` is
+///   not given), so it follows `.OPTIONS GMIN`. A PSpice `VSWITCH`/`ISWITCH`
+///   card gets what ngspice's PSpice translation makes of it
+///   (`frontend/inpcompat.c`): its `VT`/`VH` (`IT`/`IH`) form becomes a
+///   `sw`/`csw` card with `roff=1.0e12`, its `VON`/`VOFF` (`ION`/`IOFF`) form
+///   a `pswitch`/`aswitch` code model with `r_off=1.0e6`.
+///
+/// `GMIN = 0` leaves a SPICE3 card no finite off resistance, which the
+/// log-resistance switch law cannot represent, so it is refused by name.
+pub(super) fn insert_default_switch_off_resistance(
+    params: &mut HashMap<String, Value>,
+    dialect: SpiceDialect,
+    model_type: &str,
+    gmin: Value,
+    element_name: &str,
+    model_name: &str,
+) -> Result<(), SimulationError> {
+    if params.contains_key("ROFF") {
+        return Ok(());
+    }
+    let pspice_card =
+        model_type.eq_ignore_ascii_case("VSWITCH") || model_type.eq_ignore_ascii_case("ISWITCH");
+    let roff = if dialect == SpiceDialect::Xyce {
+        1.0e6
+    } else if pspice_card {
+        if ["VON", "VOFF", "ION", "IOFF"]
+            .iter()
+            .any(|key| params.contains_key(*key))
+        {
+            1.0e6
+        } else {
+            1.0e12
+        }
+    } else {
+        let roff = 1.0 / gmin;
+        if !(gmin > 0.0 && roff.is_finite()) {
+            return Err(SimulationError::Circuit(format!(
+                "Switch '{element_name}' model '{model_name}' names no ROFF, and a {model_type} \
+                 card's default off resistance is 1/GMIN, which .OPTIONS GMIN={gmin:e} leaves \
+                 infinite; give the model an explicit ROFF"
+            )));
+        }
+        roff
+    };
+    params.insert("ROFF".to_owned(), roff);
+    Ok(())
+}
 pub(super) const XYCE_TEAM_MODEL_PARAMS: &[&str] = &[
     "LEVEL",
     "KON",

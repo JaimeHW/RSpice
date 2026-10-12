@@ -8746,7 +8746,7 @@ impl Engine {
                         model_def,
                         &["SW", "VSWITCH", "VSW"],
                     )?;
-                    let params_map = resolve_supported_model_params_upper_map(
+                    let mut params_map = resolve_supported_model_params_upper_map(
                         netlist,
                         model_def,
                         "Voltage-controlled switch",
@@ -8754,6 +8754,14 @@ impl Engine {
                         model,
                         VSWITCH_MODEL_PARAMS,
                         self.config.temperature,
+                    )?;
+                    insert_default_switch_off_resistance(
+                        &mut params_map,
+                        self.config.spice_dialect,
+                        &model_def.model_type,
+                        self.config.convergence_config.junction_gmin_target,
+                        &element.name,
+                        model,
                     )?;
 
                     let mut sw = crate::device::VoltageSwitch::new(
@@ -8791,7 +8799,7 @@ impl Engine {
                         model_def,
                         &["CSW", "ISWITCH", "ISW"],
                     )?;
-                    let params_map = resolve_supported_model_params_upper_map(
+                    let mut params_map = resolve_supported_model_params_upper_map(
                         netlist,
                         model_def,
                         "Current-controlled switch",
@@ -8799,6 +8807,14 @@ impl Engine {
                         model,
                         ISWITCH_MODEL_PARAMS,
                         self.config.temperature,
+                    )?;
+                    insert_default_switch_off_resistance(
+                        &mut params_map,
+                        self.config.spice_dialect,
+                        &model_def.model_type,
+                        self.config.convergence_config.junction_gmin_target,
+                        &element.name,
+                        model,
                     )?;
 
                     let mut sw = crate::device::CurrentSwitch::new(

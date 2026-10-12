@@ -17,7 +17,7 @@
 //! | VT | Threshold voltage | 0.0V |
 //! | VH | Hysteresis voltage | 0.0V |
 //! | RON | On resistance | 1Ω |
-//! | ROFF | Off resistance | 1MΩ |
+//! | ROFF | Off resistance | dialect (below) |
 //!
 //! ## ISWITCH (Current-controlled)
 //! | Parameter | Description | Default |
@@ -25,7 +25,13 @@
 //! | IT | Threshold current | 0.0A |
 //! | IH | Hysteresis current | 0.0A |
 //! | RON | On resistance | 1Ω |
-//! | ROFF | Off resistance | 1MΩ |
+//! | ROFF | Off resistance | dialect (below) |
+//!
+//! A card that names no `ROFF` takes its dialect's default when the circuit
+//! is built: 1/GMIN for a SPICE3 `SW`/`CSW` card under ngspice and the native
+//! dialect, 1 MΩ under Xyce, and ngspice's PSpice translation for a
+//! `VSWITCH`/`ISWITCH` card (see the builder's
+//! `insert_default_switch_off_resistance`).
 //!
 //! # Implementation
 //! Uses a smooth transition function to avoid discontinuities:
