@@ -1250,8 +1250,15 @@ endmodule
     let (prefix, _) = text
         .split_once("runtime_veriloga_state_available ")
         .expect("current checkpoint contains runtime Verilog-A provenance");
-    let missing_state =
-        format!("{prefix}runtime_veriloga_state_available 0\nruntime_veriloga_states 0\n");
+    // Format 57 closes the image with the mixed-runtime section, after the
+    // runtime Verilog-A states; keep it so only the model state is absent.
+    let (_, mixed_runtime) = text
+        .rsplit_once("\nmixed_runtime_image ")
+        .expect("current checkpoint closes with its mixed-runtime section");
+    let missing_state = format!(
+        "{prefix}runtime_veriloga_state_available 0\nruntime_veriloga_states 0\n\
+         mixed_runtime_image {mixed_runtime}"
+    );
     let legacy = TransientCheckpoint::from_text(&missing_state)
         .expect("state-absent checkpoint remains parseable for a precise refusal");
     let error = engine
