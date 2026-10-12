@@ -6,7 +6,12 @@
 .include ../net/sar_analog.cir
 .include ../net/vin_ramp.cir
 .include ../net/sar_full.cir
-.param vcc=1.8 nconv=16
+* The testbench calls $finish at the NCONV-th eoc (k us + 950 ns for
+* conversion k), which ends the run. The DNL window [0.5, 16.5] us must hold
+* the eoc-high interval of the staircase's last conversion (15.95 to
+* 16.05 us), so one more conversion runs: the 17th repeats the last input
+* and its eoc (16.95 us) falls after the window.
+.param vcc=1.8 nconv=17
 * DNL probe: 1 V while eoc is high on a conversion that produced code 127
 bis127 is127 0 v = v(eoc)>0.9 ? (abs(v(code)-127)<0.5 ? 1 : 0) : 0
 .mc 10 seed 3

@@ -1,6 +1,7 @@
 * C4 variant full (RSpice-authored; corpus design C4): the testbench tb_sar
 * drives the register's clk and start (digital nets the two modules share) and
 * watches eoc and the bits on their analog nodes. NCONV is the number of
-* conversions before $finish; the decks set it to their staircase length.
+* conversions before $finish, which ends the run; each deck sets it so its
+* measures lie inside the run.
 xtb clk start eoc b7 b6 b5 b4 b3 b2 b1 b0 tb_sar NCONV={nconv}
 xsar clk start cmp samp eoc b7 b6 b5 b4 b3 b2 b1 b0 sar8
