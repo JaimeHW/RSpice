@@ -33,12 +33,17 @@ fn simulate(input: &str, output: &str, card: &str, flags: &[&str]) -> String {
 fn sensitivity_measures_the_authored_numeric_node() {
     for (input, output) in [("in", "out"), ("2", "1"), ("10", "20")] {
         let csv = simulate(input, output, &format!(".sens V({output})"), &[]);
-        let mut lines = csv.lines();
-        let headings: Vec<_> = lines.next().unwrap().split(',').collect();
-        let values: Vec<f64> = lines
+        // The `sens:parameter(..)` identity columns carry commas inside quoted
+        // headings, so the table is read as CSV rather than split on commas.
+        let mut table =
+            csv::Reader::from_reader(common::delimited_data_text(&csv, b',').as_bytes());
+        let headings = table.headers().unwrap().clone();
+        let values: Vec<f64> = table
+            .records()
             .next()
             .unwrap()
-            .split(',')
+            .unwrap()
+            .iter()
             .map(|x| x.parse().unwrap())
             .collect();
         let source = headings
@@ -58,7 +63,21 @@ fn sensitivity_measures_the_authored_numeric_node() {
 fn numeric_pole_zero_card_and_flags_match_named_ports() {
     let named = simulate("in", "out", ".pz in 0 out 0 vol pz", &[]);
     let numeric = simulate("10", "20", ".pz 10 0 20 0 vol pz", &[]);
-    assert_eq!(numeric, named);
+    // The table names the transfer's ports as authored, so those identities
+    // are the only text a rename may change; every measured value is not.
+    for (csv, input, output) in [(&named, "IN", "OUT"), (&numeric, "10", "20")] {
+        assert!(
+            csv.contains(&format!("\"pz:input(V({input},0))\""))
+                && csv.contains(&format!("\"pz:output(V({output},0))\"")),
+            "{csv}"
+        );
+    }
+    assert_eq!(
+        numeric
+            .replace("V(10,0)", "V(IN,0)")
+            .replace("V(20,0)", "V(OUT,0)"),
+        named
+    );
     let flagged = simulate("10", "20", "", &["--pz-input", "10", "--pz-output", "20"]);
-    assert_eq!(flagged, named);
+    assert_eq!(flagged, numeric);
 }
