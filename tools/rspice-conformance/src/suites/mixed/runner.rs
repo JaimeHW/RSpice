@@ -1132,11 +1132,21 @@ fn capture_one(
         .next()
         .ok_or("reference name lacks an analysis")?
         .to_owned();
+    let deck_source =
+        fs::read_to_string(&deck).map_err(|error| format!("{}: {error}", deck.display()))?;
+    // An oracle run is bounded by its analysis's case budget (at least
+    // 10 min), or by the deck's own `* rspice-capture-timeout: <s>` where the
+    // oracle is slower than RSpice (a transistor-level replay).
     let timeout = Duration::from_secs(
-        design
-            .analysis(&analysis)
-            .map(|entry| entry.timeout_s.max(600))
-            .unwrap_or(1800),
+        match oracle::ngspice::directive(&deck_source, "rspice-capture-timeout") {
+            Some(seconds) => seconds
+                .parse::<u64>()
+                .map_err(|_| format!("rspice-capture-timeout: {seconds} is not seconds"))?,
+            None => design
+                .analysis(&analysis)
+                .map(|entry| entry.timeout_s.max(600))
+                .unwrap_or(1800),
+        },
     );
     let fingerprint = oracle::deck_fingerprint(&deck)?;
     let mut refused = None;
@@ -1184,9 +1194,7 @@ fn capture_one(
     };
     // A transient table is kept to MAX_TRANSIENT_ROWS by uniform index,
     // except the spans the deck asks to keep whole (`* rspice-full-rows:`).
-    let spans = oracle::full_row_spans(
-        &fs::read_to_string(&deck).map_err(|error| format!("{}: {error}", deck.display()))?,
-    )?;
+    let spans = oracle::full_row_spans(&deck_source)?;
     let mut sections = sections;
     for table in sections.values_mut() {
         if table.axis_name == "time" {

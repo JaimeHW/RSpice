@@ -234,6 +234,21 @@ output:
   `<c>.oracle.out` beside the deck, which the mixed harness cannot read (format
   1, bound to the `.net` file); with 1 V inputs the ngspice-46 run reproduces
   every `.oracle.out` logic level at both strobes.
+- `oracle/<c>-xs.tran-vec.ngspice.cir` (c6288: `-xs.tran-vec-c6288`) is the
+  O1 vector replay: it includes the transistor deck verbatim, the vector
+  runs' strobe (`net/strobe_vectors.cir`) and the same 0.9 V probes, and its
+  control script `alter`s every input source `V<k>` of the deck to the PWL of
+  `net/<c>_vectors.cir` for that source's node, levels 0 / 1.8 V, then runs
+  `tran 1n 640n` (c6288: `80n`). It checks the gate-level conversion against
+  the transistor netlist on the random vectors, independently of the O6
+  expectation that shares the conversion. A capture takes about 2 to 9 min
+  per circuit in ngspice-46 (640 ns of switching on up to 10,000 BSIM4
+  devices), so the c1908 and c6288 decks raise their capture timeout to
+  30 min (`* rspice-capture-timeout: 1800`). ngspice does not reproduce
+  these replays' analog tables byte for byte between captures (seen on c499
+  and c6288; their output events, which the codes are read from, do
+  reproduce), so the decks are marked `* rspice-stochastic:` and their
+  tables are verified by header and layout.
 - The O3 templates replay the inputs and strobe of the RSpice run into
   Icarus on `net/<c>.v`; for `vlog` a wrapper instance `xdut` carries the
   converter endpoints' names.

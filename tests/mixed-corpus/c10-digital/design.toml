@@ -92,11 +92,12 @@ phase = "P2"
 
 # ISCAS: 64 random vectors, one per 10 ns, .tran 1n 640n (c6288: 8 vectors,
 # .tran 1n 80n). The outputs are read 8 ns into each vector, so the analog
-# step has nothing to resolve: the gates are event driven.
+# step has nothing to resolve: the gates are event driven. O1 replays the
+# same vectors into the ISCAS transistor decks (A5 licensing hold).
 [[analysis]]
 id = "tran-vec"
 variants = ["c432-xs", "c432-vlog", "c499-xs", "c499-vlog", "c880-xs", "c880-vlog", "c1355-xs", "c1355-vlog", "c1908-xs", "c1908-vlog"]
-oracles = ["O6", "O3"]
+oracles = ["O6", "O3", "O1"]
 timeout_s = 110
 phase = "P2"
 
@@ -112,7 +113,7 @@ phase = "P8"
 [[analysis]]
 id = "tran-vec-c6288"
 variants = ["c6288-xs", "c6288-vlog"]
-oracles = ["O6", "O3"]
+oracles = ["O6", "O3", "O1"]
 timeout_s = 120
 extended = true
 phase = "P8"

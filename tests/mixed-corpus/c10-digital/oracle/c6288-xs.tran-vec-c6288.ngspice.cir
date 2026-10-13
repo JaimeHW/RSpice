@@ -1,0 +1,57 @@
+* C10 c6288, tran-vec: O1 (ngspice-46) vector replay. The ISCAS85 transistor-level
+* deck tests/iscas85/85/c6288/c6288.net (45 nm BSIM4 PTM, Vdd 1.8 V) included verbatim,
+* plus the vector runs' strobe and the tran O1 deck's A/D probes at 0.9 V (Vdd/2) on
+* the primary outputs, named as the xs digital nets. The control script re-points
+* every input source at the 8 random vectors of net/c6288_vectors.cir (the
+* RSpice decks' PWL, one vector per 10 ns, 10 ps transitions) swung 0 -> 1.8 V as
+* the tran O1 decks swing them, and runs the vector span; the outputs are read
+* 8 ns into each vector at the strobe. This checks the gate-level conversion
+* against the transistor netlist independently of the O6 expectation.
+.include ../../../iscas85/85/c6288/c6288.net
+.include ../net/strobe_vectors.cir
+aprobe [g6257 g6258 g6259 g6260 g6261 g6262 g6263 g6264 g6265 g6266 g6267 g6268 g6269 g6270 g6271
++ g6272 g6273 g6274 g6275 g6276 g6277 g6278 g6279 g6280 g6281 g6282 g6283 g6284 g6285 g6286 g6287
++ g6288] [d_g6257 d_g6258 d_g6259 d_g6260 d_g6261 d_g6262 d_g6263 d_g6264 d_g6265 d_g6266 d_g6267
++ d_g6268 d_g6269 d_g6270 d_g6271 d_g6272 d_g6273 d_g6274 d_g6275 d_g6276 d_g6277 d_g6278 d_g6279
++ d_g6280 d_g6281 d_g6282 d_g6283 d_g6284 d_g6285 d_g6286 d_g6287 d_g6288] adc_logic
+.model adc_logic adc_bridge(in_low = 0.9 in_high = 0.9 rise_delay = 1e-12 fall_delay = 1e-12)
+* rspice-write: v(g6257)
+* rspice-stochastic: ngspice-46 does not reproduce these transistor-level replays' analog tables byte for byte from one capture to the next (seen on c499 and c6288 with the same deck and executable); the output events the vector codes are read from reproduce exactly
+* rspice-events: d_stb d_g6257 d_g6258 d_g6259 d_g6260 d_g6261 d_g6262 d_g6263 d_g6264 d_g6265 d_g6266 d_g6267 d_g6268 d_g6269 d_g6270 d_g6271 d_g6272 d_g6273 d_g6274 d_g6275 d_g6276 d_g6277 d_g6278 d_g6279 d_g6280 d_g6281 d_g6282 d_g6283 d_g6284 d_g6285 d_g6286 d_g6287 d_g6288
+* rspice-capture-timeout: 1800
+* rspice-control-begin
+* alter @v1[pwl] = [ 0 0 30n 0 30.01n 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v2[pwl] = [ 0 1.8 40n 1.8 40.01n 0 70n 0 70.01n 1.8 ]
+* alter @v3[pwl] = [ 0 1.8 20n 1.8 20.01n 0 30n 0 30.01n 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v4[pwl] = [ 0 1.8 10n 1.8 10.01n 0 20n 0 20.01n 1.8 30n 1.8 30.01n 0 40n 0 40.01n 1.8 ]
+* alter @v5[pwl] = [ 0 1.8 20n 1.8 20.01n 0 40n 0 40.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v6[pwl] = [ 0 0 20n 0 20.01n 1.8 30n 1.8 30.01n 0 50n 0 50.01n 1.8 60n 1.8 60.01n 0 70n 0 70.01n 1.8 ]
+* alter @v7[pwl] = [ 0 0 30n 0 30.01n 1.8 50n 1.8 50.01n 0 70n 0 70.01n 1.8 ]
+* alter @v8[pwl] = [ 0 0 30n 0 30.01n 1.8 40n 1.8 40.01n 0 60n 0 60.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v9[pwl] = [ 0 0 20n 0 20.01n 1.8 60n 1.8 60.01n 0 70n 0 70.01n 1.8 ]
+* alter @v10[pwl] = [ 0 1.8 30n 1.8 30.01n 0 40n 0 40.01n 1.8 50n 1.8 50.01n 0 ]
+* alter @v11[pwl] = [ 0 0 10n 0 10.01n 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 ]
+* alter @v12[pwl] = [ 0 0 20n 0 20.01n 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 60n 1.8 60.01n 0 70n 0 70.01n 1.8 ]
+* alter @v13[pwl] = [ 0 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 ]
+* alter @v14[pwl] = [ 0 0 10n 0 10.01n 1.8 20n 1.8 20.01n 0 40n 0 40.01n 1.8 50n 1.8 50.01n 0 60n 0 60.01n 1.8 ]
+* alter @v15[pwl] = [ 0 1.8 10n 1.8 10.01n 0 30n 0 30.01n 1.8 40n 1.8 40.01n 0 70n 0 70.01n 1.8 ]
+* alter @v16[pwl] = [ 0 0 10n 0 10.01n 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 ]
+* alter @v17[pwl] = [ 0 0 20n 0 20.01n 1.8 30n 1.8 30.01n 0 60n 0 60.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v18[pwl] = [ 0 0 10n 0 10.01n 1.8 30n 1.8 30.01n 0 50n 0 50.01n 1.8 60n 1.8 60.01n 0 ]
+* alter @v19[pwl] = [ 0 0 20n 0 20.01n 1.8 30n 1.8 30.01n 0 40n 0 40.01n 1.8 60n 1.8 60.01n 0 70n 0 70.01n 1.8 ]
+* alter @v20[pwl] = [ 0 1.8 20n 1.8 20.01n 0 30n 0 30.01n 1.8 ]
+* alter @v21[pwl] = [ 0 1.8 10n 1.8 10.01n 0 30n 0 30.01n 1.8 60n 1.8 60.01n 0 70n 0 70.01n 1.8 ]
+* alter @v22[pwl] = [ 0 0 10n 0 10.01n 1.8 30n 1.8 30.01n 0 40n 0 40.01n 1.8 60n 1.8 60.01n 0 ]
+* alter @v23[pwl] = [ 0 0 40n 0 40.01n 1.8 50n 1.8 50.01n 0 ]
+* alter @v24[pwl] = [ 0 1.8 50n 1.8 50.01n 0 70n 0 70.01n 1.8 ]
+* alter @v25[pwl] = [ 0 1.8 10n 1.8 10.01n 0 20n 0 20.01n 1.8 30n 1.8 30.01n 0 50n 0 50.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v26[pwl] = [ 0 1.8 30n 1.8 30.01n 0 40n 0 40.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v27[pwl] = [ 0 0 20n 0 20.01n 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 70n 1.8 70.01n 0 ]
+* alter @v28[pwl] = [ 0 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 ]
+* alter @v29[pwl] = [ 0 0 20n 0 20.01n 1.8 ]
+* alter @v30[pwl] = [ 0 0 20n 0 20.01n 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 60n 1.8 60.01n 0 ]
+* alter @v31[pwl] = [ 0 1.8 10n 1.8 10.01n 0 30n 0 30.01n 1.8 60n 1.8 60.01n 0 ]
+* alter @v32[pwl] = [ 0 1.8 40n 1.8 40.01n 0 50n 0 50.01n 1.8 70n 1.8 70.01n 0 ]
+* tran 1n 80n
+* rspice-control-end
+.end
