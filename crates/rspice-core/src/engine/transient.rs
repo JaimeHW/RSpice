@@ -469,11 +469,14 @@ fn reconciled_model_bound(
 /// `next_after` yields the earliest source or line clock strictly after its
 /// argument. A GP phase arrival is not carried past: its history is solved at
 /// its own clock and coalescing it is not qualified, so a landing that reaches
-/// one stays there.
+/// one stays there. Any other landing less than one floor before `stop_time`
+/// lands on it ([`coalesced_with_horizon`]), as the breakpoint schedule's own
+/// copy of that clock does (`BreakpointManager::reconcile_onto_stop`).
 fn physical_event_landing(
     earliest: Value,
     phase_arrival: Option<Value>,
     hard_min_dt: Value,
+    stop_time: Value,
     mut next_after: impl FnMut(Value) -> Result<Option<Value>, SimulationError>,
 ) -> Result<Value, SimulationError> {
     let mut landing = earliest;
@@ -491,7 +494,10 @@ fn physical_event_landing(
             _ => break,
         }
     }
-    Ok(landing)
+    if phase_arrival == Some(landing) {
+        return Ok(landing);
+    }
+    Ok(coalesced_with_horizon(landing, stop_time, hard_min_dt))
 }
 
 /// How many consecutive accepted points may advance by no more than the
@@ -5318,6 +5324,18 @@ impl Engine {
             Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt)
         };
         let hard_min_dt = hard_min_at_clock(dialect_min_dt, model_min_dt, resume_time);
+        // The floor the stepper will have at the stop time, which is the one
+        // that decides whether a breakpoint just before it is another instant.
+        let stop_floor = hard_min_at_clock(
+            if self.config.spice_dialect == SpiceDialect::Xyce {
+                xyce_hard_min_timestep(tstop)
+            } else {
+                dialect_min_dt
+            },
+            model_min_dt,
+            tstop,
+        );
+        breakpoints.reconcile_onto_stop(tstop, stop_floor);
         // A mixed module's discrete half schedules on its own declared
         // precision, which can be far finer than this. Tell it what the analog
         // side can resolve so an activation inside that window is landed
@@ -7397,6 +7415,7 @@ impl Engine {
                         earliest,
                         phase_arrival.map(|arrival| arrival.time),
                         timestep.hard_min_dt(),
+                        tstop,
                         |after| {
                             Ok(next_source_event(after)?
                                 .into_iter()
@@ -13735,9 +13754,11 @@ mod tests {
     /// launched at 5.1 ns and carried through two 10 ns delays, are one instant
     /// one ulp apart (2.51e-8 against 2.5100000000000003e-8, under a Xyce
     /// floor of 5.6e-23 s): the landing is the later clock, and a clock clear
-    /// of it, or a GP phase arrival, is not carried past.
+    /// of it, or a GP phase arrival, is not carried past. The stop time is the
+    /// last such clock: a landing less than one floor before it is the stop.
     #[test]
     fn coincident_physical_clocks_land_on_the_later_one() {
+        const NO_HORIZON: Value = Value::INFINITY;
         let corner: Value = 25.0e-9 + 0.1e-9;
         let arrival = corner.next_up();
         assert_eq!(arrival, 2.5100000000000003e-8, "the BUG 662 pair");
@@ -13746,31 +13767,44 @@ mod tests {
         let next_after = |after: Value| Ok(schedule.iter().copied().find(|time| *time > after));
 
         assert_eq!(
-            physical_event_landing(corner, None, floor, next_after).unwrap(),
+            physical_event_landing(corner, None, floor, NO_HORIZON, next_after).unwrap(),
             arrival,
             "the corner lands with the arrival one ulp after it"
         );
         assert_eq!(
-            physical_event_landing(arrival, None, floor, next_after).unwrap(),
+            physical_event_landing(arrival, None, floor, NO_HORIZON, next_after).unwrap(),
             arrival,
             "a clock five nanoseconds on is its own landing"
         );
         assert_eq!(
-            physical_event_landing(corner, None, 0.0, next_after).unwrap(),
+            physical_event_landing(corner, None, 0.0, NO_HORIZON, next_after).unwrap(),
             corner,
             "no floor, no coincidence"
         );
         assert_eq!(
-            physical_event_landing(corner, Some(corner), floor, next_after).unwrap(),
+            physical_event_landing(corner, Some(corner), floor, NO_HORIZON, next_after).unwrap(),
             corner,
             "a phase arrival is never carried past"
         );
         let phase = corner.next_up();
         assert_eq!(
-            physical_event_landing(corner, Some(phase), floor, |_| Ok(Some(arrival.next_up())))
-                .unwrap(),
+            physical_event_landing(corner, Some(phase), floor, NO_HORIZON, |_| {
+                Ok(Some(arrival.next_up()))
+            })
+            .unwrap(),
             phase,
             "a landing reaching a phase arrival stops on it"
+        );
+        let stop = arrival.next_up();
+        assert_eq!(
+            physical_event_landing(corner, None, floor, stop, next_after).unwrap(),
+            stop,
+            "the landing one ulp before the stop time is the stop time"
+        );
+        assert_eq!(
+            physical_event_landing(corner, Some(arrival), floor, stop, next_after).unwrap(),
+            arrival,
+            "a phase arrival keeps its own clock before the stop time"
         );
     }
 

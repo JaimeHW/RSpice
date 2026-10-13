@@ -594,9 +594,11 @@ endmodule
 /// A `zi_nd` filter's last sample is delivered at the stop time it rounds onto.
 ///
 /// The twentieth sample of a 1 µs filter, `20 * 1e-6`, is one ulp below the
-/// `2e-5` stop time. The run must take that instant as the stop time instead
-/// of landing on it and refusing the one-ulp interval left after it. Every
-/// accepted point is checked against the filter's closed form:
+/// `2e-5` stop time, and under a `3e-5` stop time the thirtieth sample and the
+/// input's PWL corner at `30u` are both one ulp below it. The run must take
+/// each such instant as the stop time instead of landing on it and refusing
+/// the one-ulp interval left after it. Every accepted point is checked
+/// against the filter's closed form:
 /// `y[k] = x[k] + y[k-1] / 2` on the ramp `x[k] = 0.1 k` gives
 /// `y[k] = 0.1 (2k - 2 + 2^(1-k))`.
 #[test]
@@ -627,41 +629,43 @@ endmodule
     .expect("parse");
     let period = 1.0e-6;
     let closed_form = |k: i32| 0.1 * (2.0 * f64::from(k) - 2.0 + 2.0_f64.powi(1 - k));
-    let (samples, stop) = (20, 2.0e-5);
-    let last_sample = f64::from(samples) * period;
-    assert_eq!(last_sample.next_up(), stop, "the case under test");
-    for max_timestep in [f64::INFINITY, 1.0e-6, 0.3e-6] {
-        let result = Engine::new(SimulationConfig {
-            max_timestep,
-            ..SimulationConfig::default()
-        })
-        .run_tran(&netlist, stop, period)
-        .unwrap_or_else(|error| panic!("maximum {max_timestep:e}: {error}"));
-        assert_eq!(
-            result.time.last(),
-            Some(&stop),
-            "the run ends on the stop time"
-        );
-        let out = node_series(&result.node_names, &result.voltages, "out");
-        for (time, value) in result.time.iter().zip(out) {
-            // The sample a point holds: the last instant at or before it,
-            // the stop time holding the sample one ulp below it.
-            let k = ((time / period) * (1.0 + 1.0e-12)).floor() as i32;
-            assert!(
-                (value - closed_form(k)).abs() <= 1.0e-9,
-                "maximum {max_timestep:e}: y at {time:e} is {value}, sample {k} is {}",
-                closed_form(k)
+    for (samples, stop) in [(20, 2.0e-5), (30, 3.0e-5)] {
+        let last_sample = f64::from(samples) * period;
+        assert_eq!(last_sample.next_up(), stop, "the case under test");
+        for max_timestep in [f64::INFINITY, 1.0e-6, 0.3e-6] {
+            let result = Engine::new(SimulationConfig {
+                max_timestep,
+                ..SimulationConfig::default()
+            })
+            .run_tran(&netlist, stop, period)
+            .unwrap_or_else(|error| panic!("stop {stop:e}, maximum {max_timestep:e}: {error}"));
+            assert_eq!(
+                result.time.last(),
+                Some(&stop),
+                "the run ends on the stop time"
             );
-        }
-        for k in 1..=samples {
-            let instant = f64::from(k) * period;
-            assert!(
-                result
-                    .time
-                    .iter()
-                    .any(|time| *time == instant || (k == samples && *time == stop)),
-                "maximum {max_timestep:e}: no point on sample {k}"
-            );
+            let out = node_series(&result.node_names, &result.voltages, "out");
+            for (time, value) in result.time.iter().zip(out) {
+                // The sample a point holds: the last instant at or before it,
+                // the stop time holding the sample one ulp below it.
+                let k = ((time / period) * (1.0 + 1.0e-12)).floor() as i32;
+                assert!(
+                    (value - closed_form(k)).abs() <= 1.0e-9,
+                    "stop {stop:e}, maximum {max_timestep:e}: y at {time:e} is {value}, \
+                     sample {k} is {}",
+                    closed_form(k)
+                );
+            }
+            for k in 1..=samples {
+                let instant = f64::from(k) * period;
+                assert!(
+                    result
+                        .time
+                        .iter()
+                        .any(|time| *time == instant || (k == samples && *time == stop)),
+                    "stop {stop:e}, maximum {max_timestep:e}: no point on sample {k}"
+                );
+            }
         }
     }
     let _ = std::fs::remove_file(model);

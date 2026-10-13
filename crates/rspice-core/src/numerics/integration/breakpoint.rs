@@ -263,6 +263,31 @@ impl BreakpointManager {
         )
     }
 
+    /// Deliver every permanent breakpoint less than one `floor` before `stop`
+    /// at `stop` itself ([`coincides_before`]).
+    ///
+    /// Two breakpoints inside the merge tolerance keep the one the schedule
+    /// had first, and a run's stop time is added after its sources' corners.
+    /// A corner computed one ulp before the stop time — a PWL knot at `30u`,
+    /// read as `30 * 1e-6`, under a `3e-5` stop — therefore replaced the stop
+    /// time: the run landed on the corner and was left a one-ulp interval to
+    /// the stop time, a step no floor admits. The stop time is the instant the
+    /// run ends on, so it is the one kept. A corner one floor or more before it
+    /// keeps its own instant.
+    pub(crate) fn reconcile_onto_stop(&mut self, stop: Value, floor: Value) {
+        let pending = self.current_index.min(self.breakpoints.len());
+        let mut ahead = self.breakpoints.split_off(pending);
+        let before = ahead.len();
+        ahead.retain(|&time| !coincides_before(time, stop, floor));
+        if ahead.len() != before {
+            let position = Self::sorted_insert_position(&ahead, stop);
+            if ahead.get(position) != Some(&stop) {
+                ahead.insert(position, stop);
+            }
+        }
+        self.breakpoints.append(&mut ahead);
+    }
+
     /// Merge a sorted or unsorted permanent schedule in linear time after one
     /// canonical sort. Non-finite values are ignored and points within the
     /// manager tolerance are coalesced exactly as repeated [`Self::add`]
@@ -1222,6 +1247,36 @@ mod breakpoint_manager_tests {
         }
         assert_eq!(clock_resolution(0.0), 8.0 * 0.0_f64.next_up());
         assert_eq!(clock_resolution(Value::INFINITY), 0.0);
+    }
+
+    /// A corner less than one floor before the stop time is the stop time;
+    /// one a floor or more before it keeps its own instant.
+    #[test]
+    fn a_corner_inside_the_floor_before_the_stop_is_delivered_at_the_stop() {
+        let stop: Value = 3.0e-5;
+        let corner: Value = 30.0 * 1.0e-6;
+        assert_eq!(
+            corner.next_up(),
+            stop,
+            "the PWL corner one ulp before the stop"
+        );
+        let floor = clock_resolution(stop);
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-14);
+        breakpoints.extend([1.0e-5, corner]);
+        breakpoints.add(stop);
+        assert_eq!(
+            breakpoints.times(),
+            &[1.0e-5, corner],
+            "the merge kept the corner and dropped the stop time"
+        );
+        breakpoints.reconcile_onto_stop(stop, floor);
+        assert_eq!(breakpoints.times(), &[1.0e-5, stop]);
+
+        let early = stop - 2.0 * floor;
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-30);
+        breakpoints.extend([early, stop]);
+        breakpoints.reconcile_onto_stop(stop, floor);
+        assert_eq!(breakpoints.times(), &[early, stop]);
     }
 
     #[test]
