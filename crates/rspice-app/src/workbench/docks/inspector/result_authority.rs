@@ -156,7 +156,9 @@ pub(super) fn result_convergence(ui: &mut Ui, analysis: &crate::state::AnalysisR
 
 /// Every point any phase of the run accepted past its LTE criterion: the
 /// source transient's and, for a periodic run, its initialization's.
-fn forced_lte_acceptances(quality: &crate::state::TransientConvergenceEvidence) -> u64 {
+fn forced_lte_acceptances(
+    quality: &rspice_results::convergence_quality::TransientConvergenceEvidence,
+) -> u64 {
     quality.transient.force_accepted_points
         + quality.initialization.as_ref().map_or(0, |initialization| {
             initialization.report.force_accepted_points

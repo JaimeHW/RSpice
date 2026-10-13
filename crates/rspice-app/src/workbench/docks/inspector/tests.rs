@@ -1046,20 +1046,6 @@ fn the_waves_details_panel_keeps_every_line_inside_the_row_inset() {
             !lines.is_empty(),
             "the inspector painted no text at {width}"
         );
-        let left = lines
-            .iter()
-            .map(|line| line.rect.left())
-            .fold(f32::INFINITY, f32::min);
-        let right = lines
-            .iter()
-            .map(|line| line.rect.right())
-            .fold(f32::NEG_INFINITY, f32::max);
-        eprintln!(
-            "width {width}: {} text runs; leftmost starts at {left:.1}, rightmost ends at \
-             {right:.1} (right inset {:.1})",
-            lines.len(),
-            width - right
-        );
         let mut off_inset = Vec::new();
         let mut clipped = Vec::new();
         for line in &lines {
