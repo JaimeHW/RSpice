@@ -7,15 +7,15 @@ full	op	interp	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.80000
 full	op	native	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
 ports	op	interp	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
 ports	op	native	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
-full	ac	interp	pass	acc (O5) [1] Δ=1.929e-15 dB, 3.106e-18° allowed 1e-4 dB, 1e-3°
-full	ac	native	pass	acc (O5) [1] Δ=1.929e-15 dB, 3.106e-18° allowed 1e-4 dB, 1e-3°
-ports	ac	interp	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
-ports	ac	native	pass	acc (O6) [5] Δ=-1.832e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
-full	noise	interp	pass	nz (O6) [2] |a−e|=2.629e-18 allowed 1.810e-16 (a=9.049596e-15, e=9.052224e-15)
-full	noise	native	pass	nz (O6) [2] |a−e|=2.629e-18 allowed 1.810e-16 (a=9.049596e-15, e=9.052224e-15)
-ports	noise	interp	pass	nz (O6) [2] |a−e|=2.629e-18 allowed 1.810e-16 (a=9.049596e-15, e=9.052224e-15)
-ports	noise	native	pass	nz (O6) [2] |a−e|=2.629e-18 allowed 1.810e-16 (a=9.049596e-15, e=9.052224e-15)
+full	ac	interp	pass	acc (O5) [4] Δ=1.929e-15 dB, 0.000e0° allowed 1e-4 dB, 1e-3°
+full	ac	native	pass	acc (O5) [4] Δ=1.929e-15 dB, 0.000e0° allowed 1e-4 dB, 1e-3°
+ports	ac	interp	pass	acc (O6) [5] Δ=-1.736e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
+ports	ac	native	pass	acc (O6) [5] Δ=-1.736e-14 dB, -2.544e-14° allowed 2e-2 dB, 2e-1°
+full	noise	interp	pass	nz (O6) [2] |a−e|=2.630e-18 allowed 1.810e-16 (a=9.049595e-15, e=9.052224e-15)
+full	noise	native	pass	nz (O6) [2] |a−e|=2.630e-18 allowed 1.810e-16 (a=9.049595e-15, e=9.052224e-15)
+ports	noise	interp	pass	nz (O6) [2] |a−e|=2.630e-18 allowed 1.810e-16 (a=9.049595e-15, e=9.052224e-15)
+ports	noise	native	pass	nz (O6) [2] |a−e|=2.630e-18 allowed 1.810e-16 (a=9.049595e-15, e=9.052224e-15)
 full	mc-tran	interp	pass	dnl (O6) std over 10 samples: 6.454972e-2 in [3.600000e-2, 1.360000e-1]
 full	mc-tran	native	pass	dnl (O6) std over 10 samples: 6.454972e-2 in [3.600000e-2, 1.360000e-1]
-ports	mc-tran	interp	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]
-ports	mc-tran	native	pass	dnl (O6) std over 10 samples: 6.456155e-2 in [3.600000e-2, 1.360000e-1]
+ports	mc-tran	interp	pass	dnl (O6) std over 10 samples: 6.454972e-2 in [3.600000e-2, 1.360000e-1]
+ports	mc-tran	native	pass	dnl (O6) std over 10 samples: 6.454972e-2 in [3.600000e-2, 1.360000e-1]

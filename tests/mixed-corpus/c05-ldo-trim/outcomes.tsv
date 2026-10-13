@@ -17,5 +17,5 @@ mx	sens	interp	pass	sens (O5-O1) [1] |a−e|=8.678e-12 allowed 8.582e-8 (a=-8.58
 mx	sens	native	pass	sens (O5-O1) [1] |a−e|=8.678e-12 allowed 8.582e-8 (a=-8.582326e-6, e=-8.582317e-6)
 mx	pz	interp	refused	analysis.mixed_signal.discrete_state; label="pz"; instance=xtrim form=structured; token-form=structured; analysis-form=structured
 mx	pz	native	refused	analysis.mixed_signal.discrete_state; label="pz"; instance=xtrim form=structured; token-form=structured; analysis-form=structured
-mx	tran	interp	pass	trim (O5-O1) [0] |a−e|=4.109e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
-mx	tran	native	pass	trim (O5-O1) [0] |a−e|=4.109e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
+mx	tran	interp	pass	trim (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)
+mx	tran	native	pass	trim (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310610e0, e=1.310610e0)

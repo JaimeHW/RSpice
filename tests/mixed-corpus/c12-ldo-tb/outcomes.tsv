@@ -1,13 +1,13 @@
 # variant	analysis	route	outcome	detail
 full	tran	interp	refused	compile_refusal; label="net/tb_ldo_full.vams"; instance=tb_ldo_full.vams form=structured; token-form=structured; analysis-form=location; site=net/tb_ldo_full.vams
 full	tran	native	refused	compile_refusal; label="net/tb_ldo_full.vams"; instance=tb_ldo_full.vams form=structured; token-form=structured; analysis-form=location; site=net/tb_ldo_full.vams
-unrolled	tran	interp	pass	vk.15 (O5-O1) [0] |a−e|=4.108e-8 allowed 1.000e-3 (a=1.310611e0, e=1.310611e0)
-unrolled	tran	native	pass	vk.15 (O5-O1) [0] |a−e|=4.108e-8 allowed 1.000e-3 (a=1.310611e0, e=1.310611e0)
+unrolled	tran	interp	pass	vk.15 (O5-O1) [0] |a−e|=4.106e-8 allowed 1.000e-3 (a=1.310611e0, e=1.310611e0)
+unrolled	tran	native	pass	vk.15 (O5-O1) [0] |a−e|=4.106e-8 allowed 1.000e-3 (a=1.310611e0, e=1.310611e0)
 top	tran	interp	refused	compile_refusal; label="net/top.vams"; instance=top form=structured; token-form=structured; analysis-form=location; site=net/top.vams
 top	tran	native	refused	compile_refusal; label="net/top.vams"; instance=top form=structured; token-form=structured; analysis-form=location; site=net/top.vams
 full	op	interp	refused	compile_refusal; label="net/tb_ldo_full.vams"; instance=tb_ldo_full.vams form=structured; token-form=structured; analysis-form=location; site=net/tb_ldo_full.vams
 full	op	native	refused	compile_refusal; label="net/tb_ldo_full.vams"; instance=tb_ldo_full.vams form=structured; token-form=structured; analysis-form=location; site=net/tb_ldo_full.vams
-unrolled	op	interp	pass	op (O5) [0] |a−e|=2.850e-12 allowed 2.151e-5 (a=1.151161e0, e=1.151161e0)
-unrolled	op	native	pass	op (O5) [0] |a−e|=2.850e-12 allowed 2.151e-5 (a=1.151161e0, e=1.151161e0)
+unrolled	op	interp	pass	op (O5-O1) [0] |a−e|=7.907e-11 allowed 2.151e-3 (a=1.151161e0, e=1.151161e0)
+unrolled	op	native	pass	op (O5-O1) [0] |a−e|=7.907e-11 allowed 2.151e-3 (a=1.151161e0, e=1.151161e0)
 top	op	interp	refused	compile_refusal; label="net/top.vams"; instance=top form=structured; token-form=structured; analysis-form=location; site=net/top.vams
 top	op	native	refused	compile_refusal; label="net/top.vams"; instance=top form=structured; token-form=structured; analysis-form=location; site=net/top.vams

@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-base	tran	interp	pass	trst2 (O6) [0] |a−e|=1.000e-10 allowed 1.000e-6 (a=3.415001e-4, e=3.415000e-4)
-base	tran	native	pass	trst2 (O6) [0] |a−e|=1.000e-10 allowed 1.000e-6 (a=3.415001e-4, e=3.415000e-4)
+base	tran	interp	pass	trst (O6) [0] |a−e|=5.000e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
+base	tran	native	pass	trst (O6) [0] |a−e|=5.000e-13 allowed 1.000e-6 (a=9.850000e-5, e=9.850000e-5)
 p3	tran	interp	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 p3	tran	native	refused	compile_refusal; label="net/por_ctrl_p3.vams"; instance=por_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/por_ctrl_p3.vams
 live	tran	interp	wrong	track (O6) [0] |a−e|=1.650e0 allowed 8.250e-2 (a=3.300000e0, e=1.650000e0)
