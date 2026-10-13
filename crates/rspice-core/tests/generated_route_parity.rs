@@ -553,6 +553,169 @@ fn r3_cmc_transient_agrees_across_routes() {
 }
 
 // ---------------------------------------------------------------------------
+// R2_CMC on an R card — the card's value is the module's resistance `r`
+//
+// `R1 in 0 rmod 1k` with `.model rmod r2_cmc` used to run at R2_CMC's own
+// default of 100 ohm without a word: the card's value — positional, `R=` or
+// `VALUE=` — was parsed and then never handed to the module. The X card
+// `X1 in 0 r2_cmc r=1k` names the parameter and always honoured it.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "veriloga-model-r2-cmc")]
+const R2_CMC_SOURCE: &str = "models/veriloga/cmc/r2_cmc_v1.0.2/r2_cmc.va";
+
+/// One volt across the device and the device's own terminal current, so the
+/// ratio is its resistance with no nodal GMIN in it.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+fn measured_resistance(deck: &str, device: &str) -> f64 {
+    let netlist = Netlist::parse_validated(deck).unwrap_or_else(|err| panic!("{err}\n{deck}"));
+    let result = Engine::default()
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|err| panic!("{err}\n{deck}"));
+    let volts = node_voltage(&result, "in").expect("V(in)");
+    let amperes = result
+        .try_dc_observable_named(&format!("i({device})"))
+        .unwrap_or_else(|| panic!("I({device}) is published\n{deck}"));
+    volts / amperes
+}
+
+#[cfg(feature = "veriloga-model-r2-cmc")]
+fn r_card_deck(card: &str) -> String {
+    format!(
+        "* R2_CMC on an R card\n.param rv=1k\nV1 in 0 1\n{card}\n.model rmod r2_cmc\n\
+         .save v(in) i(r1)\n.end\n"
+    )
+}
+
+#[cfg(feature = "veriloga-model-r2-cmc")]
+fn assert_ohms(label: &str, measured: f64, expected: f64) {
+    assert!(
+        agrees(measured, expected),
+        "{label}: {measured:.17e} ohm, expected {expected:.17e} (relative {:.3e})",
+        (measured - expected).abs() / expected
+    );
+}
+
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn an_r_cards_value_is_the_generated_resistors_resistance() {
+    for card in [
+        "R1 in 0 rmod 1k",
+        "R1 in 0 rmod r=1k",
+        "R1 in 0 rmod R=1k",
+        "R1 in 0 rmod value=1k",
+        "R1 in 0 1k rmod",
+        "R1 in 0 rmod {rv}",
+        "R1 in 0 rmod r={2*rv/2}",
+    ] {
+        let deck = r_card_deck(card);
+        assert!(
+            uses_generated_devices(&deck),
+            "{card}: the card must route to the generated R2_CMC"
+        );
+        assert_ohms(card, measured_resistance(&deck, "r1"), 1.0e3);
+    }
+
+    // A card without a value leaves `r` unset, so the module keeps its own
+    // default: no value is not a value of zero.
+    assert_ohms(
+        "R1 in 0 rmod",
+        measured_resistance(&r_card_deck("R1 in 0 rmod"), "r1"),
+        100.0,
+    );
+}
+
+/// The R card, the generated X card and the X card on the `.va` runtime are
+/// one resistor.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn an_r_card_and_both_x_card_routes_agree() {
+    let r_card = measured_resistance(&r_card_deck("R1 in 0 rmod 1k"), "r1");
+    let x_body = "V1 in 0 1\nX1 in 0 r2_cmc r=1k\n.save v(in) i(x1)";
+    let generated_deck = format!("* R2_CMC X card generated\n{x_body}\n.end\n");
+    let runtime_deck = format!(
+        "* R2_CMC X card runtime\n.va \"{}\" r2_cmc\n{x_body}\n.end\n",
+        model_source(R2_CMC_SOURCE)
+    );
+    assert!(uses_generated_devices(&generated_deck));
+    assert!(!uses_generated_devices(&runtime_deck));
+    let generated = measured_resistance(&generated_deck, "x1");
+    let runtime = measured_resistance(&runtime_deck, "x1");
+    assert_ohms("generated X card", generated, 1.0e3);
+    assert_ohms("runtime X card", runtime, 1.0e3);
+    assert_ohms("R card against the generated X card", r_card, generated);
+    assert_ohms("R card against the runtime X card", r_card, runtime);
+}
+
+/// R2_CMC computes its resistance from `w` and `l` when both are given and
+/// then ignores `r`, so a card that also states a value has said two things
+/// about one quantity. Neither is chosen in silence.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn an_r_card_value_beside_w_and_l_is_refused() {
+    // The geometry alone is rsh·l/w = 100·20u/1u = 2 kohm.
+    let deck = r_card_deck("R1 in 0 rmod 1k w=1u l=20u");
+    let error = Engine::default()
+        .run_dc_op(&Netlist::parse_validated(&deck).expect("deck parses"))
+        .expect_err("a value and a full geometry for one resistance must be refused");
+    let rspice_core::SimulationError::Elaboration(refusal) = &error else {
+        panic!("the conflict must be a typed elaboration refusal: {error}");
+    };
+    assert_eq!(
+        refusal.kind,
+        rspice_core::ElaborationErrorKind::ParameterValue,
+        "{error}"
+    );
+    assert!(
+        refusal
+            .instance
+            .as_deref()
+            .is_some_and(|instance| instance.eq_ignore_ascii_case("r1")),
+        "{error}"
+    );
+    assert!(
+        refusal
+            .module
+            .as_deref()
+            .is_some_and(|module| module.eq_ignore_ascii_case("r2_cmc")),
+        "{error}"
+    );
+    let message = error.to_string();
+    assert!(
+        message.contains("'w'") && message.contains("'l'"),
+        "the refusal must name the geometry it conflicts with: {message}"
+    );
+
+    // Either one alone leaves `r` in force, as R2_CMC documents.
+    for card in ["R1 in 0 rmod 1k w=1u", "R1 in 0 rmod 1k l=10u"] {
+        assert_ohms(card, measured_resistance(&r_card_deck(card), "r1"), 1.0e3);
+    }
+}
+
+/// A resistance that moves with the solution is a behavioural resistor, and a
+/// compact model has no input for one.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn an_r_card_value_that_reads_the_circuit_is_refused_on_the_generated_route() {
+    let deck = r_card_deck("R1 in 0 rmod r={1k + v(in)}");
+    let error = Engine::default()
+        .run_dc_op(&Netlist::parse_validated(&deck).expect("deck parses"))
+        .expect_err("a state-dependent value cannot be a module parameter");
+    let rspice_core::SimulationError::Elaboration(refusal) = &error else {
+        panic!("the refusal must be typed: {error}");
+    };
+    assert_eq!(
+        refusal.kind,
+        rspice_core::ElaborationErrorKind::ParameterValue,
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("circuit state"),
+        "the refusal must say why: {error}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Finiteness: what the generated route hands the solver at a wild iterate
 //
 // The runtime route audits every stamped value (`finite_stamp_value` in

@@ -686,13 +686,29 @@ fn add_generated_instance(
         netlist,
         temperature,
     )?;
-    let params = generated_params(
+    let mut params = generated_params(
         target,
         model_def,
         instance_params,
         deferred_params,
         spice_dialect,
     )?;
+    if let ElementKind::Resistor {
+        value, value_expr, ..
+    } = &element.kind
+    {
+        append_generated_resistor_value(
+            target,
+            element,
+            ResistorCardValue {
+                value: *value,
+                expression: value_expr.as_deref(),
+            },
+            &context,
+            netlist,
+            &mut params,
+        )?;
+    }
     let Some(mut device) = instantiate_builtin_scoped(
         target.model_name,
         &element.name,
@@ -772,6 +788,148 @@ fn add_generated_instance(
     device.set_temperature(keywords.temperature);
     device.set_initially_off(keywords.initial_off);
     circuit.add_generated_veriloga_device(device);
+    Ok(())
+}
+
+/// The instance parameter every CMC resistor declares for its resistance:
+/// R2_CMC, R2_ET_CMC and R3_CMC each have `r`, "resistance (per segment, total
+/// resistance is r/m)".
+const GENERATED_RESISTANCE_PARAMETER: &str = "r";
+
+/// The geometry a CMC resistor computes its resistance from instead of `r`
+/// when both are given: "Either l and w are both specified, in which case they
+/// over-ride specification of r" (`r2_cmc_body.include`).
+const GENERATED_RESISTOR_OVERRIDING_GEOMETRY: [&str; 2] = ["w", "l"];
+
+/// What an `R` card says its resistance is, before routing reads it.
+#[derive(Clone, Copy)]
+struct ResistorCardValue<'a> {
+    /// The card's value. The parser folds the positional value, `R=` and
+    /// `VALUE=` into this one field.
+    value: f64,
+    /// The card's value as an expression still to evaluate, when it is one.
+    expression: Option<&'a str>,
+}
+
+/// Hand an `R` card's value to the generated resistor as its resistance `r`.
+///
+/// The card's value is the resistance. That is Xyce's rule (a resistor's
+/// unlabeled value is its primary parameter `R`, `N_DEV_Resistor.h`) and what
+/// the X card `X1 a b r2_cmc r=1k` says by name. ngspice settles nothing here:
+/// it has no `R`-card route to a compiled model, and its `N` card refuses an
+/// unlabeled value outright (`inp2n.c`).
+///
+/// A card without a value carries the parser's marker instead, and leaves the
+/// module's own default in force. A value the card states twice, or beside a
+/// geometry the module would let override it, is refused rather than ordered.
+fn append_generated_resistor_value(
+    target: GeneratedTarget,
+    element: &Element,
+    card: ResistorCardValue<'_>,
+    context: &GeneratedRoutingContext<'_>,
+    netlist: &Netlist,
+    params: &mut Vec<BuiltinParameterAssignment>,
+) -> Result<(), SimulationError> {
+    let refuse = |detail: String| -> SimulationError {
+        crate::ElaborationError::new(crate::ElaborationErrorKind::ParameterValue, detail)
+            .instance(element.name.as_str())
+            .module(target.model_name)
+            .into()
+    };
+    let mut evaluation = super::InstanceParameterContext::new(netlist, context.temperature);
+    let card_value = match card.expression {
+        Some(expression) if expression_references_circuit_state(expression) => {
+            return Err(refuse(format!(
+                "the card's value {{{expression}}} depends on circuit state, but the module's \
+                 resistance '{GENERATED_RESISTANCE_PARAMETER}' is a parameter fixed for the \
+                 analysis; write a behavioural resistor without the model instead"
+            )));
+        }
+        Some(expression) => Some(
+            crate::netlist::expr::eval_expression(expression, evaluation.get()).map_err(
+                |error| {
+                    refuse(format!(
+                        "cannot resolve the card's value {{{expression}}}: {error}"
+                    ))
+                },
+            )?,
+        ),
+        None if card.value.is_nan()
+            || context
+                .instance_params
+                .iter()
+                .any(|(name, _)| is_internal_routing_param(name)) =>
+        {
+            None
+        }
+        None => Some(card.value),
+    };
+
+    // The resistance stated as an instance parameter too, which `.step` on a
+    // model resistor writes beside the value. It agrees with the value or the
+    // card is refused.
+    let mut stated = card_value;
+    let explicit = context
+        .instance_params
+        .iter()
+        .filter(|(name, _)| name.eq_ignore_ascii_case(GENERATED_RESISTANCE_PARAMETER))
+        .map(|(_, value)| Ok(*value))
+        .chain(
+            context
+                .deferred_params
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case(GENERATED_RESISTANCE_PARAMETER))
+                .map(|(_, expression)| {
+                    crate::netlist::expr::eval_expression(expression, evaluation.get()).map_err(
+                        |error| {
+                            refuse(format!(
+                                "cannot resolve instance parameter \
+                                 {GENERATED_RESISTANCE_PARAMETER}={expression}: {error}"
+                            ))
+                        },
+                    )
+                }),
+        )
+        .collect::<Result<Vec<_>, _>>()?;
+    for value in explicit {
+        match stated {
+            Some(previous) if previous != value => {
+                return Err(refuse(format!(
+                    "the card states its resistance twice, as {previous} and as instance \
+                     parameter '{GENERATED_RESISTANCE_PARAMETER}'={value}; give one value"
+                )));
+            }
+            _ => stated = Some(value),
+        }
+    }
+
+    if stated.is_some()
+        && GENERATED_RESISTOR_OVERRIDING_GEOMETRY
+            .iter()
+            .all(|geometry| {
+                params
+                    .iter()
+                    .any(|assignment| assignment.name.eq_ignore_ascii_case(geometry))
+            })
+    {
+        return Err(refuse(format!(
+            "the card gives a resistance and both '{}' and '{}'; module '{}' computes its \
+             resistance from '{}' and '{}' when both are given and would ignore the value, so \
+             give either the value or the geometry",
+            GENERATED_RESISTOR_OVERRIDING_GEOMETRY[0],
+            GENERATED_RESISTOR_OVERRIDING_GEOMETRY[1],
+            target.model_name,
+            GENERATED_RESISTOR_OVERRIDING_GEOMETRY[0],
+            GENERATED_RESISTOR_OVERRIDING_GEOMETRY[1],
+        )));
+    }
+
+    if let Some(resistance) = card_value {
+        params.push(BuiltinParameterAssignment::instance(
+            GENERATED_RESISTANCE_PARAMETER,
+            ParametricValue::Resolved(resistance),
+        ));
+    }
     Ok(())
 }
 
