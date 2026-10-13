@@ -1504,9 +1504,17 @@ impl TransientCapturePlan {
     /// declared bus of them, as ngspice's `esave` does ("Node %s is not an
     /// event node"): recording nothing for a misspelled net would be a silent
     /// omission.
+    ///
+    /// An event net is every net the run records a digital trace for: the
+    /// event-only nets, and the deck nets a mixed module's converted boundary
+    /// bits are drawn on (`boundary_trace_nodes`), which keep their voltage
+    /// as well. Both are recorded by default, so both have to be nameable
+    /// here; refusing the second would leave a net the run records that no
+    /// selection can keep.
     fn validate_esave_list(
         netlist: &Netlist,
         nodes: TransientNodeNamespace<'_>,
+        boundary_trace_nodes: &std::collections::BTreeSet<usize>,
         buses: &[DigitalBusDeclaration],
     ) -> Result<(), SimulationError> {
         let Some(crate::netlist::EventSaveSelection::Nets(nets)) =
@@ -1518,8 +1526,11 @@ impl TransientCapturePlan {
             .names
             .iter()
             .zip(nodes.event_only)
-            .filter(|(_, kind)| kind.is_some())
-            .map(|(name, _)| canonical_event_name(name))
+            .enumerate()
+            .filter(|(index, (_, kind))| {
+                kind.is_some() || boundary_trace_nodes.contains(&(index + 1))
+            })
+            .map(|(_, (name, _))| canonical_event_name(name))
             .chain(buses.iter().map(|bus| canonical_event_name(&bus.name)))
             .collect();
         match nets
@@ -5465,6 +5476,7 @@ impl Engine {
                 names: &node_names,
                 event_only: &event_only_nodes,
             },
+            &circuit.mixed_boundary_trace_nodes(),
             &digital_buses,
         )?;
         let capture_plan = TransientCapturePlan::compile(

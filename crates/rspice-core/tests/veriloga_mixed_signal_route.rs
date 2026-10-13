@@ -1104,6 +1104,101 @@ fn an_unloaded_digital_only_module_drives_its_analog_boundary() {
     }
 }
 
+/// Every digital net of the design is recorded by default, under its own
+/// name, and `.esave` can name each of them.
+///
+/// Two kinds of net carry a digital trace here. `q` joins two modules and
+/// nothing else, so it is an event net with no converter and no voltage. `a`
+/// drives a resistor, so it is converted: it keeps its voltage and also
+/// carries the bit the module drove, under the deck's name. The converter's
+/// own endpoint, `x1.a__event_0`, exists only because the converter does —
+/// `q` has none, and a reader that looked for one would find nothing.
+///
+/// `.esave` is the one selection over these traces, so a net the run
+/// records by default has to be one it can keep: refusing `a` as "not an
+/// event node" left a recorded net that no selection could name.
+#[test]
+fn every_digital_net_is_recorded_and_esave_names_each_one() {
+    let drive = ModelFile::new(
+        "esave_drive",
+        "`timescale 1ns/1ps\n\
+         module esave_drive(q, a); output q, a; reg q, a;\n\
+         initial begin q = 1'b0; a = 1'b0; end\n\
+         always #2 q = ~q;\n\
+         always #3 a = ~a;\n\
+         endmodule\n",
+    );
+    let watch = ModelFile::new(
+        "esave_watch",
+        "`timescale 1ns/1ps\n\
+         module esave_watch(d); input d; reg seen;\n\
+         initial seen = 1'b0;\n\
+         always @(d) seen = d;\n\
+         endmodule\n",
+    );
+    let run = |esave: &str| {
+        let netlist = Netlist::parse(&format!(
+            "* digital nets of a mixed design\n.param vcc=1.8\n\
+             X1 q a esave_drive\nX2 q esave_watch\nR1 a 0 1k\n\
+             .va \"{}\" esave_drive\n.va \"{}\" esave_watch\n{esave}\n.end\n",
+            drive.deck_path(),
+            watch.deck_path(),
+        ))
+        .unwrap();
+        Engine::default().run_tran(&netlist, 10e-9, 1e-10)
+    };
+    let traced = |result: &TransientResult| {
+        let mut names: Vec<String> = result
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.to_ascii_lowercase())
+            .collect();
+        names.sort();
+        names
+    };
+    let rises = |result: &TransientResult, net: &str| -> Vec<f64> {
+        result
+            .digital_trace_named(net)
+            .unwrap_or_else(|| panic!("net '{net}' has no digital trace"))
+            .iter()
+            .filter(|point| format!("{:?}", point.value.state) == "One")
+            .map(|point| point.time)
+            .collect()
+    };
+
+    let all = run("").unwrap();
+    assert_eq!(traced(&all), ["a", "q", "x1.a__event_0"]);
+    let q = rises(&all, "q");
+    assert!(q.len() >= 2, "q rises at 2 and 6 ns: {q:?}");
+    for (rise, expected) in q.iter().zip([2e-9, 6e-9]) {
+        assert!((rise - expected).abs() < 1e-15, "{q:?}");
+    }
+    assert_eq!(
+        rises(&all, "a"),
+        rises(&all, "x1.a__event_0"),
+        "the net and its converter endpoint carry the bit the module drove"
+    );
+    assert!(
+        all.node_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("a")),
+        "a converted net keeps its voltage"
+    );
+
+    assert_eq!(traced(&run(".esave a").unwrap()), ["a"]);
+    assert_eq!(traced(&run(".esave q").unwrap()), ["q"]);
+    assert_eq!(
+        traced(&run(".esave q x1.a__event_0").unwrap()),
+        ["q", "x1.a__event_0"]
+    );
+    assert!(traced(&run(".esave none").unwrap()).is_empty());
+    let error = run(".esave nosuch")
+        .expect_err("a name that is no digital net is refused")
+        .to_string()
+        .to_ascii_lowercase();
+    assert!(error.contains("'nosuch' is not an event node"), "{error}");
+}
+
 #[test]
 fn a_portless_mixed_initializer_finishes_without_contribution_equations() {
     use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};

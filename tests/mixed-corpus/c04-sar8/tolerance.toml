@@ -9,12 +9,12 @@ id = "codes"
 analysis = "tran"
 variants = ["full", "ports"]
 kind = "codes"
-nets = ["xsar.b7__event_0", "xsar.b6__event_0", "xsar.b5__event_0", "xsar.b4__event_0", "xsar.b3__event_0", "xsar.b2__event_0", "xsar.b1__event_0", "xsar.b0__event_0"]
-strobe = "xsar.eoc__event_0"
+nets = ["b7", "b6", "b5", "b4", "b3", "b2", "b1", "b0"]
+strobe = "eoc"
 window = [0.0, 3.2e-5]
 oracle = "O6"
 expect = "c04::codes"
-why = "the register's own bits at each eoc rise; every input is mid-code, half an LSB (1.95 mV) from both decision levels: v(xcmp.o1) = 0.195 V, tanh(9.8), so every decision is unambiguous"
+why = "the register's own bits at each eoc rise, read on the design's nets: a bit net carries what sar8 drove and eoc is the testbench's own event net in full, so neither is named by a converter endpoint, which only a variant with a converter there has; every input is mid-code, half an LSB (1.95 mV) from both decision levels: v(xcmp.o1) = 0.195 V, tanh(9.8), so every decision is unambiguous"
 
 [[q]]
 id = "code"

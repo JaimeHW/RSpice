@@ -156,6 +156,11 @@ pub struct Observation {
     /// Every signal name the producer delivered before retention filtering.
     #[serde(default)]
     pub available: Vec<String>,
+    /// Every event net the producer delivered before retention filtering,
+    /// which is what a missing net is reported against: the retained nets
+    /// are only the ones the tolerance file already names.
+    #[serde(default)]
+    pub available_events: Vec<String>,
 }
 
 impl Observation {
@@ -171,6 +176,7 @@ impl Observation {
         available.sort();
         available.dedup();
         self.available = available;
+        self.available_events = self.events.keys().cloned().collect();
         if !signals.iter().any(|name| name == "*") {
             self.real.retain(|name, _| signals.contains(name));
             self.complex.retain(|name, _| signals.contains(name));

@@ -949,6 +949,32 @@ impl CircuitData {
         }
     }
 
+    /// The deck nets a mixed module's boundary bits are recorded on.
+    ///
+    /// A converted boundary net keeps its voltage and also carries the bit
+    /// the module drove or read there, so the run publishes a digital trace
+    /// under the net's own name although the net is not event-only. These
+    /// are the nets that are digital without being [event-only], and the
+    /// event-net selection has to know them to be able to name them.
+    ///
+    /// [event-only]: Self::event_only_net_kind
+    pub(crate) fn mixed_boundary_trace_nodes(&self) -> std::collections::BTreeSet<NodeId> {
+        #[cfg(feature = "veriloga")]
+        {
+            let mut nodes = std::collections::BTreeSet::new();
+            for host in &self.mixed_signal_hosts {
+                host.boundary_trace_bindings(|node, _, _, _| {
+                    if node > 0 {
+                        nodes.insert(node);
+                    }
+                });
+            }
+            nodes
+        }
+        #[cfg(not(feature = "veriloga"))]
+        std::collections::BTreeSet::new()
+    }
+
     /// Record the analog-touch classification the netlist build computed.
     ///
     /// One producer, one answer: the mixed-boundary classifier and the result

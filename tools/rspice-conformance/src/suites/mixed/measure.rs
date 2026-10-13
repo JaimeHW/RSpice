@@ -513,11 +513,21 @@ fn missing(observation: &Observation, name: &str) -> String {
 
 fn event_trace<'a>(observation: &'a Observation, net: &str) -> MeasureResult<&'a Trace> {
     observation.events.get(net).ok_or_else(|| {
-        let available: Vec<_> = observation.events.keys().take(12).cloned().collect();
+        // Retention keeps only the nets the tolerance file names, so the
+        // retained set cannot show what the producer called the net instead.
+        let delivered: Vec<&str> = if observation.available_events.is_empty() {
+            observation.events.keys().map(String::as_str).collect()
+        } else {
+            observation
+                .available_events
+                .iter()
+                .map(String::as_str)
+                .collect()
+        };
         MeasureError::Missing(format!(
             "event net {net} (producer delivered {} nets: {})",
-            observation.events.len(),
-            available.join(", ")
+            delivered.len(),
+            delivered.join(", "),
         ))
     })
 }
