@@ -211,15 +211,20 @@ jobs:
       # shipped built-in is gated on `veriloga-builtins-base`, which
       # `veriloga-model-diode-cmc` implies and plain `veriloga` does not, so the
       # interpreter-only lane would compile that case out.
+      #
+      # `veriloga_terminal_currents` measures generated instances beside runtime
+      # ones, so it runs here; `veriloga-model-r2-cmc` is the generated device
+      # whose catalog labels a terminal with more than two letters (`in1`).
       - name: Test the tri-family and generated-route suites through the bytecode interpreter
         run: >-
           cargo test --locked -p rspice-core
-          --features veriloga,veriloga-model-diode-cmc --no-fail-fast
+          --features veriloga,veriloga-model-diode-cmc,veriloga-model-r2-cmc --no-fail-fast
           --test tri_family_transient
           --test tri_family_events
           --test tri_family_small_signal
           --test generated_route_parity
           --test veriloga_master_shadowing
+          --test veriloga_terminal_currents
 
   test-libraries:
     name: Test workspace libraries & tools (Linux)
@@ -386,12 +391,13 @@ jobs:
       - name: Test the tri-family and generated-route suites through the native JIT (Linux x64)
         run: >-
           cargo test --locked -p rspice-core
-          --features veriloga-native,veriloga-model-diode-cmc --no-fail-fast
+          --features veriloga-native,veriloga-model-diode-cmc,veriloga-model-r2-cmc --no-fail-fast
           --test tri_family_transient
           --test tri_family_events
           --test tri_family_small_signal
           --test generated_route_parity
           --test veriloga_master_shadowing
+          --test veriloga_terminal_currents
           -- --test-threads=1
       # Three suites the native lane never named. `numeric_integrity` and
       # `device_eval` are ungated, so the libraries job compiles them against the
