@@ -1481,11 +1481,18 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         let source_bound = binding
             .and_then(|value| value.source_path.as_ref())
             .is_some();
+        // A Verilog-A view runs the project bundle its cell view owns,
+        // configured or not (`source_view_source`): Spectre's default view
+        // list reaches `veriloga`, and a placed binding's copy of its source
+        // and module is only what placement saw.
+        let requests_veriloga = cell
+            .and_then(|cell| find_view(cell, &requested.view))
+            .is_some_and(|view| view.view_type == ViewType::VerilogA);
 
         // Compatibility mode retains the historical placed-binding authority.
         // Configuration mode below instead materializes each selected L/C/V
         // from the authoritative library view.
-        if self.configuration.is_none() && source_bound {
+        if self.configuration.is_none() && source_bound && !requests_veriloga {
             if !search_order
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(&requested.view))
@@ -1546,7 +1553,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 }
                 continue;
             }
-            if self.configuration.is_some() && hierarchy_stop_view(view_type) {
+            if hierarchy_stop_view(view_type)
+                && (self.configuration.is_some() || view_type == ViewType::VerilogA)
+            {
                 let Some(placed) = binding else {
                     return Err(format!(
                         "configuration root {} cannot materialize source view '{}' without an instance interface",
@@ -1626,7 +1635,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             .source_path
             .as_deref()
             .expect("validated only for source-backed bindings");
-        if view.view_type == ViewType::VerilogA && self.configuration.is_some() {
+        if view.view_type == ViewType::VerilogA {
             let reference = CellViewRef::new(&library.name, &cell.name, &view.name);
             let project_binding = project_veriloga_binding_for_view(
                 self.context.project_id,
