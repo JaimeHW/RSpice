@@ -1,0 +1,2121 @@
+# RSpice outcomes on the Icarus Verilog ivtest suite (IEEE 1364-2005 selection).
+# Test names and RSpice results only; the suite itself is read from RSPICE_IVTEST_DIR at run time.
+# Regenerate with `rspice-ivtest run --record`; see tools/rspice-conformance/src/suites/verilog/ivtest.rs.
+# test	list	class	lane	outcome	detail
+addsr	vlg	passed	L1	pass	PASSED
+addwide	vlg	passed	L1	pass	PASSED
+always3.1.10A	vlg	ce	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+always3.1.11A	vlg	passed	L1	pass	PASSED
+always3.1.11B	vlg	passed	L1	pass	PASSED
+always3.1.12A	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+always3.1.12B	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+always3.1.12C	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+always3.1.1A	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
+always3.1.1B	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
+always3.1.1C	vlg	passed	L1	pass	PASSED
+always3.1.1D	vlg	passed	L1	pass	PASSED
+always3.1.1E	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.1F	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.1G	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+always3.1.1H	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+always3.1.1I	vlg	passed	L1	pass	PASSED
+always3.1.1J	vlg	passed	L1	pass	PASSED
+always3.1.1K	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+always3.1.2A	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
+always3.1.2B	vlg	ce	L1	refused:always	Semantic error: Unsupported feature: `always` process has no timing control, so it never suspends and simulation time cannot advance; add an event control such ...
+always3.1.2C	vlg	ce	L1	fail	compiled without error; run-time error: process always #1 could not run: the process entered 100000 blocks without suspending or returning
+always3.1.2D	vlg	ce	L1	fail	compiled without error; run-time error: process always #1 could not run: the process entered 100000 blocks without suspending or returning
+always3.1.2E	vlg	ce	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.2F	vlg	ce	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.2G	vlg	ce	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+always3.1.2H	vlg	ce	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+always3.1.2I	vlg	ce	L1	fail	compiled without error; run-time error: process always #2 could not run: the process entered 100000 blocks without suspending or returning
+always3.1.3A	vlg	ce	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+always3.1.3B	vlg	ce	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+always3.1.3B2	vlg	passed	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+always3.1.3C	vlg	ce	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+always3.1.3D	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+always3.1.3D2	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+always3.1.3E	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+always3.1.3E2	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+always3.1.3F	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+always3.1.3F2	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+always3.1.3G	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+always3.1.3H	vlg	ce	L4	refused:release	Parse error: Verilog-AMS digital construct not yet supported: `release`
+always3.1.3J	vlg	ce	L4	refused:release	Parse error: Verilog-AMS digital construct not yet supported: `release`
+always3.1.4A	vlg	passed	L1	pass	PASSED
+always3.1.4B	vlg	passed	L1	pass	PASSED
+always3.1.4C	vlg	passed	L1	pass	PASSED
+always3.1.4D	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.4E	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: a min:typ:max delay; write a single delay expression instead
+always3.1.4F	vlg	passed	L1	pass	PASSED
+always3.1.4G	vlg	passed	L1	pass	PASSED
+always3.1.4H	vlg	passed	L1	pass	PASSED
+always3.1.4I	vlg	passed	L1	pass	PASSED
+always3.1.5A	vlg	passed	L1	pass	PASSED
+always3.1.5B	vlg	passed	L1	pass	PASSED
+always3.1.5C	vlg	passed	L1	pass	PASSED
+always3.1.5D	vlg	passed	L1	pass	PASSED
+always3.1.5E	vlg	passed	L1	pass	PASSED
+always3.1.5F	vlg	passed	L1	pass	PASSED
+always3.1.6A	vlg	passed	L1	pass	PASSED
+always3.1.6B	vlg	passed	L1	pass	PASSED
+always3.1.6C	vlg	passed	L1	pass	PASSED
+always3.1.6D	vlg	passed	L1	pass	PASSED
+always3.1.7A	vlg	passed	L1	pass	PASSED
+always3.1.7B	vlg	passed	L1	pass	PASSED
+always3.1.7C	vlg	passed	L1	pass	PASSED
+always3.1.7D	vlg	passed	L1	pass	PASSED
+always3.1.8A	vlg	passed	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+always3.1.9A	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+always3.1.9B	vlg	ce	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+always3.1.9C	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+always3.1.9D	vlg	passed	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+always_star_array_lval	vlg	gold	L1	pass	matches the gold file
+andnot1	vlg	passed	-	excluded:systemverilog:ref	
+arith-unknown	vlg	passed	L1	pass	PASSED
+array4	vlg	passed	L1	fail	run-time error: process initial #0 could not run: the process entered 100000 blocks without suspending or returning
+array5	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `a` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant exp...
+array6	vlg	passed	L1	pass	PASSED
+array7	vlg	passed	L1	pass	PASSED
+array_lval_select1	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+array_lval_select2	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+array_lval_select3b	vlg	ce	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+array_lval_select3c	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
+array_lval_select4a	vlg	passed	L4	refused:force	testbench gap: no defines (__ICARUS__); Parse error: Verilog-AMS digital construct not yet supported: `force`
+array_lval_select4b	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+array_lval_select5	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+array_lval_select6	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
+array_packed_2d	vlg	gold	L1	fail	compile error: Parse error: Expected declared name, found LBracket
+array_select	vlg	passed	L1	fail	run-time error: process initial #2 could not run: numeric conversion at value 4 failed: real array index is unknown, unrepresentable or outside the declared bounds
+array_select_a	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+array_word_check	vlg	gold	L5	fail	compile error: Semantic error: Invalid expression: argument 2 of `$dumpvars` names a module instance, block or signal, not an expression
+array_word_width	vlg	gold	L1	pass	matches the gold file
+array_word_width2	vlg	passed	L1	pass	PASSED
+assign3.2A	vlg	passed	L1	pass	PASSED
+assign3.2B	vlg	passed	L1	pass	PASSED
+assign3.2C	vlg	passed	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+assign3.2D	vlg	passed	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+assign3.2E	vlg	passed	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+assign_add	vlg	passed	L1	pass	PASSED
+assign_deassign_pv	vlg	passed	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+assign_delay	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+assign_deq	vlg	passed	L1	pass	PASSED
+assign_ge	vlg	passed	L1	pass	PASSED
+assign_le	vlg	passed	L1	pass	PASSED
+assign_mem1	vlg	passed	L1	pass	PASSED
+assign_mem2	vlg	passed	L1	pass	PASSED
+assign_nb1	vlg	passed	L1	pass	PASSED
+assign_nb2	vlg	passed	L1	pass	PASSED
+assign_neq	vlg	passed	L1	pass	PASSED
+attrib	vlg	passed	L1	pass	PASSED
+attrib01_module	vlg	passed	L1	pass	PASSED
+attrib02_port_decl	vlg	passed	L1	pass	PASSED
+attrib03_parameter	vlg	passed	L4	pass	PASSED
+attrib04_net_var	vlg	passed	L1	pass	PASSED
+attrib05_port_conn	vlg	passed	L1	fail	compile error: Parse error: Invalid expression
+attrib06_operator_suffix	vlg	passed	L1	fail	compile error: Parse error: Invalid expression
+attrib07_func_call	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+attrib08_mod_inst	vlg	passed	L1	pass	PASSED
+attrib09_case	vlg	passed	L1	pass	PASSED
+attrib_expr	vlg	passed	L4	fail	compile error: Parse error: Expected Star, found Plus
+automatic_error1	vlg	ce	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error10	vlg	ce	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error2	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error3	vlg	ce	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error5	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error6	vlg	ce	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error7	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error8	vlg	ce	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_error9	vlg	ce	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_events	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_events2	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_events3	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_task	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_task2	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+automatic_task3	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+bitwidth	vlg	passed	L1	pass	PASSED
+bitwidth2	vlg	passed	L1	pass	PASSED
+blankport	vlg	passed	L1	pass	testbench gap: no root selection (-s main); PASSED
+block_only_with_var_def	vlg	passed	L4	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+bnot	vlg	passed	L1	pass	PASSED
+br1000	vlg	passed	L1	fail	run-time error: event network did not settle at tick 0 within 10000 delta cycles (busiest driver always#0.process fired 5000 times)
+br1001	vlg	passed	L7	refused:wand	Parse error: Verilog-AMS digital construct not yet supported: `wand`
+br1006	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br1007	vlg	gold	-	excluded:flag-Wselect-range	
+br1008	vlg	gold	L1	fail	differs from the gold file at line 1 (1 lines against 1)
+br1015a	vlg	ce	-	excluded:systemverilog:^=	
+br1019	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+br1027	vlg	passed	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+br1027a	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br1027c	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br1027e	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br1029a	vlg	gold	L1	fail	differs from the gold file at line 7 (12 lines against 12)
+br1029b	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+br1029c	vlg	ce	L1	refused:$signed	Semantic error: Unsupported feature: `$signed` takes one integral argument
+br605a	vlg	passed	-	excluded:icarus-override	
+br605b	vlg	passed	-	excluded:icarus-override	
+br916a	vlg	gold	L1	fail	differs from the gold file at line 1 (1 lines against 4)
+br916b	vlg	gold	L1	fail	differs from the gold file at line 1 (3 lines against 4)
+br918a	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+br918b	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+br918c	vlg	passed	L7	refused:buf	Parse error: Unsupported `buf` gate: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the resolution cann...
+br918d	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+br919	vlg	passed	L1	pass	PASSED
+br924	vlg	ce	L3	refused:function	Parse error: Unsupported module item: function
+br930	vlg	co	-	excluded:systemverilog:type	
+br931	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br935	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+br937	vlg	passed	L4	refused:feature	Semantic error: Unsupported feature: parameter `expect`: this expression form has no discrete-domain lowering
+br946	vlg	passed	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+br947	vlg	gold	L6	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+br948	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+br955	vlg	passed	L4	fail	compile error: Parse error: Expected Semicolon, found Hash
+br960a	vlg	gold	-	excluded:sdf-annotate	
+br960b	vlg	gold	-	excluded:sdf-annotate	
+br960c	vlg	gold	-	excluded:sdf-annotate	
+br960d	vlg	gold	-	excluded:sdf-annotate	
+br961	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+br961a	vlg	ce	L3	refused:function	Parse error: Unsupported module item: function
+br965	vlg	passed	L1	pass	PASSED
+br967	vlg	passed	L1	pass	PASSED
+br968	vlg	passed	L1	pass	PASSED
+br971	vlg	passed	-	excluded:icarus-override	
+br972	vlg	passed	L1	pass	PASSED
+br977	vlg	passed	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+br982	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br982a	vlg	ce	L3	refused:function	Parse error: Unsupported module item: function
+br982b	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br988	vlg	passed	L4	refused:begin	Parse error: Unsupported module item: begin
+br990	vlg	passed	L4	fail	compile error: Parse error: Expected Semicolon, found Hash
+br991a	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+br999	vlg	passed	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+br_gh103	vlg	passed	L1	pass	PASSED
+br_gh11	vlg	co	L1	fail	compile error: Parse error: Invalid expression
+br_gh1117	vlg	ce	L1	refused:generate-region	Parse error: Unsupported generate region: IEEE 1364-2005 section 12.4 nests generate constructs directly, without reopening a region
+br_gh1173	vlg	ce	L4	pass	language error: Parse error: Expected port name, found RParen
+br_gh1174a	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+br_gh1174b	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+br_gh1175a	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175a.v` declares no digital nets, processes or drivers
+br_gh1175b	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175b.v` declares no digital nets, processes or drivers
+br_gh1175c	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175c.v` declares no digital nets, processes or drivers
+br_gh1175d	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175d.v` declares no digital nets, processes or drivers
+br_gh1175e	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175e.v` declares no digital nets, processes or drivers
+br_gh1175f	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175f.v` declares no digital nets, processes or drivers
+br_gh1178a	vlg	ce	-	excluded:systemverilog:logic	
+br_gh1178b	vlg	passed	-	excluded:systemverilog:logic	
+br_gh1178c	vlg	passed	-	excluded:systemverilog:logic	
+br_gh1182	vlg	ce	-	excluded:systemverilog:logic	
+br_gh12	vlg	passed	L1	pass	PASSED
+br_gh1225a	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
+br_gh1225b	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
+br_gh1225c	vlg	ce	L1	refused:for	Parse error: Unsupported module item: for
+br_gh1237	vlg	passed	L1	pass	PASSED
+br_gh127a	vlg	gold	L1	pass	matches the gold file
+br_gh127b	vlg	gold	L1	fail	compile error: Semantic error: Type mismatch in port `in` of instance `copy1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or extend...
+br_gh127c	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
+br_gh127d	vlg	gold	L1	fail	compile error: Semantic error: Type mismatch in port `out` of instance `copy1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or exten...
+br_gh127e	vlg	gold	L1	fail	compile error: Semantic error: Type mismatch in port `out` of instance `copy1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or exten...
+br_gh127f	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
+br_gh13	vlg	passed	L1	pass	PASSED
+br_gh14	vlg	passed	L1	pass	PASSED
+br_gh142	vlg	ce	L1	fail	internal error: Code generation error: canonical IR validation failed: Error HirValidation at 0:73-74: HIR unknown identifier 'b'
+br_gh15	vlg	passed	L1	pass	PASSED
+br_gh152	vlg	ce	L1	pass	language error: Parse error: Expected RParen, found Identifier
+br_gh156	vlg	gold	L5	fail	compile error: Parse error: Expected Semicolon, found Identifier
+br_gh157	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+br_gh162	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+br_gh163	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br_gh18	vlg	passed	L1	pass	PASSED
+br_gh19	vlg	passed	L1	pass	PASSED
+br_gh198	vlg	gold	L1	pass	matches the gold file
+br_gh199a	vlg	passed	L1	pass	PASSED
+br_gh199b	vlg	passed	L1	pass	PASSED
+br_gh19a	vlg	passed	L1	pass	PASSED
+br_gh19b	vlg	passed	L1	pass	PASSED
+br_gh209	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+br_gh22	vlg	passed	L1	pass	PASSED
+br_gh244a	vlg	passed	L1	pass	PASSED
+br_gh244b	vlg	passed	L1	pass	PASSED
+br_gh25a	vlg	ce	L3	pass	language error: Parse error: Unexpected token: Function
+br_gh25b	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br_gh26	vlg	ce	L1	fail	compiled without error; ran to quiescence
+br_gh277a	vlg	passed	L4	refused:function	Parse error: Unsupported module item: function
+br_gh28	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: \test_str="hello"
+br_gh283a	vlg	passed	L1	pass	PASSED
+br_gh283b	vlg	passed	L1	pass	PASSED
+br_gh283c	vlg	passed	L1	pass	PASSED
+br_gh30	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+br_gh309	vlg	passed	L1	pass	PASSED
+br_gh315	vlg	passed	-	excluded:flag-g2005-sv	
+br_gh316a	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh316b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh316c	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh33	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+br_gh330	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+br_gh345	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+br_gh356a	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh356b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh37	vlg	passed	L1	pass	PASSED
+br_gh435	vlg	passed	L1	fail	compile error: Parse error: Unexpected token: SystemIdentifier
+br_gh484	vlg	passed	L4	fail	compile error: I/O error: Preprocessor error: line 6: Invalid include syntax: `MY_FILE(ivltests, br_gh484.vh)
+br_gh497a	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found LBracket
+br_gh497c	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found LBracket
+br_gh497e	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found LBracket
+br_gh508b	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+br_gh515	vlg	passed	L1	pass	PASSED
+br_gh531	vlg	gold	-	excluded:systemverilog:|=	
+br_gh533	vlg	ce	-	excluded:systemverilog-systf:$bits	
+br_gh567	vlg	gold	-	excluded:flag-g2001	
+br_gh6	vlg	passed	L1	pass	PASSED
+br_gh60a	vlg	ce	L1	pass	language error: Lexer error: Invalid number literal: 0'b0: '0'b0' has a zero width
+br_gh62	vlg	ce	L4	pass	language error: Parse error: Invalid expression
+br_gh621	vlg	passed	L4	refused:for	Parse error: Unsupported module item: for
+br_gh632	vlg	passed	L1	pass	PASSED
+br_gh632b	vlg	passed	-	excluded:flag-S	
+br_gh632c	vlg	passed	L1	pass	PASSED
+br_gh674	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+br_gh7	vlg	passed	L1	pass	PASSED
+br_gh732	vlg	gold	L6	fail	compile error: Parse error: Expected LParen, found Assign_
+br_gh782c	vlg	passed	L4	fail	compile error: Parse error: Unexpected token: Identifier
+br_gh782d	vlg	passed	L4	pass	PASSED
+br_gh782e	vlg	passed	L4	fail	compile error: Parse error: Unexpected token: StringLiteral
+br_gh782f	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 3: unsupported `default_nettype `; supported net defaults are wire, tri and none
+br_gh788	vlg	gold	-	excluded:flag-gno-io-range-error	
+br_gh79	vlg	ce	L1	pass	language error: Lexer error: Invalid number literal: 4'b_: '4'b_' is missing digits after its base
+br_gh793	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+br_gh8	vlg	passed	L1	pass	PASSED
+br_gh827	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+br_gh889	vlg	gold	-	excluded:sdf-annotate	
+br_gh9	vlg	passed	L1	pass	PASSED
+br_gh956a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: analog port 'o' of instance 'sub.i' connects discrete net 'x' without a connect module
+br_gh956b	vlg	ce	L7	refused:tranif1	Parse error: Unsupported module item: tranif1
+br_gh99a	vlg	passed	L1	pass	PASSED
+br_gh99b	vlg	passed	L1	pass	PASSED
+br_gh99d	vlg	passed	L1	fail	run-time error: process assign #2 could not run: numeric conversion at value 1 failed: integer-to-real conversion contains X/Z bits
+br_gh99f	vlg	passed	L1	fail	run-time error: process assign #2 could not run: numeric conversion at value 1 failed: integer-to-real conversion contains X/Z bits
+br_gh99g	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+br_gh99h	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+br_gh99i	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `buffer`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+br_gh99j	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `buffer`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+br_gh99k	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `buffer`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+br_gh99l	vlg	passed	L1	pass	PASSED
+br_gh99m	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+br_gh99o	vlg	passed	L1	pass	PASSED
+br_gh99p	vlg	passed	L1	pass	PASSED
+br_gh99q	vlg	passed	L1	pass	PASSED
+br_gh99r	vlg	passed	L1	pass	PASSED
+br_gh99s	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+br_gh99t	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+br_gh99u	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+br_ml20150315	vlg	gold	L1	pass	matches the gold file
+br_ml20150321	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'undeclared'
+br_ml20190806a	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+br_ml20190806b	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+br_ml20190814	vlg	gold	-	excluded:sdf-annotate	
+br_mw20171108	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+bufif	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `ad_drv`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+busbug	vlg	gold	L1	pass	matches the gold file
+ca_force	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+ca_func	vlg	passed	-	excluded:flag-gstrict-ca-eval	
+ca_mult	vlg	gold	L1	pass	matches the gold file
+ca_pow_synth	vlg	passed	L1	pass	PASSED
+ca_pow_unsigned	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+ca_real_logical	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: parameter 'pargi' requires an exact finite numeric elaboration value
+ca_time	vlg	gold	L1	pass	matches the gold file
+case3.8A	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+case3.8B	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+case3.8C	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+case3.8D	vlg	passed	L1	pass	PASSED
+casex3.9A	vlg	passed	L1	pass	PASSED
+casex3.9B	vlg	passed	L1	pass	PASSED
+casex3.9C	vlg	passed	L1	pass	PASSED
+casex3.9D	vlg	passed	L1	pass	PASSED
+casex3.9E	vlg	passed	L1	pass	PASSED
+casez3.10A	vlg	passed	L1	pass	PASSED
+casez3.10B	vlg	passed	L1	pass	PASSED
+casez3.10C	vlg	passed	L1	pass	PASSED
+casez3.10D	vlg	passed	L1	pass	PASSED
+casez3.10E	vlg	passed	L1	pass	PASSED
+cast_int	vlg	passed	L1	fail	run-time error: process assign #1 could not run: numeric conversion at value 1 failed: real-to-integer conversion requires a finite value
+check_constant_1	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/check_constant_1.v` declares no digital nets, processes or drivers
+check_constant_10	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: `unpacked array Array` vector bounds must be compile-time constants within the supported signed 64-bit index range
+check_constant_11	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a bit or part select must have constant bounds representable as signed 64-bit integers
+check_constant_12	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `In` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant ex...
+check_constant_13	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `In` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant ex...
+check_constant_14	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: packed array part-select bounds must be constant signed 64-bit integers
+check_constant_15	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: packed array part-select bounds must be constant signed 64-bit integers
+check_constant_16	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a bit or part select must have constant bounds representable as signed 64-bit integers
+check_constant_17	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: packed array part-select bounds must be constant signed 64-bit integers
+check_constant_18	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: packed array part-select bounds must be constant signed 64-bit integers
+check_constant_19	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `Out` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant e...
+check_constant_2	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+check_constant_20	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `Out` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant e...
+check_constant_3	vlg	ce	-	excluded:flag-g1995	
+check_constant_4	vlg	ce	L1	fail	compiled without error; run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+check_constant_5	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
+check_constant_6	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
+check_constant_7	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
+check_constant_8	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wire` vector bounds must be compile-time constants within the supported signed 64-bit index range
+check_constant_9	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: `unpacked array Array` vector bounds must be compile-time constants within the supported signed 64-bit index range
+cmos	vlg	gold	L7	fail	compile error: Semantic error: Undefined module: 'nmos'
+cmpi	vlg	passed	L1	pass	PASSED
+comp1000	vlg	gold	L1	fail	differs from the gold file at line 91 (255 lines against 255)
+comp1001	vlg	gold	L1	fail	differs from the gold file at line 179 (255 lines against 255)
+comp1001_fail3	vlg	passed	L1	pass	PASSED
+comp1001_fail4	vlg	passed	L1	pass	PASSED
+comp1001_fail5	vlg	passed	L1	pass	PASSED
+complex_lidx	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+con_tri	vlg	passed	L1	pass	PASSED
+concat3	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+concat4	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+concat_zero_wid_fail	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+concat_zero_wid_fail2	vlg	passed	L1	pass	PASSED
+cond_band	vlg	passed	L1	pass	PASSED
+cond_wide	vlg	passed	L1	pass	PASSED
+cond_wide2	vlg	passed	L1	pass	PASSED
+const	vlg	passed	L1	fail	compile error: Parse error: Invalid expression
+const2	vlg	passed	L1	pass	PASSED
+const3	vlg	passed	L1	pass	PASSED
+const4	vlg	passed	L1	fail	compile error: Parse error: Invalid expression
+constadd	vlg	passed	L1	pass	PASSED
+constadd2	vlg	passed	L1	pass	PASSED
+constadd3	vlg	passed	L1	pass	PASSED
+constfunc1	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc10	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc11	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc12	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc13	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc14	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc15	vlg	passed	L3	refused:function	testbench gap: no defines (__ICARUS__); Parse error: Unsupported module item: function
+constfunc2	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc3	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc4	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc5	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc6	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc7	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunc9	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+constmult	vlg	passed	L1	pass	PASSED
+consttern	vlg	passed	L1	pass	PASSED
+contrib8.1	vlg	passed	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+contrib8.2	vlg	passed	L4	fail	testbench gap: no root selection (-s test); compile error: Parse error: Expected port name, found Dot
+contrib8.3	vlg	ce	L1	pass	language error: Semantic error: Undefined module: 'MUX_REG_8x8'
+contrib8.4	vlg	passed	L1	pass	PASSED
+contrib8.5	vlg	passed	L1	pass	PASSED
+countdrivers1	vlg	passed	-	excluded:nonstandard-systf:$countdrivers	
+countdrivers2	vlg	passed	-	excluded:nonstandard-systf:$countdrivers	
+countdrivers3	vlg	passed	-	excluded:nonstandard-systf:$countdrivers	
+countdrivers4	vlg	passed	-	excluded:nonstandard-systf:$countdrivers	
+countdrivers5	vlg	passed	-	excluded:nonstandard-systf:$countdrivers	
+cprop	vlg	passed	L1	pass	PASSED
+credence20041209	vlg	passed	L1	pass	PASSED
+dangling_port	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+dcomp1	vlg	gold	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+deassign3.4A	vlg	passed	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+decl_assign1	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+def_nettype	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 118: unsupported `default_nettype tri0`; supported net defaults are wire, tri and none
+def_nettype_none	vlg	ce	L1	refused:implicit-net-declaration	Parse error: Unsupported implicit net declaration: `b` requires a net declaration under `default_nettype none`
+define1	vlg	passed	L1	pass	PASSED
+defparam	vlg	passed	L4	refused:defparam	testbench gap: no root selection (-s main); Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+defparam2	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+defparam3	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+defparam3.5	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+defparam4	vlg	gold	L4	refused:if	Parse error: Unsupported module item: if
+delay	vlg	gold	L1	pass	matches the gold file
+delay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+delay4	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+delay5	vlg	passed	L6	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+delay_assign_nb	vlg	passed	L1	pass	PASSED
+delay_assign_nb2	vlg	passed	L1	pass	PASSED
+delay_var	vlg	gold	-	excluded:systemverilog:int	
+delayed_comp_reduct	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+dff1	vlg	passed	L1	pass	PASSED
+disable3.6A	vlg	passed	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+disable3.6B	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+disable_cleanup	vlg	passed	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+disable_fork	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+disblock	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+disblock2	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+disp_dec	vlg	gold	L1	pass	matches the gold file
+disp_dec2	vlg	gold	L1	pass	matches the gold file
+disp_leading_z	vlg	gold	L1	pass	matches the gold file
+disp_parm	vlg	gold	L1	pass	matches the gold file
+disp_part	vlg	gold	L1	pass	matches the gold file
+div16	vlg	passed	L3	fail	testbench gap: no root selection (-s test_div16); compile error: Parse error: Expected Assign_, found LParen
+dotinid	vlg	passed	L4	refused:module-item	Parse error: Unsupported module item: m
+drive_strength	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+drive_strength1	vlg	passed	L7	fail	compile error: Parse error: Expected declared name, found LParen
+drive_strength2	vlg	gold	L1	pass	matches the gold file
+drive_strength3	vlg	passed	-	excluded:systemverilog:bit	
+dummy7	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 1 (6 lines against 6)
+dump_memword	vlg	gold	L5	fail	compile error: Semantic error: Invalid expression: argument 2 of `$dumpvars` names a module instance, block or signal, not an expression
+dumpvars	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.u1` is not a continuous net, branch, parameter or analog function
+eeq	vlg	passed	L1	pass	PASSED
+else1	vlg	passed	L1	pass	PASSED
+else2	vlg	passed	L1	pass	PASSED
+else3	vlg	passed	L1	pass	PASSED
+elsif_test	vlg	passed	L1	pass	PASSED
+eq	vlg	passed	L1	pass	PASSED
+escape1	vlg	passed	-	excluded:nonstandard-systf:$I178	
+escape2a	vlg	co	L1	pass	compiled
+escape2b	vlg	co	L1	pass	compiled
+escape2c	vlg	co	L1	pass	compiled
+escape3	vlg	passed	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.cpu3` is not a continuous net, branch, parameter or analog function
+escape4	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `bot.r` is not a continuous net, branch, parameter or analog function
+escape4b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `bot.m` is not a continuous net, branch, parameter or analog function
+event2	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+event3	vlg	gold	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+event3.15	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+event_array	vlg	ce	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+event_list	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+event_list2	vlg	passed	L1	pass	PASSED
+event_list3	vlg	gold	L1	pass	matches the gold file
+extend	vlg	passed	L1	pass	PASSED
+fdisplay1	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fwrite`) is not supported yet
+fdisplay2	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fdisplay_fail_fd	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fdisplay`) is not supported yet
+fdisplay_fail_mcd	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fdisplay`) is not supported yet
+fifo	vlg	passed	L5	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+fopen1	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fopen2	vlg	passed	L5	fail	compile error: Parse error: Expected Assign_, found LParen
+for3.16A	vlg	passed	L1	pass	PASSED
+force1	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+force2	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+force3.17A	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+force3.17B	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+force3.17C	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+force_lval_part	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+force_release_reg_pv	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+force_release_wire8_pv	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+force_release_wire_pv	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+fork1	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+fork3.19A	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+fork3.19B	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+format	vlg	gold	L1	fail	differs from the gold file at line 5 (5 lines against 5)
+fr47	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+fread	vlg	passed	-	excluded:systemverilog:string	
+fscanf_u	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fscanf_u_warn	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fscanf_z	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fscanf_z_warn	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+function1	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+function2	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function3	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function3.11B	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function3.11C	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function3.11D	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function3.11F	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function4	vlg	ce	L3	refused:function	Parse error: Unsupported module item: function
+function5	vlg	co	L3	refused:function	Parse error: Unsupported module item: function
+function6	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function7	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+function8	vlg	passed	L4	refused:function	Parse error: Unsupported module item: function
+function9	vlg	passed	L4	refused:function	Parse error: Unsupported module item: function
+function_exp	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+ga_and	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+ga_mod	vlg	passed	L4	refused:module-instance	testbench gap: no root selection (-s main); Parse error: Unsupported module instance `foo`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elab...
+ga_mod1	vlg	passed	L4	refused:module-instance	testbench gap: no root selection (-s main); Parse error: Unsupported module instance `foo`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elab...
+ga_mod2	vlg	passed	L4	refused:module-instance	testbench gap: no root selection (-s main); Parse error: Unsupported module instance `u`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
+ga_nand	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+ga_nor	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+ga_or	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+ga_xnor	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+ga_xor	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+galan	vlg	passed	L1	pass	PASSED
+gate_connect1	vlg	passed	L1	pass	PASSED
+gate_connect2	vlg	ce	L4	pass	language error: Parse error: Expected LParen, found LBracket
+gen_case_opt1	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
+gen_case_opt2	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
+gen_case_opt3	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
+gencrc	vlg	passed	-	excluded:systemverilog:byte	
+generate_case	vlg	passed	L4	refused:case	Parse error: Unsupported module item: case
+generate_case2	vlg	passed	L4	refused:case	Parse error: Unsupported module item: case
+generate_case3	vlg	passed	L1	refused:if	Parse error: Unsupported module item: if
+generate_multi_loop	vlg	gold	-	excluded:systemverilog:byte	
+generate_specify	vlg	ce	-	excluded:flag-g2005-sv	
+generate_specparam	vlg	ce	-	excluded:flag-g2005-sv	
+genloop	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
+genvar_scopes	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
+hello1	vlg	passed	L1	pass	PASSED
+hier_ref_error	vlg	ce	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+hierspace	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `inst.x` is not a continuous net, branch, parameter or analog function
+idiv1	vlg	passed	L1	pass	PASSED
+idiv2	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+idiv3	vlg	gold	L1	pass	matches the gold file
+ifdef1	vlg	passed	L1	pass	PASSED
+ifdef2	vlg	passed	L1	pass	PASSED
+ifdef3	vlg	passed	L1	pass	PASSED
+ifdef4	vlg	passed	L1	pass	PASSED
+ifdef_fail	vlg	ce	L1	pass	language error: I/O error: Preprocessor error: line 0: Unclosed conditional (1 `endif missing)
+include1	vlg	passed	L1	fail	nothing to run: module `ivltests/include1.v` declares no digital nets, processes or drivers
+include2	vlg	passed	L1	fail	nothing to run: module `ivltests/include2.v` declares no digital nets, processes or drivers
+include3	vlg	passed	L1	fail	nothing to run: module `ivltests/include3.v` declares no digital nets, processes or drivers
+indef_width_concat	vlg	ce	L1	fail	compiled without error; ran to quiescence
+initmod	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `M0.r` is not a continuous net, branch, parameter or analog function
+initmod2	vlg	gold	L1	pass	matches the gold file
+inout	vlg	passed	L1	fail	compile error: Semantic error: Duplicate symbol: 'a' already defined
+inout2	vlg	passed	L1	pass	PASSED
+inout3	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: port `T` of instance `a` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler connec...
+inout4	vlg	passed	L1	pass	PASSED
+int_not_signext	vlg	gold	L1	pass	matches the gold file
+integer1lt	vlg	passed	L1	pass	PASSED
+integer2le	vlg	passed	L1	pass	PASSED
+integer3gt	vlg	passed	L1	pass	PASSED
+integer4ge	vlg	passed	L1	pass	PASSED
+integer5	vlg	passed	L1	pass	PASSED
+itor_rtoi	vlg	gold	L1	fail	run-time error: process initial #0 could not run: numeric conversion at value 7 failed: integer-to-real conversion contains X/Z bits
+land2	vlg	passed	L1	pass	PASSED
+land3	vlg	passed	L1	pass	PASSED
+land4	vlg	gold	L1	pass	matches the gold file
+landor1	vlg	passed	L1	pass	PASSED
+ldelay1	vlg	passed	L6	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+ldelay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+ldelay3	vlg	passed	L6	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+ldelay4	vlg	passed	L7	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
+ldelay5	vlg	passed	L7	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
+lh_catadd	vlg	passed	L1	pass	PASSED
+lh_memcat	vlg	gold	L1	pass	matches the gold file
+lh_memcat2	vlg	passed	L1	pass	PASSED
+lh_memcat3	vlg	passed	L1	pass	PASSED
+lh_varindx	vlg	passed	L1	pass	PASSED
+lh_varindx2	vlg	passed	L1	pass	PASSED
+lh_varindx4	vlg	passed	L1	pass	PASSED
+lh_varindx5	vlg	passed	L1	pass	PASSED
+long_div	vlg	gold	L1	pass	matches the gold file
+macro2	vlg	passed	L1	pass	PASSED
+macro_args	vlg	co	-	excluded:flag-yivltests	
+macro_comment1	vlg	passed	L1	pass	PASSED
+macro_comment2	vlg	passed	L1	pass	PASSED
+macro_comment3	vlg	passed	L1	pass	PASSED
+macro_comment_multiline	vlg	passed	L1	fail	compile error: Parse error: Unexpected token: Identifier
+macro_redefinition	vlg	gold	-	excluded:flag-Wmacro-redefinition	
+macro_replacement	vlg	gold	-	excluded:flag-Wmacro-replacement	
+macsub	vlg	passed	L1	pass	PASSED
+mangle	vlg	passed	L1	refused:escaped-ground-or-comma-bearing	Parse error: Unsupported escaped ground or comma-bearing identifier requires structured branch labels: \`~!-_=+\|[]{};:'"",./<>?
+mangle_1	vlg	passed	L4	refused:module-item	Parse error: Unsupported module item: m
+many_drivers	vlg	passed	L1	fail	no PASSED line (15 output lines)
+mcl2	vlg	gold	L1	pass	matches the gold file
+mem1	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
+mem2port	vlg	passed	L1	pass	PASSED
+memassign	vlg	passed	L1	pass	PASSED
+memidx	vlg	passed	L1	pass	PASSED
+memidxrng	vlg	passed	L1	fail	testbench gap: no defines (__ICARUS__); run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+meminit	vlg	passed	L1	pass	PASSED
+meminit2	vlg	passed	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+memport_bs	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+memref	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+mhead_task	vlg	passed	L4	fail	compile error: Parse error: Expected Assign_, found Semicolon
+mixed_type_div_mod	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+mixed_width_case	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+modparam	vlg	passed	L1	pass	testbench gap: no root selection (-s top); PASSED
+module3.12A	vlg	passed	L1	pass	testbench gap: no root selection (-s main); PASSED
+module3.12B	vlg	passed	L1	pass	PASSED
+module_inout_port_list_def	vlg	ce	L1	pass	language error: Parse error: Invalid port declaration
+module_inout_port_type	vlg	ce	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_input_port_list_def	vlg	ce	L4	pass	language error: Parse error: Invalid port declaration
+module_input_port_type	vlg	ce	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_nonansi_fail1	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail10	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail11	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail12	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Identifier
+module_nonansi_fail13	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail2	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail3	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail4	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail5	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Identifier
+module_nonansi_fail6	vlg	ce	L1	pass	language error: Parse error: Invalid port declaration
+module_nonansi_fail7	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail8	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_fail9	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
+module_nonansi_integer1	vlg	passed	-	excluded:systemverilog-systf:$bits	
+module_nonansi_integer2	vlg	passed	-	excluded:systemverilog-systf:$bits	
+module_nonansi_integer_fail	vlg	ce	L1	fail	compiled without error; ran to quiescence
+module_nonansi_time1	vlg	passed	-	excluded:systemverilog-systf:$bits	
+module_nonansi_time2	vlg	passed	-	excluded:systemverilog-systf:$bits	
+module_nonansi_time_fail	vlg	ce	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_nonansi_vec1	vlg	passed	-	excluded:systemverilog-systf:$bits	
+module_nonansi_vec2	vlg	passed	-	excluded:systemverilog-systf:$bits	
+module_nonansi_vec_fail1	vlg	ce	L1	fail	compiled without error; ran to quiescence
+module_nonansi_vec_fail2	vlg	ce	L1	fail	compiled without error; ran to quiescence
+module_nonansi_vec_fail3	vlg	ce	L1	fail	compiled without error; ran to quiescence
+module_output_port_list_def	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+module_output_port_var1	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_output_port_var2	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_port_range_mismatch	vlg	ce	L1	fail	compiled without error; ran to quiescence
+modulus	vlg	passed	L1	pass	PASSED
+modulus2	vlg	passed	L1	pass	PASSED
+monitor	vlg	gold	L1	pass	matches the gold file
+monitor2	vlg	gold	L1	pass	matches the gold file
+monitor3	vlg	gold	L1	pass	matches the gold file
+mult1	vlg	passed	L1	pass	PASSED
+mult16	vlg	passed	L3	fail	testbench gap: no root selection (-s mul16); compile error: Parse error: Expected Assign_, found LParen
+mult2	vlg	passed	L1	pass	PASSED
+multi_bit_strength	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+multi_driver_delay	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+multiply_large	vlg	passed	L1	pass	PASSED
+muxtest	vlg	passed	L1	pass	PASSED
+named_event_no_edges	vlg	ce	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+nb_assign	vlg	passed	-	excluded:systemverilog:var	
+nb_delay	vlg	passed	L1	pass	PASSED
+nb_ec_concat	vlg	passed	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+nb_ec_multi_ev	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+nblkorder	vlg	passed	L1	pass	PASSED
+negative_genvar	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
+negvalue	vlg	gold	L1	pass	matches the gold file
+neq1	vlg	gold	L1	pass	matches the gold file
+nested_func	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+nested_impl_event1	vlg	gold	L1	pass	matches the gold file
+nested_impl_event2	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: `@*` names no signal: the statement it guards reads none, so the process could never resume
+no_if_statement	vlg	ce	-	excluded:systemverilog:var	
+no_timescale_in_module	vlg	ce	L1	refused:module-item	Parse error: Unsupported module item: __rspice_timescale
+npmos	vlg	passed	L7	fail	compile error: Semantic error: Undefined module: 'nmos'
+npmos2	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `ad_drv`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+onehot	vlg	passed	L5	pass	PASSED
+p_monta	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+par_mismatch	vlg	ce	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+param-extend	vlg	passed	L1	pass	PASSED
+param_add	vlg	passed	L1	pass	PASSED
+param_and	vlg	passed	L1	pass	PASSED
+param_and2	vlg	passed	L1	pass	PASSED
+param_band	vlg	passed	L1	pass	PASSED
+param_binv	vlg	passed	L1	pass	PASSED
+param_bor	vlg	passed	L1	pass	PASSED
+param_concat	vlg	passed	L1	pass	PASSED
+param_eq3	vlg	passed	L1	pass	PASSED
+param_expr	vlg	passed	L1	pass	PASSED
+param_mod	vlg	passed	L1	pass	PASSED
+param_select	vlg	passed	L1	pass	PASSED
+param_select2	vlg	passed	L1	fail	internal error: Code generation error: canonical IR validation failed: Error HirValidation at 0:125-133: HIR scalar symbol 'value' must not be indexed; Error HirValidation at 0...
+param_select3	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+param_string	vlg	passed	L1	fail	compile error: Semantic error: Invalid expression: parameter `passed`: this expression form has no discrete-domain lowering
+param_tern	vlg	passed	L1	pass	PASSED
+param_tern2	vlg	passed	L1	pass	PASSED
+param_test1	vlg	gold	L1	pass	matches the gold file
+param_test2	vlg	gold	L1	pass	matches the gold file
+param_test4	vlg	passed	L1	pass	PASSED
+param_times	vlg	passed	L1	pass	PASSED
+parameter_1bit	vlg	passed	-	excluded:systemverilog-systf:$bits	
+parameter_in_generate1	vlg	ce	L1	refused:parameter	Parse error: Unsupported generate block: parameter declaration (use localparam); VAMS-2023 6.6 excludes module-interface declarations from a generate block
+parameter_no_default	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_omit1	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_omit2	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_omit3	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_omit_invalid1	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_omit_invalid2	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_omit_invalid3	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_override_invalid1	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_override_invalid2	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_override_invalid3	vlg	ce	L4	pass	language error: Semantic error: Undeclared symbol: 'A'
+parameter_override_invalid4	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+parameter_override_invalid5	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+parameter_override_invalid6	vlg	ce	L4	pass	language error: Parse error: Expected Semicolon, found Hash
+patch1268	vlg	passed	L1	fail	compile error: Parse error: Invalid expression
+pca1	vlg	passed	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+pic	vlg	gold	L5	fail	compile error: Parse error: Expected Assign_, found Semicolon
+port-test2	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found Comma
+port-test3	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `data`, which module `CPU` declares both a `inout` port and a `reg`; IEEE 1364-2005 section 12.3.3 le...
+port-test4a	vlg	ce	L1	pass	language error: Parse error: Expected port name, found RParen
+port-test4b	vlg	ce	L1	pass	language error: Parse error: Expected port name, found RParen
+port-test5	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (2 output lines)
+port-test6	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (2 output lines)
+port-test7	vlg	passed	L1	pass	PASSED
+posedge	vlg	passed	L1	pass	PASSED
+pow-ca	vlg	passed	L1	pass	PASSED
+pow-const	vlg	passed	L1	pass	PASSED
+pow-proc	vlg	passed	L1	pass	PASSED
+pow_ca_signed	vlg	passed	L4	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pow_ca_unsigned	vlg	passed	L4	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pow_reg_signed	vlg	passed	L4	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pow_reg_unsigned	vlg	passed	L4	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pow_signed	vlg	passed	L1	pass	PASSED
+pow_unsigned	vlg	passed	L1	pass	PASSED
+pr1002	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1002a	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 1 (9 lines against 10)
+pr1007	vlg	passed	L1	pass	PASSED
+pr1008	vlg	gold	L1	pass	matches the gold file
+pr1022	vlg	passed	L1	pass	PASSED
+pr1024	vlg	passed	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+pr1026	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (31 lines against 31)
+pr1029	vlg	passed	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.eric` is not a continuous net, branch, parameter or analog function
+pr1032	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr1033	vlg	gold	L1	pass	matches the gold file
+pr1065	vlg	gold	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr1072	vlg	passed	L1	pass	PASSED
+pr1077	vlg	gold	-	excluded:flag-g2	
+pr1087	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `INST_COUNTER`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this comp...
+pr1101	vlg	passed	L1	pass	PASSED
+pr1115	vlg	passed	L1	pass	PASSED
+pr1353345	vlg	passed	L4	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr1353345b	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr136	vlg	passed	L1	pass	PASSED
+pr1367855	vlg	passed	L1	pass	PASSED
+pr1380261	vlg	passed	L1	pass	PASSED
+pr1403406	vlg	gold	L1	refused:$printtimescale	Semantic error: Unsupported feature: `$printtimescale` names `other`, which is neither a signal nor a module instance visible here
+pr1403406a	vlg	gold	-	excluded:flag-fivltests/pr1403406-1.cf	
+pr1403406b	vlg	gold	-	excluded:flag-fivltests/pr1403406-1.cf	
+pr142	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1421777	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.tmp` is not a continuous net, branch, parameter or analog function
+pr1444055	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1449749a	vlg	passed	L1	pass	PASSED
+pr1455873	vlg	passed	L1	pass	PASSED
+pr1465769	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr1467825	vlg	co	-	excluded:flag-gno-specify	
+pr1474283	vlg	passed	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+pr1474316	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr1474318	vlg	passed	L1	pass	PASSED
+pr1476440	vlg	gold	L1	pass	matches the gold file
+pr1477190	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr1478121	vlg	passed	-	excluded:systemverilog:do	
+pr1478988	vlg	passed	L1	pass	PASSED
+pr1489568	vlg	passed	L1	pass	PASSED
+pr1489570	vlg	passed	L1	pass	PASSED
+pr1491355	vlg	passed	L1	pass	PASSED
+pr1492075	vlg	gold	L1	pass	matches the gold file
+pr1508882	vlg	passed	L1	pass	PASSED
+pr1510724	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr1515168	vlg	passed	L1	pass	PASSED
+pr1520314	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1522570	vlg	passed	L1	pass	PASSED
+pr1530426	vlg	passed	L1	pass	PASSED
+pr1561597	vlg	passed	L1	pass	PASSED
+pr1565544	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
+pr1565699b	vlg	passed	L4	pass	PASSED
+pr1570451	vlg	passed	L1	pass	PASSED
+pr1570451b	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+pr1570635	vlg	passed	L1	pass	PASSED
+pr1570635b	vlg	passed	L1	pass	PASSED
+pr1574175	vlg	gold	L1	pass	matches the gold file
+pr1581580	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `u_lat`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
+pr1587634	vlg	co	-	excluded:systemverilog:-=	
+pr1587669	vlg	gold	-	excluded:systemverilog:+=	
+pr1589497	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+pr1598445	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pr1601896	vlg	passed	L1	pass	PASSED
+pr1601898	vlg	passed	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1603313	vlg	passed	L1	pass	PASSED
+pr1603918	vlg	passed	L1	pass	PASSED
+pr1612693	vlg	passed	L1	pass	PASSED
+pr1623097	vlg	gold	L1	pass	matches the gold file
+pr1625912	vlg	passed	L1	pass	PASSED
+pr1628288	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+pr1628300	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+pr1629683	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+pr1632861	vlg	gold	L1	pass	matches the gold file
+pr1634526	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+pr1636409	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1637208	vlg	passed	L1	pass	PASSED
+pr1638985	vlg	gold	L1	pass	matches the gold file
+pr1639060	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1639064	vlg	gold	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+pr1639064b	vlg	gold	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+pr1639968	vlg	gold	L1	pass	matches the gold file
+pr1639971	vlg	gold	L1	pass	matches the gold file
+pr1645277	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1645518	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1648365	vlg	gold	L1	pass	matches the gold file
+pr1650842	vlg	passed	-	excluded:nonstandard-systf:$ID241	
+pr1657307	vlg	passed	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1661640	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1662508	vlg	passed	L1	racy	passes in source order only; no PASSED line (18 output lines)
+pr1664684	vlg	gold	L7	refused:tri0	Parse error: Verilog-AMS digital construct not yet supported: `tri0`
+pr1675789	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr1675789b	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr1676071	vlg	passed	-	excluded:systemverilog:bit	
+pr1676836	vlg	passed	L1	pass	PASSED
+pr1682887	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1687193	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1688717	vlg	gold	L4	fail	compile error: Parse error: Invalid expression
+pr1690058	vlg	passed	L1	pass	PASSED
+pr1691599b	vlg	passed	L1	pass	PASSED
+pr1691709	vlg	passed	L1	pass	PASSED
+pr1693890	vlg	passed	L1	pass	PASSED
+pr1693921	vlg	passed	L1	pass	PASSED
+pr1694413	vlg	passed	L1	pass	PASSED
+pr1694427	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+pr1695257	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1695309	vlg	passed	L1	pass	PASSED
+pr1695322	vlg	passed	L1	pass	PASSED
+pr1695334	vlg	passed	L1	pass	PASSED
+pr1696137	vlg	passed	L1	pass	PASSED
+pr1697250	vlg	passed	L1	pass	PASSED
+pr1697732	vlg	passed	L1	pass	PASSED
+pr1698499	vlg	gold	-	excluded:nonstandard-systf:$D_IN	
+pr1698658	vlg	gold	L1	pass	matches the gold file
+pr1698659	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `lwr.lowervar` is not a continuous net, branch, parameter or analog function
+pr1698820	vlg	gold	-	excluded:systemverilog:var	
+pr1699444	vlg	gold	L1	pass	matches the gold file
+pr1699519	vlg	gold	L1	fail	differs from the gold file at line 3 (4 lines against 4)
+pr1701855	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.dut` is not a continuous net, branch, parameter or analog function
+pr1701855b	vlg	gold	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+pr1701889	vlg	gold	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr1701921	vlg	passed	L1	pass	PASSED
+pr1702593	vlg	gold	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+pr1703120	vlg	gold	L1	fail	differs from the gold file at line 2 (19 lines against 19)
+pr1703346	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr1703959	vlg	passed	L7	refused:pmos	Parse error: Unsupported module item: pmos
+pr1704013	vlg	ce	L1	fail	compiled without error; ran to quiescence
+pr1704726a	vlg	ce	L6	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1704726b	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1704726c	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1704726d	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1705027	vlg	co	L4	refused:feature	Semantic error: Unsupported feature: analog port 'r' of instance 'test.ua' must connect to a net identifier or ground
+pr1716276	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr1717361	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr1719055	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 3 (23 lines against 17)
+pr1723367	vlg	gold	-	excluded:flag-gno-io-range-error	
+pr1735724	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: slice of unpacked array `out` requires whole-array value lowering
+pr1735822	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr1735836	vlg	gold	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr1740476b	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
+pr1742910	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS_UNSIZED__); PASSED
+pr1745005	vlg	passed	-	excluded:systemverilog:ref	
+pr1746401	vlg	passed	L1	pass	PASSED
+pr1746848	vlg	gold	L1	pass	matches the gold file
+pr1752353	vlg	passed	L1	fail	compile error: Semantic error: Type mismatch in port `out` of instance `U1`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or extendin...
+pr1752823a	vlg	gold	L1	pass	matches the gold file
+pr1752823b	vlg	gold	L1	refused:statement	Parse error: Verilog-AMS digital construct not yet supported: `inf`
+pr1755593	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr1755629	vlg	passed	L1	pass	PASSED
+pr1758122	vlg	gold	-	excluded:flag-g2001-noconfig	
+pr1758135	vlg	gold	L1	pass	matches the gold file
+pr1763333	vlg	ce	L1	pass	language error: Parse error: Invalid expression
+pr1770199	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr1776485	vlg	passed	L1	pass	PASSED
+pr1777103	vlg	passed	L1	pass	PASSED
+pr1780480	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 2 (2 lines against 4)
+pr1784984	vlg	passed	L1	pass	PASSED
+pr1787394a	vlg	gold	L7	fail	compile error: Semantic error: Undefined module: 'nmos'
+pr1787394b	vlg	gold	L7	fail	compile error: Semantic error: Undefined module: 'bufif1'
+pr1787423	vlg	gold	L7	refused:pulldown	Parse error: Unsupported module item: pulldown
+pr1787423b	vlg	passed	L7	refused:pulldown	Parse error: Unsupported module item: pulldown
+pr1787423c	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
+pr1792108	vlg	gold	-	excluded:systemverilog:int	
+pr1792152	vlg	gold	L6	fail	compile error: Parse error: Expected RParen, found Colon
+pr1792734	vlg	gold	L1	pass	matches the gold file
+pr1793157	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1794362	vlg	passed	L1	pass	PASSED
+pr1795005a	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1795005b	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1799904	vlg	gold	L1	pass	matches the gold file
+pr1804877	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr1805837	vlg	gold	L1	pass	matches the gold file
+pr1812297	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1819452	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1820472	vlg	gold	L1	pass	matches the gold file
+pr1822658	vlg	passed	L1	pass	PASSED
+pr1823732	vlg	gold	L1	pass	matches the gold file
+pr1828642	vlg	gold	L1	pass	matches the gold file
+pr183	vlg	co	-	excluded:flag-gno-specify	
+pr1830834	vlg	gold	L4	fail	compile error: Parse error: Invalid expression
+pr1831724	vlg	gold	L1	pass	matches the gold file
+pr1832097a	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr1832097b	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr1833024	vlg	ce	L7	pass	language error: Parse error: Invalid expression
+pr1833754	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
+pr1841300	vlg	gold	-	excluded:flag-gno-io-range-error	
+pr1845683	vlg	gold	L1	pass	matches the gold file
+pr1851310	vlg	gold	L1	pass	matches the gold file
+pr1855504	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 1 (1 lines against 1)
+pr1861212a	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (2 lines against 3)
+pr1862744a	vlg	passed	-	excluded:flag-Winfloop	
+pr1862744b	vlg	ce	-	excluded:flag-Winfloop	
+pr1866215	vlg	gold	L1	fail	compile error: Semantic error: Invalid expression: physical port 'B0.CH' requires 1 lanes, but its connection supplies 7
+pr1866215b	vlg	gold	L1	fail	compile error: Semantic error: Invalid expression: physical port 'B0.CH' requires 1 lanes, but its connection supplies 16
+pr1867161a	vlg	gold	L1	pass	matches the gold file
+pr1867161b	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 2 (5 lines against 6)
+pr1867332	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1868792	vlg	passed	L1	pass	PASSED
+pr1868991a	vlg	passed	L1	pass	PASSED
+pr1868991b	vlg	co	L1	pass	compiled
+pr1869769	vlg	passed	L1	pass	PASSED
+pr1869772	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr1869781	vlg	passed	L1	pass	PASSED
+pr1873146	vlg	passed	L6	fail	compile error: Parse error: Expected LParen, found LBracket
+pr1875866	vlg	passed	L1	pass	PASSED
+pr1875866b	vlg	passed	L1	pass	PASSED
+pr1876798	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1877740	vlg	passed	L1	pass	PASSED
+pr1877743	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+pr1878909	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `test_mod0`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compile...
+pr1879226	vlg	passed	L1	pass	PASSED
+pr1883052	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr1883052b	vlg	passed	L6	refused:function	Parse error: Unsupported module item: function
+pr1885847	vlg	gold	L1	pass	matches the gold file
+pr1887168	vlg	gold	L1	pass	matches the gold file
+pr1892959	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr1892959b	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr1898983	vlg	gold	L4	refused:module-instance	Parse error: Unsupported module instance `sm`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabo...
+pr1901125	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr1903157	vlg	co	L1	pass	compiled
+pr1903324	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `tstr.data_in_array` is not a continuous net, branch, parameter or analog function
+pr1903343	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr1903520	vlg	passed	L1	pass	PASSED
+pr1907192	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr1909940	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
+pr1909940b	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
+pr1912843	vlg	passed	L1	pass	PASSED
+pr1913918a	vlg	passed	L1	pass	PASSED
+pr1913918b	vlg	passed	L1	pass	PASSED
+pr1913918c	vlg	passed	L1	pass	PASSED
+pr1913937	vlg	passed	L1	pass	PASSED
+pr1916261	vlg	passed	L1	pass	PASSED
+pr1921332	vlg	co	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr1924845	vlg	passed	L1	pass	PASSED
+pr1925356	vlg	passed	L1	pass	PASSED
+pr1925363a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+pr1925363b	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+pr1932444	vlg	passed	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+pr1934744	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr1936363	vlg	gold	L1	pass	matches the gold file
+pr1938138	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'a' already defined
+pr1939165	vlg	passed	L1	pass	PASSED
+pr1946411	vlg	passed	L1	pass	PASSED
+pr1948110	vlg	passed	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+pr1948342	vlg	passed	L1	pass	PASSED
+pr1949025	vlg	gold	L1	pass	matches the gold file
+pr1950282	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr1956211	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (4 output lines)
+pr1958801	vlg	passed	L1	pass	PASSED
+pr1960545	vlg	gold	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pr1960548	vlg	gold	L1	pass	matches the gold file
+pr1960558	vlg	gold	L1	pass	matches the gold file
+pr1960575	vlg	gold	L1	pass	matches the gold file
+pr1960596	vlg	gold	L1	pass	matches the gold file
+pr1960619	vlg	gold	-	excluded:flag-gno-io-range-error	
+pr1960625	vlg	passed	L1	pass	PASSED
+pr1960633	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr1963240	vlg	gold	L1	pass	matches the gold file
+pr1963960	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr1963962	vlg	gold	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr1971662a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+pr1971662b	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+pr1978358	vlg	passed	-	excluded:systemverilog:var	
+pr1978358b	vlg	passed	-	excluded:systemverilog:var	
+pr1978358c	vlg	passed	-	excluded:systemverilog:var	
+pr1978358d	vlg	passed	-	excluded:systemverilog:var	
+pr1983762	vlg	passed	L1	fail	compile error: Semantic error: Invalid expression: parameter `message`: this expression form has no discrete-domain lowering
+pr1985582	vlg	gold	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
+pr1988302	vlg	passed	L1	pass	PASSED
+pr1988302b	vlg	ce	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: generated scope `V` with index None is missing or not source-visible
+pr1988310	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr1990029	vlg	passed	L5	refused:hdl.system_task.file_io	testbench gap: no defines (__ICARUS__); HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1990164	vlg	passed	L1	pass	PASSED
+pr1990269	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr1992244	vlg	passed	L1	pass	PASSED
+pr1992729	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr1993479	vlg	gold	L4	fail	compile error: Parse error: Invalid expression
+pr2001162	vlg	gold	-	excluded:flag-gno-io-range-error	
+pr2011429	vlg	passed	L1	pass	PASSED
+pr2013758	vlg	passed	L1	pass	PASSED
+pr2014673	vlg	passed	L1	pass	PASSED
+pr2015466	vlg	passed	L1	pass	PASSED
+pr2018235a	vlg	passed	L1	pass	PASSED
+pr2018235b	vlg	passed	L1	pass	PASSED
+pr2018305	vlg	passed	L1	pass	PASSED
+pr2019553	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pr2029336	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr2030767	vlg	passed	L1	pass	PASSED
+pr2036953	vlg	passed	L1	pass	PASSED
+pr2038048	vlg	passed	L1	pass	PASSED
+pr2039632	vlg	ce	L1	refused:generate-if-condition	Parse error: Unsupported generate if condition: an expression this compiler cannot fold to a constant; IEEE 1364-2005 section 12.4 elaborates a generate region ...
+pr2039694	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr2043324	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr2043585	vlg	gold	-	excluded:flag-Wsensitivity-entire-array	
+pr2051694	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'unknown'
+pr2051975	vlg	ce	L1	refused:mixed-named-and-ordered	Parse error: Unsupported mixed named and ordered module port connections: reset
+pr2053944	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+pr2076363	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr2076391	vlg	gold	L1	pass	matches the gold file
+pr2076425	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2085984	vlg	passed	L1	pass	PASSED
+pr2091455	vlg	gold	L1	fail	differs from the gold file at line 1 (2 lines against 2)
+pr2109179	vlg	passed	L1	pass	PASSED
+pr2117473	vlg	passed	L1	pass	PASSED
+pr2117488	vlg	passed	L1	pass	PASSED
+pr2119622	vlg	gold	L1	pass	matches the gold file
+pr2121536	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `lwr.lout` is not a continuous net, branch, parameter or analog function
+pr2121536b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `lwr.lout` is not a continuous net, branch, parameter or analog function
+pr2123190	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr2132552	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2136787	vlg	gold	L1	pass	matches the gold file
+pr2138682	vlg	gold	L1	pass	matches the gold file
+pr2138979	vlg	passed	L1	pass	PASSED
+pr2138979b	vlg	gold	L1	pass	matches the gold file
+pr2138979c	vlg	gold	L1	pass	matches the gold file
+pr2138979d	vlg	gold	L1	pass	matches the gold file
+pr2139593	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr2146620	vlg	gold	L1	pass	matches the gold file
+pr2146620b	vlg	gold	L1	pass	matches the gold file
+pr2146620c	vlg	passed	L1	pass	PASSED
+pr2146824	vlg	gold	L1	pass	matches the gold file
+pr2148401	vlg	passed	L1	pass	PASSED
+pr2152011	vlg	gold	L1	pass	matches the gold file
+pr2159630	vlg	gold	L1	pass	matches the gold file
+pr2166188	vlg	passed	L1	pass	PASSED
+pr2166311	vlg	passed	L4	fail	testbench gap: no defines (__ICARUS__); compile error: Parse error: Invalid expression
+pr2169870	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2172606	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pr2172606b	vlg	passed	-	excluded:systemverilog:bit	
+pr2181249	vlg	passed	L1	pass	PASSED
+pr2190323	vlg	passed	L1	pass	PASSED
+pr2201909	vlg	passed	L1	pass	PASSED
+pr2201909b	vlg	passed	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
+pr2202706	vlg	passed	L1	pass	PASSED
+pr2202706b	vlg	passed	L1	pass	PASSED
+pr2202706c	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr2202846a	vlg	passed	L1	pass	PASSED
+pr2202846b	vlg	passed	L1	pass	PASSED
+pr2202846c	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr2208681	vlg	passed	L1	pass	PASSED
+pr2215342	vlg	passed	-	excluded:flag-grelative-include	
+pr2219441	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
+pr2219441b	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `child`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler el...
+pr2224845	vlg	passed	L1	pass	PASSED
+pr2224949	vlg	passed	L1	fail	compile error: Semantic error: Type mismatch in port `b` of instance `dut`; IEEE 1364-2005 section 12.3.9 connects a port to a differently sized net by truncating or extending...
+pr2233180	vlg	passed	L1	pass	PASSED
+pr2233180b	vlg	passed	L1	pass	PASSED
+pr2233180c	vlg	passed	L1	pass	PASSED
+pr2233192	vlg	passed	L1	pass	PASSED
+pr2233192b	vlg	passed	L1	pass	PASSED
+pr2233192c	vlg	passed	L1	pass	PASSED
+pr224	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2248925	vlg	gold	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr224a	vlg	passed	L1	fail	nothing to run: module `ivltests/pr224a.v` declares no digital nets, processes or drivers
+pr2251119	vlg	gold	L1	pass	matches the gold file
+pr2257003	vlg	passed	L4	fail	compile error: Parse error: Expected Assign_, found Semicolon
+pr2257003b	vlg	passed	L4	pass	PASSED
+pr2270035	vlg	passed	L1	pass	PASSED
+pr2276163	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr2281479	vlg	passed	L1	pass	PASSED
+pr2305307	vlg	passed	L4	fail	no PASSED line (3 output lines)
+pr2305307b	vlg	passed	-	excluded:systemverilog:rand	
+pr2305307c	vlg	passed	L1	fail	no PASSED line (3 output lines)
+pr2306259	vlg	passed	L1	pass	PASSED
+pr2350934	vlg	passed	L4	refused:function	Parse error: Unsupported module item: function
+pr2350934b	vlg	passed	L4	refused:function	Parse error: Unsupported module item: function
+pr2350988	vlg	passed	L4	refused:function	Parse error: Unsupported module item: function
+pr2352834	vlg	passed	L1	pass	PASSED
+pr2355304	vlg	passed	L1	pass	PASSED
+pr2355304b	vlg	passed	L1	pass	PASSED
+pr2358264	vlg	passed	L1	pass	PASSED
+pr2358848	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr2395378a	vlg	ce	L6	refused:buf	Parse error: Unsupported `buf` gate: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the resolution cann...
+pr2395378b	vlg	ce	L1	pass	language error: Parse error: Invalid expression
+pr2395378c	vlg	ce	L6	refused:not	Parse error: Unsupported `not` gate: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the resolution cann...
+pr2395835	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2425055a	vlg	passed	L1	pass	PASSED
+pr2425055b	vlg	passed	L1	pass	PASSED
+pr2425055c	vlg	passed	L1	pass	PASSED
+pr2428890	vlg	passed	L1	pass	PASSED
+pr2428890b	vlg	passed	L1	pass	PASSED
+pr243	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 3 (516 lines against 515)
+pr2434688	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr2434688b	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr245	vlg	gold	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr2450244	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr2453002	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: packed parameter 'udef' cannot be read through the analog numeric ABI; a typed conversion is required
+pr2459681	vlg	passed	L1	pass	PASSED
+pr245_std	vlg	gold	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr2470181a	vlg	passed	L1	racy	passes in source order only; no PASSED line (4 output lines)
+pr2470181b	vlg	passed	-	excluded:systemverilog:bit	
+pr2503208	vlg	passed	L1	pass	PASSED
+pr2528915	vlg	ce	L5	pass	language error: Semantic error: Undeclared symbol: 'out_usb_stream'
+pr2533175	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2579479	vlg	passed	L7	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
+pr2580730	vlg	gold	L1	pass	matches the gold file
+pr2593733	vlg	passed	L1	fail	compile error: Semantic error: Invalid expression: parameter `option`: this expression form has no discrete-domain lowering
+pr2597278	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+pr2597278b	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `icim`, which is a `wire`; IEEE 1364-2005 section 6.2 lets a procedural assignment write only a varia...
+pr2605006	vlg	passed	L1	pass	PASSED
+pr2673846	vlg	passed	L1	pass	PASSED
+pr2688910	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.passed` is not a continuous net, branch, parameter or analog function
+pr2709097	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+pr2715547	vlg	passed	L1	pass	PASSED
+pr2715558	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr2715558b	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr2721213	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2722330a	vlg	passed	L1	pass	PASSED
+pr2722330b	vlg	passed	L1	pass	PASSED
+pr2722339a	vlg	passed	L1	pass	PASSED
+pr2722339b	vlg	passed	L1	pass	PASSED
+pr2723712	vlg	passed	L1	pass	PASSED
+pr2725700a	vlg	passed	L7	refused:bufif0	Parse error: Unsupported module item: bufif0
+pr2725700b	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `bufs`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler ela...
+pr2725700c	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `bufs`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler ela...
+pr2728032	vlg	passed	L6	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr2728547	vlg	passed	L5	fail	compile error: Semantic error: Invalid expression: parameter `in`: this expression form has no discrete-domain lowering
+pr2728812a	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr2728812b	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+pr2728812c	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+pr273	vlg	passed	L1	pass	PASSED
+pr2745281	vlg	passed	L1	pass	PASSED
+pr2781595	vlg	passed	L6	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
+pr2785294	vlg	gold	L1	fail	differs from the gold file at line 2 (25 lines against 5)
+pr2788686	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr2790236	vlg	passed	L1	pass	PASSED
+pr2792883	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: a parameter declaration cannot reference outside its module (VAMS-2023 6.7.1)
+pr2792897	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr2794144	vlg	ce	L1	fail	compiled without error; ran to quiescence
+pr2800985a	vlg	passed	-	excluded:nonstandard-systf:$fputc	
+pr2801134	vlg	passed	L1	pass	PASSED
+pr2801662	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr2809288	vlg	ce	L1	refused:genvar	Parse error: Unsupported generate for: a loop over `i`, which is not declared `genvar`; IEEE 1364-2005 section 12.1.3.2 makes the index of a generate loop a gen...
+pr2815398a	vlg	gold	L3	refused:time	testbench gap: no defines (__ICARUS__); Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr2815398a_std	vlg	passed	L3	refused:time	testbench gap: no defines (__ICARUS__); Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr2815398b	vlg	gold	L1	pass	testbench gap: no defines (__ICARUS__); matches the gold file
+pr2818823	vlg	passed	L1	pass	PASSED
+pr2823414	vlg	ce	L1	pass	language error: Parse error: Expected Assign_, found LParen
+pr2823711	vlg	passed	L1	pass	PASSED
+pr2824189	vlg	passed	-	excluded:systemverilog:var	
+pr2829776	vlg	passed	L6	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
+pr2829776b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+pr2832234	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pr2834340	vlg	passed	L6	refused:pulldown	Parse error: Unsupported module item: pulldown
+pr2834340b	vlg	passed	L6	refused:pullup	Parse error: Unsupported module item: pullup
+pr2835632a	vlg	passed	L4	fail	testbench gap: no defines (__ICARUS__); compile error: Parse error: Invalid expression
+pr2835632b	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr2837451	vlg	passed	L1	pass	PASSED
+pr2842185	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2842621	vlg	gold	L5	refused:function	Parse error: Unsupported module item: function
+pr2842621_std	vlg	passed	L5	refused:function	Parse error: Unsupported module item: function
+pr2848986	vlg	ce	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+pr2849783	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr2865563	vlg	passed	L1	pass	PASSED
+pr2877564	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
+pr2883958	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr2885048	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr2890322	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr2901556	vlg	passed	L6	fail	compile error: Parse error: Expected declared name, found Hash
+pr2909386a	vlg	passed	L1	pass	PASSED
+pr2909386b	vlg	passed	L1	pass	PASSED
+pr2909414	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr2909555	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr2913404	vlg	passed	L1	pass	PASSED
+pr2913416	vlg	passed	L1	pass	PASSED
+pr2913438a	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr2913438b	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr2913927	vlg	passed	L4	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pr2918095	vlg	passed	L1	pass	PASSED
+pr2922063	vlg	passed	L1	pass	PASSED
+pr2922063a	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2922063b	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2924354	vlg	gold	L1	refused:for	Parse error: Unsupported module item: for
+pr2929913	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr2930506	vlg	passed	-	excluded:systemverilog:string	
+pr2937417	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr2937417b	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr2937417c	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr2941939	vlg	passed	L6	refused:supply1	Parse error: Verilog-AMS digital construct not yet supported: `supply1`
+pr2943394	vlg	passed	L4	refused:release	Parse error: Verilog-AMS digital construct not yet supported: `release`
+pr2951657	vlg	passed	L1	pass	PASSED
+pr2969724	vlg	passed	L1	pass	PASSED
+pr2971207	vlg	passed	L5	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+pr2972866	vlg	gold	-	excluded:systemverilog:+=	
+pr2973532	vlg	passed	L1	pass	PASSED
+pr2974051	vlg	passed	L1	pass	PASSED
+pr2974216	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr2974216b	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr2974294	vlg	passed	L1	pass	PASSED
+pr298	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr2985542	vlg	passed	L1	pass	PASSED
+pr2986497	vlg	co	-	excluded:systemverilog:var	
+pr2986528	vlg	passed	L1	racy	passes in source order only; no PASSED line (2 output lines)
+pr2991457	vlg	passed	L1	pass	PASSED
+pr2991457b	vlg	passed	L1	pass	PASSED
+pr2994193	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$dumpfile`) is not supported yet
+pr2998515	vlg	passed	L1	pass	PASSED
+pr3011327	vlg	passed	L1	pass	PASSED
+pr3012758	vlg	passed	L1	fail	compile error: I/O error: Preprocessor error: line 3: Invalid include syntax: `TESTFILE
+pr3015421	vlg	ce	-	excluded:systemverilog:int	
+pr3022502	vlg	passed	L1	pass	PASSED
+pr3024131	vlg	passed	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+pr3039548	vlg	gold	L1	pass	matches the gold file
+pr304	vlg	passed	L1	pass	PASSED
+pr3044843	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pr3054101a	vlg	gold	L1	pass	matches the gold file
+pr3054101b	vlg	gold	L1	pass	matches the gold file
+pr3054101c	vlg	gold	L4	fail	compile error: Parse error: Invalid expression
+pr3054101d	vlg	gold	L4	fail	compile error: Parse error: Invalid expression
+pr3054101e	vlg	gold	L4	fail	compile error: Parse error: Invalid expression
+pr3054101f	vlg	gold	L4	fail	compile error: Parse error: Invalid expression
+pr3054101g	vlg	gold	L1	pass	matches the gold file
+pr3054101h	vlg	gold	L1	pass	matches the gold file
+pr3061015a	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in default of parameter 'PARAMB' references itself
+pr3061015b	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: default of parameter 'PARAMB' references later parameter 'PARAMA'; Verilog-AMS parameter defaults may reference only previo...
+pr3061015c	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in default of parameter 'PARAMB' references itself
+pr3064375	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 1 (25 lines against 25)
+pr3064511	vlg	passed	L1	pass	PASSED
+pr307	vlg	passed	L1	pass	PASSED
+pr3077640	vlg	passed	L1	pass	PASSED
+pr3078759	vlg	co	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+pr307a	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr3098439	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr3098439a	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr3098439b	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr3103880	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr3104254	vlg	passed	L1	pass	PASSED
+pr3112073a	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Identifier
+pr312	vlg	passed	L1	pass	PASSED
+pr3149494	vlg	gold	L1	pass	matches the gold file
+pr3190941	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: port `x` of instance `foo` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler conn...
+pr3190948	vlg	passed	L1	pass	PASSED
+pr3194155	vlg	gold	L7	fail	compile error: Parse error: Expected LParen, found IntegerLiteral
+pr3197861	vlg	passed	-	excluded:systemverilog:var	
+pr3197917	vlg	passed	L4	fail	compile error: Parse error: Expected RParen, found LBracket
+pr3270320	vlg	ce	L3	refused:function	Parse error: Unsupported module item: function
+pr3284821	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr3292735	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found LParen
+pr3296466a	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
+pr3296466b	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
+pr3296466c	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `t`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabor...
+pr3296466d	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `t3`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler elabo...
+pr3306516	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+pr3309391	vlg	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr3368642	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr338	vlg	co	L1	pass	compiled
+pr3409749	vlg	passed	L4	refused:for	Parse error: Unsupported module item: for
+pr3437290a	vlg	passed	L7	refused:wor	Parse error: Verilog-AMS digital construct not yet supported: `wor`
+pr3437290b	vlg	passed	L7	refused:wor	Parse error: Verilog-AMS digital construct not yet supported: `wor`
+pr3437290c	vlg	passed	L7	refused:wand	Parse error: Verilog-AMS digital construct not yet supported: `wand`
+pr3441576	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: `@*` names no signal: the statement it guards reads none, so the process could never resume
+pr3445452	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr3452808	vlg	passed	L6	refused:not	Parse error: Unsupported `not` gate: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the resolution cann...
+pr3465541	vlg	passed	L6	refused:not	Parse error: Unsupported `not` gate: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the resolution cann...
+pr3477107	vlg	passed	L5	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr3499807	vlg	gold	L6	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
+pr3522653	vlg	gold	L1	pass	matches the gold file
+pr3527022	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr3527694	vlg	gold	L5	fail	compile error: Parse error: Expected Semicolon, found Hash
+pr3534422	vlg	passed	L1	pass	PASSED
+pr3539372	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
+pr3549328	vlg	ce	L4	pass	language error: Parse error: Invalid expression
+pr355	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr3557493	vlg	passed	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr3561350	vlg	passed	L1	pass	PASSED
+pr3563412	vlg	passed	L1	pass	PASSED
+pr3571573	vlg	gold	L1	pass	matches the gold file
+pr3582052	vlg	passed	L1	pass	PASSED
+pr3587570	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr3592746	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr377	vlg	gold	L1	fail	compile error: Parse error: Expected port name, found Dot
+pr434	vlg	gold	L1	pass	matches the gold file
+pr445	vlg	passed	L1	pass	PASSED
+pr478	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Directive
+pr487	vlg	gold	L1	pass	matches the gold file
+pr492	vlg	gold	L1	pass	matches the gold file
+pr498b	vlg	ce	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+pr508	vlg	passed	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+pr509	vlg	passed	L1	pass	PASSED
+pr509b	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pr511	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr513	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr522	vlg	gold	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pr524	vlg	gold	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+pr527	vlg	gold	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr528	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr528b	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+pr529	vlg	passed	-	excluded:systemverilog:bit	
+pr530a	vlg	gold	L1	pass	matches the gold file
+pr530b	vlg	gold	L1	pass	matches the gold file
+pr530c	vlg	gold	L1	pass	matches the gold file
+pr531a	vlg	gold	L1	pass	matches the gold file
+pr531b	vlg	gold	L1	pass	matches the gold file
+pr532	vlg	gold	L1	pass	matches the gold file
+pr532b	vlg	gold	L1	pass	matches the gold file
+pr533	vlg	gold	L1	pass	matches the gold file
+pr538	vlg	gold	L1	pass	matches the gold file
+pr540	vlg	gold	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pr540b	vlg	gold	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+pr540c	vlg	gold	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+pr541	vlg	gold	L1	pass	matches the gold file
+pr542	vlg	gold	L1	pass	matches the gold file
+pr544	vlg	gold	L7	refused:bufif1	Parse error: Unsupported module item: bufif1
+pr547	vlg	gold	L1	pass	testbench gap: no defines (__ICARUS__); matches the gold file
+pr556	vlg	gold	L1	pass	matches the gold file
+pr564	vlg	passed	L1	pass	PASSED
+pr569	vlg	gold	L1	pass	matches the gold file
+pr572	vlg	gold	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+pr572b	vlg	gold	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+pr578	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr584	vlg	gold	L1	pass	matches the gold file
+pr585	vlg	passed	L1	pass	PASSED
+pr587	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr590	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 4 (8 lines against 9)
+pr594	vlg	gold	L1	fail	compile error: Semantic error: Invalid expression: parameter `Message`: this expression form has no discrete-domain lowering
+pr596	vlg	gold	L1	fail	differs from the gold file at line 1 (50 lines against 49)
+pr602	vlg	passed	L1	pass	PASSED
+pr617	vlg	passed	L1	pass	PASSED
+pr632	vlg	gold	L1	pass	matches the gold file
+pr673	vlg	gold	L1	pass	matches the gold file
+pr675	vlg	passed	L1	pass	PASSED
+pr678	vlg	passed	L1	pass	PASSED
+pr690	vlg	passed	L5	fail	compile error: Semantic error: Invalid expression: parameter `MemFile`: this expression form has no discrete-domain lowering
+pr693	vlg	gold	L1	pass	matches the gold file
+pr699	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr699b	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+pr704	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pr707	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr708	vlg	passed	L1	refused:$realtobits	Semantic error: Unsupported feature: a real value has no four-state form here: Verilog-AMS LRM 2.4 section 3.7 converts one to bits with the explicit `$realtobi...
+pr710	vlg	passed	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+pr718	vlg	passed	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+pr722	vlg	passed	L1	refused:reg	Semantic error: Unsupported feature: `reg` vector [65536:0] is 65537 bits; this compiler supports at most 65536 bits per signal
+pr729	vlg	gold	L1	pass	matches the gold file
+pr734	vlg	passed	L1	refused:reg	Semantic error: Unsupported feature: `reg` vector [69119:0] is 69120 bits; this compiler supports at most 65536 bits per signal
+pr735	vlg	passed	L1	pass	PASSED
+pr748	vlg	passed	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+pr751	vlg	gold	-	excluded:flag-Wsensitivity-entire-vector	
+pr757	vlg	passed	L1	pass	PASSED
+pr772	vlg	passed	L1	fail	compile error: Semantic error: Invalid expression: parameter `kuku`: this expression form has no discrete-domain lowering
+pr810	vlg	passed	L1	pass	PASSED
+pr812	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (4 lines against 4)
+pr820	vlg	gold	L1	pass	matches the gold file
+pr823	vlg	passed	L1	pass	PASSED
+pr841	vlg	passed	L7	refused:tri0	Parse error: Verilog-AMS digital construct not yet supported: `tri0`
+pr842	vlg	passed	L4	pass	PASSED
+pr848	vlg	passed	L1	pass	PASSED
+pr856	vlg	passed	L1	pass	PASSED
+pr859	vlg	passed	L1	pass	PASSED
+pr860	vlg	passed	L1	pass	PASSED
+pr872	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `u1.bar` is not a continuous net, branch, parameter or analog function
+pr902	vlg	gold	L1	pass	matches the gold file
+pr905	vlg	gold	L1	pass	matches the gold file
+pr910	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (5 lines against 5)
+pr913	vlg	passed	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+pr923	vlg	gold	L3	fail	compile error: Parse error: Expected Assign_, found LParen
+pr938	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr938b	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr938b_std	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+pr941	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+pr973	vlg	passed	L1	pass	PASSED
+pr978	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+pr985	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file at line 1 (2 lines against 2)
+pr987	vlg	gold	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+pr990	vlg	passed	L1	pass	PASSED
+pr991	vlg	gold	L1	pass	matches the gold file
+pr993	vlg	gold	L1	pass	matches the gold file
+pr995	vlg	gold	L1	pass	matches the gold file
+prng	vlg	passed	L1	pass	PASSED
+ptest001	vlg	passed	L1	pass	PASSED
+ptest002	vlg	passed	L1	pass	PASSED
+ptest003	vlg	passed	L1	pass	PASSED
+ptest004	vlg	passed	L1	pass	PASSED
+ptest005	vlg	passed	L1	pass	PASSED
+ptest006	vlg	passed	L1	pass	PASSED
+ptest007	vlg	passed	L1	pass	PASSED
+ptest008	vlg	passed	L1	pass	PASSED
+ptest009	vlg	passed	L1	pass	PASSED
+ptest010	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Comma
+ptest011	vlg	passed	L1	fail	compile error: Semantic error: Invalid expression: physical port 'b1.x' requires 1 lanes, but its connection supplies 4
+pullupdown	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+pullupdown2	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pullupdown3	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+pv_undef_sig_sel	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+pv_wr_vec4	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pv_wr_vec4_nb	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pv_wr_vec4_nb_ec	vlg	passed	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+pv_wr_vec4a	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pv_wr_vec4a_nb	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+pv_wr_vec4a_nb_ec	vlg	passed	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+qmark	vlg	passed	L1	pass	PASSED
+qmark1	vlg	passed	L1	pass	PASSED
+qmark3	vlg	passed	L1	pass	PASSED
+qmark5	vlg	passed	L1	pass	PASSED
+qmark6	vlg	passed	L1	pass	PASSED
+queue	vlg	passed	-	excluded:nonstandard-systf:$q_add	
+queue_stat	vlg	gold	-	excluded:nonstandard-systf:$q_add	
+ram16x1	vlg	passed	L1	pass	PASSED
+random	vlg	gold	-	excluded:systemverilog:++	
+readmem-error	vlg	gold	L5	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+readmemb1	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
+readmemb2	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
+readmemb3	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
+readmemh1	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+readmemh1a	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+readmemh2	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+readmemh3	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+readmemh4	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+readmemh5	vlg	ce	L5	refused:feature	Semantic error: Unsupported feature: slice of unpacked array `array` requires whole-array value lowering
+real	vlg	passed	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
+real10	vlg	passed	L1	pass	PASSED
+real11	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+real2	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+real3	vlg	passed	L1	pass	PASSED
+real5	vlg	gold	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+real6	vlg	passed	L1	pass	PASSED
+real7	vlg	passed	L1	pass	PASSED
+real9	vlg	passed	L1	pass	PASSED
+real_array_multi_dim	vlg	passed	L1	fail	compile error: Parse error: Invalid expression
+real_array_store_after_cmp	vlg	passed	L1	fail	run-time error: shared digital execution failed: analog-variable sample requests [DigitalAnalogProbeId(0)] require a circuit evaluation participant
+real_assign_deassign	vlg	passed	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+real_concat_invalid2	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/real_concat_invalid2.v` declares no digital nets, processes or drivers
+real_delay	vlg	gold	-	excluded:sdf-annotate	
+real_events	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+real_force_rel	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+real_invalid_ops	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found BitNot
+real_logical	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: parameter 'pargi' requires an exact finite numeric elaboration value
+real_reg_force_rel	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+recursive_func1	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+recursive_func_const1	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+recursive_task	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+redef_net_error	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'value' already defined
+redef_reg_error	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'value' already defined
+repeat2	vlg	passed	L1	pass	PASSED
+repeat_expr_probe	vlg	passed	L1	pass	PASSED
+repl_zero_wid_fail	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+repl_zero_wid_pass	vlg	passed	L1	pass	PASSED
+resetall	vlg	gold	-	excluded:flag-Wtimescale	
+resetall2	vlg	gold	-	excluded:flag-Wtimescale	
+resolv1	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+rise_fall_decay1	vlg	passed	L6	fail	compile error: Parse error: Expected RParen, found Comma
+rise_fall_decay2	vlg	passed	L6	refused:function	Parse error: Unsupported module item: function
+rise_fall_delay1	vlg	passed	L6	fail	compile error: Parse error: Expected RParen, found Comma
+rise_fall_delay2	vlg	passed	L6	fail	compile error: Parse error: Expected RParen, found Comma
+rise_fall_delay3	vlg	passed	L6	refused:function	Parse error: Unsupported module item: function
+rl_pow	vlg	passed	L1	pass	PASSED
+rnpmos	vlg	passed	L7	fail	compile error: Semantic error: Undefined module: 'rnmos'
+rnpmos2	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `ad_drv`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler e...
+rop	vlg	passed	L1	pass	PASSED
+rptconcat	vlg	passed	L1	pass	PASSED
+rtran	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+rtranif0	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+rtranif1	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+scanf	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sscanf`) is not supported yet
+scanf2	vlg	passed	L5	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+scanf3	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sscanf`) is not supported yet
+scanf4	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+sched1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
+sched2	vlg	passed	L1	pass	PASSED
+schedule	vlg	passed	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+scope1	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+scope2	vlg	passed	L1	pass	PASSED
+scope2b	vlg	ce	L1	fail	compiled without error; ran to tick-ceiling
+scope4	vlg	passed	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `test3.test4` is not a continuous net, branch, parameter or analog function
+scope5	vlg	passed	-	excluded:systemverilog:bit	
+scoped_events	vlg	gold	L4	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+sdf1	vlg	gold	-	excluded:sdf-annotate	
+sdf2	vlg	gold	-	excluded:sdf-annotate	
+sdf3	vlg	gold	-	excluded:sdf-annotate	
+sdf4	vlg	gold	-	excluded:sdf-annotate	
+sdf5	vlg	gold	-	excluded:sdf-annotate	
+sdf6	vlg	gold	-	excluded:sdf-annotate	
+sdf7	vlg	gold	-	excluded:sdf-annotate	
+sdf8	vlg	gold	-	excluded:sdf-annotate	
+sdf_del_max	vlg	passed	-	excluded:sdf-annotate	
+sdf_del_min	vlg	passed	-	excluded:sdf-annotate	
+sdf_del_typ	vlg	passed	-	excluded:sdf-annotate	
+sdf_esc_id	vlg	gold	-	excluded:sdf-annotate	
+sdw_always1	vlg	passed	L1	pass	PASSED
+sdw_always2	vlg	passed	L1	pass	PASSED
+sdw_always3	vlg	passed	L1	pass	PASSED
+sdw_array	vlg	passed	L1	pass	PASSED
+sdw_assign	vlg	passed	L1	pass	PASSED
+sdw_dsbl	vlg	passed	L3	refused:disable	Parse error: Verilog-AMS digital construct not yet supported: `disable`
+sdw_force	vlg	passed	L4	refused:statement	Parse error: Verilog-AMS digital construct not yet supported: `timer`
+sdw_function1	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+sdw_function2	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+sdw_function3	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+sdw_function4	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+sdw_function5	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+sdw_instmod1	vlg	passed	L1	pass	PASSED
+sdw_instmod2	vlg	passed	L1	pass	PASSED
+sdw_int	vlg	passed	L1	pass	PASSED
+sdw_lvalconcat	vlg	passed	L1	pass	PASSED
+sdw_param1	vlg	passed	L1	pass	PASSED
+sdw_param2	vlg	passed	L1	pass	PASSED
+sdw_release	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+sdw_stmt002	vlg	passed	L1	pass	PASSED
+sdw_task1	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+sdw_task2	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+sel_rval_bit_ob	vlg	gold	-	excluded:flag-Wselect-range	
+sel_rval_part_ob	vlg	gold	-	excluded:flag-Wselect-range	
+select	vlg	passed	L1	pass	PASSED
+select2	vlg	passed	L1	pass	PASSED
+select3	vlg	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+select4	vlg	passed	L1	pass	PASSED
+select5	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+select6	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+select7	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+select8	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+select_padding	vlg	passed	L1	fail	compile error: Parse error: Invalid expression
+shellho1	vlg	gold	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `top` is not declared in this module or its generated ancestors or enclosing instances
+shift1	vlg	gold	L1	pass	matches the gold file
+shift2	vlg	passed	L1	pass	PASSED
+shift3	vlg	passed	L1	pass	PASSED
+shift4	vlg	passed	L1	pass	PASSED
+shift5	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 1 (1 lines against 1)
+shift_pad	vlg	passed	L1	pass	PASSED
+signed1	vlg	passed	L1	pass	PASSED
+signed10	vlg	gold	L1	pass	matches the gold file
+signed11	vlg	passed	L1	pass	PASSED
+signed12	vlg	gold	L1	pass	matches the gold file
+signed13	vlg	passed	-	excluded:systemverilog:var	
+signed2	vlg	passed	L1	pass	PASSED
+signed3	vlg	passed	L1	pass	PASSED
+signed4	vlg	gold	L1	pass	matches the gold file
+signed5	vlg	passed	L1	pass	PASSED
+signed6	vlg	passed	L1	pass	PASSED
+signed7	vlg	passed	L1	pass	PASSED
+signed8	vlg	passed	L1	pass	PASSED
+signed9	vlg	passed	L1	pass	PASSED
+signed_a	vlg	passed	L5	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+signed_equality	vlg	passed	L1	pass	PASSED
+signed_net_display	vlg	passed	L5	refused:for	Parse error: Unsupported module item: for
+signed_part	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+signed_pv	vlg	passed	L5	fail	testbench gap: no defines (__ICARUS__); compile error: Parse error: Invalid expression
+sp2	vlg	gold	-	excluded:systemverilog-systf:$bits	
+specify1	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+specify2	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+specify3	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+specify4	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+specify5	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+specify_01	vlg	passed	L6	refused:hdl.option.specify	testbench gap: no root selection (-s test); `specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+sqrt32	vlg	passed	-	excluded:systemverilog:bit	
+sscanf_u	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+sscanf_z	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+stask_parm1	vlg	passed	L1	pass	PASSED
+stask_parm2	vlg	gold	L1	pass	matches the gold file
+stask_sens_null_arg	vlg	passed	L1	pass	PASSED
+string1	vlg	passed	L1	pass	PASSED
+string10	vlg	gold	L1	pass	matches the gold file
+string11	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+string12	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+string13	vlg	passed	L5	fail	compile error: Parse error: Invalid expression
+string14	vlg	passed	-	excluded:systemverilog-systf:$bits	
+string2	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+string3	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+string4	vlg	gold	L3	refused:function	Parse error: Unsupported module item: function
+string5	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+string7	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+string8	vlg	gold	L1	pass	matches the gold file
+string9	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: this expression form has no discrete-domain lowering
+supply1	vlg	passed	L7	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
+supply2	vlg	passed	L7	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
+switch_primitives	vlg	gold	L7	refused:bufif0	Parse error: Unsupported module item: bufif0
+sys_func_task_error	vlg	re	-	excluded:nonstandard-systf:$this_icarus_call_should_not_exist	
+talu	vlg	passed	L1	pass	PASSED
+task-scope	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task3.14A	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task3.14B	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task3.14C	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task3.14D	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task3.14E	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+task3.14F	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_bypath	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_in_expr_fail	vlg	ce	-	excluded:systemverilog:int	
+task_inpad	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_iotypes	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_iotypes2	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_mem	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail1	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail10	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail11	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail2	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail3	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail4	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail5	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail6	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail7	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail8	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_fail9	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_integer1	vlg	passed	-	excluded:systemverilog-systf:$bits	
+task_nonansi_integer2	vlg	passed	-	excluded:systemverilog-systf:$bits	
+task_nonansi_integer_fail	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_real1	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_real2	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_real_fail	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_time1	vlg	passed	-	excluded:systemverilog-systf:$bits	
+task_nonansi_time2	vlg	passed	-	excluded:systemverilog-systf:$bits	
+task_nonansi_time_fail	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_vec1	vlg	passed	-	excluded:systemverilog-systf:$bits	
+task_nonansi_vec2	vlg	passed	-	excluded:systemverilog-systf:$bits	
+task_nonansi_vec_fail1	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_vec_fail2	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_nonansi_vec_fail3	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_noop	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_noop2	vlg	co	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_omemw2	vlg	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_omemw3	vlg	co	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_port_range_mismatch	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+task_port_size	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+task_scope	vlg	passed	L4	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+tern1	vlg	passed	L1	pass	PASSED
+tern10	vlg	passed	L1	pass	PASSED
+tern2	vlg	co	L1	pass	compiled
+tern4	vlg	passed	L1	pass	PASSED
+tern5	vlg	gold	L1	pass	matches the gold file
+tern6	vlg	passed	L1	pass	PASSED
+tern7	vlg	passed	-	excluded:systemverilog:ref	
+tern9	vlg	passed	L1	pass	PASSED
+test_bufif0	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_bufif1	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_disphob	vlg	gold	L1	pass	matches the gold file
+test_dispwided	vlg	gold	L1	pass	matches the gold file
+test_extended	vlg	gold	L1	pass	matches the gold file
+test_mos_strength_reduction	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_nmos	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_notif0	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_notif1	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_pmos	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_rnmos	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_rpmos	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+test_width	vlg	gold	L1	pass	matches the gold file
+time1	vlg	passed	L1	pass	PASSED
+time2	vlg	passed	L1	pass	PASSED
+time3	vlg	passed	L1	pass	PASSED
+time4	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+time5	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+time7	vlg	passed	L1	pass	PASSED
+time8	vlg	passed	L1	pass	PASSED
+timeform1	vlg	gold	L1	pass	matches the gold file
+timeform2	vlg	gold	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+timescale1	vlg	passed	L1	pass	PASSED
+timescale2	vlg	passed	L1	pass	PASSED
+timescale3	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/timescale3.v` declares no digital nets, processes or drivers
+tran	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+tran-keeper	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+tranif0	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+tranif1	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+tri0	vlg	passed	L7	refused:tri0	Parse error: Verilog-AMS digital construct not yet supported: `tri0`
+tri0b	vlg	passed	L7	refused:tri0	Parse error: Verilog-AMS digital construct not yet supported: `tri0`
+tri1	vlg	passed	L7	refused:tri1	Parse error: Verilog-AMS digital construct not yet supported: `tri1`
+tri2	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `s.p` is not a continuous net, branch, parameter or analog function
+tri3	vlg	passed	L7	refused:tri1	Parse error: Verilog-AMS digital construct not yet supported: `tri1`
+triand	vlg	passed	L7	refused:triand	Parse error: Verilog-AMS digital construct not yet supported: `triand`
+trior	vlg	passed	L7	refused:trior	Parse error: Verilog-AMS digital construct not yet supported: `trior`
+types1	vlg	passed	L1	pass	PASSED
+udp_bufg	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_bufg2	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_bx	vlg	gold	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_delay_fail	vlg	ce	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_dff	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_dff_std	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_eval_arg	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
+udp_jkff	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_output_reg	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_real_delay	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_sched	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+udp_x	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
+unary_and	vlg	passed	L1	pass	PASSED
+unary_lnot1	vlg	passed	L1	pass	PASSED
+unary_lnot2	vlg	passed	L1	pass	PASSED
+unary_lnot3	vlg	passed	L1	pass	PASSED
+unary_minus	vlg	passed	L1	pass	PASSED
+unary_minus1	vlg	passed	L1	pass	PASSED
+unary_minus2	vlg	passed	L1	pass	PASSED
+unary_minus3	vlg	passed	L1	pass	PASSED
+unary_minus4	vlg	passed	L1	pass	PASSED
+unary_nand	vlg	passed	L1	pass	PASSED
+unary_nand2	vlg	passed	L1	pass	PASSED
+unary_nor	vlg	passed	L1	pass	PASSED
+unary_nor2	vlg	passed	L1	pass	PASSED
+unary_not	vlg	passed	L1	pass	PASSED
+unary_or	vlg	passed	L1	pass	PASSED
+unary_xnor1	vlg	passed	L1	pass	PASSED
+unary_xnor2	vlg	passed	L1	pass	PASSED
+unary_xor	vlg	passed	L1	pass	PASSED
+uncon_drive	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.pass` is not a continuous net, branch, parameter or analog function
+undef	vlg	gold	L1	fail	compile error: Parse error: Invalid expression
+undef_lval_select	vlg	passed	L4	fail	testbench gap: no defines (__ICARUS__); compile error: Parse error: Invalid expression
+undef_lval_select2	vlg	passed	L4	fail	testbench gap: no defines (__ICARUS__); compile error: Parse error: Invalid expression
+undef_lval_select3a	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
+undef_lval_select3b	vlg	ce	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+undef_lval_select3c	vlg	ce	L4	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
+undef_lval_select4a	vlg	passed	L4	racy	testbench gap: no defines (__ICARUS__); passes in reverse order only; no PASSED line (8 output lines)
+undef_lval_select4b	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+undef_lval_select4c	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
+undef_lval_select5	vlg	passed	L4	racy	testbench gap: no defines (__ICARUS__); passes in reverse order only; no PASSED line (6 output lines)
+undefined_shift	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (12 output lines)
+unnamed_block_var_decl	vlg	ce	L1	fail	compiled without error; ran to quiescence
+unnamed_fork_var_decl	vlg	ce	L3	refused:fork	Parse error: Verilog-AMS digital construct not yet supported: `fork`
+urand_r	vlg	gold	-	excluded:systemverilog:var	
+urand_r2	vlg	gold	-	excluded:systemverilog:var	
+urand_r3	vlg	gold	-	excluded:systemverilog:var	
+uwire	vlg	passed	L1	fail	compile error: Semantic error: Undefined discipline: 'uwire'
+uwire2	vlg	passed	L1	fail	compile error: Semantic error: Undefined discipline: 'uwire'
+uwire_fail	vlg	ce	L1	pass	language error: Semantic error: Undefined discipline: 'uwire'
+vardly	vlg	passed	L1	pass	PASSED
+varlsfht	vlg	passed	L1	pass	PASSED
+varlsfht1	vlg	passed	L1	pass	PASSED
+varlsfht2	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+varrshft	vlg	passed	L1	pass	PASSED
+varrshft1	vlg	passed	L1	pass	PASSED
+varrshft2	vlg	passed	L3	refused:function	Parse error: Unsupported module item: function
+vcd-dup	vlg	gold	L5	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+vector	vlg	gold	L1	pass	matches the gold file
+verify_two_var_delays	vlg	passed	L6	fail	compile error: Parse error: Expected RParen, found Comma
+vvp_scalar_value	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
+wait1	vlg	passed	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+wait2	vlg	passed	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+wait3	vlg	gold	L3	refused:wait	Parse error: Verilog-AMS digital construct not yet supported: `wait`
+wildsense	vlg	passed	L1	pass	PASSED
+wildsense2	vlg	passed	L1	racy	passes in source order only; no PASSED line (2 output lines)
+wireadd1	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+wireeq	vlg	passed	L1	pass	PASSED
+wirege	vlg	passed	L1	pass	PASSED
+wireland	vlg	passed	L1	pass	PASSED
+wirele	vlg	passed	L1	pass	PASSED
+wiremod1	vlg	passed	L1	pass	PASSED
+wiresl	vlg	passed	L1	pass	PASSED
+wiresl2	vlg	gold	-	excluded:systemverilog:bit	
+wiresr	vlg	passed	L1	pass	PASSED
+wiresub1	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+wirexor1	vlg	passed	L1	pass	PASSED
+writemem-error	vlg	gold	-	excluded:nonstandard-systf:$writememb	
+writememb1	vlg	passed	-	excluded:nonstandard-systf:$writememb	
+writememb2	vlg	passed	-	excluded:nonstandard-systf:$writememb	
+writememh1	vlg	passed	-	excluded:nonstandard-systf:$writememh	
+writememh2	vlg	passed	-	excluded:nonstandard-systf:$writememh	
+xnor_test	vlg	passed	L1	pass	PASSED
+z1	vlg	passed	L1	fail	testbench gap: no root selection (-s foo); compile error: Parse error: Expected LParen, found IntegerLiteral
+z2	vlg	passed	L1	fail	testbench gap: no root selection (-s foo); compile error: Parse error: Expected LParen, found IntegerLiteral
+zero_repl	vlg	passed	L1	pass	PASSED
+zero_repl_fail	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+basicexpr	synth	passed	L1	pass	PASSED
+basicexpr2	synth	passed	L1	pass	PASSED
+basicexpr3	synth	passed	L1	pass	PASSED
+basicexpr4	synth	passed	L1	pass	PASSED
+basiclatch	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+basicreg	synth	passed	L1	pass	PASSED
+basicstate	synth	passed	L1	pass	PASSED
+basicstate2	synth	passed	L1	pass	PASSED
+blocksynth1	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+blocksynth2	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+blocksynth3	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+br993a	synth	passed	L1	pass	PASSED
+br993b	synth	passed	L1	pass	PASSED
+br994	synth	passed	L1	pass	PASSED
+br995	synth	ce	-	excluded:synthesis-error	
+br_gh115	synth	passed	-	excluded:systemverilog:bit	
+br_gh306a	synth	ce	-	excluded:synthesis-error	
+br_gh306b	synth	ce	-	excluded:synthesis-error	
+br_gh99v	synth	passed	L1	pass	PASSED
+br_gh99w	synth	passed	L1	pass	PASSED
+br_gh99x	synth	passed	L1	pass	PASSED
+case4	synth	passed	L1	pass	PASSED
+case5	synth	passed	-	excluded:systemverilog:bit	
+case5-syn-fail	synth	ce	-	excluded:systemverilog:bit	
+case6	synth	passed	-	excluded:systemverilog:bit	
+case7	synth	passed	-	excluded:systemverilog:bit	
+case_wo_default	synth	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+casesynth1	synth	passed	L1	pass	PASSED
+casesynth2	synth	passed	L1	pass	PASSED
+casesynth3	synth	passed	L1	pass	PASSED
+casesynth4	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+casesynth5	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+casesynth6	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+casesynth7	synth	gold	L1	pass	matches the gold file
+casesynth8	synth	ce	-	excluded:synthesis-error	
+casesynth9	synth	passed	L1	racy	passes in reverse order only; no PASSED line (5 output lines)
+condit1	synth	passed	-	excluded:systemverilog:bit	
+conditsynth1	synth	passed	L1	pass	PASSED
+conditsynth2	synth	passed	L1	pass	PASSED
+conditsynth3	synth	passed	L1	pass	PASSED
+ff_dual_enable	synth	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+for_loop_synth	synth	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
+for_loop_synth2	synth	passed	-	excluded:systemverilog:+=	
+if_part_no_else	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+if_part_no_else2	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+inside_synth	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+inside_synth2	synth	passed	L1	pass	PASSED
+inside_synth3	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+land5	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+lcatsynth	synth	passed	L1	pass	PASSED
+memsynth8	synth	passed	L1	pass	PASSED
+multireg	synth	passed	L1	pass	PASSED
+not_a_latch1	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+not_a_latch2	synth	passed	L1	racy	passes in reverse order only; no PASSED line (2 output lines)
+partselsynth	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+pr519	synth	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+pr685	synth	passed	L1	pass	PASSED
+shiftl	synth	passed	L1	pass	PASSED
+sqrt32synth	synth	passed	-	excluded:systemverilog:bit	
+ssetclr1	synth	passed	L1	pass	PASSED
+ssetclr2	synth	passed	L1	pass	PASSED
+ssetclr3	synth	passed	L1	pass	PASSED
+synth_if_no_else	synth	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+ufuncsynth1	synth	passed	L3	refused:function	Parse error: Unsupported module item: function
+always4A	vvp	ce	-	excluded:flag-g2005-sv	
+always4B	vvp	ce	-	excluded:flag-g2005-sv	
+analog1	vvp	-	-	excluded:type-NI	
+analog2	vvp	-	-	excluded:type-NI	
+array_packed_sysfunct	vvp	-	-	excluded:type-NI	
+array_packed_value_list	vvp	-	-	excluded:type-NI	
+array_packed_write_read	vvp	passed	-	excluded:flag-g2009	
+array_slice_concat	vvp	passed	L1	pass	PASSED
+automatic_error11	vvp	-	-	excluded:type-EF	
+automatic_error12	vvp	-	-	excluded:type-EF	
+automatic_error13	vvp	-	-	excluded:type-EF	
+bits4	vvp	passed	-	excluded:flag-g2005-sv	
+bitsel11	vvp	passed	-	excluded:flag-g2005-sv	
+br_gh1001	vvp	passed	-	excluded:flag-g2009	
+br_gh1018	vvp	passed	-	excluded:flag-g2005-sv	
+br_gh1029	vvp	ce	-	excluded:flag-g2009	
+br_gh1074a	vvp	passed	-	excluded:flag-g2009	
+br_gh1074b	vvp	passed	-	excluded:flag-g2009	
+br_gh1087a1	vvp	ce	-	excluded:flag-gno-xtypes	
+br_gh1087a2	vvp	ce	-	excluded:flag-gxtypes	
+br_gh1087a3	vvp	ce	-	excluded:flag-g2009	
+br_gh1087b	vvp	ce	-	excluded:flag-gxtypes	
+br_gh1087c	vvp	ce	-	excluded:flag-g2009	
+br_gh1097	vvp	passed	-	excluded:flag-g2009	
+br_gh1099a	vvp	passed	L1	pass	PASSED
+br_gh1099b	vvp	passed	L1	pass	PASSED
+br_gh1099c	vvp	passed	L1	pass	PASSED
+br_gh1104	vvp	ce	L1	fail	compiled without error; nothing to run: module `ivltests/br_gh1104_src2.v` declares no digital nets, processes or drivers
+br_gh1122	vvp	passed	L7	refused:supply1	Parse error: Verilog-AMS digital construct not yet supported: `supply1`
+br_gh1143a	vvp	passed	-	excluded:flag-g2012	
+br_gh1143b	vvp	passed	-	excluded:flag-g2012	
+br_gh1143c	vvp	passed	-	excluded:flag-g2012	
+br_gh1143d	vvp	passed	-	excluded:flag-g2012	
+br_gh1143e	vvp	ce	-	excluded:flag-g2009	
+br_gh1143f	vvp	ce	-	excluded:flag-g2009	
+br_gh1143g	vvp	ce	-	excluded:flag-g2009	
+br_gh1143h	vvp	ce	-	excluded:flag-g2009	
+br_gh1155	vvp	passed	L1	pass	PASSED
+br_gh1163	vvp	passed	-	excluded:systemverilog-systf:$bits	
+br_gh1180a	vvp	ce	-	excluded:flag-g2009	
+br_gh1180b	vvp	ce	-	excluded:flag-g2009	
+br_gh1181	vvp	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `dut.data_bus` is not a continuous net, branch, parameter or analog function
+br_gh1184	vvp	-	-	excluded:type-EF	
+br_gh1242	vvp	gold	L1	pass	matches the gold file
+br_gh1248	vvp	gold	-	excluded:flag-ginterconnect	
+br_gh1256a	vvp	passed	-	excluded:flag-g2009	
+br_gh1256b	vvp	passed	-	excluded:flag-g2009	
+br_gh1258a	vvp	gold	-	excluded:flag-gno-specify	
+br_gh1258b	vvp	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh1286	vvp	passed	-	excluded:flag-g2009	
+br_gh13a	vvp	gold	L1	pass	matches the gold file
+br_gh230	vvp	-	-	excluded:type-EF	
+br_gh383a	vvp	gold	-	excluded:flag-g2012	
+br_gh383b	vvp	gold	-	excluded:flag-g2012	
+br_gh383c	vvp	gold	-	excluded:flag-g2012	
+br_gh383d	vvp	gold	-	excluded:flag-g2012	
+br_gh440	vvp	ce	-	excluded:flag-g2009	
+br_gh483a	vvp	passed	-	excluded:systemverilog-systf:$bits	
+br_gh483b	vvp	passed	-	excluded:systemverilog-systf:$bits	
+br_gh552	vvp	ce	L1	pass	language error: Parse error: Expected Semicolon, found BitNot
+br_gh687	vvp	gold	-	excluded:flag-g2009	
+br_gh703	vvp	passed	-	excluded:flag-g2009	
+br_gh710a	vvp	gold	-	excluded:flag-g2009	
+br_gh710b	vvp	gold	-	excluded:flag-g2009	
+br_gh710c	vvp	gold	-	excluded:flag-g2009	
+br_gh939	vvp	ce	-	excluded:flag-g2005-sv	
+br_gh99c	vvp	passed	-	excluded:flag-gverilog-ams	
+ca_time_real	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
+case1	vvp	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+case2	vvp	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
+case2-S	vvp	passed	-	excluded:flag-S	
+case3	vvp	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
+casex_synth	vvp	passed	-	excluded:flag-S	
+cast_int_ams	vvp	passed	-	excluded:flag-gverilog-ams	
+cast_real_invalid1	vvp	ce	-	excluded:flag-g2005-sv	
+cast_real_invalid2	vvp	ce	-	excluded:flag-g2005-sv	
+cast_real_invalid3	vvp	ce	-	excluded:flag-g2005-sv	
+cast_real_invalid4	vvp	ce	-	excluded:flag-g2005-sv	
+comment1	vvp	ce	L1	fail	compiled without error; ran to quiescence
+constfunc16	vvp	passed	-	excluded:flag-g2009	
+constfunc17	vvp	passed	-	excluded:flag-g2009	
+constfunc18	vvp	passed	-	excluded:flag-g2009	
+constfunc19	vvp	passed	-	excluded:flag-g2009	
+constfunc20	vvp	passed	-	excluded:flag-g2009	
+constfunc4_ams	vvp	passed	-	excluded:flag-gverilog-ams	
+constfunc6_ams	vvp	passed	-	excluded:nonstandard-systf:$abs	
+constfunccall1	vvp	passed	L3	refused:function	Parse error: Unsupported module item: function
+constfunccall2	vvp	passed	-	excluded:flag-g2009	
+constfunccall3	vvp	ce	L4	refused:function	Parse error: Unsupported module item: function
+decl_before_use1	vvp	ce	L1	fail	compiled without error; ran to quiescence
+decl_before_use2	vvp	ce	L1	fail	compiled without error; ran to quiescence
+decl_before_use3	vvp	ce	L3	refused:statement	Parse error: Verilog-AMS digital construct not yet supported: `minus`
+decl_before_use4	vvp	ce	L3	refused:event	Parse error: Verilog-AMS digital construct not yet supported: `event`
+decl_before_use5	vvp	ce	L1	fail	compiled without error; ran to quiescence
+decl_before_use6	vvp	passed	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
+delayed_sfunc	vvp	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+dffsynth	vvp	passed	L1	pass	PASSED
+dffsynth-S	vvp	-	-	excluded:type-NI	
+dffsynth10	vvp	passed	-	excluded:flag-S	
+dffsynth11	vvp	passed	-	excluded:flag-S	
+dffsynth2	vvp	passed	-	excluded:flag-S	
+dffsynth3	vvp	passed	-	excluded:flag-S	
+dffsynth4	vvp	passed	-	excluded:flag-S	
+dffsynth5	vvp	passed	-	excluded:flag-S	
+dffsynth6	vvp	passed	-	excluded:flag-S	
+dffsynth7	vvp	passed	-	excluded:flag-S	
+dffsynth8	vvp	-	-	excluded:type-NI	
+dffsynth9	vvp	passed	-	excluded:flag-S	
+dumpfile	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$dumpvars`) is not supported yet
+early_sig_elab1	vvp	passed	-	excluded:systemverilog-systf:$bits	
+early_sig_elab2	vvp	passed	-	excluded:systemverilog-systf:$bits	
+early_sig_elab3	vvp	ce	-	excluded:systemverilog-systf:$bits	
+eofmt_percent	vvp	gold	L1	pass	matches the gold file
+fdisplay3	vvp	-	-	excluded:type-EF	
+final3	vvp	passed	-	excluded:flag-g2009	
+fmonitor1	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fmonitor2	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fread-error	vvp	-	-	excluded:type-EF	
+line_directive	vvp	gold	-	excluded:flag-g2009	
+localparam_type	vvp	gold	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
+macro_str_esc	vvp	gold	L4	fail	compile error: Parse error: Invalid expression
+memsynth1	vvp	-	-	excluded:type-NI	
+memsynth2	vvp	passed	L1	pass	PASSED
+memsynth2-synth	vvp	-	-	excluded:type-NI	
+memsynth3	vvp	passed	-	excluded:systemverilog:bit	
+memsynth3-synth	vvp	-	-	excluded:type-NI	
+memsynth4	vvp	passed	L1	pass	PASSED
+memsynth4-synth	vvp	passed	-	excluded:flag-S	
+memsynth5	vvp	passed	L1	pass	PASSED
+memsynth5-synth	vvp	-	-	excluded:type-NI	
+memsynth6	vvp	passed	L1	pass	PASSED
+memsynth6-synth	vvp	-	-	excluded:type-NI	
+memsynth7	vvp	passed	L1	pass	PASSED
+memsynth7-synth	vvp	-	-	excluded:type-NI	
+memsynth9	vvp	passed	L1	pass	PASSED
+memsynth9-synth	vvp	-	-	excluded:type-NI	
+mix_reset	vvp	passed	L1	pass	PASSED
+mix_reset-synth	vvp	-	-	excluded:type-NI	
+module_ordered_list1	vvp	passed	-	excluded:flag-g2005-sv	
+module_ordered_list2	vvp	ce	L1	pass	language error: Semantic error: Function 'i_M' expects at most 2 port connections argument(s), got 3
+module_port_array1	vvp	passed	-	excluded:flag-g2009	
+module_port_array_init1	vvp	passed	-	excluded:flag-g2005-sv	
+monitor4	vvp	gold	L1	fail	differs from the gold file at line 11 (16 lines against 17)
+non-polymorphic-abs	vvp	passed	-	excluded:nonstandard-systf:$abs	
+param-width	vvp	gold	L4	refused:defparam	Parse error: Unsupported module item: `defparam`; IEEE 1364-2005 section 12.2.1 gives it the same effect as a `#(...)` override on the instance and deprecates i...
+param_test3	vvp	gold	L1	fail	compile error: Semantic error: Function 'am' expects at most 0 parameter overrides argument(s), got 3
+parameter_type	vvp	gold	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
+partsel_invalid_idx1	vvp	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'does_not_exist'
+partsel_invalid_idx2	vvp	ce	L4	pass	language error: Parse error: Invalid expression
+partsel_invalid_idx3	vvp	ce	L4	pass	language error: Parse error: Invalid expression
+partsel_invalid_idx4	vvp	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'does_not_exist'
+partsel_invalid_idx5	vvp	ce	L4	pass	language error: Parse error: Invalid expression
+partsel_invalid_idx6	vvp	ce	L4	pass	language error: Parse error: Invalid expression
+partsel_outside_const	vvp	passed	L4	fail	compile error: Lexer error: Invalid number literal: 'x: ''x' has invalid base 'x'
+partsel_outside_expr	vvp	passed	L4	fail	compile error: Lexer error: Invalid number literal: 'x: ''x' has invalid base 'x'
+partsel_reversed_idx1	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `x`, which is a `reg`; a continuous `assign` drives a net, so declare it `wire` or write it from an `...
+partsel_reversed_idx2	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found LBracket
+partsel_reversed_idx3	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: part select `x[0:1]` runs against the direction `x` was declared in, `[1:0]`; IEEE 1364-2005 section 5.2.1 makes the left in...
+partsel_reversed_idx4	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found LBracket
+partsel_reversed_idx5	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: part select `x[0:1]` runs against the direction `x` was declared in, `[1:0]`; IEEE 1364-2005 section 5.2.1 makes the left in...
+partsel_reversed_idx6	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found LBracket
+pr1388974	vvp	passed	L1	pass	PASSED
+pr1701890	vvp	gold	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
+pr1864110a	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
+pr1864110b	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
+pr1864115	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
+pr1916261a	vvp	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
+pr2509349a	vvp	gold	-	excluded:nonstandard-systf:$readmempath	
+pr2509349b	vvp	gold	-	excluded:nonstandard-systf:$readmempath	
+pr2800985b	vvp	-	-	excluded:type-EF	
+pr3270320_ams	vvp	ce	-	excluded:nonstandard-systf:$abs	
+pr903	vvp	passed	L1	pass	PASSED
+program2b	vvp	passed	-	excluded:flag-g2009	
+program3a	vvp	passed	-	excluded:flag-g2009	
+pv_wr_fn_vec2	vvp	passed	-	excluded:flag-g2009	
+pv_wr_fn_vec4	vvp	passed	L4	refused:function	Parse error: Unsupported module item: function
+queue_fail	vvp	-	-	excluded:type-EF	
+readmem-invalid	vvp	-	-	excluded:type-EF	
+scaled_real	vvp	passed	-	excluded:flag-gverilog-ams	
+scan-invalid	vvp	-	-	excluded:type-EF	
+sdf_header	vvp	gold	-	excluded:sdf-annotate	
+sdf_interconnect1	vvp	gold	-	excluded:flag-ginterconnect	
+sdf_interconnect2	vvp	gold	-	excluded:flag-ginterconnect	
+sdf_interconnect3	vvp	gold	-	excluded:flag-ginterconnect	
+sdf_interconnect4	vvp	gold	-	excluded:flag-ginterconnect	
+sf_countbits_fail	vvp	-	-	excluded:type-EF	
+sf_countones_fail	vvp	-	-	excluded:type-EF	
+sf_isunknown_fail	vvp	-	-	excluded:type-EF	
+sf_onehot0_fail	vvp	-	-	excluded:type-EF	
+sf_onehot_fail	vvp	-	-	excluded:type-EF	
+shift6	vvp	passed	L4	fail	compile error: Parse error: Invalid expression
+single_element_array	vvp	passed	L1	pass	PASSED
+struct_enum_partsel	vvp	passed	-	excluded:flag-g2009	
+struct_field_left_right	vvp	passed	-	excluded:flag-g2009	
+struct_nested1	vvp	passed	-	excluded:flag-g2005-sv	
+struct_packed_value_list	vvp	-	-	excluded:type-NI	
+struct_packed_write_read	vvp	passed	-	excluded:flag-g2009	
+struct_packed_write_read2	vvp	passed	-	excluded:flag-g2009	
+sv_2state_array_init_prop	vvp	passed	-	excluded:flag-g2005-sv	
+sv_ap_uarray1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_ap_uarray2	vvp	passed	-	excluded:flag-g2005-sv	
+sv_ap_uarray3	vvp	passed	-	excluded:flag-g2005-sv	
+sv_ap_uarray4	vvp	passed	-	excluded:flag-g2005-sv	
+sv_ap_uarray5	vvp	passed	-	excluded:flag-g2005-sv	
+sv_ap_uarray6	vvp	passed	-	excluded:flag-g2005-sv	
+sv_ap_uarray_fail1	vvp	ce	-	excluded:flag-g2005-sv	
+sv_ap_uarray_fail2	vvp	ce	-	excluded:flag-g2005-sv	
+sv_argumentless_func	vvp	passed	-	excluded:flag-g2012	
+sv_array_assign_fail1	vvp	ce	-	excluded:flag-g2005-sv	
+sv_array_assign_fail2	vvp	ce	-	excluded:flag-g2005-sv	
+sv_array_cassign6	vvp	passed	-	excluded:flag-g2009	
+sv_array_cassign7	vvp	gold	-	excluded:flag-g2009	
+sv_array_cassign8	vvp	passed	-	excluded:flag-g2009	
+sv_automatic_2state	vvp	passed	-	excluded:flag-g2005-sv	
+sv_chained_constructor1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_chained_constructor2	vvp	passed	-	excluded:flag-g2005-sv	
+sv_chained_constructor3	vvp	passed	-	excluded:flag-g2005-sv	
+sv_chained_constructor4	vvp	passed	-	excluded:flag-g2005-sv	
+sv_chained_constructor5	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_assign_op1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_assign_op2	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_logic	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_nest_darray1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_nest_obj1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_nest_real1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_nest_str1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_class_prop_nest_vec1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_const1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_const2	vvp	passed	-	excluded:flag-g2005-sv	
+sv_const3	vvp	passed	-	excluded:flag-g2005-sv	
+sv_const4	vvp	passed	-	excluded:flag-g2005-sv	
+sv_const5	vvp	passed	-	excluded:flag-g2005-sv	
+sv_const_fail1	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail2	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail3	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail4	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail5	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail6	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail7	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail8	vvp	ce	-	excluded:flag-g2005-sv	
+sv_const_fail9	vvp	ce	-	excluded:flag-g2005-sv	
+sv_darray_assign_op	vvp	passed	-	excluded:flag-g2005-sv	
+sv_default_port_value1	vvp	passed	-	excluded:flag-g2009	
+sv_default_port_value2	vvp	passed	-	excluded:flag-g2009	
+sv_default_port_value3	vvp	ce	-	excluded:flag-g2009	
+sv_foreach10	vvp	passed	-	excluded:flag-g2009	
+sv_foreach9	vvp	gold	-	excluded:flag-g2009	
+sv_interface	vvp	-	-	excluded:type-NI	
+sv_literals	vvp	passed	-	excluded:flag-g2012	
+sv_mixed_assign1	vvp	-	-	excluded:type-NI	
+sv_mixed_assign2	vvp	-	-	excluded:type-NI	
+sv_mixed_assign_error1	vvp	ce	-	excluded:flag-g2009	
+sv_mixed_assign_error2	vvp	ce	-	excluded:flag-g2009	
+sv_mixed_assign_error3	vvp	ce	-	excluded:flag-g2009	
+sv_mixed_assign_error4	vvp	ce	-	excluded:flag-g2009	
+sv_module_port1	vvp	passed	-	excluded:flag-g2005-sv	
+sv_module_port2	vvp	passed	-	excluded:flag-g2005-sv	
+sv_module_port3	vvp	passed	-	excluded:flag-g2005-sv	
+sv_module_port4	vvp	passed	-	excluded:flag-g2005-sv	
+sv_parameter_type	vvp	passed	-	excluded:flag-g2012	
+sv_queue_assign_op	vvp	passed	-	excluded:flag-g2005-sv	
+sv_wildcard_import8	vvp	passed	-	excluded:flag-g2005-sv	
+task_return1	vvp	passed	-	excluded:flag-g2005-sv	
+task_return2	vvp	passed	-	excluded:flag-g2005-sv	
+task_return_fail1	vvp	ce	-	excluded:flag-g2005-sv	
+task_return_fail2	vvp	ce	-	excluded:flag-g2005-sv	
+test_va_math	vvp	gold	-	excluded:flag-mva_math	
+test_vams_math	vvp	gold	-	excluded:flag-gverilog-ams	
+timing_check_delayed_signals	vvp	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+timing_check_syntax	vvp	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+uwire_fail2	vvp	ce	L1	pass	language error: Semantic error: Undefined discipline: 'uwire'
+uwire_fail3	vvp	ce	L1	pass	language error: Semantic error: Undefined discipline: 'uwire'
+va_math	vvp	passed	-	excluded:nonstandard-systf:$abs	
+value_range1	vvp	passed	-	excluded:flag-gverilog-ams	
+value_range2	vvp	passed	-	excluded:flag-gverilog-ams	
+value_range3	vvp	ce	-	excluded:flag-gverilog-ams	
+vams_abs1	vvp	passed	-	excluded:flag-gverilog-ams	
+vams_abs2	vvp	passed	-	excluded:flag-gverilog-ams	
+vams_abs3	vvp	passed	-	excluded:flag-gverilog-ams	
+vardly_undefined_vec	vvp	passed	-	excluded:systemverilog:var	
+vvp_quiet_mode	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fdisplay`) is not supported yet
+warn_opt_sys_tf	vvp	-	-	excluded:type-EF	
+wreal	vvp	passed	-	excluded:flag-gverilog-ams	
+writemem-invalid	vvp	-	-	excluded:type-EF	

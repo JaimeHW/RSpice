@@ -165,6 +165,11 @@ path = "tests/panic_gate.rs"
 required-features = ["circuit-suites"]
 
 [[test]]
+name = "verilog_ivtest"
+path = "tests/verilog_ivtest.rs"
+required-features = ["verilog-digital"]
+
+[[test]]
 name = "xyce_regression"
 path = "tests/xyce_regression.rs"
 required-features = ["circuit-suites"]
