@@ -135,6 +135,11 @@ pub enum Outcome {
     Refused(String),
     Racy,
     Excluded(String),
+    /// A failing run the manifest accepts: the test expects what the cited
+    /// clause does not give, and RSpice follows the clause (design §2.5). The
+    /// clause is the row's detail; only the manifest marks a row so, and a
+    /// run that fails such a row keeps the mark.
+    Deviation,
 }
 
 impl Outcome {
@@ -145,6 +150,7 @@ impl Outcome {
             Self::Refused(token) => format!("refused:{token}"),
             Self::Racy => "racy".to_owned(),
             Self::Excluded(reason) => format!("excluded:{reason}"),
+            Self::Deviation => "deviation".to_owned(),
         }
     }
 
@@ -153,6 +159,7 @@ impl Outcome {
             "pass" => Some(Self::Pass),
             "fail" => Some(Self::Fail),
             "racy" => Some(Self::Racy),
+            "deviation" => Some(Self::Deviation),
             _ => {
                 if let Some(refused) = token.strip_prefix("refused:") {
                     Some(Self::Refused(refused.to_owned()))
@@ -165,11 +172,13 @@ impl Outcome {
         }
     }
 
-    /// The ratchet order pass > racy > refused > fail; an exclusion is the
-    /// selection's, not the run's, and ranks below everything.
+    /// The ratchet order pass > deviation > racy > refused > fail; an
+    /// exclusion is the selection's, not the run's, and ranks below
+    /// everything.
     pub const fn rank(&self) -> u8 {
         match self {
-            Self::Pass => 4,
+            Self::Pass => 5,
+            Self::Deviation => 4,
             Self::Racy => 3,
             Self::Refused(_) => 2,
             Self::Fail => 1,
@@ -177,8 +186,8 @@ impl Outcome {
         }
     }
 
-    /// The outcome's class for counting: `pass`, `fail`, `refused`, `racy`
-    /// or `excluded`.
+    /// The outcome's class for counting: `pass`, `fail`, `refused`, `racy`,
+    /// `excluded` or `deviation`.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Pass => "pass",
@@ -186,6 +195,7 @@ impl Outcome {
             Self::Refused(_) => "refused",
             Self::Racy => "racy",
             Self::Excluded(_) => "excluded",
+            Self::Deviation => "deviation",
         }
     }
 }
@@ -1201,10 +1211,13 @@ mod tests {
             Outcome::Racy,
             Outcome::Refused("hdl.option.specify".to_owned()),
             Outcome::Excluded("flag-g2009".to_owned()),
+            Outcome::Deviation,
         ] {
             assert_eq!(Outcome::from_token(&outcome.token()), Some(outcome));
         }
         assert_eq!(Outcome::from_token("passed"), None);
+        assert!(Outcome::Pass.rank() > Outcome::Deviation.rank());
+        assert!(Outcome::Deviation.rank() > Outcome::Racy.rank());
         assert!(Outcome::Pass.rank() > Outcome::Racy.rank());
         assert!(Outcome::Racy.rank() > Outcome::Refused(String::new()).rank());
         assert!(Outcome::Refused(String::new()).rank() > Outcome::Fail.rank());

@@ -9,9 +9,14 @@
 //! RSpice's own diagnostics, which change wording without changing meaning,
 //! so it is rewritten by `--record` and never compared. Any outcome that
 //! moved fails the run: `regressed` when it got worse in the order
-//! pass > racy > refused > fail, and `changed` when it improved, moved
-//! between refusals, or moved in or out of the selection, until it is
+//! pass > deviation > racy > refused > fail, and `changed` when it improved,
+//! moved between refusals, or moved in or out of the selection, until it is
 //! re-recorded.
+//!
+//! A `deviation` row is written by hand, never by a run: the test expects
+//! what an IEEE clause does not give, and its detail cites that clause. A run
+//! that fails such a test keeps the row (see [`accept_deviations`]); one that
+//! passes it, or stops running it, moves it like any other row.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -54,6 +59,11 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
         };
         fn optional(token: &str) -> Option<&str> {
             (token != "-").then_some(token)
+        }
+        if *outcome == "deviation" && !detail.contains('§') {
+            return Err(at(
+                "a deviation row cites its clause (`§`) in the detail column",
+            ));
         }
         rows.push(Row {
             name: (*name).to_owned(),
@@ -192,6 +202,25 @@ pub fn ratchet(recorded: &[Row], observed: &[Row], complete: bool) -> Vec<Drift>
     drift
 }
 
+/// Keep the manifest's deviations: an observed failure of a test the manifest
+/// records as a `deviation` is that deviation, with the recorded detail that
+/// cites its clause.
+pub fn accept_deviations<'a>(recorded: &[Row], observed: impl IntoIterator<Item = &'a mut Row>) {
+    let deviations: BTreeMap<&str, &Row> = recorded
+        .iter()
+        .filter(|row| row.outcome == Outcome::Deviation)
+        .map(|row| (row.name.as_str(), row))
+        .collect();
+    for row in observed {
+        if row.outcome == Outcome::Fail
+            && let Some(deviation) = deviations.get(row.name.as_str())
+        {
+            row.outcome = Outcome::Deviation;
+            row.detail.clone_from(&deviation.detail);
+        }
+    }
+}
+
 /// The recorded rows with the observed ones written over them. A complete
 /// run replaces the table.
 pub fn record(recorded: &[Row], observed: &[Row], complete: bool) -> Vec<Row> {
@@ -289,5 +318,34 @@ mod tests {
         assert_eq!(partial[0].outcome, Outcome::Pass);
         assert_eq!(partial[1].outcome, Outcome::Fail);
         assert_eq!(record(&recorded, &observed, true).len(), 1);
+    }
+
+    #[test]
+    fn a_deviation_cites_its_clause_and_survives_a_failing_run() {
+        let clause = "IEEE 1364-2005 §5.1.13: an ambiguous condition with a real arm gives 0";
+        let mut deviation = row("dev", Outcome::Deviation);
+        deviation.detail = clause.to_owned();
+        let recorded = vec![
+            deviation.clone(),
+            row("fails", Outcome::Fail),
+            row("fixed", Outcome::Deviation),
+            row("broken", Outcome::Deviation),
+        ];
+        assert!(parse(&render(&recorded[..1])).is_ok());
+        assert!(parse("dev\tvlg\tpassed\tL1\tdeviation\tIcarus differs\n").is_err());
+        let mut observed = vec![
+            row("dev", Outcome::Fail),
+            row("fails", Outcome::Fail),
+            row("fixed", Outcome::Pass),
+            row("broken", Outcome::Refused("task".to_owned())),
+        ];
+        accept_deviations(&recorded, &mut observed);
+        assert_eq!(observed[0], deviation);
+        assert_eq!(observed[1].outcome, Outcome::Fail);
+        let drift = ratchet(&recorded, &observed, true);
+        assert_eq!(drift.len(), 2, "{drift:#?}");
+        assert!(matches!(&drift[0], Drift::Changed { name, .. } if name == "fixed"));
+        assert!(matches!(&drift[1], Drift::Regressed { name, .. } if name == "broken"));
+        assert!(record(&recorded, &observed, true).contains(&deviation));
     }
 }

@@ -262,20 +262,29 @@ fn run_selection(
         budget: Duration::from_secs(budget_s),
         timings: Some(std::env::temp_dir().join("rspice-ivtest-timings.tsv")),
     };
+    let path = manifest_path.unwrap_or_else(ivtest::manifest_path);
+    let recorded = match std::fs::read_to_string(&path) {
+        Ok(text) => manifest::parse(&text)?,
+        Err(_) if record => Vec::new(),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
     let reports = runner::run(&options, &candidates, |report| {
         if !matches!(report.row.outcome, Outcome::Excluded(_)) {
+            let mut row = report.row.clone();
+            manifest::accept_deviations(&recorded, [&mut row]);
             eprintln!(
                 "ivtest: {} {} {} {} - {} ({:.2} s)",
-                report.row.name,
-                report.row.class.map_or("-", select::Class::token),
-                report.row.lane.map_or("-", select::Lane::token),
-                report.row.outcome,
-                report.row.detail,
+                row.name,
+                row.class.map_or("-", select::Class::token),
+                row.lane.map_or("-", select::Lane::token),
+                row.outcome,
+                row.detail,
                 report.elapsed_s
             );
         }
     });
-    let reports = reports?;
+    let mut reports = reports?;
+    manifest::accept_deviations(&recorded, reports.iter_mut().map(|report| &mut report.row));
     let wall = started.elapsed();
 
     summarize(&reports, &options, wall);
@@ -290,12 +299,6 @@ fn run_selection(
         gaps.join(", ")
     );
 
-    let path = manifest_path.unwrap_or_else(ivtest::manifest_path);
-    let recorded = match std::fs::read_to_string(&path) {
-        Ok(text) => manifest::parse(&text)?,
-        Err(_) if record => Vec::new(),
-        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
-    };
     let observed: Vec<manifest::Row> = reports.iter().map(|report| report.row.clone()).collect();
     if record {
         let rows = manifest::record(&recorded, &observed, complete);
@@ -319,7 +322,7 @@ fn run_selection(
 
 /// Counts by class and by bucket, the wall time, and the slowest tests.
 fn summarize(reports: &[runner::TestReport], options: &runner::RunOptions, wall: Duration) {
-    const KINDS: [&str; 5] = ["pass", "fail", "refused", "racy", "excluded"];
+    const KINDS: [&str; 6] = ["pass", "deviation", "fail", "refused", "racy", "excluded"];
     let mut by_class: BTreeMap<&str, BTreeMap<&str, usize>> = BTreeMap::new();
     let mut by_lane: BTreeMap<select::Lane, BTreeMap<&str, usize>> = BTreeMap::new();
     let mut refusals: BTreeMap<String, usize> = BTreeMap::new();
