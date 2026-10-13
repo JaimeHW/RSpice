@@ -669,6 +669,7 @@ impl DigitalElaborator<'_> {
             module: instance.module.clone(),
             signals,
             processes: child.digital.processes.clone(),
+            routines: child.digital.routines.clone(),
             continuous_assigns: child.digital.continuous_assigns.clone(),
             port_drivers,
             bit_aliases,

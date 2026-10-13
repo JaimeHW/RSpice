@@ -205,6 +205,8 @@ pub struct Module {
     /// Each carries the [`DigitalProcessId`] it was given here, so a later
     /// pass can name a process without depending on its index in this vector.
     pub digital_processes: Vec<DigitalProcess>,
+    /// `task` and `function` declarations, in declaration order.
+    pub digital_routines: Vec<DigitalRoutine>,
     /// `genvar` declarations (IEEE 1364-2005 section 12.1.3.2).
     ///
     /// Retained after the generate regions are unrolled, because the names are
@@ -289,6 +291,7 @@ impl Module {
             || !self.digital_variables.is_empty()
             || !self.continuous_assigns.is_empty()
             || !self.digital_processes.is_empty()
+            || !self.digital_routines.is_empty()
             || self.variables.iter().any(|declaration| {
                 declaration.var_type == VarType::Integer
                     && declaration.items.iter().any(|item| {
@@ -320,6 +323,7 @@ impl Module {
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
             digital_processes: Vec::new(),
+            digital_routines: Vec::new(),
             genvars: Vec::new(),
             generates: Vec::new(),
             generate_template: None,
@@ -2106,6 +2110,10 @@ pub enum DigitalVariableKind {
     /// module-level `real` promoted out of the continuous domain because a
     /// process writes it and nothing analog can.
     Real,
+    /// A named event (IEEE 1364-2005 section 9.7.3). It carries no value an
+    /// expression can read; its storage is one bit that `->` toggles, so a
+    /// trigger is a change every `@event` waiter sees.
+    Event,
 }
 
 impl DigitalVariableKind {
@@ -2114,6 +2122,7 @@ impl DigitalVariableKind {
             Self::Reg => "reg",
             Self::Integer => "integer",
             Self::Real => "real",
+            Self::Event => "event",
         }
     }
 
@@ -2239,8 +2248,105 @@ pub enum DigitalStatement {
     /// section 17). An empty argument (`$display(a,,b)`) is
     /// [`Expression::NullArgument`].
     SystemTask(SystemFunction),
+    /// A user task enable, `name(args);` or `name;` (IEEE 1364-2005 section
+    /// 10.2.2).
+    TaskEnable(DigitalTaskEnable),
+    /// `fork [: name] ... join` (section 9.8.2): each statement is a branch.
+    Fork(DigitalBlock),
+    /// `disable name;` (section 10.3).
+    Disable(DigitalDisable),
+    /// `wait (condition) statement` (section 9.7.6).
+    Wait(DigitalWaitStatement),
+    /// `-> event;` (section 9.7.3).
+    EventTrigger(DigitalEventTrigger),
     /// A lone `;`.
     Null(Span),
+}
+
+/// `name(args);` — a user task enable.
+#[derive(Debug, Clone)]
+pub struct DigitalTaskEnable {
+    pub name: SmolStr,
+    pub args: Vec<Expression>,
+    pub span: Span,
+}
+
+/// `disable name;`, naming a block or a task.
+#[derive(Debug, Clone)]
+pub struct DigitalDisable {
+    pub target: SmolStr,
+    pub span: Span,
+}
+
+/// `wait (condition) statement`; a null statement is `None`.
+#[derive(Debug, Clone)]
+pub struct DigitalWaitStatement {
+    pub condition: Expression,
+    pub statement: Option<Box<DigitalStatement>>,
+    pub span: Span,
+}
+
+/// `-> event;`
+#[derive(Debug, Clone)]
+pub struct DigitalEventTrigger {
+    pub target: DigitalLValue,
+    pub span: Span,
+}
+
+/// Whether a routine is a task or a function, and a function's result type.
+#[derive(Debug, Clone)]
+pub enum DigitalRoutineKind {
+    Task,
+    Function(Box<DigitalRoutineType>),
+}
+
+/// The value type of a routine argument, local or function result.
+#[derive(Debug, Clone)]
+pub struct DigitalRoutineType {
+    pub kind: DigitalRoutineValueKind,
+    pub signedness: Signedness,
+    pub range: Option<VectorRange>,
+}
+
+/// What a routine argument or result holds (IEEE 1364-2005 sections 10.2.1
+/// and 10.4.1). `time` is an unsigned 64-bit `reg`; `realtime` is `real`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigitalRoutineValueKind {
+    Reg,
+    Integer,
+    Real,
+    Time,
+}
+
+/// One argument of a task or function, in declaration order.
+#[derive(Debug, Clone)]
+pub struct DigitalRoutineArgument {
+    pub direction: PortDirection,
+    pub ty: DigitalRoutineType,
+    pub name: SmolStr,
+    pub span: Span,
+}
+
+/// A `task` or `function` declared in a module (IEEE 1364-2005 section 10).
+#[derive(Debug, Clone)]
+pub struct DigitalRoutine {
+    pub kind: DigitalRoutineKind,
+    /// `automatic`: arguments and locals live in a per-activation frame.
+    pub automatic: bool,
+    pub name: SmolStr,
+    pub arguments: Vec<DigitalRoutineArgument>,
+    /// Routine-local `integer`/`real` declarations.
+    pub variables: Vec<VariableDecl>,
+    /// Routine-local `reg`/`time`/`event` declarations.
+    pub digital_variables: Vec<DigitalVariableDecl>,
+    pub body: DigitalStatement,
+    pub span: Span,
+}
+
+impl DigitalRoutine {
+    pub const fn is_function(&self) -> bool {
+        matches!(self.kind, DigitalRoutineKind::Function(_))
+    }
 }
 
 impl DigitalStatement {
@@ -2256,6 +2362,11 @@ impl DigitalStatement {
             Self::Forever(statement) => statement.span,
             Self::Timing(timing) => timing.span,
             Self::SystemTask(task) => task.span,
+            Self::TaskEnable(task) => task.span,
+            Self::Fork(block) => block.span,
+            Self::Disable(disable) => disable.span,
+            Self::Wait(wait) => wait.span,
+            Self::EventTrigger(trigger) => trigger.span,
             Self::Null(span) => *span,
         }
     }
@@ -2263,8 +2374,10 @@ impl DigitalStatement {
     /// Whether this statement, or anything under it, suspends.
     pub fn contains_timing_control(&self) -> bool {
         match self {
-            Self::Timing(_) => true,
-            Self::Block(block) => block.statements.iter().any(Self::contains_timing_control),
+            Self::Timing(_) | Self::Wait(_) => true,
+            Self::Block(block) | Self::Fork(block) => {
+                block.statements.iter().any(Self::contains_timing_control)
+            }
             Self::Conditional(conditional) => {
                 conditional.then_branch.contains_timing_control()
                     || conditional
@@ -2288,7 +2401,13 @@ impl DigitalStatement {
             Self::BlockingAssign(assign) | Self::NonblockingAssign(assign) => {
                 assign.timing.is_some()
             }
-            Self::SystemTask(_) | Self::Null(_) => false,
+            // A task enable suspends when the task's body does, which only
+            // the analyzer, holding the module's routines, can answer.
+            Self::SystemTask(_)
+            | Self::TaskEnable(_)
+            | Self::Disable(_)
+            | Self::EventTrigger(_)
+            | Self::Null(_) => false,
         }
     }
 }

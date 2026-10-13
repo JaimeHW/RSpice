@@ -161,7 +161,7 @@ impl Parser<'_> {
 
     /// Read the comma-separated names of a net or variable declaration,
     /// each with optional unpacked dimensions and an optional initializer.
-    fn parse_digital_decl_items(&mut self) -> Result<Vec<DigitalDeclItem>, ParseError> {
+    pub(super) fn parse_digital_decl_items(&mut self) -> Result<Vec<DigitalDeclItem>, ParseError> {
         let mut items = Vec::new();
         loop {
             let item_start = self.current_span();
@@ -671,9 +671,17 @@ impl Parser<'_> {
                 self.parse_digital_assignment()
             }
             TokenKind::SystemIdentifier => self.parse_system_task_enable(),
-            TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::LBrace => {
-                self.parse_digital_assignment()
+            TokenKind::Fork => self.parse_digital_fork(),
+            TokenKind::Disable => self.parse_digital_disable(),
+            TokenKind::AmsDigital if self.digital_keyword_is("wait") => self.parse_digital_wait(),
+            TokenKind::Minus if self.event_trigger_follows() => self.parse_event_trigger(),
+            TokenKind::Identifier | TokenKind::EscapedIdentifier => {
+                match self.try_parse_task_enable()? {
+                    Some(enable) => Ok(enable),
+                    None => self.parse_digital_assignment(),
+                }
             }
+            TokenKind::LBrace => self.parse_digital_assignment(),
             // IEEE 1800-2017 section 11.4.2's prefix `++i;` / `--i;`, which
             // both reference simulators accept in a `.v` source.
             TokenKind::Plus | TokenKind::Minus if self.step_operator_follows() => {
@@ -681,9 +689,9 @@ impl Parser<'_> {
                 self.expect(TokenKind::Semicolon)?;
                 Ok(DigitalStatement::BlockingAssign(assign))
             }
-            // Every procedural statement outside this wave's scope —
-            // `fork`/`join`, `wait`, `disable`, `force`, `assign` as a
-            // procedural statement — stops here on its own keyword.
+            // Every procedural statement outside the digital subset so far —
+            // `force`, `release`, `assign` and `deassign` as procedural
+            // statements — stops here on its own keyword.
             _ => Err(self.unsupported_digital_statement()),
         }
     }
@@ -883,6 +891,9 @@ impl Parser<'_> {
                 }
                 TokenKind::Reg => {
                     digital_variables.push(self.parse_digital_variable_decl(None)?);
+                }
+                _ if self.keyword_declaration_follows() => {
+                    self.parse_keyword_declaration(&mut variables, &mut digital_variables)?;
                 }
                 _ => statements.push(self.parse_digital_statement()?),
             }
@@ -1095,6 +1106,22 @@ impl Parser<'_> {
             }));
         }
 
+        // `@name` without parentheses: one level-sensitive term, typically a
+        // named event (IEEE 1364-2005 section 9.7.3).
+        if self.check(TokenKind::Identifier) || self.check(TokenKind::EscapedIdentifier) {
+            let term_start = self.current_span();
+            let name = self.parse_reference_name("event name")?;
+            let span = term_start.extend(self.previous_span());
+            return Ok(TimingControl::Event(EventControl {
+                repeat: None,
+                sensitivity: Sensitivity::Explicit(vec![EventTerm {
+                    edge: None,
+                    signal: Expression::Identifier(Identifier { name, span }),
+                    span,
+                }]),
+                span: start.extend(self.previous_span()),
+            }));
+        }
         self.expect(TokenKind::LParen)?;
         if self.check(TokenKind::Star) && self.peek_is(TokenKind::RParen) {
             self.advance();

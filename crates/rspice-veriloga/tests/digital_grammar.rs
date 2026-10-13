@@ -562,7 +562,12 @@ fn every_wave_one_behavioral_statement_parses() {
             DigitalStatement::NonblockingAssign(_) => "<=",
             DigitalStatement::Timing(_) => "timing",
             DigitalStatement::Block(_) => "block",
-            DigitalStatement::SystemTask(_) => "task",
+            DigitalStatement::SystemTask(_) => "system task",
+            DigitalStatement::TaskEnable(_) => "task",
+            DigitalStatement::Fork(_) => "fork",
+            DigitalStatement::Disable(_) => "disable",
+            DigitalStatement::Wait(_) => "wait",
+            DigitalStatement::EventTrigger(_) => "->",
         })
         .collect();
     assert_eq!(
@@ -652,9 +657,6 @@ fn continuous_assignments_parse_with_targets_and_delays() {
 #[test]
 fn out_of_scope_procedural_statements_are_refused_by_name() {
     for (keyword, statement) in [
-        ("fork", "fork q = 1'b1; join"),
-        ("wait", "wait (q) q = 1'b1;"),
-        ("disable", "disable body;"),
         ("force", "force q = 1'b1;"),
         ("release", "release q;"),
         ("deassign", "deassign q;"),
@@ -3130,4 +3132,205 @@ fn every_registered_system_call_is_accepted() {
          \x20     i = $rtoi(r) + $clog2(q) + $signed(q) + $unsigned(i);\n\
          \x20   end",
     ));
+}
+
+// ===========================================================================
+// Tasks, functions and thread statements (IEEE 1364-2005 sections 9.7, 9.8.2,
+// 10.2-10.4)
+// ===========================================================================
+
+/// Both argument styles, `automatic`, a typed function result, and the
+/// `time`/`realtime`/`event` declarations parse into the module's routines
+/// and variables.
+#[test]
+fn tasks_and_functions_parse_in_both_argument_styles() {
+    let file = parse(
+        "module top;\n\
+         \x20 time t0; realtime r0; event go;\n\
+         \x20 task t(input [7:0] a, b, output reg c);\n\
+         \x20   reg [3:0] scratch;\n\
+         \x20   begin c = a[0] ^ b[0]; scratch = 4'd1; end\n\
+         \x20 endtask\n\
+         \x20 task old;\n\
+         \x20   input integer n;\n\
+         \x20   output [1:0] q;\n\
+         \x20   q = n;\n\
+         \x20 endtask\n\
+         \x20 function automatic integer fact(input integer n);\n\
+         \x20   if (n <= 1) fact = 1; else fact = n * fact(n - 1);\n\
+         \x20 endfunction\n\
+         \x20 function [7:0] inc; input [7:0] v; inc = v + 1; endfunction\n\
+         endmodule\n",
+    );
+    let module = parsed_module(&file);
+    let names: Vec<_> = module
+        .digital_routines
+        .iter()
+        .map(|routine| {
+            (
+                routine.name.as_str(),
+                routine.automatic,
+                routine.is_function(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            ("t", false, false),
+            ("old", false, false),
+            ("fact", true, true),
+            ("inc", false, true),
+        ]
+    );
+    let t = &module.digital_routines[0];
+    let directions: Vec<_> = t
+        .arguments
+        .iter()
+        .map(|argument| (argument.name.as_str(), argument.direction))
+        .collect();
+    assert_eq!(
+        directions,
+        vec![
+            ("a", PortDirection::Input),
+            ("b", PortDirection::Input),
+            ("c", PortDirection::Output),
+        ]
+    );
+    assert!(t.arguments[1].ty.range.is_some(), "`b` continues `[7:0]`");
+    assert_eq!(t.digital_variables.len(), 1);
+    let old = &module.digital_routines[1];
+    assert_eq!(old.arguments[0].ty.kind, DigitalRoutineValueKind::Integer);
+    assert_eq!(old.arguments[1].direction, PortDirection::Output);
+    let DigitalRoutineKind::Function(result) = &module.digital_routines[2].kind else {
+        panic!("fact is a function");
+    };
+    assert_eq!(result.kind, DigitalRoutineValueKind::Integer);
+    let kinds: Vec<_> = module
+        .digital_variables
+        .iter()
+        .map(|declaration| (declaration.kind, declaration.range.is_some()))
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            (DigitalVariableKind::Reg, true),
+            (DigitalVariableKind::Event, false)
+        ],
+        "`time` is a 64-bit reg and `event` its own kind"
+    );
+    assert!(module.variables.iter().any(|declaration| {
+        declaration.var_type == VarType::Real && declaration.items[0].name == "r0"
+    }));
+}
+
+/// The thread statements each parse to their own node, including `@name`
+/// without parentheses and a task enable with and without arguments.
+#[test]
+fn thread_statements_parse_to_their_own_nodes() {
+    let file = parse(
+        "module top;\n\
+         \x20 reg q; event go;\n\
+         \x20 task pulse; q = 1; endtask\n\
+         \x20 initial begin : body\n\
+         \x20   pulse;\n\
+         \x20   pulse();\n\
+         \x20   fork : both #1 q = 0; @go q = 1; join\n\
+         \x20   wait (q) q = 0;\n\
+         \x20   wait (q);\n\
+         \x20   -> go;\n\
+         \x20   disable body;\n\
+         \x20 end\n\
+         endmodule\n",
+    );
+    let module = parsed_module(&file);
+    let DigitalStatement::Block(block) = &module.digital_processes[0].body else {
+        panic!("the process body is a block");
+    };
+    let kinds: Vec<&str> = block
+        .statements
+        .iter()
+        .map(|statement| match statement {
+            DigitalStatement::TaskEnable(_) => "task",
+            DigitalStatement::Fork(_) => "fork",
+            DigitalStatement::Wait(_) => "wait",
+            DigitalStatement::EventTrigger(_) => "->",
+            DigitalStatement::Disable(_) => "disable",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec!["task", "task", "fork", "wait", "wait", "->", "disable"]
+    );
+    let DigitalStatement::Fork(fork) = &block.statements[2] else {
+        unreachable!()
+    };
+    assert_eq!(fork.name.as_deref(), Some("both"));
+    assert_eq!(fork.statements.len(), 2, "each statement is a branch");
+}
+
+/// IEEE 1800 fork forms are refused by name.
+#[test]
+fn ieee_1800_fork_forms_are_refused_by_name() {
+    for (statement, what) in [
+        ("fork q = 1; join_any", "join_any"),
+        ("fork q = 1; join_none", "join_none"),
+        ("disable fork;", "disable fork"),
+    ] {
+        let message = parse_error(&format!(
+            "module top; reg q; initial begin {statement} end endmodule\n"
+        ));
+        assert!(
+            message.contains(what),
+            "expected `{what}` refused, got {message:?}"
+        );
+    }
+}
+
+/// The analyzer resolves routine names, arity, argument targets and the
+/// section 10.4.4 function restrictions, and keeps named events out of
+/// expressions and edges.
+#[test]
+fn routines_and_events_are_checked_where_they_are_used() {
+    let analyzed = analyze(
+        "module top;\n\
+         \x20 reg [7:0] r; event go;\n\
+         \x20 task t(input [7:0] a, output [7:0] b); #1 b = a; endtask\n\
+         \x20 function [7:0] f(input [7:0] v); f = v + 1; endfunction\n\
+         \x20 always t(r, r);\n\
+         \x20 initial begin r = f(r); -> go; @go r = 0; end\n\
+         endmodule\n",
+    );
+    let module = only_module(&analyzed);
+    assert_eq!(module.digital.routines.len(), 2);
+    assert!(module.digital.routines[0].suspends, "t has a delay");
+    assert!(!module.digital.routines[1].suspends);
+    for (body, expected) in [
+        (
+            "function f(input a); #1 f = a; endfunction initial r = f(1);",
+            "section 10.4.4",
+        ),
+        (
+            "task t(input a); endtask initial t(1, 2);",
+            "takes 1 argument and is given 2",
+        ),
+        (
+            "task t(output a); endtask initial t(1);",
+            "must be a variable",
+        ),
+        ("initial r = go;", "is a named event"),
+        ("initial @(posedge go) r = 0;", "has no edges"),
+        ("initial -> r;", "not a named event"),
+        ("initial disable nowhere;", "nowhere"),
+        ("task t; r = 0; endtask always t;", "no timing control"),
+    ] {
+        let message = analyze_error(&format!(
+            "module top; reg r; event go;\n{body}\nendmodule\n"
+        ));
+        assert!(
+            message.contains(expected),
+            "expected {expected:?} for {body:?}, got {message:?}"
+        );
+    }
 }

@@ -1757,6 +1757,21 @@ impl ProcessLowerer<'_> {
         ));
     }
 
+    /// Refuse a procedural thread statement that has no executable form yet.
+    fn unsupported_thread_statement(&mut self, statement: &DigitalStatement) {
+        let what = match statement {
+            DigitalStatement::TaskEnable(_) => "task enable",
+            DigitalStatement::Fork(_) => "`fork`",
+            DigitalStatement::Disable(_) => "`disable`",
+            DigitalStatement::Wait(_) => "`wait`",
+            _ => "event trigger `->`",
+        };
+        self.error(
+            format!("{what} has no executable form yet"),
+            statement.span(),
+        );
+    }
+
     /// Report a violation of something this pass established itself. Nothing
     /// an author can write reaches one, so it stays an internal error.
     fn invariant(&mut self, message: impl Into<String>, span: Span) {
@@ -2113,9 +2128,22 @@ impl ProcessLowerer<'_> {
                     self.initialize_static_locals(entry, statement);
                 }
             }
+            DigitalStatement::Fork(block) => {
+                for statement in &block.statements {
+                    self.initialize_static_locals(entry, statement);
+                }
+            }
+            DigitalStatement::Wait(wait) => {
+                if let Some(statement) = &wait.statement {
+                    self.initialize_static_locals(entry, statement);
+                }
+            }
             DigitalStatement::BlockingAssign(_)
             | DigitalStatement::NonblockingAssign(_)
             | DigitalStatement::SystemTask(_)
+            | DigitalStatement::TaskEnable(_)
+            | DigitalStatement::Disable(_)
+            | DigitalStatement::EventTrigger(_)
             | DigitalStatement::Null(_) => {}
         }
     }
@@ -2275,6 +2303,14 @@ impl ProcessLowerer<'_> {
                 current
             }
             DigitalStatement::SystemTask(task) => self.system_task_statement(block, task),
+            DigitalStatement::TaskEnable(_)
+            | DigitalStatement::Fork(_)
+            | DigitalStatement::Disable(_)
+            | DigitalStatement::Wait(_)
+            | DigitalStatement::EventTrigger(_) => {
+                self.unsupported_thread_statement(statement);
+                block
+            }
             DigitalStatement::BlockingAssign(assign) => self.assign(block, assign, false),
             DigitalStatement::NonblockingAssign(assign) => self.assign(block, assign, true),
             DigitalStatement::Conditional(conditional) => {

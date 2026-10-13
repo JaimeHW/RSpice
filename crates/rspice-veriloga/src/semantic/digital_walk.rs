@@ -133,7 +133,24 @@ fn walk_roots(
                         visit(argument, &locals);
                     }
                 }
-                DigitalStatement::Null(_) => {}
+                DigitalStatement::TaskEnable(enable) => {
+                    for argument in &enable.args {
+                        visit(argument, &locals);
+                    }
+                }
+                DigitalStatement::Fork(block) => {
+                    pending.extend(block.statements.iter().rev().map(Work::Statement));
+                }
+                DigitalStatement::Wait(wait) => {
+                    visit(&wait.condition, &locals);
+                    if let Some(statement) = &wait.statement {
+                        pending.push(Work::Statement(statement));
+                    }
+                }
+                DigitalStatement::EventTrigger(trigger) => {
+                    pending.push(Work::Target(&trigger.target))
+                }
+                DigitalStatement::Disable(_) | DigitalStatement::Null(_) => {}
             },
             Work::Assignment(assign) => {
                 visit(&assign.value, &locals);
@@ -252,7 +269,24 @@ pub(super) fn rewrite_roots(body: &mut DigitalStatement, visit: &mut impl FnMut(
                         visit(argument);
                     }
                 }
-                DigitalStatement::Null(_) => {}
+                DigitalStatement::TaskEnable(enable) => {
+                    for argument in &mut enable.args {
+                        visit(argument);
+                    }
+                }
+                DigitalStatement::Fork(block) => {
+                    pending.extend(block.statements.iter_mut().rev().map(Work::Statement));
+                }
+                DigitalStatement::Wait(wait) => {
+                    visit(&mut wait.condition);
+                    if let Some(statement) = &mut wait.statement {
+                        pending.push(Work::Statement(statement));
+                    }
+                }
+                DigitalStatement::EventTrigger(trigger) => {
+                    pending.push(Work::Target(&mut trigger.target))
+                }
+                DigitalStatement::Disable(_) | DigitalStatement::Null(_) => {}
             },
             Work::Assignment(assign) => {
                 visit(&mut assign.value);
@@ -457,6 +491,42 @@ pub(super) fn collect_module_writes(
                     pending.push(Work::Statement(&loop_.body))
                 }
                 DigitalStatement::Forever(loop_) => pending.push(Work::Statement(&loop_.body)),
+                // Which arguments a task writes is the task's declaration, which
+                // this walk does not see; every variable-shaped argument counts.
+                DigitalStatement::TaskEnable(enable) => {
+                    let mut names = Vec::new();
+                    for argument in &enable.args {
+                        if let Some(target) =
+                            super::digital_routines::expression_as_lvalue(argument)
+                        {
+                            names
+                                .extend(target.written_names().into_iter().map(|(n, _)| n.clone()));
+                        }
+                        expression_call_output_names(argument, &mut names);
+                    }
+                    record(names, &locals, written);
+                }
+                DigitalStatement::EventTrigger(trigger) => {
+                    let names = trigger
+                        .target
+                        .written_names()
+                        .into_iter()
+                        .map(|(name, _)| name.clone())
+                        .collect();
+                    record(names, &locals, written);
+                }
+                DigitalStatement::Fork(block) => {
+                    pending.extend(block.statements.iter().rev().map(Work::Statement));
+                }
+                DigitalStatement::Wait(wait) => {
+                    let mut names = Vec::new();
+                    expression_call_output_names(&wait.condition, &mut names);
+                    record(names, &locals, written);
+                    if let Some(statement) = &wait.statement {
+                        pending.push(Work::Statement(statement));
+                    }
+                }
+                DigitalStatement::Disable(_) => {}
                 DigitalStatement::Timing(timing) => {
                     if let TimingControl::Delay(delay) = &timing.control {
                         let mut names = Vec::new();

@@ -11,6 +11,7 @@ use crate::source::Span;
 use smol_str::SmolStr;
 
 mod digital;
+mod digital_routines;
 mod generate;
 mod hierarchical_names;
 mod implicit_nets;
@@ -733,6 +734,22 @@ impl<'a> Parser<'a> {
             TokenKind::Initial => {
                 let process = self.parse_digital_process(DigitalProcessKind::Initial)?;
                 module.digital_processes.push(process);
+            }
+            // IEEE 1364-2005 section 10: tasks and functions. `analog
+            // function` is consumed by the `analog` arm below.
+            TokenKind::Task | TokenKind::Function => {
+                let routine = self.parse_digital_routine()?;
+                module.digital_routines.push(routine);
+            }
+            TokenKind::AmsDigital if self.digital_keyword_is("realtime") => {
+                let var = self.parse_variable_decl()?;
+                module.variables.push(var);
+            }
+            TokenKind::AmsDigital
+                if self.digital_keyword_is("time") || self.digital_keyword_is("event") =>
+            {
+                let variable = self.parse_keyword_variable_decl()?;
+                module.digital_variables.push(variable);
             }
             TokenKind::Identifier => {
                 self.parse_identifier_module_item(module)?;
@@ -1530,6 +1547,13 @@ impl<'a> Parser<'a> {
     fn parse_variable_decl(&mut self) -> Result<VariableDecl, ParseError> {
         let start = self.current_span();
         let var_type = if self.match_token(TokenKind::Real) {
+            VarType::Real
+        } else if self.check(TokenKind::AmsDigital)
+            && self.current().text.as_deref() == Some("realtime")
+        {
+            // IEEE 1364-2005 section 4.8: `realtime` is declared and used
+            // exactly as `real`.
+            self.advance();
             VarType::Real
         } else if self.match_token(TokenKind::Integer) {
             VarType::Integer

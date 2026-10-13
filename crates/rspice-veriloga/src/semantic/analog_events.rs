@@ -33,8 +33,13 @@ pub(super) fn lower(source: &Module) -> CompileResult<LoweredAnalogEvents> {
     // writers. Analog ownership/event classification is completed after function
     // copy-outs and all other assignments have been semantically lowered.
     let mut digital_writes = HashSet::new();
-    for process in &source.digital_processes {
-        super::digital_walk::collect_module_writes(&process.body, &mut digital_writes);
+    for body in source
+        .digital_processes
+        .iter()
+        .map(|process| &process.body)
+        .chain(source.digital_routines.iter().map(|routine| &routine.body))
+    {
+        super::digital_walk::collect_module_writes(body, &mut digital_writes);
     }
     let candidates: BTreeSet<_> = source
         .variables
@@ -616,7 +621,21 @@ impl Lower {
             DigitalStatement::While(statement) => self.statement(&mut statement.body, locals)?,
             DigitalStatement::Repeat(statement) => self.statement(&mut statement.body, locals)?,
             DigitalStatement::Forever(statement) => self.statement(&mut statement.body, locals)?,
-            DigitalStatement::SystemTask(_) | DigitalStatement::Null(_) => {}
+            DigitalStatement::Fork(block) => {
+                for statement in &mut block.statements {
+                    self.statement(statement, locals)?;
+                }
+            }
+            DigitalStatement::Wait(wait) => {
+                if let Some(body) = &mut wait.statement {
+                    self.statement(body, locals)?;
+                }
+            }
+            DigitalStatement::SystemTask(_)
+            | DigitalStatement::TaskEnable(_)
+            | DigitalStatement::Disable(_)
+            | DigitalStatement::EventTrigger(_)
+            | DigitalStatement::Null(_) => {}
         }
         Ok(())
     }

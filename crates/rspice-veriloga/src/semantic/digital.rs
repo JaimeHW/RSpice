@@ -47,6 +47,8 @@ pub struct AnalyzedDigital {
     pub bit_aliases: Vec<ElaboratedDigitalBitAlias>,
     /// Processes with their static sensitivity resolved, in declaration order.
     pub processes: Vec<AnalyzedDigitalProcess>,
+    /// Tasks and functions, in declaration order.
+    pub routines: Vec<super::digital_routines::AnalyzedDigitalRoutine>,
     /// Continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// Instantiated child modules, elaborated flat into this module's scope.
@@ -536,6 +538,9 @@ pub struct ElaboratedDigitalInstance {
     /// instances of one module therefore share. Lowering allocates a fresh id
     /// per frame; the one here is never used as an identity.
     pub processes: Vec<AnalyzedDigitalProcess>,
+    /// The instance's tasks and functions: each instance has its own static
+    /// storage for them (IEEE 1364-2005 section 10.2.3).
+    pub routines: Vec<super::digital_routines::AnalyzedDigitalRoutine>,
     /// The instance's continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// The implicit continuous assignments of this instance's variable output
@@ -689,10 +694,12 @@ impl SemanticAnalyzer {
             .map(|(position, signal)| (signal.name.clone(), position))
             .collect();
 
+        self.register_digital_routines(module);
         let mut processes = Vec::new();
         for process in &module.digital_processes {
             processes.push(self.analyze_digital_process(process, &signals, &index));
         }
+        let mut routines = self.analyze_digital_routines(module, &signals, &index);
 
         let mut continuous_assigns = Vec::new();
         // IEEE 1364-2005 section 6.1.2: a net declaration assignment *is* a
@@ -732,6 +739,11 @@ impl SemanticAnalyzer {
                 self.resolve_digital_accesses(expression)
             });
         }
+        for routine in &mut routines {
+            super::digital_walk::rewrite_roots(&mut routine.routine.body, &mut |expression| {
+                self.resolve_digital_accesses(expression)
+            });
+        }
         for assign in &mut continuous_assigns {
             self.resolve_digital_accesses(&mut assign.assignment.value);
             if let Some(delay) = &mut assign.assignment.delay {
@@ -747,6 +759,7 @@ impl SemanticAnalyzer {
             signals,
             bit_aliases: Vec::new(),
             processes,
+            routines,
             continuous_assigns,
             // A module is analyzed on its own, so it knows nothing yet about
             // what it instantiates; hierarchy elaboration fills this in on the
@@ -1256,8 +1269,13 @@ impl SemanticAnalyzer {
         seen: &mut HashMap<SmolStr, Span>,
     ) {
         let mut written: std::collections::HashSet<SmolStr> = std::collections::HashSet::new();
-        for process in &module.digital_processes {
-            super::digital_walk::collect_module_writes(&process.body, &mut written);
+        for body in module
+            .digital_processes
+            .iter()
+            .map(|process| &process.body)
+            .chain(module.digital_routines.iter().map(|routine| &routine.body))
+        {
+            super::digital_walk::collect_module_writes(body, &mut written);
         }
         for assignment in &module.continuous_assigns {
             for (name, _) in assignment.target.written_names() {
@@ -1779,7 +1797,7 @@ impl SemanticAnalyzer {
     ///
     /// Digital child instances are reanalyzed after their effective parameter
     /// values are installed, so this same path resolves each specialized shape.
-    fn resolve_vector_range(
+    pub(super) fn resolve_vector_range(
         &mut self,
         range: Option<&VectorRange>,
         keyword: &str,
@@ -1862,7 +1880,10 @@ impl SemanticAnalyzer {
         // IEEE 1364-2005 section 9.9.2: an `always` process restarts the
         // instant it finishes. One with no timing control anywhere in its body
         // never yields, so simulation time cannot advance past it.
-        if process.kind == DigitalProcessKind::Always && !process.has_timing_control() {
+        // A task enable counts when the task's body suspends.
+        if process.kind == DigitalProcessKind::Always
+            && !self.digital_statement_suspends(&process.body)
+        {
             self.record_error_at(
                 SemanticErrorKind::UnsupportedFeature(
                     "`always` process has no timing control, so it never suspends and \
@@ -1908,6 +1929,28 @@ impl SemanticAnalyzer {
         let mut resolved = Vec::new();
         let mut computed = false;
         for term in terms {
+            if let Expression::Identifier(identifier) = &term.signal
+                && self.names_digital_event(&identifier.name, signals, index)
+            {
+                // IEEE 1364-2005 section 9.7.3: a named event is waited for,
+                // and has no edges.
+                if term.edge.is_some() {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "`{}` is a named event, which has no edges; write `@{}`",
+                            identifier.name, identifier.name
+                        )),
+                        term.span,
+                    );
+                    continue;
+                }
+                resolved.push(AnalyzedSensitivity {
+                    edge: None,
+                    signal: identifier.name.clone(),
+                    span: term.span,
+                });
+                continue;
+            }
             self.check_digital_expression(&term.signal, signals, index);
             let Expression::Identifier(identifier) = &term.signal else {
                 computed = true;
@@ -1960,14 +2003,25 @@ impl SemanticAnalyzer {
     // Statements
     // ------------------------------------------------------------------
 
-    fn check_digital_statement(
+    pub(super) fn check_digital_statement(
         &mut self,
         statement: &DigitalStatement,
         signals: &[AnalyzedDigitalSignal],
         index: &HashMap<SmolStr, usize>,
     ) {
         match statement {
-            DigitalStatement::Block(block) => {
+            DigitalStatement::TaskEnable(enable) => self.check_task_enable(enable, signals, index),
+            DigitalStatement::Disable(disable) => self.check_disable(disable),
+            DigitalStatement::EventTrigger(trigger) => {
+                self.check_event_trigger(trigger, signals, index)
+            }
+            DigitalStatement::Wait(wait) => {
+                self.check_digital_expression(&wait.condition, signals, index);
+                if let Some(inner) = &wait.statement {
+                    self.check_digital_statement(inner, signals, index);
+                }
+            }
+            DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
                 let scope = self.collect_process_locals(block);
                 self.digital_scopes.push(scope);
                 // Initializers are checked inside the scope they belong to, so
@@ -2049,7 +2103,10 @@ impl SemanticAnalyzer {
     /// VAMS-2023 section 6.8 gives each named block its own scope. A name
     /// shadows outer local and module declarations; only a second declaration
     /// in the same scope is a collision.
-    fn collect_process_locals(&mut self, block: &DigitalBlock) -> Vec<AnalyzedProcessLocal> {
+    pub(super) fn collect_process_locals(
+        &mut self,
+        block: &DigitalBlock,
+    ) -> Vec<AnalyzedProcessLocal> {
         let mut scope: Vec<AnalyzedProcessLocal> = Vec::new();
 
         for declaration in &block.variables {
@@ -2168,7 +2225,7 @@ impl SemanticAnalyzer {
     /// `procedural` selects the IEEE 1364-2005 section 6.2 rule that applies:
     /// a procedural assignment drives a variable, a continuous assignment
     /// drives a net.
-    fn check_digital_lvalue(
+    pub(super) fn check_digital_lvalue(
         &mut self,
         target: &DigitalLValue,
         signals: &[AnalyzedDigitalSignal],
@@ -2708,7 +2765,7 @@ impl SemanticAnalyzer {
 
     /// Resolve every identifier a discrete-domain expression reads, and refuse
     /// the continuous-domain forms that cannot appear in one.
-    fn check_digital_expression(
+    pub(super) fn check_digital_expression(
         &mut self,
         expression: &Expression,
         signals: &[AnalyzedDigitalSignal],
@@ -2717,7 +2774,16 @@ impl SemanticAnalyzer {
         match expression {
             Expression::Number(_) | Expression::StringLit(_) | Expression::NullArgument(_) => {}
             Expression::Identifier(identifier) => {
-                if matches!(
+                if self.names_digital_event(&identifier.name, signals, index) {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "`{}` is a named event, which has no value to read; wait for it \
+                             with `@{}` (IEEE 1364-2005 section 9.7.3)",
+                            identifier.name, identifier.name
+                        )),
+                        identifier.span,
+                    );
+                } else if matches!(
                     self.resolve_digital_name(&identifier.name, index),
                     Resolution::Undeclared
                 ) {
@@ -2787,8 +2853,20 @@ impl SemanticAnalyzer {
                 self.check_digital_expression(&access.index, signals, index);
             }
             Expression::Binary(binary) => {
-                self.check_digital_expression(&binary.left, signals, index);
-                self.check_digital_expression(&binary.right, signals, index);
+                // A left-associative chain (`a + b + ... + z`) is a left-deep
+                // tree, so walk its left spine in a loop and recurse only into
+                // the right operands, left to right as before: a chain of
+                // hundreds of operators must not take one frame per operator.
+                let mut rights = vec![&*binary.right];
+                let mut left = &*binary.left;
+                while let Expression::Binary(inner) = left {
+                    rights.push(&*inner.right);
+                    left = &*inner.left;
+                }
+                self.check_digital_expression(left, signals, index);
+                for right in rights.into_iter().rev() {
+                    self.check_digital_expression(right, signals, index);
+                }
             }
             Expression::Unary(unary) => {
                 self.check_digital_expression(&unary.operand, signals, index);
@@ -2850,6 +2928,9 @@ impl SemanticAnalyzer {
             Expression::Call(call) => {
                 if let Some(access) = self.digital_access_call(call) {
                     self.check_analog_probe(&access, index);
+                    return;
+                }
+                if self.check_function_call(call, signals, index) {
                     return;
                 }
                 self.record_error_at(

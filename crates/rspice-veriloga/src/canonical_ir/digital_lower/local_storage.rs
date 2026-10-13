@@ -237,7 +237,21 @@ impl ProcessLowerer<'_> {
                 }
                 self.mark_names(&names, required);
             }
-            DigitalStatement::SystemTask(_) | DigitalStatement::Null(_) => {}
+            DigitalStatement::Fork(block) => {
+                for statement in &block.statements {
+                    self.storage_dependencies(statement, required);
+                }
+            }
+            DigitalStatement::Wait(wait) => {
+                if let Some(statement) = &wait.statement {
+                    self.storage_dependencies(statement, required);
+                }
+            }
+            DigitalStatement::SystemTask(_)
+            | DigitalStatement::TaskEnable(_)
+            | DigitalStatement::Disable(_)
+            | DigitalStatement::EventTrigger(_)
+            | DigitalStatement::Null(_) => {}
         }
     }
 
@@ -308,7 +322,19 @@ impl ProcessLowerer<'_> {
                     self.event_expression_reads(argument, &mut names);
                 }
             }
-            DigitalStatement::Null(_) => {}
+            DigitalStatement::TaskEnable(enable) => {
+                for argument in &enable.args {
+                    self.event_expression_reads(argument, &mut names);
+                }
+            }
+            DigitalStatement::Fork(block) => children.extend(&block.statements),
+            DigitalStatement::Wait(wait) => {
+                self.event_expression_reads(&wait.condition, &mut names);
+                children.extend(wait.statement.as_deref());
+            }
+            DigitalStatement::Disable(_)
+            | DigitalStatement::EventTrigger(_)
+            | DigitalStatement::Null(_) => {}
             DigitalStatement::Block(_) => unreachable!("block handled above"),
         }
         for name in names {

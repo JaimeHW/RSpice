@@ -744,7 +744,28 @@ fn collect_parameters(
         }
     };
     match statement {
-        DigitalStatement::Null(_) => {}
+        DigitalStatement::Null(_) | DigitalStatement::Disable(_) => {}
+        DigitalStatement::TaskEnable(enable) => {
+            for argument in &enable.args {
+                expression(argument, reads);
+            }
+        }
+        DigitalStatement::EventTrigger(trigger) => {
+            let mut names = BTreeSet::new();
+            collect_lvalue_index_reads(&trigger.target, &mut names);
+            reads.extend(names.into_iter().filter(|name| !locals.contains(name)));
+        }
+        DigitalStatement::Wait(wait) => {
+            expression(&wait.condition, reads);
+            if let Some(inner) = &wait.statement {
+                collect_parameters(inner, locals, reads);
+            }
+        }
+        DigitalStatement::Fork(block) => {
+            for inner in &block.statements {
+                collect_parameters(inner, locals, reads);
+            }
+        }
         DigitalStatement::SystemTask(task) => {
             for argument in &task.args {
                 expression(argument, reads);

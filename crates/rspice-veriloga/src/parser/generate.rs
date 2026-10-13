@@ -1110,6 +1110,24 @@ impl Unroller<'_> {
                     self.substitute(argument);
                 }
             }
+            DigitalStatement::TaskEnable(enable) => {
+                for argument in &mut enable.args {
+                    self.substitute(argument);
+                }
+            }
+            DigitalStatement::Fork(block) => {
+                for inner in &mut block.statements {
+                    self.substitute_statement(inner);
+                }
+            }
+            DigitalStatement::Wait(wait) => {
+                self.substitute(&mut wait.condition);
+                if let Some(inner) = &mut wait.statement {
+                    self.substitute_statement(inner);
+                }
+            }
+            DigitalStatement::EventTrigger(trigger) => self.substitute_lvalue(&mut trigger.target),
+            DigitalStatement::Disable(_) => {}
         }
     }
 

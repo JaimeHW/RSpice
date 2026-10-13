@@ -386,6 +386,7 @@ mod bounded_loop;
 mod constant_dependencies;
 mod digital;
 mod digital_elaborate;
+mod digital_routines;
 mod digital_walk;
 mod discrete_left_limit;
 mod discrete_projection;
@@ -413,6 +414,7 @@ mod symbols;
 
 pub use analyzed::*;
 pub use digital::*;
+pub use digital_routines::AnalyzedDigitalRoutine;
 pub(crate) use elaboration::elaborate_executable_module;
 pub(crate) use flow_probes::lower as lower_flow_probes;
 pub(crate) use packed_parameters::retain_packed_parameters;
@@ -525,6 +527,11 @@ pub struct SemanticAnalyzer {
     /// threading a scope through every one of them would put the same argument
     /// in every signature to be used by three.
     digital_scopes: Vec<Vec<digital::AnalyzedProcessLocal>>,
+    /// The module's tasks and functions by name, while its digital content
+    /// is analyzed (IEEE 1364-2005 section 10).
+    digital_routines: HashMap<SmolStr, digital_routines::RoutineSignature>,
+    /// What a `disable` in this module may name: its named blocks and tasks.
+    digital_scope_names: HashSet<SmolStr>,
     /// Dense identity assigned once, before an analyzed expression is cloned
     /// into the flat compatibility stream and the structured CFG body.
     next_noise_process: u32,
@@ -589,6 +596,8 @@ impl SemanticAnalyzer {
             unfiltered_initial_step_guards: Vec::new(),
             warnings: Vec::new(),
             digital_scopes: Vec::new(),
+            digital_routines: HashMap::new(),
+            digital_scope_names: HashSet::new(),
             next_noise_process: 0,
             implicit_integrators: Vec::new(),
         }

@@ -204,13 +204,12 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         ("trireg", "trireg t;"),
         ("supply0", "supply0 vss;"),
         ("supply1", "supply1 vdd;"),
-        ("time", "time t;"),
-        ("realtime", "realtime t;"),
-        ("event", "event e;"),
+        // `time`, `realtime`, `event` and `task` have productions now (IEEE
+        // 1364-2005 sections 4.8, 9.7.3 and 10.2), pinned by
+        // `tests/digital_grammar.rs`.
         ("edge", "edge e;"),
         ("scalared", "scalared b;"),
         ("vectored", "vectored b;"),
-        ("task", "task report_it; endtask"),
         ("endtask", "endtask"),
         ("specify", "specify endspecify"),
         ("endspecify", "endspecify"),
