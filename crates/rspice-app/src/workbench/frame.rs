@@ -254,7 +254,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         }
         return;
     }
-    let plural = if retained == 1 { "" } else { "es" };
+    let plural = if retained == 1 { "is" } else { "es" };
     app.state.ui.toasts.notify_with_action(
         ctx,
         category,
@@ -764,6 +764,11 @@ mod tests {
             "the transition raises exactly one notice"
         );
         assert_eq!(activity[0].title(), "Run 1 complete");
+        assert_eq!(
+            activity[0].message(),
+            "1 retained analysis in this immutable dataset.",
+            "one analysis is an analysis, not an \"analys\""
+        );
         assert_eq!(
             activity[0].action(),
             Some(NotificationAction::OpenRunInResults { run_sequence: 1 }),
