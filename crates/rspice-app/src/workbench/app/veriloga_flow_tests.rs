@@ -48,7 +48,10 @@ impl User {
         user
     }
 
-    /// One whole application frame, in the order `eframe::App::ui` runs one.
+    /// One application frame, in the order `eframe::App::ui` runs one, closed
+    /// at its own boundary: every step that drives the design, the compile,
+    /// the run and the selection's cross-probe. The account, live session and
+    /// autosave have no part in this flow.
     fn frame(&mut self, events: Vec<egui::Event>) {
         let Self { ctx, app, named } = self;
         let output = ctx.run_ui(
@@ -65,9 +68,7 @@ impl User {
                 app.render_secondary_application_windows(&ctx);
                 app.refresh_incremental_connectivity_checks();
                 app.render_frame_dialogs(&ctx);
-                app.invalidate_simulation_preflight_after_frame_edit(&before);
-                crate::workbench::synchronize_schematic_cross_probe(&mut app.state);
-                app.state.workbench.capture_authoring_recovery();
+                app.end_frame(&before);
             },
         );
         named.clear();

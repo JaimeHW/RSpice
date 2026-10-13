@@ -355,6 +355,20 @@ impl RSpiceApp {
         }
     }
 
+    /// The frame boundary, once every window has drawn: an edit the frame
+    /// made drops preflight authority, the schematic selection cross-probes
+    /// into the results and the generated netlist, the authoring recovery
+    /// point is captured, and a project the frame replaced takes the old
+    /// project's automation authority with it.
+    fn end_frame(&mut self, simulation_input_before_frame: &FrameSimulationInput) {
+        self.invalidate_simulation_preflight_after_frame_edit(simulation_input_before_frame);
+        crate::workbench::synchronize_schematic_cross_probe(&mut self.state);
+        self.state.workbench.capture_authoring_recovery();
+        // A project replacement can commit from a dialog after prepare_frame.
+        // Terminate at the same frame boundary so old authority cannot survive.
+        self.terminate_automation_runtime_after_project_change();
+    }
+
     pub(crate) fn manual_deck_run_block_reason(&self) -> Option<String> {
         if let Some(reason) = self.state.manual_deck_run_block_reason() {
             return Some(reason);
@@ -1339,12 +1353,7 @@ impl eframe::App for RSpiceApp {
         self.render_secondary_application_windows(&ctx);
         self.refresh_incremental_connectivity_checks();
         self.render_frame_dialogs(&ctx);
-        self.invalidate_simulation_preflight_after_frame_edit(&simulation_input_before_frame);
-        crate::workbench::synchronize_schematic_cross_probe(&mut self.state);
-        self.state.workbench.capture_authoring_recovery();
-        // A project replacement can commit from a dialog after prepare_frame.
-        // Terminate at the same frame boundary so old authority cannot survive.
-        self.terminate_automation_runtime_after_project_change();
+        self.end_frame(&simulation_input_before_frame);
     }
 
     /// Called by eframe when the application is shutting down.
