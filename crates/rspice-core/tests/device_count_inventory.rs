@@ -84,6 +84,11 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "the kind of quantity each net carries, a node fact with no element",
     ),
     (
+        "xspice_event_loads",
+        "the total load on each event net, summed from the counted XSPICE \
+         instances' input loads -- a node fact, not a device",
+    ),
+    (
         "xspice_touched_digital_nodes",
         "scratch nodes touched while applying one digital event batch",
     ),
