@@ -700,6 +700,19 @@ struct PssJacobianProbe<'a> {
     fd_step: Value,
 }
 
+/// How a sensitivity column differences the fixed-grid period map.
+#[derive(Clone, Copy)]
+enum PssColumnStencil<'a> {
+    /// `(F(x0 + h e_j) - F(x0 - h e_j)) / 2h` with the probe's relative step:
+    /// second-order accurate for any smooth map, at two traversals per column.
+    Central,
+    /// `(F(x0 + s e_j) - F(x0)) / s` at the coordinate's own unit scale `s`,
+    /// against the endpoint `F(x0)` the caller already traversed. An affine
+    /// map has no curvature for a large step to sample, so this is exact up to
+    /// roundoff relative to the orbit, at one traversal per column.
+    Affine { endpoint: &'a [Value] },
+}
+
 /// The fixed accepted-step grid a PSS traversal replays, when it replays one.
 #[derive(Clone, Copy)]
 struct PssFixedGrid {
@@ -2590,17 +2603,19 @@ impl Engine {
         // correction, so qualify it again at the reported state and period.
         // For a driven linear circuit the period map is affine in x0: its
         // Jacobian is independent of bias and already describes this orbit.
+        // A mesh closed by fixed-point steps alone, such as a delay basis
+        // whose reflections contract each period, holds no Jacobian; its
+        // affine map is then differenced exactly at one traversal per column.
         self.pss_set_reactive_state(&mut circuit, &shooting_state.x0)?;
-        let linear_jacobian = Self::pss_period_map_is_affine(&circuit, &config)
-            .then_some(preconditioner_jacobian)
-            .flatten();
-        let monodromy = if let Some(mut jacobian) = linear_jacobian {
-            for (index, row) in jacobian.iter_mut().enumerate() {
-                row[index] += 1.0;
+        let affine = Self::pss_period_map_is_affine(&circuit, &config);
+        let monodromy = match preconditioner_jacobian.filter(|_| affine) {
+            Some(mut jacobian) => {
+                for (index, row) in jacobian.iter_mut().enumerate() {
+                    row[index] += 1.0;
+                }
+                jacobian
             }
-            jacobian
-        } else {
-            self.pss_compute_monodromy(
+            None => self.pss_compute_monodromy(
                 &circuit,
                 &shooting_state,
                 PssJacobianProbe {
@@ -2608,8 +2623,9 @@ impl Engine {
                     config: &config,
                     fd_step: PSS_FD_STEP,
                 },
+                affine,
                 abort,
-            )?
+            )?,
         };
         let orbit_kind = if config.is_autonomous() {
             FloquetOrbitKind::Autonomous
@@ -2670,12 +2686,14 @@ impl Engine {
     ///
     /// A driven circuit without nonlinear devices or state-dependent line
     /// interpolation has an affine period map, whose Jacobian on a mesh is a
-    /// constant up to the traversal's own tolerances. Such a solve
-    /// differentiates its mesh at most once and takes every later direct
-    /// Newton step with that Jacobian; a residual random walk at the shooting
-    /// tolerance then costs one traversal per step instead of a fresh
-    /// Jacobian. A reused Jacobian is returned only while the converged state
-    /// stays inside the difference stencil it was taken with.
+    /// constant up to the traversal's own roundoff. Such a solve
+    /// differentiates its mesh at most once, by one unit-scale traversal per
+    /// column, and takes every later direct Newton step with that Jacobian;
+    /// a residual random walk at the shooting tolerance then costs one
+    /// traversal per step instead of a fresh Jacobian or a matrix-free
+    /// refinement. A nonlinear map's reused Jacobian is returned only while
+    /// the converged state stays inside the difference stencil it was taken
+    /// with; an affine map's is returned wherever the state converged.
     fn pss_solve_grid(
         &self,
         circuit: &mut PssCircuit,
@@ -2706,9 +2724,10 @@ impl Engine {
         let mut chord_residual: Option<Value> = None;
         let affine = Self::pss_period_map_is_affine(circuit, config);
         // Set once a direct step reuses the mesh's Jacobian. That Jacobian
-        // then belongs to an earlier iterate, and is returned for Floquet
-        // reporting only when the converged state still lies inside the
-        // central-difference stencil it was differentiated with.
+        // then belongs to an earlier iterate, and a nonlinear map's is
+        // returned for Floquet reporting only when the converged state still
+        // lies inside the central-difference stencil it was differentiated
+        // with.
         let mut reused_jacobian = false;
         let mut jacobian_origin: Vec<Value> = Vec::new();
 
@@ -2746,6 +2765,7 @@ impl Engine {
             if solver.check_convergence(&shooting_state) {
                 let jacobian = preconditioner_jacobian.filter(|_| {
                     !reused_jacobian
+                        || affine
                         || self.pss_state_within_jacobian_stencil(
                             circuit,
                             &jacobian_origin,
@@ -2843,25 +2863,28 @@ impl Engine {
                 detected_period += (solver.damping * delta_t).clamp(-max_dt, max_dt);
                 shooting_state.period = detected_period;
             } else {
-                let krylov_step = if shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
-                    if let Some(jacobian) = preconditioner_jacobian.as_deref() {
-                        self.pss_compute_newton_step_krylov(
-                            circuit,
-                            &shooting_state,
-                            PssJacobianProbe {
-                                period: detected_period,
-                                config,
-                                fd_step: PSS_FD_STEP,
-                            },
-                            jacobian,
-                            abort,
-                        )?
+                // An affine map's Jacobian is exact at every state, so a
+                // direct step with it needs no matrix-free refinement.
+                let krylov_step =
+                    if !affine && shooting_state.dimension() >= PSS_KRYLOV_STATE_THRESHOLD {
+                        if let Some(jacobian) = preconditioner_jacobian.as_deref() {
+                            self.pss_compute_newton_step_krylov(
+                                circuit,
+                                &shooting_state,
+                                PssJacobianProbe {
+                                    period: detected_period,
+                                    config,
+                                    fd_step: PSS_FD_STEP,
+                                },
+                                jacobian,
+                                abort,
+                            )?
+                        } else {
+                            None
+                        }
                     } else {
                         None
-                    }
-                } else {
-                    None
-                };
+                    };
                 let delta = if let Some(delta) = krylov_step {
                     if config.verbose {
                         log::debug!("PSS driven Newton-Krylov step accepted");
@@ -2885,6 +2908,13 @@ impl Engine {
                             period: detected_period,
                             config,
                             fd_step: PSS_FD_STEP,
+                        },
+                        if affine {
+                            PssColumnStencil::Affine {
+                                endpoint: &shooting_state.x_t,
+                            }
+                        } else {
+                            PssColumnStencil::Central
                         },
                         abort,
                     )?;
@@ -3387,13 +3417,15 @@ impl Engine {
         }
     }
 
-    /// Compute the shooting sensitivity columns by CENTRAL differences on
-    /// the fixed-grid period map: column j is
-    /// `(F(x0 + h e_j) - F(x0 - h e_j)) / 2h` with `F = Phi - I` when
-    /// `subtract_identity` is set (Newton Jacobian) or `F = Phi` otherwise
-    /// (monodromy). The fixed integration grid makes Phi smooth in x0, so
-    /// the O(h^2) central difference reaches derivative accuracy the
-    /// adaptive-grid forward difference never could.
+    /// Compute the shooting sensitivity columns by differences on the
+    /// fixed-grid period map, with `F = Phi - I` when `subtract_identity` is
+    /// set (Newton Jacobian) or `F = Phi` otherwise (monodromy). The default
+    /// CENTRAL stencil differences column j as
+    /// `(F(x0 + h e_j) - F(x0 - h e_j)) / 2h`; the fixed integration grid
+    /// makes Phi smooth in x0, so the O(h^2) central difference reaches
+    /// derivative accuracy the adaptive-grid forward difference never could.
+    /// An affine map instead takes one unit-scale step per column (see
+    /// [`PssColumnStencil::Affine`]).
     ///
     /// Columns are pure functions of `(x0, j)`, so they parallelize across
     /// per-worker circuit clones with deterministic results. `PssCircuit`
@@ -3406,6 +3438,7 @@ impl Engine {
         circuit: &PssCircuit,
         x0: &[Value],
         probe: PssJacobianProbe<'_>,
+        stencil: PssColumnStencil<'_>,
         subtract_identity: bool,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
@@ -3429,13 +3462,37 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let h = fd_step
-                * worker_circuit.perturbation_scale(
-                    j,
-                    x0[j],
-                    self.current_abstol() / self.voltage_abstol(),
-                    self.config.convergence_config.charge_abstol / self.voltage_abstol(),
-                );
+            let scale = worker_circuit.perturbation_scale(
+                j,
+                x0[j],
+                self.current_abstol() / self.voltage_abstol(),
+                self.config.convergence_config.charge_abstol / self.voltage_abstol(),
+            );
+            if let PssColumnStencil::Affine { endpoint } = stencil {
+                let mut x_plus = x0.to_vec();
+                x_plus[j] += scale;
+                // Divide by the perturbation the state actually received.
+                let step = x_plus[j] - x0[j];
+                self.pss_set_reactive_state(worker_circuit, &x_plus)?;
+                let (x_t_plus, _) = self.pss_simulate_one_period::<false>(
+                    worker_circuit,
+                    worker_matrix,
+                    period,
+                    config,
+                    abort,
+                )?;
+                return Ok((0..n)
+                    .map(|i| {
+                        let difference = (x_t_plus[i] - endpoint[i]) / step;
+                        if subtract_identity && i == j {
+                            difference - 1.0
+                        } else {
+                            difference
+                        }
+                    })
+                    .collect());
+            }
+            let h = fd_step * scale;
 
             let mut x_plus = x0.to_vec();
             x_plus[j] += h;
@@ -3742,6 +3799,7 @@ impl Engine {
         circuit: &PssCircuit,
         state: &ShootingState,
         probe: PssJacobianProbe<'_>,
+        stencil: PssColumnStencil<'_>,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, Vec<Vec<Value>>), SimulationError> {
         let PssJacobianProbe {
@@ -3758,6 +3816,7 @@ impl Engine {
                 config,
                 fd_step,
             },
+            stencil,
             true,
             abort,
         )?;
@@ -3817,6 +3876,7 @@ impl Engine {
                 config,
                 fd_step,
             },
+            PssColumnStencil::Central,
             true,
             abort,
         )?;
@@ -3869,15 +3929,16 @@ impl Engine {
     }
 
     /// Compute the monodromy matrix via finite differences — the fallback
-    /// for the zero-Newton-iteration case (otherwise the converged Newton
-    /// Jacobian is recycled as J + I). The converged trajectory endpoint
-    /// `state.x_t` is the shared base; columns run in parallel on private
-    /// circuit clones.
+    /// for an orbit whose qualified mesh holds no Jacobian to recycle as
+    /// J + I. The converged trajectory endpoint `state.x_t`, traversed from
+    /// `state.x0` on this mesh, is the base of an affine map's one-sided
+    /// columns; columns run in parallel on private circuit clones.
     fn pss_compute_monodromy(
         &self,
         circuit: &PssCircuit,
         state: &ShootingState,
         probe: PssJacobianProbe<'_>,
+        affine: bool,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
         let PssJacobianProbe {
@@ -3893,6 +3954,13 @@ impl Engine {
                 period,
                 config,
                 fd_step,
+            },
+            if affine {
+                PssColumnStencil::Affine {
+                    endpoint: &state.x_t,
+                }
+            } else {
+                PssColumnStencil::Central
             },
             false,
             abort,
@@ -6366,6 +6434,84 @@ mod tests {
         let error = Engine::ensure_pss_state_supported(&circuit)
             .expect_err("distributed-line convolution still needs its own state basis");
         assert!(error.to_string().contains("transmission-line convolution"));
+    }
+
+    #[test]
+    fn affine_delay_monodromy_matches_central_differences() {
+        // Reflections contract this line's history every period, so each
+        // re-sampled delay basis closes by fixed-point steps and the qualified
+        // mesh holds no Newton Jacobian to recycle.
+        let deck = Netlist::parse(
+            "Reflected pulse\nVIN in 0 PULSE(0 1 710n 5n 5n 20n 1u)\nRS in near 75\nT1 near 0 far 0 Z0=50 TD=137n\nRL far 0 100\n.end\n",
+        )
+        .unwrap();
+        let mut simulation = SimulationConfig::default();
+        simulation.resource_limits.max_result_values = 8_000_000;
+        let engine = Engine::new(simulation);
+        let config = PssConfig::new(1e6)
+            .with_harmonics(1)
+            .with_points_per_period(16)
+            .with_tstab_periods(0)
+            .with_tolerance(1e-8);
+        let (pss, mut circuit, mut matrix, x0) = engine
+            .run_pss_with_state_abort(&deck, config.clone(), &crate::NoAbort)
+            .unwrap();
+        assert!(Engine::pss_period_map_is_affine(&circuit, &config));
+        assert!(
+            pss.monodromy.len() > 16,
+            "the delay owns the shooting basis"
+        );
+        engine.pss_set_reactive_state(&mut circuit, &x0).unwrap();
+        let (x_t, _) = engine
+            .pss_simulate_one_period::<false>(
+                &mut circuit,
+                &mut matrix,
+                pss.period,
+                &config,
+                &crate::NoAbort,
+            )
+            .unwrap();
+        let mut state = ShootingState::new(x0, pss.period);
+        state.x_t = x_t;
+        // Normwise relative distance from the reported monodromy to a
+        // central-difference monodromy with the given relative step.
+        let distance = |fd_step: Value| {
+            let central = engine
+                .pss_compute_monodromy(
+                    &circuit,
+                    &state,
+                    PssJacobianProbe {
+                        period: pss.period,
+                        config: &config,
+                        fd_step,
+                    },
+                    false,
+                    &crate::NoAbort,
+                )
+                .unwrap();
+            let scale = central
+                .iter()
+                .flatten()
+                .fold(0.0_f64, |largest, value| largest.max(value.abs()));
+            assert!(scale > 0.0);
+            central
+                .iter()
+                .flatten()
+                .zip(pss.monodromy.iter().flatten())
+                .fold(0.0_f64, |largest, (c, a)| largest.max((c - a).abs()))
+                / scale
+        };
+        // An affine map has no truncation error at any step, so a wide central
+        // stencil is an oracle limited only by roundoff divided by its step.
+        let wide = distance(1e-2);
+        assert!(wide <= 1e-9, "wide central stencil differs by {wide:.3e}");
+        // The production stencil divides the same traversal roundoff by a
+        // cube-root-epsilon step, which bounds its own agreement.
+        let production = distance(PSS_FD_STEP);
+        assert!(
+            production <= 1e-6,
+            "production central stencil differs by {production:.3e}"
+        );
     }
 
     #[test]
