@@ -625,6 +625,26 @@ pub struct VoltageSwitch {
     /// Whether the next nonlinear load must use the SPICE initial-junction
     /// state instead of evaluating the control quantity.
     initial_load_pending: bool,
+    /// [`Self::physical_parameter_error`] and the two resistance logarithms
+    /// for the parameter values they were computed from; see
+    /// [`SwitchParameterCheck`].
+    parameter_check: std::cell::Cell<Option<SwitchParameterCheck>>,
+}
+
+/// A voltage switch's parameter validation and the logarithms its law takes,
+/// keyed by the exact bits of the parameters they were derived from.
+///
+/// The parameters are public fields, so a cache that trusted its own
+/// invalidation could go stale; this one re-derives whenever any of the five
+/// values reads differently, bit for bit, and otherwise returns what the same
+/// arithmetic produced last time. The validation takes logarithms, a hypot
+/// and an exponential, and the law asked for it at every evaluation.
+#[derive(Debug, Clone, Copy)]
+struct SwitchParameterCheck {
+    key: [u64; 5],
+    error: Option<&'static str>,
+    log_ron: Value,
+    log_roff: Value,
 }
 
 impl VoltageSwitch {
@@ -657,7 +677,33 @@ impl VoltageSwitch {
             authored_initial_state: None,
             initial_load_started: false,
             initial_load_pending: false,
+            parameter_check: std::cell::Cell::new(None),
         }
+    }
+
+    /// [`Self::physical_parameter_error`] and `ln(RON)`, `ln(ROFF)` for the
+    /// current parameter values, derived once per distinct set of values.
+    fn parameter_check(&self) -> SwitchParameterCheck {
+        let key = [
+            self.vt.to_bits(),
+            self.vh.to_bits(),
+            self.smooth.to_bits(),
+            self.ron.to_bits(),
+            self.roff.to_bits(),
+        ];
+        if let Some(check) = self.parameter_check.get()
+            && check.key == key
+        {
+            return check;
+        }
+        let check = SwitchParameterCheck {
+            key,
+            error: self.physical_parameter_error(),
+            log_ron: self.ron.ln(),
+            log_roff: self.roff.ln(),
+        };
+        self.parameter_check.set(Some(check));
+        check
     }
 
     /// Set model parameters
@@ -1008,7 +1054,11 @@ impl VoltageSwitch {
     ///
     /// Returns `(g, dg/dvctrl)` for the current hysteresis state.
     fn control_sensitivity(&self, vctrl: Value) -> (Value, Value) {
-        if !vctrl.is_finite() || self.physical_parameter_error().is_some() {
+        if !vctrl.is_finite() {
+            return (Value::NAN, Value::NAN);
+        }
+        let check = self.parameter_check();
+        if check.error.is_some() {
             return (Value::NAN, Value::NAN);
         }
         if self.xyce_curve.is_some() {
@@ -1022,8 +1072,8 @@ impl VoltageSwitch {
         let f = 0.5 * (1.0 - tanh_x);
 
         // Interpolate in log-R domain (SPICE-compatible smooth transition).
-        let log_ron = self.ron.ln();
-        let log_roff = self.roff.ln();
+        let log_ron = check.log_ron;
+        let log_roff = check.log_roff;
         let dlog_r = log_roff - log_ron;
         let log_r = log_ron + dlog_r * f;
         let g = (-log_r).exp();
@@ -2909,6 +2959,50 @@ mod tests {
         assert_eq!(
             switch.physical_parameter_error(),
             Some("maximum |dg/dVctrl| must be finite and representable")
+        );
+    }
+
+    #[test]
+    fn voltage_switch_law_follows_parameters_written_after_an_evaluation() {
+        let fresh = |ron: f64, roff: f64, vt: f64, vh: f64, smooth: f64| {
+            let mut switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0)
+                .with_thresholds(vt, vh)
+                .with_resistances(ron, roff);
+            switch.smooth = smooth;
+            switch
+        };
+        let bits = |(g, dg): (f64, f64)| (g.to_bits(), dg.to_bits());
+        let mut switch = fresh(1.0, 1.0e6, 0.5, 0.0, 0.01);
+        let control = 0.503;
+        assert_eq!(
+            bits(switch.control_sensitivity(control)),
+            bits(fresh(1.0, 1.0e6, 0.5, 0.0, 0.01).control_sensitivity(control))
+        );
+
+        // Each public parameter, written in place after the law has run, is
+        // what the next evaluation uses.
+        switch.roff = 1.0e3;
+        assert_eq!(
+            bits(switch.control_sensitivity(control)),
+            bits(fresh(1.0, 1.0e3, 0.5, 0.0, 0.01).control_sensitivity(control))
+        );
+        switch.ron = 10.0;
+        switch.vt = 0.49;
+        switch.vh = 0.02;
+        switch.smooth = 0.02;
+        assert_eq!(
+            bits(switch.control_sensitivity(control)),
+            bits(fresh(10.0, 1.0e3, 0.49, 0.02, 0.02).control_sensitivity(control))
+        );
+
+        // An invalid value refuses the law, and the valid value restores it.
+        switch.ron = 1.0e-320;
+        let (conductance, derivative) = switch.control_sensitivity(control);
+        assert!(conductance.is_nan() && derivative.is_nan());
+        switch.ron = 10.0;
+        assert_eq!(
+            bits(switch.control_sensitivity(control)),
+            bits(fresh(10.0, 1.0e3, 0.49, 0.02, 0.02).control_sensitivity(control))
         );
     }
 
