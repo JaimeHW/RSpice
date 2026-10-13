@@ -303,11 +303,11 @@ impl CanonicalIrArtifact {
             .iter()
             .map(|signal| (&signal.name, signal))
             .collect();
-        let selections: std::collections::HashSet<_> = self
+        let selections: std::collections::HashMap<_, _> = self
             .hir
             .discrete_selections
             .iter()
-            .map(|selection| selection.value)
+            .map(|selection| (selection.value, selection))
             .collect();
         let edges: std::collections::HashSet<_> = self
             .hir
@@ -325,9 +325,17 @@ impl CanonicalIrArtifact {
                 )));
                 continue;
             };
-            // An edge flag is an integer whatever width it watches.
+            // An edge flag is an integer whatever it watches. A whole packed
+            // grouping of 32 bits or more reads as a real (an extension beyond
+            // Verilog-AMS 2023 Table 7-1), and so does a numeric selection that
+            // wide; an encoded chunk never does.
             let edge = edges.contains(value);
-            let expected = if !edge && signal.kind.is_real() {
+            let selection = selections.get(value);
+            let wide = match selection {
+                Some(selection) => !selection.encoded && selection.width > 31,
+                None => !signal.kind.is_real() && !signal.integer && signal.width > 31,
+            };
+            let expected = if !edge && (signal.kind.is_real() || wide) {
                 super::hir::CanonicalValueType::Real
             } else {
                 super::hir::CanonicalValueType::Integer
@@ -337,13 +345,8 @@ impl CanonicalIrArtifact {
                 .variables
                 .get(usize::from(*value))
                 .is_none_or(|variable| variable.value_type != expected)
-                || (selections.contains(value) && (signal.kind.is_real() || edge))
+                || (selection.is_some() && (signal.kind.is_real() || edge))
                 || (edge && signal.kind.is_real())
-                || (!edge
-                    && !selections.contains(value)
-                    && !signal.kind.is_real()
-                    && !signal.integer
-                    && signal.width > 31)
             {
                 diagnostics.push(artifact_error(format!(
                     "analog input '{name}' has an incompatible digital type or bit grouping"

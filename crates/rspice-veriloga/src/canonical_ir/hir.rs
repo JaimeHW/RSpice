@@ -1387,23 +1387,30 @@ impl HirModel {
         }
         let mut selected = HashSet::new();
         if self.discrete_selections.iter().any(|selection| {
+            // A numeric group of 32 bits or more reads as a real holding its
+            // unsigned value (an extension beyond Verilog-AMS 2023 Table 7-1).
+            let (widths, value_type) = if selection.encoded {
+                (
+                    1..=crate::array_index::PACKED_CHUNK_BITS,
+                    CanonicalValueType::Integer,
+                )
+            } else if selection.width > 31 {
+                (32..=u32::MAX, CanonicalValueType::Real)
+            } else {
+                (1..=31, CanonicalValueType::Integer)
+            };
             !input_values.contains(&selection.value)
                 || !selected.insert(selection.value)
                 || self.discrete_bindings.get(&selection.value) != Some(&selection.signal)
-                || !(1..=if selection.encoded {
-                    crate::array_index::PACKED_CHUNK_BITS
-                } else {
-                    31
-                })
-                    .contains(&selection.width)
+                || !widths.contains(&selection.width)
                 || self
                     .variables
                     .get(usize::from(selection.value))
-                    .is_none_or(|variable| variable.value_type != CanonicalValueType::Integer)
+                    .is_none_or(|variable| variable.value_type != value_type)
         }) {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
-                "packed discrete selections must name unique integer input slots and 1..31 bits for numeric groups or 1..15 bits for encoded chunks",
+                "packed discrete selections must name unique input slots: integer ones of 1..31 bits for numeric groups or 1..15 bits for encoded chunks, real ones for numeric groups of 32 bits or more",
             ));
         }
         let mut edged = HashSet::new();

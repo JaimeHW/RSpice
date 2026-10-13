@@ -1386,6 +1386,15 @@ impl DiscreteAnalogInput {
     /// Shared by ordinary sampling and the circuit's Active-region exchange.
     fn four_state_value(&self, value: &FourStateValue) -> Option<f64> {
         if let Some((lsb, width, encoded)) = self.selection {
+            if !encoded && width > 31 {
+                // A numeric selection of 32 bits or more (an extension beyond
+                // Verilog-AMS 2023 Table 7-1) reads its unsigned value,
+                // correctly rounded; a position outside the value is X.
+                let msb = lsb.checked_add(i64::from(width - 1))?;
+                return rspice_veriloga::canonical_ir::digital_value::part_select(value, msb, lsb)
+                    .to_real(false)
+                    .ok();
+            }
             let mut selected = 0u32;
             let mut known = 0u32;
             for bit in 0..width {
@@ -1406,7 +1415,10 @@ impl DiscreteAnalogInput {
             }
             return Some(f64::from(selected));
         }
-        value.to_integer(self.signed).map(|value| value as f64)
+        // Correctly rounded at any width, so a grouping of 32 bits or more
+        // (an extension beyond Verilog-AMS 2023 Table 7-1) is exact below
+        // 2^53. X or Z leaves the read unavailable.
+        value.to_real(self.signed).ok()
     }
 
     fn sample(
@@ -1655,7 +1667,11 @@ impl MixedSignalHost {
                     selection: selection
                         .map(|selection| (selection.lsb, selection.width, selection.encoded)),
                     edge,
-                    signed: signal.integer && selection.is_none(),
+                    // A narrow packed grouping is zero-extended whatever its
+                    // signedness (Verilog-AMS 2023 Table 7-1); one of 32 bits
+                    // or more keeps the sign it was declared with.
+                    signed: selection.is_none()
+                        && (signal.integer || (signal.width > 31 && signal.signed)),
                     real: signal.kind.is_real(),
                     name: signal.name.to_string(),
                     analog_sample: false,

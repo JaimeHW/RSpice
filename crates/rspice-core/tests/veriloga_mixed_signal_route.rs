@@ -4930,3 +4930,78 @@ endmodule
         }
     }
 }
+
+/// **A packed grouping of 32 bits or more reads as a real.**
+///
+/// Verilog-AMS 2023 Table 7-1 stops at 31 bits; beyond it RSpice reads the
+/// integer value, unsigned unless declared signed, correctly rounded. Each
+/// read is compared against a nearby exact double, so an inexact read is off
+/// by whole units: 2^40 - 1 is exact, 2^53 + 1 rounds down to the even 2^53,
+/// and 2^53 + 3 rounds up to the even 2^53 + 4.
+///
+/// A part-select that wide reads the same way, unsigned as every part-select
+/// is: bits 47..8 of the signed -5 are forty ones, 2^40 - 1, whether the
+/// select is of a vector or of one element of an unpacked array.
+#[test]
+fn an_analog_read_of_a_wide_packed_value_is_its_integer_value() {
+    let model = ModelFile::new(
+        "wide_reader",
+        r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module wide_reader(a, b, c, d, e, f);
+    inout a, b, c, d, e, f;
+    electrical a, b, c, d, e, f;
+    reg [39:0] big;
+    reg signed [47:0] negative;
+    reg [63:0] down, up;
+    reg [63:0] words[0:1];
+    initial begin
+        big = 40'hFF_FFFF_FFFF;
+        negative = -48'sd5;
+        down = 64'h0020_0000_0000_0001;
+        up = 64'h0020_0000_0000_0003;
+        words[0] = 64'd0;
+        words[1] = 64'h0000_FFFF_FFFF_FF00;
+    end
+    analog begin
+        V(a) <+ big - 1099511627770.0;
+        V(b) <+ negative;
+        V(c) <+ down - 9007199254740992.0;
+        V(d) <+ up - 9007199254740992.0;
+        V(e) <+ negative[47:8] - 1099511627770.0;
+        V(f) <+ words[1][47:8] - 1099511627770.0;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* analog reads of wide packed values\n\
+         x1 a b c d e f wide_reader\n\
+         ra a 0 1k\n\
+         rb b 0 1k\n\
+         rc c 0 1k\n\
+         rd d 0 1k\n\
+         re e 0 1k\n\
+         rf f 0 1k\n\
+         .va \"{}\" wide_reader\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 2.0e-9, 0.5e-9);
+    for (node, expected) in [
+        ("a", 5.0),
+        ("b", -5.0),
+        ("c", 0.0),
+        ("d", 4.0),
+        ("e", 5.0),
+        ("f", 5.0),
+    ] {
+        for value in waveform(&result, node) {
+            assert!(
+                (value - expected).abs() < 1e-9,
+                "V({node}) is {value}, expected {expected}"
+            );
+        }
+    }
+}

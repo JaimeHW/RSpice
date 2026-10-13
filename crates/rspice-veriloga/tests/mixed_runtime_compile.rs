@@ -169,27 +169,34 @@ fn shared_discrete_inputs_reject_dual_writers_and_unrepresentable_widths() {
         enable_ams: true,
         ..Default::default()
     });
-    for (source, expected) in [
-        (
+    let error = compiler
+        .compile_runtime(
             "module dual(p); inout p; electrical p; reg state; initial state=0; analog begin state=1; I(p)<+state; end endmodule",
-            "cannot be written by the analog body",
-        ),
-        // VAMS-2023 Table 7-1 separates an `integer` variable from a packed
-        // bit grouping: the grouping is zero-extended into the analog domain
-        // and carries at most 31 bits, whatever its signedness in a discrete
-        // expression. A 64-bit `reg` names no analog value, so the refusal is
-        // the width and it says which spelling does carry a signed 32-bit one.
-        (
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("cannot be written by the analog body"),
+        "{error}"
+    );
+    // VAMS-2023 Table 7-1 separates an `integer` variable from a packed bit
+    // grouping and stops the grouping at 31 bits. A wider one is an RSpice
+    // extension: its analog input slot is a real holding the integer value.
+    let wide = compiler
+        .compile_runtime(
             "module wide(p); inout p; electrical p; reg [63:0] state; initial state=0; analog I(p)<+state; endmodule",
-            "exceeds the 31-bit grouping limit",
-        ),
-    ] {
-        let error = compiler
-            .compile_runtime(source, None)
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains(expected), "{error}");
-    }
+            None,
+        )
+        .unwrap();
+    let hir = &wide.canonical_ir.hir;
+    let [[value, _]] = hir.discrete_inputs.as_slice() else {
+        panic!("one discrete input: {:?}", hir.discrete_inputs);
+    };
+    assert_eq!(
+        hir.variables[usize::from(*value)].value_type,
+        rspice_veriloga::canonical_ir::hir::CanonicalValueType::Real
+    );
 }
 
 #[test]
@@ -639,9 +646,24 @@ endmodule
         1
     );
     assert_eq!(hir.discrete_selections.len(), 2);
+    // A numeric selection of 32 bits or more reads as a real (an extension
+    // beyond Verilog-AMS 2023 Table 7-1), into a real input slot.
+    let wide = compiler
+        .compile_runtime(
+            "module wide(p); inout p; electrical p; reg [95:0] value; initial value=0; analog I(p)<+value[31:0]; endmodule",
+            None,
+        )
+        .unwrap();
+    wide.canonical_ir.validate().unwrap();
+    let [selection] = wide.canonical_ir.hir.discrete_selections.as_slice() else {
+        panic!("one selection");
+    };
+    assert_eq!((selection.width, selection.encoded), (32, false));
+    assert_eq!(
+        wide.canonical_ir.hir.variables[usize::from(selection.value)].value_type,
+        rspice_veriloga::canonical_ir::hir::CanonicalValueType::Real
+    );
     for (declaration, read, diagnostic) in [
-        ("reg [95:0] value;", "value[31:0]", "31-bit grouping limit"),
-        ("reg [95:0] value;", "value", "31-bit grouping limit"),
         (
             "reg [0:95] value;",
             "value[3:0]",

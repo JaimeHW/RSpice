@@ -16,7 +16,8 @@ use smol_str::SmolStr;
 ///
 /// Version 160 lowers an analog `@(posedge d)`/`@(negedge d)` on a discrete
 /// signal to a digital edge event (`HirModel::discrete_edges`) where it was a
-/// `cross` detector.
+/// `cross` detector, and reads a packed grouping or numeric part-select of 32
+/// bits or more as a real where it was refused.
 /// Version 159 gives the digital plan a system-call site table, `%m` scopes
 /// and observer functions, four process value kinds (system task, system
 /// function, call output, pure function), and relocates sites and renames

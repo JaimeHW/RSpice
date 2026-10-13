@@ -2899,6 +2899,80 @@ fn analog_edges_of_reals_and_of_discrete_expressions_are_refused() {
     }
 }
 
+/// A packed grouping of 32 bits or more reads as a real (beyond Verilog-AMS
+/// 2023 Table 7-1), with one note per module citing the table.
+#[test]
+fn an_analog_read_of_a_wide_packed_signal_is_a_real_with_one_note() {
+    let file = analyze(&module_src(
+        r#"
+        reg [39:0] wide;
+        reg signed [63:0] wider;
+        reg [31:0] narrow;
+        initial begin wide = 0; wider = 0; narrow = 0; end
+        analog I(p, n) <+ (wide + wider + narrow[30:0]) * V(p, n);
+    "#,
+    ))
+    .expect("a wide packed read compiles");
+    let notes: Vec<_> = file
+        .warnings
+        .iter()
+        .filter(|warning| warning.code == "VA-SEM-WIDE-DISCRETE-READ")
+        .collect();
+    assert_eq!(notes.len(), 1, "{:?}", file.warnings);
+    assert!(
+        notes[0].message.contains("Table 7-1"),
+        "{}",
+        notes[0].message
+    );
+    let module = file.modules.into_values().next().unwrap();
+    for name in ["wide", "wider"] {
+        let variable = module
+            .variables
+            .iter()
+            .find(|variable| variable.name == name)
+            .unwrap();
+        assert_eq!(variable.value_type, ValueType::Real, "{name}");
+    }
+}
+
+/// A numeric part-select of 32 bits or more reads as a real too, with a note
+/// at the select, while a narrower one keeps its integer slot.
+#[test]
+fn an_analog_part_select_of_32_bits_or_more_is_a_real_with_a_note() {
+    let file = analyze(&module_src(
+        r#"
+        reg [95:0] word;
+        initial word = 0;
+        analog I(p, n) <+ (word[71:32] + word[30:0]) * V(p, n);
+    "#,
+    ))
+    .expect("a wide part-select compiles");
+    let notes: Vec<_> = file
+        .warnings
+        .iter()
+        .filter(|warning| warning.code == "VA-SEM-WIDE-DISCRETE-READ")
+        .collect();
+    assert_eq!(notes.len(), 1, "{:?}", file.warnings);
+    assert!(
+        notes[0].message.contains("40-bit part-select"),
+        "{}",
+        notes[0].message
+    );
+    let module = file.modules.into_values().next().unwrap();
+    let mut widths: Vec<_> = module
+        .discrete_selections
+        .iter()
+        .map(|selection| {
+            (
+                selection.width,
+                module.variables[selection.value].value_type,
+            )
+        })
+        .collect();
+    widths.sort_by_key(|(width, _)| *width);
+    assert_eq!(widths, [(31, ValueType::Integer), (40, ValueType::Real)]);
+}
+
 #[test]
 fn parameter_defaults_and_array_bounds_can_read_earlier_localparams() {
     let module = analyze_one(&module_src(

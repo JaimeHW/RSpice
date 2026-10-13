@@ -2671,11 +2671,22 @@ fn module_integer_ownership_checks_domains_widths_and_array_storage() {
             );
         }
     }
+    // A 32-bit grouping is past Verilog-AMS 2023 Table 7-1's 31 bits, which
+    // RSpice extends: the analog read is a real holding the integer value.
     for kind in ["reg", "reg signed"] {
-        let error = analyze_error(&format!(
-            "module bad(p); inout p; electrical p; {kind} [31:0] bits; initial bits=1; analog I(p)<+bits; endmodule"
+        let analyzed = analyze(&format!(
+            "module wide(p); inout p; electrical p; {kind} [31:0] bits; initial bits=1; analog I(p)<+bits; endmodule"
         ));
-        assert!(error.contains("31-bit grouping limit"), "{error}");
+        let module = only_module(&analyzed);
+        let slot = module
+            .variables
+            .iter()
+            .position(|variable| variable.name == "bits")
+            .unwrap();
+        assert_eq!(
+            module.variables[slot].value_type,
+            rspice_veriloga::types::ValueType::Real
+        );
     }
     let analyzed = analyze("module owned; integer values[0:1]; initial values[0]=1; endmodule");
     let array = &only_module(&analyzed).digital.signals[0];

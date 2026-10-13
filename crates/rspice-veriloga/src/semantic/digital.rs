@@ -648,6 +648,10 @@ enum SelectBound {
     Part,
 }
 
+/// Diagnostic code for an analog read of a packed discrete value wider than
+/// the 31 bits Verilog-AMS 2023 Table 7-1 gives a bit grouping.
+pub(super) const WIDE_DISCRETE_READ_CODE: &str = "VA-SEM-WIDE-DISCRETE-READ";
+
 impl SemanticAnalyzer {
     /// Resolve and validate the module's discrete-domain content.
     ///
@@ -849,19 +853,34 @@ impl SemanticAnalyzer {
             {
                 continue;
             }
-            let is_real = signal.class.is_real();
             let integer = matches!(
                 signal.class,
                 DigitalSignalClass::Variable(DigitalVariableKind::Integer)
             );
             // VAMS-2023 Table 7-1 distinguishes integer variables from packed
             // bit groupings. The latter are zero-extended and limited to 31 bits,
-            // independently of their signedness in a digital expression.
-            if !is_real && !integer && signal.width > 31 {
-                self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
-                    "analog read of packed discrete signal `{}` exceeds the 31-bit grouping limit; use an integer variable for a signed 32-bit value", signal.name
-                )), signal.span);
+            // independently of their signedness in a digital expression. A
+            // grouping of 32 bits or more is an RSpice extension beyond the
+            // table: it reads as a `real` holding the grouping's integer value,
+            // signed when the declaration is, correctly rounded (exact below
+            // 2^53). An X or Z bit leaves the read unavailable, as it does a
+            // narrow one.
+            let wide = !signal.class.is_real() && !integer && signal.width > 31;
+            if wide {
+                self.warn(
+                    WIDE_DISCRETE_READ_CODE,
+                    format!(
+                        "analog read of the {}-bit packed discrete signal `{}` (and any other \
+                         packed value of 32 bits or more in this module) goes beyond Verilog-AMS \
+                         2023 Table 7-1, which limits a bit grouping read from the analog \
+                         context to 31 bits; RSpice reads it as a real holding the integer \
+                         value, signed only when the declaration is, exact below 2^53",
+                        signal.width, signal.name
+                    ),
+                    module.span,
+                );
             }
+            let is_real = signal.class.is_real() || wide;
             let value_type = if is_real {
                 super::ValueType::Real
             } else {

@@ -24,6 +24,18 @@ struct Projection {
     packed: Option<PackedArrayLayout>,
 }
 
+impl Projection {
+    /// A numeric group of 32 bits or more reads as a real holding its integer
+    /// value; a narrower one, and every encoded chunk, as an integer.
+    fn value_type(width: u32, packed: Option<PackedArrayLayout>) -> ValueType {
+        if packed.is_none() && width > 31 {
+            ValueType::Real
+        } else {
+            ValueType::Integer
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct ProjectionBuilder {
     signals: HashMap<SmolStr, SignalShape>,
@@ -167,11 +179,31 @@ impl SemanticAnalyzer {
                 (high, low)
             }
         };
-        let width = high.abs_diff(low).checked_add(1)
-            .filter(|width| *width <= 31)
-            .ok_or_else(|| error(format!(
-                "analog read of packed discrete selection `{name}` exceeds the 31-bit grouping limit"
-            )))? as u32;
+        let width = high
+            .abs_diff(low)
+            .checked_add(1)
+            .and_then(|width| u32::try_from(width).ok())
+            .ok_or_else(|| {
+                error(format!(
+                    "analog read of packed discrete selection `{name}` is wider than a bit \
+                     grouping can be"
+                ))
+            })?;
+        // A selection of 32 bits or more reads as a real holding its unsigned
+        // integer value, as a whole grouping that wide does (see
+        // `bind_discrete_analog_reads`).
+        if width > 31 {
+            self.warn(
+                super::digital::WIDE_DISCRETE_READ_CODE,
+                format!(
+                    "analog read of the {width}-bit part-select of packed discrete signal \
+                     `{name}` goes beyond Verilog-AMS 2023 Table 7-1, which limits a bit \
+                     grouping read from the analog context to 31 bits; RSpice reads it as a \
+                     real holding the selection's unsigned integer value, exact below 2^53"
+                ),
+                span,
+            );
+        }
         // Saturation is safe here: the bounded-width group is entirely outside
         // storage when its exact least-significant offset cannot fit in i64.
         let lsb = shape.range.position_of(low);
@@ -294,6 +326,7 @@ impl SemanticAnalyzer {
             ))
         };
         let key = (name.clone(), lsb, width, packed.is_some());
+        let value_type = Projection::value_type(width, packed);
         let existing = self.discrete_projection.indices.get(&key).copied();
         let ordinal = if let Some(ordinal) = existing {
             ordinal
@@ -323,11 +356,11 @@ impl SemanticAnalyzer {
             // inlining. Source declarations cannot alias a projection lane.
             let value: SmolStr = format!("__packed@{ordinal}_value").into();
             let validity: SmolStr = format!("__packed@{ordinal}_valid").into();
-            for name in [&value, &validity] {
+            for (name, value_type) in [(&value, value_type), (&validity, ValueType::Integer)] {
                 self.define_symbol(Symbol {
                     name: name.clone(),
                     kind: SymbolKind::Variable,
-                    value_type: ValueType::Integer,
+                    value_type,
                     span,
                     attrs: Default::default(),
                 })?;
@@ -376,14 +409,17 @@ impl SemanticAnalyzer {
         // symbol scope has since closed. Its storage remains module-owned.
         let names = {
             let projection = &self.discrete_projection.projections[ordinal];
-            [projection.value.clone(), projection.validity.clone()]
+            [
+                (projection.value.clone(), value_type),
+                (projection.validity.clone(), ValueType::Integer),
+            ]
         };
-        for name in names {
+        for (name, value_type) in names {
             if self.symbols.lookup(&name).is_none() {
                 self.define_symbol(Symbol {
                     name,
                     kind: SymbolKind::Variable,
-                    value_type: ValueType::Integer,
+                    value_type,
                     span,
                     attrs: Default::default(),
                 })?;
@@ -411,9 +447,10 @@ impl SemanticAnalyzer {
             };
             let value_base = module.variables.len();
             let validity_base = value_base + len;
-            for (name, base) in [
-                (&projection.value, value_base),
-                (&projection.validity, validity_base),
+            let value_type = Projection::value_type(projection.width, projection.packed);
+            for (name, base, value_type) in [
+                (&projection.value, value_base, value_type),
+                (&projection.validity, validity_base, ValueType::Integer),
             ] {
                 if is_array {
                     let layout = AnalyzedArray {
@@ -434,8 +471,12 @@ impl SemanticAnalyzer {
                     };
                     module.variables.push(AnalyzedVariable {
                         name,
-                        var_type: VarType::Integer,
-                        value_type: ValueType::Integer,
+                        var_type: if value_type == ValueType::Real {
+                            VarType::Real
+                        } else {
+                            VarType::Integer
+                        },
+                        value_type,
                         is_state: true,
                         retains_input: false,
                         is_event_controlled: true,
