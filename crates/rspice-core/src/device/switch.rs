@@ -1138,7 +1138,7 @@ impl VoltageSwitch {
 
     /// Calculate resistance based on control voltage and the present state.
     fn calculate_resistance(&self, vctrl: Value) -> Value {
-        if self.is_ideal() && self.physical_parameter_error().is_none() {
+        if self.is_ideal() && self.parameter_check().error.is_none() {
             return ideal_resistance(self.state, self.ron, self.roff);
         }
         let (g, _) = self.control_sensitivity(vctrl);
@@ -3227,6 +3227,30 @@ mod tests {
         let (conductance, derivative) = switch.control_sensitivity(control);
         assert!(conductance.is_nan() && derivative.is_nan());
         switch.ron = 10.0;
+        assert_eq!(
+            bits(switch.control_sensitivity(control)),
+            bits(fresh(10.0, 1.0e3, 0.49, 0.02, 0.02).control_sensitivity(control))
+        );
+
+        // A zero SMOOTH written in place selects the ideal law, whose
+        // validation (no transition slope) and resistance come from the same
+        // keyed check; a negative one refuses it, and SMOOTH back restores
+        // the smooth law.
+        switch.smooth = 0.0;
+        let ideal = fresh(10.0, 1.0e3, 0.49, 0.02, 0.0);
+        assert_eq!(
+            bits(switch.control_sensitivity(control)),
+            bits(ideal.control_sensitivity(control))
+        );
+        assert_eq!(
+            switch.calculate_resistance(control).to_bits(),
+            ideal.calculate_resistance(control).to_bits()
+        );
+        switch.smooth = -0.1;
+        let (conductance, derivative) = switch.control_sensitivity(control);
+        assert!(conductance.is_nan() && derivative.is_nan());
+        assert!(switch.calculate_resistance(control).is_nan());
+        switch.smooth = 0.02;
         assert_eq!(
             bits(switch.control_sensitivity(control)),
             bits(fresh(10.0, 1.0e3, 0.49, 0.02, 0.02).control_sensitivity(control))
