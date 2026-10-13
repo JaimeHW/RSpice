@@ -844,3 +844,78 @@ endmodule
         "the clamped node must follow the same trace either way, worst difference {worst:e}"
     );
 }
+
+/// A D/A edge lifts a switch's control from 0.1 V to 0.91 V at 10 ns, short of
+/// the 0.95 V it turns on at; a slow ramp then carries it across at 14 ns.
+/// The switch's step limit (ngspice's `sw/swtrunc.c`) reads the control's
+/// change across a step as a rate. With an edge that has no transition time,
+/// the change across every step out of 10 ns carries the 0.81 V jump whole,
+/// however short the step; read as a rate, it would ask the same tenth of
+/// every retry until the step collapsed. The limit takes its reference after
+/// the jump instead. With the edge a 1 ps ramp the control is continuous.
+/// Either way the switch turns on within the 1 ns maximum step of 14 ns
+/// (ngspice-46 on the deck with the edges as 1 ps PWL ramps: 14.56 ns), and
+/// off at the falling edge.
+#[test]
+fn a_drive_step_onto_a_switch_control_is_not_read_as_a_rate() {
+    const MODULE: &str = "`timescale 1ns/1ps
+module edge_drive(q);
+  output q; reg q;
+  initial begin q = 1'b0; #10 q = 1'b1; #20 q = 1'b0; end
+endmodule
+";
+    for ramp in [None, Some(1.0e-12)] {
+        let mut source = String::from(MODULE);
+        if let Some(ramp) = ramp {
+            for (_, module) in rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES {
+                source.push_str(module);
+            }
+            source.push_str(&format!(
+                "\nconnectrules edge_rules;\nconnect d2a #(.vsup(1.8), .trise({ramp:e}), \
+                 .tfall({ramp:e}));\nendconnectrules\n"
+            ));
+        }
+        let model = ModelFile::new(&source);
+        let deck = format!(
+            "* a D/A edge onto a switch control\n.param vcc=1.8\n\
+             vr r 0 pwl(0 0 40n 0.4)\nbc c 0 v = 0.45*v(q) + v(r)\n\
+             s1 out 0 c 0 swh\n.model swh sw vt=0.9 vh=0.05 ron=50 roff=1e12\n\
+             vdd vdd 0 1\nrl vdd out 1k\nx1 q edge_drive\n.va \"{}\" edge_drive\n.end\n",
+            model.path()
+        );
+        let engine = Engine::default();
+        let tran = engine
+            .run_tran(&Netlist::parse(&deck).unwrap(), 40.0e-9, 1.0e-9)
+            .unwrap_or_else(|error| panic!("ramp {ramp:?}: {error}"));
+        let out = tran.try_voltage_waveform_named("out").expect("v(out)");
+        let on = tran.time[out
+            .iter()
+            .position(|&v| v < 0.5)
+            .expect("the switch turns on")];
+        let edge = tran.time.partition_point(|&t| t < 10.0e-9);
+        println!(
+            "ramp {ramp:?}: {} points, {} timestep reductions, on at {on:e} s; from the rising edge: {:?}",
+            tran.time.len(),
+            engine.convergence_quality().timestep_reductions,
+            &tran.time[edge..(edge + 8).min(tran.time.len())]
+        );
+        assert!(
+            (14.0e-9..=15.0e-9).contains(&on),
+            "ramp {ramp:?}: the switch turned on at {on:e} s"
+        );
+        let after_fall = tran
+            .time
+            .partition_point(|&t| t <= 30.0e-9 + ramp.unwrap_or(0.0));
+        assert!(
+            out[after_fall] > 0.9,
+            "ramp {ramp:?}: v(out) = {} at {:e} s, after the falling edge",
+            out[after_fall],
+            tran.time[after_fall]
+        );
+        assert!(
+            tran.time.len() < 400,
+            "ramp {ramp:?}: {} points",
+            tran.time.len()
+        );
+    }
+}

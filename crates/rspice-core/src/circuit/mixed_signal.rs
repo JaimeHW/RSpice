@@ -205,6 +205,16 @@ impl CircuitData {
         !self.mixed_signal_hosts.is_empty()
     }
 
+    /// Whether the accepted point stepped a digital-to-analog drive of any
+    /// instance: the solution accepted there is the drive's left limit, and
+    /// the interval leaving it opens on a right limit no accepted sample
+    /// holds. See `MixedSignalHost::accepted_point_stepped_a_drive`.
+    pub(crate) fn accepted_point_stepped_a_mixed_drive(&self) -> bool {
+        self.mixed_signal_hosts
+            .iter()
+            .any(MixedSignalHost::accepted_point_stepped_a_drive)
+    }
+
     /// Register one elaborated mixed module.
     pub(crate) fn add_mixed_signal_host(
         &mut self,

@@ -2849,12 +2849,32 @@ impl Engine {
     /// from `accepted_solution` to `candidate_solution`, each switch in the
     /// state the candidate left it. `None` when no control is closing on the
     /// threshold that would change its switch.
+    ///
+    /// The limit reads a control's change across the step as a rate, so it
+    /// never counts a discontinuity of the control at a breakpoint. Where the
+    /// accepted point stepped a D/A drive with no transition time, the sample
+    /// there is the drive's left limit, and a control that follows the drive
+    /// jumps at the first instant after it: the change across every step out
+    /// of that point carries the jump whole, however short the step, so the
+    /// limit would ask the same fraction of each retry until the step
+    /// collapsed. The reference is the control just after the jump, the
+    /// right limit, which no sample holds until the step out of the point
+    /// ends; that step is left to the other limits, and the switch limit
+    /// takes up again from its end. The accepted point's record cannot tell
+    /// an edge with a transition time from one without, so a ramp's first
+    /// step is left to the other limits too; the ramp's completion
+    /// breakpoint ends that step at the latest, and the limit holds for the
+    /// rest of the ramp.
     pub(super) fn switch_threshold_truncation_limit(
         circuit: &crate::circuit::CircuitData,
         accepted_solution: &[Value],
         candidate_solution: &[Value],
         dt: Value,
     ) -> Option<Value> {
+        #[cfg(feature = "veriloga")]
+        if circuit.accepted_point_stepped_a_mixed_drive() {
+            return None;
+        }
         let voltage_limits = circuit.vswitches.iter().filter_map(|switch| {
             switch.threshold_approach_step_limit(accepted_solution, candidate_solution, dt)
         });
