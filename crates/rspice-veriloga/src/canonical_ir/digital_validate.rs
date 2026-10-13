@@ -1202,7 +1202,9 @@ impl CanonicalDigitalPlan {
                                 ));
                             }
                             if let CfgValueKind::DigitalPackedNonblockingWrite {
-                                region, wait, ..
+                                region,
+                                wait,
+                                ..
                             } = kind
                             {
                                 if *region != DigitalSchedulingRegion::NonBlockingAssign {

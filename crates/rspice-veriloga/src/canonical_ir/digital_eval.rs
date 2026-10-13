@@ -2877,9 +2877,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         };
         Ok(self
             .selection_index(base, signed)?
-            .and_then(|base| {
-                super::digital::indexed_part_bounds(authored, base, width, ascending)
-            })
+            .and_then(|base| super::digital::indexed_part_bounds(authored, base, width, ascending))
             .map(|(msb, lsb)| DigitalArrayWriteSelect::Part { msb, lsb }))
     }
 
