@@ -1851,6 +1851,15 @@ impl DigitalHost {
             return index;
         }
         let index = self.slots.len();
+        self.intern_thread_target(process, index);
+        self.slots.push(slot);
+        index
+    }
+
+    /// Give the forked thread in slot `index`, the next new slot, its kernel
+    /// target. Slots keep their target once freed, so a restore re-interns
+    /// every child slot's target in slot order and gets the same identities.
+    fn intern_thread_target(&mut self, process: usize, index: usize) {
         let plan_process = &self.plan.processes[process];
         let id = self.scheduler.intern_target(EventTarget {
             node_id: index,
@@ -1868,8 +1877,6 @@ impl DigitalHost {
         }
         self.process_of_target[usize::from(id)] = index;
         self.targets.push(id);
-        self.slots.push(slot);
-        index
     }
 
     /// A forked child ended: free its slot, and resume its parent at the join

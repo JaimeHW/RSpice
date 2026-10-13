@@ -431,6 +431,18 @@ impl<'a> DigitalCheckpointReader<'a> {
         &mut self,
         image: &DigitalResumeCheckpoint,
     ) -> Result<DigitalResumeState> {
+        self.restore_thread_resume(image, false)
+    }
+
+    /// [`Self::restore_resume`] for a thread, `forked` when a `fork` started
+    /// it. A forked thread's outermost frame is the process or routine that
+    /// forked it (IEEE 1364-2005 section 9.8.2), so it may run a routine with
+    /// no caller below it; that routine must then contain a `fork`.
+    pub fn restore_thread_resume(
+        &mut self,
+        image: &DigitalResumeCheckpoint,
+        forked: bool,
+    ) -> Result<DigitalResumeState> {
         self.header(&image.header)?;
         self.charge(image.arguments.len().saturating_add(1))?;
         if image.analog_instruction.is_some() && image.routine.is_some() {
@@ -443,9 +455,18 @@ impl<'a> DigitalCheckpointReader<'a> {
         let slots = self.routine_slots(image.routine, &image.slots)?;
         let mut callers = Vec::with_capacity(image.callers.len());
         for (depth, caller) in image.callers.iter().enumerate() {
-            // The outermost frame is the process's own; every frame above it
-            // runs a routine.
-            if (depth == 0) != caller.routine.is_none() {
+            // The outermost frame is the process's own, or for a forked
+            // thread the routine that forked it; every frame above it runs a
+            // routine.
+            let ordered = if depth == 0 {
+                match caller.routine {
+                    None => true,
+                    Some(routine) => forked && self.forks(routine)?,
+                }
+            } else {
+                caller.routine.is_some()
+            };
+            if !ordered {
                 return Err(invalid("task-enable frames are out of order"));
             }
             let caller_function = self.frame_function(image.process, caller.routine)?;
@@ -472,7 +493,10 @@ impl<'a> DigitalCheckpointReader<'a> {
                 slots,
             });
         }
-        if image.routine.is_some() && callers.is_empty() {
+        if let Some(routine) = image.routine
+            && callers.is_empty()
+            && !(forked && self.forks(routine)?)
+        {
             return Err(invalid("a routine frame without its callers"));
         }
         let block = function
@@ -528,6 +552,38 @@ impl<'a> DigitalCheckpointReader<'a> {
             callers,
             unwinding: None,
         })
+    }
+
+    /// Whether `routine`'s body forks, so that a thread can start inside it.
+    fn forks(&self, routine: DigitalRoutineId) -> Result<bool> {
+        let routine = self
+            .plan
+            .routine(routine)
+            .ok_or_else(|| invalid("unknown routine"))?;
+        Ok(routine.function.blocks.iter().any(|block| {
+            matches!(
+                block.terminator,
+                CfgTerminator::Wait {
+                    wait: DigitalWait::Fork { .. },
+                    ..
+                }
+            )
+        }))
+    }
+
+    /// A thread waiting at a `join` must resume where its `fork` resumes.
+    pub fn validate_join_resume(&self, state: &DigitalResumeState) -> Result<()> {
+        if state.plan_identity != self.plan.content_identity || state.analog_instruction.is_some() {
+            return Err(invalid("join has an incompatible continuation"));
+        }
+        let function = self.frame_function(state.process, state.routine)?;
+        if !function.blocks.iter().any(|block| {
+            matches!(&block.terminator,
+            CfgTerminator::Wait { wait: DigitalWait::Fork { .. }, resume, .. } if *resume == state.block)
+        }) {
+            return Err(invalid("joining continuation is not a compiled fork"));
+        }
+        Ok(())
     }
 
     /// An automatic routine frame's slots, typed by the routine's frame.

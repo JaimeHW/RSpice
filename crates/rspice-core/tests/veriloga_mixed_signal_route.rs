@@ -601,6 +601,77 @@ fn rejected_timepoints_leave_the_digital_half_exactly_where_they_found_it() {
     }
 }
 
+/// A process that forks three threads every cycle and joins them, so that
+/// forked threads are always alive when the step controller throws a
+/// timepoint away.
+const FORK_PULSES: &str = r#"
+`include "disciplines.vams"
+module fork_pulses(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q;
+    initial begin
+        q = 1'b0;
+        forever begin
+            fork
+                #7 q = 1'b1;
+                #12 q = 1'b0;
+                begin #3; #6; end
+            join
+        end
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// Rollback mid-fork: rejected timepoints land while the forked threads wait
+/// at their delays, and the digital half must come out of every one exactly
+/// as it went in. Icarus 13 runs the same process with `q` rising at 7, 19,
+/// ..., 199 ns and falling at 12, 24, ..., 192 ns: 33 transitions in 200 ns.
+#[test]
+fn rejected_timepoints_leave_forked_threads_exactly_where_they_found_them() {
+    let model = ModelFile::new("fork_pulses_rollback", FORK_PULSES);
+    let deck = format!(
+        "* forked digital threads driving an analog RC across a d2a boundary\n\
+         x1 p 0 q fork_pulses\n\
+         rp p 0 1meg\n\
+         r1 q out 1k\n\
+         c1 out 0 10p\n\
+         .va \"{}\" fork_pulses\n\
+         .tran 1n 200n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let (coarse, coarse_rejections) = run_divider_with_rejection_count(&deck, 4.0e-9);
+    let (fine, _) = run_divider_with_rejection_count(&deck, 2.0e-11);
+    assert!(
+        coarse_rejections > 0,
+        "this test is vacuous unless the coarse run actually rejected timepoints"
+    );
+    let coarse_points = coarse
+        .digital_trace_named("q")
+        .expect("the coarse run traced q");
+    let fine_points = fine
+        .digital_trace_named("q")
+        .expect("the fine run traced q");
+    assert_eq!(digital_transitions(&coarse, "q"), 33);
+    assert_eq!(
+        coarse_points.len(),
+        fine_points.len(),
+        "a rejected timepoint must not add or drop a transition of a forked thread"
+    );
+    for (coarse_point, fine_point) in coarse_points.iter().zip(fine_points) {
+        assert_eq!(coarse_point.value, fine_point.value);
+        assert!(
+            (coarse_point.time - fine_point.time).abs() < 1.0e-15,
+            "a rejected timepoint must not move a forked thread's write: {:e} against {:e}",
+            coarse_point.time,
+            fine_point.time
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // (d) The analog-only module is untouched by any of this
 // ---------------------------------------------------------------------------

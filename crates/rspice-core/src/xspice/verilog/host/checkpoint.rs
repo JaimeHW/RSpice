@@ -46,7 +46,9 @@ pub(crate) struct HostCheckpoint {
     /// Version 1's per-process slots; empty in a version 2 image.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     slots: Vec<SlotImage>,
-    /// Version 2's threads, one per process until fork arrives.
+    /// Version 2's threads in slot order: one per process, then the threads
+    /// `fork` started, with a free slot kept as a finished thread with no
+    /// parent so that slot numbers survive.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     threads: Vec<ThreadImage>,
     delayed: Vec<(u64, Vec<DigitalDeferredCheckpoint>)>,
@@ -96,7 +98,8 @@ enum FrameRoutine {
 }
 
 /// One activation record: the routine, where it resumes, and its frame
-/// slots (none for a process body).
+/// slots (none for a process body). A thread inside tasks keeps one frame:
+/// its continuation carries the task-enable frames beneath it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FrameImage {
@@ -126,6 +129,8 @@ enum StatusImage {
     Event(DigitalWaitCheckpoint),
     Expression(u64),
     Finished,
+    /// At a `join`, waiting for the threads it forked.
+    Join,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,9 +191,6 @@ impl DigitalHost {
                     .into(),
             );
         }
-        if self.slots.len() > self.plan.processes.len() {
-            return Err("a design that has started `fork` branches cannot be checkpointed".into());
-        }
         if !self.inactive.is_empty()
             || !self.analog_waiters.is_empty()
             || self.analog_ready.is_some()
@@ -230,30 +232,28 @@ impl DigitalHost {
         let threads = self
             .slots
             .iter()
-            .enumerate()
-            .map(|(index, slot)| {
-                ThreadImage::from_slot(
-                    index,
-                    SlotImage {
-                        status: match &slot.status {
-                            ProcessStatus::Queued => StatusImage::Queued,
-                            ProcessStatus::AwaitingEvent(terms) => {
-                                StatusImage::Event(DigitalWaitCheckpoint::capture(
-                                    &self.plan,
-                                    &DigitalWaitRequest::Event(terms.clone()),
-                                ))
-                            }
-                            ProcessStatus::AwaitingExpression(token) => {
-                                StatusImage::Expression(*token)
-                            }
-                            ProcessStatus::Finished => StatusImage::Finished,
-                            _ => unreachable!("checked drained boundary"),
-                        },
-                        resume: slot.resume.as_ref().map(DigitalResumeCheckpoint::capture),
-                        after: slot.wait_after_sequence,
-                        remaining: DigitalEventCountCheckpoint::capture(&slot.remaining_events),
-                    },
-                )
+            .map(|slot| ThreadImage {
+                process: slot.process as u32,
+                parent: slot.parent.map(|parent| parent as u32),
+                status: match &slot.status {
+                    ProcessStatus::Queued => StatusImage::Queued,
+                    ProcessStatus::AwaitingEvent(terms) => {
+                        StatusImage::Event(DigitalWaitCheckpoint::capture(
+                            &self.plan,
+                            &DigitalWaitRequest::Event(terms.clone()),
+                        ))
+                    }
+                    ProcessStatus::AwaitingExpression(token) => StatusImage::Expression(*token),
+                    ProcessStatus::AwaitingJoin => StatusImage::Join,
+                    ProcessStatus::Finished => StatusImage::Finished,
+                    _ => unreachable!("checked drained boundary"),
+                },
+                frames: vec![FrameImage {
+                    routine: FrameRoutine::Process(slot.process as u32),
+                    resume: slot.resume.as_ref().map(DigitalResumeCheckpoint::capture),
+                }],
+                after: slot.wait_after_sequence,
+                remaining: DigitalEventCountCheckpoint::capture(&slot.remaining_events),
             })
             .collect();
         let effects = super::super::effects::checkpoint::EffectsImage::capture(&self.effects)?;
@@ -363,22 +363,28 @@ impl DigitalHost {
                 .chain([image.events.len(), image.expressions.len()]),
             limits,
         )?;
-        if threads.len() != self.plan.processes.len() {
+        let processes = self.plan.processes.len();
+        if threads.len() < processes {
             return Err("host process dimensions differ".into());
         }
         let mut slots = Vec::with_capacity(threads.len());
+        let mut lineage = Vec::with_capacity(threads.len());
         for (index, thread) in threads.into_iter().enumerate() {
-            // Until fork and tasks land, every thread is a process's root
-            // thread with exactly one frame, executing that process.
+            // Every thread has one frame, running its process; the frames of
+            // the tasks it is inside live in that frame's continuation. A
+            // process's own thread sits in its process's slot with no parent.
             let [frame] = thread.frames.as_slice() else {
                 return Err("host thread does not have exactly one frame".into());
             };
-            if thread.process as usize != index
-                || thread.parent.is_some()
-                || frame.routine != FrameRoutine::Process(index as u32)
+            let process = thread.process as usize;
+            let root = index < processes;
+            if frame.routine != FrameRoutine::Process(thread.process)
+                || process >= processes
+                || (root && (process != index || thread.parent.is_some()))
             {
                 return Err("host thread belongs to another process or routine".into());
             }
+            lineage.push((process, thread.parent.map(|parent| parent as usize)));
             slots.push(SlotImage {
                 status: thread.status,
                 resume: frame.resume.clone(),
@@ -391,16 +397,33 @@ impl DigitalHost {
         let mut restored = self.fresh();
         // Preserve the receiving registration order, including interleaved real
         // and bit participants. No old queued event or accounting is copied.
-        restored.scheduler = self.scheduler.checkpoint_template();
-        restored.targets.clone_from(&self.targets);
+        // Forked threads' targets come after every other, so the receiver's
+        // own are left behind and the image's are interned again in slot
+        // order: the kernel then refuses an image whose targets differ.
+        let base_targets = self.targets[..processes]
+            .iter()
+            .chain([&self.nba_target])
+            .chain(&self.external_targets)
+            .chain(&self.external_real_targets)
+            .map(|target| usize::from(*target) + 1)
+            .max()
+            .unwrap_or(0);
+        restored.scheduler = self.scheduler.checkpoint_template(base_targets);
+        restored.targets = self.targets[..processes].to_vec();
         restored.nba_target = self.nba_target;
         restored.external_targets.clone_from(&self.external_targets);
         restored
             .external_real_targets
             .clone_from(&self.external_real_targets);
-        restored
+        restored.process_of_target = self
             .process_of_target
-            .clone_from(&self.process_of_target);
+            .iter()
+            .copied()
+            .take(base_targets)
+            .collect();
+        for (index, (process, _)) in lineage.iter().enumerate().skip(processes) {
+            restored.intern_thread_target(*process, index);
+        }
         restored
             .scheduler
             .restore_checkpoint(&image.scheduler, limits.scheduler)
@@ -422,10 +445,11 @@ impl DigitalHost {
             restored.effects.restore_state(&section.image)?;
         }
         for (index, image) in slots.iter().enumerate() {
+            let (process, parent) = lineage[index];
             let resume = image
                 .resume
                 .as_ref()
-                .map(|image| reader.restore_resume(image))
+                .map(|image| reader.restore_thread_resume(image, parent.is_some()))
                 .transpose()
                 .map_err(|e| e.to_string())?;
             let remaining_events = reader
@@ -453,14 +477,39 @@ impl DigitalHost {
                     }
                     ProcessStatus::AwaitingExpression(*token)
                 }
+                StatusImage::Join => ProcessStatus::AwaitingJoin,
             };
-            restored.slots[index] = ProcessSlot {
+            let slot = ProcessSlot {
                 status,
                 resume,
+                parent,
                 remaining_events,
                 wait_after_sequence: image.after,
-                ..ProcessSlot::start(index)
+                ..ProcessSlot::start(process)
             };
+            if index < processes {
+                restored.slots[index] = slot;
+            } else {
+                restored.slots.push(slot);
+            }
+        }
+        // A thread's count of live children follows from their parents; a
+        // forked slot with no parent is free.
+        for index in processes..restored.slots.len() {
+            match restored.slots[index].parent {
+                Some(parent) => {
+                    let Some(forker) = restored.slots.get_mut(parent) else {
+                        return Err("forked thread names an unknown parent".into());
+                    };
+                    forker.children = forker
+                        .children
+                        .checked_add(1)
+                        .ok_or_else(|| "forked thread count overflows".to_string())?;
+                }
+                None => {
+                    restored.free_threads.insert(index);
+                }
+            }
         }
         let mut previous = None;
         for (tick, images) in &image.delayed {
@@ -528,13 +577,14 @@ impl DigitalHost {
             .store
             .current_sequence()
             .ok_or_else(|| "exhausted store sequence".to_string())?;
+        self.validate_thread_lineage()?;
         let mut expression_owners = BTreeSet::new();
         for (index, slot) in self.slots.iter().enumerate() {
             if slot.wait_after_sequence > sequence
                 || slot
                     .resume
                     .as_ref()
-                    .is_some_and(|resume| usize::from(resume.process()) != index)
+                    .is_some_and(|resume| usize::from(resume.process()) != slot.process)
             {
                 return Err("process frame or event barrier belongs to another execution".into());
             }
@@ -555,7 +605,8 @@ impl DigitalHost {
                         )
                         .map_err(|e| e.to_string())?;
                     check_remaining(&slot.remaining_events, repeated)?;
-                    if self.plan.processes[index].kind == DigitalProcessKind::ContinuousAssign
+                    if self.plan.processes[slot.process].kind
+                        == DigitalProcessKind::ContinuousAssign
                         && slot.wait_after_sequence != 0
                     {
                         return Err("continuous driver has a procedural event barrier".into());
@@ -579,9 +630,18 @@ impl DigitalHost {
                         .map_err(|e| e.to_string())?;
                     check_remaining(remaining, repeated)?;
                 }
+                ProcessStatus::AwaitingJoin => reader
+                    .validate_join_resume(require_frame()?)
+                    .map_err(|e| e.to_string())?,
                 ProcessStatus::Finished => {
-                    if self.plan.processes[index].kind == DigitalProcessKind::Always {
+                    if slot.parent.is_none()
+                        && index < self.plan.processes.len()
+                        && self.plan.processes[index].kind == DigitalProcessKind::Always
+                    {
                         return Err("always process is marked finished".into());
+                    }
+                    if slot.resume.is_some() {
+                        return Err("finished thread keeps a continuation".into());
                     }
                 }
                 _ => return Err("host has unfinished same-time execution".into()),
@@ -674,6 +734,74 @@ impl DigitalHost {
         for (slot, count) in self.slots.iter().zip(activations) {
             if count != usize::from(matches!(slot.status, ProcessStatus::Queued)) {
                 return Err("queued process and scheduled wakeup disagree".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl DigitalHost {
+    /// A forked thread hangs off a live thread of its own process that waits
+    /// at a `join` for exactly its live children, and every chain of parents
+    /// ends at a process's own thread. A free slot is a finished forked slot
+    /// with no parent, and nothing else is.
+    fn validate_thread_lineage(&self) -> Result<(), String> {
+        let processes = self.plan.processes.len();
+        if self.slots.len() < processes
+            || self
+                .free_threads
+                .iter()
+                .any(|index| *index < processes || *index >= self.slots.len())
+        {
+            return Err("thread slots and free slots differ".into());
+        }
+        let mut children = vec![0u32; self.slots.len()];
+        for (index, slot) in self.slots.iter().enumerate() {
+            let Some(parent) = slot.parent else {
+                let free = index >= processes;
+                if free != self.free_threads.contains(&index)
+                    || (free
+                        && (slot.status != ProcessStatus::Finished
+                            || slot.resume.is_some()
+                            || slot.children != 0))
+                    || (!free && slot.process != index)
+                {
+                    return Err("free thread slots differ".into());
+                }
+                continue;
+            };
+            let Some(forker) = self
+                .slots
+                .get(parent)
+                .filter(|_| index >= processes && parent != index)
+            else {
+                return Err("forked thread names an unknown parent".into());
+            };
+            if forker.process != slot.process
+                || forker.status != ProcessStatus::AwaitingJoin
+                || slot.status == ProcessStatus::Finished
+                || self.free_threads.contains(&index)
+            {
+                return Err("forked thread and its parent disagree".into());
+            }
+            children[parent] = children[parent].saturating_add(1);
+            let mut ancestor = parent;
+            let mut steps = 0;
+            while let Some(next) = self.slots[ancestor].parent {
+                steps += 1;
+                if steps > self.slots.len() {
+                    return Err("forked threads form a cycle".into());
+                }
+                ancestor = next;
+            }
+            if ancestor >= processes {
+                return Err("forked thread descends from no process".into());
+            }
+        }
+        for (slot, count) in self.slots.iter().zip(children) {
+            if slot.children != count || (slot.status == ProcessStatus::AwaitingJoin) != (count > 0)
+            {
+                return Err("thread waits at a join for other threads than it forked".into());
             }
         }
         Ok(())
@@ -819,6 +947,151 @@ endmodule
         assert_eq!(image(&restored), saved);
     }
 
+    const THREADS: &str = r#"`timescale 1ns/1ns
+module th;
+  reg [7:0] a, b, c, t, u, w;
+  reg go;
+  event e;
+  task automatic bump(inout [7:0] v, input [7:0] by);
+    begin #2 v = v + by; end
+  endtask
+  task stat;
+    begin
+      fork
+        #3 u = u + 1;
+        begin @(e) u = u + 8'h10; end
+      join
+      #1 u = u + 2;
+    end
+  endtask
+  initial begin
+    a = 0; b = 0; c = 0; t = 0; u = 0; w = 0; go = 0;
+    fork
+      begin #2 a = 1; #4 a = 2; end
+      begin @(posedge go) b = 5; #1 b = 6; end
+      begin
+        fork
+          #3 c = 7;
+          #5 c = c + 1;
+        join
+        c = c + 10;
+      end
+    join
+    w = 1;
+  end
+  initial begin
+    bump(t, 3);
+    bump(t, 4);
+  end
+  initial begin
+    #1 stat;
+  end
+  initial begin
+    #4 go = 1;
+    #1 -> e;
+  end
+endmodule
+"#;
+
+    /// Design P2 section 5.4: threads checkpoint mid-fork and mid-task. At
+    /// tick 1 the first process waits at a join for three children, one of
+    /// them at a join of its own; the second sleeps inside an automatic task;
+    /// the third waits at a join inside a static task, whose two children run
+    /// in that task's frame. A host restored at any tick resumes every thread
+    /// exactly: Icarus 13 ends at a=2 b=6 c=18 t=7 u=19 w=1.
+    #[test]
+    fn host_checkpoint_resumes_threads_mid_fork_and_mid_task() {
+        let mut original = host(THREADS);
+        original.start().unwrap();
+        for tick in [1, 3, 4, 5] {
+            original.advance_to(tick).unwrap();
+            let saved = transport(&image(&original));
+            let mut restored = host(THREADS);
+            restored
+                .restore_checkpoint(&saved, HostCheckpointLimits::default())
+                .unwrap();
+            assert_eq!(image(&restored), saved, "tick {tick}");
+            let mut reference = original.clone();
+            reference.advance_to(20).unwrap();
+            restored.advance_to(20).unwrap();
+            assert_eq!(image(&restored), image(&reference), "tick {tick}");
+            for (name, value) in [("a", 2), ("b", 6), ("c", 18), ("t", 7), ("u", 19), ("w", 1)] {
+                assert_eq!(
+                    restored.read(signal(&restored, name)).unwrap().to_u64(),
+                    Some(value),
+                    "{name} after a restore at tick {tick}"
+                );
+            }
+        }
+        // The first image really held forked threads, joins and task frames.
+        let mut early = host(THREADS);
+        early.start().unwrap();
+        early.advance_to(1).unwrap();
+        let value = serde_json::to_value(image(&early)).unwrap();
+        let threads = value["threads"].as_array().unwrap();
+        assert!(threads.len() > early.plan.processes.len() + 4);
+        assert_eq!(
+            threads
+                .iter()
+                .filter(|thread| thread["status"] == "Join")
+                .count(),
+            3
+        );
+        let in_task = |thread: &Value| {
+            !thread["frames"][0]["resume"]["callers"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        };
+        assert!(in_task(&threads[1]) && in_task(&threads[2]));
+    }
+
+    /// A forked thread whose parent, process, status or kernel target does
+    /// not fit the rest of the image is refused, and the receiver is left as
+    /// it was.
+    #[test]
+    fn host_checkpoint_rejects_threads_that_do_not_fit_their_lineage() {
+        let mut receiver = host(THREADS);
+        receiver.start().unwrap();
+        receiver.advance_to(1).unwrap();
+        let before = image(&receiver);
+        let base = serde_json::to_value(&before).unwrap();
+        let processes = receiver.plan.processes.len();
+        let child = processes;
+        let mut bad: Vec<Value> = Vec::new();
+        let mut value = base.clone();
+        value["threads"][child]["parent"] = json!(3);
+        bad.push(value);
+        let mut value = base.clone();
+        value["threads"][child]["process"] = json!(1);
+        bad.push(value);
+        let mut value = base.clone();
+        value["threads"][child]["status"] = json!("Finished");
+        value["threads"][child]["frames"][0]["resume"] = Value::Null;
+        bad.push(value);
+        let mut value = base.clone();
+        value["threads"].as_array_mut().unwrap().pop();
+        bad.push(value);
+        let mut value = base.clone();
+        value["threads"][child]["parent"] = json!(child);
+        bad.push(value);
+        let mut value = base.clone();
+        let targets = value["scheduler"]["targets"].as_array_mut().unwrap();
+        let last = targets.len() - 1;
+        targets[last]["instance"] = json!("initial#0 thread 99");
+        bad.push(value);
+        for (case, value) in bad.into_iter().enumerate() {
+            let bad: HostCheckpoint = serde_json::from_value(value).unwrap();
+            assert!(
+                receiver
+                    .restore_checkpoint(&bad, HostCheckpointLimits::default())
+                    .is_err(),
+                "case {case}"
+            );
+            assert_eq!(image(&receiver), before, "case {case} changed receiver");
+        }
+    }
+
     /// `$random`'s global seed and a process's `$urandom` stream are design
     /// state: a resumed run continues them exactly.
     #[test]
@@ -915,8 +1188,8 @@ endmodule
         let mut value = base.clone();
         value["threads"][queued]["status"] = value["threads"][expression]["status"].clone();
         bad.push(value);
-        // A thread of another process, a forked thread, and a second frame
-        // are all refused until fork and tasks exist.
+        // A process's own thread that names another process or a parent, and
+        // a second frame (task frames live in the continuation), are refused.
         let mut value = base.clone();
         value["threads"][queued]["process"] = json!(event);
         bad.push(value);

@@ -180,11 +180,12 @@ fn check_budget(
 }
 
 impl EventScheduler {
-    /// Retain registration order and limits without cloning pending execution.
+    /// Retain the registration order of the first `targets` targets and the
+    /// limits, without cloning pending execution.
     #[cfg(feature = "veriloga")]
-    pub(crate) fn checkpoint_template(&self) -> Self {
+    pub(crate) fn checkpoint_template(&self, targets: usize) -> Self {
         let mut template = Self::new(self.limits);
-        for target in self.queues.targets() {
+        for target in self.queues.targets().iter().take(targets) {
             template.queues.intern(target.clone());
         }
         template
