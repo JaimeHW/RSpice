@@ -16,6 +16,8 @@ use super::*;
 use crate::state::{CellViewRef, ComponentType, InstancePath, SchematicState};
 use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
 
+#[cfg(not(target_arch = "wasm32"))]
+mod object_rows;
 mod shelf;
 
 /// Give the project one more schematic master: the library cell view, and the
@@ -2159,15 +2161,16 @@ fn two_rf_ports_claiming_one_number_are_marked_on_both_rows() {
         "the port claiming a number alone states no hazard"
     );
 
-    // And the marking reaches the screen: a warning painted in the faint tone
-    // every other meta column uses is not a warning.
+    // The marking reaches the screen in the warning tone, not the faint one. The
+    // meta elides beside the port's name in this rail: it is found by its opening.
     let panel = NavigatorPanel::open(app);
     let warn = Tokens::get(&panel.ctx).color.warn;
     let tone = |meta: &str| {
         panel
             .runs
             .iter()
-            .find(|(run, _, _)| run.as_str() == meta)
+            .filter(|(run, _, _)| !run.is_empty())
+            .find(|(run, _, _)| meta.starts_with(run.trim_end_matches('\u{2026}')))
             .map(|(_, _, color)| *color)
     };
     assert_eq!(tone(&rf_port_meta(&rows[0])), Some(warn));

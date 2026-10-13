@@ -28,7 +28,9 @@ use crate::workbench::app_state::AppState;
 use rspice_design::connectivity::summary::DesignNet;
 
 use super::super::super::commands::vocabulary::Command;
-use super::super::super::design_system::{PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon};
+use super::super::super::design_system::{
+    PANEL_SECTION_H, PANEL_TABS_H, WorkbenchIcon, elide_text,
+};
 use super::super::super::state::{DesignPanel, Workspace};
 use super::rail::{self, RailDisclosure, RailFold};
 use super::{
@@ -155,16 +157,28 @@ fn occurrence_object_row(ui: &mut Ui, row: OccurrenceObjectRow<'_>) -> Response 
         t.color.text_faint
     };
     let font = theme::mono(SCHEMATIC_NAV_LABEL_SIZE, FontWeight::Regular);
-    let meta_width = ui
+    let meta_font = theme::mono(SCHEMATIC_NAV_META_SIZE, FontWeight::Regular);
+    let label_left = rect.left() + 47.0 + indent;
+    // The row is named by its reference, so the reference reads whole and the
+    // meta takes the room left beside it, elided. Sized the other way round, a
+    // source's reading clipped its name to its first letter: `V1` read `V`
+    // beside `V · DC · 1V · transient drive`, with nothing to say so.
+    let label_width = ui
         .painter()
-        .layout_no_wrap(
-            row.meta.to_owned(),
-            theme::mono(SCHEMATIC_NAV_META_SIZE, FontWeight::Regular),
-            meta_color,
-        )
+        .layout_no_wrap(announced.clone(), font.clone(), t.color.text)
         .size()
         .x;
-    let label_left = rect.left() + 47.0 + indent;
+    let meta = elide_text(
+        ui,
+        row.meta,
+        &meta_font,
+        rect.right() - 14.0 - label_left - label_width,
+    );
+    let meta_width = ui
+        .painter()
+        .layout_no_wrap(meta.clone(), meta_font.clone(), meta_color)
+        .size()
+        .x;
     let label_right = rect.right() - 14.0 - meta_width;
     let painter = ui.painter().with_clip_rect(egui::Rect::from_x_y_ranges(
         label_left..=label_right.max(label_left),
@@ -194,18 +208,23 @@ fn occurrence_object_row(ui: &mut Ui, row: OccurrenceObjectRow<'_>) -> Response 
             t.color.text_dim
         },
     );
+    let elided = meta != row.meta;
     ui.painter().text(
         egui::pos2(rect.right() - 8.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
-        row.meta,
-        theme::mono(SCHEMATIC_NAV_META_SIZE, FontWeight::Regular),
+        meta,
+        meta_font,
         meta_color,
     );
     theme::paint_focus_ring(ui, &response, rect);
     // The row draws itself at one level of indent, so it sits two levels under
     // the rail's band — the same place the nets and probes rails put theirs.
     rail::row(ui, &response, 2, None);
-    response
+    if elided {
+        response.on_hover_text(row.meta)
+    } else {
+        response
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
