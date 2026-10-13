@@ -15,7 +15,7 @@
 mod dc;
 mod frequency_table;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use num_complex::Complex64;
 
@@ -48,6 +48,7 @@ use crate::analysis::dcmatch::DcMatchResult;
 use crate::analysis::distortion::{DistortionAnalysisResult, DistortionPointResult};
 use crate::analysis::fourier::FourierResult;
 use crate::analysis::harmonic_balance::HbResult;
+use crate::analysis::measure_signals::impulse_observation::current_parameter;
 use crate::analysis::monte_carlo::{
     MeanConfidenceInterval, MeanConfidenceMethod, MonteCarloResult,
 };
@@ -335,6 +336,34 @@ fn require_named_columns(
     Ok(())
 }
 
+/// The branch names a result solved, lower case, for [`device_parameter_unit`].
+fn solved_branch_names<'a>(names: impl IntoIterator<Item = &'a str>) -> HashSet<String> {
+    names
+        .into_iter()
+        .map(|name| name.trim().to_ascii_lowercase())
+        .collect()
+}
+
+/// The unit of a device-parameter series, as the output layer classifies the
+/// parameter wherever it reads one.
+///
+/// A lead current (`@q1[ic]`) is a current, and so is a parameter whose
+/// `device:param` spelling names a branch the result solved: a metered
+/// Verilog-A terminal, `@x1[iout]`, is the branch of its zero-volt meter
+/// whatever the length of its label. Both are in amperes. No other device
+/// parameter declares a unit, so none is claimed for it.
+fn device_parameter_unit(
+    device: &str,
+    parameter: &str,
+    solved_branches: &HashSet<String>,
+) -> Option<SignalUnit> {
+    let metered = || {
+        solved_branches
+            .contains(&format!("{}:{}", device.trim(), parameter.trim()).to_ascii_lowercase())
+    };
+    (current_parameter(parameter) || metered()).then_some(SignalUnit::Ampere)
+}
+
 /// Build one device-state history per device seen in the supplied reports.
 ///
 /// A device that is absent from one report keeps its column and records an
@@ -342,6 +371,7 @@ fn require_named_columns(
 fn device_states_from_reports(
     location: &'static str,
     reports: &[&DeviceOpReport],
+    solved_branches: &HashSet<String>,
 ) -> Result<Vec<DeviceStateSeries>, ResultDocumentError> {
     let point_count = reports.len();
     let mut order: Vec<String> = Vec::new();
@@ -428,8 +458,8 @@ fn device_states_from_reports(
             .iter()
             .zip(columns)
             .map(|(name, values)| DeviceParameterSeries {
+                unit: device_parameter_unit(&display_name, name, solved_branches),
                 name: name.clone(),
-                unit: None,
                 values,
             })
             .collect();
@@ -520,7 +550,11 @@ impl AnalysisResultDocument {
         }
 
         let device_states = match device_report {
-            Some(report) => device_states_from_reports(LOCATION, &[report])?,
+            Some(report) => device_states_from_reports(
+                LOCATION,
+                &[report],
+                &solved_branch_names(result.branch_names.iter().map(String::as_str)),
+            )?,
             None => Vec::new(),
         };
 
@@ -724,7 +758,11 @@ impl AnalysisResultDocument {
             .iter()
             .map(|point| &point.device_op_report)
             .collect::<Vec<_>>();
-        let device_states = device_states_from_reports(LOCATION, &reports)?;
+        let device_states = device_states_from_reports(
+            LOCATION,
+            &reports,
+            &solved_branch_names(branch_names.iter().map(String::as_str)),
+        )?;
 
         Ok(Self::builder(
             analysis,
@@ -873,6 +911,7 @@ impl AnalysisResultDocument {
 
         let mut device_columns: BTreeMap<String, Vec<DeviceParameterSeries>> = BTreeMap::new();
         let mut device_order: Vec<String> = Vec::new();
+        let solved_branches = solved_branch_names(result.branch_names.iter().map(String::as_str));
         for trace in &result.device_op_traces {
             if trace.values.len() != point_count {
                 return Err(source_error(
@@ -893,7 +932,7 @@ impl AnalysisResultDocument {
                 });
             entry.push(DeviceParameterSeries {
                 name: trace.parameter.clone(),
-                unit: None,
+                unit: device_parameter_unit(&trace.device_name, &trace.parameter, &solved_branches),
                 values: finite_samples(LOCATION, &trace.parameter, &trace.values)?,
             });
         }
@@ -1053,6 +1092,13 @@ impl AnalysisResultDocument {
                     .iter()
                     .any(|trace| trace.node_name.eq_ignore_ascii_case(node))
         };
+        let solved_branches =
+            solved_branch_names(compressed.channels.iter().filter_map(|channel| {
+                match channel.descriptor.role() {
+                    TransientChannelRole::BranchCurrent { branch } => Some(branch.as_str()),
+                    _ => None,
+                }
+            }));
         for channel in &compressed.channels {
             if let TransientChannelRole::NodeVoltage { node, .. } = channel.descriptor.role()
                 && channel.availability == TransientChannelAvailability::NotProjected
@@ -1089,7 +1135,8 @@ impl AnalysisResultDocument {
                     });
                     entry.push(DeviceParameterSeries {
                         name: parameter.clone(),
-                        unit: compressed_channel_unit(channel.descriptor.unit()),
+                        unit: compressed_channel_unit(channel.descriptor.unit())
+                            .or_else(|| device_parameter_unit(device, parameter, &solved_branches)),
                         values: samples,
                     });
                 }

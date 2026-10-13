@@ -1454,6 +1454,93 @@ fn transient_document_keeps_unretained_series_as_explicit_absence() {
     );
 }
 
+/// A device-state series is in amperes wherever the output layer reads its
+/// parameter as a current: a lead current by its spelling (`@q1[ic]`), and a
+/// metered terminal current whatever the length of its label (`@x1[igs]`,
+/// whose `x1:igs` is a solved branch). Any other parameter declares no unit.
+#[test]
+fn device_states_carry_the_unit_of_a_current_parameter() {
+    fn units(document: &AnalysisResultDocument, device: &str) -> Vec<(String, Option<SignalUnit>)> {
+        document
+            .device_states()
+            .iter()
+            .find(|state| state.device_name() == device)
+            .expect("device state")
+            .parameters()
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.unit.clone()))
+            .collect()
+    }
+    let named = |pairs: &[(&str, Option<SignalUnit>)]| {
+        pairs
+            .iter()
+            .map(|(name, unit)| ((*name).to_owned(), unit.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    let mut op = operating_point_result();
+    op.branch_names.push("x1:igs".to_owned());
+    op.branch_currents.push(2.0e-6);
+    let report = DeviceOpReport {
+        entries: vec![
+            DeviceOpEntry::new(
+                "Q1".to_owned(),
+                OpLabel::BJT,
+                Some(OpLabel::ACTIVE),
+                vec![(OpLabel::IC, 1.0e-3), (OpLabel::GM, 4.0e-2)],
+            ),
+            DeviceOpEntry::new(
+                "X1".to_owned(),
+                OpLabel::MOSFET,
+                None,
+                vec![(OpLabel::IGS, 2.0e-6), (OpLabel::IGD, 0.0)],
+            ),
+        ],
+    };
+    let document = AnalysisResultDocument::from_operating_point(
+        instance(AnalysisKind::Op),
+        &op,
+        Some(&report),
+    )
+    .expect("the point projects")
+    .build()
+    .expect("the document builds");
+    assert_eq!(
+        units(&document, "Q1"),
+        named(&[("ic", Some(SignalUnit::Ampere)), ("gm", None)])
+    );
+    assert_eq!(
+        units(&document, "X1"),
+        named(&[("igs", Some(SignalUnit::Ampere)), ("igd", None)]),
+        "only the metered terminal is a solved branch"
+    );
+    let json = document.to_json().expect("the document serializes");
+    assert_eq!(AnalysisResultDocument::from_json(&json).unwrap(), document);
+
+    let mut tran = transient_result();
+    tran.branch_names.push("X1:IOUT".to_owned());
+    tran.branch_currents.push(vec![0.0, 1.0e-6, 2.0e-6]);
+    tran.device_op_traces.push(TransientDeviceOpTrace {
+        device_name: "X1".to_owned(),
+        parameter: "iout".to_owned(),
+        values: vec![0.0, 1.0e-6, 2.0e-6],
+    });
+    let document = AnalysisResultDocument::from_transient(
+        instance(AnalysisKind::Tran),
+        &tran,
+        None,
+        Vec::new(),
+    )
+    .expect("the trace projects")
+    .build()
+    .expect("the document builds");
+    assert_eq!(units(&document, "M1"), named(&[("gm", None)]));
+    assert_eq!(
+        units(&document, "X1"),
+        named(&[("iout", Some(SignalUnit::Ampere))])
+    );
+}
+
 #[test]
 fn noise_document_records_an_absent_contributor_without_zero_filling() {
     let document = document_for(AnalysisResultKind::Noise);

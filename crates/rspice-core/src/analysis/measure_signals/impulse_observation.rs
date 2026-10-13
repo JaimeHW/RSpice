@@ -467,7 +467,11 @@ impl<'a> Resolver<'a, '_> {
     }
 }
 
-pub(super) fn current_parameter(parameter: &str) -> bool {
+/// Whether a device parameter is a lead current by its spelling alone: `I`,
+/// or Xyce's `I` and one letter. A parameter of any other length is a current
+/// where its `device:param` names a solved branch, which only the result
+/// knows.
+pub(crate) fn current_parameter(parameter: &str) -> bool {
     let parameter = parameter.to_ascii_uppercase();
     parameter == "I" || is_device_lead_current_accessor(&parameter)
 }
