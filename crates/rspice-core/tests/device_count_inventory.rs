@@ -43,6 +43,11 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "control-branch work list over already-stored CCVS instances",
     ),
     (
+        "veriloga_terminal_meters",
+        "the terminal-current meters' records, over the zero-volt sources \
+         `voltage_sources` already counts",
+    ),
+    (
         "pending_iswitch",
         "control-branch work list over already-stored ISWITCH instances",
     ),
