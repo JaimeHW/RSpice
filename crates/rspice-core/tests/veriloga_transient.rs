@@ -282,6 +282,99 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+/// `@(final_step)` runs in the solve that lands on the stop time. A body that
+/// writes a value a contribution reads steps the equations inside the last
+/// interval, which is solved at order one as every other analog event body's
+/// landing is; a body that only runs tasks changes nothing and the last
+/// interval keeps the trapezoidal rule. An RC (tau = 10 ns) behind a 20 MHz
+/// sine, against its analytic response, whose capacitor state is continuous
+/// at the stop time whatever the body does there.
+#[test]
+fn final_step_restarts_the_stop_time_only_when_its_body_feeds_a_contribution() {
+    let (r, c, f, step) = (1.0e3, 10.0e-12, 20.0e6, 1.0e-3);
+    let tau = r * c;
+    let w = 2.0 * std::f64::consts::PI * f;
+    let wt = w * tau;
+    let analytic =
+        |t: f64| ((w * t).sin() - wt * (w * t).cos() + wt * (-t / tau).exp()) / (1.0 + wt * wt);
+    let run = |label: &str, body: &str, tstop: f64| {
+        let model = write_model(
+            &format!("final_step_{label}"),
+            &format!(
+                "`include \"disciplines.vams\"\nmodule va_final_step(p, n);\n    inout p, n;\n    \
+                 electrical p, n;\n    real i0;\n    analog begin\n        i0 = 0.0;\n        \
+                 {body}\n        I(p, n) <+ i0;\n    end\nendmodule\n"
+            ),
+        );
+        let deck = format!(
+            "* final_step at the stop time\nV1 in 0 SIN(0 1 {f})\nR1 in out {r}\nC1 out 0 {c}\n\
+             X1 out 0 va_final_step\n.va \"{}\" va_final_step\n.end\n",
+            deck_path(&model)
+        );
+        let netlist = Netlist::parse(&deck).expect("parse");
+        let result = Engine::default()
+            .run_tran(&netlist, tstop, 1.0e-9)
+            .expect("transient run");
+        let _ = std::fs::remove_file(model);
+        let out = node_series(&result.node_names, &result.voltages, "out").to_vec();
+        (result.time, out)
+    };
+    for tstop in [103.0e-9, 250.0e-9] {
+        let (plain_time, plain) = run("plain", "", tstop);
+        let (time, out) = run(
+            "tasks",
+            "@(final_step(\"tran\")) $strobe(\"stop %g\", V(p, n));",
+            tstop,
+        );
+        assert_eq!(
+            (&time, &out),
+            (&plain_time, &plain),
+            "a final_step body that only runs tasks must leave the run untouched"
+        );
+        let n = time.len() - 1;
+        let h = time[n] - time[n - 1];
+        let error = |i: usize| out[i] - analytic(time[i]);
+        // The last step's own error: the previous point's error decays by the
+        // trapezoidal RC factor, and the rest is what the step added, bounded
+        // by h^3/12 |v'''| with |v'''| <= w^3 A for the sine's amplitude A.
+        let decay = (1.0 - h / (2.0 * tau)) / (1.0 + h / (2.0 * tau));
+        let local = error(n) - decay * error(n - 1);
+        let bound = h.powi(3) / 12.0 * w.powi(3) / (1.0 + wt * wt).sqrt();
+        assert!(
+            local.abs() <= bound,
+            "tstop {tstop:e}: last-step error {local:e} exceeds the trapezoidal bound {bound:e} \
+             (stop-time error {:e}, h {h:e})",
+            error(n)
+        );
+
+        let (feeds_time, feeds) = run(
+            "feeds",
+            &format!("@(final_step(\"tran\")) i0 = {step};"),
+            tstop,
+        );
+        let m = feeds_time.len() - 1;
+        let feeds_h = feeds_time[m] - feeds_time[m - 1];
+        // Backward Euler's error estimate sees the step and cuts the last
+        // interval; the trapezoidal estimate of an endpoint jump would not.
+        assert!(
+            feeds_time.len() > time.len() && feeds_h < 0.25 * h,
+            "tstop {tstop:e}: the stepped stop time must be cut: {} -> {} points, last step \
+             {h:e} -> {feeds_h:e}",
+            time.len(),
+            feeds_time.len()
+        );
+        // Order one carries the step over the whole last interval, h * dI/C;
+        // the trapezoidal rule would carry half of it.
+        let feeds_error = |i: usize| feeds[i] - analytic(feeds_time[i]);
+        let jump = feeds_error(m) - feeds_error(m - 1) / (1.0 + feeds_h / tau);
+        let backward_euler = -feeds_h * step / c;
+        assert!(
+            (jump / backward_euler - 1.0).abs() < 0.1,
+            "tstop {tstop:e}: stop-time step error {jump:e}, backward Euler {backward_euler:e}"
+        );
+    }
+}
+
 #[test]
 fn transient_operating_point_has_ic_and_static_queries_without_reinitialization() {
     let model = write_model(

@@ -2,6 +2,61 @@
 
 use super::*;
 
+/// What the point a step lands on holds, for the order that step is solved
+/// at ([`Engine::breakpoint_landing_forces_order_one`]).
+///
+/// Every kind but [`Self::Smooth`] names a producer whose landing point can
+/// already hold its change, so the landing interval would contain a jump. The
+/// trapezoidal rule carries a jump inside its interval forward as an
+/// undamped alternating error; backward Euler damps it in one step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum BreakpointLanding {
+    /// Every drive holds, at the landing point, the value it had up to it.
+    /// A default-dialect landing solves its independent sources at their
+    /// left limit; a built-in D/A converter holds its level from before an
+    /// edge on the edge's own point, and a mixed module's analog read of a
+    /// discrete value outside an event body reads the value from before the
+    /// activation there; ramps, PWL corners and converter transitions only
+    /// turn there. Whatever changes at the breakpoint changes in the step
+    /// that leaves it, so the landing interval is smooth.
+    Smooth,
+    /// A Verilog-A analog event owns the landing point: a `timer`, a
+    /// `cross`/`above` root, a scheduled `transition`/`zi_*` corner, or the
+    /// stop time of a deck where a `@(final_step)` body writes a value a
+    /// contribution reads (`CircuitData::veriloga_final_step_feeds_equations`).
+    /// The language places the event at its own timepoint, so its body runs
+    /// in the landing solve and the point already holds the event's outcome.
+    /// The device does not say whether a `timer` or `cross` body steps a
+    /// contribution, so every such landing is solved at order one; a
+    /// `@(final_step)` body that only runs tasks keeps the order.
+    AnalogModelEvent,
+    /// A behavioral expression's own clock owns the landing point: a B-source
+    /// or capacitor expression of `time`, or a switch's control expression.
+    /// The expression is evaluated at the solve's own clock, where `pwl()` at
+    /// a last knot that repeats its time, a `pulse()` edge with no transition
+    /// time and a control compared with `>=` already read their value after
+    /// the breakpoint. The clock does not say which of its times step and
+    /// which only turn a corner, so every one of them is solved at order one.
+    ExpressionClock,
+    /// A discrete activation lands while a mixed module's analog equations
+    /// read a discrete value as it stands after that activation (a value an
+    /// analog event body reads, or an edge an analog event waits on, that
+    /// reaches a contribution), so they can already hold the new value at
+    /// the landing point.
+    DiscreteRead,
+}
+
+/// Where a step lands, for [`Engine::classify_breakpoint_landing`].
+#[derive(Clone, Copy, Debug)]
+pub(super) struct LandingClock {
+    pub(super) step_time: Value,
+    pub(super) stop_time: Value,
+    /// `Some` when the step lands on the exact target of the Verilog-A and
+    /// discrete event lanes, holding whether an analog event owns that target
+    /// rather than a discrete activation.
+    pub(super) model_event: Option<bool>,
+}
+
 /// Pre-resolved matrix slots for one two-terminal companion branch.
 ///
 /// `stamp_two_terminal_companion` pays four position-map hash lookups per
@@ -698,12 +753,56 @@ impl Engine {
         }
     }
 
-    /// Whether clipping a proposed interval to a breakpoint changes the order
-    /// used to solve that landing interval. Ngspice and Xyce preserve the
-    /// current order and reinitialize only after accepting the breakpoint.
+    /// Whether the step that lands on a breakpoint is solved at order one.
+    ///
+    /// The step that *leaves* a breakpoint restarts at order one in every
+    /// dialect (`next_trapezoidal_order_after_accepted_step`): a drive that
+    /// changes at the breakpoint changes inside that interval. The landing
+    /// interval keeps the order in force unless the landing point itself
+    /// can already hold a change: in the default dialect, every
+    /// [`BreakpointLanding`] but `Smooth`. Ngspice and Xyce keep the order on
+    /// every landing.
     #[inline]
-    pub(super) fn breakpoint_landing_forces_order_one(dialect: SpiceDialect) -> bool {
-        !matches!(dialect, SpiceDialect::Xyce | SpiceDialect::Ngspice)
+    pub(super) fn breakpoint_landing_forces_order_one(
+        dialect: SpiceDialect,
+        landing: BreakpointLanding,
+    ) -> bool {
+        dialect == SpiceDialect::BestAvailable && landing != BreakpointLanding::Smooth
+    }
+
+    /// What the breakpoint a step lands on holds ([`BreakpointLanding`]).
+    pub(super) fn classify_breakpoint_landing(
+        circuit: &crate::circuit::CircuitData,
+        breakpoints: &BreakpointManager,
+        clock: LandingClock,
+    ) -> BreakpointLanding {
+        match clock.model_event {
+            Some(true) => return BreakpointLanding::AnalogModelEvent,
+            Some(false) if Self::mixed_analog_reads_discrete_after_activity(circuit) => {
+                return BreakpointLanding::DiscreteRead;
+            }
+            _ => {}
+        }
+        if clock.step_time == clock.stop_time && circuit.veriloga_final_step_feeds_equations() {
+            // `@(final_step)` runs in the solve that lands on the stop time.
+            return BreakpointLanding::AnalogModelEvent;
+        }
+        if breakpoints.is_expression_clock(clock.step_time) {
+            return BreakpointLanding::ExpressionClock;
+        }
+        BreakpointLanding::Smooth
+    }
+
+    fn mixed_analog_reads_discrete_after_activity(circuit: &crate::circuit::CircuitData) -> bool {
+        #[cfg(feature = "veriloga")]
+        {
+            circuit.mixed_analog_reads_discrete_after_activity()
+        }
+        #[cfg(not(feature = "veriloga"))]
+        {
+            let _ = circuit;
+            false
+        }
     }
 
     #[inline]

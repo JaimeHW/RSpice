@@ -1187,6 +1187,9 @@ pub struct VerilogADevice {
     /// first use. Empty means "no simulator-control variable in this module",
     /// which is every module that never calls `$bound_step`/`$discontinuity`.
     small_signal_replay_variables: std::sync::OnceLock<std::sync::Arc<[bool]>>,
+    /// Variables the module's equations read, computed once on first use
+    /// (`equation_live_variables`). Clones share the mask.
+    equation_live_variables: std::sync::OnceLock<std::sync::Arc<[bool]>>,
     /// Native compiled model. In native mode this is required: construction
     /// fails if a complete native image cannot be produced.
     #[cfg(feature = "native")]
@@ -3308,6 +3311,7 @@ impl VerilogADevice {
             one_step_dae_split_safe,
             noise_gain_live_variables: std::sync::OnceLock::new(),
             small_signal_replay_variables: std::sync::OnceLock::new(),
+            equation_live_variables: std::sync::OnceLock::new(),
             #[cfg(feature = "native")]
             native_model,
             #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
@@ -9111,6 +9115,110 @@ impl VerilogADevice {
         })
     }
 
+    /// Variables the module's equations read, closed over the analog
+    /// assignments that compute them: every contribution's value, limiter
+    /// correction, activation condition and Jacobians, and the retained kind
+    /// of every switch branch. A task is not an equation, so a variable that
+    /// only `$strobe` or `$fdisplay` reads is not live.
+    fn equation_live_variables(&self) -> &[bool] {
+        use crate::codegen::assignment_liveness::{
+            AssignmentEffects, mark_program_variable_reads, propagate_live_assignment_slots,
+        };
+        self.equation_live_variables.get_or_init(|| {
+            let mut live = vec![
+                false;
+                self.model
+                    .num_variables
+                    .max(self.model.variable_names.len())
+            ];
+            for stamp in &self.model.stamp_programs {
+                let programs = std::iter::once(&stamp.value_program)
+                    .chain(&stamp.limiter_correction)
+                    .chain(&stamp.static_condition)
+                    .chain(stamp.jacobian_programs.iter().map(|entry| &entry.program))
+                    .chain(stamp.reactive_jacobians.iter().map(|entry| &entry.program));
+                for program in programs {
+                    mark_program_variable_reads(program, &mut live);
+                }
+            }
+            for &slot in &self.model.switch_branch_variables {
+                if let Some(slot) = live.get_mut(slot) {
+                    *slot = true;
+                }
+            }
+            propagate_live_assignment_slots(
+                &self.model.assignment_steps,
+                &mut live,
+                AssignmentEffects::SkipTasks,
+            );
+            live.into()
+        })
+    }
+
+    /// Whether the module's equations read variable `slot`, directly or
+    /// through the analog assignments that feed them.
+    pub fn equations_read_variable(&self, slot: usize) -> bool {
+        self.equation_live_variables().get(slot) == Some(&true)
+    }
+
+    /// Whether a `@(final_step)` body can change the module's equations: it
+    /// writes a variable a contribution reads, directly or through other
+    /// analog assignments. The event lowers to a guard that queries
+    /// `analysis("__rspice_final_step")`, so the body feeds the equations
+    /// exactly when an assignment the equations depend on reads that query.
+    /// A body that only runs tasks (`$strobe`, `$fdisplay`) feeds none.
+    pub fn final_step_feeds_equations(&self) -> bool {
+        use crate::codegen::assignment_liveness::{
+            AssignmentEffects, assignment_range_live, assignment_step_is_live,
+        };
+        let Some(final_step) = rspice_veriloga_runtime::analysis_query_id("__rspice_final_step")
+        else {
+            return false;
+        };
+        let queries = |program: &crate::codegen::BytecodeProgram| {
+            program.instructions.iter().any(
+                |instruction| matches!(instruction, Instruction::Analysis(id) if *id == final_step),
+            )
+        };
+        fn live_step_queries(
+            steps: &[AssignmentStep],
+            live: &[bool],
+            queries: &dyn Fn(&crate::codegen::BytecodeProgram) -> bool,
+        ) -> bool {
+            steps.iter().any(|step| match step {
+                AssignmentStep::Assign(assignment) => {
+                    live.get(assignment.var_index) == Some(&true) && queries(&assignment.program)
+                }
+                AssignmentStep::AssignIndexed {
+                    base,
+                    len,
+                    index,
+                    value,
+                    ..
+                } => assignment_range_live(*base, *len, live) && (queries(index) || queries(value)),
+                AssignmentStep::Loop { condition, body } => {
+                    body.iter().any(|step| {
+                        assignment_step_is_live(step, live, AssignmentEffects::SkipTasks)
+                    }) && (queries(condition) || live_step_queries(body, live, queries))
+                }
+                // Initialization runs before the analysis; a task is not an
+                // equation.
+                AssignmentStep::Initialization { .. } | AssignmentStep::Task(_) => false,
+            })
+        }
+        let stamps_query = self.model.stamp_programs.iter().any(|stamp| {
+            queries(&stamp.value_program)
+                || stamp.limiter_correction.as_ref().is_some_and(queries)
+                || stamp.static_condition.as_ref().is_some_and(queries)
+        });
+        stamps_query
+            || live_step_queries(
+                &self.model.assignment_steps,
+                self.equation_live_variables(),
+                &queries,
+            )
+    }
+
     fn noise_gain_live_variables(&self) -> &[bool] {
         use crate::codegen::assignment_liveness::{
             AssignmentEffects, mark_program_variable_reads, propagate_live_assignment_slots,
@@ -10772,6 +10880,53 @@ mod static_dae_device_tests {
     }
 
     #[test]
+    fn a_final_step_body_feeds_the_equations_only_through_a_contribution() {
+        let device = |body: &str| {
+            let source = format!(
+                "module m(p, n);\n inout p, n;\n electrical p, n;\n real x = 1.0;\n \
+                 real y = 1.0;\n real z = 1.0;\n analog begin\n  {body}\n  \
+                 I(p,n) <+ x*V(p,n);\n end\nendmodule\n"
+            );
+            let runtime = VerilogACompiler::new(CompilerOptions::default())
+                .compile_runtime(&source, None)
+                .unwrap();
+            VerilogADevice::try_new_with_canonical_ir(
+                "M",
+                runtime.model,
+                &runtime.canonical_ir,
+                &[1, 0],
+            )
+            .unwrap()
+        };
+        // The body writes the contribution's operand, directly or through
+        // another assignment.
+        assert!(device("@(final_step) x = 2.0;").final_step_feeds_equations());
+        assert!(device("@(final_step(\"tran\")) x = 2.0;").final_step_feeds_equations());
+        assert!(device("@(final_step) y = 2.0;\n  x = y;").final_step_feeds_equations());
+        // Tasks, a variable no contribution reads, another event, or no event.
+        assert!(!device("@(final_step) $strobe(\"x=%g\", x);").final_step_feeds_equations());
+        assert!(
+            !device("@(final_step) begin z = 2.0; $strobe(\"%g\", z); end")
+                .final_step_feeds_equations()
+        );
+        assert!(!device("@(initial_step) x = 2.0;").final_step_feeds_equations());
+        assert!(!device("x = x;").final_step_feeds_equations());
+
+        let feeding = device("@(final_step) y = 2.0;\n  x = y;\n  z = x;");
+        let slot = |name: &str| {
+            feeding
+                .model
+                .variable_names
+                .iter()
+                .position(|variable| variable == name)
+                .unwrap()
+        };
+        assert!(feeding.equations_read_variable(slot("x")));
+        assert!(feeding.equations_read_variable(slot("y")));
+        assert!(!feeding.equations_read_variable(slot("z")));
+    }
+
+    #[test]
     fn static_dae_observation_retains_event_bodies_without_replaying_them() {
         let source = include_str!("../tests/fixtures/static_dae_events.va");
         let runtime = VerilogACompiler::new(CompilerOptions::default())
@@ -11816,6 +11971,7 @@ endmodule
             one_step_dae_split_safe: false,
             noise_gain_live_variables: std::sync::OnceLock::new(),
             small_signal_replay_variables: std::sync::OnceLock::new(),
+            equation_live_variables: std::sync::OnceLock::new(),
             prev_discontinuity: false,
             dynamic_charge_slots: Vec::new(),
             dynamic_charge_third_back: Vec::new(),

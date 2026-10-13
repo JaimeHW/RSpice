@@ -2039,6 +2039,30 @@ impl MixedSignalHost {
         }
     }
 
+    /// Whether the analog equations read a discrete value as it stands after
+    /// the digital activity of a timepoint: a value an analog event body
+    /// reads, or an edge an analog event waits on, whose slot reaches a
+    /// contribution (`VerilogADevice::equations_read_variable`). Either steps
+    /// that contribution at the activation's own point; every other read
+    /// takes its left limit there ([`DiscreteAnalogInput::reads_left_limit`]),
+    /// and an event body that only runs tasks steps nothing. A real that a
+    /// code model samples off the analog solution is continuous at the
+    /// timepoints and is not one.
+    pub(crate) fn analog_reads_discrete_after_activity(&self) -> bool {
+        self.discrete_inputs.iter().any(|input| {
+            !input.reads_left_limit()
+                && !input.analog_sample
+                && (self.analog.equations_read_variable(input.variable)
+                    || self.analog.equations_read_variable(input.validity))
+        })
+    }
+
+    /// Whether the analog block's `@(final_step)` body can change its
+    /// equations (`VerilogADevice::final_step_feeds_equations`).
+    pub(crate) fn analog_final_step_feeds_equations(&self) -> bool {
+        self.analog.final_step_feeds_equations()
+    }
+
     /// A converted output can jump, release its impedance, or start/retarget
     /// a ramp. Preserve both integration restart and endpoint feedback dating
     /// when the physical stamp moves from the host into a shared converter.
@@ -5626,6 +5650,32 @@ endmodule
             .expect("the wheel is readable")
             .expect("the A/D edge leaves its `#2` resume behind");
         (host, 1.0e-9, due)
+    }
+
+    /// Which analog reads of a discrete value can step the equations at the
+    /// activation's own point: one an event body or an edge flag makes of the
+    /// settled value, when it reaches a contribution. A read outside an event
+    /// body takes its left limit there, and a task reaches no equation.
+    #[test]
+    fn only_a_settled_read_that_reaches_a_contribution_steps_an_activation() {
+        let steps = |analog: &str| {
+            let source = format!(
+                "module m(p, n);\n  inout p, n;\n  electrical p, n;\n  reg d;\n  real v;\n  \
+                 initial d = 1'b0;\n  always #5 d = ~d;\n  analog begin\n    {analog}\n  \
+                 end\nendmodule\n"
+            );
+            MixedSignalHost::compile(&source, None, "xm", &[1, 0], SchedulerLimits::default())
+                .expect("mixed source compiles and starts")
+                .analog_reads_discrete_after_activity()
+        };
+        assert!(!steps("I(p, n) <+ d * V(p, n);"));
+        assert!(!steps("v = d;\n    I(p, n) <+ v * V(p, n);"));
+        assert!(steps("@(posedge d) v = 2.0;\n    I(p, n) <+ v * V(p, n);"));
+        assert!(steps("@(posedge d) v = d;\n    I(p, n) <+ v * V(p, n);"));
+        assert!(!steps(
+            "@(posedge d) $strobe(\"d=%d\", d);\n    I(p, n) <+ V(p, n);"
+        ));
+        assert!(!steps("@(posedge d) v = d;\n    I(p, n) <+ V(p, n);"));
     }
 
     /// The missed-breakpoint refusal is kept for an activation the stepper had

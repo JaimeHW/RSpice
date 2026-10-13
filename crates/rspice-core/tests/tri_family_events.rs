@@ -86,10 +86,18 @@ const DECK_E_OUT_LATE: f64 = 1.827762;
 /// each). The step leaving the edge's completion adds -3.9e-5 V. With
 /// RELTOL tightened tenfold both runs land within 1.2e-5 V of the analytic
 /// value, and within 3e-7 V of each other.
+///
+/// Re-measured a fifth time when the default dialect stopped solving every
+/// breakpoint landing at order one: the same 278 points, on a grid that
+/// moved, every `clk` and `qdiv` transition bit-identical. The landing on
+/// `clk`'s 10 ns activation is now trapezoidal, which takes out the error
+/// described above: the late sample (1.827762 -> 1.828458) erred -5.15e-4 V
+/// against the analytic response and now +1.61e-4 V; the early one is
+/// unchanged at +1.34e-4 V. `out`'s worst error over the run is 1.94e-4 V.
 const DECK_E_FINGERPRINT: Fingerprint = Fingerprint {
     points: 278,
-    grid_hash: 0x9165_451f_8d31_c4ae,
-    volt_hash: 0x104f_75b4_2e20_6b47,
+    grid_hash: 0xb6b1_3459_6364_c0d9,
+    volt_hash: 0x60f8_4df0_68e3_cd88,
 };
 
 /// First transition of the flop output in deck E3, and the delay every one of

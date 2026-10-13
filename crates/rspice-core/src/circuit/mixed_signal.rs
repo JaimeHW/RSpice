@@ -53,6 +53,21 @@ pub(crate) struct ThresholdFinding {
     pub(crate) voltage: Value,
 }
 
+/// What inspecting a converged candidate found in the mixed modules.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct MixedCandidateInspection {
+    /// The earliest root strictly inside the candidate's interval that the
+    /// solver is asked to land on.
+    pub(crate) refinement: Option<Value>,
+    /// Whether that root is an analog block's own `cross`/`above` event, whose
+    /// body runs in the solve that lands on it, rather than an A/D converter's
+    /// threshold crossing, which only the discrete half reads.
+    pub(crate) analog_event_root: bool,
+    /// Some host's electrical change at the candidate cannot be compared with
+    /// smooth history (its `candidate_discontinuity`).
+    pub(crate) discontinuity: bool,
+}
+
 /// Which boundary a [`ThresholdFinding`] sits on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum ThresholdFindingKind {
@@ -225,6 +240,15 @@ impl CircuitData {
         self.mixed_signal_hosts
             .iter()
             .filter_map(MixedSignalHost::read_step_completion)
+    }
+
+    /// Whether some instance's analog block reads a discrete value as it
+    /// stands after a timepoint's digital activity. See
+    /// `MixedSignalHost::analog_reads_discrete_after_activity`.
+    pub(crate) fn mixed_analog_reads_discrete_after_activity(&self) -> bool {
+        self.mixed_signal_hosts
+            .iter()
+            .any(MixedSignalHost::analog_reads_discrete_after_activity)
     }
 
     /// Register one elaborated mixed module.
@@ -943,7 +967,6 @@ impl CircuitData {
     /// After all roots are resolved, `validate_acceptance` checks every host
     /// on a copy before final-step equations replace a finishing candidate.
     /// Ordinary numerical candidates require no copies here.
-    /// Returns the earliest refinement time and any candidate discontinuity.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn visit_mixed_transient_candidate_task(
         &mut self,
@@ -958,9 +981,9 @@ impl CircuitData {
         kind: rspice_veriloga_runtime::AnalogTaskKind,
         validate_acceptance: bool,
         consume: &mut dyn FnMut(rspice_veriloga_runtime::AnalogTaskEvent<'_>),
-    ) -> Result<(Option<Value>, bool), SimulationError> {
+    ) -> Result<MixedCandidateInspection, SimulationError> {
         if self.mixed_signal_hosts.is_empty() {
-            return Ok((None, false));
+            return Ok(MixedCandidateInspection::default());
         }
         let mut trial = self.open_trial(
             Candidate {
@@ -979,7 +1002,11 @@ impl CircuitData {
             // own interval is a root the solver is asked to land on.
             let mut refinement = trial.interior_root(minimum_timestep)?;
             if refinement.is_some() {
-                return Ok((refinement, false));
+                return Ok(MixedCandidateInspection {
+                    refinement,
+                    analog_event_root: false,
+                    discontinuity: false,
+                });
             }
             // A design's `$finish`, `$stop` or `$fatal` (IEEE 1364-2005
             // section 17.4.1) at this candidate ends the run on it, through the
@@ -1034,7 +1061,12 @@ impl CircuitData {
                 })();
                 named(host, inspected)?;
             }
-            Ok((refinement, discontinuity))
+            // No A/D root returned above, so any root left is an analog block's.
+            Ok(MixedCandidateInspection {
+                refinement,
+                analog_event_root: refinement.is_some(),
+                discontinuity,
+            })
         })();
         trial.finish(inspected)
     }

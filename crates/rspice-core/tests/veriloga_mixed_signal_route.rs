@@ -5530,6 +5530,95 @@ fn instantaneous_reads_and_samplers_take_the_left_limit_and_event_bodies_the_new
     );
 }
 
+/// **A step landing on a discrete activation keeps its integration order
+/// unless the analog equations read the value the activation settled.**
+///
+/// A read outside an event body takes its left limit at the activation, so
+/// the landing interval is smooth and is solved at the order in force; an
+/// `@(posedge d)` body that only runs tasks reaches no equation either. An
+/// event body that writes a value a contribution reads changes the equations
+/// at the landing point itself, and that landing is solved at order one, as
+/// every analog event body's is. An RC (tau = 10 ns) behind a 20 MHz sine
+/// shares the run with each module, whose own node it never sees. On each
+/// step that lands on an activation, the RC's error against its analytic
+/// response, less the previous point's error carried by the trapezoidal
+/// factor, is what the landing step added: within `h^3/12 |v'''|` for the
+/// trapezoidal rule, about `h^2/2 |v''|` for backward Euler.
+#[test]
+fn a_discrete_landing_restarts_only_for_a_settled_read_that_reaches_a_contribution() {
+    let (tau, w) = (1.0e-8, 2.0 * std::f64::consts::PI * 20.0e6);
+    let wt = w * tau;
+    let amplitude = 1.0 / (1.0 + wt * wt).sqrt();
+    let analytic =
+        |t: f64| ((w * t).sin() - wt * (w * t).cos() + wt * (-t / tau).exp()) / (1.0 + wt * wt);
+    // The largest ratio of a landing step's own error to the trapezoidal bound.
+    let worst = |name: &str, body: &str| {
+        let model = ModelFile::new(
+            name,
+            &format!(
+                "`timescale 1ns/1ps\n`include \"disciplines.vams\"\n\
+                 module {name}(aux);\n    inout aux;\n    electrical aux;\n    reg d;\n    \
+                 real v;\n    initial d = 1'b0;\n    always #5 d = ~d;\n\
+                 analog begin\n{body}\nend\nendmodule\n"
+            ),
+        );
+        let result = run(
+            &format!(
+                "* {name}: an RC beside a discrete clock\nx1 aux {name}\nraux aux 0 1k\n\
+                 V1 in 0 SIN(0 1 20Meg)\nR1 in out 1k\nC1 out 0 10p\n.va \"{}\" {name}\n.end\n",
+                model.deck_path()
+            ),
+            100.0e-9,
+            1.0e-9,
+        );
+        let time = &result.time;
+        let out = waveform(&result, "out");
+        let error = |i: usize| out[i] - analytic(time[i]);
+        let mut landings = 0;
+        let mut ratio = 0.0_f64;
+        for i in 1..time.len() {
+            let edges = time[i] / 5.0e-9;
+            if (edges - edges.round()).abs() > 1.0e-6 {
+                continue;
+            }
+            landings += 1;
+            let h = time[i] - time[i - 1];
+            let carried = (1.0 - h / (2.0 * tau)) / (1.0 + h / (2.0 * tau)) * error(i - 1);
+            // |v'''| of the sine response and of its decaying start.
+            let third = w.powi(3) * amplitude
+                + wt / (1.0 + wt * wt) * (-time[i - 1] / tau).exp() / tau.powi(3);
+            let bound = h.powi(3) / 12.0 * third;
+            ratio = ratio.max((error(i) - carried).abs() / bound);
+        }
+        assert!(landings >= 19, "{name}: {landings} landings on the clock");
+        eprintln!(
+            "{name}: {} points, {landings} landings, worst landing error / trapezoidal bound \
+             {ratio:.3}",
+            time.len()
+        );
+        ratio
+    };
+    let left = worst("landing_left_limit", "V(aux) <+ d;");
+    let tasks = worst(
+        "landing_event_tasks",
+        "@(posedge d) $strobe(\"edge\");\nV(aux) <+ d;",
+    );
+    let feeds = worst("landing_event_feeds", "@(posedge d) v = d;\nV(aux) <+ v;");
+    // The bound is the leading term; the next is smaller by about h * w, an
+    // eighth at the 1 ns step.
+    for (case, ratio) in [("left-limit read", left), ("task-only event body", tasks)] {
+        assert!(
+            ratio <= 1.25,
+            "{case}: a landing step erred {ratio:.3} times the trapezoidal bound"
+        );
+    }
+    assert!(
+        feeds > 10.0,
+        "an event body that feeds a contribution is landed at order one, whose error is \
+         {feeds:.3} times the trapezoidal bound"
+    );
+}
+
 /// **`.SAVE I(x)` on a runtime Verilog-A instance reports its current.**
 ///
 /// The instance keeps no per-terminal current of its own, so the saved

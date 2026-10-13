@@ -180,16 +180,20 @@ fn xyce_iteration_retry_timestep(rejected_dt: Value, hard_min_dt: Value, max_dt:
     (rejected_dt * 0.125).clamp(hard_min_dt, max_dt)
 }
 
+/// The exact target the stepper lands on next, and whether a Verilog-A analog
+/// event owns it rather than a discrete activation
+/// ([`BreakpointLanding::AnalogModelEvent`]).
 fn accepted_veriloga_event_time(
     circuit: &crate::circuit::CircuitData,
     floor_grid: &mut FloorLandingGrid,
     accepted_time: Value,
     hard_min_dt: Value,
     stop_time: Value,
-) -> Result<Option<Value>, SimulationError> {
-    let mut target = circuit
+) -> Result<(Option<Value>, bool), SimulationError> {
+    let analog_event = circuit
         .veriloga_transient_event_time(accepted_time)
         .map_err(SimulationError::Circuit)?;
+    let mut target = analog_event;
     // The two discrete lanes have the same exact landing contract as an analog
     // device's event target, and the fold above cannot see either: a shared
     // code model's events and a mixed module's digital queue belong to the
@@ -214,15 +218,18 @@ fn accepted_veriloga_event_time(
         target = Some(target.map_or(event, |target| target.min(event)));
     }
     let Some(target) = target else {
-        return Ok(None);
+        return Ok((None, false));
     };
-    Ok(Some(landed_veriloga_event_time(
-        floor_grid,
-        target,
-        accepted_time,
-        hard_min_dt,
-        stop_time,
-    )?))
+    Ok((
+        Some(landed_veriloga_event_time(
+            floor_grid,
+            target,
+            accepted_time,
+            hard_min_dt,
+            stop_time,
+        )?),
+        analog_event == Some(target),
+    ))
 }
 
 /// One run of consecutive landings on the solver's floor.
@@ -779,7 +786,9 @@ pub use checkpoint_stream::{
 mod companion_stamps;
 #[cfg_attr(not(test), allow(dead_code))]
 pub(super) mod source_events;
-use companion_stamps::{CompactTwoTerminalStampSlots, TwoTerminalStampSlots};
+use companion_stamps::{
+    BreakpointLanding, CompactTwoTerminalStampSlots, LandingClock, TwoTerminalStampSlots,
+};
 mod charge_stamper;
 // The physical event operator is qualified independently before the main
 // acceptance owner routes incoming/outgoing solves through it.
@@ -5318,6 +5327,9 @@ impl Engine {
         // It is reconstructed from t=0/checkpoint state below and replaced
         // only after another atomic Verilog-A acceptance.
         let mut pending_veriloga_event_time: Option<Value> = None;
+        // Whether that target is a Verilog-A analog event, whose body runs in
+        // the solve that lands on it, rather than a discrete activation.
+        let mut pending_analog_model_event = false;
         // The floor grid the current run of sub-minimum landings walks. It
         // belongs to the run rather than to any one point, which is what keeps
         // a march at the minimum from drifting off the grid it started on.
@@ -5654,13 +5666,14 @@ impl Engine {
                     )?;
                 }
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
-                pending_veriloga_event_time = accepted_veriloga_event_time(
-                    &circuit,
-                    &mut veriloga_floor_grid,
-                    resume_time,
-                    timestep.hard_min_dt(),
-                    tstop,
-                )?;
+                (pending_veriloga_event_time, pending_analog_model_event) =
+                    accepted_veriloga_event_time(
+                        &circuit,
+                        &mut veriloga_floor_grid,
+                        resume_time,
+                        timestep.hard_min_dt(),
+                        tstop,
+                    )?;
                 if circuit.has_any_veriloga_devices()
                     && let Some(bound) = circuit
                         .veriloga_timestep_bound()
@@ -6083,13 +6096,14 @@ impl Engine {
             checkpoint
                 .inject(&mut circuit)
                 .map_err(SimulationError::Circuit)?;
-            pending_veriloga_event_time = accepted_veriloga_event_time(
-                &circuit,
-                &mut veriloga_floor_grid,
-                resume_time,
-                timestep.hard_min_dt(),
-                tstop,
-            )?;
+            (pending_veriloga_event_time, pending_analog_model_event) =
+                accepted_veriloga_event_time(
+                    &circuit,
+                    &mut veriloga_floor_grid,
+                    resume_time,
+                    timestep.hard_min_dt(),
+                    tstop,
+                )?;
             if circuit.has_any_veriloga_devices()
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
@@ -7745,19 +7759,63 @@ impl Engine {
             } else if let Some(method) = fixed_method {
                 trapgear.force_method(method);
             }
+            // The default dialect solves a step that lands on a breakpoint with
+            // every independent source at its left limit, the value it held up
+            // to the breakpoint. Whatever a source does at the breakpoint — a
+            // vertical PWL knot, a TRRANDOM sample, a delayed PWL's first
+            // value — then happens in the step that leaves it, which restarts
+            // at order one, and the landing interval is smooth
+            // (`BreakpointLanding::Smooth`). ngspice evaluates a PWL knot the
+            // same way; both reference dialects keep their published values.
+            //
+            // `t + (breakpoint - t)` can round an ulp past the breakpoint,
+            // where every side of a source is its right limit, so a landing
+            // that rounding alone moved off its breakpoint is solved at the
+            // breakpoint's own clock. A wider merge window is not closed: an
+            // activation inside it would be stepped over.
+            let left_limit_landing = self.config.spice_dialect == SpiceDialect::BestAvailable
+                && at_breakpoint
+                && locked_grid.is_none()
+                && !has_exact_transient_history;
+            let breakpoint_clock = (left_limit_landing && exact_device_event_time.is_none())
+                .then(|| {
+                    let candidate = canonical_transient_step_time(t, dt, tstop);
+                    let clock = breakpoints.snap_to_breakpoint(candidate);
+                    let roundoff = 64.0 * Value::EPSILON * candidate.abs().max(clock.abs());
+                    ((clock - candidate).abs() <= roundoff).then_some(clock)
+                })
+                .flatten()
+                .filter(|time| *time > t && *time <= tstop);
             let step_time = canonical_transient_step_time_with_device_event(
                 t,
                 dt,
                 tstop,
-                exact_device_event_time.or(exact_grid_time),
+                exact_device_event_time
+                    .or(exact_grid_time)
+                    .or(breakpoint_clock),
             );
             let landed_device_event = exact_device_event_time.is_some();
+            let breakpoint_landing = if at_breakpoint {
+                Self::classify_breakpoint_landing(
+                    &circuit,
+                    &breakpoints,
+                    LandingClock {
+                        step_time,
+                        stop_time: tstop,
+                        model_event: exact_device_event_time
+                            .filter(|time| Some(*time) == pending_veriloga_event_time)
+                            .map(|_| pending_analog_model_event),
+                    },
+                )
+            } else {
+                BreakpointLanding::Smooth
+            };
             let physical_event = physical_event_time == Some(step_time);
             let trial_phase_context = bjt::BjtPhaseContext {
                 incoming_arrival: physical_event,
                 input_left_limits: None,
             };
-            let trial_source_side = if physical_event {
+            let trial_source_side = if physical_event || left_limit_landing {
                 crate::circuit::SourceTimeSide::LeftLimit
             } else if has_exact_transient_history {
                 crate::circuit::SourceTimeSide::RightLimit
@@ -7865,7 +7923,10 @@ impl Engine {
                     current_method,
                     trap_order,
                     (at_breakpoint
-                        && Self::breakpoint_landing_forces_order_one(self.config.spice_dialect))
+                        && Self::breakpoint_landing_forces_order_one(
+                            self.config.spice_dialect,
+                            breakpoint_landing,
+                        ))
                         || locked_edge_order_reset
                         || locked_reference_order_restart,
                 )
@@ -8090,6 +8151,7 @@ impl Engine {
                                 )));
                             }
                             pending_veriloga_event_time = Some(target);
+                            pending_analog_model_event = model_candidate.analog_event_root;
                             // Recorded before the chase's first cut, so the
                             // step this root interrupted survives it.
                             veriloga_refinement_approach_step
@@ -11123,13 +11185,14 @@ impl Engine {
                         breakpoints.mark_external_breakpoint_solved(t, interrupted)
                     });
                     hit_breakpoint |= veriloga_discontinuity;
-                    pending_veriloga_event_time = accepted_veriloga_event_time(
-                        &circuit,
-                        &mut veriloga_floor_grid,
-                        t,
-                        timestep.hard_min_dt(),
-                        tstop,
-                    )?;
+                    (pending_veriloga_event_time, pending_analog_model_event) =
+                        accepted_veriloga_event_time(
+                            &circuit,
+                            &mut veriloga_floor_grid,
+                            t,
+                            timestep.hard_min_dt(),
+                            tstop,
+                        )?;
                     if analysis_final_step {
                         Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
                     }
@@ -11734,13 +11797,14 @@ impl Engine {
             if has_external_models {
                 Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
             }
-            pending_veriloga_event_time = accepted_veriloga_event_time(
-                &circuit,
-                &mut veriloga_floor_grid,
-                t,
-                timestep.hard_min_dt(),
-                tstop,
-            )?;
+            (pending_veriloga_event_time, pending_analog_model_event) =
+                accepted_veriloga_event_time(
+                    &circuit,
+                    &mut veriloga_floor_grid,
+                    t,
+                    timestep.hard_min_dt(),
+                    tstop,
+                )?;
             if analysis_final_step {
                 Self::publish_pending_model_finish(abort, pending_model_finish.take())?;
             }
@@ -14935,27 +14999,47 @@ D1 D 0 DMOD
     }
 
     #[test]
-    fn ngspice_and_xyce_preserve_breakpoint_landing_order_then_restart_after_acceptance() {
-        assert!(!Engine::breakpoint_landing_forces_order_one(
-            SpiceDialect::Xyce
-        ));
-        assert!(!Engine::breakpoint_landing_forces_order_one(
-            SpiceDialect::Ngspice
-        ));
-        assert!(Engine::breakpoint_landing_forces_order_one(
-            SpiceDialect::BestAvailable
-        ));
-
-        let landing_order = Engine::step_trapezoidal_order(
-            IntegrationMethod::Trapezoidal,
-            2,
-            Engine::breakpoint_landing_forces_order_one(SpiceDialect::Ngspice),
-        );
-        assert_eq!(landing_order, 2);
-
-        let leaving_order =
-            Engine::next_trapezoidal_order_after_accepted_step(landing_order, true, true);
-        assert_eq!(leaving_order, 1);
+    fn breakpoint_landings_keep_their_order_then_restart_after_acceptance() {
+        for dialect in [
+            SpiceDialect::BestAvailable,
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+        ] {
+            assert!(!Engine::breakpoint_landing_forces_order_one(
+                dialect,
+                BreakpointLanding::Smooth
+            ));
+            let landing_order = Engine::step_trapezoidal_order(
+                IntegrationMethod::Trapezoidal,
+                2,
+                Engine::breakpoint_landing_forces_order_one(dialect, BreakpointLanding::Smooth),
+            );
+            assert_eq!(landing_order, 2, "{dialect:?}");
+            let leaving_order =
+                Engine::next_trapezoidal_order_after_accepted_step(landing_order, true, true);
+            assert_eq!(leaving_order, 1, "{dialect:?}");
+        }
+        // A landing point that can already hold its producer's change — a
+        // Verilog-A event body, a behavioral expression's clock, a discrete
+        // value an analog block reads after the activation — is solved at
+        // order one in the default dialect; both reference dialects keep
+        // their order on every landing.
+        for landing in [
+            BreakpointLanding::AnalogModelEvent,
+            BreakpointLanding::ExpressionClock,
+            BreakpointLanding::DiscreteRead,
+        ] {
+            assert!(
+                Engine::breakpoint_landing_forces_order_one(SpiceDialect::BestAvailable, landing),
+                "{landing:?}"
+            );
+            for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+                assert!(
+                    !Engine::breakpoint_landing_forces_order_one(dialect, landing),
+                    "{dialect:?} {landing:?}"
+                );
+            }
+        }
 
         assert_eq!(
             Engine::step_trapezoidal_order(IntegrationMethod::Trapezoidal, 2, false),

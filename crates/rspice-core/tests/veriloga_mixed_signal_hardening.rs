@@ -256,10 +256,17 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // crosses half its level 0.5 ps after each edge, where it crossed
         // 2.0 ps after (half the restart step that first solved the new
         // level); a 1 ps PWL edge crosses at 0.5 ps.
+        //
+        // Re-measured when the default dialect began solving every
+        // breakpoint landing with its sources at their left limit: the same
+        // 518 points on the same grid, QS and P bit-identical, and CLK moved
+        // at the 34 points that land on its PULSE corners, by at most
+        // 8.7e-13 V — the corner is now evaluated on the segment that leads
+        // into it, which rounds differently from the one that leaves it.
         Fingerprint {
             points: 518,
             grid_hash: 0xac5c_1670_ff3a_1bea,
-            volt_hash: 0x7512_13e8_713a_8551,
+            volt_hash: 0xe168_6057_86ee_1195,
         },
     ),
     (
@@ -292,10 +299,20 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // lands on the 15 ns activation, which is solved at order one: it grew
         // 0.870 -> 0.947 ns on the moved grid, and its error, which scales
         // with the square of the step, grew 4.27e-3 -> 5.04e-3 V.
+        //
+        // Re-measured, 1958 -> 1760, when the default dialect stopped solving
+        // every breakpoint landing at order one: the 100 QDIV-edge landings
+        // and the 100 clock-only landings are now trapezoidal, since the
+        // drive holds its left limit on the landing point and nothing changes
+        // inside the landing interval. Against the analytic response, the
+        // local error those landings add fell 0.2198 -> 5.28e-3 V (edges)
+        // and 0.1189 -> 6.60e-3 V (clock only), OUT's worst 5.76e-3 ->
+        // 4.70e-4 V and its mean 1.39e-3 -> 2.13e-4 V. Every event stays
+        // bit-identical.
         Fingerprint {
-            points: 1958,
-            grid_hash: 0xc32e_bd19_6814_2bc5,
-            volt_hash: 0x1448_5c80_84b0_97b5,
+            points: 1760,
+            grid_hash: 0x107f_6aab_fafa_bd04,
+            volt_hash: 0xbcfc_74cd_c2e2_7329,
         },
     ),
     (
@@ -386,10 +403,18 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // The restart after each edge here was already shorter than the
         // picosecond, so QDIV crosses half its level 0.06 ps after each edge
         // in both runs.
+        //
+        // Re-measured, 196 -> 190, when the default dialect stopped solving
+        // every breakpoint landing at order one. The eight landings on the
+        // HDL clock's activations, which change no analog drive, are now
+        // trapezoidal: their local error against the analytic RC response
+        // fell 7.97e-3 -> 2.68e-4 V in sum, and OUT's run-wide worst
+        // 2.463e-3 -> 5.01e-4 V, its mean 1.10e-3 -> 2.49e-4 V. Every
+        // CLK/FROMX/QDIV event stays bit-identical.
         Fingerprint {
-            points: 196,
-            grid_hash: 0xf73a_2b73_fc1e_312f,
-            volt_hash: 0xe9e3_75a9_5bdf_cddb,
+            points: 190,
+            grid_hash: 0x593b_21a6_bcf0_a8c2,
+            volt_hash: 0xaf8a_b3ef_e073_1446,
         },
     ),
     (

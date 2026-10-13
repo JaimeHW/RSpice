@@ -362,6 +362,120 @@ endmodule
         device.try_evaluate().unwrap()[0].to_bits(),
         0.0_f64.to_bits()
     );
+    assert!(device.final_step_feeds_equations());
+}
+
+/// The generated route solves a built-in's stop time without asking whether
+/// its `@(final_step)` body feeds the equations, which is exact only while no
+/// shipped built-in has such a body. Every shipped source is preprocessed as
+/// the generator preprocesses it; a module whose stream still names
+/// `final_step` is compiled and its body must feed no contribution.
+///
+/// HiSIM_HV is the one shipped model whose source names the event: its
+/// degradation report runs `$fopen`/`$fdisplay` under `_AGING_`, which no
+/// compile profile defines, so its stream holds no event at all.
+#[test]
+fn generated_builtin_final_step_bodies_feed_no_equations() {
+    use rspice_veriloga::preprocessor::MacroDef;
+    use rspice_veriloga::rust_backend::{
+        VERILOGA_COMPILE_PROFILE_FILE_NAME, discover_veriloga_sources,
+    };
+    use rspice_veriloga::{CompilerOptions, Preprocessor, VerilogACompiler};
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("models")
+        .join("veriloga")
+        .canonicalize()
+        .expect("the model tree is checked in");
+    let profile = std::fs::read_to_string(root.join(VERILOGA_COMPILE_PROFILE_FILE_NAME))
+        .expect("the model root declares a compile profile");
+    let shipped: BTreeSet<(String, String)> = profile
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("namespace "))
+        .map(|arguments| {
+            let (selector, _) = arguments.split_once('=').expect("SOURCE::MODULE=HEX_ID");
+            let (source, module) = selector.rsplit_once("::").expect("SOURCE::MODULE");
+            (source.to_string(), module.to_string())
+        })
+        .collect();
+
+    let mut preprocessed_sources = 0usize;
+    let mut named = Vec::new();
+    for candidate in discover_veriloga_sources(&root).expect("the generator's discovery") {
+        let relative = candidate
+            .path
+            .strip_prefix(&root)
+            .expect("discovery stays under its root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let modules: Vec<&String> = candidate
+            .modules
+            .iter()
+            .filter(|module| shipped.contains(&(relative.clone(), (*module).clone())))
+            .collect();
+        if modules.is_empty() {
+            continue;
+        }
+        let mut preprocessor = Preprocessor::new();
+        preprocessor.add_include_path(&root);
+        for name in &candidate.compile_profile.undefines {
+            preprocessor.undefine(name);
+        }
+        for (name, value) in &candidate.compile_profile.defines {
+            preprocessor.define(name, MacroDef::simple(value.as_deref().unwrap_or_default()));
+        }
+        let stream = preprocessor
+            .preprocess_file(&candidate.path)
+            .expect("a shipped source preprocesses");
+        preprocessed_sources += 1;
+        if !stream.contains("final_step") {
+            continue;
+        }
+        let mut options = CompilerOptions::default();
+        options.include_paths.push(root.clone());
+        options.defines = candidate.compile_profile.defines.clone();
+        options.undefines = candidate.compile_profile.undefines.clone();
+        let compiler = VerilogACompiler::new(options);
+        for module in modules {
+            let compiled = compiler
+                .compile_file_runtime_with_metadata(&candidate.path, Some(module.as_str()))
+                .expect("a shipped module compiles");
+            let nodes: Vec<usize> = (1..=compiled.model.num_terminals).collect();
+            let device = VerilogADevice::try_new_with_canonical_ir(
+                module.as_str(),
+                compiled.model,
+                &compiled.canonical_ir,
+                &nodes,
+            )
+            .expect("a shipped module builds a device");
+            assert!(
+                !device.final_step_feeds_equations(),
+                "{relative}::{module}: a final_step body feeds a contribution, so the generated \
+                 route would solve its stop time differently from the .va route"
+            );
+            named.push(format!("{relative}::{module}"));
+        }
+    }
+    // Every shipped device's source was read, so a missing one fails here
+    // rather than passing unexamined.
+    let shipped_sources: BTreeSet<&String> = shipped.iter().map(|(source, _)| source).collect();
+    assert_eq!(preprocessed_sources, shipped_sources.len());
+    let hisim = root
+        .join("cmc/HiSIM_HV_2.5.1_Release_20230209/HiSIM_HV_2.5.1_VA-Code/hisimhv_va")
+        .join("HSMHV_module.inc");
+    assert!(
+        std::fs::read_to_string(hisim)
+            .expect("HiSIM_HV's module body is checked in")
+            .contains("@(final_step(\"tran\"))"),
+        "the scan's one known source of the event moved"
+    );
+    eprintln!(
+        "{preprocessed_sources} shipped sources; modules whose stream names final_step: {named:?}"
+    );
 }
 
 #[test]

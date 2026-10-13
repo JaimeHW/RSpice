@@ -8,6 +8,10 @@ use rspice_veriloga_runtime::{AnalogTaskArgument, AnalogTaskEvent, AnalogTaskKin
 pub(super) struct TransientModelCandidate {
     pub finish: Option<ModelFinish>,
     pub refinement_time: Option<f64>,
+    /// `refinement_time` is a Verilog-A analog event's own root (`cross`,
+    /// `above`), whose body runs in the solve that lands on it, rather than a
+    /// mixed module's A/D threshold crossing.
+    pub analog_event_root: bool,
     pub discontinuity: bool,
 }
 
@@ -315,8 +319,8 @@ impl Engine {
             consume(event);
         }
         #[cfg(feature = "veriloga")]
-        let (mixed_refinement_time, mixed_discontinuity) = circuit
-            .visit_mixed_transient_candidate_task(
+        let (mixed_refinement_time, mixed_event_root, mixed_discontinuity) = {
+            let mixed = circuit.visit_mixed_transient_candidate_task(
                 abort,
                 time,
                 dt,
@@ -329,8 +333,14 @@ impl Engine {
                 false,
                 &mut consume,
             )?;
+            (
+                mixed.refinement,
+                mixed.analog_event_root,
+                mixed.discontinuity,
+            )
+        };
         #[cfg(not(feature = "veriloga"))]
-        let (mixed_refinement_time, mixed_discontinuity) = (None, false);
+        let (mixed_refinement_time, mixed_event_root, mixed_discontinuity) = (None, false, false);
         let _ = (
             abort,
             dt,
@@ -343,10 +353,16 @@ impl Engine {
         if let Some(error) = invalid {
             return Err(SimulationError::Circuit(error.into()));
         }
-        let refinement_time = [refinement_time, mixed_refinement_time]
+        let analog_refinement_time = refinement_time;
+        let refinement_time = [analog_refinement_time, mixed_refinement_time]
             .into_iter()
             .flatten()
             .reduce(f64::min);
+        // On a tie the analog event's body runs at the landing all the same.
+        let analog_event_root = refinement_time.is_some_and(|root| {
+            analog_refinement_time == Some(root)
+                || (mixed_event_root && mixed_refinement_time == Some(root))
+        });
         if candidate.is_some() && refinement_time.is_none() {
             circuit
                 .validate_nonmixed_model_acceptance()
@@ -369,6 +385,7 @@ impl Engine {
         Ok(TransientModelCandidate {
             finish: candidate,
             refinement_time,
+            analog_event_root,
             discontinuity: circuit.veriloga_discontinuity_rising() || mixed_discontinuity,
         })
     }

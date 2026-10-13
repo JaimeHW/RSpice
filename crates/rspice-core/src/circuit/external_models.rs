@@ -1052,6 +1052,27 @@ impl CircuitData {
         false
     }
 
+    /// Whether some Verilog-A device's `@(final_step)` body can change its
+    /// equations at the stop time, where the event runs
+    /// (`VerilogADevice::final_step_feeds_equations`). A build-time generated
+    /// compact model is not asked: no shipped one has a body that feeds a
+    /// contribution, which `generated_builtin_final_step_bodies_feed_no_equations`
+    /// checks, so both routes solve its stop time alike.
+    pub(crate) fn veriloga_final_step_feeds_equations(&self) -> bool {
+        #[cfg(feature = "veriloga")]
+        {
+            self.veriloga_devices
+                .iter()
+                .any(|device| device.final_step_feeds_equations())
+                || self
+                    .mixed_signal_hosts
+                    .iter()
+                    .any(|host| host.analog_final_step_feeds_equations())
+        }
+        #[cfg(not(feature = "veriloga"))]
+        false
+    }
+
     /// Smallest interval supported by every installed Verilog-A execution path.
     #[inline]
     pub(crate) fn veriloga_integration_timestep_floor(&self) -> Value {

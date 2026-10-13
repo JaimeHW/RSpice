@@ -130,6 +130,9 @@ pub struct BreakpointManager {
     edge_completions: BTreeSet<BreakpointTimeKey>,
     /// The edge the stepper is crossing, from its landing to its completion.
     edge_crossing: Option<EdgeCrossing>,
+    /// The permanent breakpoints a behavioral expression's own clock produced
+    /// ([`Self::extend_expression_clocks`]).
+    expression_clocks: BTreeSet<BreakpointTimeKey>,
 }
 
 /// An edge between its landing and its completion.
@@ -190,6 +193,25 @@ impl BreakpointManager {
             },
             edge_completions: BTreeSet::new(),
             edge_crossing: None,
+            expression_clocks: BTreeSet::new(),
+        }
+    }
+
+    /// An empty schedule that merges and compares times as this one does.
+    pub(crate) fn empty_like(&self) -> Self {
+        Self {
+            breakpoints: Vec::new(),
+            runtime_breakpoints: BTreeSet::new(),
+            current_index: 0,
+            just_passed_breakpoint: false,
+            saved_delta_before_breakpoint: None,
+            restart_step_scale: self.restart_step_scale,
+            equalize_pre_breakpoint_steps: self.equalize_pre_breakpoint_steps,
+            inclusive_tolerance: self.inclusive_tolerance,
+            tolerance: self.tolerance,
+            edge_completions: BTreeSet::new(),
+            edge_crossing: None,
+            expression_clocks: BTreeSet::new(),
         }
     }
 
@@ -367,18 +389,46 @@ impl BreakpointManager {
         )
     }
 
-    fn is_edge_completion(&self, time: Value) -> bool {
+    /// Whether `set` holds the instant `time` names, to the breakpoint
+    /// tolerance.
+    fn holds(&self, set: &BTreeSet<BreakpointTimeKey>, time: Value) -> bool {
         let key = BreakpointTimeKey(time);
-        self.edge_completions
-            .range(..=key)
+        set.range(..=key)
             .next_back()
             .into_iter()
-            .chain(
-                self.edge_completions
-                    .range((Excluded(key), Unbounded))
-                    .next(),
-            )
-            .any(|completion| self.coincides(time, completion.0))
+            .chain(set.range((Excluded(key), Unbounded)).next())
+            .any(|held| self.coincides(time, held.0))
+    }
+
+    fn is_edge_completion(&self, time: Value) -> bool {
+        self.holds(&self.edge_completions, time)
+    }
+
+    /// Add the permanent breakpoints a behavioral expression's own clock
+    /// produced — a B-source or capacitor expression of `time`, a switch's
+    /// control expression — and remember them as such.
+    ///
+    /// The expression evaluator publishes some of these at their right limit:
+    /// `pwl()` at a last knot that repeats its time, a `pulse()` edge with no
+    /// transition time, a switch control compared with `>=`. The point a step
+    /// lands on then already holds the change, so the transient stepper
+    /// solves the step that lands on any of them at order one; the clock does
+    /// not say which of its times step and which only turn a corner.
+    pub(crate) fn extend_expression_clocks(&mut self, times: &[Value]) {
+        self.expression_clocks.extend(
+            times
+                .iter()
+                .copied()
+                .filter(|time| time.is_finite())
+                .map(BreakpointTimeKey),
+        );
+        self.extend(times.iter().copied());
+    }
+
+    /// Whether `time` is a behavioral expression's own clock
+    /// ([`Self::extend_expression_clocks`]).
+    pub(crate) fn is_expression_clock(&self, time: Value) -> bool {
+        self.holds(&self.expression_clocks, time)
     }
 
     /// The step the stepper resumes with after landing on a zero-duration
@@ -883,6 +933,32 @@ mod breakpoint_manager_tests {
         for floor in [0.0, -1.0, Value::NAN, Value::INFINITY] {
             assert!(!coincides_before(tick, stop, floor), "floor {floor}");
         }
+    }
+
+    #[test]
+    fn expression_clocks_join_the_schedule_and_stay_recognizable() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-15);
+        breakpoints.add(1.0e-6);
+        let mut clocks = breakpoints.empty_like();
+        clocks.add(2.0e-6);
+        clocks.add(1.0e-6);
+        breakpoints.extend_expression_clocks(clocks.times());
+
+        assert_eq!(breakpoints.times(), &[1.0e-6, 2.0e-6]);
+        assert!(breakpoints.is_expression_clock(2.0e-6));
+        assert!(
+            breakpoints.is_expression_clock(1.0e-6),
+            "a clock shared with another producer is still the expression's"
+        );
+        assert!(breakpoints.is_expression_clock(2.0e-6 + 5.0e-16));
+        assert!(!breakpoints.is_expression_clock(3.0e-6));
+
+        breakpoints.discard_through(2.5e-6);
+        breakpoints.reset();
+        assert!(
+            breakpoints.is_expression_clock(2.0e-6),
+            "the permanent schedule survives a reset"
+        );
     }
 
     #[test]

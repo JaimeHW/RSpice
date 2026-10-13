@@ -1307,26 +1307,28 @@ impl Engine {
             SourceBreakpointGeometry::Authored,
         )?;
 
+        // The default dialect solves a landing on a behavioral expression's
+        // own clock at order one (`BreakpointLanding::ExpressionClock`), so
+        // those times are gathered apart and recorded as such; the reference
+        // dialects merge them as they always have.
+        let mut expression_clocks = (dialect == crate::engine::SpiceDialect::BestAvailable)
+            .then(|| breakpoints.empty_like());
+        let clocks = expression_clocks.as_mut().unwrap_or(&mut *breakpoints);
         for switch in &circuit.generic_switches {
             for &time in switch.time_breakpoints() {
-                Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+                Self::add_breakpoint_if_in_range(clocks, time, tstop);
             }
         }
 
-        circuit.behavioral_sources.collect_transient_breakpoints(
-            tstop,
-            breakpoints,
-            abort,
-            max_points,
-            false,
-        )?;
-        circuit.capacitors.collect_transient_breakpoints(
-            tstop,
-            breakpoints,
-            abort,
-            max_points,
-            false,
-        )?;
+        circuit
+            .behavioral_sources
+            .collect_transient_breakpoints(tstop, clocks, abort, max_points, false)?;
+        circuit
+            .capacitors
+            .collect_transient_breakpoints(tstop, clocks, abort, max_points, false)?;
+        if let Some(expression_clocks) = expression_clocks {
+            breakpoints.extend_expression_clocks(expression_clocks.times());
+        }
 
         for instance in &circuit.xspice_instances {
             match instance.transient_breakpoints() {

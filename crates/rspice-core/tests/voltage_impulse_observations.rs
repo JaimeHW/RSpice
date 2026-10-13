@@ -564,21 +564,42 @@ fn ccvs_source_slope_changes_have_finite_voltage_and_capacitor_charge() {
             voltage[i]
         );
     }
+    // Each corner steps V(out) = 3 Ohm * I(V1) by 3 * C1 * 1 V/ns = 6 mV, so
+    // H1 delivers C2 * 6 mV = 3e-14 C. V(out) left of a corner is 3 * I(V1),
+    // the C1 companion current. A trapezoidal step forms it as
+    // (2 C1 / h) (v_n - v_{n-1}) - i_{n-1}: each unit-magnitude node value
+    // carries at most two roundings (source evaluation and solve), so the
+    // difference adds at most 4 C1 eps / h, and the trapezoidal rule carries
+    // every earlier step's addition forward undamped. Since the order-one
+    // restart at the previous corner, I(V1) is therefore exact to
+    // sum(4 C1 eps / h), and the charge to C2 * 3 Ohm times that. A tiny
+    // restart step dominates the sum (2.8 fs after 2 ns gives 2e-23 C).
+    let h1 = action_current(&result, "h1");
+    let mut previous_corner = 0.0;
     for (time, expected) in [
         (0.0, 3e-14),
         (1e-9, -3e-14),
         (2e-9, -3e-14),
         (3.0 * 1e-9, 3e-14),
     ] {
-        action_close(
-            action_current(&result, "h1")
-                .points
-                .iter()
-                .find(|p| p.time == time)
-                .unwrap()
-                .charge_coulombs,
-            expected,
+        let inverse_steps: f64 = result
+            .time
+            .windows(2)
+            .filter(|step| step[0] >= previous_corner && step[1] <= time)
+            .map(|step| 1.0 / (step[1] - step[0]))
+            .sum();
+        let roundoff = 5e-12 * 3.0 * 4.0 * 2e-12 * f64::EPSILON * inverse_steps;
+        let actual = h1
+            .points
+            .iter()
+            .find(|p| p.time == time)
+            .unwrap()
+            .charge_coulombs;
+        assert!(
+            (actual - expected).abs() <= roundoff.max(2e-12 * expected.abs()),
+            "H1 charge at {time:e}: {actual:e} != {expected:e} (roundoff bound {roundoff:e})"
         );
+        previous_corner = time;
     }
     assert!(
         action_voltage(&result, "out")

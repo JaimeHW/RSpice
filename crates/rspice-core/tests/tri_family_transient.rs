@@ -142,7 +142,13 @@ const DECK_A_GRID_HASH: u64 = 0xf90b_311b_de64_ddd7;
 ///
 /// Re-measured with the grid for the picosecond edge completion, which moves
 /// no digital trace point and keeps that pinned analog solution.
-const DECK_A_VOLT_HASH: u64 = 0xb7b4_5134_11c8_c8e0;
+///
+/// Re-measured when the default dialect stopped solving every breakpoint
+/// landing at order one and began solving it with the sources at their left
+/// limit: `DECK_A_POINTS` and `DECK_A_GRID_HASH` did not move, no digital
+/// trace point moved, and the analog solution at every pinned digital instant
+/// still holds to 1 uV; only the analog samples on the landing points moved.
+const DECK_A_VOLT_HASH: u64 = 0xf719_57e0_0972_fbf6;
 
 /// Deck A's fingerprint, from the three constants above.
 const DECK_A_FINGERPRINT: Fingerprint = Fingerprint {

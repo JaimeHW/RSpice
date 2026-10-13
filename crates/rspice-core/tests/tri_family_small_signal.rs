@@ -36,7 +36,13 @@ const CHARGED_X: (f64, f64) = (0.5, -1.5708e-3);
 const OUTPUT_NOISE: f64 = 4.144e-18;
 
 /// Accepted transient points for a native 1 pF capacitor at each reltol.
-const NATIVE_CAP_POINTS: [usize; 3] = [135, 217, 598];
+///
+/// Re-measured, [135, 217, 598] -> [135, 167, 472], when the default dialect
+/// stopped solving every breakpoint landing at order one. The deck's twenty
+/// PULSE corners are landed trapezoidally now, so the steps into them carry
+/// the second-order truncation error the controller already budgets for
+/// every other step, and fewer of them are needed at the tighter tolerances.
+const NATIVE_CAP_POINTS: [usize; 3] = [135, 167, 472];
 const RELTOLS: [&str; 3] = ["1e-2", "1e-3", "1e-5"];
 
 //=============================================================================
