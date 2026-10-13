@@ -416,6 +416,45 @@ fn hard_min_at_clock(dialect_min_dt: Value, model_min_dt: Value, time: Value) ->
         .max(crate::numerics::integration::clock_resolution(time))
 }
 
+/// A Verilog-A step bound, carried onto the instant its event was reconciled
+/// onto.
+///
+/// A device bounds the next step so that it ends on the device's own next
+/// event — a timer, a `zi_*` sample, a transition corner — measured from the
+/// accepted time. The stepper takes that event as its pending event and
+/// reconciles it with the stop time ([`landed_veriloga_event_time`]): the
+/// twentieth sample of a 1 µs `zi_nd` filter, `20 * 1e-6`, rounds one ulp
+/// below a `2e-5` stop time and is delivered at the stop time. A bound still
+/// aimed at the unreconciled instant ends one ulp short of where the step has
+/// to land, and the breakpoint schedule then equalizes every step against it —
+/// the step is less than the interval and more than half of it, so it takes
+/// half — until the interval is under two floors and no step can cross it.
+///
+/// So a bound whose instant is less than one floor before `event`, the
+/// pending event as reconciled, aims at `event` instead. It widens by less
+/// than one floor, only to the instant the step is cut to anyway. A bound with
+/// no event behind it, a `$bound_step`, keeps its width: a march at the floor
+/// under it reaches the stop time by `fit_model_interval`'s floor count.
+fn reconciled_model_bound(
+    accepted_time: Value,
+    bound: Value,
+    event: Option<Value>,
+    hard_min_dt: Value,
+) -> Value {
+    match event {
+        Some(event)
+            if crate::numerics::integration::coincides_before(
+                accepted_time + bound,
+                event,
+                hard_min_dt,
+            ) =>
+        {
+            (event - accepted_time).max(bound)
+        }
+        _ => bound,
+    }
+}
+
 /// The clock a physical source, delay or line event lands on.
 ///
 /// Physical clocks are exact, and the solver lands on each one; but two owners
@@ -5687,6 +5726,14 @@ impl Engine {
                     && let Some(bound) = circuit
                         .veriloga_timestep_bound()
                         .map_err(SimulationError::Circuit)?
+                        .map(|bound| {
+                            reconciled_model_bound(
+                                resume_time,
+                                bound,
+                                pending_veriloga_event_time,
+                                timestep.hard_min_dt(),
+                            )
+                        })
                     && bound.max(timestep.hard_min_dt()) < timestep.dt()
                 {
                     timestep.force_step(bound.max(timestep.hard_min_dt()).min(max_step));
@@ -6117,6 +6164,14 @@ impl Engine {
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
+                    .map(|bound| {
+                        reconciled_model_bound(
+                            resume_time,
+                            bound,
+                            pending_veriloga_event_time,
+                            timestep.hard_min_dt(),
+                        )
+                    })
                 && bound.max(timestep.hard_min_dt()) < timestep.dt()
             {
                 timestep.force_step(bound.max(timestep.hard_min_dt()).min(max_step));
@@ -7671,7 +7726,14 @@ impl Engine {
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
                     .map_or(timestep.max_dt(), |bound| {
-                        bound.max(timestep.hard_min_dt()).min(timestep.max_dt())
+                        reconciled_model_bound(
+                            t,
+                            bound,
+                            pending_veriloga_event_time,
+                            timestep.hard_min_dt(),
+                        )
+                        .max(timestep.hard_min_dt())
+                        .min(timestep.max_dt())
                     })
                     .min(max_step);
                 let fitted = breakpoints::fit_model_interval(
@@ -12145,6 +12207,14 @@ impl Engine {
                 && let Some(bound) = circuit
                     .veriloga_timestep_bound()
                     .map_err(SimulationError::Circuit)?
+                    .map(|bound| {
+                        reconciled_model_bound(
+                            t,
+                            bound,
+                            pending_veriloga_event_time,
+                            timestep.hard_min_dt(),
+                        )
+                    })
                 && bound.max(timestep.hard_min_dt()) < timestep.dt()
             {
                 timestep.force_step(bound.max(timestep.hard_min_dt()).min(max_step));
