@@ -227,6 +227,10 @@ pub struct B3SoiDdModel {
     pub xpart: Value,
     pub noff: Binned,
     pub delvt: Binned,
+    /// Xyce CAPMOD 3 (charge-thickness) parameters.
+    pub dtoxcv: Value,
+    pub acde: Binned,
+    pub moin: Binned,
 
     pub tnom: Value,
     pub sheet_resistance: Value,
@@ -607,6 +611,9 @@ impl B3SoiDdModel {
             xpart: val(p, "XPART", 0.0),
             noff: binned(p, "NOFF", 1.0, 0.0, 0.0, 0.0),
             delvt: binned(p, "DELVT", 0.0, 0.0, 0.0, 0.0),
+            dtoxcv: val(p, "DTOXCV", 0.0),
+            acde: binned(p, "ACDE", 1.0, 0.0, 0.0, 0.0),
+            moin: binned(p, "MOIN", 15.0, 0.0, 0.0, 0.0),
 
             tnom,
             sheet_resistance: val(p, "RSH", 0.0),

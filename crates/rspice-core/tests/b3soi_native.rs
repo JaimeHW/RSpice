@@ -1244,6 +1244,38 @@ fn xyce_level10_capmod2_terminal_charges_match_xyce710_in_both_modes() {
     );
 }
 
+/// Xyce's CAPMOD 3 is its own charge-centroid model
+/// (N_DEV_MOSFET_B3SOI.C:12409-12792), with DTOXCV, ACDE and MOIN, not
+/// ngspice B3SOIDD's CAPMOD 3: run through ngspice's equations, the inverse
+/// gate charge came out +8.8e-16 C against Xyce's -2.2e-15 C.
+#[test]
+fn xyce_level10_capmod3_terminal_charges_match_xyce710_in_both_modes() {
+    assert_terminal_charges_match_xyce(
+        "inverse CAPMOD 3",
+        3,
+        XYCE_INVERSE_RAMP,
+        [
+            2.923423e-14,
+            -2.231235e-15,
+            -2.952223e-14,
+            0.0,
+            2.519241e-15,
+        ],
+    );
+    assert_terminal_charges_match_xyce(
+        "forward CAPMOD 3",
+        3,
+        XYCE_FORWARD_RAMP,
+        [
+            -1.661806e-14,
+            -7.406965e-15,
+            2.142603e-14,
+            0.0,
+            2.598990e-15,
+        ],
+    );
+}
+
 #[test]
 fn xyce_level10_soimod1_self_heating_ac_bounds_xyce710_delta() {
     let deck = format!(

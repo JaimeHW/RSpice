@@ -2296,6 +2296,11 @@ pub struct ModelConsts {
     pub qsieff: Value,
     pub adice: Value,
     pub tox: Value,
+    /// CV oxide-thickness offset `DTOXCV` (Xyce CAPMOD 3).
+    pub dtoxcv: Value,
+    /// `SHMOD=1` with a nonzero `RTH0` (Xyce's `selfheat`), which selects
+    /// Xyce's temperature-dependent CAPMOD 3 flat band.
+    pub self_heating: bool,
     pub tsi: Value,
     pub xj: Value,
     pub charge_q: Value,
@@ -2660,7 +2665,7 @@ fn eval_charges_capmod2_or_3(
     mode: i32,
     i: &ChargeInputs,
 ) -> B3SoiDdCharge {
-    if m.cap_mod == 2 && m.dialect == B3SoiDialect::Xyce {
+    if m.dialect == B3SoiDialect::Xyce {
         return eval_charges_xyce(p, m, mode, i);
     }
 
@@ -3541,7 +3546,7 @@ struct XyceCv {
 }
 
 /// The Xyce LEVEL=10 B3SOI charges (`N_DEV_MOSFET_B3SOI.C:12090-13115`),
-/// CAPMOD 2.
+/// CAPMOD 2 and 3.
 ///
 /// Every intermediate carries its derivatives along the mode-frame (Vgs, Vds,
 /// Vbs, Ves). Xyce forms each capacitance from partials taken along Vgsteff
@@ -3610,10 +3615,14 @@ fn eval_charges_xyce(
         cox_wl: m.cox * (p.weff_cv / p.nseg) * p.leff_cv,
         cox_wlb: p.fbody * m.cox * (p.weff_cv / p.nseg) * p.leff_cv_b,
     };
-    let intrinsic = xyce_capmod2_charges(p, m, i, &cv);
+    let intrinsic = if m.cap_mod == 2 {
+        xyce_capmod2_charges(p, m, i, &cv)
+    } else {
+        xyce_capmod3_charges(p, m, i, &cv)
+    };
 
     // Back-gate charge against the mode-frame Ves (N_DEV_MOSFET_B3SOI.C:9382,
-    // 12335): in inverse mode the reference terminal is the drain.
+    // 12335, 12728): in inverse mode the reference terminal is the drain.
     let cbox_wl = p.kb1 * p.fbody * i.cbox * (p.weff_cv / p.nseg) * p.leff_cv_bg;
     let ves = if mode > 0 {
         i.ves_raw
@@ -3634,7 +3643,11 @@ fn eval_charges_xyce(
     let mut qgate = qgate;
     let mut qbody = qbody - qe1;
     let mut qsub = qe1;
-    let mut qdrn = -(qgate + qsrc + qbody + qsub);
+    let mut qdrn = if m.cap_mod == 2 {
+        -(qgate + qsrc + qbody + qsub)
+    } else {
+        -(qgate + qbody + qsub + qsrc)
+    };
     let dqbody = dqbody - dqe1;
     let dqdrn = -(dqgate + dqsrc + dqbody + dqe1);
 
@@ -3910,6 +3923,207 @@ fn xyce_capmod2_charges(
     IntrinsicCharges {
         qgate: qinv + qac0 + qsub0,
         dqgate: dqinv + dqac0 + dqsub0,
+        qbody: qbulk - qac0 - qsub0,
+        dqbody: dqbulk - dqac0 - dqsub0,
+        qsrc,
+        dqsrc,
+    }
+}
+
+/// The effective oxide capacitance `Cox*Ccen/(Cox + Ccen)` of a charge
+/// centroid at depth `tcen` (`Ccen = EPSSI/Tcen`), and its gradient.
+fn centroid_oxide_capacitance(cox: Value, tcen: Value, dtcen: Grad4) -> (Value, Grad4) {
+    let ccen = EPSSI / tcen;
+    let t = cox / (cox + ccen);
+    (t * ccen, dtcen * (t * t * (-ccen / tcen)))
+}
+
+/// Xyce's zero-bias flat band for CAPMOD 3: `paramPtr->vfbzb`
+/// (`N_DEV_MOSFET_B3SOI.C:8397-8438`), or with self-heating `Vthzb - phi -
+/// K1*sqrt(phi)` at the device temperature (:9932-9971, 12428), which takes
+/// TOX rather than TOX - DTOXCV in its K3 term.
+fn xyce_vfbzb(p: &B3SoiDdSized, m: &ModelConsts) -> Value {
+    use super::super::common::{EXPL_THRESHOLD, MIN_EXPL};
+
+    let roll_off = |t0: Value| {
+        let t1 = if t0 > -EXPL_THRESHOLD {
+            t0.exp()
+        } else {
+            MIN_EXPL
+        };
+        t1 * (1.0 + 2.0 * t1)
+    };
+    let lt = p.factor1 * p.xdep0.sqrt();
+    let v0 = p.vbi - p.phi;
+    let delt_vthw = p.dvt0w * roll_off(-0.5 * p.dvt1w * p.weff * p.leff / lt) * v0;
+    let delt_vth = p.dvt0 * roll_off(-0.5 * p.dvt1 * p.leff / lt) * v0;
+    let tox = if m.self_heating {
+        m.tox
+    } else {
+        m.tox - m.dtoxcv
+    };
+    let t4 = tox * p.phi / (p.weff + p.w0);
+    let t0 = (1.0 + p.nlx / p.leff).sqrt();
+    let t5 = p.k1 * (t0 - 1.0) * p.sqrt_phi + (p.kt1 + p.kt1l / p.leff) * (p.temp / p.tnom - 1.0);
+    let vthzb = m.mtype * p.vth0 - delt_vthw - delt_vth + p.k3 * t4 + t5;
+    vthzb - p.phi - p.k1 * p.sqrt_phi
+}
+
+/// Xyce CAPMOD 3, the charge-thickness model (`N_DEV_MOSFET_B3SOI.C:12409-12792`,
+/// soiMod 0/1): the accumulation and depletion charges at a first charge
+/// centroid, the inversion and bulk charges at a second, with the gate-bias
+/// dependent surface-potential shift `DeltaPhi`.
+#[allow(clippy::too_many_lines)]
+fn xyce_capmod3_charges(
+    p: &B3SoiDdSized,
+    m: &ModelConsts,
+    i: &ChargeInputs,
+    cv: &XyceCv,
+) -> IntrinsicCharges {
+    use super::super::common::{DELTA_3, DELTA_4, EPSOX, EXPL_THRESHOLD, MAX_EXPL, MIN_EXPL};
+
+    let k1 = i.k1;
+    let vtm = p.vtm;
+    let tox_cv = m.tox - m.dtoxcv;
+    let cox = EPSOX / tox_cv;
+    let cox_wl = cv.cox_wl * m.tox / tox_cv;
+    let cox_wlb = cv.cox_wlb * m.tox / tox_cv;
+    let tox = 1.0e8 * tox_cv;
+    let vfbzb = xyce_vfbzb(p, m) + p.delvt;
+    let (vgsteff, dvgsteff) = (cv.vgsteff, cv.dvgsteff);
+
+    // Accumulation (12436-12455) at the first centroid (12457-12500).
+    let v3 = vfbzb - cv.vgs_eff + cv.vbseff - DELTA_3;
+    let dv3 = cv.dvbseff - cv.dvgs_eff;
+    let delta_sign = if vfbzb <= 0.0 { -1.0 } else { 1.0 };
+    let t0 = (v3 * v3 + delta_sign * 4.0 * DELTA_3 * vfbzb).sqrt();
+    let vfbeff = vfbzb - 0.5 * (v3 + t0);
+    let dvfbeff = dv3 * (-0.5 * (1.0 + v3 / t0));
+
+    let t0 = (cv.vgs_eff - cv.vbseff - vfbzb) / tox;
+    let dt0 = (cv.dvgs_eff - cv.dvbseff) * (1.0 / tox);
+    let tmp = t0 * p.acde;
+    let (tcen, dtcen) = if -EXPL_THRESHOLD < tmp && tmp < EXPL_THRESHOLD {
+        let tcen = p.ldeb * tmp.exp();
+        (tcen, dt0 * (p.acde * tcen))
+    } else if tmp <= -EXPL_THRESHOLD {
+        (p.ldeb * MIN_EXPL, Grad4::default())
+    } else {
+        (p.ldeb * MAX_EXPL, Grad4::default())
+    };
+    let link = 1.0e-3 * tox_cv;
+    let v3 = p.ldeb - tcen - link;
+    let v4 = (v3 * v3 + 4.0 * link * p.ldeb).sqrt();
+    let tcen = p.ldeb - 0.5 * (v3 + v4);
+    let dtcen = dtcen * (0.5 * (1.0 + v3 / v4));
+    let (coxeff, dcoxeff) = centroid_oxide_capacitance(cox, tcen, dtcen);
+    let cox_wlcenb = cox_wlb * coxeff / cox;
+    let dcox_wlcenb = dcoxeff * (cox_wlb / cox);
+
+    let qac0 = cox_wlcenb * (vfbeff - vfbzb);
+    let dqac0 = dvfbeff * cox_wlcenb + dcox_wlcenb * (vfbeff - vfbzb);
+
+    // Depletion (12516-12544).
+    let t0 = 0.5 * k1;
+    let t3 = cv.vgs_eff - vfbeff - cv.vbseff - vgsteff;
+    let dt3 = cv.dvgs_eff - dvfbeff - cv.dvbseff - dvgsteff;
+    let (t1, dt1) = if k1 == 0.0 {
+        (0.0, Grad4::default())
+    } else if t3 < 0.0 {
+        (t0 + t3 / k1, dt3 * (1.0 / k1))
+    } else {
+        let t1 = (t0 * t0 + t3).sqrt();
+        (t1, dt3 * (0.5 / t1))
+    };
+    let qsub0 = cox_wlcenb * k1 * (t1 - t0);
+    let dqsub0 = dt1 * (cox_wlcenb * k1) + dcox_wlcenb * (k1 * (t1 - t0));
+
+    // Gate-bias dependent DeltaPhi (12552-12566).
+    let (denomi, t0) = if k1 <= 0.0 {
+        (0.25 * p.moin * vtm, 0.5 * p.sqrt_phi)
+    } else {
+        (p.moin * vtm * k1 * k1, k1 * p.sqrt_phi)
+    };
+    let t1 = 2.0 * t0 + vgsteff;
+    let delta_phi = vtm * (1.0 + t1 * vgsteff / denomi).ln();
+    let ddelta_phi = dvgsteff * (2.0 * vtm * (t1 - t0) / (denomi + t1 * vgsteff));
+
+    // The second centroid (12570-12607).
+    let t3 = 4.0 * (cv.vth - vfbzb - i.phi);
+    let t2 = (t3 * t3 + 0.0001).sqrt();
+    let t4 = 0.5 * (t3 + t2);
+    let dt4 = cv.dvth * (2.0 * (1.0 + t3 / t2));
+    let tox2 = tox + tox;
+    let t0 = (vgsteff + t4) / tox2;
+    let dt0 = (dvgsteff + dt4) * (1.0 / tox2);
+    let tmp = (0.7 * t0.ln()).exp();
+    let t1 = 1.0 + tmp;
+    let tcen = 1.9e-9 / t1;
+    let dtcen = dt0 * (-tcen / t1 * 0.7 * tmp / t0);
+    let (coxeff, dcoxeff) = centroid_oxide_capacitance(cox, tcen, dtcen);
+    let cox_wlcen = cox_wl * coxeff / cox;
+    let dcox_wlcen = dcoxeff * (cox_wl / cox);
+    let cox_wlcenb = cox_wlb * coxeff / cox;
+    let dcox_wlcenb = dcoxeff * (cox_wlb / cox);
+
+    // VdseffCV (12609-12622).
+    let (abulk, dabulk) = (cv.abulk_cv, cv.dabulk_cv);
+    let vdsat_cv = (vgsteff - delta_phi) / abulk;
+    let dvdsat_cv = (dvgsteff - ddelta_phi - dabulk * vdsat_cv) * (1.0 / abulk);
+    let v4 = vdsat_cv - cv.vds - DELTA_4;
+    let dv4 = dvdsat_cv - Grad4::VDS;
+    let t0 = (v4 * v4 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
+    let dt0 = (dv4 * v4 + dvdsat_cv * (2.0 * DELTA_4)) * (1.0 / t0);
+    let vdseff = vdsat_cv - 0.5 * (v4 + t0);
+    let dvdseff = dvdsat_cv - (dv4 + dt0) * 0.5;
+
+    // Inversion and bulk charges (12624-12676).
+    let t0 = abulk * vdseff;
+    let dt0 = dabulk * vdseff + dvdseff * abulk;
+    let t1 = vgsteff - delta_phi;
+    let dt1 = dvgsteff - ddelta_phi;
+    let t2 = 12.0 * (t1 - 0.5 * t0 + 1.0e-20);
+    let dt2 = dt1 * 12.0 - dt0 * 6.0;
+    let t3 = t0 / t2;
+    let dt3 = (dt0 * t2 - dt2 * t0) * (1.0 / (t2 * t2));
+
+    let qinv = cox_wlcen * (t1 - t0 * (0.5 - t3));
+    let dqinv =
+        dcox_wlcen * (t1 - t0 * (0.5 - t3)) + (dt1 - dt0 * (0.5 - t3) + dt3 * t0) * cox_wlcen;
+
+    let t7 = 1.0 - abulk;
+    let bulk = 0.5 * vdseff - t0 * vdseff / t2;
+    let dbulk = dvdseff * 0.5 - (dt0 * vdseff + dvdseff * t0) * (1.0 / t2)
+        + dt2 * (t0 * vdseff / (t2 * t2));
+    let qbulk = cox_wlcenb * t7 * bulk;
+    let dqbulk = dcox_wlcenb * (t7 * bulk) + (dbulk * t7 - dabulk * bulk) * cox_wlcenb;
+
+    // Source partition (12679-12722).
+    let (qsrc, dqsrc);
+    if m.xpart > 0.5 {
+        let h = t1 / 2.0 + t0 / 4.0 - 0.5 * t0 * t0 / t2;
+        let dh = dt1 * 0.5 + dt0 * 0.25 - dt0 * (t0 / t2) + dt2 * (0.5 * t0 * t0 / (t2 * t2));
+        qsrc = -cox_wlcen * h;
+        dqsrc = -(dcox_wlcen * h + dh * cox_wlcen);
+    } else if m.xpart < 0.5 {
+        let t2p = t2 / 12.0;
+        let dt2p = dt2 * (1.0 / 12.0);
+        let t3p = 0.5 * cox_wlcen / (t2p * t2p);
+        let dt3p = dcox_wlcen * (0.5 / (t2p * t2p)) - dt2p * (cox_wlcen / (t2p * t2p * t2p));
+        let t4p =
+            t1 * (2.0 * t0 * t0 / 3.0 + t1 * (t1 - 4.0 * t0 / 3.0)) - 2.0 * t0 * t0 * t0 / 15.0;
+        let dt4p = dt1 * (t1 * (3.0 * t1 - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0)
+            - dt0 * (4.0 / 3.0 * t1 * (t1 - t0) + 0.4 * t0 * t0);
+        qsrc = -t3p * t4p;
+        dqsrc = -(dt3p * t4p + dt4p * t3p);
+    } else {
+        qsrc = -0.5 * qinv;
+        dqsrc = dqinv * -0.5;
+    }
+
+    IntrinsicCharges {
+        qgate: qinv + (qac0 + qsub0 - qbulk),
+        dqgate: dqinv + dqac0 + dqsub0 - dqbulk,
         qbody: qbulk - qac0 - qsub0,
         dqbody: dqbulk - dqac0 - dqsub0,
         qsrc,

@@ -266,6 +266,8 @@ impl B3SoiDd {
             qsieff: model.qsieff,
             adice: model.adice,
             tox: model.tox,
+            dtoxcv: model.dtoxcv,
+            self_heating: model.sh_mod == 1 && geom.rth0 != 0.0,
             tsi: model.tsi,
             xj: model.xj,
             charge_q: super::common::CHARGE_Q,
@@ -1858,6 +1860,8 @@ mod tests {
             qsieff: m.qsieff,
             adice: m.adice,
             tox: m.tox,
+            dtoxcv: m.dtoxcv,
+            self_heating: m.sh_mod == 1 && m.rth0 != 0.0,
             tsi: m.tsi,
             xj: m.xj,
             charge_q: super::super::common::CHARGE_Q,
@@ -2487,6 +2491,49 @@ mod tests {
             B3SoiDdModel::from_params(&HashMap::from([("LEVEL".to_string(), 10.0)]), false, 300.15);
         assert_eq!(xyce.dialect, B3SoiDialect::Xyce);
         assert_eq!(xyce.beta0.v, 0.0);
+    }
+
+    /// Xyce's CAPMOD 3 card parameters default as in Xyce 7.10
+    /// (N_DEV_MOSFET_B3SOI.C: DTOXCV 0, ACDE 1, MOIN 15, length/width/area
+    /// terms 0), and a card value overrides each. Like Xyce (:15900), a
+    /// card whose TOX - DTOXCV is not positive is refused, whatever its CAPMOD.
+    #[test]
+    fn xyce_capmod3_centroid_parameters_default_as_xyce() {
+        let xyce = HashMap::from([("LEVEL".to_string(), 10.0)]);
+        let model = B3SoiDdModel::from_params(&xyce, false, 300.15);
+        assert_eq!(model.dtoxcv, 0.0);
+        assert_eq!(
+            (model.acde.v, model.acde.l, model.acde.w, model.acde.p),
+            (1.0, 0.0, 0.0, 0.0)
+        );
+        assert_eq!(
+            (model.moin.v, model.moin.l, model.moin.w, model.moin.p),
+            (15.0, 0.0, 0.0, 0.0)
+        );
+
+        let mut card = xyce.clone();
+        card.extend([
+            ("DTOXCV".to_string(), 1.0e-10),
+            ("ACDE".to_string(), 0.5),
+            ("LACDE".to_string(), 1.0e-8),
+            ("MOIN".to_string(), 20.0),
+            ("WMOIN".to_string(), 2.0e-6),
+        ]);
+        let model = B3SoiDdModel::from_params(&card, false, 300.15);
+        assert_eq!(model.dtoxcv, 1.0e-10);
+        assert_eq!((model.acde.v, model.acde.l), (0.5, 1.0e-8));
+        assert_eq!((model.moin.v, model.moin.w), (20.0, 2.0e-6));
+
+        for capmod in [2.0, 3.0] {
+            let mut thin = n1_params();
+            thin.extend([
+                ("LEVEL".to_string(), 10.0),
+                ("CAPMOD".to_string(), capmod),
+                ("DTOXCV".to_string(), 1.0),
+            ]);
+            let model = B3SoiDdModel::from_params(&thin, false, 300.15);
+            assert!(B3SoiDdSized::new(&model, &geom(), 300.15).is_err());
+        }
     }
 
     #[test]

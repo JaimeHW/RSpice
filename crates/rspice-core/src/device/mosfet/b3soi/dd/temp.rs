@@ -81,6 +81,11 @@ pub struct B3SoiDdSized {
     pub voff: Value,
     pub noff: Value,
     pub delvt: Value,
+    /// Xyce CAPMOD 3: the centroid exponent `ACDE*(NCH/2e16)^-0.25`, `MOIN`,
+    /// and the Debye length `ldeb`.
+    pub acde: Value,
+    pub moin: Value,
+    pub ldeb: Value,
     pub eta0: Value,
     pub etab: Value,
     pub dsub: Value,
@@ -414,6 +419,8 @@ impl B3SoiDdSized {
         bin!(voff);
         bin!(noff);
         bin!(delvt);
+        bin!(acde);
+        bin!(moin);
         bin!(eta0);
         bin!(etab);
         bin!(dsub);
@@ -643,6 +650,16 @@ impl B3SoiDdSized {
         p.theta_rout = p.pdibl1 * t2 + p.pdibl2;
 
         p.min_isub = 5.0e-2 * p.weff * m.tsi * p.isdif.max(p.isrec);
+
+        // Xyce refuses a non-positive CV oxide thickness on every card
+        // (N_DEV_MOSFET_B3SOI.C:15900).
+        if m.dialect == B3SoiDialect::Xyce && m.tox - m.dtoxcv <= 0.0 {
+            return Err("B3SOIDD: TOX - DTOXCV must be positive".to_string());
+        }
+        // Xyce CAPMOD 3 charge centroid (N_DEV_MOSFET_B3SOI.C:8032-8033, 8463).
+        p.acde *= (p.npeak / 2.0e16).powf(-0.25);
+        let vtm0 = KB_OVER_Q * tnom;
+        p.ldeb = (EPSSI * vtm0 / (CHARGE_Q * p.npeak * 1.0e6)).sqrt() / 3.0;
 
         // --- Instance-level depletion-capacitance knots (748-788) ---
         p.csbox = m.cbox * geom.source_area;
