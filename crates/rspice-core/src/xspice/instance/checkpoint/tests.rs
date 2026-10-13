@@ -129,15 +129,15 @@ fn instance_runtime_checkpoint_checks_inverted_inputs_inout_ownership_and_real_p
     )
     .unwrap();
     instance.init().unwrap();
-    let bits = HashMap::from([(1, DigitalValue::one())]);
-    let times = HashMap::from([(1, 2e-9)]);
-    let reals = HashMap::from([
+    let bits = HashMap::from_iter([(1, DigitalValue::one())]);
+    let times = HashMap::from_iter([(1, 2e-9)]);
+    let reals = HashMap::from_iter([
         (2, -0.0),
         (3, f64::from_bits(0x7ff8_0000_0000_5678)),
         (4, 5.0),
     ]);
-    let real_times = HashMap::from([(2, 1e-9)]);
-    let loads = HashMap::from([(1, 1e-12)]);
+    let real_times = HashMap::from_iter([(2, 1e-9)]);
+    let loads = HashMap::from_iter([(1, 1e-12)]);
     let inputs = || XspiceEventInputs {
         digital_values: &bits,
         digital_event_times: &times,
@@ -149,7 +149,7 @@ fn instance_runtime_checkpoint_checks_inverted_inputs_inout_ownership_and_real_p
         crate::xspice::DigitalState::Zero,
         crate::xspice::DigitalStrength::Resistive,
     );
-    let drivers = HashMap::from([(
+    let drivers = HashMap::from_iter([(
         1,
         std::collections::BTreeMap::from([
             (("A".into(), "io".into(), 0), own),
@@ -210,7 +210,7 @@ fn instance_runtime_checkpoint_checks_inverted_inputs_inout_ownership_and_real_p
             )
             .is_err()
     );
-    let wrong_time = HashMap::from([(1, 1e-9)]);
+    let wrong_time = HashMap::from_iter([(1, 1e-9)]);
     assert!(
         instance
             .validate_runtime_event_observations(
@@ -227,7 +227,7 @@ fn instance_runtime_checkpoint_checks_inverted_inputs_inout_ownership_and_real_p
         instance
             .validate_runtime_event_observations(
                 XspiceEventInputs {
-                    event_total_loads: &HashMap::new(),
+                    event_total_loads: &Default::default(),
                     ..inputs()
                 },
                 &drivers,
@@ -290,8 +290,8 @@ fn drive(
     t: f64,
     level: DigitalValue,
 ) {
-    let mut values = HashMap::new();
-    let mut times = HashMap::new();
+    let mut values = HashMap::default();
+    let mut times = HashMap::default();
     instance.for_each_event_input_net(|_, node| {
         values.insert(node, level);
         times.insert(node, t);
@@ -303,9 +303,9 @@ fn drive(
             XspiceEventInputs {
                 digital_values: &values,
                 digital_event_times: &times,
-                event_total_loads: &HashMap::new(),
-                real_values: &HashMap::new(),
-                real_event_times: &HashMap::new(),
+                event_total_loads: &Default::default(),
+                real_values: &Default::default(),
+                real_event_times: &Default::default(),
             },
             &[],
         )

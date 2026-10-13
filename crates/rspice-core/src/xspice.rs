@@ -109,7 +109,8 @@ pub use event::EventValue;
 #[cfg(any(feature = "veriloga", test))]
 pub(crate) use event::checkpoint as event_checkpoint;
 pub(crate) use event::{
-    SharedXspiceEventQueue, SharedXspiceEventValues, XspiceEventScheduler, XspiceEventValues,
+    EventNodeMap, SharedXspiceEventQueue, SharedXspiceEventValues, XspiceEventScheduler,
+    XspiceEventValues,
 };
 pub use external::{
     DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimRuntimeFactory, DigitalCosimSpec,
@@ -120,8 +121,8 @@ pub use external::{
 pub(crate) use instance::checkpoint as instance_checkpoint;
 pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
 pub(crate) use instance::{
-    CodeModelVectorParams, EvaluationRecovery, EventInputKind, SharedXspiceInstance,
-    XspiceEventInputs, XspiceInstanceCheckpoint,
+    AnalogTransitionMap, CodeModelVectorParams, EvaluationRecovery, EventInputKind,
+    SharedXspiceInstance, XspiceEventInputs, XspiceInstanceCheckpoint,
 };
 pub use registry::CodeModelRegistry;
 pub(crate) use resource_transaction::{

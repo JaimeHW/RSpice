@@ -13,7 +13,7 @@ use super::event_scheduler::{
     EventScheduler, EventTarget, Instant, SchedulerError, SchedulerLimits, SchedulerRegion,
 };
 use crate::{NodeId, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[cfg(any(feature = "veriloga", test))]
@@ -349,6 +349,14 @@ impl XspiceEventScheduler {
 
 /// Identity of one output driver: instance, port, and vector element.
 pub(crate) type XspiceDriverId = (String, String, usize);
+/// Per-node map of the event world, keyed by node number.
+///
+/// Every code model reads its event inputs out of these maps on every
+/// evaluation, so the keyed lookup is on the Newton path. A node number needs
+/// no flood-resistant hash, and nothing reads these maps in iteration order
+/// (the one walk that does, the checkpoint image, sorts what it collects), so
+/// the cheap hash changes no result.
+pub(crate) type EventNodeMap<V> = rustc_hash::FxHashMap<NodeId, V>;
 // Node lookup order is immaterial; the driver fold is not. In particular,
 // summing real drivers in randomized HashMap order changes cancellation after
 // rebuilding a circuit. Keep every fold, including inout other-driver views,
@@ -360,9 +368,9 @@ pub(crate) type XspiceDriverId = (String, String, usize);
 // `String`s on every node of the design.
 /// Per-node digital drive state, one entry per driver of the node.
 pub(crate) type XspiceDigitalDrivers =
-    HashMap<NodeId, CopyOnWrite<BTreeMap<XspiceDriverId, DigitalValue>>>;
+    EventNodeMap<CopyOnWrite<BTreeMap<XspiceDriverId, DigitalValue>>>;
 /// Per-node real-valued drive state, one entry per driver of the node.
-pub(crate) type XspiceRealDrivers = HashMap<NodeId, CopyOnWrite<BTreeMap<XspiceDriverId, Value>>>;
+pub(crate) type XspiceRealDrivers = EventNodeMap<CopyOnWrite<BTreeMap<XspiceDriverId, Value>>>;
 
 /// What every event-driven net of one circuit currently carries.
 ///
@@ -376,17 +384,17 @@ pub(crate) type XspiceRealDrivers = HashMap<NodeId, CopyOnWrite<BTreeMap<XspiceD
 pub(crate) struct XspiceEventValues {
     pub(crate) traces: super::event_trace::EventTraceJournal,
     /// Resolved digital value of each event-driven node.
-    pub(crate) digital_values: HashMap<NodeId, DigitalValue>,
+    pub(crate) digital_values: EventNodeMap<DigitalValue>,
     /// Per-output digital driver values, resolved onto digital nodes.
     pub(crate) digital_drivers: XspiceDigitalDrivers,
     /// Last event time per digital node.
-    pub(crate) digital_event_times: HashMap<NodeId, Value>,
+    pub(crate) digital_event_times: EventNodeMap<Value>,
     /// Resolved real-valued value of each event-driven node.
-    pub(crate) real_values: HashMap<NodeId, Value>,
+    pub(crate) real_values: EventNodeMap<Value>,
     /// Per-output real-valued drivers, summed onto real nodes.
     pub(crate) real_drivers: XspiceRealDrivers,
     /// Last event time per real-valued node.
-    pub(crate) real_event_times: HashMap<NodeId, Value>,
+    pub(crate) real_event_times: EventNodeMap<Value>,
 }
 
 /// A circuit's handle on its resolved event-node state, shared with rollback

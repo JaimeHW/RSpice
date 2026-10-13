@@ -29,7 +29,6 @@ use crate::xspice::{
 };
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 
 /// Who a scheduled activation belongs to, for a diagnostic that has to name
 /// it.
@@ -134,7 +133,7 @@ pub(crate) struct XspiceActiveWave {
     coefficients: crate::numerics::integration::CompanionCoefficients,
     xyce_one_step_order2: bool,
     current_source_values: Vec<Value>,
-    analog_transitions: HashMap<(NodeId, NodeId), crate::xspice::AnalogTransition>,
+    analog_transitions: crate::xspice::AnalogTransitionMap,
     pass: usize,
     /// Mixed input converters wait until the trial records physical roots.
     defer_mixed_adc: bool,
@@ -1418,7 +1417,7 @@ impl CircuitData {
             coefficients: *companion.coefficients,
             xyce_one_step_order2: companion.xyce_one_step_order2,
             current_source_values: self.current_sources.values_at_time(time),
-            analog_transitions: HashMap::new(),
+            analog_transitions: Default::default(),
             pass: 0,
             defer_mixed_adc: false,
             interpolated: false,

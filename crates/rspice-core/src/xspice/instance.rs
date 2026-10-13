@@ -33,12 +33,17 @@ pub(crate) struct CodeModelVectorParams<'a> {
 /// event node presents.
 #[derive(Clone, Copy)]
 pub(crate) struct XspiceEventInputs<'a> {
-    pub digital_values: &'a HashMap<usize, DigitalValue>,
-    pub digital_event_times: &'a HashMap<usize, Value>,
-    pub event_total_loads: &'a HashMap<usize, Value>,
-    pub real_values: &'a HashMap<usize, Value>,
-    pub real_event_times: &'a HashMap<usize, Value>,
+    pub digital_values: &'a super::EventNodeMap<DigitalValue>,
+    pub digital_event_times: &'a super::EventNodeMap<Value>,
+    pub event_total_loads: &'a super::EventNodeMap<Value>,
+    pub real_values: &'a super::EventNodeMap<Value>,
+    pub real_event_times: &'a super::EventNodeMap<Value>,
 }
+
+/// The analog output transitions an active wave has published so far, keyed
+/// by the output's terminal pair. Read by every later instance of the wave,
+/// so on the Newton path; nothing walks it in iteration order.
+pub(crate) type AnalogTransitionMap = rustc_hash::FxHashMap<(usize, usize), AnalogTransition>;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -379,7 +384,7 @@ fn set_context_event_total_load(
     context: &mut CmContext,
     port_name: &str,
     connection: &PortConnection,
-    event_total_loads: &HashMap<usize, Value>,
+    event_total_loads: &super::EventNodeMap<Value>,
 ) -> CmResult<()> {
     match connection {
         PortConnection::Digital(node)
@@ -729,7 +734,7 @@ impl DigitalPortConnection {
         Self { node, inverted }
     }
 
-    fn input_value(&self, values: &HashMap<usize, DigitalValue>) -> DigitalValue {
+    fn input_value(&self, values: &super::EventNodeMap<DigitalValue>) -> DigitalValue {
         let value = values.get(&self.node).copied().unwrap_or_default();
         if self.inverted { value.invert() } else { value }
     }
@@ -919,7 +924,7 @@ pub struct XspiceInstance {
     /// Optional MNA branch variable per port (for voltage-type outputs)
     output_branches: CopyOnWrite<Vec<Option<usize>>>,
     /// Optional MNA branch variable per vector output element.
-    output_vector_branches: CopyOnWrite<HashMap<(usize, usize), usize>>,
+    output_vector_branches: CopyOnWrite<rustc_hash::FxHashMap<(usize, usize), usize>>,
     /// Node-voltage count for the most recently supplied MNA solution.
     solution_num_nodes: usize,
     /// Node-voltage count used to build the current context port bindings.
@@ -1783,7 +1788,7 @@ impl XspiceInstance {
                 real_event_times,
             },
             current_source_values,
-            &HashMap::new(),
+            &AnalogTransitionMap::default(),
         )
     }
 
@@ -1888,7 +1893,7 @@ impl XspiceInstance {
         num_nodes: usize,
         events: XspiceEventInputs<'_>,
         current_source_values: &[Value],
-        analog_transitions: &HashMap<(usize, usize), AnalogTransition>,
+        analog_transitions: &AnalogTransitionMap,
     ) -> CmResult<()> {
         let XspiceEventInputs {
             digital_values,
@@ -2503,7 +2508,7 @@ impl XspiceInstance {
         num_nodes: usize,
         events: XspiceEventInputs<'_>,
         current_source_values: &[Value],
-        analog_transitions: &HashMap<(usize, usize), AnalogTransition>,
+        analog_transitions: &AnalogTransitionMap,
         analysis: AnalysisType,
     ) {
         let XspiceEventInputs {
@@ -4239,7 +4244,7 @@ mod tests {
         )
         .expect("event-load instance constructs");
 
-        let mut event_total_loads = HashMap::new();
+        let mut event_total_loads = HashMap::default();
         instance.for_each_event_load_contribution(|node, load| {
             *event_total_loads.entry(node).or_insert(0.0) += load;
         });
@@ -4253,11 +4258,11 @@ mod tests {
                 &[],
                 0,
                 XspiceEventInputs {
-                    digital_values: &HashMap::new(),
-                    digital_event_times: &HashMap::new(),
+                    digital_values: &Default::default(),
+                    digital_event_times: &Default::default(),
                     event_total_loads: &event_total_loads,
-                    real_values: &HashMap::new(),
-                    real_event_times: &HashMap::new(),
+                    real_values: &Default::default(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -4742,11 +4747,11 @@ mod tests {
                 &[0.0, 0.0, 0.0, 0.0],
                 4,
                 XspiceEventInputs {
-                    digital_values: &HashMap::new(),
-                    digital_event_times: &HashMap::new(),
-                    event_total_loads: &HashMap::new(),
-                    real_values: &HashMap::new(),
-                    real_event_times: &HashMap::new(),
+                    digital_values: &Default::default(),
+                    digital_event_times: &Default::default(),
+                    event_total_loads: &Default::default(),
+                    real_values: &Default::default(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -4871,7 +4876,7 @@ mod tests {
             &[],
         )
         .expect("inverted digital input should construct");
-        let mut digital_values = HashMap::new();
+        let mut digital_values = HashMap::default();
         digital_values.insert(1, DigitalValue::zero());
 
         instance
@@ -4880,10 +4885,10 @@ mod tests {
                 0,
                 XspiceEventInputs {
                     digital_values: &digital_values,
-                    digital_event_times: &HashMap::new(),
-                    event_total_loads: &HashMap::new(),
-                    real_values: &HashMap::new(),
-                    real_event_times: &HashMap::new(),
+                    digital_event_times: &Default::default(),
+                    event_total_loads: &Default::default(),
+                    real_values: &Default::default(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -4917,12 +4922,12 @@ mod tests {
         )
         .expect("vector input instance should construct");
 
-        let mut digital_values = HashMap::new();
+        let mut digital_values = HashMap::default();
         digital_values.insert(3, DigitalValue::zero());
         digital_values.insert(4, DigitalValue::one());
-        let mut digital_event_times = HashMap::new();
+        let mut digital_event_times = HashMap::default();
         digital_event_times.insert(4, 2.0e-9);
-        let mut real_values = HashMap::new();
+        let mut real_values = HashMap::default();
         real_values.insert(5, 10.0);
         real_values.insert(6, 11.0);
 
@@ -4933,9 +4938,9 @@ mod tests {
                 XspiceEventInputs {
                     digital_values: &digital_values,
                     digital_event_times: &digital_event_times,
-                    event_total_loads: &HashMap::new(),
+                    event_total_loads: &Default::default(),
                     real_values: &real_values,
-                    real_event_times: &HashMap::new(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -4971,9 +4976,9 @@ mod tests {
                 XspiceEventInputs {
                     digital_values: &digital_values,
                     digital_event_times: &digital_event_times,
-                    event_total_loads: &HashMap::new(),
+                    event_total_loads: &Default::default(),
                     real_values: &real_values,
-                    real_event_times: &HashMap::new(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -5116,11 +5121,11 @@ mod tests {
                 &[0.0; 8],
                 5,
                 XspiceEventInputs {
-                    digital_values: &HashMap::new(),
-                    digital_event_times: &HashMap::new(),
-                    event_total_loads: &HashMap::new(),
-                    real_values: &HashMap::new(),
-                    real_event_times: &HashMap::new(),
+                    digital_values: &Default::default(),
+                    digital_event_times: &Default::default(),
+                    event_total_loads: &Default::default(),
+                    real_values: &Default::default(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -5146,11 +5151,11 @@ mod tests {
                 &[0.0; 10],
                 7,
                 XspiceEventInputs {
-                    digital_values: &HashMap::new(),
-                    digital_event_times: &HashMap::new(),
-                    event_total_loads: &HashMap::new(),
-                    real_values: &HashMap::new(),
-                    real_event_times: &HashMap::new(),
+                    digital_values: &Default::default(),
+                    digital_event_times: &Default::default(),
+                    event_total_loads: &Default::default(),
+                    real_values: &Default::default(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -5195,11 +5200,11 @@ mod tests {
                 &[0.0; 8],
                 5,
                 XspiceEventInputs {
-                    digital_values: &HashMap::new(),
-                    digital_event_times: &HashMap::new(),
-                    event_total_loads: &HashMap::new(),
-                    real_values: &HashMap::new(),
-                    real_event_times: &HashMap::new(),
+                    digital_values: &Default::default(),
+                    digital_event_times: &Default::default(),
+                    event_total_loads: &Default::default(),
+                    real_values: &Default::default(),
+                    real_event_times: &Default::default(),
                 },
                 &[],
             )
@@ -5323,11 +5328,11 @@ mod tests {
                     &[0.0],
                     1,
                     XspiceEventInputs {
-                        digital_values: &HashMap::new(),
-                        digital_event_times: &HashMap::new(),
-                        event_total_loads: &HashMap::new(),
-                        real_values: &HashMap::new(),
-                        real_event_times: &HashMap::new(),
+                        digital_values: &Default::default(),
+                        digital_event_times: &Default::default(),
+                        event_total_loads: &Default::default(),
+                        real_values: &Default::default(),
+                        real_event_times: &Default::default(),
                     },
                     &[],
                 )

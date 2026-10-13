@@ -103,7 +103,7 @@ impl XspiceInstance {
     #[cfg(feature = "veriloga")]
     pub(crate) fn prepare_checkpoint_loads(
         &mut self,
-        loads: &HashMap<usize, Value>,
+        loads: &crate::xspice::EventNodeMap<Value>,
     ) -> Result<(), String> {
         for (port, connection) in self.ports.iter().zip(&self.connections) {
             set_context_event_total_load(&mut self.context, &port.name, connection, loads)

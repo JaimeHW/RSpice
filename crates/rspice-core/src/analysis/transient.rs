@@ -12,7 +12,7 @@ use crate::netlist::OutputScheduleError;
 use crate::netlist::{FftFormat, FftOutput, FftWindow, XyceFftMode, XyceOutputIntervalSchedule};
 use crate::xspice::{DigitalState, DigitalStrength, DigitalValue};
 use crate::{NodeId, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use thiserror::Error;
 
 /// Why a `.TRAN` directive cannot produce a solver maximum-step ceiling.
@@ -1336,7 +1336,7 @@ impl TransientResult {
         &mut self,
         time: Value,
         snapshot: &[(NodeId, DigitalValue)],
-        trace_indices: &mut HashMap<NodeId, usize>,
+        trace_indices: &mut rustc_hash::FxHashMap<NodeId, usize>,
         retained_nodes: &[bool],
     ) -> usize {
         let mut added_values = 0usize;
@@ -1468,7 +1468,7 @@ impl TransientResult {
         &mut self,
         time: Value,
         snapshot: &[(NodeId, Value)],
-        trace_indices: &mut HashMap<NodeId, usize>,
+        trace_indices: &mut rustc_hash::FxHashMap<NodeId, usize>,
         retained_nodes: &[bool],
     ) -> usize {
         let mut added_values = 0usize;

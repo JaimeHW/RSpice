@@ -981,9 +981,9 @@ struct TransientEventCapture<'a> {
     /// Committed real event values of the accepted point, refilled per point.
     real_snapshot: &'a mut Vec<(crate::NodeId, Value)>,
     /// Node id to index in `TransientResult::digital_traces`.
-    digital_trace_indices: &'a mut HashMap<crate::NodeId, usize>,
+    digital_trace_indices: &'a mut rustc_hash::FxHashMap<crate::NodeId, usize>,
     /// Node id to index in `TransientResult::real_traces`.
-    real_trace_indices: &'a mut HashMap<crate::NodeId, usize>,
+    real_trace_indices: &'a mut rustc_hash::FxHashMap<crate::NodeId, usize>,
     /// Which nodes output projection retains an event trace for.
     retained_event_nodes: &'a [bool],
     /// The run's bus declarations resolved onto node ids, lent to the sample
@@ -5753,8 +5753,8 @@ impl Engine {
         let mut digital_snapshot = Vec::new();
         let mut digital_event_codes = Vec::new();
         let mut real_snapshot = Vec::new();
-        let mut digital_trace_indices = HashMap::new();
-        let mut real_trace_indices = HashMap::new();
+        let mut digital_trace_indices = rustc_hash::FxHashMap::default();
+        let mut real_trace_indices = rustc_hash::FxHashMap::default();
         let mut retained_result_values = Self::transient_result_value_count(&result);
         let mut t = resume_time;
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
