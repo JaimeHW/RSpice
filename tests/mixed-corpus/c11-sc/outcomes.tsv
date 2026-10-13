@@ -1,9 +1,9 @@
 # variant	analysis	route	outcome	detail
 mx	tran	interp	wrong	rec (O6) [0] |a−e|=1.214e-3 allowed 5.000e-5 (a=5.011858e-1, e=5.023999e-1)
 mx	tran	native	wrong	rec (O6) [0] |a−e|=1.214e-3 allowed 5.000e-5 (a=5.011858e-1, e=5.023999e-1)
-mx	pss	interp	fail	parse: parse: line 21: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v:0: module '__rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v': the Verilog-A source could n
-mx	pss	native	fail	parse: parse: line 21: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v:0: module '__rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v': the Verilog-A source could n
-mx	pac	interp	fail	parse: parse: line 18: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v:0: module '__rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v': the Verilog-A source could n
-mx	pac	native	fail	parse: parse: line 18: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v:0: module '__rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v': the Verilog-A source could n
-mx	pnoise	interp	fail	parse: parse: line 18: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v:0: module '__rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v': the Verilog-A source could n
-mx	pnoise	native	fail	parse: parse: line 18: the deck's periodic sources could not be read: Elaboration error at __rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v:0: module '__rspice_project__/mixed-corpus/c11-sc/nonov_clk/nonov_clk.v': the Verilog-A source could n
+mx	pss	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pss	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pac	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pac	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pnoise	interp	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
+mx	pnoise	native	refused	analysis.mixed_signal.discrete_state; label="pss"; instance=xclk form=structured; token-form=structured; analysis-form=structured
