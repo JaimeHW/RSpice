@@ -216,6 +216,12 @@ test = false
 required-features = ["mixed-corpus"]
 
 [[bin]]
+name = "rspice-ivtest"
+path = "src/bin/ivtest.rs"
+test = false
+required-features = ["verilog-digital"]
+
+[[bin]]
 name = "rspice-xyce-case-runner"
 path = "src/bin/xyce_case_runner.rs"
 test = false

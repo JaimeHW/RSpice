@@ -116,6 +116,7 @@ pub mod ams;
 #[cfg(feature = "verilog-digital")]
 pub mod ams_semantics;
 pub mod corpus;
+pub mod ivtest;
 /// The mixed-versus-all-analog exit-gate benchmarks. Behind `verilog-digital`
 /// for the reason [`ams_semantics`] is: half of each benchmark is a mixed deck.
 #[cfg(feature = "verilog-digital")]
