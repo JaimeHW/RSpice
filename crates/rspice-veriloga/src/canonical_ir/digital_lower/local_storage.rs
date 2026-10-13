@@ -243,6 +243,10 @@ impl ProcessLowerer<'_> {
                 }
             }
             DigitalStatement::Wait(wait) => {
+                // The condition is an event expression the thread waits on.
+                let mut names = BTreeSet::new();
+                collect_expression_reads(&wait.condition, &mut names);
+                self.mark_names(&names, required);
                 if let Some(statement) = &wait.statement {
                     self.storage_dependencies(statement, required);
                 }

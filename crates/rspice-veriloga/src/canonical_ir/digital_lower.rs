@@ -1841,9 +1841,7 @@ impl ProcessLowerer<'_> {
     fn unsupported_thread_statement(&mut self, statement: &DigitalStatement) {
         let what = match statement {
             DigitalStatement::Fork(_) => "`fork`",
-            DigitalStatement::Disable(_) => "`disable`",
-            DigitalStatement::Wait(_) => "`wait`",
-            _ => "event trigger `->`",
+            _ => "`disable`",
         };
         self.error(
             format!("{what} has no executable form yet"),
@@ -2410,10 +2408,9 @@ impl ProcessLowerer<'_> {
             }
             DigitalStatement::SystemTask(task) => self.system_task_statement(block, task),
             DigitalStatement::TaskEnable(enable) => self.task_enable(block, enable),
-            DigitalStatement::Fork(_)
-            | DigitalStatement::Disable(_)
-            | DigitalStatement::Wait(_)
-            | DigitalStatement::EventTrigger(_) => {
+            DigitalStatement::Wait(wait) => self.wait_statement(block, wait),
+            DigitalStatement::EventTrigger(trigger) => self.event_trigger(block, trigger),
+            DigitalStatement::Fork(_) | DigitalStatement::Disable(_) => {
                 self.unsupported_thread_statement(statement);
                 block
             }

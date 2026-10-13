@@ -403,6 +403,98 @@ pub(super) fn lower_routine(
 }
 
 impl ProcessLowerer<'_> {
+    /// `wait (condition) statement` (IEEE 1364-2005 section 9.7.6): go on at
+    /// once when the condition is true, otherwise wait for its value to change
+    /// and test it again. An `x` or `z` condition is not true.
+    pub(super) fn wait_statement(
+        &mut self,
+        block: BlockId,
+        wait: &crate::ast::DigitalWaitStatement,
+    ) -> BlockId {
+        let header = self.builder.create_block();
+        self.builder.set_terminator(
+            block,
+            CfgTerminator::Jump {
+                target: header,
+                args: Vec::new(),
+            },
+        );
+        let condition = self.condition(header, &wait.condition);
+        let waiting = self.builder.create_block();
+        let done = self.builder.create_block();
+        self.builder.set_terminator(
+            header,
+            CfgTerminator::Branch {
+                condition,
+                then_target: done,
+                then_args: Vec::new(),
+                else_target: waiting,
+                else_args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(waiting);
+        self.builder.seal_block(done);
+        let control = crate::ast::TimingControl::Event(crate::ast::EventControl {
+            repeat: None,
+            sensitivity: crate::ast::Sensitivity::Explicit(vec![crate::ast::EventTerm {
+                edge: None,
+                signal: wait.condition.clone(),
+                span: wait.condition.span(),
+            }]),
+            span: wait.span,
+        });
+        let resume = self.wait(waiting, &control, None, &mut []);
+        self.builder.set_terminator(
+            resume,
+            CfgTerminator::Jump {
+                target: header,
+                args: Vec::new(),
+            },
+        );
+        self.builder.seal_block(header);
+        match &wait.statement {
+            Some(statement) => self.statement(done, statement),
+            None => done,
+        }
+    }
+
+    /// `-> event` (section 9.7.3). A named event is a one-bit variable that
+    /// starts at 0, so toggling it is a value change that wakes every process
+    /// waiting on `@event`, now, in the active region.
+    pub(super) fn event_trigger(
+        &mut self,
+        block: BlockId,
+        trigger: &crate::ast::DigitalEventTrigger,
+    ) -> BlockId {
+        let source = match &trigger.target {
+            DigitalLValue::Identifier { name, span } => {
+                Expression::Identifier(crate::ast::Identifier {
+                    name: name.clone(),
+                    span: *span,
+                })
+            }
+            DigitalLValue::ArraySelect(access) => {
+                Expression::Digital(crate::ast::DigitalExpr::ArraySelect(access.clone()))
+            }
+            _ => {
+                self.error(
+                    "`->` names an event or an element of an event array",
+                    trigger.span,
+                );
+                return block;
+            }
+        };
+        let current = self.expression(block, &source);
+        let width = self.value_width(current);
+        let toggled = self.builder.push(
+            block,
+            CfgValueType::FourState { width },
+            CfgValueKind::DigitalBitwiseNot { input: current },
+        );
+        self.write(block, &trigger.target, toggled, false);
+        block
+    }
+
     /// Declare an argument or a function's result as a local of `shape`.
     fn declare_routine_local(
         &mut self,

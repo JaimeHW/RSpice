@@ -105,3 +105,64 @@ endmodule
          nested=20\n"
     );
 }
+
+/// `-> event` wakes every `@event` waiter at once (section 9.7.3); `wait`
+/// goes on at once when its condition is true and otherwise waits for it,
+/// with `x` not true (section 9.7.6); `time` and `realtime` variables hold
+/// the clock (section 3.9).
+#[test]
+fn events_and_wait_run_as_icarus_runs_them() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module top;
+  event go, done;
+  event kick;
+  reg [3:0] count;
+  reg ready;
+  integer hits;
+  time stamp;
+  realtime rstamp;
+  initial begin
+    count = 0; hits = 0;
+    #5 -> go;
+    #5;
+    #5 -> kick;
+    @done $display("done t=%0t count=%0d hits=%0d stamp=%0t r=%0.1f", $time, count, hits, stamp, rstamp);
+    $finish(0);
+  end
+  always @go begin
+    count = count + 1;
+    stamp = $time;
+    rstamp = $realtime;
+    $display("go t=%0t", $time);
+  end
+  initial begin
+    wait (ready) $display("ready t=%0t", $time);
+    wait (ready);
+    $display("again t=%0t", $time);
+    wait (count == 2) $display("two");
+  end
+  initial begin
+    @(kick) hits = hits + 1;
+    -> go;
+    #1 -> done;
+  end
+  initial begin
+    ready = 1'bx;
+    #1 ready = 0;
+    #9 ready = 1;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "go t=5\n\
+         ready t=10\n\
+         again t=10\n\
+         go t=15\n\
+         two\n\
+         done t=16 count=2 hits=1 stamp=15 r=15.0\n"
+    );
+}
