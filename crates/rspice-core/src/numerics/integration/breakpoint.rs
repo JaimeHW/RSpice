@@ -125,6 +125,22 @@ pub struct BreakpointManager {
     inclusive_tolerance: bool,
     /// Tolerance for merging and detecting breakpoint times.
     tolerance: Value,
+    /// The runtime breakpoints that complete a zero-duration edge
+    /// ([`Self::replace_edge_completions`]).
+    edge_completions: BTreeSet<BreakpointTimeKey>,
+    /// The edge the stepper is crossing, from its landing to its completion.
+    edge_crossing: Option<EdgeCrossing>,
+}
+
+/// An edge between its landing and its completion.
+#[derive(Debug, Clone, Copy)]
+struct EdgeCrossing {
+    /// The completion breakpoint the crossing ends on.
+    completion: Value,
+    /// The proposal [`BreakpointManager::limit_step`] last cut to land on the
+    /// completion: the restart the edge's landing proposed, or what the
+    /// controller grew it to inside the realization.
+    resume: Option<Value>,
 }
 
 impl Default for BreakpointManager {
@@ -162,6 +178,8 @@ impl BreakpointManager {
             } else {
                 DEFAULT_BREAKPOINT_TOLERANCE
             },
+            edge_completions: BTreeSet::new(),
+            edge_crossing: None,
         }
     }
 
@@ -291,6 +309,122 @@ impl BreakpointManager {
                 self.inclusive_tolerance,
             );
         }
+    }
+
+    /// Replace the set of runtime breakpoints that complete a zero-duration
+    /// edge.
+    ///
+    /// An edge with no transition time is a step at its own instant, realized
+    /// over the shortest transition its model admits and completed at a
+    /// breakpoint just after it. The edge is the discontinuity; its completion
+    /// is a sliver of that discontinuity's realization, not a second one. So
+    /// the stepper restarts once, at the edge, and the completion only cuts
+    /// that restart:
+    ///
+    /// * the restart after the edge's landing is measured past the completion,
+    ///   as if the edge were a lone step, and is then cut to land on the
+    ///   completion like any proposal that overshoots a breakpoint — where it
+    ///   is longer than the realization, the stepper crosses it in one step;
+    /// * the step after the completion is the restart that cut interrupted
+    ///   ([`Self::edge_completion_resume`]), not a tenth of the realization's
+    ///   width. A tenth of a picosecond, doubled one accepted point at a time
+    ///   back to the step the edge interrupted, is fourteen points per edge
+    ///   that no error term asked for.
+    ///
+    /// Each time is also a runtime breakpoint
+    /// ([`Self::replace_runtime_breakpoints`]); this only says which ones end
+    /// an edge.
+    pub(crate) fn replace_edge_completions<I>(&mut self, times: I)
+    where
+        I: IntoIterator<Item = Value>,
+    {
+        self.edge_completions.clear();
+        self.edge_completions.extend(
+            times
+                .into_iter()
+                .filter(|time| time.is_finite() && *time >= 0.0)
+                .map(BreakpointTimeKey),
+        );
+    }
+
+    /// Whether `time` is the instant `other` names, to the breakpoint
+    /// tolerance.
+    fn coincides(&self, time: Value, other: Value) -> bool {
+        Self::difference_within_tolerance(
+            (time - other).abs(),
+            self.tolerance,
+            self.inclusive_tolerance,
+        )
+    }
+
+    fn is_edge_completion(&self, time: Value) -> bool {
+        let key = BreakpointTimeKey(time);
+        self.edge_completions
+            .range(..=key)
+            .next_back()
+            .into_iter()
+            .chain(
+                self.edge_completions
+                    .range((Excluded(key), Unbounded))
+                    .next(),
+            )
+            .any(|completion| self.coincides(time, completion.0))
+    }
+
+    /// The step the stepper resumes with after landing on a zero-duration
+    /// edge's completion at `time`: the restart the edge's landing proposed,
+    /// which the completion cut.
+    ///
+    /// The width the stepper lands on the completion with is the edge's
+    /// realization, which no error term chose, so neither the restart after it
+    /// nor any growth ceiling the caller derives from that width may measure
+    /// from it.
+    pub(crate) fn edge_completion_resume(&self, time: Value) -> Option<Value> {
+        self.edge_crossing
+            .filter(|crossing| self.coincides(time, crossing.completion))
+            .and_then(|crossing| crossing.resume)
+    }
+
+    /// The restart after a landing at `time` that interrupted `approach`.
+    ///
+    /// Ngspice's rule, a tenth of the smaller of the approach and the gap to the
+    /// next breakpoint, except around a zero-duration edge
+    /// ([`Self::replace_edge_completions`]). Call with
+    /// `just_passed_breakpoint` already set, so the next breakpoint is found
+    /// strictly after `time`.
+    fn restart_after(&mut self, time: Value, approach: Option<Value>) -> Option<Value> {
+        // Landing on the completion of the edge being crossed: the restart it
+        // cut is what the stepper was taking.
+        let resume = self
+            .edge_crossing
+            .take()
+            .filter(|crossing| self.coincides(time, crossing.completion))
+            .and_then(|crossing| crossing.resume);
+        let mut next = self.next_after(time).filter(|next| next - time > 0.0);
+        let edge_landing = next.filter(|next| self.is_edge_completion(*next));
+        if let Some(completion) = edge_landing {
+            // A landing whose next breakpoint completes an edge is that edge's
+            // landing: measure its restart past the completion.
+            self.edge_crossing = Some(EdgeCrossing {
+                completion,
+                resume: None,
+            });
+            next = self.next_after(completion);
+        }
+        if edge_landing.is_none()
+            && let Some(resume) = resume
+        {
+            return Some(resume);
+        }
+        // An ordinary restart, or a new edge's: from the step this landing
+        // interrupted, which on another edge's completion is the one resumed.
+        let approach = approach
+            .into_iter()
+            .chain(resume)
+            .filter(|delta| delta.is_finite() && *delta > 0.0)
+            .reduce(Value::max)?;
+        let next_gap = next.map_or(Value::INFINITY, |next| next - time);
+        Some(self.restart_step_scale * approach.min(next_gap))
     }
 
     fn difference_within_tolerance(difference: Value, tolerance: Value, inclusive: bool) -> bool {
@@ -423,6 +557,12 @@ impl BreakpointManager {
             self.current_index += 1;
         }
         self.remove_runtime_through(time);
+        if self
+            .edge_crossing
+            .is_some_and(|crossing| crossing.completion <= time + self.tolerance)
+        {
+            self.edge_crossing = None;
+        }
     }
 
     fn permanent_breakpoint_within_tolerance(&self, time: Value) -> Option<Value> {
@@ -515,18 +655,36 @@ impl BreakpointManager {
                 if current_time + proposed_dt >= bp {
                     self.saved_delta_before_breakpoint = Some(proposed_dt);
                     self.just_passed_breakpoint = false;
+                    self.cut_for_edge_completion(bp, proposed_dt);
                     (time_to_bp, true)
                 } else if self.equalize_pre_breakpoint_steps
                     && current_time + BREAKPOINT_EQUALIZATION_FACTOR * proposed_dt > bp
                 {
                     self.saved_delta_before_breakpoint = Some(proposed_dt);
                     self.just_passed_breakpoint = false;
+                    self.cut_for_edge_completion(bp, proposed_dt);
                     (time_to_bp / 2.0, false)
                 } else {
                     (proposed_dt, false)
                 }
             }
             None => (proposed_dt, false),
+        }
+    }
+
+    /// Remember `proposed` as the step to resume with when `breakpoint`, the
+    /// completion of the edge being crossed, cut it.
+    fn cut_for_edge_completion(&mut self, breakpoint: Value, proposed: Value) {
+        let tolerance = self.tolerance;
+        let inclusive = self.inclusive_tolerance;
+        if let Some(crossing) = self.edge_crossing.as_mut()
+            && Self::difference_within_tolerance(
+                (breakpoint - crossing.completion).abs(),
+                tolerance,
+                inclusive,
+            )
+        {
+            crossing.resume = Some(proposed);
         }
     }
 
@@ -565,18 +723,9 @@ impl BreakpointManager {
         }
         self.remove_runtime_through(time);
         self.just_passed_breakpoint = true;
-        let next_gap = self
-            .next_after(time)
-            .map(|next| next - time)
-            .filter(|gap| gap.is_finite() && *gap > 0.0)
-            .unwrap_or(Value::INFINITY);
-        let saved_delta = self
-            .saved_delta_before_breakpoint
-            .take()
-            .filter(|delta| delta.is_finite() && *delta > 0.0);
+        let saved_delta = self.saved_delta_before_breakpoint.take();
 
-        saved_delta
-            .map(|delta| self.restart_step_scale * delta.min(next_gap))
+        self.restart_after(time, saved_delta)
             .filter(|restart| restart.is_finite() && *restart > 0.0)
             .unwrap_or(MIN_STEP_AFTER_BREAKPOINT)
     }
@@ -594,18 +743,9 @@ impl BreakpointManager {
         accepted_delta: Value,
     ) -> Value {
         self.just_passed_breakpoint = true;
-        let next_gap = self
-            .next_after(time)
-            .map(|next| next - time)
-            .filter(|gap| gap.is_finite() && *gap > 0.0)
-            .unwrap_or(Value::INFINITY);
-        let restart = self.restart_step_scale * accepted_delta.min(next_gap);
-
-        if restart.is_finite() && restart > 0.0 {
-            restart
-        } else {
-            MIN_STEP_AFTER_BREAKPOINT
-        }
+        self.restart_after(time, Some(accepted_delta))
+            .filter(|restart| restart.is_finite() && *restart > 0.0)
+            .unwrap_or(MIN_STEP_AFTER_BREAKPOINT)
     }
 
     /// Check if we just passed a breakpoint and should use minimal timestep
@@ -617,6 +757,8 @@ impl BreakpointManager {
     pub fn reset(&mut self) {
         self.current_index = 0;
         self.runtime_breakpoints.clear();
+        self.edge_completions.clear();
+        self.edge_crossing = None;
         self.just_passed_breakpoint = false;
     }
 
@@ -774,6 +916,106 @@ mod breakpoint_manager_tests {
         let restart = breakpoints.mark_breakpoint_solved(10.0);
 
         assert!((restart - 0.05).abs() <= 8.0 * Value::EPSILON);
+    }
+
+    /// An edge with its completion a thousandth after it, landed with a 6.0
+    /// approach, and the next breakpoint of any kind at 20.0. `completion` says
+    /// whether the model named that completion as the end of the edge.
+    fn landed_on_an_edge(completion: bool) -> (BreakpointManager, Value) {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+        breakpoints.add(20.0);
+        let (_, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert!(lands_on_breakpoint);
+        // The model asks for the completion from the edge's own accepted point.
+        breakpoints.replace_runtime_breakpoints([10.001]);
+        if completion {
+            breakpoints.replace_edge_completions([10.001]);
+        }
+        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        (breakpoints, restart)
+    }
+
+    /// A zero-duration edge restarts the stepper once. Its landing measures the
+    /// restart past its own completion, the completion cuts that restart like
+    /// any proposal that overshoots a breakpoint, and the step after the
+    /// completion is the restart it cut — not a tenth of the realization's
+    /// width, which is what an ordinary breakpoint that close would leave.
+    #[test]
+    fn a_zero_duration_edge_restarts_once_and_its_completion_resumes_that_restart() {
+        let (mut plain, restart) = landed_on_an_edge(false);
+        assert!(
+            (restart - 1.0e-4).abs() <= 1.0e-15,
+            "an ordinary breakpoint a thousandth away limits the restart to a tenth \
+             of that gap, got {restart:e}"
+        );
+        let (dt, lands_on_breakpoint) = plain.limit_step(10.0, restart);
+        assert!(!lands_on_breakpoint && dt == restart);
+
+        let (mut breakpoints, restart) = landed_on_an_edge(true);
+        assert!(
+            (restart - 0.6).abs() <= 8.0 * Value::EPSILON,
+            "the edge's restart is measured past its completion: a tenth of the 6.0 \
+             approach, got {restart:e}"
+        );
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(10.0, restart);
+        assert!(
+            lands_on_breakpoint,
+            "the restart crosses the realization in one step"
+        );
+        assert!((dt - 0.001).abs() <= 1.0e-15, "{dt:e}");
+        assert_eq!(breakpoints.edge_completion_resume(10.001), Some(restart));
+        assert_eq!(breakpoints.edge_completion_resume(10.0), None);
+
+        // Accepted at the completion, the model asks for nothing more.
+        breakpoints.replace_runtime_breakpoints([]);
+        breakpoints.replace_edge_completions([]);
+        let resumed = breakpoints.mark_breakpoint_solved(10.001);
+        assert_eq!(
+            resumed, restart,
+            "the step after the completion is the cut restart"
+        );
+        assert_eq!(breakpoints.edge_completion_resume(10.001), None);
+        // An ordinary breakpoint after it keeps ngspice's rule.
+        let (_, lands_on_breakpoint) = breakpoints.limit_step(19.0, 3.0);
+        assert!(lands_on_breakpoint);
+        let restart = breakpoints.mark_breakpoint_solved(20.0);
+        assert!((restart - 0.3).abs() <= 8.0 * Value::EPSILON, "{restart:e}");
+    }
+
+    /// A restart too short to cross the realization grows inside it as the
+    /// controller grows it anywhere, and the completion resumes the last
+    /// proposal it cut.
+    #[test]
+    fn a_completion_resumes_what_the_controller_grew_the_restart_to() {
+        // Binary fractions, so every sum below is exact.
+        let edge = 8.0;
+        let approach = 2.0_f64.powi(-8);
+        let completion = edge + 2.0_f64.powi(-10);
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(edge);
+        let (_, lands_on_breakpoint) = breakpoints.limit_step(edge - approach, approach);
+        assert!(lands_on_breakpoint);
+        breakpoints.replace_runtime_breakpoints([completion]);
+        breakpoints.replace_edge_completions([completion]);
+        let restart = breakpoints.mark_breakpoint_solved(edge);
+        assert_eq!(restart, 0.1 * approach);
+        assert!(
+            restart < completion - edge,
+            "the restart must not reach the completion"
+        );
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(edge, restart);
+        assert!(!lands_on_breakpoint && dt == restart);
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(edge + restart, 2.0 * restart);
+        assert!(lands_on_breakpoint);
+        assert_eq!(dt, completion - (edge + restart));
+        breakpoints.replace_runtime_breakpoints([]);
+        breakpoints.replace_edge_completions([]);
+        assert_eq!(
+            breakpoints.mark_breakpoint_solved(completion),
+            2.0 * restart
+        );
     }
 
     #[test]

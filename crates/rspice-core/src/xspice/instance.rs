@@ -3112,6 +3112,11 @@ impl XspiceInstance {
         self.context.drain_requested_breakpoints()
     }
 
+    /// Drain which of the breakpoint requests complete a zero-duration edge.
+    pub(crate) fn drain_requested_edge_completions(&mut self) -> impl Iterator<Item = Value> + '_ {
+        self.context.drain_requested_edge_completions()
+    }
+
     /// Whether [`Self::schedule_events`] would place anything in the queue.
     ///
     /// The settle loop visits every dispatched instance and asks this before

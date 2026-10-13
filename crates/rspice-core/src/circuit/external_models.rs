@@ -2002,14 +2002,20 @@ impl CircuitData {
     #[cfg(test)]
     pub(crate) fn take_xspice_requested_breakpoints(&mut self) -> Vec<Value> {
         let mut breakpoints = Vec::new();
-        self.drain_xspice_requested_breakpoints(|time| breakpoints.push(time));
+        self.drain_xspice_requested_breakpoints(|time| breakpoints.push(time), |_| {});
         breakpoints
     }
 
-    /// Drain XSPICE breakpoint requests directly into a caller-provided sink.
-    pub(crate) fn drain_xspice_requested_breakpoints<F>(&mut self, mut sink: F)
-    where
+    /// Drain XSPICE breakpoint requests directly into a caller-provided sink,
+    /// and the ones among them that complete a zero-duration edge into
+    /// `edge_completion` as well.
+    pub(crate) fn drain_xspice_requested_breakpoints<F, G>(
+        &mut self,
+        mut sink: F,
+        mut edge_completion: G,
+    ) where
         F: FnMut(Value),
+        G: FnMut(Value),
     {
         for instance in &mut self.xspice_instances {
             // Asking first keeps the sweep off the copy-on-write path for
@@ -2018,7 +2024,11 @@ impl CircuitData {
             if !instance.has_requested_breakpoints() {
                 continue;
             }
-            for time in instance.make_mut().drain_requested_breakpoints() {
+            let instance = instance.make_mut();
+            for time in instance.drain_requested_edge_completions() {
+                edge_completion(time);
+            }
+            for time in instance.drain_requested_breakpoints() {
                 sink(time);
             }
         }

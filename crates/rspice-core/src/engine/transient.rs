@@ -10581,6 +10581,7 @@ impl Engine {
                                 t = snapped;
                             }
                         }
+                        let edge_completion_resume = breakpoints.edge_completion_resume(t);
                         let approach = veriloga_refinement_approach_step;
                         if let Some(step) = approach {
                             breakpoints.restore_approach_step(step);
@@ -10598,8 +10599,11 @@ impl Engine {
                         } else {
                             restart_dt
                         };
-                        let controller_dt =
-                            approach.map_or(timestep.dt(), |step| step.max(timestep.dt()));
+                        let controller_dt = approach
+                            .into_iter()
+                            .chain(edge_completion_resume)
+                            .reduce(Value::max)
+                            .map_or(timestep.dt(), |step| step.max(timestep.dt()));
                         timestep.force_step(restart_dt.min(controller_dt).min(max_step));
                     }
                     if !landed_device_event {
@@ -11873,7 +11877,12 @@ impl Engine {
                     );
                 }
             }
+            // The completion of a zero-duration edge: its width is the edge's
+            // realization, and the step after it resumes the restart the
+            // edge's landing proposed (`BreakpointManager::replace_edge_completions`).
+            let mut edge_completion_resume = None;
             if hit_breakpoint {
+                edge_completion_resume = breakpoints.edge_completion_resume(t);
                 let approach = veriloga_refinement_approach_step;
                 if let Some(step) = approach {
                     breakpoints.restore_approach_step(step);
@@ -11900,7 +11909,11 @@ impl Engine {
                     .transient_device_max_timestep(&circuit, t, hinted_max_step)
                     .min(span_ceiling.unwrap_or(Value::INFINITY));
                 timestep.set_max_dt(restarted_max_step);
-                let controller_dt = approach.map_or(timestep.dt(), |step| step.max(timestep.dt()));
+                let controller_dt = approach
+                    .into_iter()
+                    .chain(edge_completion_resume)
+                    .reduce(Value::max)
+                    .map_or(timestep.dt(), |step| step.max(timestep.dt()));
                 timestep.force_step(restart_dt.min(controller_dt).min(restarted_max_step));
                 if !lte_estimator.uses_accepted_solution_reference() && !circuit.vdmoses.is_empty()
                 {
@@ -11934,9 +11947,13 @@ impl Engine {
             // controller doubles out of the floor one accepted point at a
             // time. So on such a landing only a limit an error term set below
             // that ceiling caps the restart. Physical clocks keep the rule
-            // they share with ngspice.
-            let growth_ceiling_of_an_event_cut =
-                |limit: Value| landed_device_event && !physical_event && limit >= 2.0 * dt;
+            // they share with ngspice. A zero-duration edge's completion is
+            // the same kind of landing: its width is the edge's realization.
+            let growth_ceiling_of_an_event_cut = |limit: Value| {
+                (landed_device_event || edge_completion_resume.is_some())
+                    && !physical_event
+                    && limit >= 2.0 * dt
+            };
             if !xyce_iteration_error_control
                 && !first_accepted_transient_step
                 && let Some(limit) = candidate_truncation_limit

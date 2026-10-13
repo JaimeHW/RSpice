@@ -679,6 +679,9 @@ pub struct CmContext {
     inertial_outputs: CopyOnWrite<HashMap<String, InertialOutputState>>,
     /// Absolute transient times requested by analog code models.
     requested_breakpoints: Vec<Value>,
+    /// The requests in `requested_breakpoints` that complete a zero-duration
+    /// edge ([`Self::request_edge_completion`]).
+    requested_edge_completions: Vec<Value>,
 
     //-------------------------------------------------------------------------
     // Matrix Stamping
@@ -783,6 +786,7 @@ impl CmContext {
             pending_real_events: Vec::new(),
             inertial_outputs: CopyOnWrite::default(),
             requested_breakpoints: Vec::new(),
+            requested_edge_completions: Vec::new(),
             stamps: Vec::new(),
             rhs: Vec::new(),
             static_stamps: Vec::new(),
@@ -2186,8 +2190,26 @@ impl CmContext {
         }
     }
 
+    /// Request the breakpoint at which an edge with no transition time
+    /// completes.
+    ///
+    /// Such an edge is a step at its own instant, realized over the shortest
+    /// transition the model admits, and the stepper lands on its end like any
+    /// other requested breakpoint. Naming it as the end of an edge lets the
+    /// stepper treat the edge and its completion as the one discontinuity they
+    /// are: it crosses the realization in one step where that step fits the
+    /// restart, and restarts after it as it would after a lone step at the
+    /// edge.
+    pub(crate) fn request_edge_completion(&mut self, time: Value) {
+        if time.is_finite() && time >= 0.0 {
+            self.requested_breakpoints.push(time);
+            self.requested_edge_completions.push(time);
+        }
+    }
+
     /// Drain pending absolute transient breakpoint requests.
     pub fn take_requested_breakpoints(&mut self) -> Vec<Value> {
+        self.requested_edge_completions.clear();
         std::mem::take(&mut self.requested_breakpoints)
     }
 
@@ -2200,6 +2222,14 @@ impl CmContext {
     /// Drain pending breakpoint requests while preserving the queue allocation.
     pub(crate) fn drain_requested_breakpoints(&mut self) -> Drain<'_, Value> {
         self.requested_breakpoints.drain(..)
+    }
+
+    /// Drain which of the pending breakpoint requests complete an edge.
+    ///
+    /// Every one of them is also a breakpoint request, so a caller drains this
+    /// beside [`Self::drain_requested_breakpoints`], never instead of it.
+    pub(crate) fn drain_requested_edge_completions(&mut self) -> Drain<'_, Value> {
+        self.requested_edge_completions.drain(..)
     }
 
     //-------------------------------------------------------------------------
@@ -2837,6 +2867,7 @@ impl CmContext {
             && self.pending_events.len() == before.pending_events.len()
             && self.pending_real_events.len() == before.pending_real_events.len()
             && self.requested_breakpoints == before.requested_breakpoints
+            && self.requested_edge_completions == before.requested_edge_completions
             && self.stamps == before.stamps
             && self.rhs == before.rhs
             && self.static_stamps == before.static_stamps

@@ -338,12 +338,17 @@ impl Engine {
         {
             runtime_breakpoints.push(event_time);
         }
-        circuit.drain_xspice_requested_breakpoints(|time| {
-            if time.is_finite() && time >= 0.0 && time <= tstop {
-                runtime_breakpoints.push(time);
-            }
-        });
+        let mut edge_completions = Vec::new();
+        circuit.drain_xspice_requested_breakpoints(
+            |time| {
+                if time.is_finite() && time >= 0.0 && time <= tstop {
+                    runtime_breakpoints.push(time);
+                }
+            },
+            |time| edge_completions.push(time),
+        );
         breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
+        breakpoints.replace_edge_completions(edge_completions);
         Ok(())
     }
 
