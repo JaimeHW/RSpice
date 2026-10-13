@@ -266,6 +266,27 @@ impl Jfet {
         (igs, igd)
     }
 
+    /// The gate-source and gate-drain currents whose shot noise the gate
+    /// junctions carry: [`Self::gate_current`] without the GMIN shunt the
+    /// solver lays across each junction. That shunt is a convergence aid, not
+    /// a barrier carriers cross, so its current carries no shot noise; on a
+    /// reverse-biased gate it is typically far larger than the junction's own
+    /// leakage, and counting it would overstate the gate's current noise by
+    /// the same factor.
+    pub(crate) fn gate_shot_noise_currents(
+        &self,
+        vgs: Value,
+        vgd: Value,
+        temp: Value,
+    ) -> (Value, Value) {
+        if self.junction_gmin == 0.0 {
+            return self.gate_current(vgs, vgd, temp);
+        }
+        let mut junctions = self.clone();
+        junctions.set_junction_gmin(0.0);
+        junctions.gate_current(vgs, vgd, temp)
+    }
+
     /// Thermal-noise temperature offset in kelvin. An explicit instance TEMP
     /// is an absolute temperature and therefore outranks DTEMP; without TEMP,
     /// DTEMP offsets the analysis temperature. TNOM affects parameter scaling,

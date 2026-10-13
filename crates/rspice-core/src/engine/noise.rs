@@ -2861,7 +2861,17 @@ impl Engine {
                 noise_sources.push(source);
             }
 
-            let (igs, igd) = jfet.gate_current(vgs, vgd, temp);
+            // Gate shot noise is a deliberate deviation from both references:
+            // ngspice's `jfet/jfetnoi.c` and `jfet2/jfet2noi.c` give a JFET
+            // only RD, RS, channel and flicker noise, and Xyce's JFET has no
+            // noise at all. The gate is a junction, though, and its diffusion
+            // and generation current crosses a barrier and carries full shot
+            // noise 2q|I_G| (van der Ziel; the input current noise
+            // sqrt(2q·I_G) JFET-input amplifiers specify) exactly as the diode
+            // and bipolar junctions here do, so every dialect keeps it. Only
+            // the junction current counts: the GMIN shunt the solver lays
+            // across each junction carries none.
+            let (igs, igd) = jfet.gate_shot_noise_currents(vgs, vgd, temp);
             if igs != 0.0 {
                 noise_sources.push(
                     NoiseSource::shot(jfet.name.clone(), jfet.gate, jfet.source, igs)

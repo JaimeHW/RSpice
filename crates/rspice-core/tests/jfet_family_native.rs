@@ -575,3 +575,63 @@ fn classic_jfet_transient_preserves_charge_when_c_phi_overflows() {
         assert_eq!(engine.convergence_quality().force_accepted_points, 0);
     }
 }
+
+/// A JFET gate is a junction, and its leakage carries full shot noise
+/// `2q|I_G|` in every dialect, a deliberate deviation from ngspice's
+/// `jfetnoi.c` and from Xyce, which give a JFET no gate noise. Only the
+/// junction's own current counts: the GMIN shunt the solver lays across each
+/// junction is not a barrier and carries none.
+///
+/// The gate here sits 2 V below the source and 7 V below the held drain,
+/// behind 1 MΩ. Both junctions leak `IS·(1 + (3·Vt/(e·V))³)`, essentially `IS`,
+/// into the same gate node, so each shot contribution is `2q·IS·Z²`; counting
+/// the GMIN currents (2 pA and 7 pA beside 10 fA of leakage) made them about
+/// 200 and 700 times that.
+#[test]
+fn jfet_gate_shot_noise_is_the_junction_leakage_in_every_dialect() {
+    use rspice_core::engine::SpiceDialect;
+    let deck = "* JFET gate shot noise behind a large gate resistance\n\
+                vdd d 0 dc 5\n\
+                vg gb 0 dc -2 ac 1\n\
+                rg gb g 1meg\n\
+                j1 d g 0 jn\n\
+                .model jn njf vto=-3 beta=1e-3 is=1e-14\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("JFET gate noise deck parses");
+    const Q: f64 = 1.602_176_634e-19;
+    let gmin = 1.0e-12;
+    let gate_impedance = 1.0 / (1.0e-6 + 2.0 * gmin);
+    let expected = 2.0 * Q * 1.0e-14 * gate_impedance * gate_impedance;
+    for dialect in [
+        SpiceDialect::Ngspice,
+        SpiceDialect::BestAvailable,
+        SpiceDialect::Xyce,
+    ] {
+        let results = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            ..Default::default()
+        })
+        .run_noise_named_with_input_source(&netlist, "g", None, "vg", &[1.0e3], 300.15)
+        .expect("JFET gate noise analysis runs");
+        let mechanism = |name: &str| {
+            results[0]
+                .contributions
+                .iter()
+                .find(|contribution| {
+                    contribution.identity.device.eq_ignore_ascii_case("j1")
+                        && contribution.identity.mechanism.as_deref() == Some(name)
+                })
+                .unwrap_or_else(|| panic!("{dialect:?}: j1 exports {name}"))
+                .output_contribution
+        };
+        for name in ["IGS", "IGD"] {
+            let actual = mechanism(name);
+            let relative = (actual - expected).abs() / expected;
+            assert!(
+                relative <= 1.0e-4,
+                "{dialect:?} {name}: {actual:.6e} V^2/Hz against 2q*IS*Z^2 = {expected:.6e} \
+                 (rel {relative:.3e})"
+            );
+        }
+    }
+}
