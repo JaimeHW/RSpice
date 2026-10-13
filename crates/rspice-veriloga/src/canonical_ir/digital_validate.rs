@@ -672,6 +672,19 @@ impl CanonicalDigitalPlan {
                         DigitalWait::Call { routine, args } => {
                             self.check_routine_call(function, *routine, args, true)
                         }
+                        DigitalWait::Fork { branches } => {
+                            if branches.iter().any(|branch| {
+                                function
+                                    .blocks
+                                    .get(usize::from(*branch))
+                                    .is_none_or(|block| !block.params.is_empty())
+                            }) {
+                                return Err(error(
+                                    "a fork branch must be a block that takes no arguments",
+                                ));
+                            }
+                            Ok(())
+                        }
                         DigitalWait::Repeat { .. } => unreachable!("nested repeat rejected"),
                     }
                 };

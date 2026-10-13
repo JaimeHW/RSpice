@@ -186,6 +186,9 @@ impl DigitalHost {
                     .into(),
             );
         }
+        if self.slots.len() > self.plan.processes.len() {
+            return Err("a design that has started `fork` branches cannot be checkpointed".into());
+        }
         if !self.inactive.is_empty()
             || !self.analog_waiters.is_empty()
             || self.analog_ready.is_some()
@@ -456,6 +459,7 @@ impl DigitalHost {
                 resume,
                 remaining_events,
                 wait_after_sequence: image.after,
+                ..ProcessSlot::start(index)
             };
         }
         let mut previous = None;

@@ -98,6 +98,49 @@ fn a_checkpoint_keeps_the_task_frames_of_a_suspended_process() {
     assert_eq!(harness.get("r"), format!("{:032b}", 51));
 }
 
+/// `fork` hands the kernel one start state per branch, in source order, and
+/// the state that resumes at the join (section 9.8.2, design P2 §4.2). A
+/// branch runs in the forking task's frame and ends at its own end; the join
+/// keeps the process frame below the task.
+#[test]
+fn a_fork_hands_the_kernel_its_branches_in_source_order_and_its_join() {
+    let mut harness = Harness::from_source(
+        "module top;\n\
+         \x20 reg [7:0] a, b, c;\n\
+         \x20 task t; fork a = 1; b = 2; join endtask\n\
+         \x20 initial begin a = 0; b = 0; t; c = a + b; end\n\
+         endmodule\n",
+    );
+    let DigitalProcessOutcome::Forked(fork) = harness.run() else {
+        panic!("expected the process to fork");
+    };
+    let [first, second] = fork.branches() else {
+        panic!("one start state per branch");
+    };
+    assert_eq!(
+        fork.join().callers().len(),
+        1,
+        "the process frame waits below"
+    );
+    for branch in [first, second] {
+        let routine = branch.routine().expect("a branch runs in the task's frame");
+        assert_eq!(harness.plan.routines[routine.index()].name, "t");
+        assert!(
+            branch.callers().is_empty(),
+            "a branch's end ends its thread"
+        );
+    }
+    expect_finished(harness.resume(0, first));
+    assert_eq!(
+        (harness.get("a"), harness.get("b")),
+        ("00000001".into(), "00000000".into())
+    );
+    expect_finished(harness.resume(0, second));
+    assert_eq!(harness.get("b"), "00000010");
+    expect_finished(harness.resume(0, fork.join()));
+    assert_eq!(harness.get("c"), "00000011");
+}
+
 /// Automatic functions recurse (section 10.4.1); a static function's local
 /// keeps its value between calls; recursion without end is the named error
 /// rather than a host stack overflow.

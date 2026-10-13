@@ -960,9 +960,7 @@ fn expect_finished(outcome: DigitalProcessOutcome) {
 fn expect_suspended(outcome: DigitalProcessOutcome) -> DigitalSuspension {
     match outcome {
         DigitalProcessOutcome::Suspended(suspension) => suspension,
-        DigitalProcessOutcome::Finished | DigitalProcessOutcome::Halted(_) => {
-            panic!("expected the process to suspend")
-        }
+        outcome => panic!("expected the process to suspend, got {outcome:?}"),
     }
 }
 
@@ -4189,6 +4187,7 @@ impl Design {
         self.waits[index] = match outcome {
             DigitalProcessOutcome::Suspended(suspension) => Some(suspension.into_parts()),
             DigitalProcessOutcome::Finished | DigitalProcessOutcome::Halted(_) => None,
+            DigitalProcessOutcome::Forked(_) => panic!("this kernel stand-in does not fork"),
         };
     }
 

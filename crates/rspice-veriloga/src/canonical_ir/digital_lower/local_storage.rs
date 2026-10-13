@@ -41,6 +41,18 @@ impl ProcessLowerer<'_> {
     ) {
         let mut required = BTreeSet::new();
         self.storage_dependencies(statement, &mut required);
+        // Forked branches share their parent's variables (IEEE 1364-2005
+        // section 9.8.2), and a branch starts with no value of its parent's
+        // in hand, so every named variable of a forking process is stored.
+        if contains_fork(statement) {
+            required.extend(
+                self.locals
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, local)| local.name.is_some())
+                    .map(|(id, _)| DigitalLocalId::from(id)),
+            );
+        }
         required.extend(self.locals.iter().enumerate().filter_map(|(id, local)| {
             self.analog_local_inputs
                 .contains_key(&local.span)
@@ -403,4 +415,42 @@ fn assignment_reads(assign: &DigitalAssign, reads: &mut BTreeSet<String>) {
         None => {}
     }
     collect_lvalue_index_reads(&assign.target, reads);
+}
+
+/// Whether `statement`, or any statement nested in it, satisfies `test`.
+pub(super) fn any_statement(
+    statement: &DigitalStatement,
+    test: &impl Fn(&DigitalStatement) -> bool,
+) -> bool {
+    if test(statement) {
+        return true;
+    }
+    let nested = |statement: &DigitalStatement| any_statement(statement, test);
+    match statement {
+        DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
+            block.statements.iter().any(nested)
+        }
+        DigitalStatement::Conditional(conditional) => {
+            nested(&conditional.then_branch)
+                || conditional.else_branch.as_deref().is_some_and(nested)
+        }
+        DigitalStatement::Case(case) => {
+            case.items.iter().any(|item| nested(&item.statement))
+                || case.default.as_deref().is_some_and(nested)
+        }
+        DigitalStatement::For(statement) => nested(&statement.body),
+        DigitalStatement::While(statement) => nested(&statement.body),
+        DigitalStatement::Repeat(statement) => nested(&statement.body),
+        DigitalStatement::Forever(statement) => nested(&statement.body),
+        DigitalStatement::Timing(timing) => timing.statement.as_deref().is_some_and(nested),
+        DigitalStatement::Wait(wait) => wait.statement.as_deref().is_some_and(nested),
+        _ => false,
+    }
+}
+
+/// Whether a body forks (IEEE 1364-2005 section 9.8.2).
+pub(super) fn contains_fork(statement: &DigitalStatement) -> bool {
+    any_statement(statement, &|statement| {
+        matches!(statement, DigitalStatement::Fork(_))
+    })
 }

@@ -458,6 +458,48 @@ impl ProcessLowerer<'_> {
         }
     }
 
+    /// `fork ... join` (section 9.8.2): each statement is a branch block that
+    /// ends its thread with `Return`, and the forking thread waits at the
+    /// join. A branch reads and writes its parent's variables through
+    /// storage, which is why a process with a `fork` keeps every named
+    /// variable in signals.
+    pub(super) fn fork_statement(
+        &mut self,
+        block: BlockId,
+        fork: &crate::ast::DigitalBlock,
+    ) -> BlockId {
+        if self.locals.iter().any(|local| local.slot.is_some()) {
+            self.error(
+                "`fork` inside an automatic task has no executable form yet: its branches \
+                 would share the activation's frame",
+                fork.span,
+            );
+            return block;
+        }
+        let Some(scope) = self.static_scopes.get(&fork.span).cloned() else {
+            self.invariant("fork block has no prepared declaration scope", fork.span);
+            return block;
+        };
+        self.scopes.push(scope);
+        let named = fork
+            .name
+            .as_ref()
+            .is_some_and(|name| self.enter_named_scope(name));
+        let mut branches = Vec::with_capacity(fork.statements.len());
+        for statement in &fork.statements {
+            let entry = self.builder.create_block();
+            self.builder.seal_block(entry);
+            let exit = self.statement(entry, statement);
+            self.builder.set_terminator(exit, CfgTerminator::Return);
+            branches.push(entry);
+        }
+        if named {
+            self.leave_named_scope();
+        }
+        self.scopes.pop();
+        self.suspend(block, DigitalWait::Fork { branches }, &mut [])
+    }
+
     /// `-> event` (section 9.7.3). A named event is a one-bit variable that
     /// starts at 0, so toggling it is a value change that wakes every process
     /// waiting on `@event`, now, in the active region.

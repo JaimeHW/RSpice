@@ -420,13 +420,24 @@ enum ProcessStatus {
     AwaitingAnalog(DigitalAnalogProbeId),
     /// Waiting in the inactive region for the active region to drain (`#0`).
     Inactive,
+    /// At a `join`, waiting for its forked children to end (IEEE 1364-2005
+    /// section 9.8.2).
+    AwaitingJoin,
     /// Reached `Return`. An `initial` process ends here and never runs again.
     Finished,
 }
 
-/// One process's schedule state.
+/// One thread's schedule state: a process's own thread, or a child a `fork`
+/// started (design P2 §5.2). Process threads occupy the first slots, in
+/// process order; children take the lowest free slot after them.
 #[derive(Debug, Clone)]
 struct ProcessSlot {
+    /// The plan process whose code the thread runs.
+    process: usize,
+    /// The thread that forked this one; `None` for a process's own thread.
+    parent: Option<usize>,
+    /// Children still running that this thread waits for at its join.
+    children: u32,
     status: ProcessStatus,
     /// How to enter the process next time. `None` enters at the entry block,
     /// which is what a process that has never run does.
@@ -436,6 +447,21 @@ struct ProcessSlot {
     /// Continuous drivers remain sensitive to their own resolved net changes.
     wait_after_sequence: u64,
     remaining_events: DigitalEventCount,
+}
+
+impl ProcessSlot {
+    /// A process's own thread, queued to start at its entry block.
+    fn start(process: usize) -> Self {
+        Self {
+            process,
+            parent: None,
+            children: 0,
+            status: ProcessStatus::Queued,
+            resume: None,
+            wait_after_sequence: 0,
+            remaining_events: DigitalEventCount::one(),
+        }
+    }
 }
 
 /// Name the tick an oscillating instant sits on, for the sentence the
@@ -483,6 +509,9 @@ pub(crate) struct DigitalHost {
     event_waiters: Vec<BTreeSet<u64>>,
     event_candidates: Vec<u64>,
     slots: Vec<ProcessSlot>,
+    /// Child slots whose thread has ended, reused lowest first so that slot
+    /// numbers, and with them same-tick order, are deterministic.
+    free_threads: BTreeSet<usize>,
     /// Net to waiting-process index, ascending within each net.
     waiters: Vec<Vec<usize>>,
     /// Processes deferred to the inactive region, in the order they deferred.
@@ -678,15 +707,8 @@ impl DigitalHost {
             store: DigitalSignalStore::from_plan(Arc::clone(&plan)),
             scheduler,
             resolution,
-            slots: vec![
-                ProcessSlot {
-                    status: ProcessStatus::Queued,
-                    resume: None,
-                    wait_after_sequence: 0,
-                    remaining_events: DigitalEventCount::one(),
-                };
-                plan.processes.len()
-            ],
+            slots: (0..plan.processes.len()).map(ProcessSlot::start).collect(),
+            free_threads: BTreeSet::new(),
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             analog_ready: None,
@@ -907,7 +929,10 @@ impl DigitalHost {
         }
         Some((
             tick,
-            self.process_of_target.get(usize::from(target)).copied(),
+            self.process_of_target
+                .get(usize::from(target))
+                .and_then(|slot| self.slots.get(*slot))
+                .map(|slot| slot.process),
         ))
     }
 
@@ -1388,7 +1413,7 @@ impl DigitalHost {
         // for free. What they replaced is still the point: a whole
         // `CfgFunction` — blocks, instructions, values, params — plus the
         // static sensitivity list, copied and dropped per activation.
-        let Some(process) = self.plan.processes.get(index) else {
+        let Some(process) = self.plan.processes.get(self.slots[index].process) else {
             return Ok(());
         };
         // The resume state goes in **by value**: its argument list is the one
@@ -1462,6 +1487,27 @@ impl DigitalHost {
         }
 
         match outcome {
+            // A forked child that ends, by its branch's end or by a halt.
+            DigitalProcessOutcome::Finished | DigitalProcessOutcome::Halted(_)
+                if self.slots[index].parent.is_some() =>
+            {
+                self.end_child(index, tick)
+            }
+            DigitalProcessOutcome::Forked(fork) => {
+                let (branches, join) = fork.into_parts();
+                self.slots[index].resume = Some(join);
+                self.slots[index].status = ProcessStatus::AwaitingJoin;
+                self.slots[index].children = branches.len() as u32;
+                if branches.is_empty() {
+                    return self.queue(index, tick);
+                }
+                // Section 9.8.2: every branch starts now, in source order.
+                for branch in branches {
+                    let child = self.spawn(index, branch);
+                    self.queue(child, tick)?;
+                }
+                Ok(())
+            }
             DigitalProcessOutcome::Finished => {
                 // An `always` process that returns is a lowering bug: section
                 // 9.9.2 makes it restart, spelled as a back edge, so its graph
@@ -1741,6 +1787,62 @@ impl DigitalHost {
     /// per thing that moved. Supersession is per driver and a process is its
     /// own driver, so this never touches another process's activation.
     fn queue(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
+        self.queue_thread(index, tick)
+    }
+
+    /// Start a forked child of `parent` at `start`, in the lowest free slot.
+    fn spawn(&mut self, parent: usize, start: DigitalResumeState) -> usize {
+        let process = self.slots[parent].process;
+        let slot = ProcessSlot {
+            parent: Some(parent),
+            resume: Some(start),
+            ..ProcessSlot::start(process)
+        };
+        if let Some(index) = self.free_threads.pop_first() {
+            self.slots[index] = slot;
+            return index;
+        }
+        let index = self.slots.len();
+        let plan_process = &self.plan.processes[process];
+        let id = self.scheduler.intern_target(EventTarget {
+            node_id: index,
+            port_name: driven_signal_name(&self.plan, process),
+            driver_index: 0,
+            instance: format!(
+                "{}#{} thread {index}",
+                plan_process.kind.keyword(),
+                usize::from(plan_process.id)
+            ),
+        });
+        if self.process_of_target.len() <= usize::from(id) {
+            self.process_of_target
+                .resize(usize::from(id) + 1, usize::MAX);
+        }
+        self.process_of_target[usize::from(id)] = index;
+        self.targets.push(id);
+        self.slots.push(slot);
+        index
+    }
+
+    /// A forked child ended: free its slot, and resume its parent at the join
+    /// once the last child has ended (section 9.8.2).
+    fn end_child(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
+        let parent = self.slots[index].parent.take();
+        self.slots[index].status = ProcessStatus::Finished;
+        self.slots[index].resume = None;
+        self.free_threads.insert(index);
+        let Some(parent) = parent else {
+            return Ok(());
+        };
+        let waiting = &mut self.slots[parent].children;
+        *waiting = waiting.saturating_sub(1);
+        if *waiting == 0 && self.slots[parent].status == ProcessStatus::AwaitingJoin {
+            self.queue(parent, tick)?;
+        }
+        Ok(())
+    }
+
+    fn queue_thread(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
         if matches!(self.slots[index].status, ProcessStatus::Finished) {
             return Ok(());
         }
@@ -1813,9 +1915,10 @@ impl DigitalHost {
 
     /// A process, as a diagnostic names it.
     fn describe(&self, index: usize) -> String {
+        let process = self.slots.get(index).map_or(index, |slot| slot.process);
         self.plan
             .processes
-            .get(index)
+            .get(process)
             .map(|process| format!("{} #{}", process.kind.keyword(), usize::from(process.id)))
             .unwrap_or_else(|| format!("#{index}"))
     }

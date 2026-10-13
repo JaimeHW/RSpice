@@ -691,7 +691,7 @@ fn relocate_wait(wait: &mut DigitalWait, map: &DigitalLinkedInstance) {
                 }
             }
         }
-        DigitalWait::Delay(_) | DigitalWait::Call { .. } => {}
+        DigitalWait::Delay(_) | DigitalWait::Call { .. } | DigitalWait::Fork { .. } => {}
         DigitalWait::Repeat { event, .. } => relocate_wait(event, map),
     }
 }

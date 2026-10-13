@@ -2191,7 +2191,7 @@ impl ProcessLowerer<'_> {
     /// block; leaving that scope must not end the declaration's lifetime.
     fn initialize_static_locals(&mut self, entry: BlockId, statement: &DigitalStatement) {
         match statement {
-            DigitalStatement::Block(block) => {
+            DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
                 self.scopes.push(Vec::new());
                 self.declare_block_locals(entry, block);
                 let scope = self.scopes.last().cloned().unwrap_or_default();
@@ -2229,11 +2229,6 @@ impl ProcessLowerer<'_> {
             }
             DigitalStatement::Timing(timing) => {
                 if let Some(statement) = &timing.statement {
-                    self.initialize_static_locals(entry, statement);
-                }
-            }
-            DigitalStatement::Fork(block) => {
-                for statement in &block.statements {
                     self.initialize_static_locals(entry, statement);
                 }
             }
@@ -2410,7 +2405,8 @@ impl ProcessLowerer<'_> {
             DigitalStatement::TaskEnable(enable) => self.task_enable(block, enable),
             DigitalStatement::Wait(wait) => self.wait_statement(block, wait),
             DigitalStatement::EventTrigger(trigger) => self.event_trigger(block, trigger),
-            DigitalStatement::Fork(_) | DigitalStatement::Disable(_) => {
+            DigitalStatement::Fork(fork) => self.fork_statement(block, fork),
+            DigitalStatement::Disable(_) => {
                 self.unsupported_thread_statement(statement);
                 block
             }

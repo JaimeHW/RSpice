@@ -540,9 +540,9 @@ mod tests {
     /// corpus; what is under test here is the *arm*, and the arm's contract is
     /// that a design it cannot compile becomes a named refusal rather than an
     /// empty trace. So the design is written here, out of a construct chosen for
-    /// being firmly outside the language subset this engine executes — IEEE
-    /// 1364-2005 section 9.8.2's `fork`/`join`, which needs concurrent process
-    /// spawning the kernel has no notion of.
+    /// being firmly outside the language this engine executes — IEEE 1800's
+    /// `fork ... join_none` (section 9.3.2), a SystemVerilog fork form that IEEE
+    /// 1364-2005 does not have and the front end refuses by name.
     ///
     /// The case borrows a corpus entry's stimulus so the harness has ports to
     /// drive, and points at its own source. Nothing about the stimulus matters:
@@ -553,7 +553,7 @@ mod tests {
              \x20 input clk;\n\
              \x20 output q;\n\
              \x20 reg q;\n\
-             \x20 always @(posedge clk) fork q <= 1'b1; join\n\
+             \x20 always @(posedge clk) fork q <= 1'b1; join_none\n\
              endmodule\n";
 
         fs::create_dir_all(directory).expect("scratch directory");
@@ -579,13 +579,13 @@ mod tests {
         let case = unimplementable_case(&workspace);
 
         let error = run_case(&case, VerilogEngine::Rspice, None, &workspace, 1_000)
-            .expect_err("`fork`/`join` has no executable form");
+            .expect_err("`fork ... join_none` is not IEEE 1364");
 
         let RunError::RspiceRefused { case: name, detail } = &error else {
             panic!("expected the named refusal, got {error:?}");
         };
         assert_eq!(name, "refuses");
-        assert!(detail.contains("fork"), "{detail}");
+        assert!(detail.contains("join_none"), "{detail}");
     }
 
     /// The plumbing must propagate a refusal rather than treat an unrunnable

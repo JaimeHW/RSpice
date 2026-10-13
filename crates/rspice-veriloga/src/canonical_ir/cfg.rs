@@ -2390,13 +2390,19 @@ pub enum DigitalWait {
         routine: super::digital::DigitalRoutineId,
         args: Vec<ValueId>,
     },
+    /// `fork ... join` (IEEE 1364-2005 section 9.8.2): start one child
+    /// thread per branch block, in source order, and resume when every child
+    /// has ended. A branch block takes no parameters and ends in `Return`,
+    /// which ends its thread; everything a branch shares with its parent
+    /// lives in storage, so no value crosses into a branch.
+    Fork { branches: Vec<BlockId> },
 }
 
 impl DigitalWait {
     /// Values this wait reads.
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
-            Self::Event(_) => Vec::new(),
+            Self::Event(_) | Self::Fork { .. } => Vec::new(),
             Self::Call { args, .. } => args.clone(),
             Self::Expressions(terms) => terms.iter().map(|term| term.value).collect(),
             Self::Repeat { count, event } => {
@@ -2413,7 +2419,7 @@ impl DigitalWait {
     /// value took its old index.
     pub fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
-            Self::Event(_) => {}
+            Self::Event(_) | Self::Fork { .. } => {}
             Self::Call { args, .. } => {
                 for arg in args {
                     *arg = map(*arg);
@@ -2437,7 +2443,7 @@ impl DigitalWait {
         match self {
             Self::Event(terms) => Some(terms),
             Self::Delay(_) => Some(&[]),
-            Self::Expressions(_) | Self::Call { .. } => None,
+            Self::Expressions(_) | Self::Call { .. } | Self::Fork { .. } => None,
             Self::Repeat { event, .. } => event.sensitivity(),
         }
     }

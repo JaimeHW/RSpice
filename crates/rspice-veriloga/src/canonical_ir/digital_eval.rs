@@ -414,6 +414,31 @@ pub enum DigitalProcessOutcome {
     /// A system task at this site ended the thread (`$finish`, `$stop`,
     /// `$fatal`). Any process kind can halt; it never runs again.
     Halted(DigitalSystemCallId),
+    /// The thread reached `fork` (IEEE 1364-2005 section 9.8.2) and waits at
+    /// the join for the children it starts.
+    Forked(DigitalFork),
+}
+
+/// A thread that reached `fork`: one start state per branch, in source order,
+/// and the state the thread resumes in once every branch has ended.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalFork {
+    branches: Vec<DigitalResumeState>,
+    join: DigitalResumeState,
+}
+
+impl DigitalFork {
+    pub fn branches(&self) -> &[DigitalResumeState] {
+        &self.branches
+    }
+
+    pub fn join(&self) -> &DigitalResumeState {
+        &self.join
+    }
+
+    pub fn into_parts(self) -> (Vec<DigitalResumeState>, DigitalResumeState) {
+        (self.branches, self.join)
+    }
 }
 
 /// A suspended process: what it is waiting for, and how to start it again.
@@ -1669,7 +1694,9 @@ pub fn run_observer<E: DigitalEnvironment + ?Sized>(
         .run(function.entry, function.blocks.len())?
     {
         DigitalProcessOutcome::Finished => Ok(()),
-        DigitalProcessOutcome::Suspended(_) | DigitalProcessOutcome::Halted(_) => {
+        DigitalProcessOutcome::Suspended(_)
+        | DigitalProcessOutcome::Halted(_)
+        | DigitalProcessOutcome::Forked(_) => {
             Err(DigitalEvalError::InvalidSystemCall(ValueId::from(0usize)))
         }
     }
@@ -2018,6 +2045,54 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         self.enter_routine(id, inputs)
     }
 
+    /// Reach `fork`: hand the kernel one start state per branch and the state
+    /// to resume at the join. A child runs in the parent's routine frame, as
+    /// its bottom frame: the branch's `Return` ends the child, never the
+    /// routine.
+    fn fork(
+        &mut self,
+        branches: &[BlockId],
+        join: BlockId,
+        join_args: &[ValueId],
+    ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
+        let arguments = self.call_arguments(join_args)?;
+        let params = self.function.block(join).params.len();
+        if arguments.len() != params {
+            return Err(DigitalEvalError::ArgumentArityMismatch {
+                target: join,
+                expected: params,
+                found: arguments.len(),
+            });
+        }
+        let branches = branches
+            .iter()
+            .map(|branch| DigitalResumeState {
+                plan_identity: self.plan.content_identity,
+                process: self.process.id,
+                block: *branch,
+                analog_instruction: None,
+                arguments: Vec::new(),
+                routine: self.routine,
+                slots: self.slots.clone(),
+                callers: Vec::new(),
+            })
+            .collect();
+        let callers = self.suspended_callers()?;
+        Ok(DigitalProcessOutcome::Forked(DigitalFork {
+            branches,
+            join: DigitalResumeState {
+                plan_identity: self.plan.content_identity,
+                process: self.process.id,
+                block: join,
+                analog_instruction: None,
+                arguments,
+                routine: self.routine,
+                slots: std::mem::take(&mut self.slots),
+                callers,
+            },
+        }))
+    }
+
     /// End the running routine's activation and return to its caller; `None`
     /// when the running frame is the bottom one.
     fn return_from_routine(&mut self) -> Result<Option<(BlockId, usize)>, DigitalEvalError> {
@@ -2302,6 +2377,11 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 } => {
                     block = self.call_task(*routine, args, *resume, resume_args)?;
                 }
+                CfgTerminator::Wait {
+                    wait: DigitalWait::Fork { branches },
+                    resume,
+                    resume_args,
+                } => return self.fork(branches, *resume, resume_args),
                 CfgTerminator::Jump { target, args } => {
                     self.cross(*target, args)?;
                     block = *target;
@@ -2677,6 +2757,12 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     detail: "a task enable is not an event control",
                 });
             }
+            DigitalWait::Fork { .. } => {
+                return Err(DigitalEvalError::InvalidEventExpression {
+                    value: ValueId::from(0usize),
+                    detail: "a fork is not an event control".into(),
+                });
+            }
             DigitalWait::Delay(delay) => {
                 let ticks = self.integer(*delay)?;
                 if ticks < 0 {
@@ -2779,7 +2865,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                         .table
                         .get(function, *result)
                         .map(ScalarRef::into_owned),
-                    DigitalProcessOutcome::Suspended(_) | DigitalProcessOutcome::Halted(_) => {
+                    DigitalProcessOutcome::Suspended(_)
+                    | DigitalProcessOutcome::Halted(_)
+                    | DigitalProcessOutcome::Forked(_) => {
                         Err(DigitalEvalError::InvalidEventExpression {
                             value: id,
                             detail: "an event expression must not suspend or halt".into(),
