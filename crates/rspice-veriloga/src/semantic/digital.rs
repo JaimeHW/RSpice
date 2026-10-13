@@ -2397,9 +2397,7 @@ impl SemanticAnalyzer {
         let width = self
             .digital_selector_value(&select.width, index)
             .and_then(|value| value.as_exact_i64());
-        if !width.is_some_and(|width| {
-            width > 0 && width <= i64::from(MAX_DIGITAL_VECTOR_WIDTH)
-        }) {
+        if !width.is_some_and(|width| width > 0 && width <= i64::from(MAX_DIGITAL_VECTOR_WIDTH)) {
             self.record_error_at(
                 SemanticErrorKind::InvalidExpression(format!(
                     "the width of an indexed part-select of `{name}` must be a positive constant \

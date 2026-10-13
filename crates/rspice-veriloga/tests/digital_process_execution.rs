@@ -5086,7 +5086,12 @@ fn dynamic_bit_writes_validate_source_and_artifact_types() {
             .function
             .values
             .iter_mut()
-            .find(|node| matches!(node.kind, CfgValueKind::DigitalPackedNonblockingWrite { .. }))
+            .find(|node| {
+                matches!(
+                    node.kind,
+                    CfgValueKind::DigitalPackedNonblockingWrite { .. }
+                )
+            })
             .unwrap();
         let CfgValueKind::DigitalPackedNonblockingWrite {
             signal,

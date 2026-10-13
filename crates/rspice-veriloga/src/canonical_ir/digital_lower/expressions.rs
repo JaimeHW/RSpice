@@ -447,7 +447,12 @@ enum Work<'a> {
     /// Input, its authored range, base signedness, width, `+:`.
     IndexedSelect(BlockId, ValueId, VectorBounds, bool, u32, bool),
     /// An array element read, then its indexed part.
-    IndexedArraySelect(BlockId, &'a crate::ast::IndexedPartSelectExpr, VectorBounds, u32),
+    IndexedArraySelect(
+        BlockId,
+        &'a crate::ast::IndexedPartSelectExpr,
+        VectorBounds,
+        u32,
+    ),
     LogicalLeft(BlockId, LogicalOp, &'a Expression),
     LogicalRight(LogicalFrame),
     Conditional(BlockId, &'a crate::ast::ConditionalExpr, ConditionalDomain),
@@ -814,8 +819,7 @@ pub(super) fn lower_prepared(
                     continue;
                 };
                 if select.indices.is_empty() {
-                    let Some(input) =
-                        lowerer.packed_named_value(block, &select.name, select.span)
+                    let Some(input) = lowerer.packed_named_value(block, &select.name, select.span)
                     else {
                         values.push(lowerer.unknown(width));
                         continue;
@@ -836,9 +840,9 @@ pub(super) fn lower_prepared(
                     continue;
                 }
                 let rank = lowerer.array_rank(&select.name);
-                let array = lowerer
-                    .digital_array(&select.name)
-                    .filter(|array| rank == select.indices.len() && !lowerer.real_signal(array.base));
+                let array = lowerer.digital_array(&select.name).filter(|array| {
+                    rank == select.indices.len() && !lowerer.real_signal(array.base)
+                });
                 let Some(array) = array else {
                     lowerer.error(
                         "an indexed part-select after array coordinates requires every unpacked \

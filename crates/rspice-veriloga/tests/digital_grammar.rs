@@ -3450,7 +3450,10 @@ fn indexed_part_selects_parse_and_check_their_width_base_and_target() {
          \x20 initial begin q = v[i +: P]; mem[i][i -: 2] = q; end\n\
          endmodule\n",
     );
-    assert!(parse_error("module m; reg [7:0] v; reg q; initial q = v[0 + : 1]; endmodule").contains("Invalid expression"));
+    assert!(
+        parse_error("module m; reg [7:0] v; reg q; initial q = v[0 + : 1]; endmodule")
+            .contains("Invalid expression")
+    );
     for (source, expected) in [
         (
             "module m; reg [7:0] v; integer w; reg q; initial q = |v[0 +: w]; endmodule",
