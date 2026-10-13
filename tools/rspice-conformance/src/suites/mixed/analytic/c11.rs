@@ -12,8 +12,9 @@ use num_complex::Complex64;
 
 use super::{Context, Registry, complex, points, values};
 use crate::suites::mixed::compare::Expected;
+use crate::suites::mixed::measure::Measured;
 
-pub const REGISTRY: Registry = &[("rec", rec), ("pac", pac)];
+pub const REGISTRY: Registry = &[("rec", rec), ("pac", pac), ("fft", fft), ("pn", pn)];
 
 const PERIOD: f64 = 1e-6;
 const PH1_FALL: f64 = 480e-9;
@@ -80,6 +81,33 @@ fn pac(context: &Context<'_>) -> Result<Expected, String> {
         })
         .collect();
     Ok(complex(expected))
+}
+
+/// The amplitude of each frequency in the held output once the recursion's
+/// start has died away: the input amplitude times |sideband 0| (the design's
+/// 0.2·0.85903·0.999836 = 0.17178 V at 10 kHz).
+fn fft(context: &Context<'_>) -> Result<Expected, String> {
+    let Expected::Measured(Measured::Complex(sideband)) = pac(context)? else {
+        return Err("c11::fft: sideband 0 is complex".into());
+    };
+    Ok(values(
+        sideband
+            .iter()
+            .map(|value| INPUT_AMPLITUDE * value.norm())
+            .collect(),
+    ))
+}
+
+/// The sampled output's noise power. Each ph1 leaves kT/C1 on C1, of which
+/// the share hands C2 a²; the ph2 switch's own noise across C1 and C2 in
+/// series leaves a²·kT/(C1C2/(C1 + C2)) on C2; (1 − a)² of C2's previous
+/// noise survives. The stationary variance a²kT(1/C1 + (C1 + C2)/(C1C2)) /
+/// (1 − (1 − a)²) is exactly kT/C2 (design: 4.60e-10 V² at 27 °C).
+fn pn(_: &Context<'_>) -> Result<Expected, String> {
+    const BOLTZMANN: f64 = 1.380_649e-23;
+    const KELVIN: f64 = 300.15;
+    const C2: f64 = 9e-12;
+    Ok(values(vec![BOLTZMANN * KELVIN / C2]))
 }
 
 #[cfg(test)]

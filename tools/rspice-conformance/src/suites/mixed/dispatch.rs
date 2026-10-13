@@ -154,7 +154,7 @@ pub fn retained_outputs(
             {
                 expressions.push(signal);
             }
-            if measure.kind == "noise" && measure.signal.is_none() {
+            if matches!(measure.kind.as_str(), "noise" | "noise_int") && measure.signal.is_none() {
                 signals.insert("onoise".to_owned());
             }
             if measure.kind == "stb" {

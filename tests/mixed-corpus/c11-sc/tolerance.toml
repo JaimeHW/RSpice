@@ -16,6 +16,36 @@ expect = "c11::rec"
 abs = 5e-5
 why = "y[k] = 0.1·x[k] + 0.9·y[k−1] from the 0.5 V operating point, x at the ph1 fall; Ron·C ≈ 1 ns ≪ the 460 ns phases, input tracking lag ≤ 13 uV"
 
+# The design's transient FFT, on the deck's 300 us: the 10 kHz amplitude of
+# v(out) over [100 us, 300 us] (two input periods, coherent; the recursion's
+# start has decayed by 0.9^100), Hann.
+[[q]]
+id = "fft"
+analysis = "tran"
+variants = ["mx"]
+kind = "fft"
+signal = "v(out)"
+window = [1e-4, 3e-4]
+points = [1e4]
+taper = "hann"
+oracle = "O6"
+expect = "c11::fft"
+rel = 0.005
+why = "0.2·|0.1/(1 − 0.9·e^−jωT)|·sinc(πfT) = 0.2·0.85903·0.999836 = 0.17178 V (design)"
+
+# P7: the sampled output noise, integrated over the pnoise sweep (100 Hz to
+# fs/2; below 100 Hz holds under 1 % of a spectrum flat to the 16 kHz pole).
+[[q]]
+id = "pn"
+analysis = "pnoise"
+variants = ["mx"]
+kind = "noise_int"
+window = [100.0, 5e5]
+oracle = "O6"
+expect = "c11::pn"
+rel = 0.10
+why = "kT/C2 = 4.60e-10 V² (design; derivation in analytic/c11.rs)"
+
 # P7: sideband 0 of the periodic small-signal transfer.
 [[q]]
 id = "pac"

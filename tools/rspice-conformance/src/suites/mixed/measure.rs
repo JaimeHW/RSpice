@@ -89,16 +89,55 @@ pub fn evaluate(
             }
             Ok(scaled(values))
         }
-        "mean" | "min" | "max" => {
+        "mean" | "min" | "max" | "pp" => {
             let signal = single_signal(spec, variant)?;
             let series = real_series(observation, &signal)?;
             let window = window(spec)?;
             let value = match spec.kind.as_str() {
                 "mean" => pwl_mean(&observation.axis, &series, window)?,
                 "min" => window_extreme(&observation.axis, &series, window, f64::min)?,
-                _ => window_extreme(&observation.axis, &series, window, f64::max)?,
+                "max" => window_extreme(&observation.axis, &series, window, f64::max)?,
+                _ => {
+                    window_extreme(&observation.axis, &series, window, f64::max)?
+                        - window_extreme(&observation.axis, &series, window, f64::min)?
+                }
             };
             Ok(scaled(vec![value]))
+        }
+        "fft" => {
+            let signal = single_signal(spec, variant)?;
+            let series = real_series(observation, &signal)?;
+            let window = window(spec)?;
+            let taper = Taper::named(spec.taper.as_deref().unwrap_or("hann"))?;
+            let samples = spec.samples.unwrap_or(FFT_SAMPLES);
+            let values = axis_points(spec)?
+                .iter()
+                .map(|frequency| {
+                    tone_amplitude(
+                        &observation.axis,
+                        &series,
+                        window,
+                        *frequency,
+                        taper,
+                        samples,
+                    )
+                })
+                .collect::<MeasureResult<Vec<_>>>()?;
+            Ok(scaled(values))
+        }
+        "noise_int" => {
+            let signal = spec
+                .signal
+                .as_ref()
+                .and_then(|signal| signal.for_variant(variant))
+                .unwrap_or_else(|| "onoise".to_owned());
+            let series = real_series(observation, &signal)?;
+            let band = window(spec)?;
+            Ok(scaled(vec![integrated_density(
+                &observation.axis,
+                &series,
+                band,
+            )?]))
         }
         "cross" if spec.nets.is_some() => {
             // The n-th digital edge of an event net: 0→1 for rise, 1→0 for fall.
@@ -713,7 +752,11 @@ pub fn pwl_mean(axis: &[f64], series: &[f64], (start, stop): (f64, f64)) -> Meas
     check_axis(axis, series)?;
     let (first, last) = (axis[0], axis[axis.len() - 1]);
     // A window end that is the run's end spelled another way is the run's end.
-    let start = if same_point(first, start) { first } else { start };
+    let start = if same_point(first, start) {
+        first
+    } else {
+        start
+    };
     let stop = if same_point(last, stop) { last } else { stop };
     if stop.partial_cmp(&start) != Some(std::cmp::Ordering::Greater) || start < first || stop > last
     {
@@ -761,6 +804,129 @@ fn window_extreme(
         }
     }
     Ok(extreme)
+}
+
+/// Uniform samples `fft` takes of the window unless the quantity says.
+pub const FFT_SAMPLES: usize = 8192;
+
+/// The window function a transient FFT applies.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Taper {
+    Hann,
+    Rectangular,
+}
+
+impl Taper {
+    fn named(name: &str) -> MeasureResult<Self> {
+        match name {
+            "hann" => Ok(Self::Hann),
+            "rect" => Ok(Self::Rectangular),
+            other => invalid(format!("fft taper must be hann or rect, not {other}")),
+        }
+    }
+
+    /// The weight at `phase` ∈ [0, 1) through the window.
+    fn weight(self, phase: f64) -> f64 {
+        match self {
+            Self::Hann => 0.5 - 0.5 * (2.0 * std::f64::consts::PI * phase).cos(),
+            Self::Rectangular => 1.0,
+        }
+    }
+}
+
+/// The amplitude of the `frequency` component of `series` over `window`: the
+/// signal is resampled uniformly (`samples` points, linear interpolation,
+/// periodic: the window's end is not sampled), weighted by `taper`, and the
+/// single-bin DFT is normalized by the taper's coherent gain, so a sinusoid
+/// of amplitude A whose period divides the window measures A exactly. The
+/// design's "transient FFT magnitude at a frequency" (C11).
+pub fn tone_amplitude(
+    axis: &[f64],
+    series: &[f64],
+    (start, stop): (f64, f64),
+    frequency: f64,
+    taper: Taper,
+    samples: usize,
+) -> MeasureResult<f64> {
+    check_axis(axis, series)?;
+    if axis.len() < 2
+        || samples < 8
+        || stop.partial_cmp(&start) != Some(std::cmp::Ordering::Greater)
+    {
+        return invalid("fft needs a run, a window of positive length and at least 8 samples");
+    }
+    let (first, last) = (axis[0], axis[axis.len() - 1]);
+    if !((start >= first || same_point(first, start)) && (stop <= last || same_point(last, stop))) {
+        return invalid(format!(
+            "fft window [{start:e}, {stop:e}] is not inside the run"
+        ));
+    }
+    let step = (stop - start) / samples as f64;
+    let mut sum = Complex64::new(0.0, 0.0);
+    let mut gain = 0.0;
+    // One forward sweep: the sample times increase, so the bracketing
+    // interval only moves right.
+    let mut index = 0usize;
+    for k in 0..samples {
+        let time = (start + k as f64 * step).clamp(first, last);
+        while index + 2 < axis.len() && axis[index + 1] <= time {
+            index += 1;
+        }
+        let (t0, t1) = (axis[index], axis[index + 1]);
+        let value = if t1 > t0 {
+            series[index] + (time - t0) / (t1 - t0) * (series[index + 1] - series[index])
+        } else {
+            series[index]
+        };
+        let weight = taper.weight(k as f64 / samples as f64);
+        let angle = -2.0 * std::f64::consts::PI * frequency * (time - start);
+        sum += Complex64::from_polar(weight * value, angle);
+        gain += weight;
+    }
+    Ok(2.0 * sum.norm() / gain)
+}
+
+/// The integral of a power density (V²/Hz) over the band `[low, high]` of
+/// its frequency axis: each segment between sweep points is integrated as
+/// the power law through its end values (exact for 1/fⁿ and flat segments),
+/// or linearly where a value is not positive. The band ends are read as the
+/// `noise` measure reads its points (linear in log frequency). The result is
+/// a mean-square value (V²).
+pub fn integrated_density(
+    axis: &[f64],
+    series: &[f64],
+    (low, high): (f64, f64),
+) -> MeasureResult<f64> {
+    check_axis(axis, series)?;
+    if !(low > 0.0 && high > low) {
+        return invalid(format!(
+            "noise band [{low:e}, {high:e}] needs 0 < low < high"
+        ));
+    }
+    let mut points: Vec<(f64, f64)> = vec![(low, axis_interp(axis, series, low, true)?)];
+    points.extend(
+        axis.iter()
+            .zip(series)
+            .filter(|(frequency, _)| **frequency > low && **frequency < high)
+            .map(|(frequency, value)| (*frequency, *value)),
+    );
+    points.push((high, axis_interp(axis, series, high, true)?));
+    let mut total = 0.0;
+    for pair in points.windows(2) {
+        let ((f1, s1), (f2, s2)) = (pair[0], pair[1]);
+        total += if s1 > 0.0 && s2 > 0.0 {
+            let ratio = f2 / f1;
+            let exponent = (s2 / s1).ln() / ratio.ln();
+            if (exponent + 1.0).abs() < 1e-9 {
+                s1 * f1 * ratio.ln()
+            } else {
+                s1 * f1 * (ratio.powf(exponent + 1.0) - 1.0) / (exponent + 1.0)
+            }
+        } else {
+            0.5 * (s1 + s2) * (f2 - f1)
+        };
+    }
+    Ok(total)
 }
 
 /// Linearly interpolated crossing times of `level` in the window.
@@ -963,6 +1129,99 @@ mod tests {
             panic!()
         };
         assert!((value[0] - 1.0).abs() < 1e-9, "{value:?}");
+    }
+
+    #[test]
+    fn extremes_and_peak_to_peak_read_one_window() {
+        let axis: Vec<f64> = (0..=40).map(|k| k as f64 * 0.25).collect();
+        let wave: Vec<f64> = axis
+            .iter()
+            .map(|t| 1.0 + 0.5 * (t * std::f64::consts::FRAC_PI_2).sin())
+            .collect();
+        let mut observation = Observation {
+            axis,
+            ..Default::default()
+        };
+        observation.real.insert("v(a)".into(), wave);
+        let measured = |kind: &str| {
+            let mut spec = spec(kind);
+            spec.window = Some([1.0, 9.0]);
+            match evaluate(&spec, "x", &observation).unwrap() {
+                Measured::Values(values) => values[0],
+                other => panic!("{other:?}"),
+            }
+        };
+        assert!((measured("max") - 1.5).abs() < 1e-12);
+        assert!((measured("min") - 0.5).abs() < 1e-12);
+        assert!((measured("pp") - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_tone_measures_its_amplitude_under_either_taper() {
+        // 0.3 + 0.2 sin(2π·10k·t) + 0.05 sin(2π·30k·t) sampled at 100 ns over
+        // 1 ms; the window [0.5m, 1m] holds 5 periods of 10 kHz.
+        let axis: Vec<f64> = (0..=10_000).map(|k| k as f64 * 1e-7).collect();
+        let tau = 2.0 * std::f64::consts::PI;
+        let wave: Vec<f64> = axis
+            .iter()
+            .map(|t| 0.3 + 0.2 * (tau * 1e4 * t).sin() + 0.05 * (tau * 3e4 * t).sin())
+            .collect();
+        for taper in [Taper::Hann, Taper::Rectangular] {
+            let at = |frequency| {
+                tone_amplitude(&axis, &wave, (5e-4, 1e-3), frequency, taper, 4096).unwrap()
+            };
+            assert!((at(1e4) - 0.2).abs() < 1e-5, "{taper:?}: {}", at(1e4));
+            assert!((at(3e4) - 0.05).abs() < 1e-5, "{taper:?}: {}", at(3e4));
+        }
+        let mut observation = Observation {
+            axis: axis.clone(),
+            ..Default::default()
+        };
+        observation.real.insert("v(a)".into(), wave);
+        let mut fft = spec("fft");
+        fft.window = Some([5e-4, 1e-3]);
+        fft.points = Some(vec![1e4]);
+        let Measured::Values(values) = evaluate(&fft, "x", &observation).unwrap() else {
+            panic!()
+        };
+        assert!((values[0] - 0.2).abs() < 1e-5, "{values:?}");
+        fft.window = Some([5e-4, 2e-3]);
+        assert!(evaluate(&fft, "x", &observation).is_err());
+    }
+
+    #[test]
+    fn integrated_noise_is_exact_for_flat_and_power_law_spectra() {
+        // A flat 4e-17 V²/Hz from 10 Hz to 1 MHz plus a 1/f corner at 1 kHz.
+        let axis: Vec<f64> = (0..=50)
+            .map(|k| 10f64.powf(1.0 + k as f64 / 10.0))
+            .collect();
+        let density: Vec<f64> = axis.iter().map(|f| 4e-17 * (1.0 + 1e3 / f)).collect();
+        let total = integrated_density(&axis, &density, (100.0, 1e5)).unwrap();
+        let exact = 4e-17 * ((1e5 - 100.0) + 1e3 * (1e5f64 / 100.0).ln());
+        assert!((total / exact - 1.0).abs() < 2e-3, "{total} vs {exact}");
+        let flat = vec![2.0; axis.len()];
+        assert!(
+            (integrated_density(&axis, &flat, (20.0, 2e4)).unwrap() - 2.0 * 19_980.0).abs() < 1e-6
+        );
+        assert!(integrated_density(&axis, &flat, (1e5, 1e2)).is_err());
+        let mut observation = Observation {
+            kind: "noise".into(),
+            axis,
+            ..Default::default()
+        };
+        observation.real.insert("onoise".into(), flat);
+        let spec = MeasureSpec {
+            kind: "noise_int".into(),
+            window: Some([20.0, 2e4]),
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate(&spec, "x", &observation).unwrap(),
+            Measured::Values(vec![
+                integrated_density(&observation.axis, &observation.real["onoise"], (20.0, 2e4))
+                    .unwrap()
+            ])
+        );
     }
 
     #[test]

@@ -222,6 +222,13 @@ pub struct MeasureSpec {
     pub params: Option<Vec<String>>,
     #[serde(default)]
     pub scale: Option<f64>,
+    /// `fft`: `hann` (default) or `rect`.
+    #[serde(default)]
+    pub taper: Option<String>,
+    /// `fft`: uniform samples of the window (default
+    /// [`super::measure::FFT_SAMPLES`]).
+    #[serde(default)]
+    pub samples: Option<usize>,
     #[serde(default)]
     pub exclude: Vec<Exclusion>,
 }
@@ -273,9 +280,10 @@ pub struct Quantity {
 }
 
 /// Keys a measure (a `[[q]]` or its `of`) may carry.
-const MEASURE_KEYS: [&str; 19] = [
+const MEASURE_KEYS: [&str; 21] = [
     "kind", "signal", "signals", "times", "at", "window", "level", "edge", "n", "target", "band",
-    "points", "nets", "strobe", "lattice", "smax", "params", "scale", "exclude",
+    "points", "nets", "strobe", "lattice", "smax", "params", "scale", "taper", "samples",
+    "exclude",
 ];
 
 /// Keys only a `[[q]]` carries.
@@ -313,12 +321,16 @@ pub fn check_quantity_keys(text: &str) -> Result<(), String> {
 }
 
 /// The measure kinds `tolerance.toml` may name.
-pub const MEASURE_KINDS: [&str; 18] = [
+pub const MEASURE_KINDS: [&str; 22] = [
     "op",
     "held_at",
     "interp_at",
     "mean",
     "min",
+    "max",
+    "pp",
+    "fft",
+    "noise_int",
     "cross",
     "period",
     "settle",
