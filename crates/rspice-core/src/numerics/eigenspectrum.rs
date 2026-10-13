@@ -86,11 +86,19 @@ pub(crate) fn qualified_real_eigenspectrum(
     abort: &dyn AbortSignal,
 ) -> Result<QualifiedOrdinarySpectrum, OrdinarySpectrumError> {
     match qualified_eigenspectrum_impl(matrix, abort, DenseSchurForm::Real) {
-        // Nearly defective real Schur blocks can lose accuracy during the
-        // real-to-complex eigenvector back substitution, including zero or
-        // nonfinite vectors for a defective block. Retry a
-        // complex Schur solve, then apply the identical residual certificate
-        // in the original coordinates. Never relax the qualification bound.
+        // faer 0.24's real-Schur eigenvectors are not backward stable inside
+        // a cluster of complex multipliers of radius about sqrt(eps * s),
+        // s being the entrywise 1-norm of the Schur form T, such as the
+        // rounding images of a defective zero multiplier. Its back
+        // substitution solves each 2x2 block of T - lambda*I by Cramer's
+        // rule and, when the determinant falls below eps * s, replaces the
+        // determinant but keeps the adjugate. That is no perturbation of the
+        // block, so the block's residual stays the size of its right-hand
+        // side. The complex Schur back substitution clamps a scalar pivot
+        // instead, which is a perturbation within the bound. A defective
+        // block can also yield a zero or nonfinite vector. Retry a complex
+        // Schur solve, then apply the identical residual certificate in the
+        // original coordinates. Never relax the qualification bound.
         Err(
             OrdinarySpectrumError::NumericalQualification { .. }
             | OrdinarySpectrumError::InvalidEigenvector { .. },
