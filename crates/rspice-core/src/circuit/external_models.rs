@@ -1310,6 +1310,7 @@ impl CircuitData {
         ) {
             return;
         }
+        self.ensure_xspice_event_dispatch();
         let iterates = &mut self.xspice_output_iterates;
         if iterates.candidate_time.to_bits() != time.to_bits() {
             iterates.candidate_time = time;
@@ -1320,8 +1321,16 @@ impl CircuitData {
             iterates.have_previous = true;
         }
         iterates.current.clear();
-        for instance in &self.xspice_instances {
-            instance.collect_output_iterate(&mut iterates.current);
+        // An instance that drives only event ports would append zeros at every
+        // iterate, which no tolerance can veto, so only the others are read.
+        // Both iterates leave out the same instances, so they still align.
+        let dispatch = self
+            .scheduler
+            .xspice_event_dispatch
+            .as_ref()
+            .expect("prepared event dispatch");
+        for &index in dispatch.continuous_output_instances() {
+            self.xspice_instances[index as usize].collect_output_iterate(&mut iterates.current);
         }
         iterates.have_current = true;
     }
@@ -2849,7 +2858,26 @@ impl CircuitData {
 
         let mut skipped_partial: Option<(String, String)> = None;
         let skipped = &mut skipped_partial;
-        for slot in &mut self.xspice_instances {
+        // Only an instance with an analog connection or port can contribute a
+        // term; on a gate-level design the rest are thousands of gates the
+        // walk below would visit to find nothing. Skipping them leaves every
+        // other instance's additions in the same order.
+        self.ensure_xspice_event_dispatch();
+        let dispatch = self
+            .scheduler
+            .xspice_event_dispatch
+            .as_ref()
+            .expect("prepared event dispatch");
+        #[cfg(debug_assertions)]
+        for instance in &self.xspice_instances {
+            debug_assert!(
+                instance.has_analog_stamp_surface() || !instance.has_deferred_contributions(),
+                "XSPICE instance '{}' has no analog terminal but queued explicit stamps",
+                instance.name
+            );
+        }
+        for &index in dispatch.analog_stamp_instances() {
+            let slot = &mut self.xspice_instances[index as usize];
             let instance = &**slot;
             for (pos, neg, branch_ordinal) in instance.current_probe_branches() {
                 stamp_current_probe(matrix, pos, neg, branch_ordinal, num_nodes);

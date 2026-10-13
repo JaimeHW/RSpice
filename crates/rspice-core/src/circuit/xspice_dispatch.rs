@@ -141,6 +141,17 @@ pub(crate) struct XspiceEventDispatch {
     /// opening pass of every settle call, exactly as it was before this map
     /// existed.
     dirty_dispatched: Vec<bool>,
+    /// Ascending registration indices of the instances whose driven outputs
+    /// can read as anything but zero
+    /// ([`crate::xspice::XspiceInstance::drives_continuous_outputs`]): the
+    /// only ones a Newton iterate's output record has to visit.
+    continuous_output_instances: Vec<u32>,
+    /// Ascending registration indices of the instances the XSPICE matrix
+    /// stamp can read a term from
+    /// ([`crate::xspice::XspiceInstance::has_analog_stamp_surface`]). On a
+    /// gate-level design that is the handful of bridges among thousands of
+    /// gates, and the stamp visits them in registration order as before.
+    analog_stamp_instances: Vec<u32>,
 }
 
 impl XspiceEventDispatch {
@@ -151,8 +162,16 @@ impl XspiceEventDispatch {
         #[cfg(feature = "veriloga")]
         let mut analog_fanout: HashMap<NodeId, Vec<u32>> = HashMap::new();
         let mut dirty_dispatched = Vec::with_capacity(instances.len());
+        let mut continuous_output_instances = Vec::new();
+        let mut analog_stamp_instances = Vec::new();
         for (index, instance) in instances.iter().enumerate() {
             let index = index as u32;
+            if instance.drives_continuous_outputs() {
+                continuous_output_instances.push(index);
+            }
+            if instance.has_analog_stamp_surface() {
+                analog_stamp_instances.push(index);
+            }
             instance.for_each_event_input_net(|kind, node| {
                 let fanout = match kind {
                     EventInputKind::Digital => &mut digital_fanout,
@@ -181,7 +200,23 @@ impl XspiceEventDispatch {
             #[cfg(feature = "veriloga")]
             analog_fanout,
             dirty_dispatched,
+            continuous_output_instances,
+            analog_stamp_instances,
         }
+    }
+
+    /// The instances whose driven outputs can read as anything but zero, in
+    /// registration order.
+    #[inline]
+    pub(crate) fn continuous_output_instances(&self) -> &[u32] {
+        &self.continuous_output_instances
+    }
+
+    /// The instances the XSPICE matrix stamp can read a term from, in
+    /// registration order.
+    #[inline]
+    pub(crate) fn analog_stamp_instances(&self) -> &[u32] {
+        &self.analog_stamp_instances
     }
 
     #[inline]

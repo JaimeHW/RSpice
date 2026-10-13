@@ -875,6 +875,21 @@ impl PortConnection {
     pub fn is_null(&self) -> bool {
         matches!(self, PortConnection::Null)
     }
+
+    /// Whether this connection carries event values or nothing: it reaches no
+    /// analog node, branch or source.
+    pub(crate) fn is_event_or_null_connection(&self) -> bool {
+        matches!(
+            self,
+            PortConnection::Digital(_)
+                | PortConnection::DigitalInverted(_)
+                | PortConnection::DigitalVector(_)
+                | PortConnection::DigitalVectorMapped(_)
+                | PortConnection::Real(_)
+                | PortConnection::RealVector(_)
+                | PortConnection::Null
+        )
+    }
 }
 
 //=============================================================================
@@ -926,6 +941,8 @@ pub struct XspiceInstance {
     /// The model's [`super::CodeModel::probe_writes_only_outputs`], read once:
     /// a transient probe of this instance may run on the live instance.
     probe_writes_only_outputs: bool,
+    /// See [`Self::has_analog_stamp_surface`].
+    analog_stamp_surface: bool,
     /// Has been initialized
     initialized: bool,
     /// A coupled trial has bound this instance's declared input thresholds.
@@ -1365,6 +1382,7 @@ impl XspiceInstance {
         }
 
         let probe_writes_only_outputs = model.probe_writes_only_outputs();
+        let analog_stamp_surface = Self::compute_analog_stamp_surface(&ports, &connections);
         Ok(Self {
             name,
             model,
@@ -1382,6 +1400,7 @@ impl XspiceInstance {
             // happen. Nothing else establishes that base case.
             event_inputs_dirty: true,
             probe_writes_only_outputs,
+            analog_stamp_surface,
             initialized: false,
             mixed_input_thresholds_bound: false,
         })
@@ -2239,21 +2258,42 @@ impl XspiceInstance {
         self.model.can_skip_unchanged_event_inputs() && self.has_only_event_connections()
     }
 
+    /// Whether [`Self::collect_output_iterate`] can append anything but zeros:
+    /// some driven port is not a digital or real event port. An event port's
+    /// output entry is created with its event kind and no setter changes the
+    /// kind of an existing entry, so it always reads as zero there.
+    pub(crate) fn drives_continuous_outputs(&self) -> bool {
+        self.ports.iter().any(|port| {
+            matches!(
+                port.direction,
+                super::PortDirection::Out | super::PortDirection::InOut
+            ) && !matches!(port.default_type, PortType::Digital | PortType::Real)
+        })
+    }
+
+    /// Whether the XSPICE matrix stamp can read anything from this instance
+    /// besides explicitly queued stamps: it has an analog connection or an
+    /// analog port. An instance with neither has no current probe, no analog
+    /// output contribution and no terminal to stamp. Ports and connections
+    /// are fixed at construction, which is where this is decided.
+    #[inline]
+    pub(crate) fn has_analog_stamp_surface(&self) -> bool {
+        self.analog_stamp_surface
+    }
+
+    fn compute_analog_stamp_surface(ports: &[PortSpec], connections: &[PortConnection]) -> bool {
+        !connections
+            .iter()
+            .all(PortConnection::is_event_or_null_connection)
+            || ports.iter().any(|port| port.default_type.is_analog())
+    }
+
     /// Event-only models can execute inside an interpolated analog interval.
     /// Models with a physical connection require a solved analog boundary.
     pub(crate) fn has_only_event_connections(&self) -> bool {
-        self.connections.iter().all(|connection| {
-            matches!(
-                connection,
-                PortConnection::Digital(_)
-                    | PortConnection::DigitalInverted(_)
-                    | PortConnection::DigitalVector(_)
-                    | PortConnection::DigitalVectorMapped(_)
-                    | PortConnection::Real(_)
-                    | PortConnection::RealVector(_)
-                    | PortConnection::Null
-            )
-        })
+        self.connections
+            .iter()
+            .all(PortConnection::is_event_or_null_connection)
     }
 
     /// Visit every circuit net this instance reads event values from, with the
