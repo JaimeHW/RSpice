@@ -995,3 +995,106 @@ endmodule
         "steps shorter than 1 as at the switches' change of state"
     );
 }
+
+/// A zero-duration D/A edge is crossed in one step, however much the drive
+/// moves the devices behind it.
+///
+/// C3's 555 drives its discharge transistor's base through 10 kΩ from a
+/// Verilog flip-flop's output. Each edge is solved at its own timepoint with
+/// the drive's left limit and completes 1 ps later. The node-activity limit
+/// read the transistor's terminals across the step leaving the edge as a rate:
+/// the drive's whole step is in that interval however short it is, so every
+/// retry asked for a twentieth of itself, and the restart fell to the floor
+/// before reaching the completion — 4 to 5 rejections an edge, and a refusal
+/// once the floor was below what the clock resolves at 0.128 s under a 1 µs
+/// maximum step. Here each edge's next point is its completion, the event
+/// records keep the ticks' own instants, and the collector follows a run
+/// under a twentieth of the maximum step.
+#[test]
+fn a_zero_duration_d_a_edge_into_a_transistor_is_crossed_in_one_step() {
+    let module = std::env::temp_dir().join(format!(
+        "rspice_unified_audit_{}_{}.v",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::write(
+        &module,
+        "`timescale 1us/1ps\n\
+         module toggle(q); output q; reg q;\n\
+         \x20 initial q = 0;\n\
+         \x20 always #10 q = ~q;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    let model = ModelFile(module);
+    let deck = Netlist::parse(&format!(
+        "* zero-duration D/A edges switching a transistor\n.hdl \"{}\"\n\
+         x1 q toggle\nvcc vcc 0 5\nrb q b 10k\nq1 c b 0 npn1\n.model npn1 npn\n\
+         rc vcc c 1k\ncc c 0 1n\n.end\n",
+        model.path()
+    ))
+    .unwrap();
+    let run = |maximum: f64| {
+        Engine::default()
+            .run_tran(&deck, 45.0e-6, maximum)
+            .unwrap_or_else(|error| panic!("maximum {maximum:e}: {error}"))
+    };
+    let tran = run(1.0e-6);
+    let reference = run(0.05e-6);
+
+    let q = tran
+        .digital_traces
+        .iter()
+        .find(|trace| trace.node_name.to_ascii_lowercase().contains("q"))
+        .unwrap_or_else(|| {
+            panic!(
+                "a trace of q in {:?}",
+                tran.digital_traces
+                    .iter()
+                    .map(|trace| &trace.node_name)
+                    .collect::<Vec<_>>()
+            )
+        });
+    let edges: Vec<f64> = q
+        .points
+        .iter()
+        .map(|point| point.time)
+        .filter(|time| *time > 0.0)
+        .collect();
+    let ticks: Vec<f64> = (1..=4).map(|k| f64::from(k) * 1.0e7 * 1.0e-12).collect();
+    assert_eq!(edges, ticks, "each edge is recorded at its tick");
+
+    let collector = tran.try_voltage_waveform_named("c").expect("v(c)");
+    let reference_collector = reference.try_voltage_waveform_named("c").expect("v(c)");
+    let at_reference = |time: f64| {
+        let index = reference.time.partition_point(|sample| *sample < time);
+        if reference.time[index] == time {
+            return reference_collector[index];
+        }
+        let (t0, t1) = (reference.time[index - 1], reference.time[index]);
+        let (v0, v1) = (reference_collector[index - 1], reference_collector[index]);
+        v0 + (v1 - v0) * (time - t0) / (t1 - t0)
+    };
+    let mut worst: f64 = 0.0;
+    for edge in ticks {
+        let landing = tran
+            .time
+            .iter()
+            .position(|time| *time == edge)
+            .unwrap_or_else(|| panic!("a point on the edge at {edge:e}"));
+        let step = tran.time[landing + 1] - edge;
+        assert!(
+            (step - 1.0e-12).abs() <= 1.0e-15,
+            "the step leaving the edge at {edge:e} is {step:e}, not its 1 ps completion"
+        );
+        let around = landing.saturating_sub(2)..(landing + 6).min(tran.time.len());
+        for (time, value) in tran.time[around.clone()].iter().zip(&collector[around]) {
+            worst = worst.max((value - at_reference(*time)).abs());
+        }
+    }
+    println!(
+        "{} points; worst v(c) against the reference: {worst:e} V",
+        tran.time.len()
+    );
+    assert!(worst <= 1.0e-2, "v(c) is {worst:e} V from the reference");
+}

@@ -500,6 +500,16 @@ impl BreakpointManager {
             .and_then(|crossing| crossing.resume)
     }
 
+    /// Whether the step leaving the accepted point `time` is inside the
+    /// realization of the zero-duration edge being crossed: `time` is the
+    /// edge's landing, or a point accepted inside its realization, and the
+    /// step ends on the completion at the latest.
+    pub(crate) fn crosses_edge_from(&self, time: Value) -> bool {
+        self.edge_crossing.is_some_and(|crossing| {
+            time < crossing.completion && !self.coincides(time, crossing.completion)
+        })
+    }
+
     /// The edge completions still ahead of `time` and the edge being crossed,
     /// for a checkpoint taken at the accepted point `time`.
     ///
@@ -1149,8 +1159,13 @@ mod breakpoint_manager_tests {
         );
         let (dt, lands_on_breakpoint) = plain.limit_step(10.0, restart);
         assert!(!lands_on_breakpoint && dt == restart);
+        assert!(!plain.crosses_edge_from(10.0), "no edge is being crossed");
 
         let (mut breakpoints, restart) = landed_on_an_edge(true);
+        assert!(
+            breakpoints.crosses_edge_from(10.0),
+            "the step leaving the landing crosses the realization"
+        );
         assert!(
             (restart - 0.6).abs() <= 8.0 * Value::EPSILON,
             "the edge's restart is measured past its completion: a tenth of the 6.0 \
@@ -1174,6 +1189,10 @@ mod breakpoint_manager_tests {
             "the step after the completion is the cut restart"
         );
         assert_eq!(breakpoints.edge_completion_resume(10.001), None);
+        assert!(
+            !breakpoints.crosses_edge_from(10.001),
+            "the step leaving the completion is an ordinary one"
+        );
         // An ordinary breakpoint after it keeps ngspice's rule.
         let (_, lands_on_breakpoint) = breakpoints.limit_step(19.0, 3.0);
         assert!(lands_on_breakpoint);

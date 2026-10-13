@@ -10314,8 +10314,18 @@ impl Engine {
                     )
                 })
                 .reduce(Value::min);
+            // The activity limit reads a terminal's change across the step as
+            // a rate. A zero-duration edge's drive steps at its landing, whose
+            // solution is the drive's left limit, so the step leaving it
+            // carries the whole step of the drive however short it is: the
+            // limit asks the same fraction of every retry, and the restart
+            // collapses to the floor before it can reach the completion. That
+            // realization's width is the edge's, not one an error term chose
+            // (`BreakpointManager::replace_edge_completions`), and the
+            // other limits still judge the step crossing it.
             let activity_limit = if !first_accepted_transient_step
                 && !lte_estimator.uses_accepted_solution_reference()
+                && !breakpoints.crosses_edge_from(t)
             {
                 Self::nonlinear_terminal_activity_limit(
                     &nonlinear_terminal_solution_indices,
