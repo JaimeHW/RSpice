@@ -229,7 +229,12 @@ pub(super) fn lower(
     let index = HashMap::new();
     let array_names = HashSet::new();
     let analog_variables = HashMap::new();
-    let mut calls = PlanCalls::default();
+    let mut calls = PlanCalls {
+        disabled: std::sync::Arc::new(super::disable::disabled_names(
+            analyzed.iter().map(|routine| &routine.routine.body),
+        )),
+        ..PlanCalls::default()
+    };
     let scope = ScopeFrame {
         id: DigitalScopeId(0),
         path: SmolStr::default(),
