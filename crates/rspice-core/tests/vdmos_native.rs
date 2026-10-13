@@ -2657,6 +2657,39 @@ fn ngspice_vdmos_quasi_saturation_noise_matches_the_ngspice46_oracle() {
     );
 }
 
+/// `M` parallel VDMOS put their series resistances in parallel: ngspice-46
+/// divides `RD`, `RS` (and `RQ`, `RG`, `RB`) by `M`, and gives this stage
+/// `V(d) = 7.156254698254892` with `RD/M = 0.25`, `RS/M = 0.1`.
+#[test]
+fn ngspice_vdmos_multiplicity_divides_its_series_resistances() {
+    let deck = "* vdmos m=2 series resistance scaling\n\
+                vdd vdd 0 dc 12\n\
+                vin g 0 dc 3\n\
+                rl vdd d 10\n\
+                m1 d g 0 0 vd m=2\n\
+                .model vd vdmos (vto=2 kp=0.5 rd=0.5 rs=0.2 lambda=0.01)\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("VDMOS M deck parses");
+    let op = Engine::new(SimulationConfig {
+        spice_dialect: rspice_core::engine::SpiceDialect::Ngspice,
+        ..Default::default()
+    })
+    .run_dc_op(&netlist)
+    .expect("VDMOS M operating point solves");
+    let index = op
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("d"))
+        .expect("drain node");
+    let expected = 7.156_254_698_254_892;
+    let relative = (op.node_voltages[index] - expected).abs() / expected;
+    assert!(
+        relative <= 1.0e-9,
+        "V(d) {:.15e} against ngspice-46 {expected:.15e}",
+        op.node_voltages[index]
+    );
+}
+
 fn assert_vdmos_noise_matches_ngspice46(deck: &str, table: &[[f64; 6]; 6]) {
     let netlist = Netlist::parse(deck).expect("VDMOS noise deck parses");
     let frequencies: Vec<f64> = table.iter().map(|row| row[0]).collect();

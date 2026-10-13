@@ -1152,6 +1152,14 @@ impl Vdmos {
                 self.d1_isr *= multiplier;
                 self.d1_ikf *= multiplier;
                 self.d1_cjo *= multiplier;
+                // `M` parallel devices put their series resistances in
+                // parallel too: ngspice divides RD, RQ, RS, RG and the body
+                // diode's RB by M (`vdmostemp.c`, `vdmosset.c`).
+                self.rd /= multiplier;
+                self.rq /= multiplier;
+                self.rs /= multiplier;
+                self.rg /= multiplier;
+                self.d1_rs /= multiplier;
             }
             self.is *= multiplier;
             self.source_area = source_area * multiplier;
