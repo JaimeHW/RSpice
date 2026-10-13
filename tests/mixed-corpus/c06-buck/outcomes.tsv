@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-vdig	tran	interp	pass	env530 (O1) [0] |a−e|=1.520e-2 allowed 1.810e-2 (a=1.631087e0, e=1.615887e0)
-vdig	tran	native	pass	env530 (O1) [0] |a−e|=1.520e-2 allowed 1.810e-2 (a=1.631087e0, e=1.615887e0)
+vdig	tran	interp	pass	env530 (O1) [0] |a−e|=1.583e-2 allowed 1.810e-2 (a=1.631721e0, e=1.615887e0)
+vdig	tran	native	pass	env530 (O1) [0] |a−e|=1.583e-2 allowed 1.810e-2 (a=1.631721e0, e=1.615887e0)
 vams	tran	interp	refused	compile_refusal; label="net/buck_ctrl_ams.vams"; instance=buck_ctrl form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams
 vams	tran	native	refused	compile_refusal; label="net/buck_ctrl_ams.vams"; instance=buck_ctrl form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams
 p3	tran	interp	refused	compile_refusal; label="net/buck_ctrl_p3.vams"; instance=buck_ctrl_p3.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_p3.vams
@@ -9,7 +9,7 @@ vdig	ckpt	interp	pass	resume (O7) resumed@4e-4: identical; 281244 of 281244 acce
 vdig	ckpt	native	pass	resume (O7) resumed@4e-4: identical; 281244 of 281244 accepted times shared, 4 nets
 vams	ckpt	interp	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20
 vams	ckpt	native	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20
-vdig	mc-tran	interp	pass	ripple (O6) trial 0: [0] |a−e|=1.456e-3 allowed 4.512e-3 (a=1.303762e-1, e=1.289207e-1)
-vdig	mc-tran	native	pass	ripple (O6) trial 0: [0] |a−e|=1.456e-3 allowed 4.512e-3 (a=1.303762e-1, e=1.289207e-1)
+vdig	mc-tran	interp	pass	ripple (O6) trial 0: [0] |a−e|=1.949e-3 allowed 4.512e-3 (a=1.308696e-1, e=1.289207e-1)
+vdig	mc-tran	native	pass	ripple (O6) trial 0: [0] |a−e|=1.949e-3 allowed 4.512e-3 (a=1.308696e-1, e=1.289207e-1)
 vams	mc-tran	interp	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20
 vams	mc-tran	native	refused	compile_refusal; label="net/buck_ctrl_ams.vams:20"; instance=net/buck_ctrl_ams.vams form=structured; token-form=structured; analysis-form=location; site=net/buck_ctrl_ams.vams:20

@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-555	tran	interp	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=4.610e-7 allowed 2.000e-6
-555	tran	native	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=4.610e-7 allowed 2.000e-6
+555	tran	interp	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=4.716e-7 allowed 2.000e-6
+555	tran	native	pass	q555 (O2) net x555.xverilog.q__event_0 event 23: |Δt|=4.716e-7 allowed 2.000e-6
 adc	tran	interp	pass	adccode (O6) [0] |a−e|=0.000e0 allowed 1.000e0 (a=0.000000e0, e=0.000000e0)
 adc	tran	native	pass	adccode (O6) [0] |a−e|=0.000e0 allowed 1.000e0 (a=0.000000e0, e=0.000000e0)
 adc_nd	tran	interp	pass	adccode (O6) [0] |a−e|=0.000e0 allowed 1.000e0 (a=0.000000e0, e=0.000000e0)
@@ -9,8 +9,8 @@ delay	tran	interp	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 off th
 delay	tran	native	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 off the lattice, allowed 1.000e-12
 delay_v2005	tran	interp	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 off the lattice, allowed 1.000e-12
 delay_v2005	tran	native	pass	johnson (O6) net d0 edge at 9.600000e-5: 1.355e-20 off the lattice, allowed 1.000e-12
-pwm	tran	interp	pass	pwmsine (O2) [49] |a−e|=1.095e-5 allowed 1.000e-4 (a=6.314698e-1, e=6.314588e-1)
-pwm	tran	native	pass	pwmsine (O2) [49] |a−e|=1.095e-5 allowed 1.000e-4 (a=6.314698e-1, e=6.314588e-1)
+pwm	tran	interp	pass	pwmsine (O2) [49] |a−e|=6.305e-6 allowed 1.000e-4 (a=6.314651e-1, e=6.314588e-1)
+pwm	tran	native	pass	pwmsine (O2) [49] |a−e|=6.305e-6 allowed 1.000e-4 (a=6.314651e-1, e=6.314588e-1)
 555	op	interp	fail	convergence: convergence: Convergence failed after 1500 iterations: Newton-Raphson iteration limit exceeded
 555	op	native	fail	convergence: convergence: Convergence failed after 1500 iterations: Newton-Raphson iteration limit exceeded
 adc	op	interp	pass	op (O6) [0] |a−e|=0.000e0 allowed 1.000e-3 (a=3.300000e0, e=3.300000e0)

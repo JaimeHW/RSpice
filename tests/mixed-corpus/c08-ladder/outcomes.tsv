@@ -1,6 +1,6 @@
 # variant	analysis	route	outcome	detail
-tr	tran	interp	pass	ovs (O6) [0] |a−e|=3.731e-3 allowed 6.000e-3 (a=-6.221977e-1, e=-6.259284e-1)
-tr	tran	native	pass	ovs (O6) [0] |a−e|=3.731e-3 allowed 6.000e-3 (a=-6.221977e-1, e=-6.259284e-1)
+tr	tran	interp	pass	ovs (O6) [0] |a−e|=3.718e-3 allowed 6.000e-3 (a=-6.222104e-1, e=-6.259284e-1)
+tr	tran	native	pass	ovs (O6) [0] |a−e|=3.718e-3 allowed 6.000e-3 (a=-6.222104e-1, e=-6.259284e-1)
 va	tran	interp	fail	convergence: convergence: Circuit error: Transient startup failed: primary DC error: Convergence failed: GMIN stepping stopped before its first stage; the stage at gmin = 1.000e-3 S did not solve; linearized fallback error: Circuit error: matrix is singular: no equa
 va	tran	native	fail	convergence: convergence: Circuit error: Transient startup failed: primary DC error: Convergence failed: GMIN stepping stopped before its first stage; the stage at gmin = 1.000e-3 S did not solve; linearized fallback error: Circuit error: matrix is singular: no equa
 wr	tran	interp	pass	ovs (O6) [0] |a−e|=0.000e0 allowed 2.000e-3 (a=-6.259670e-1, e=-6.259670e-1)
