@@ -154,7 +154,10 @@ impl AxisValue {
 fn plain_text(value: f64, step: i32) -> String {
     let trim = |digits: &str| -> String {
         if digits.contains('.') {
-            digits.trim_end_matches('0').trim_end_matches('.').to_owned()
+            digits
+                .trim_end_matches('0')
+                .trim_end_matches('.')
+                .to_owned()
         } else {
             digits.to_owned()
         }
