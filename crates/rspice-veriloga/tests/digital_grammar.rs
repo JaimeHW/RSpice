@@ -3366,7 +3366,18 @@ fn routine_ports_and_fork_declarations_follow_ieee_1364() {
             "module m; task t; event e; endtask endmodule",
             "a named event declared inside a task",
         ),
-        ("module m; reg [3:0] a; initial a[0 +: 2] = 0; endmodule", "`+:`"),
+        (
+            "module m; task t; input [7:0] x; reg [3:0] x; endtask endmodule",
+            "Duplicate",
+        ),
+        (
+            "module m; task t; input [63:0] x; time x; endtask endmodule",
+            "Duplicate",
+        ),
+        (
+            "module m; task t; input x; reg x; reg x; endtask endmodule",
+            "Duplicate",
+        ),
     ] {
         let error = VerilogACompiler::new(CompilerOptions::default())
             .compile_canonical_ir(source)
@@ -3376,7 +3387,7 @@ fn routine_ports_and_fork_declarations_follow_ieee_1364() {
     }
     let file = parse(
         "module m; reg r;\n\
-         \x20 task t; input x; real x; input y; reg [3:0] y; endtask\n\
+         \x20 task t; input x; real x; input [3:0] y; reg [3:0] y; endtask\n\
          \x20 function f(input a); f = a; endfunction\n\
          \x20 initial r = f (* keep *) (1'b1);\n\
          endmodule\n",

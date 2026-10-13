@@ -485,19 +485,28 @@ fn type_arguments(
     variables: &mut Vec<VariableDecl>,
     digital_variables: &mut Vec<DigitalVariableDecl>,
 ) {
-    // A `reg` redeclaration repeats the port's range; any other type needs
-    // a port declared with none.
-    fn untyped<'a>(
-        arguments: &'a mut [DigitalRoutineArgument],
-        name: &SmolStr,
-        reg: bool,
-    ) -> Option<&'a mut DigitalRoutineArgument> {
-        arguments.iter_mut().find(|argument| {
+    // A port is typed once. A `reg` redeclaration repeats the port's range
+    // exactly; any other type needs a port declared with none. Anything else
+    // stays a second declaration, which analysis reports as a duplicate.
+    let mut typed = std::collections::HashSet::new();
+    let mut untyped = |arguments: &mut [DigitalRoutineArgument],
+                       name: &SmolStr,
+                       reg_range: Option<Option<&VectorRange>>|
+     -> Option<usize> {
+        if typed.contains(name) {
+            return None;
+        }
+        let index = arguments.iter().position(|argument| {
             argument.name == *name
                 && argument.ty.kind == DigitalRoutineValueKind::Reg
-                && (reg || (argument.ty.range.is_none() && !argument.ty.signedness.is_signed()))
-        })
-    }
+                && match reg_range {
+                    Some(range) => same_range(argument.ty.range.as_ref(), range),
+                    None => argument.ty.range.is_none() && !argument.ty.signedness.is_signed(),
+                }
+        })?;
+        typed.insert(name.clone());
+        Some(index)
+    };
     for declaration in variables.iter_mut() {
         let kind = match declaration.var_type {
             VarType::Real => DigitalRoutineValueKind::Real,
@@ -508,10 +517,10 @@ fn type_arguments(
             if !item.dimensions.is_empty() {
                 return true;
             }
-            let Some(argument) = untyped(arguments, &item.name, false) else {
+            let Some(index) = untyped(arguments, &item.name, None) else {
                 return true;
             };
-            argument.ty = DigitalRoutineType {
+            arguments[index].ty = DigitalRoutineType {
                 kind,
                 signedness: Signedness::Signed,
                 range: None,
@@ -527,16 +536,27 @@ fn type_arguments(
             DigitalVariableKind::Real => DigitalRoutineValueKind::Real,
             _ => continue,
         };
+        // `time` arrives as `reg [63:0]` whose range is the keyword itself
+        // (see `time_range`); it types like `integer`, not like `reg`.
+        let time = declaration
+            .range
+            .as_ref()
+            .is_some_and(|range| range.span == range.msb.span());
+        let reg_range = (kind == DigitalRoutineValueKind::Reg && !time)
+            .then_some(declaration.range.as_ref());
         declaration.items.retain(|item| {
             if !item.dimensions.is_empty() || item.init.is_some() {
                 return true;
             }
-            let reg = kind == DigitalRoutineValueKind::Reg;
-            let Some(argument) = untyped(arguments, &item.name, reg) else {
+            let Some(index) = untyped(arguments, &item.name, reg_range) else {
                 return true;
             };
-            argument.ty = DigitalRoutineType {
-                kind,
+            arguments[index].ty = DigitalRoutineType {
+                kind: if time {
+                    DigitalRoutineValueKind::Time
+                } else {
+                    kind
+                },
                 signedness: declaration.signedness,
                 range: declaration.range.clone(),
             };
@@ -544,6 +564,28 @@ fn type_arguments(
         });
     }
     digital_variables.retain(|declaration| !declaration.items.is_empty());
+}
+
+/// Whether two declared ranges are the same, as far as their literal bounds
+/// show; a bound written as an expression is taken as the same.
+fn same_range(port: Option<&VectorRange>, redeclared: Option<&VectorRange>) -> bool {
+    let literal = |expression: &Expression| match expression {
+        Expression::Number(number) => Some(number.value),
+        _ => None,
+    };
+    match (port, redeclared) {
+        (None, None) => true,
+        (Some(port), Some(redeclared)) => [
+            (&port.msb, &redeclared.msb),
+            (&port.lsb, &redeclared.lsb),
+        ]
+        .into_iter()
+        .all(|(a, b)| match (literal(a), literal(b)) {
+            (Some(a), Some(b)) => a == b,
+            _ => true,
+        }),
+        _ => false,
+    }
 }
 
 /// `[63:0]`, the range a `time` variable is declared over.

@@ -2816,18 +2816,6 @@ impl<'a> Parser<'a> {
         let mut left = self.parse_multiplicative()?;
 
         loop {
-            if matches!(self.current().kind, TokenKind::Plus | TokenKind::Minus)
-                && self.peek_is(TokenKind::Colon)
-            {
-                return Err(ParseError::new(
-                    ParseErrorKind::UnsupportedConstruct {
-                        context: "part-select".to_string(),
-                        found: "an indexed part-select `+:` or `-:` (IEEE 1364-2005 section 5.2.1)"
-                            .to_string(),
-                    },
-                    self.current_span(),
-                ));
-            }
             let op = match self.current().kind {
                 TokenKind::Plus => {
                     self.advance();
