@@ -877,8 +877,9 @@ impl CircuitData {
         }
     }
 
-    /// Rebuild event kinds from the already-renumbered XSPICE connections and
+    /// Rebuild event kinds from the already-rebound XSPICE connections and
     /// circuit HDL graph. Ground has no event kind.
+    #[cfg(feature = "veriloga")]
     pub(crate) fn rebuild_net_kinds(&mut self) {
         self.net_kinds = NetKinds::default();
         for instance in &self.xspice_instances {
@@ -886,7 +887,6 @@ impl CircuitData {
                 mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
             }
         }
-        #[cfg(feature = "veriloga")]
         if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
             for (node, real) in digital.event_domains() {
                 self.net_kinds.register(
@@ -899,8 +899,8 @@ impl CircuitData {
                 );
             }
         }
-        // Renumbered connections move the nets the sensitivity map is keyed
-        // by, so it is rebuilt from the same replay this cache is.
+        // Rebound connections move the nets the sensitivity map is keyed by,
+        // so it is rebuilt from the same replay this cache is.
         self.invalidate_xspice_event_dispatch();
     }
 

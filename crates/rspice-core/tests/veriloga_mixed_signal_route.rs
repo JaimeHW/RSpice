@@ -2400,6 +2400,234 @@ endmodule
     }
 }
 
+/// Every number a deck's operating point and transient report, as bits: node
+/// voltages by name, branch currents by position (a module's branch unknowns
+/// are named after its own nets), and the time axis.
+fn reported_bits(deck: &str) -> std::collections::BTreeMap<String, u64> {
+    let netlist = Netlist::parse(deck).expect("the deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let mut report = std::collections::BTreeMap::new();
+    let op = engine
+        .run_dc_op(&netlist)
+        .expect("the operating point solves");
+    for (name, value) in op.node_names.iter().zip(&op.node_voltages) {
+        let name = name.to_ascii_lowercase();
+        report.insert(format!("op v({name})"), value.to_bits());
+    }
+    for (index, value) in op.branch_currents.iter().enumerate() {
+        report.insert(format!("op i[{index}]"), value.to_bits());
+    }
+    let tran = engine
+        .run_tran(&netlist, 40e-9, 1e-9)
+        .expect("the transient runs");
+    for (point, time) in tran.time.iter().enumerate() {
+        report.insert(format!("tran[{point:04}] t"), time.to_bits());
+        for (name, series) in tran.node_names.iter().zip(&tran.voltages) {
+            if let Some(value) = series.get(point) {
+                let name = name.to_ascii_lowercase();
+                report.insert(format!("tran[{point:04}] v({name})"), value.to_bits());
+            }
+        }
+        for (index, series) in tran.branch_currents.iter().enumerate() {
+            if let Some(value) = series.get(point) {
+                report.insert(format!("tran[{point:04}] i[{index}]"), value.to_bits());
+            }
+        }
+    }
+    report
+}
+
+/// A deck that names no node 0 is connected to it all the same when a module
+/// contributes to one of its ports single-ended: `V(out) <+ 2 * V(in)` is a
+/// source from `out` to node 0. Taking the first voltage source's negative
+/// net as the reference would move that node; the deck keeps node 0, and runs
+/// exactly as the deck that wires the module's reference to an explicit `0`.
+#[test]
+fn a_module_reaching_its_ports_single_ended_keeps_node_zero_as_the_reference() {
+    let implicit = ModelFile::new(
+        "implicit_reference_amp",
+        "module implicit_reference_amp(in, out);\n inout in, out; electrical in, out;\n \
+         analog V(out) <+ 2 * V(in);\nendmodule\n",
+    );
+    let explicit = ModelFile::new(
+        "explicit_reference_amp",
+        "module explicit_reference_amp(in, out, r);\n inout in, out, r; electrical in, out, r;\n \
+         analog V(out, r) <+ 2 * V(in, r);\nendmodule\n",
+    );
+    let deck = |model: &ModelFile, module: &str, card: &str| {
+        format!(
+            "* grounded only through the module\n.va \"{}\" {module}\n\
+             V1 in ref SIN(0.5 0.5 5e7)\nR1 in ref 1k\n{card}\nR2 out ref 1k\n.end\n",
+            model.deck_path()
+        )
+    };
+    let implicit = deck(
+        &implicit,
+        "implicit_reference_amp",
+        "X1 in out implicit_reference_amp",
+    );
+    let explicit = deck(
+        &explicit,
+        "explicit_reference_amp",
+        "X1 in out 0 explicit_reference_amp",
+    );
+
+    // R2 carries no current back to node 0, so `ref` sits at V(out), and
+    // V(out) = 2 (V(ref) + 0.5) puts both at -1 V. Had `ref` become the
+    // reference, V(out) would read 1 V.
+    let report = reported_bits(&implicit);
+    for node in ["ref", "out"] {
+        let value = f64::from_bits(report[&format!("op v({node})")]);
+        assert!((value + 1.0).abs() < 1e-9, "v({node}) = {value}");
+    }
+    let explicit = reported_bits(&explicit);
+    let differences: Vec<String> = report
+        .iter()
+        .filter(|(key, bits)| explicit.get(*key) != Some(*bits))
+        .take(12)
+        .map(|(key, bits)| {
+            format!(
+                "{key}: {:e} implicit, {:?} explicit",
+                f64::from_bits(*bits),
+                explicit.get(key).map(|bits| f64::from_bits(*bits))
+            )
+        })
+        .collect();
+    assert!(
+        differences.is_empty() && report.len() == explicit.len(),
+        "{} and {} observations:\n{}",
+        report.len(),
+        explicit.len(),
+        differences.join("\n")
+    );
+}
+
+/// The node a deck's `ref` net became.
+fn reference_node(deck: &str) -> Option<usize> {
+    let netlist = Netlist::parse_validated(deck).expect("deck parses");
+    Engine::default()
+        .build_circuit(&netlist)
+        .expect("deck builds")
+        .get_node_by_name("ref")
+}
+
+/// The observations that differ between a deck naming its reference `0` and
+/// the same deck naming it `ref`, which the build must then choose. The
+/// reference net is the one name the two decks spell apart.
+fn reference_choice_differences(deck: impl Fn(&str) -> String) -> Vec<String> {
+    let observe = |reference: &str| {
+        let mut report = reported_bits(&deck(reference));
+        report.retain(|key, _| !key.ends_with("v(0)") && !key.ends_with("v(ref)"));
+        report
+    };
+    let named = observe("0");
+    let chosen = observe("ref");
+    named
+        .iter()
+        .chain(chosen.iter().filter(|(key, _)| !named.contains_key(*key)))
+        .filter(|(key, _)| named.get(*key) != chosen.get(*key))
+        .take(12)
+        .map(|(key, _)| {
+            let show = |bits: Option<&u64>| bits.map(|bits| f64::from_bits(*bits));
+            format!(
+                "{key}: {:?} naming node 0, {:?} naming ref",
+                show(named.get(key)),
+                show(chosen.get(key))
+            )
+        })
+        .collect()
+}
+
+/// A wreal net that reaches the electrical world goes through the automatic
+/// real-to-voltage converter the build inserts, which drives it against node
+/// 0. A converter the build inserts does not decide the reference: its ground
+/// end is the deck's reference, whichever net that is. A deck that names no
+/// node 0 and is driven only that way takes its first voltage source's
+/// negative net as the reference, and runs bit for bit as the same deck
+/// naming that net 0.
+#[test]
+fn a_deck_driven_only_through_a_real_to_voltage_converter_takes_the_automatic_reference() {
+    let level = ModelFile::new(
+        "reference_level",
+        "module reference_level(s);\n output s; wreal s; real v;\n assign s = v;\n \
+         initial v = 1.5;\nendmodule\n",
+    );
+    let deck = |reference: &str| {
+        format!(
+            "* driven only through the converter\n.va \"{}\" reference_level\n\
+             V1 a {reference} 1\nR1 a {reference} 1k\nX1 s reference_level\n\
+             R2 s {reference} 1k\n.end\n",
+            level.deck_path()
+        )
+    };
+    assert_eq!(
+        reference_node(&deck("ref")),
+        Some(0),
+        "the converter is the build's, so `ref` is the reference"
+    );
+    // The converter drives `s` against `ref`, so `s` reads the converted
+    // 1.5 V and `a` its source's 1 V. Had the converter kept node 0, `ref`
+    // would float to `s` through R2, and `a` would read 2.5 V.
+    let result = run(&deck("ref"), 2e-9, 0.1e-9);
+    for (node, expected) in [("s", 1.5), ("a", 1.0)] {
+        let value = *waveform(&result, node).last().expect("samples");
+        assert!(
+            (value - expected).abs() < 1e-9,
+            "v({node}) = {value}, expected {expected}"
+        );
+    }
+    let differences = reference_choice_differences(deck);
+    assert!(
+        differences.is_empty(),
+        "these differ:\n{}",
+        differences.join("\n")
+    );
+}
+
+/// A discrete input on an electrical net reaches it through an automatic A/D
+/// converter, which senses the net against node 0, and a discrete output with
+/// no other connection drives its net through an automatic D/A converter,
+/// against node 0. Neither decides the reference: the build inserts them, and
+/// their ground end is the deck's reference, whichever net that is. A deck
+/// that names no node 0 and touches it only that way takes its first voltage
+/// source's negative net as the reference, and runs bit for bit as the same
+/// deck naming that net 0.
+#[test]
+fn a_deck_reaching_node_zero_only_through_automatic_converters_takes_the_automatic_reference() {
+    let latch = ModelFile::new(
+        "sensed_latch",
+        "module sensed_latch(d, q);\n input d; wire d;\n output q; reg q;\n \
+         initial q = 1'b0;\n always @(d) q <= d;\nendmodule\n",
+    );
+    let deck = |reference: &str| {
+        format!(
+            "* reached only through the converters\n.va \"{}\" sensed_latch\n\
+             V1 a {reference} PWL(0 0 10n 0 20n 3.3)\nR1 a {reference} 1k\n\
+             Xs a q sensed_latch\n.end\n",
+            latch.deck_path()
+        )
+    };
+    assert_eq!(
+        reference_node(&deck("ref")),
+        Some(0),
+        "the converters are the build's, so `ref` is the reference"
+    );
+    let traces = |reference: &str| run(&deck(reference), 40e-9, 1e-9).digital_traces;
+    let named_traces = traces("0");
+    let q = named_traces
+        .iter()
+        .find(|trace| trace.node_name.eq_ignore_ascii_case("q"))
+        .expect("q is traced");
+    assert_eq!(q.points.len(), 2, "q rises once, when `a` crosses 1.65 V");
+    assert_eq!(named_traces, traces("ref"), "digital events");
+    let differences = reference_choice_differences(deck);
+    assert!(
+        differences.is_empty(),
+        "these differ:\n{}",
+        differences.join("\n")
+    );
+}
+
 #[test]
 fn direct_hdl_connections_replay_after_rejected_analog_steps() {
     let source = ModelFile::new(

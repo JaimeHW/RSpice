@@ -487,6 +487,21 @@ impl ResistorNoiseTemperatureProvenance {
     }
 }
 
+/// Whether a Verilog-A or Verilog-AMS instance built so far connects node 0
+/// through its own contributions, while the build still has to decide the
+/// reference of a deck that names no node 0.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) enum GroundCensus {
+    /// Nothing to decide: the deck names node 0, or its reference is chosen.
+    #[default]
+    Settled,
+    /// The deck names no node 0, and no instance built so far connects it.
+    Open,
+    /// This instance's contributions connect node 0.
+    Referenced(String),
+}
+
 /// High-performance circuit representation using Struct-of-Arrays
 ///
 /// `Clone` exists so embarrassingly-parallel sweeps (AC frequency points)
@@ -496,7 +511,8 @@ impl ResistorNoiseTemperatureProvenance {
 pub struct CircuitData {
     /// Node name to ID mapping
     node_map: HashMap<String, NodeId>,
-    /// Tracks whether any element explicitly referenced the SPICE ground node.
+    /// Whether the circuit has its reference node: an element named node 0,
+    /// or the build chose one for a deck that names none.
     has_explicit_ground_reference: bool,
     /// Branch element name to branch ordinal mapping (for CCCS/CCVS control lookup)
     /// Keys are element names (e.g., "V1", "L1"), values are branch ordinals (1-indexed)
@@ -515,9 +531,7 @@ pub struct CircuitData {
     ///
     /// `None` until a netlist build classifies them. A circuit assembled by
     /// hand therefore claims no event-only net and its analog namespace
-    /// keeps every row it has always kept. A ground remap renumbers the
-    /// vector rather than dropping it: the build classifies before the remap,
-    /// so dropping it would unclassify every deck that names no ground.
+    /// keeps every row it has always kept.
     pub(crate) analog_touched_nodes: Option<Vec<bool>>,
     /// Number of branch current variables (voltage sources, inductors)
     num_branches: usize,
@@ -720,6 +734,9 @@ pub struct CircuitData {
     /// the transactional idiom, not the storage.
     #[cfg(feature = "veriloga")]
     pub(crate) mixed_signal_hosts: Vec<crate::xspice::verilog::MixedSignalHost>,
+    /// See [`GroundCensus`]; the build alone writes and reads it.
+    #[cfg(feature = "veriloga")]
+    pub(crate) ground_census: GroundCensus,
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevices,
     /// Solver-controlled `$simparam` environment. This is deliberately not

@@ -1219,20 +1219,6 @@ impl Diode {
         }
     }
 
-    pub(crate) fn remap_nodes(&mut self, old_node_id: NodeId) {
-        fn remap_node_id(id: NodeId, old_id: NodeId) -> NodeId {
-            if id == old_id {
-                0
-            } else if id > old_id {
-                id - 1
-            } else {
-                id
-            }
-        }
-        self.node_anode = remap_node_id(self.node_anode, old_node_id);
-        self.node_cathode = remap_node_id(self.node_cathode, old_node_id);
-    }
-
     /// Scale the junction to the operating temperature.
     ///
     /// Mirrors ngspice's diotemp.c and Xyce's `Instance::updateTemperature`

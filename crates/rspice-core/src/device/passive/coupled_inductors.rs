@@ -519,10 +519,6 @@ impl MultiWindingTransformer {
         &self.nodes
     }
 
-    pub(crate) fn nodes_mut(&mut self) -> &mut [(NodeId, NodeId)] {
-        &mut self.nodes
-    }
-
     /// Self-inductances in winding order.
     pub(crate) fn inductances(&self) -> &[Value] {
         &self.inductances

@@ -4473,17 +4473,18 @@ fn the_refusals_carriers_are_spellings_the_export_surfaces_really_publish() {
 
 /// A deck that names no ground is classified too.
 ///
-/// The build classifies which nodes an analog stamp reaches, and only then
-/// does `ensure_ground_reference` renumber the nodes of a deck that never
-/// named `0`. Dropping the classification at that renumbering left every such
-/// deck unclassified, which silently restored the pinned 0 V column for every
-/// event-only net it has — the fix off for a whole class of decks, with no
-/// symptom but the wrong number.
+/// The build classifies which nodes an analog stamp reaches. When the
+/// reference of a deck that never named `0` was chosen after that, by
+/// renumbering every node, dropping the classification at the renumbering left
+/// every such deck unclassified, which silently restored the pinned 0 V column
+/// for every event-only net it has — the fix off for a whole class of decks,
+/// with no symptom but the wrong number. The converter only senses `clk`, so
+/// the deck connects node 0 nowhere and takes `vss` as its reference.
 #[test]
 fn a_deck_with_no_named_ground_still_leaves_its_event_nets_out_of_the_namespace() {
     let netlist = Netlist::parse(
         "\
-* no node is named 0 or gnd: the build picks vss and renumbers
+* no node is named 0 or gnd: the build picks vss as the reference
 vclk clk vss pulse(0 3.3 1n 0.2n 0.2n 4n 8n)
 rclk clk vss 1k
 aadc [clk] [d] adc
@@ -4505,17 +4506,17 @@ ainv [d] [q] inv
     for event_only in ["d", "q"] {
         assert!(
             transient_node_series(&result, event_only).is_empty(),
-            "{event_only} kept a voltage column of {} samples after the ground remap",
+            "{event_only} kept a voltage column of {} samples in a deck without node 0",
             transient_node_series(&result, event_only).len()
         );
         assert!(
             result.event_only_node_kind(event_only).is_some(),
-            "{event_only} must be recognised as event-only after the ground remap"
+            "{event_only} must be recognised as event-only in a deck without node 0"
         );
     }
     assert!(
         !transient_node_series(&result, "clk").is_empty(),
-        "the loaded analog node keeps its channel through the same remap"
+        "the loaded analog node keeps its channel in the same deck"
     );
 }
 

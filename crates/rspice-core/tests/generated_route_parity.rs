@@ -459,6 +459,130 @@ fn diode_cmc_ac_agrees_across_routes() {
 }
 
 // ---------------------------------------------------------------------------
+// A deck without node 0
+//
+// The build takes the first voltage source's negative terminal as the
+// reference. It used to choose it after every device was built and shift every
+// higher node number down by one, device by device; the generated devices were
+// never shifted, so they read and loaded their neighbours' nets. A diode in
+// such a deck carried 2.53e-2 A in a transient where the same deck naming the
+// reference 0 carried -1.9e-23 A, and the operating point did not converge.
+// ---------------------------------------------------------------------------
+
+/// One deck run twice, naming its reference `0` and naming it `ref`, which the
+/// build must then choose: the operating point and the transient must report
+/// the same bits. `generated` says which route the deck must take.
+fn assert_reference_choice_is_invisible(label: &str, deck: &str, generated: bool) {
+    let grounded = deck.replace("{ref}", "0");
+    let chosen = deck.replace("{ref}", "ref");
+    assert_eq!(
+        uses_generated_devices(&chosen),
+        generated,
+        "{label}: the deck must take the route the row names"
+    );
+    let (nodes, branches) = (&["in", "a"][..], &["V1"][..]);
+    for (analysis, with_zero, without_zero) in [
+        (
+            "op",
+            operating_point_trace(&grounded, nodes, branches),
+            operating_point_trace(&chosen, nodes, branches),
+        ),
+        (
+            "tran",
+            transient_trace(&grounded, 20.0e-9, 1.0e-9, nodes, branches),
+            transient_trace(&chosen, 20.0e-9, 1.0e-9, nodes, branches),
+        ),
+    ] {
+        assert_eq!(
+            with_zero.first().and_then(|entry| entry.text.as_deref()),
+            Some("ok"),
+            "{label} {analysis} with node 0: {with_zero:?}"
+        );
+        let same = |left: &Entry, right: &Entry| {
+            left.key == right.key
+                && left.text == right.text
+                && left.value.to_bits() == right.value.to_bits()
+        };
+        let differences: Vec<String> = with_zero
+            .iter()
+            .zip(&without_zero)
+            .filter(|(left, right)| !same(left, right))
+            .map(|(left, right)| format!("{left:?} with node 0, {right:?} without"))
+            .collect();
+        assert!(
+            with_zero.len() == without_zero.len() && differences.is_empty(),
+            "{label} {analysis}: {} of {} observations differ without node 0 ({} without):\n{}",
+            differences.len(),
+            with_zero.len(),
+            without_zero.len(),
+            differences
+                .iter()
+                .take(12)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+}
+
+#[test]
+fn a_deck_without_node_zero_matches_it_for_a_generated_diode_x_card() {
+    assert_reference_choice_is_invisible(
+        "DIODE_CMC X card",
+        "* diode_cmc X card without node 0\nV1 in {ref} SIN(0.5 0.5 5e7)\nR1 in a 1k\n\
+         X1 a {ref} DIODE_CMC\n.end\n",
+        true,
+    );
+}
+
+#[test]
+fn a_deck_without_node_zero_matches_it_for_a_generated_diode_d_card() {
+    assert_reference_choice_is_invisible(
+        "DIODE_CMC D card",
+        "* diode_cmc D card without node 0\nV1 in {ref} SIN(0.5 0.5 5e7)\nR1 in a 1k\n\
+         D1 a {ref} dmod\n.model dmod diode_cmc\n.end\n",
+        true,
+    );
+}
+
+#[test]
+fn a_deck_without_node_zero_matches_it_for_the_diode_cmc_va_runtime() {
+    let deck = format!(
+        "* diode_cmc .va runtime without node 0\n.va \"{}\" DIODE_CMC\n\
+         V1 in {{ref}} SIN(0.5 0.5 5e7)\nR1 in a 1k\nX1 a {{ref}} DIODE_CMC\n.end\n",
+        model_source(DIODE_CMC_SOURCE)
+    );
+    assert_reference_choice_is_invisible("DIODE_CMC .va runtime", &deck, false);
+}
+
+#[cfg(feature = "veriloga-model-r2-cmc")]
+#[test]
+fn a_deck_without_node_zero_matches_it_for_a_generated_resistor_r_card() {
+    assert_reference_choice_is_invisible(
+        "R2_CMC R card",
+        "* r2_cmc R card without node 0\nV1 in {ref} SIN(0.5 0.5 5e7)\nR1 in a rmod r=1k\n\
+         R2 a {ref} 2k\n.model rmod r2_cmc\n.end\n",
+        true,
+    );
+}
+
+/// The R card leaves R2_ET_CMC's thermal node out, and the route ties it to
+/// node 0. That tie is the card's, not the deck naming ground: the deck still
+/// takes `ref` as its reference, and the thermal node joins it.
+#[cfg(feature = "veriloga-model-r2-et-cmc")]
+#[test]
+fn a_deck_without_node_zero_matches_it_with_an_omitted_thermal_node() {
+    let deck = "* r2_et_cmc R card without node 0\nV1 in {ref} SIN(0.5 0.5 5e7)\n\
+                R1 in a rmod r=1k\nR2 a {ref} 2k\n.model rmod r2_et_cmc\n.end\n";
+    let netlist = Netlist::parse_validated(&deck.replace("{ref}", "ref")).expect("deck parses");
+    let circuit = Engine::default()
+        .build_circuit(&netlist)
+        .expect("deck builds");
+    assert_eq!(circuit.get_node_by_name("ref"), Some(0));
+    assert_reference_choice_is_invisible("R2_ET_CMC R card", deck, true);
+}
+
+// ---------------------------------------------------------------------------
 // JUNCAP200 — junction charge storage, a second two-terminal generated family.
 //
 // Its generated crate is 289 KB of Rust. The feature is not in this lane's

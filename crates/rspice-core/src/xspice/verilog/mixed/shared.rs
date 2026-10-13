@@ -786,18 +786,6 @@ impl MixedDigitalCoordinator {
         self.digital.make_mut().observe_other_drivers(drivers)
     }
 
-    pub(crate) fn remap_circuit_nodes(&mut self, remap: impl Fn(usize) -> usize) {
-        debug_assert!(!self.enabled);
-        self.digital.make_mut().remap_external_nodes(&remap);
-        // Retain group indices: the digital bit topology refers to these slots.
-        for node in &mut self.event_nodes {
-            *node = remap(*node);
-        }
-        for (node, _) in &mut self.real_event_nodes {
-            *node = remap(*node);
-        }
-    }
-
     #[cfg(test)]
     pub(crate) fn event_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.event_domains().map(|(node, _)| node)

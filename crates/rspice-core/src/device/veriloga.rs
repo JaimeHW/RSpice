@@ -355,13 +355,6 @@ impl VerilogADevices {
     pub fn all_converged(&self) -> bool {
         self.devices.iter().all(VerilogADevice::limiter_converged)
     }
-
-    /// Remap all terminal and internal circuit node IDs after topology changes.
-    pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
-        for device in &mut self.devices {
-            device.remap_circuit_nodes(&mut remap);
-        }
-    }
 }
 
 #[cfg(all(test, feature = "veriloga", not(feature = "veriloga-native")))]

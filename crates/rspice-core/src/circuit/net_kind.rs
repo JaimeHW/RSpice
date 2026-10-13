@@ -197,21 +197,23 @@ mod tests {
         assert_views_agree(&circuit);
     }
 
-    /// A deck with no explicit node `0` gets its ground chosen after every
-    /// element is in place, and that choice shifts every higher node ID down by
-    /// one. The recorded kinds are keyed by node ID, so they have to follow the
-    /// renumbering or they describe the wrong nets: before this was fixed the
-    /// table marked the analog output net discrete and the digital net
-    /// continuous, which is exactly backwards.
+    /// A deck with no explicit node `0` takes `ref` as its reference. The
+    /// recorded kinds are keyed by node ID, so they must describe the nets as
+    /// finally numbered: when the reference was chosen after every element was
+    /// in place and the higher IDs were shifted down, the table marked the
+    /// analog output net discrete and the digital net continuous, which is
+    /// exactly backwards. The D/A drives against `ref`: a single-ended output
+    /// would connect node 0, and the deck would keep it. The A/D only senses
+    /// its input, single-ended or not.
     #[test]
     fn event_net_identity_survives_a_late_auto_ground_remap() {
         let circuit = build(
-            "* no explicit ground, so `ref` is auto-selected after elaboration\n\
+            "* no explicit ground, so `ref` is auto-selected as the reference\n\
              vin in ref pulse(0 1 0 1p 1p 1n 2n)\n\
              r1 in ref 1k\n\
              a_adc [in] [dig] adc\n\
              .model adc adc_bridge (in_low=0.4 in_high=0.6)\n\
-             a_dac [dig] [out] dac\n\
+             a_dac [dig] [%vd(out ref)] dac\n\
              .model dac dac_bridge (out_low=0 out_high=1)\n\
              r2 out ref 1k\n\
              .tran 100p 2n\n\
@@ -226,17 +228,14 @@ mod tests {
         let out = circuit
             .get_node_by_name("out")
             .expect("the deck names `out`");
-        // The remap moved `dig` down onto the ID `out` used to hold, which is
-        // what made a shifted table point at the wrong net.
-        assert!(
-            dig < out,
-            "the remap is expected to renumber `dig` below `out`"
-        );
+        // `dig` holds the ID `out` held before the shift, which is what made a
+        // shifted table point at the wrong net.
+        assert!(dig < out, "`dig` is expected to number below `out`");
 
         assert_eq!(
             circuit.net_kinds.discrete_nodes().collect::<Vec<NodeId>>(),
             vec![dig],
-            "only the bridged digital net is discrete after the remap"
+            "only the bridged digital net is discrete"
         );
         assert!(circuit.is_discrete_net(dig));
         assert!(!circuit.is_discrete_net(out));

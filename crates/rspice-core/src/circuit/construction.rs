@@ -108,6 +108,8 @@ impl CircuitData {
             veriloga_devices: crate::device::veriloga::VerilogADevices::new(),
             #[cfg(feature = "veriloga")]
             mixed_signal_hosts: Vec::new(),
+            #[cfg(feature = "veriloga")]
+            ground_census: Default::default(),
             #[cfg(feature = "veriloga-builtins-base")]
             generated_veriloga_devices:
                 crate::device::veriloga_builtins::BuiltinVerilogADevices::new(),
@@ -346,328 +348,20 @@ impl CircuitData {
         self.has_explicit_ground_reference
     }
 
-    /// Ensure a ground reference exists. If no explicit node "0" was specified,
-    /// pick the first node connected to a voltage source's negative terminal
-    /// as the reference.
-    /// This should be called after all elements are added but before simulation.
-    pub fn ensure_ground_reference(&mut self) {
-        if self.has_explicit_ground_reference() {
-            return; // Already have explicit ground
-        }
-
-        // No explicit ground - pick first voltage source's negative terminal
-        // This matches standard behavior
-        if let Some(index) = self.voltage_sources.names.iter().position(|name| {
-            !self
-                .terminal_probe_source_names
-                .contains(&name.to_ascii_uppercase())
-        }) {
-            let terminal = self.voltage_sources.node_neg[index];
-            let ref_node_id = self
-                .terminal_probe_nodes
-                .get(&terminal)
-                .copied()
-                .unwrap_or(terminal);
-            if ref_node_id > 0 {
-                // Find the name of this node and remap it to 0
-                let mut ref_node_name = None;
-                for (name, &id) in &self.node_map {
-                    if id == ref_node_id {
-                        ref_node_name = Some(name.clone());
-                        break;
-                    }
-                }
-
-                if let Some(name) = ref_node_name {
-                    // Remap this node to ground (0)
-                    self.remap_node_to_ground(ref_node_id);
-                    log::info!("Auto-selected node '{}' as ground reference", name);
-                }
-            }
-        }
-    }
-
-    /// Remap all occurrences of old_node_id to ground (0) and shift all higher
-    /// node IDs down by 1 to maintain contiguous matrix indices
-    pub(in crate::circuit) fn remap_node_to_ground(&mut self, old_node_id: NodeId) {
-        // Update node map
-        for (_, id) in self.node_map.iter_mut() {
-            *id = Self::remap_node_id(*id, old_node_id);
-        }
-
-        // Update all device node references
-        // Resistors
-        for stamp in &mut self.resistors.stamps {
-            Self::remap_stamp_full(stamp, old_node_id);
-        }
-
-        // Capacitors
-        for stamp in &mut self.capacitors.stamps {
-            Self::remap_stamp_full(stamp, old_node_id);
-        }
-
-        // Voltage sources
-        Self::remap_node_slice(&mut self.voltage_sources.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.voltage_sources.node_neg, old_node_id);
-        self.voltage_sources.invalidate_constraint_projection();
-
-        // Branch-form resistors
-        Self::remap_node_slice(&mut self.resistor_branches.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.resistor_branches.node_neg, old_node_id);
-
-        // Current sources
-        Self::remap_node_slice(&mut self.current_sources.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.current_sources.node_neg, old_node_id);
-
-        // Inductors
-        Self::remap_node_slice(&mut self.inductors.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.inductors.node_neg, old_node_id);
-        for diode in &mut self.diodes.devices {
-            diode.remap_nodes(old_node_id);
-        }
-        for bjt in &mut self.bjts.devices {
-            bjt.node_collector = Self::remap_node_id(bjt.node_collector, old_node_id);
-            bjt.node_base = Self::remap_node_id(bjt.node_base, old_node_id);
-            bjt.node_emitter = Self::remap_node_id(bjt.node_emitter, old_node_id);
-            bjt.node_substrate = Self::remap_node_id(bjt.node_substrate, old_node_id);
-        }
-        for mosfet in &mut self.mosfets.devices {
-            mosfet.node_drain = Self::remap_node_id(mosfet.node_drain, old_node_id);
-            mosfet.node_gate = Self::remap_node_id(mosfet.node_gate, old_node_id);
-            mosfet.node_source = Self::remap_node_id(mosfet.node_source, old_node_id);
-            mosfet.node_bulk = Self::remap_node_id(mosfet.node_bulk, old_node_id);
-        }
-        for dev in &mut self.bsim3v3.devices {
-            dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
-            dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
-            dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
-            dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
-            dev.node_charge_deficit = Self::remap_node_id(dev.node_charge_deficit, old_node_id);
-        }
-        for dev in &mut self.bsim4v8.devices {
-            dev.node_drain_external = Self::remap_node_id(dev.node_drain_external, old_node_id);
-            dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
-            dev.node_gate_external = Self::remap_node_id(dev.node_gate_external, old_node_id);
-            dev.node_gate_mid = Self::remap_node_id(dev.node_gate_mid, old_node_id);
-            dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
-            dev.node_source_external = Self::remap_node_id(dev.node_source_external, old_node_id);
-            dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
-            dev.node_bulk_external = Self::remap_node_id(dev.node_bulk_external, old_node_id);
-            dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
-            dev.node_drain_body = Self::remap_node_id(dev.node_drain_body, old_node_id);
-            dev.node_source_body = Self::remap_node_id(dev.node_source_body, old_node_id);
-            dev.node_charge_deficit = Self::remap_node_id(dev.node_charge_deficit, old_node_id);
-        }
-        for dev in &mut self.ekv26s.devices {
-            dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
-            dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
-            dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
-            dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
-        }
-        for dev in &mut self.ekv3s.devices {
-            dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
-            dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
-            dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
-            dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
-        }
-        for vdmos in &mut self.vdmoses.devices {
-            vdmos.drain = Self::remap_node_id(vdmos.drain, old_node_id);
-            vdmos.gate = Self::remap_node_id(vdmos.gate, old_node_id);
-            vdmos.source = Self::remap_node_id(vdmos.source, old_node_id);
-            vdmos.bulk = Self::remap_node_id(vdmos.bulk, old_node_id);
-            vdmos.drain_int = vdmos
-                .drain_int
-                .map(|node| Self::remap_node_id(node, old_node_id));
-            vdmos.drain_drift = vdmos
-                .drain_drift
-                .map(|node| Self::remap_node_id(node, old_node_id));
-            vdmos.source_int = vdmos
-                .source_int
-                .map(|node| Self::remap_node_id(node, old_node_id));
-            vdmos.d1_prime = vdmos
-                .d1_prime
-                .map(|node| Self::remap_node_id(node, old_node_id));
-        }
-        for jfet in &mut self.jfets {
-            jfet.drain = Self::remap_node_id(jfet.drain, old_node_id);
-            jfet.gate = Self::remap_node_id(jfet.gate, old_node_id);
-            jfet.source = Self::remap_node_id(jfet.source, old_node_id);
-            jfet.external_drain = Self::remap_node_id(jfet.external_drain, old_node_id);
-            jfet.external_source = Self::remap_node_id(jfet.external_source, old_node_id);
-        }
-        Self::remap_node_slice(&mut self.vcvs.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.vcvs.node_neg, old_node_id);
-        Self::remap_node_slice(&mut self.vcvs.ctrl_pos, old_node_id);
-        Self::remap_node_slice(&mut self.vcvs.ctrl_neg, old_node_id);
-        Self::remap_node_slice(&mut self.vccs.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.vccs.node_neg, old_node_id);
-        Self::remap_node_slice(&mut self.vccs.ctrl_pos, old_node_id);
-        Self::remap_node_slice(&mut self.vccs.ctrl_neg, old_node_id);
-        Self::remap_node_slice(&mut self.cccs.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.cccs.node_neg, old_node_id);
-        Self::remap_node_slice(&mut self.ccvs.node_pos, old_node_id);
-        Self::remap_node_slice(&mut self.ccvs.node_neg, old_node_id);
-        for switch in &mut self.vswitches {
-            switch.node_pos = Self::remap_node_id(switch.node_pos, old_node_id);
-            switch.node_neg = Self::remap_node_id(switch.node_neg, old_node_id);
-            switch.ctrl_pos = Self::remap_node_id(switch.ctrl_pos, old_node_id);
-            switch.ctrl_neg = Self::remap_node_id(switch.ctrl_neg, old_node_id);
-        }
-        for switch in &mut self.iswitches {
-            switch.node_pos = Self::remap_node_id(switch.node_pos, old_node_id);
-            switch.node_neg = Self::remap_node_id(switch.node_neg, old_node_id);
-        }
-        for switch in &mut self.generic_switches {
-            switch.node_pos = Self::remap_node_id(switch.node_pos, old_node_id);
-            switch.node_neg = Self::remap_node_id(switch.node_neg, old_node_id);
-        }
-        for tline in &mut self.tlines {
-            tline.node1_pos = Self::remap_node_id(tline.node1_pos, old_node_id);
-            tline.node1_neg = Self::remap_node_id(tline.node1_neg, old_node_id);
-            tline.node2_pos = Self::remap_node_id(tline.node2_pos, old_node_id);
-            tline.node2_neg = Self::remap_node_id(tline.node2_neg, old_node_id);
-        }
-        for tline in &mut self.coupled_tlines {
-            Self::remap_node_slice(&mut tline.near_nodes, old_node_id);
-            Self::remap_node_slice(&mut tline.far_nodes, old_node_id);
-            tline.near_ref = Self::remap_node_id(tline.near_ref, old_node_id);
-            tline.far_ref = Self::remap_node_id(tline.far_ref, old_node_id);
-        }
-        for binding in &mut self.coupled_inductor_pairs {
-            binding.device.node1_pos = Self::remap_node_id(binding.device.node1_pos, old_node_id);
-            binding.device.node1_neg = Self::remap_node_id(binding.device.node1_neg, old_node_id);
-            binding.device.node2_pos = Self::remap_node_id(binding.device.node2_pos, old_node_id);
-            binding.device.node2_neg = Self::remap_node_id(binding.device.node2_neg, old_node_id);
-        }
-        for binding in &mut self.multi_winding_transformers {
-            for (pos, neg) in binding.device.nodes_mut() {
-                *pos = Self::remap_node_id(*pos, old_node_id);
-                *neg = Self::remap_node_id(*neg, old_node_id);
-            }
-        }
-        for binding in &mut self.jiles_atherton_inductors {
-            binding.device.node_pos = Self::remap_node_id(binding.device.node_pos, old_node_id);
-            binding.device.node_neg = Self::remap_node_id(binding.device.node_neg, old_node_id);
-        }
-        for group in &mut self.xyce_core_groups {
-            group.device.node_pos = Self::remap_node_id(group.device.node_pos, old_node_id);
-            group.device.node_neg = Self::remap_node_id(group.device.node_neg, old_node_id);
-        }
-        for binding in &mut self.xyce_memristors {
-            binding.node_pos = Self::remap_node_id(binding.node_pos, old_node_id);
-            binding.node_neg = Self::remap_node_id(binding.node_neg, old_node_id);
-            binding.node_x = Self::remap_node_id(binding.node_x, old_node_id);
-        }
-        self.non_electrical_state_nodes = self
-            .non_electrical_state_nodes
-            .iter()
-            .map(|&node| Self::remap_node_id(node, old_node_id))
-            .filter(|node| *node > 0)
-            .collect();
-        self.terminal_probe_nodes = self
-            .terminal_probe_nodes
-            .iter()
-            .map(|(&private, &external)| {
-                (
-                    Self::remap_node_id(private, old_node_id),
-                    Self::remap_node_id(external, old_node_id),
-                )
-            })
-            .filter(|(private, _)| *private > 0)
-            .collect();
-
-        // Behavioral sources
-        for source in &mut self.behavioral_sources.voltage_sources {
-            source.node_pos = Self::remap_node_id(source.node_pos, old_node_id);
-            source.node_neg = Self::remap_node_id(source.node_neg, old_node_id);
-        }
-        for source in &mut self.behavioral_sources.current_sources {
-            source.node_pos = Self::remap_node_id(source.node_pos, old_node_id);
-            source.node_neg = Self::remap_node_id(source.node_neg, old_node_id);
-        }
-
-        for instance in &mut self.xspice_instances {
-            instance
-                .make_mut()
-                .remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
-        }
-        #[cfg(feature = "veriloga")]
-        {
-            for host in &mut self.mixed_signal_hosts {
-                host.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
-            }
-            if let Some(digital) = &mut self.scheduler.mixed_digital_coordinator {
-                digital.remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
-            }
-            if let Some(bindings) = &mut self.scheduler.mixed_xspice_bindings {
-                Arc::make_mut(bindings).remap_nodes(|node| Self::remap_node_id(node, old_node_id));
-            }
-        }
-        // All participants now carry renumbered connections. Replay their
-        // event identities into the cached net-kind table.
-        self.rebuild_net_kinds();
-        // The analog-touch classification is keyed by node id, so a
-        // renumbering invalidates it — but the build classifies BEFORE this
-        // point, not after, so dropping the vector here does not "fail safe":
-        // it leaves a deck with no explicit ground unclassified, which makes
-        // every event-only net claim a 0 V analog channel again and makes the
-        // assembly's debug assertion vacuous. Renumbering the vector is what
-        // keeps the one classification true through the one remap the build
-        // performs. The former ground identity is folded onto row 0, which is
-        // the reference and is never asked.
-        if let Some(touched) = self.analog_touched_nodes.take() {
-            let mut remapped = vec![false; touched.len().saturating_sub(1).max(1)];
-            for (node, reached) in touched.into_iter().enumerate() {
-                if !reached {
-                    continue;
-                }
-                let target = Self::remap_node_id(node, old_node_id);
-                if let Some(slot) = remapped.get_mut(target) {
-                    *slot = true;
-                }
-            }
-            self.analog_touched_nodes = Some(remapped);
-        }
-
-        #[cfg(feature = "veriloga")]
-        self.veriloga_devices
-            .remap_circuit_nodes(|node| Self::remap_node_id(node, old_node_id));
-
+    /// Make `name` the reference, node 0, of a deck that names no ground.
+    ///
+    /// The build calls this before any node exists, so every device, native or
+    /// generated, and every internal node is built against the final
+    /// numbering, and nothing is renumbered afterwards. `name` keeps resolving
+    /// to node 0 through [`Self::get_node_by_name`].
+    pub(crate) fn reference_ground_at(&mut self, name: &str) {
+        debug_assert_eq!(
+            self.num_nodes, 0,
+            "the reference is chosen before any node exists"
+        );
+        self.node_map.insert(name.to_string(), 0);
         self.has_explicit_ground_reference = true;
-
-        // Decrement num_nodes since one node is now ground
-        if self.num_nodes > 0 {
-            self.num_nodes -= 1;
-        }
-    }
-
-    /// Helper to remap a two-terminal stamp with full shifting
-    pub(in crate::circuit) fn remap_stamp_full(stamp: &mut TwoTerminalStamp, old_id: NodeId) {
-        stamp.pp.row = Self::remap_node_id(stamp.pp.row, old_id);
-        stamp.pp.col = Self::remap_node_id(stamp.pp.col, old_id);
-        stamp.pn.row = Self::remap_node_id(stamp.pn.row, old_id);
-        stamp.pn.col = Self::remap_node_id(stamp.pn.col, old_id);
-        stamp.np.row = Self::remap_node_id(stamp.np.row, old_id);
-        stamp.np.col = Self::remap_node_id(stamp.np.col, old_id);
-        stamp.nn.row = Self::remap_node_id(stamp.nn.row, old_id);
-        stamp.nn.col = Self::remap_node_id(stamp.nn.col, old_id);
-    }
-
-    #[inline]
-    pub(in crate::circuit) fn remap_node_id(id: NodeId, old_id: NodeId) -> NodeId {
-        if id == old_id {
-            0
-        } else if id > old_id {
-            id - 1
-        } else {
-            id
-        }
-    }
-
-    pub(in crate::circuit) fn remap_node_slice(nodes: &mut [NodeId], old_id: NodeId) {
-        for node in nodes {
-            *node = Self::remap_node_id(*node, old_id);
-        }
+        log::info!("Auto-selected node '{}' as ground reference", name);
     }
 
     /// Allocate a branch current variable - returns branch ordinal (1-indexed)
@@ -1014,7 +708,6 @@ impl CircuitData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::device::Vdmos;
 
     #[test]
     fn resistor_absolute_noise_temperature_survives_extreme_ambient() {
@@ -1088,45 +781,119 @@ mod tests {
         );
     }
 
-    #[test]
-    fn node_remapping_preserves_private_state_classification() {
-        let mut circuit = CircuitData::new();
-        let reference = circuit.get_or_create_node("reference");
-        let electrical = circuit.get_or_create_node("electrical");
-        let state = circuit.get_or_create_node("private_state");
-        circuit.non_electrical_state_nodes.insert(state);
-        circuit.remap_node_to_ground(reference);
-        assert!(circuit.is_non_electrical_state_matrix_index(state - 2));
-        assert!(!circuit.is_non_electrical_state_matrix_index(electrical - 2));
-        circuit.remap_node_to_ground(state - 1);
-        assert!(circuit.non_electrical_state_nodes.is_empty());
+    /// A gate whose output delay grows with the total load on its output net:
+    /// 1 ns plus 1 ns per picofarad of `TOTAL_LOAD(out)`. It drives a constant
+    /// one, so every instance posts exactly one event at its delay.
+    struct LoadDelayedGate;
+
+    impl crate::xspice::CodeModel for LoadDelayedGate {
+        fn name(&self) -> &str {
+            "load_delayed_gate"
+        }
+
+        fn ports(&self) -> &[crate::xspice::PortSpec] {
+            use crate::xspice::{PortSpec, PortType};
+            static PORTS: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
+            PORTS.get_or_init(|| {
+                vec![
+                    PortSpec::input("in", PortType::Digital),
+                    PortSpec::output("out", PortType::Digital),
+                ]
+            })
+        }
+
+        fn parameters(&self) -> &[crate::xspice::ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut crate::xspice::CmContext) -> crate::xspice::CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut crate::xspice::CmContext) -> crate::xspice::CmResult<()> {
+            let delay = 1.0e-9 + 1.0e3 * ctx.port_total_load("out");
+            ctx.set_output_digital("out", crate::xspice::DigitalValue::one(), delay);
+            Ok(())
+        }
     }
 
+    /// Three buffers on nets `a`, `b`, `c`, built from a deck whose reference
+    /// is `reference`, then evaluated with [`LoadDelayedGate`] on the
+    /// connections and the load sums the build gave them.
+    ///
+    /// The loads are `a` 1 pF (`A1`'s input) and `b` 5 pF (`A2` and `A3`), so
+    /// `A1` drives `b` at 6 ns, `A2` drives `c` at 1 ns and `A3` drives `a` at
+    /// 2 ns. The reference is the deck's second net, so every event net is
+    /// numbered after it.
+    fn load_delayed_gates(reference: &str) -> Vec<(String, Value)> {
+        use crate::xspice::{SharedXspiceInstance, XspiceInstance};
+        let deck = format!(
+            "* three buffers whose delay reads TOTAL_LOAD(out)\n\
+             v1 vdd {reference} 1\n\
+             r1 vdd {reference} 1k\n\
+             a1 a b g1\n\
+             .model g1 d_buffer (input_load=1p)\n\
+             a2 b c g2\n\
+             .model g2 d_buffer (input_load=2p)\n\
+             a3 b a g3\n\
+             .model g3 d_buffer (input_load=3p)\n\
+             .end\n"
+        );
+        let netlist = crate::Netlist::parse(&deck).expect("deck parses");
+        let mut circuit = crate::engine::Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+        assert_eq!(circuit.get_node_by_name(reference), Some(0));
+        for shared in &mut circuit.xspice_instances {
+            let built = shared.make_mut();
+            let swapped = XspiceInstance::new(
+                built.name.clone(),
+                std::sync::Arc::new(LoadDelayedGate),
+                built.connections().to_vec(),
+                &[],
+                &[],
+                &[],
+                &[],
+            )
+            .expect("gate constructs");
+            *shared = SharedXspiceInstance::new(swapped);
+        }
+        circuit.invalidate_xspice_event_dispatch();
+        circuit.evaluate_xspice_with_analysis(
+            0.0,
+            1.0e-9,
+            &vec![0.0; circuit.matrix_size()],
+            crate::xspice::AnalysisType::Transient,
+        );
+        assert_eq!(circuit.take_xspice_evaluation_error(), None);
+        let mut events = Vec::new();
+        circuit
+            .scheduler
+            .xspice_event_queue
+            .make_mut()
+            .run_due_events(1.0, |event| {
+                events.push((event.instance.to_ascii_uppercase(), event.time))
+            })
+            .expect("the queue drains");
+        events.sort_by(|left, right| left.0.cmp(&right.0));
+        events
+    }
+
+    /// A deck without node 0 takes its reference before any event net is
+    /// numbered, so every code model reads its own output net's total load:
+    /// the same event times as the deck that names the reference 0.
     #[test]
-    fn vdmos_remap_updates_drain_drift_node() {
-        let mut circuit = CircuitData::new();
-        let drain = circuit.get_or_create_node("d");
-        let gate = circuit.get_or_create_node("g");
-        let source = circuit.get_or_create_node("s");
-        let bulk = circuit.get_or_create_node("b");
-        let drain_drift = circuit.get_or_create_node("dd");
-        let drain_int = circuit.get_or_create_node("di");
-        let source_int = circuit.get_or_create_node("si");
-        let d1_prime = circuit.get_or_create_node("d1p");
-
-        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), drain, gate, source);
-        vdmos.set_bulk_node(bulk);
-        vdmos.set_drain_drift_node(drain_drift);
-        vdmos.set_internal_nodes(drain_int, source_int);
-        vdmos.set_d1_prime_node(d1_prime);
-        circuit.vdmoses.add(vdmos);
-
-        circuit.remap_node_to_ground(drain_drift);
-
-        let vdmos = &circuit.vdmoses.devices[0];
-        assert_eq!(vdmos.drain_drift, Some(0));
-        assert_eq!(vdmos.drain_int, Some(drain_int - 1));
-        assert_eq!(vdmos.source_int, Some(source_int - 1));
-        assert_eq!(vdmos.d1_prime, Some(d1_prime - 1));
+    fn a_deck_without_node_zero_reads_each_event_nets_own_total_load() {
+        let grounded = load_delayed_gates("0");
+        let expected = [("A1", 6.0e-9), ("A2", 1.0e-9), ("A3", 2.0e-9)];
+        assert_eq!(grounded.len(), expected.len(), "{grounded:?}");
+        for ((instance, time), (name, at)) in grounded.iter().zip(expected) {
+            assert_eq!(instance, name);
+            assert!(
+                (time - at).abs() <= 1.0e-21,
+                "{instance} with node 0: {time:e} s, expected {at:e} s"
+            );
+        }
+        assert_eq!(load_delayed_gates("reference"), grounded);
     }
 }

@@ -2135,68 +2135,6 @@ impl MixedSignalHost {
         Ok(())
     }
 
-    /// Keep every physical and event identity aligned with the circuit's
-    /// final node numbering, before the first analysis begins.
-    pub(crate) fn remap_circuit_nodes(&mut self, remap: impl Fn(usize) -> usize + Copy) {
-        debug_assert!(!self.digital_started && self.trial.is_none());
-        self.prepared_analog.invalidate();
-        let branch_nodes: Vec<_> = (0..self.analog.num_branch_unknowns())
-            .map(|index| remap(self.analog.branch_current_index(index).unwrap()))
-            .collect();
-        let analog = self.analog.make_mut();
-        analog.remap_circuit_nodes(remap);
-        // The device remaps potential nodes itself; its separately allocated
-        // current unknowns also use this circuit's node numbering.
-        analog.set_branch_current_indices(&branch_nodes);
-        let bridges = self.state.bridges.make_mut();
-        for bridge in &mut bridges.adc {
-            bridge.positive = remap(bridge.positive);
-            bridge.negative = remap(bridge.negative);
-        }
-        for bridge in &mut bridges.dac {
-            bridge.positive = remap(bridge.positive);
-            bridge.negative = remap(bridge.negative);
-        }
-        for probe in &mut self.analog_probes {
-            if let AnalogProbeWiring::Solution {
-                positive, negative, ..
-            } = probe
-            {
-                *positive = remap(*positive);
-                *negative = remap(*negative);
-            }
-        }
-        for bus in &mut self.boundary_buses {
-            for member in &mut bus.members {
-                *member = remap(*member);
-            }
-        }
-        for node in &mut self.event_nodes {
-            *node = remap(*node);
-        }
-        for port in &mut self.event_ports {
-            port.node = remap(port.node);
-            port.trace_node = port.trace_node.map(&remap);
-        }
-        self.event_nodes.sort_unstable();
-        self.event_nodes.dedup();
-        self.max_circuit_node = analog_solver_nodes(&self.analog)
-            .chain(
-                bridges
-                    .adc
-                    .iter()
-                    .flat_map(|bridge| [bridge.positive, bridge.negative]),
-            )
-            .chain(
-                bridges
-                    .dac
-                    .iter()
-                    .flat_map(|bridge| [bridge.positive, bridge.negative]),
-            )
-            .max()
-            .unwrap_or(0);
-    }
-
     /// Physical module terminals, excluding the discrete port views.
     pub(crate) fn electrical_terminal_nodes(&self) -> impl Iterator<Item = usize> + '_ {
         self.analog
@@ -2304,6 +2242,17 @@ impl MixedSignalHost {
             .iter()
             .flat_map(|bridge| [bridge.positive, bridge.negative])
             .filter(|node| *node > 0)
+    }
+
+    /// Whether one of this module's D/A bridges drives a deck net against node
+    /// 0: its Thevenin branch has node 0 at one end. An A/D bridge only senses
+    /// its net, and stamps nothing.
+    pub(crate) fn drives_against_ground(&self) -> bool {
+        self.state
+            .bridges
+            .dac
+            .iter()
+            .any(|bridge| bridge.positive == 0 || bridge.negative == 0)
     }
 
     /// One endpoint per discrete port, excluding ground. Root-only detectors

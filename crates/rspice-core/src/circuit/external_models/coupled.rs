@@ -260,40 +260,6 @@ impl XspiceDigitalBindings {
     pub(crate) fn contains_real_node(&self, node: NodeId) -> bool {
         self.real_by_node.contains_key(&node)
     }
-
-    pub(crate) fn remap_nodes(&mut self, remap: impl Fn(usize) -> usize) {
-        for (_, target) in self.inout_observers.values_mut() {
-            target.node_id = remap(target.node_id);
-        }
-        self.by_node = std::mem::take(&mut self.by_node)
-            .into_iter()
-            .map(|(node, net)| (remap(node), net))
-            .collect();
-        for node in self.by_net.values_mut() {
-            *node = remap(*node);
-        }
-        self.drivers = std::mem::take(&mut self.drivers)
-            .into_iter()
-            .map(|(mut target, id)| {
-                target.node_id = remap(target.node_id);
-                (target, id)
-            })
-            .collect();
-        self.real_by_node = std::mem::take(&mut self.real_by_node)
-            .into_iter()
-            .map(|(node, signal)| (remap(node), signal))
-            .collect();
-        for node in self.real_by_signal.values_mut() {
-            *node = remap(*node);
-        }
-        self.real_drivers = std::mem::take(&mut self.real_drivers)
-            .into_iter()
-            .map(|(mut target, id)| {
-                target.node_id = remap(target.node_id);
-                (target, id)
-            })
-            .collect();
-    }
 }
 
 fn external_error(detail: impl Into<String>) -> DigitalRunError {

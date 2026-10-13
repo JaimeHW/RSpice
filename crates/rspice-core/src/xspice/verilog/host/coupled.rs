@@ -319,26 +319,6 @@ impl DigitalHost {
                 .any(|(_, external)| external == target)
     }
 
-    pub(crate) fn remap_external_nodes(&mut self, remap: impl Fn(usize) -> usize) {
-        assert!(
-            !self.elaboration_closed,
-            "external nodes can only remap during elaboration"
-        );
-        self.store.remap_external_nodes(remap);
-        self.external_targets = self
-            .store
-            .external_sources()
-            .iter()
-            .map(|(_, target)| self.scheduler.intern_target(target.clone()))
-            .collect();
-        self.external_real_targets = self
-            .store
-            .external_real_sources()
-            .iter()
-            .map(|(_, target)| self.scheduler.intern_target(target.clone()))
-            .collect();
-    }
-
     /// Enroll external driver identities at elaboration, before process execution.
     /// The returned IDs and immutable topology survive fresh analysis and cloning.
     pub(crate) fn attach_external_bits(

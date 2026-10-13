@@ -43,6 +43,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 mod data_dependencies;
+mod ground_reference;
 mod model_resolution;
 mod model_safety;
 mod terminal_probes;
@@ -5353,6 +5354,12 @@ impl Engine {
         self.build_circuit_for_analysis(netlist, default_ports, None, abort)
     }
 
+    /// Build the circuit a deck describes.
+    ///
+    /// A deck that names no node 0 is built as written first. Only when
+    /// nothing in that circuit references node 0 either is it built once more,
+    /// with the reference that build chose aliased to node 0 before any node
+    /// exists; see [`ground_reference`].
     fn build_circuit_for_analysis(
         &self,
         netlist: &Netlist,
@@ -5360,6 +5367,37 @@ impl Engine {
         transient_stop_time: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<BuiltRfCircuit, SimulationError> {
+        let (built, reference) =
+            self.elaborate_circuit(netlist, default_ports, transient_stop_time, None, abort)?;
+        let Some(reference) = reference else {
+            return Ok(built);
+        };
+        drop(built);
+        self.elaborate_circuit(
+            netlist,
+            default_ports,
+            transient_stop_time,
+            Some(&reference),
+            abort,
+        )
+        .map(|(built, _)| built)
+    }
+
+    /// One elaboration of the deck, with `reference`, when given, aliased to
+    /// node 0 before any node exists.
+    ///
+    /// Without one, it also returns the reference the deck should take
+    /// instead: set only when the deck names no node 0, has a voltage source
+    /// to take one from, and nothing in the circuit just built references
+    /// node 0.
+    fn elaborate_circuit(
+        &self,
+        netlist: &Netlist,
+        default_ports: &[crate::analysis::s_param::Port],
+        transient_stop_time: Option<Value>,
+        reference: Option<&str>,
+        abort: &dyn AbortSignal,
+    ) -> Result<(BuiltRfCircuit, Option<String>), SimulationError> {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
@@ -5552,6 +5590,21 @@ impl Engine {
                     .unwrap_or(XYCE_DEFAULT_ZERO_RESISTANCE_TOL),
             );
             flat_elements = reduction.elements;
+        }
+        // A deck that names no node 0 takes its reference here, before any
+        // node exists, so every device is built against the final numbering.
+        // The first build only notes the candidate; the census at its end
+        // decides whether the deck takes it.
+        let candidate_reference = match reference {
+            Some(reference) => {
+                circuit.reference_ground_at(reference);
+                None
+            }
+            None => ground_reference::automatic(&flat_elements).map(str::to_owned),
+        };
+        #[cfg(feature = "veriloga")]
+        if candidate_reference.is_some() {
+            circuit.ground_census = crate::circuit::GroundCensus::Open;
         }
         let probe_connections = terminal_probes::materialize(
             netlist,
@@ -8509,6 +8562,11 @@ impl Engine {
                                 design_connect_rules
                                     .validate_hierarchical_context(artifact, &element.name)?;
                             }
+                            ground_reference::note_module(
+                                &mut circuit,
+                                &element.name,
+                                prepared.canonical_ir.as_deref(),
+                            );
                             if mixed_modules::try_build_mixed_signal_instance(
                                 &mut circuit,
                                 element,
@@ -9537,6 +9595,15 @@ impl Engine {
         #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         veriloga_terminal_meters::resolve(&mut circuit, veriloga_terminal_meters)?;
 
+        // Every element the deck authors is in place: they alone decide the
+        // reference. The converters the build inserts from here on drive and
+        // sense against node 0, which is whichever net this settles.
+        let reference = ground_reference::to_take(candidate_reference, &circuit);
+        #[cfg(feature = "veriloga")]
+        {
+            circuit.ground_census = crate::circuit::GroundCensus::Settled;
+        }
+
         let scoped_auto_bridge_metadata =
             xspice_auto_bridge_scoped_metadata(&circuit, &flattened.xspice_auto_bridge_node_hints);
         #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
@@ -9824,16 +9891,13 @@ impl Engine {
         check_build_abort(abort)?;
         check_circuit_resource_limits(self, &circuit)?;
 
-        // Ensure ground reference exists
-        // If no node "0" was specified, auto-select a reference node
-        circuit.ensure_ground_reference();
         circuit
             .set_dc_floating_components(dc_floating_components, dc_floating_component_is_certain);
         circuit.fatal_no_dc_path_nodes =
             circuit.independent_dc_drive_nodes(self.current_abstol(), self.residual_reltol());
 
-        // Resolve behavioral source expression references after final node IDs
-        // are stabilized (including any automatic ground remap).
+        // Resolve behavioral source expression references once every node
+        // exists.
         circuit
             .bind_behavioral_references(&known_device_names)
             .map_err(SimulationError::from)?;
@@ -10034,11 +10098,14 @@ impl Engine {
             capture.owners = flat_elements;
         }
         circuit.name_metered_discrete_ports_after_their_nets();
-        Ok(BuiltRfCircuit {
-            circuit,
-            rf_ports,
-            rf_port_origin,
-        })
+        Ok((
+            BuiltRfCircuit {
+                circuit,
+                rf_ports,
+                rf_port_origin,
+            },
+            reference,
+        ))
     }
 }
 

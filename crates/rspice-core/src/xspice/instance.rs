@@ -626,23 +626,6 @@ impl AnalogInputConnection {
         }
     }
 
-    fn remap_circuit_nodes(&mut self, remap: &mut impl FnMut(usize) -> usize) {
-        match self {
-            AnalogInputConnection::Node(node) => *node = remap(*node),
-            AnalogInputConnection::Differential(pos, neg)
-            | AnalogInputConnection::VoltageOutput { pos, neg }
-            | AnalogInputConnection::CurrentProbe { pos, neg, .. }
-            | AnalogInputConnection::CurrentOutput { pos, neg }
-            | AnalogInputConnection::Hybrid { pos, neg, .. } => {
-                *pos = remap(*pos);
-                *neg = remap(*neg);
-            }
-            AnalogInputConnection::BranchCurrent { .. }
-            | AnalogInputConnection::NamedBranchCurrent { .. }
-            | AnalogInputConnection::NamedCurrentSource { .. } => {}
-        }
-    }
-
     fn value_from_solution(
         &self,
         solution: &[Value],
@@ -3463,54 +3446,6 @@ impl XspiceInstance {
                     }
                 }
                 _ => {}
-            }
-        }
-    }
-
-    /// Remap circuit node IDs after a topology-level reference-node rewrite.
-    pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
-        // The context's port loads were looked up through the old nodes.
-        self.context.set_event_loads_revision(0);
-        for connection in self.connections.iter_mut() {
-            match connection {
-                PortConnection::Analog(node)
-                | PortConnection::Digital(node)
-                | PortConnection::DigitalInverted(node)
-                | PortConnection::Real(node) => {
-                    *node = remap(*node);
-                }
-                PortConnection::Differential(pos, neg)
-                | PortConnection::VoltageOutput { pos, neg }
-                | PortConnection::CurrentOutput { pos, neg }
-                | PortConnection::Hybrid { pos, neg, .. } => {
-                    *pos = remap(*pos);
-                    *neg = remap(*neg);
-                }
-                PortConnection::CurrentProbe { pos, neg, .. } => {
-                    *pos = remap(*pos);
-                    *neg = remap(*neg);
-                }
-                PortConnection::AnalogVector(nodes)
-                | PortConnection::DigitalVector(nodes)
-                | PortConnection::RealVector(nodes) => {
-                    for node in nodes {
-                        *node = remap(*node);
-                    }
-                }
-                PortConnection::TypedAnalogVector(elements) => {
-                    for element in elements {
-                        element.remap_circuit_nodes(&mut remap);
-                    }
-                }
-                PortConnection::DigitalVectorMapped(nodes) => {
-                    for connection in nodes {
-                        connection.node = remap(connection.node);
-                    }
-                }
-                PortConnection::BranchCurrent { .. }
-                | PortConnection::NamedBranchCurrent { .. }
-                | PortConnection::NamedCurrentSource { .. } => {}
-                PortConnection::Null => {}
             }
         }
     }

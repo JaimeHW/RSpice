@@ -6003,17 +6003,6 @@ impl VerilogADevice {
             .zip(self.context.variables.iter().copied())
     }
 
-    /// Remap circuit node IDs after an external topology rewrite.
-    pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
-        for node in &mut self.node_mapping {
-            *node = remap(*node);
-        }
-        for node in &mut self.internal_node_indices {
-            *node = remap(*node);
-        }
-        self.rebuild_matrix_indices();
-    }
-
     /// Build mapped RHS stamp rows for each stamp program.
     ///
     /// Returns one entry per stamp program; each program entry contains
