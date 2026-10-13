@@ -1090,6 +1090,10 @@ fn native_level57_pd_self_heating_inverse_mode_temp_rise_is_non_negative() {
     );
 }
 
+/// The gain stage's AC against Xyce 7.10's regression gold. RSpice stamps
+/// the derivatives of Xyce's charges (`derivative_tests` holds every entry to
+/// a difference quotient); Xyce's CAPMOD 2 capacitances leave terms out of
+/// those derivatives, so the response sits 1.3e-6 from Xyce's.
 #[test]
 fn xyce_level10_soimod1_capmod2_dd_ac_bounds_xyce710_delta() {
     let deck = "\
@@ -1127,7 +1131,7 @@ fn xyce_level10_soimod1_capmod2_dd_ac_bounds_xyce710_delta() {
         let reference_mag = re_ref.hypot(im_ref).max(1.0e-12);
         let rel = (v.re - re_ref).hypot(v.im - im_ref) / reference_mag;
         assert!(
-            rel < 4.0e-1,
+            rel < 2.0e-6,
             "LEVEL=10 SOIMOD=1 CAPMOD=2 Xyce compatibility delta at {freq:.3e} Hz exceeded bound: rspice=({:.9e},{:.9e}) xyce=({re_ref:.9e},{im_ref:.9e}) rel={rel:.3e}",
             v.re,
             v.im
@@ -1316,12 +1320,9 @@ fn xyce_level10_soimod1_self_heating_ac_bounds_xyce710_delta() {
         let v = result.voltages[idx];
         let reference_mag = re_ref.hypot(im_ref).max(1.0e-12);
         let rel = (v.re - re_ref).hypot(v.im - im_ref) / reference_mag;
-        // This is a Xyce regression-gold coverage check, not the exact physics
-        // pin: RSpice currently routes LEVEL=10/SOIMOD=1 to the ngspice-derived
-        // DD flavor. Exact Xyce high-frequency AC parity needs a separate
-        // native Xyce BSIMSOI3 flavor, like the default-gain-stage test below.
+        // Measured: 7.2e-5 at 100 Hz, 1.2e-5 at 1 MHz, 1e-10 above.
         assert!(
-            rel < 6.0e-2,
+            rel < 1.0e-4,
             "LEVEL=10 SOIMOD=1 SHMOD=1 Xyce AC compatibility delta at {freq:.3e} Hz exceeded bound: rspice=({:.9e},{:.9e}) xyce=({re_ref:.9e},{im_ref:.9e}) rel={rel:.3e}",
             v.re,
             v.im

@@ -350,9 +350,27 @@ const AG0: &[(&str, Value)] = &[
     ("dt=1.7e-13", 1.0 / 1.7e-13),
 ];
 
-fn sweep(family: &str, card: &str, polarity: &str, points: &[BiasPoint]) -> (usize, Vec<String>) {
+/// The card in the requested dialect: as written (ngspice LEVEL=56), or as
+/// Xyce's LEVEL=10 SOIMOD=1, which routes the same card to the Xyce B3SOIDD.
+fn dialect_card(card: &str, xyce: bool) -> String {
+    if !xyce {
+        return card.to_string();
+    }
+    let xyce_card = card.replace("Level= 56", "Level= 10 SOIMOD = 1");
+    assert_ne!(xyce_card, card, "the card names LEVEL 56");
+    xyce_card
+}
+
+fn sweep(
+    family: &str,
+    card: &str,
+    polarity: &str,
+    points: &[BiasPoint],
+    xyce: bool,
+) -> (usize, Vec<String>) {
     let mut checked = 0;
     let mut lines = Vec::new();
+    let card = dialect_card(card, xyce);
     for capmod in ["3", "2"] {
         let card = card.replace("CAPMOD = 3", &format!("CAPMOD = {capmod}"));
         for body in ["floating", "tied", "resistive"] {
@@ -381,11 +399,10 @@ fn sweep(family: &str, card: &str, polarity: &str, points: &[BiasPoint]) -> (usi
     (checked, lines)
 }
 
-#[test]
-fn stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
+fn check_dialect(xyce: bool) {
     let sweeps = [
-        sweep("nmos", N1_CARD, "n", N_POINTS),
-        sweep("pmos", P1_CARD, "p", P_POINTS),
+        sweep("nmos", N1_CARD, "n", N_POINTS, xyce),
+        sweep("pmos", P1_CARD, "p", P_POINTS, xyce),
     ];
     let checked: usize = sweeps.iter().map(|(n, _)| n).sum();
     let lines: Vec<&str> = sweeps
@@ -414,6 +431,19 @@ fn stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
         lines.len(),
         lines.join("\n")
     );
+}
+
+#[test]
+fn stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
+    check_dialect(false);
+}
+
+/// The same check on Xyce's B3SOIDD (LEVEL=10 SOIMOD=1): its charges are
+/// Xyce's, and its stamps their derivatives even where Xyce's own
+/// capacitances leave terms out.
+#[test]
+fn xyce_stamped_jacobian_is_the_derivative_of_the_stamped_residual() {
+    check_dialect(true);
 }
 
 /// The boundary deck's transient stalled because its CAPMOD=3 charges carried

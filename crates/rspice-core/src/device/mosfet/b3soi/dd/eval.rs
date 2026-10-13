@@ -879,7 +879,16 @@ pub fn eval(
         dvgsteff_dvb = t1 * dvbseff_dvb;
     } else {
         exp_vgst = vgst_n_vt.exp();
-        let t1 = t10 * (1.0 + exp_vgst).ln();
+        // ln(1 + ExpVgst) rounds 1 + ExpVgst to an ulp of 1: a relative
+        // error of 1.1e-16/ExpVgst in Vgsteff and Ids, 5e-13 in subthreshold
+        // (ExpVgst ~ 2e-4), which the residual carries as noise. The Xyce
+        // dialect takes ln_1p; the ngspice dialect keeps b3soiddld.c's
+        // literal form, bit for bit.
+        let t1 = t10
+            * match m.dialect {
+                B3SoiDialect::Ngspice => (1.0 + exp_vgst).ln(),
+                B3SoiDialect::Xyce => exp_vgst.ln_1p(),
+            };
         let dt1_dvg = exp_vgst / (1.0 + exp_vgst);
         let dt1_dvb = -dt1_dvg * (dvth_dvb + vgst / n * dn_dvb) + t1 / n * dn_dvb;
         let dt1_dvd = -dt1_dvg * (dvth_dvd + vgst / n * dn_dvd) + t1 / n * dn_dvd;
