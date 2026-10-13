@@ -2885,6 +2885,32 @@ impl Engine {
         }
         let engine = self.resolved_for_netlist(netlist);
         let circuit = engine.build_circuit_with_abort(netlist, abort)?;
+        Ok(Self::elaborated_transient_source_names(&circuit))
+    }
+
+    /// The tone list a driven periodic steady state of `netlist` binds: its
+    /// complete set of elaborated time-varying sources, as
+    /// [`Self::transient_source_names`] lists it.
+    ///
+    /// An empty set is put to the periodic steady state's capability gate
+    /// first. A circuit no analog source drives can still be clocked — by a
+    /// mixed module's discrete state, which no periodic analysis can take part
+    /// in yet — and then the gate's refusal, naming that instance, is the
+    /// answer, where "no tone source" would name nothing the deck got wrong.
+    pub fn driven_pss_tone_sources(
+        &self,
+        netlist: &Netlist,
+    ) -> Result<Vec<String>, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        let circuit = engine.build_circuit_with_abort(netlist, &NoAbort)?;
+        let names = Self::elaborated_transient_source_names(&circuit);
+        if names.is_empty() {
+            Self::ensure_analysis_capability(&circuit, super::CapabilityAnalysis::Pss)?;
+        }
+        Ok(names)
+    }
+
+    fn elaborated_transient_source_names(circuit: &crate::circuit::CircuitData) -> Vec<String> {
         let mut names = circuit
             .voltage_sources
             .transient_specs_named_with_pwl()
@@ -2897,7 +2923,7 @@ impl Engine {
                 .then_with(|| left.cmp(right))
         });
         names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-        Ok(names)
+        names
     }
 
     /// Validate that every requested case-insensitive source name resolves to

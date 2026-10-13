@@ -258,6 +258,7 @@ pub fn prepare_headless_run(
             .iter()
             .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
         &expanded,
+        &input.veriloga_runtimes,
     )?;
     let source_digest = crate::sealed_source::manual_executable_source_digest(&expanded);
     let config_digests = tasks

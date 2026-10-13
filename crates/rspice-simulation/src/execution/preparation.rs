@@ -361,6 +361,7 @@ where
             .iter()
             .map(|task| (task.instance_id(), &task.queued_analysis().spec)),
         &netlist,
+        &project_veriloga_runtimes,
     )?;
     reject_unresolved_device_models(&netlist, has_project_technology)?;
     reject_deferred_corner_model_sources(
@@ -583,11 +584,17 @@ pub fn build_prepared_manual_deck<R, A>(
         &project_veriloga_runtimes,
         &measurement_references,
     )?;
-    let queued_tasks = manual_deck::build_manual_deck_queue(
+    let queued_tasks = manual_deck::build_manual_deck_queue_with_runtimes(
         inputs.analysis.sim_setup.reference_pvt.temperature_celsius,
         &expanded,
+        &project_veriloga_runtimes,
     )
-    .map_err(|errors| PreparationError::new(PreparationStage::SourceChecks, errors.join("; ")))?;
+    .map_err(|error| {
+        PreparationError::new(
+            PreparationStage::SourceChecks,
+            error.into_messages().join("; "),
+        )
+    })?;
     let source_digest = manual_executable_source_digest(&expanded);
     let tasks = prepare_manual_tasks(
         source_digest,

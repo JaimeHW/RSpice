@@ -24,15 +24,74 @@ use crate::sweeps::{
 mod periodic;
 mod recorded_fft;
 
+/// Why a deck's analyses could not be queued.
+#[derive(Debug)]
+pub enum ManualDeckError {
+    /// What is wrong with the deck's analysis cards, one message per problem.
+    Cards(Vec<String>),
+    /// The engine's refusal of an analysis the deck asks for, over the circuit
+    /// the deck describes, met while lowering the card: a driven `.PSS` reads
+    /// its tone list off the elaborated circuit, and a circuit the periodic
+    /// steady state cannot take part in is refused there, by the engine's
+    /// capability gate, with its token, instance and analysis.
+    Refused(Box<crate::error::SimulationError>),
+}
+
+impl ManualDeckError {
+    /// The error as the messages a deck's card problems are reported in.
+    pub fn into_messages(self) -> Vec<String> {
+        match self {
+            Self::Cards(messages) => messages,
+            Self::Refused(refusal) => vec![refusal.to_string()],
+        }
+    }
+}
+
+impl From<Vec<String>> for ManualDeckError {
+    fn from(messages: Vec<String>) -> Self {
+        Self::Cards(messages)
+    }
+}
+
 /// Parse authored analyses; returned tasks still require snapshot validation and authorization.
 pub fn build_manual_deck_queue(
     reference_temperature_celsius: f64,
     source: &str,
 ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
+    build_manual_deck_queue_with_runtimes(
+        reference_temperature_celsius,
+        source,
+        &crate::veriloga::PreparedVerilogARuntimeSet::default(),
+    )
+    .map_err(ManualDeckError::into_messages)
+}
+
+/// [`build_manual_deck_queue`] for a deck whose Verilog-A and HDL sources are
+/// the run's sealed runtimes, with an engine refusal met while lowering kept
+/// as the structured refusal it is.
+///
+/// A driven `.PSS` takes its tone list from the circuit's elaborated sources,
+/// so lowering it elaborates the circuit, and a `.veriloga` directive that
+/// names a sealed key elaborates only against the runtimes the run carries.
+pub fn build_manual_deck_queue_with_runtimes(
+    reference_temperature_celsius: f64,
+    source: &str,
+    runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+) -> Result<Vec<QueuedAnalysis>, ManualDeckError> {
     let source = compose_manual_deck_source(source);
     let parsed =
         Netlist::parse(&source).map_err(|err| vec![format!("Netlist parse error: {err}")])?;
-    let periodic_tasks = periodic::parse_periodic_tasks(&parsed, &source)?;
+    let periodic_tasks = periodic::parse_periodic_tasks(&parsed, &source, runtimes)?;
+    queue_manual_deck_analyses(reference_temperature_celsius, parsed, periodic_tasks)
+        .map_err(ManualDeckError::Cards)
+}
+
+/// Queue the deck's own analyses around its lowered periodic tasks.
+fn queue_manual_deck_analyses(
+    reference_temperature_celsius: f64,
+    parsed: Netlist,
+    periodic_tasks: Vec<QueuedAnalysis>,
+) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
     if parsed.analyses.is_empty() && periodic_tasks.is_empty() {
         return Err(vec![
             "No analysis command in netlist. Add .op, .ac, .tran, or another supported analysis."

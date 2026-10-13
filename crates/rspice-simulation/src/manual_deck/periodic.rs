@@ -91,7 +91,8 @@ struct PeriodicCarrier {
 pub(super) fn parse_periodic_tasks(
     netlist: &Netlist,
     source: &str,
-) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
+    runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+) -> Result<Vec<QueuedAnalysis>, ManualDeckError> {
     let cards = logical_cards(source);
     let mut parsed = Vec::new();
     let mut errors = Vec::new();
@@ -108,7 +109,7 @@ pub(super) fn parse_periodic_tasks(
         }
     }
     if !errors.is_empty() {
-        return Err(errors);
+        return Err(errors.into());
     }
 
     // The carrier selector is read before the precondition below, and not
@@ -129,7 +130,7 @@ pub(super) fn parse_periodic_tasks(
         }
     }
     if !errors.is_empty() {
-        return Err(errors);
+        return Err(errors.into());
     }
 
     let pss_cards = parsed
@@ -140,7 +141,8 @@ pub(super) fn parse_periodic_tasks(
         return Err(vec![format!(
             "Manual decks support one authenticated .PSS operating point per run; found {}.",
             pss_cards.len()
-        )]);
+        )]
+        .into());
     }
     // The deck's harmonic-balance carrier, read off the command the engine
     // parsed rather than off the card text: `.HB` belongs to the manual
@@ -204,22 +206,39 @@ pub(super) fn parse_periodic_tasks(
             return Err(vec![
                 ".PSTB requires a preceding .PSS; a harmonic-balance carrier has no monodromy matrix in the same deck."
                     .to_owned(),
-            ]);
+            ]
+            .into());
         }
         return Err(vec![
             ".PAC, .PNOISE, .PXF, and .PSTB require one .PSS directive in the same manual deck so the exact periodic operating point can be bound."
                 .to_owned(),
-        ]);
+        ]
+        .into());
     }
 
+    // The engine's refusal of the circuit, met while reading the tone list,
+    // is kept whole rather than reported as the card's problem.
+    let mut refused = None;
     let pss_spec = pss_cards
         .first()
         .map(|(line, _, card)| {
-            parse_pss(card, &netlist.params, || driven_tone_sources(netlist))
-                .map_err(|error| format!("line {line}: {error}"))
+            parse_pss(card, &netlist.params, || {
+                driven_tone_sources(netlist, runtimes).map_err(|error| match error {
+                    ManualDeckError::Refused(refusal) => {
+                        let text = refusal.to_string();
+                        refused = Some(refusal);
+                        text
+                    }
+                    ManualDeckError::Cards(messages) => messages.join("; "),
+                })
+            })
+            .map_err(|error| format!("line {line}: {error}"))
         })
-        .transpose()
-        .map_err(|error| vec![error])?;
+        .transpose();
+    if let Some(refusal) = refused {
+        return Err(ManualDeckError::Refused(refusal));
+    }
+    let pss_spec = pss_spec.map_err(|error| vec![error])?;
     // A dependent card with no carrier at all was refused above, and a `.PSS`
     // that retains no harmonic is refused by `parse_pss` — the engine's card
     // has no `HARMS=0` — so the fallbacks here are only reached when the deck
@@ -356,7 +375,8 @@ pub(super) fn parse_periodic_tasks(
             _ => {
                 return Err(vec![format!(
                     "line {line}: unsupported periodic directive {head} reached task construction"
-                )]);
+                )]
+                .into());
             }
         };
         let pss_spectrum_harmonics = match &task.spec {
@@ -386,11 +406,37 @@ pub(super) fn parse_periodic_tasks(
 /// the compatibility PSS entry point makes for the same reason
 /// (`services::simulation_runner::pss::run_pss_analysis_with_source_path_and_abort`).
 ///
+/// Reading them elaborates the circuit, so the run's sealed Verilog-A and HDL
+/// runtimes are installed first: a deck that names one by its sealed key
+/// does not elaborate without it, and the periodic analysis would be refused
+/// for a missing source rather than answered for the circuit it is.
+///
+/// A circuit with no such source may be clocked by a mixed module instead,
+/// and [`Engine::driven_pss_tone_sources`] then answers with the engine's
+/// capability refusal of that module, which is kept structured.
+///
 /// [`Engine::validate_periodic_source_contract`]: rspice_core::Engine::validate_periodic_source_contract
-fn driven_tone_sources(netlist: &Netlist) -> Result<Vec<String>, String> {
+/// [`Engine::driven_pss_tone_sources`]: rspice_core::Engine::driven_pss_tone_sources
+fn driven_tone_sources(
+    netlist: &Netlist,
+    runtimes: &crate::veriloga::PreparedVerilogARuntimeSet,
+) -> Result<Vec<String>, ManualDeckError> {
+    runtimes.install().map_err(|error| {
+        vec![format!(
+            "the deck's sealed Verilog-A runtimes could not be installed: {error}"
+        )]
+    })?;
     rspice_core::Engine::new(rspice_core::SimulationConfig::default())
-        .transient_source_names(netlist)
-        .map_err(|error| format!("the deck's periodic sources could not be read: {error}"))
+        .driven_pss_tone_sources(netlist)
+        .map_err(|error| match error {
+            rspice_core::SimulationError::UnsupportedCapability(_) => {
+                ManualDeckError::Refused(Box::new(error.into()))
+            }
+            error => vec![format!(
+                "the deck's periodic sources could not be read: {error}"
+            )]
+            .into(),
+        })
 }
 
 /// Every `.PSS` keyword this reader accepts.
@@ -1333,6 +1379,122 @@ fn matches_ignore_ascii_case(value: &str, candidates: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reader for a deck that carries no sealed runtime, which is every
+    /// deck here but the one that tests carrying them.
+    fn parse_periodic_tasks(
+        netlist: &Netlist,
+        source: &str,
+    ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
+        super::parse_periodic_tasks(netlist, source, &Default::default())
+            .map_err(ManualDeckError::into_messages)
+    }
+
+    /// A driven `.PSS` reads its tone list off the elaborated circuit, and a
+    /// deck whose HDL is a sealed runtime elaborates only with that runtime
+    /// installed. So the lowering carries the run's runtimes: with them the
+    /// card lowers to the deck's one driven source, and without them it
+    /// cannot read the circuit at all.
+    #[test]
+    fn a_driven_pss_lowers_over_a_sealed_hdl_runtime() {
+        const MODEL: &str = r#"
+`include "disciplines.vams"
+module sealed_pss_divider(p, n, qdiv);
+    inout p, n;
+    electrical p, n;
+    output qdiv;
+    reg clk, qdiv;
+    initial clk = 1'b0;
+    initial qdiv = 1'b0;
+    always #5 clk = ~clk;
+    always @(posedge clk) qdiv <= ~qdiv;
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+        let file = "sealed_pss.vams";
+        let module = "sealed_pss_divider";
+        let bundle = rspice_veriloga::VirtualSourceBundle::new(
+            file,
+            [rspice_veriloga::VirtualSourceFile::new(file, MODEL)],
+        )
+        .unwrap();
+        let compilation = rspice_veriloga::VerilogACompiler::new(
+            crate::compilation::unified_runtime_compiler_options(),
+        )
+        .compile_virtual_runtime(
+            &bundle,
+            module,
+            rspice_veriloga::VirtualCompileLimits::default(),
+        )
+        .unwrap();
+        let runtime = crate::veriloga::PreparedVerilogARuntime::try_from_virtual_compilation(
+            format!("__rspice_project__/sealed-pss/{file}"),
+            rspice_app_types::canonical::content_digest("sealed-pss-source/v1", MODEL.as_bytes()),
+            module.into(),
+            &compilation,
+        )
+        .unwrap();
+        let mut deck = format!(
+            "sealed periodic\nV1 in 0 SIN(0 1 1Meg)\nX1 in 0 qdiv {module}\nR1 qdiv out 1k\n\
+             C1 out 0 10p\n.pss fund=1Meg\n.end\n"
+        );
+        crate::netlist_preparation::append_project_veriloga_directive(
+            &mut deck,
+            runtime.source_key(),
+            runtime.module_name(),
+        );
+        let runtimes = crate::veriloga::PreparedVerilogARuntimeSet::try_new(vec![runtime]).unwrap();
+
+        // First without them: installing is what makes the key resolve, and
+        // it lasts for the session.
+        let errors = crate::manual_deck::build_manual_deck_queue(27.0, &deck)
+            .expect_err("without its runtime the deck's circuit does not elaborate");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("periodic sources could not be read")),
+            "{errors:?}"
+        );
+
+        let tasks =
+            crate::manual_deck::build_manual_deck_queue_with_runtimes(27.0, &deck, &runtimes)
+                .expect("the deck lowers over its sealed runtime");
+        let pss = tasks
+            .iter()
+            .find_map(|task| match &task.spec {
+                AnalysisSpec::Pss { tone_sources, .. } => Some(tone_sources),
+                _ => None,
+            })
+            .expect("the .PSS card lowers to a PSS task");
+        assert_eq!(pss, &["V1".to_owned()]);
+
+        // The same circuit with nothing analog to drive it is clocked by the
+        // module alone. That is not a deck with no tone, it is a deck the
+        // periodic steady state cannot take part in yet, and the lowering
+        // answers with the engine's refusal of the module, structured.
+        let clocked = deck.replace("SIN(0 1 1Meg)", "DC 1");
+        let refusal =
+            crate::manual_deck::build_manual_deck_queue_with_runtimes(27.0, &clocked, &runtimes)
+                .expect_err("a circuit clocked by a mixed module is refused for PSS");
+        let ManualDeckError::Refused(refusal) = refusal else {
+            panic!("the refusal is the engine's, structured: {refusal:?}");
+        };
+        let crate::error::SimulationError::UnsupportedCapability {
+            capability,
+            analysis_kind,
+            instance,
+            ..
+        } = *refusal
+        else {
+            panic!("a capability refusal: {refusal:?}");
+        };
+        assert_eq!(capability, "analysis.mixed_signal.discrete_state");
+        assert_eq!(analysis_kind.as_deref(), Some("pss"));
+        assert_eq!(
+            instance.as_deref().map(str::to_ascii_lowercase),
+            Some("x1".to_owned())
+        );
+    }
 
     /// The reader's `.PSS` key set is the engine's, read out of the engine.
     ///

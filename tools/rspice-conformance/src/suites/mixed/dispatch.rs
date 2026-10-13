@@ -39,6 +39,7 @@ use rspice_simulation::execution::{
     HeadlessPreparationError, HeadlessRunInput, HeadlessSourceResolver, HeadlessTaskRequest,
     PreparedRunAuthorization, prepare_headless_run,
 };
+use rspice_simulation::manual_deck::ManualDeckError;
 use rspice_simulation::preparation::QueuedAnalysis;
 use rspice_simulation::results::SimulationResult;
 use rspice_simulation::veriloga::{PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
@@ -427,7 +428,7 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
         Ok(sealed) => sealed,
         Err(error) => return result.failed(*error),
     };
-    let tasks = match headless_tasks(&circuit, origin, &cards) {
+    let tasks = match headless_tasks(&circuit, origin, &cards, &runtimes) {
         Ok(tasks) => tasks,
         Err(error) => return result.failed(*error),
     };
@@ -513,11 +514,13 @@ fn headless_case(request: &CaseRequest<'_>, origin: &Path, source: &str) -> Case
 /// The cards are lowered against the whole sealed circuit, includes expanded,
 /// as the application's manual-deck preparation lowers its expanded source: a
 /// driven `.PSS` takes its tone list from the circuit's time-varying sources,
-/// so a card read without its circuit binds none.
+/// so a card read without its circuit binds none, and the circuit elaborates
+/// only with the sealed HDL runtimes its `.veriloga` lines name.
 fn headless_tasks(
     circuit: &str,
     origin: &Path,
     cards: &[String],
+    runtimes: &PreparedVerilogARuntimeSet,
 ) -> Result<Vec<HeadlessTaskRequest>, CaseError> {
     let directory = origin.parent().unwrap_or(Path::new("."));
     let expanded = rspice_core::netlist::IncludeProcessor::new(directory)
@@ -534,16 +537,24 @@ fn headless_tasks(
         .filter(|line| !line.trim().eq_ignore_ascii_case(".end"))
         .collect();
     let deck = format!("{}\n{}\n.end\n", body.join("\n"), cards.join("\n"));
-    let queue =
-        rspice_simulation::manual_deck::build_manual_deck_queue(27.0, &deck).map_err(|errors| {
-            ErrorRecord {
-                category: "parse".into(),
-                stage: Some("preparation".into()),
-                detail: errors.join("; "),
-                display: errors.join("; "),
-                ..Default::default()
-            }
-        })?;
+    let queue = rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes(
+        27.0, &deck, runtimes,
+    )
+    .map_err(|error| match error {
+        // The engine's own refusal of the circuit, met while lowering a card,
+        // keeps its structure.
+        ManualDeckError::Refused(refusal) => ErrorRecord {
+            stage: Some("preparation".into()),
+            ..simulation_error(&refusal)
+        },
+        ManualDeckError::Cards(errors) => ErrorRecord {
+            category: "parse".into(),
+            stage: Some("preparation".into()),
+            detail: errors.join("; "),
+            display: errors.join("; "),
+            ..Default::default()
+        },
+    })?;
     let mut tasks: Vec<HeadlessTaskRequest> = Vec::with_capacity(queue.len());
     for queued in queue {
         let line = study_card(&queued.spec).map_err(|message| ErrorRecord {

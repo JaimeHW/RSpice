@@ -310,8 +310,10 @@ fn classify_error(error: &ErrorRecord, kind: &str, instances: &[String]) -> Clas
 
 /// Whether a refusal's structured analysis kind tag is the analysis of a
 /// `card` of this kind. Only the labelled kinds are checked; a transient card
-/// of any flavour is a `tran` refusal, and a DC sweep may refuse at the
-/// operating point it starts from.
+/// of any flavour is a `tran` refusal, a DC sweep may refuse at the operating
+/// point it starts from, and a periodic small-signal card at the periodic
+/// steady state it is taken around: its deck carries that `.pss`, which runs
+/// first, and the card has nothing to analyse until it has run.
 fn kind_names_card(refused: &str, card: &str) -> bool {
     let card = match card {
         "trnoise" | "ckpt" | "mc-tran" | "step-tran" => "tran",
@@ -320,7 +322,9 @@ fn kind_names_card(refused: &str, card: &str) -> bool {
     if !LABELLED_KINDS.contains(&card) || !LABELLED_KINDS.contains(&refused) {
         return true;
     }
-    refused == card || (card == "dc" && refused == "op")
+    refused == card
+        || (card == "dc" && refused == "op")
+        || (matches!(card, "pac" | "pnoise") && refused == "pss")
 }
 
 /// Whether `label` starts a word in `text` ("AC analysis" is not inside
@@ -431,6 +435,23 @@ mod tests {
         );
         let transient = classify(&structured("tran"), "trnoise", &["xq".into()], &[]);
         assert_eq!(transient.outcome, Outcome::Refused, "{}", transient.detail);
+    }
+
+    /// A `.pac` or `.pnoise` deck carries the `.pss` it is taken around, and
+    /// that runs first: a refusal of it is the card's refusal, named for the
+    /// analysis that refused. The converse is not: a `.pss` card refused as
+    /// `pnoise` names an analysis its deck does not run.
+    #[test]
+    fn a_periodic_small_signal_card_may_refuse_at_its_steady_state() {
+        for card in ["pac", "pnoise"] {
+            let class = classify(&structured("pss"), card, &["xq".into()], &[]);
+            assert_eq!(class.outcome, Outcome::Refused, "{card}: {}", class.detail);
+            assert!(class.detail.contains("label=\"pss\""), "{}", class.detail);
+        }
+        let converse = classify(&structured("pnoise"), "pss", &["xq".into()], &[]);
+        assert_eq!(converse.outcome, Outcome::Wrong, "{}", converse.detail);
+        let unrelated = classify(&structured("pss"), "noise", &["xq".into()], &[]);
+        assert_eq!(unrelated.outcome, Outcome::Wrong, "{}", unrelated.detail);
     }
 
     #[test]
