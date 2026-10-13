@@ -526,6 +526,7 @@ impl<'a> DigitalCheckpointReader<'a> {
             routine: image.routine,
             slots,
             callers,
+            unwinding: None,
         })
     }
 

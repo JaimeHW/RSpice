@@ -330,3 +330,133 @@ endmodule
         }
     }
 }
+
+/// `disable` (section 10.3, design P2 §4.1): a named block disabled from
+/// inside it is left at once (a loop break); one disabled from another
+/// process while it waits is left where it waits; a task disabled while it
+/// waits ends, and its enable goes on; a task that disables itself returns,
+/// copying its output; disabling a named fork ends every branch and the
+/// parent goes on after the join; a branch disabling the block around its
+/// fork ends its siblings and the parent leaves the block; every thread
+/// running a static task ends; a nonblocking update already scheduled still
+/// lands; an `always` body disabled while it waits restarts at its event
+/// control.
+#[test]
+fn disable_runs_as_icarus_runs_it() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module top;
+  reg [7:0] a, b, c, r, q, n;
+  reg clk;
+  integer i, hits;
+  task wait_t; begin #10 a = 9; end endtask
+  task s(output [7:0] o); begin o = 8'd9; disable s; o = 8'd11; end endtask
+  task shared; begin #4 b = b + 1; end endtask
+  initial begin
+    a = 0; b = 0; c = 0; r = 0; q = 0; n = 0; hits = 0;
+    i = 0;
+    begin : loop
+      forever begin
+        i = i + 1;
+        if (i == 3) disable loop;
+        c = c + 1;
+      end
+    end
+    $display("loop i=%0d c=%0d", i, c);
+    begin : blk
+      #10 a = 1;
+      #10 a = 2;
+    end
+    $display("blk a=%0d t=%0t", a, $time);
+    wait_t;
+    $display("task a=%0d t=%0t", a, $time);
+    s(r);
+    $display("self r=%0d", r);
+    fork : f
+      #2 n = n + 1;
+      #3 disable f;
+      #7 n = n + 10;
+    join
+    $display("fork n=%0d t=%0t", n, $time);
+    begin : around
+      fork
+        #1 disable around;
+        #5 n = n + 100;
+      join
+      n = n + 1000;
+    end
+    $display("around n=%0d t=%0t", n, $time);
+    fork
+      shared;
+      #1 shared;
+      #2 disable shared;
+    join
+    $display("shared b=%0d t=%0t", b, $time);
+    begin : nb
+      q <= #3 8'd5;
+      #1 disable nb;
+    end
+    $display("nb q=%0d t=%0t", q, $time);
+    #5 $display("nb later q=%0d t=%0t", q, $time);
+    clk = 0;
+    #1 clk = 1;
+    #2 disable body;
+    #1 clk = 0;
+    #1 clk = 1;
+    #1 clk = 0;
+    #5 $display("always hits=%0d t=%0t", hits, $time);
+    $finish(0);
+  end
+  initial begin
+    #15 disable blk;
+    #5 disable wait_t;
+  end
+  always @(posedge clk) begin : body
+    hits = hits + 1;
+    @(negedge clk) hits = hits + 10;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "loop i=3 c=2\n\
+         blk a=1 t=15\n\
+         task a=1 t=20\n\
+         self r=9\n\
+         fork n=1 t=23\n\
+         around n=1 t=24\n\
+         shared b=0 t=26\n\
+         nb q=0 t=27\n\
+         nb later q=5 t=32\n\
+         always hits=12 t=43\n"
+    );
+}
+
+/// A task disabled from outside copies nothing back, output or inout
+/// (design P2 §4.1, where section 10.3 leaves the result unspecified).
+/// Icarus does copy them and printed `r=5 s=4 t=5`.
+#[test]
+fn a_task_disabled_from_outside_copies_nothing_back() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module top;
+  reg [7:0] r, s;
+  task t(output [7:0] o); begin o = 8'd5; #10 o = 8'd7; end endtask
+  task u(inout [7:0] v); begin v = v + 1; #10 v = v + 1; end endtask
+  initial begin
+    r = 0; s = 3;
+    fork
+      t(r);
+      u(s);
+      #5 begin disable t; disable u; end
+    join
+    $display("r=%0d s=%0d t=%0t", r, s, $time);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(stdout(&report), "r=0 s=3 t=5\n");
+}

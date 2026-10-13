@@ -185,6 +185,7 @@ impl<E: DigitalEnvironment + ?Sized> Interpreter<'_, '_, E> {
                 routine: None,
                 slots: Vec::new(),
                 callers: Vec::new(),
+                unwinding: None,
             },
         }))
     }

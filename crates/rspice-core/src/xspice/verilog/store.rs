@@ -450,6 +450,15 @@ impl DigitalSignalStore {
             .insert(sequence, ExpressionSubscription { wait, remaining });
     }
 
+    /// Drop a thread's expression subscription: a `disable` ended its wait.
+    pub(crate) fn cancel_expression_wait(&mut self, token: u64) {
+        if let Some(subscription) = self.expression_waits.remove(&token) {
+            for input in subscription.wait.dependencies() {
+                self.expression_inputs[usize::from(*input)].remove(&token);
+            }
+        }
+    }
+
     pub(crate) fn take_expression_captures(&mut self) -> Vec<(u64, DigitalDeferredUpdate)> {
         std::mem::take(&mut self.expression_captures)
     }

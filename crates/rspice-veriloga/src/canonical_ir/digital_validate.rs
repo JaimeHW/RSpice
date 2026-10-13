@@ -685,6 +685,7 @@ impl CanonicalDigitalPlan {
                             }
                             Ok(())
                         }
+                        DigitalWait::Disable { target } => self.check_disable_target(*target),
                         DigitalWait::Repeat { .. } => unreachable!("nested repeat rejected"),
                     }
                 };
@@ -1268,6 +1269,14 @@ impl CanonicalDigitalPlan {
                                 return Err(error("task completion must be one bit"));
                             }
                         }
+                        CfgValueKind::DigitalUnwinding { scope } => {
+                            if value.value_type != (CfgValueType::FourState { width: 1 }) {
+                                return Err(error("an unwinding test must be one bit"));
+                            }
+                            self.check_disable_target(super::cfg::DigitalDisableTarget::Block(
+                                *scope,
+                            ))?;
+                        }
                         _ => {}
                     }
                 }
@@ -1324,6 +1333,26 @@ impl CanonicalDigitalPlan {
             return Err(error("digital frame slots hold four-state or real values"));
         }
         Ok(())
+    }
+
+    /// A `disable` names a named block's scope or a task.
+    fn check_disable_target(&self, target: super::cfg::DigitalDisableTarget) -> IrValidationResult {
+        use super::cfg::DigitalDisableTarget;
+        use super::digital::{DigitalRoutineKind, DigitalScopeKind};
+        let valid = match target {
+            DigitalDisableTarget::Block(scope) => self
+                .scopes
+                .get(scope.index())
+                .is_some_and(|scope| scope.kind == DigitalScopeKind::Block),
+            DigitalDisableTarget::Task(routine) => self
+                .routine(routine)
+                .is_some_and(|routine| routine.kind == DigitalRoutineKind::Task),
+        };
+        if valid {
+            Ok(())
+        } else {
+            Err(error("`disable` names neither a named block nor a task"))
+        }
     }
 
     /// A call names a routine of the right kind with one operand per input,

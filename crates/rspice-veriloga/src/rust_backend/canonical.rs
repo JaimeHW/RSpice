@@ -693,6 +693,9 @@ fn kernel_region_metrics(
                 write!(out, "digital-routine-output:{index}")
             }
             CfgValueKind::DigitalRoutineCompleted => write!(out, "digital-routine-completed"),
+            CfgValueKind::DigitalUnwinding { scope } => {
+                write!(out, "digital-unwinding:{}", scope.0)
+            }
             CfgValueKind::FrameSlotRead { slot } => write!(out, "frame-slot-read:{slot}"),
             CfgValueKind::FrameSlotWrite { slot, .. } => write!(out, "frame-slot-write:{slot}"),
         }

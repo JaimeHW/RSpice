@@ -1419,6 +1419,13 @@ impl EventScheduler {
         self.schedule_id_superseding_at(at, region, target, value)
     }
 
+    /// Cancel every pending event of a driver already interned, and return
+    /// how many there were.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn cancel_target(&mut self, target: TargetId) -> usize {
+        self.queues.supersede_driver(target, Instant::ZERO)
+    }
+
     /// [`Self::schedule_superseding_at`] for a driver already interned.
     pub(crate) fn schedule_id_superseding_at(
         &mut self,

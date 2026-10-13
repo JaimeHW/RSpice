@@ -68,12 +68,13 @@
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
 use super::cfg::{
-    CfgFunction, CfgTerminator, CfgValueKind, CfgValueType, DigitalWait, is_leaf_kind,
+    CfgFunction, CfgTerminator, CfgValueKind, CfgValueType, DigitalDisableTarget, DigitalWait,
+    is_leaf_kind,
 };
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalEventExpression,
-    DigitalRoutineId, DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalSignal,
-    DigitalSystemCallId, DigitalWriteSelect, DigitalWriteTarget,
+    DigitalRoutineId, DigitalSchedulingRegion, DigitalScopeId, DigitalSensitivityTerm,
+    DigitalSignal, DigitalSystemCallId, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{self, FourStateValue, truth};
 use super::ids::{BlockId, DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId, ValueId};
@@ -417,6 +418,47 @@ pub enum DigitalProcessOutcome {
     /// The thread reached `fork` (IEEE 1364-2005 section 9.8.2) and waits at
     /// the join for the children it starts.
     Forked(DigitalFork),
+    /// The thread reached `disable` (section 10.3). The kernel ends every
+    /// execution of the target, this thread's included, and then runs the
+    /// thread on from its state without yielding.
+    Disabling(DigitalDisable),
+}
+
+/// A thread that reached `disable`: what it names, and the state the thread
+/// goes on in. That state is unwound like any other thread's.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalDisable {
+    target: DigitalDisableTarget,
+    resume: DigitalResumeState,
+}
+
+impl DigitalDisable {
+    pub fn target(&self) -> DigitalDisableTarget {
+        self.target
+    }
+
+    pub fn resume_state(&self) -> &DigitalResumeState {
+        &self.resume
+    }
+
+    pub fn into_parts(self) -> (DigitalDisableTarget, DigitalResumeState) {
+        (self.target, self.resume)
+    }
+}
+
+/// Where a thread goes when a `disable` reaches it (section 10.3, design P2
+/// §4.1).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DigitalUnwind {
+    /// The thread is not inside the target.
+    Untouched,
+    /// The thread goes on from this state: where it stood inside the named
+    /// block, leaving it at once, or at the enable of the disabled task,
+    /// copying nothing back.
+    Resume(DigitalResumeState),
+    /// The thread's own code is inside the target, so the thread ends: a
+    /// child forked inside the disabled task.
+    End,
 }
 
 /// A thread that reached `fork`: one start state per branch, in source order,
@@ -621,6 +663,11 @@ pub struct DigitalResumeState {
     slots: Vec<DigitalScalar>,
     /// The task-enable frames below it, outermost first.
     callers: Vec<DigitalCallerFrame>,
+    /// The disabled named block this thread leaves when it resumes, through
+    /// the block's [`CfgValueKind::DigitalUnwinding`] test. Set only by
+    /// [`Self::unwind`], for a thread the kernel runs again in the same time
+    /// step.
+    unwinding: Option<DigitalScopeId>,
 }
 
 /// A frame suspended at a task enable, waiting for the task to end
@@ -691,6 +738,107 @@ impl DigitalResumeState {
     pub fn arguments(&self) -> &[DigitalScalar] {
         &self.arguments
     }
+
+    /// The disabled named block this state leaves when it resumes.
+    pub fn unwinding(&self) -> Option<DigitalScopeId> {
+        self.unwinding
+    }
+
+    /// Where this thread goes when `target` is disabled (IEEE 1364-2005
+    /// section 10.3, design P2 §4.1). The outermost frame inside the target
+    /// decides, and every frame above it is dropped: a task those frames
+    /// were running copies nothing back.
+    ///
+    /// A frame is inside a named block when the block it resumes in tests
+    /// for that block's unwinding, which every resume block inside a
+    /// disabled block does; inside a task when it runs the task. `own` marks
+    /// the disabling thread's state: a task that disables itself returns,
+    /// copying its outputs back, so its running frame is left to do that.
+    pub fn unwind(
+        &self,
+        plan: &CanonicalDigitalPlan,
+        target: DigitalDisableTarget,
+        own: bool,
+    ) -> DigitalUnwind {
+        let depth = self.callers.len();
+        // Frames outermost first: the callers, then the running frame.
+        let frame = |index: usize| match self.callers.get(index) {
+            Some(caller) => (caller.routine, caller.ret),
+            None => (self.routine, self.block),
+        };
+        let inside = |index: usize| {
+            let (routine, block) = frame(index);
+            match target {
+                DigitalDisableTarget::Task(task) => routine == Some(task),
+                // A read paused mid-block resumes past the block's tests.
+                DigitalDisableTarget::Block(scope) => {
+                    (index < depth || self.analog_instruction.is_none())
+                        && self
+                            .frame_function(plan, routine)
+                            .is_some_and(|function| tests_unwinding(function, block, scope))
+                }
+            }
+        };
+        let Some(index) = (0..=depth).find(|index| inside(*index)) else {
+            return DigitalUnwind::Untouched;
+        };
+        match target {
+            DigitalDisableTarget::Block(scope) => {
+                let mut state = self.at_frame(index);
+                state.unwinding = Some(scope);
+                DigitalUnwind::Resume(state)
+            }
+            DigitalDisableTarget::Task(_) if own && index == depth => DigitalUnwind::Untouched,
+            DigitalDisableTarget::Task(_) if index == 0 => DigitalUnwind::End,
+            DigitalDisableTarget::Task(_) => DigitalUnwind::Resume(self.at_frame(index - 1)),
+        }
+    }
+
+    /// The function a frame running `routine` executes.
+    fn frame_function<'p>(
+        &self,
+        plan: &'p CanonicalDigitalPlan,
+        routine: Option<DigitalRoutineId>,
+    ) -> Option<&'p CfgFunction> {
+        match routine {
+            Some(routine) => plan.routine(routine).map(|routine| &routine.function),
+            None => plan.process(self.process).map(|process| &process.function),
+        }
+    }
+
+    /// This state cut back to frame `index`, outermost first, which becomes
+    /// the running frame and resumes where it waits.
+    fn at_frame(&self, index: usize) -> DigitalResumeState {
+        let Some(caller) = self.callers.get(index) else {
+            return self.clone();
+        };
+        DigitalResumeState {
+            plan_identity: self.plan_identity,
+            process: self.process,
+            block: caller.ret,
+            analog_instruction: None,
+            arguments: caller.arguments.clone(),
+            routine: caller.routine,
+            slots: caller.slots.clone(),
+            callers: self.callers[..index].to_vec(),
+            unwinding: None,
+        }
+    }
+}
+
+/// Whether `block` tests for the unwinding of `scope`.
+fn tests_unwinding(function: &CfgFunction, block: BlockId, scope: DigitalScopeId) -> bool {
+    function
+        .blocks
+        .get(usize::from(block))
+        .is_some_and(|block| {
+            block.instructions.iter().any(|instruction| {
+                matches!(
+                    function.value(instruction.result).kind,
+                    CfgValueKind::DigitalUnwinding { scope: tested } if tested == scope
+                )
+            })
+        })
 }
 
 // ============================================================================
@@ -1650,7 +1798,11 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
     // displaces becomes the spare the next suspension fills.
     let displaced = std::mem::replace(&mut scratch.arguments, state.arguments);
     scratch.recycle_resume(displaced);
+    // Only a task's return completes it. A thread resumed straight into an
+    // enable's resume block left a disabled task, which copies nothing back.
+    scratch.routine_completed = false;
     let mut interpreter = Interpreter::new(plan, process, environment, scratch);
+    interpreter.unwinding = state.unwinding;
     if state.routine.is_some() || !state.callers.is_empty() {
         interpreter.restore_frames(state.routine, state.slots, state.callers)?;
     }
@@ -1696,7 +1848,8 @@ pub fn run_observer<E: DigitalEnvironment + ?Sized>(
         DigitalProcessOutcome::Finished => Ok(()),
         DigitalProcessOutcome::Suspended(_)
         | DigitalProcessOutcome::Halted(_)
-        | DigitalProcessOutcome::Forked(_) => {
+        | DigitalProcessOutcome::Forked(_)
+        | DigitalProcessOutcome::Disabling(_) => {
             Err(DigitalEvalError::InvalidSystemCall(ValueId::from(0usize)))
         }
     }
@@ -1811,6 +1964,9 @@ struct Interpreter<'a, 's, E: ?Sized> {
     time_scale: crate::time_scale::ModuleTimeScale,
     /// The frames below the running one, innermost last.
     frames: Vec<Frame<'a>>,
+    /// The disabled named block the thread is leaving, until its unwinding
+    /// test reads true.
+    unwinding: Option<DigitalScopeId>,
 }
 
 /// A frame below the running one.
@@ -2055,15 +2211,6 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         join: BlockId,
         join_args: &[ValueId],
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
-        let arguments = self.call_arguments(join_args)?;
-        let params = self.function.block(join).params.len();
-        if arguments.len() != params {
-            return Err(DigitalEvalError::ArgumentArityMismatch {
-                target: join,
-                expected: params,
-                found: arguments.len(),
-            });
-        }
         let branches = branches
             .iter()
             .map(|branch| DigitalResumeState {
@@ -2075,22 +2222,56 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 routine: self.routine,
                 slots: self.slots.clone(),
                 callers: Vec::new(),
+                unwinding: None,
             })
             .collect();
-        let callers = self.suspended_callers()?;
         Ok(DigitalProcessOutcome::Forked(DigitalFork {
             branches,
-            join: DigitalResumeState {
-                plan_identity: self.plan.content_identity,
-                process: self.process.id,
-                block: join,
-                analog_instruction: None,
-                arguments,
-                routine: self.routine,
-                slots: std::mem::take(&mut self.slots),
-                callers,
-            },
+            join: self.leave_at(join, join_args)?,
         }))
+    }
+
+    /// Reach `disable`: hand the kernel the target and the state the thread
+    /// goes on in.
+    fn disable(
+        &mut self,
+        target: DigitalDisableTarget,
+        resume: BlockId,
+        resume_args: &[ValueId],
+    ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
+        Ok(DigitalProcessOutcome::Disabling(DigitalDisable {
+            target,
+            resume: self.leave_at(resume, resume_args)?,
+        }))
+    }
+
+    /// Hand the running thread to the kernel, to go on at `block` with these
+    /// values and every frame it has.
+    fn leave_at(
+        &mut self,
+        block: BlockId,
+        args: &[ValueId],
+    ) -> Result<DigitalResumeState, DigitalEvalError> {
+        let arguments = self.call_arguments(args)?;
+        let params = self.function.block(block).params.len();
+        if arguments.len() != params {
+            return Err(DigitalEvalError::ArgumentArityMismatch {
+                target: block,
+                expected: params,
+                found: arguments.len(),
+            });
+        }
+        Ok(DigitalResumeState {
+            plan_identity: self.plan.content_identity,
+            process: self.process.id,
+            block,
+            analog_instruction: None,
+            arguments,
+            routine: self.routine,
+            slots: std::mem::take(&mut self.slots),
+            callers: self.suspended_callers()?,
+            unwinding: None,
+        })
     }
 
     /// End the running routine's activation and return to its caller; `None`
@@ -2298,6 +2479,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             slots: Vec::new(),
             time_scale: process.time_scale,
             frames: Vec::new(),
+            unwinding: None,
         }
     }
 
@@ -2382,6 +2564,11 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     resume,
                     resume_args,
                 } => return self.fork(branches, *resume, resume_args),
+                CfgTerminator::Wait {
+                    wait: DigitalWait::Disable { target },
+                    resume,
+                    resume_args,
+                } => return self.disable(*target, *resume, resume_args),
                 CfgTerminator::Jump { target, args } => {
                     self.cross(*target, args)?;
                     block = *target;
@@ -2453,6 +2640,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                             routine: self.routine,
                             slots: std::mem::take(&mut self.slots),
                             callers,
+                            unwinding: None,
                         },
                     }));
                 }
@@ -2757,10 +2945,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     detail: "a task enable is not an event control",
                 });
             }
-            DigitalWait::Fork { .. } => {
+            DigitalWait::Fork { .. } | DigitalWait::Disable { .. } => {
                 return Err(DigitalEvalError::InvalidEventExpression {
                     value: ValueId::from(0usize),
-                    detail: "a fork is not an event control".into(),
+                    detail: "a fork or a disable is not an event control".into(),
                 });
             }
             DigitalWait::Delay(delay) => {
@@ -2867,7 +3055,8 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                         .map(ScalarRef::into_owned),
                     DigitalProcessOutcome::Suspended(_)
                     | DigitalProcessOutcome::Halted(_)
-                    | DigitalProcessOutcome::Forked(_) => {
+                    | DigitalProcessOutcome::Forked(_)
+                    | DigitalProcessOutcome::Disabling(_) => {
                         Err(DigitalEvalError::InvalidEventExpression {
                             value: id,
                             detail: "an event expression must not suspend or halt".into(),
@@ -3279,6 +3468,16 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             CfgValueKind::DigitalRoutineCompleted => Ok(DigitalScalar::FourState(
                 FourStateValue::from_u64(1, u64::from(self.scratch.routine_completed)),
             )),
+            CfgValueKind::DigitalUnwinding { scope } => {
+                let leaving = self.unwinding == Some(*scope);
+                if leaving {
+                    self.unwinding = None;
+                }
+                Ok(DigitalScalar::FourState(FourStateValue::from_u64(
+                    1,
+                    u64::from(leaving),
+                )))
+            }
             CfgValueKind::FrameSlotRead { slot } => self
                 .slots
                 .get(*slot as usize)

@@ -141,6 +141,52 @@ fn a_fork_hands_the_kernel_its_branches_in_source_order_and_its_join() {
     assert_eq!(harness.get("c"), "00000011");
 }
 
+/// A `disable` of a named block another process waits in names the block's
+/// scope. The waiting thread unwinds to where it stands and, resumed, leaves
+/// the block at once, skipping the rest of it; the disabling thread is not
+/// inside the block and goes on (section 10.3, design P2 §4.1).
+#[test]
+fn a_disabled_block_is_left_from_where_its_thread_waits() {
+    use rspice_veriloga::canonical_ir::cfg::DigitalDisableTarget;
+    use rspice_veriloga::canonical_ir::digital_eval::DigitalUnwind;
+    let mut harness = Harness::from_source(
+        "module top;\n\
+         \x20 reg [7:0] a, b;\n\
+         \x20 initial begin begin : blk a = 1; #10 a = 2; end b = 3; end\n\
+         \x20 initial #5 disable blk;\n\
+         endmodule\n",
+    );
+    let waiting = expect_suspended(harness.start(0));
+    let delay = expect_suspended(harness.start(1));
+    let DigitalProcessOutcome::Disabling(disable) = harness.resume(1, delay.resume_state()) else {
+        panic!("expected the second process to disable");
+    };
+    let DigitalDisableTarget::Block(scope) = disable.target() else {
+        panic!("`blk` is a named block");
+    };
+    assert_eq!(harness.plan.scopes[scope.index()].path, "top.blk");
+    assert_eq!(
+        disable
+            .resume_state()
+            .unwind(&harness.plan, disable.target(), true),
+        DigitalUnwind::Untouched
+    );
+    let DigitalUnwind::Resume(unwound) =
+        waiting
+            .resume_state()
+            .unwind(&harness.plan, disable.target(), false)
+    else {
+        panic!("the waiting process is inside the block");
+    };
+    assert_eq!(unwound.unwinding(), Some(scope));
+    expect_finished(harness.resume(0, &unwound));
+    assert_eq!(
+        (harness.get("a"), harness.get("b")),
+        ("00000001".into(), "00000011".into())
+    );
+    expect_finished(harness.resume(1, disable.resume_state()));
+}
+
 /// Automatic functions recurse (section 10.4.1); a static function's local
 /// keeps its value between calls; recursion without end is the named error
 /// rather than a host stack overflow.

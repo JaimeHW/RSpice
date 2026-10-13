@@ -1491,6 +1491,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalCall { .. }
             | CfgValueKind::DigitalRoutineOutput { .. }
             | CfgValueKind::DigitalRoutineCompleted
+            | CfgValueKind::DigitalUnwinding { .. }
             | CfgValueKind::FrameSlotRead { .. }
             | CfgValueKind::FrameSlotWrite { .. } => {
                 return Err(CfgEvalError::DigitalConstructInAnalogEvaluation {

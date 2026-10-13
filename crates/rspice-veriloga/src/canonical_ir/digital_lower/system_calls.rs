@@ -49,6 +49,10 @@ pub(super) struct CallTables {
     /// Every module instance scope of the plan, by full path, for a call that
     /// names one (`$printtimescale(top.u1)`).
     pub module_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
+    /// `disable` lowering: the names some `disable` targets, the disabled
+    /// named blocks around the statement being lowered, and the routine
+    /// being lowered.
+    pub threads: super::disable::ThreadTables,
 }
 
 /// The plan-level tables the processes' calls collect into.
@@ -58,6 +62,11 @@ pub(super) struct PlanCalls {
     pub sites: Vec<DigitalSystemCall>,
     pub observers: Vec<DigitalObserver>,
     pub module_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
+    /// Every name a `disable` of the design targets.
+    pub disabled: Arc<std::collections::HashSet<SmolStr>>,
+    /// The `disable`s that name a block outside their own, resolved once
+    /// every scope exists.
+    pub pending_disables: Vec<super::disable::PendingDisable>,
 }
 
 impl PlanCalls {
@@ -95,18 +104,25 @@ impl PlanCalls {
             observer_base: self.observers.len() as u32,
             stack: scope.cloned().into_iter().collect(),
             module_scopes: Arc::clone(&self.module_scopes),
+            threads: super::disable::ThreadTables::new(Arc::clone(&self.disabled)),
             ..Default::default()
         }
     }
 
-    /// Append what one process's lowering produced.
-    pub fn absorb(&mut self, tables: CallTables) {
+    /// Append what one process's lowering produced; its `disable`s that
+    /// await resolution belong to `owner`.
+    pub fn absorb(&mut self, tables: CallTables, owner: super::disable::DisableOwner) {
         debug_assert_eq!(tables.scope_base as usize, self.scopes.len());
         debug_assert_eq!(tables.site_base as usize, self.sites.len());
         debug_assert_eq!(tables.observer_base as usize, self.observers.len());
         self.scopes.extend(tables.scopes);
         self.sites.extend(tables.sites);
         self.observers.extend(tables.observers);
+        self.pending_disables
+            .extend(tables.threads.pending.into_iter().map(|mut pending| {
+                pending.owner = Some(owner);
+                pending
+            }));
     }
 }
 
@@ -138,13 +154,8 @@ fn expression_as_target(argument: &Expression) -> Option<DigitalLValue> {
 }
 
 impl ProcessLowerer<'_> {
-    /// Enter a named block's scope (IEEE 1364-2005 section 9.8.3), which `%m`
-    /// inside it names.
-    pub(super) fn enter_named_scope(&mut self, name: &SmolStr) -> bool {
-        self.enter_scope(name, DigitalScopeKind::Block).is_some()
-    }
-
-    /// Enter a named block's, task's or function's scope.
+    /// Enter a named block's (IEEE 1364-2005 section 9.8.3), task's or
+    /// function's scope, which `%m` inside it names.
     pub(super) fn enter_scope(
         &mut self,
         name: &SmolStr,

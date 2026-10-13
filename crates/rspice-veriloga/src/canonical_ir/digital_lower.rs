@@ -90,6 +90,7 @@
 
 mod connection_shapes;
 mod constants;
+mod disable;
 mod expressions;
 mod local_arrays;
 mod local_storage;
@@ -104,8 +105,8 @@ use super::diagnostic::{CompilerPhase, IrDiagnostic, SourceSpanRef};
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalAnalogProbe, DigitalDriver, DigitalDriverId,
     DigitalEdge, DigitalProcessKind, DigitalRealResolution, DigitalSchedulingRegion,
-    DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal, DigitalSignalKind,
-    DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
+    DigitalScopeKind, DigitalSensitivityOrigin, DigitalSensitivityTerm, DigitalSignal,
+    DigitalSignalKind, DigitalStaticSensitivity, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{
     ArithmeticOp, BitwiseOp, DigitalCaseMatch, FourStateValue, LogicalOp, RealArithmeticOp,
@@ -657,7 +658,24 @@ fn lower_with_analog_variables(
     let mut probes = Vec::new();
     // The scopes `%m` names: the root module, then each instance frame in the
     // elaboration's depth-first order, so a parent always precedes its child.
-    let mut calls = PlanCalls::default();
+    let mut calls = PlanCalls {
+        disabled: std::sync::Arc::new(disable::disabled_names(
+            std::iter::once((&digital.processes, &digital.routines))
+                .chain(
+                    digital
+                        .instances
+                        .iter()
+                        .map(|instance| (&instance.processes, &instance.routines)),
+                )
+                .flat_map(|(processes, routines)| {
+                    processes
+                        .iter()
+                        .map(|process| &process.body)
+                        .chain(routines.iter().map(|routine| &routine.routine.body))
+                }),
+        )),
+        ..PlanCalls::default()
+    };
     let root_scope =
         calls.add_module_scope(None, root_name.into(), root_name.into(), digital.time_scale);
     let frame_scope_frames: Vec<ScopeFrame> = digital
@@ -862,6 +880,14 @@ fn lower_with_analog_variables(
             }
         }
     }
+
+    disable::resolve_disables(
+        &mut processes,
+        &mut plan_routines,
+        &calls.scopes,
+        std::mem::take(&mut calls.pending_disables),
+        &mut diagnostics,
+    );
 
     let mut bit_aliases = Vec::new();
     for alias in digital.bit_aliases.iter().chain(
@@ -1547,7 +1573,7 @@ fn lower_process(
     }
 
     local_arrays.extend(lowerer.local_arrays);
-    calls.absorb(lowerer.calls);
+    calls.absorb(lowerer.calls, disable::DisableOwner::Process(id));
     let function = lowerer.builder.finish(entry).map_err(|error| {
         vec![DigitalLoweringDiagnostic::invariant(
             format!("lowering process {id} produced an invalid graph: {error}"),
@@ -1835,18 +1861,6 @@ impl ProcessLowerer<'_> {
             message,
             SourceSpanRef::from(span),
         ));
-    }
-
-    /// Refuse a procedural thread statement that has no executable form yet.
-    fn unsupported_thread_statement(&mut self, statement: &DigitalStatement) {
-        let what = match statement {
-            DigitalStatement::Fork(_) => "`fork`",
-            _ => "`disable`",
-        };
-        self.error(
-            format!("{what} has no executable form yet"),
-            statement.span(),
-        );
     }
 
     /// Report a violation of something this pass established itself. Nothing
@@ -2387,16 +2401,22 @@ impl ProcessLowerer<'_> {
                     return block;
                 };
                 self.scopes.push(scope);
-                let named = inner
-                    .name
-                    .as_ref()
-                    .is_some_and(|name| self.enter_named_scope(name));
+                let named = inner.name.as_ref().map(|name| {
+                    let scope = self.enter_scope(name, DigitalScopeKind::Block);
+                    let forks = inner.statements.iter().any(local_storage::contains_fork);
+                    (scope.is_some(), self.open_unwind(scope, name, forks))
+                });
                 let mut current = block;
                 for statement in &inner.statements {
                     current = self.statement(current, statement);
                 }
-                if named {
-                    self.leave_named_scope();
+                if let Some((entered, unwinds)) = named {
+                    if unwinds {
+                        current = self.close_unwind(current);
+                    }
+                    if entered {
+                        self.leave_named_scope();
+                    }
                 }
                 self.scopes.pop();
                 current
@@ -2406,10 +2426,7 @@ impl ProcessLowerer<'_> {
             DigitalStatement::Wait(wait) => self.wait_statement(block, wait),
             DigitalStatement::EventTrigger(trigger) => self.event_trigger(block, trigger),
             DigitalStatement::Fork(fork) => self.fork_statement(block, fork),
-            DigitalStatement::Disable(_) => {
-                self.unsupported_thread_statement(statement);
-                block
-            }
+            DigitalStatement::Disable(disable) => self.disable_statement(block, disable),
             DigitalStatement::BlockingAssign(assign) => self.assign(block, assign, false),
             DigitalStatement::NonblockingAssign(assign) => self.assign(block, assign, true),
             DigitalStatement::Conditional(conditional) => {
@@ -3522,7 +3539,7 @@ impl ProcessLowerer<'_> {
                 .carry_variable(CfgVariable::DigitalLocal(local), block, resume);
         }
         self.builder.seal_block(resume);
-        resume
+        self.unwind_tests(resume)
     }
 
     /// Evaluate once at encounter, with the same sizing for constants and signals.

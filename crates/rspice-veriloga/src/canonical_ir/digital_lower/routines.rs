@@ -363,8 +363,32 @@ pub(super) fn lower_routine(
         signed: shape.signed,
     });
 
+    lowerer.calls.threads.routine = Some(super::disable::RoutineExit {
+        routine: signature.id,
+        function: routine.is_function(),
+        exit: None,
+    });
     let exit = lowerer.statement(entry, &routine.body);
-    lowerer.builder.set_terminator(exit, CfgTerminator::Return);
+    // A task that disables itself returns from here, as its end does.
+    match lowerer
+        .calls
+        .threads
+        .routine
+        .take()
+        .and_then(|routine| routine.exit)
+    {
+        Some(ret) => {
+            lowerer.builder.set_terminator(
+                exit,
+                CfgTerminator::Jump {
+                    target: ret,
+                    args: Vec::new(),
+                },
+            );
+            lowerer.builder.set_terminator(ret, CfgTerminator::Return);
+        }
+        None => lowerer.builder.set_terminator(exit, CfgTerminator::Return),
+    }
     lowerer.scopes.pop();
     lowerer.leave_named_scope();
     lowerer.builder.seal_all_blocks();
@@ -377,7 +401,10 @@ pub(super) fn lower_routine(
             routine.span.into(),
         )]);
     };
-    calls.absorb(lowerer.calls);
+    calls.absorb(
+        lowerer.calls,
+        super::disable::DisableOwner::Routine(signature.id),
+    );
     let function = lowerer.builder.finish(entry).map_err(|error| {
         vec![DigitalLoweringDiagnostic::invariant(
             format!(
@@ -481,10 +508,14 @@ impl ProcessLowerer<'_> {
             return block;
         };
         self.scopes.push(scope);
-        let named = fork
-            .name
-            .as_ref()
-            .is_some_and(|name| self.enter_named_scope(name));
+        let named = fork.name.as_ref().map(|name| {
+            let scope = self.enter_scope(name, DigitalScopeKind::Block);
+            (scope.is_some(), self.open_unwind(scope, name, true))
+        });
+        // A branch is a thread of its own. A disabled block around the fork,
+        // or the fork itself, is left by unwinding the forking thread, which
+        // ends the branches, so no branch tests for it or jumps out of it.
+        let around = self.hide_unwinding();
         let mut branches = Vec::with_capacity(fork.statements.len());
         for statement in &fork.statements {
             let entry = self.builder.create_block();
@@ -493,11 +524,18 @@ impl ProcessLowerer<'_> {
             self.builder.set_terminator(exit, CfgTerminator::Return);
             branches.push(entry);
         }
-        if named {
-            self.leave_named_scope();
+        self.restore_unwinding(around);
+        let mut join = self.suspend(block, DigitalWait::Fork { branches }, &mut []);
+        if let Some((entered, unwinds)) = named {
+            if unwinds {
+                join = self.close_unwind(join);
+            }
+            if entered {
+                self.leave_named_scope();
+            }
         }
         self.scopes.pop();
-        self.suspend(block, DigitalWait::Fork { branches }, &mut [])
+        join
     }
 
     /// `-> event` (section 9.7.3). A named event is a one-bit variable that

@@ -4187,7 +4187,9 @@ impl Design {
         self.waits[index] = match outcome {
             DigitalProcessOutcome::Suspended(suspension) => Some(suspension.into_parts()),
             DigitalProcessOutcome::Finished | DigitalProcessOutcome::Halted(_) => None,
-            DigitalProcessOutcome::Forked(_) => panic!("this kernel stand-in does not fork"),
+            DigitalProcessOutcome::Forked(_) | DigitalProcessOutcome::Disabling(_) => {
+                panic!("this kernel stand-in runs no threads")
+            }
         };
     }
 

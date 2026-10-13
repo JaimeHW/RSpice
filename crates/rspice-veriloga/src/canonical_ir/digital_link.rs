@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use smol_str::SmolStr;
 
+use super::cfg::DigitalDisableTarget;
 use super::digital::*;
 use super::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
 use super::{
@@ -667,8 +668,17 @@ fn relocate_function(
     for block in &mut function.blocks {
         if let CfgTerminator::Wait { wait, .. } = &mut block.terminator {
             relocate_wait(wait, map);
-            if let DigitalWait::Call { routine, .. } = wait {
-                *routine = DigitalRoutineId(routine.0 + tables.routines);
+            match wait {
+                DigitalWait::Call { routine, .. }
+                | DigitalWait::Disable {
+                    target: DigitalDisableTarget::Task(routine),
+                } => {
+                    *routine = DigitalRoutineId(routine.0 + tables.routines);
+                }
+                DigitalWait::Disable {
+                    target: DigitalDisableTarget::Block(scope),
+                } => *scope = DigitalScopeId(scope.0 + tables.scopes),
+                _ => {}
             }
         }
     }
@@ -691,7 +701,10 @@ fn relocate_wait(wait: &mut DigitalWait, map: &DigitalLinkedInstance) {
                 }
             }
         }
-        DigitalWait::Delay(_) | DigitalWait::Call { .. } | DigitalWait::Fork { .. } => {}
+        DigitalWait::Delay(_)
+        | DigitalWait::Call { .. }
+        | DigitalWait::Fork { .. }
+        | DigitalWait::Disable { .. } => {}
         DigitalWait::Repeat { event, .. } => relocate_wait(event, map),
     }
 }
@@ -767,6 +780,9 @@ fn relocate_value(
         | CfgValueKind::FrameSlotWrite { .. } => {}
         CfgValueKind::DigitalCall { routine, .. } => {
             *routine = DigitalRoutineId(routine.0 + tables.routines);
+        }
+        CfgValueKind::DigitalUnwinding { scope } => {
+            *scope = DigitalScopeId(scope.0 + tables.scopes);
         }
         CfgValueKind::DigitalArrayRead { array, .. }
         | CfgValueKind::DigitalArrayBlockingWrite { array, .. } => {

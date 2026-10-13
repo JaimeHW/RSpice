@@ -1322,6 +1322,14 @@ pub enum CfgValueKind {
     /// Whether the task whose call resumed this block completed, rather than
     /// being disabled (section 10.3: a disabled task copies nothing back).
     DigitalRoutineCompleted,
+    /// Whether the thread resumed here because `scope`, a named block around
+    /// this resume block, was disabled (section 10.3); one bit. Reading it
+    /// true ends the unwinding, so the branch it guards to the block's exit
+    /// is taken once. Every resume block inside a block some `disable`
+    /// names starts with one per such block, innermost first.
+    DigitalUnwinding {
+        scope: super::digital::DigitalScopeId,
+    },
     /// Read slot `slot` of the running automatic activation's frame.
     FrameSlotRead {
         slot: u32,
@@ -1474,6 +1482,7 @@ impl CfgValueKind {
             | Self::DigitalCall { .. }
             | Self::DigitalRoutineOutput { .. }
             | Self::DigitalRoutineCompleted
+            | Self::DigitalUnwinding { .. }
             | Self::FrameSlotRead { .. }
             | Self::FrameSlotWrite { .. } => true,
         }
@@ -2396,13 +2405,29 @@ pub enum DigitalWait {
     /// which ends its thread; everything a branch shares with its parent
     /// lives in storage, so no value crosses into a branch.
     Fork { branches: Vec<BlockId> },
+    /// `disable` (IEEE 1364-2005 section 10.3, design P2 §4.1): hand the
+    /// kernel the target, which ends every active execution of it in every
+    /// thread, then go on at the resume block without yielding. A thread
+    /// inside a disabled named block resumes where it stood and leaves the
+    /// block through [`CfgValueKind::DigitalUnwinding`]; one inside a
+    /// disabled task resumes at its enable's resume block, which copies
+    /// nothing back.
+    Disable { target: DigitalDisableTarget },
+}
+
+/// What a `disable` names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DigitalDisableTarget {
+    /// A named block, by its scope.
+    Block(super::digital::DigitalScopeId),
+    Task(super::digital::DigitalRoutineId),
 }
 
 impl DigitalWait {
     /// Values this wait reads.
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
-            Self::Event(_) | Self::Fork { .. } => Vec::new(),
+            Self::Event(_) | Self::Fork { .. } | Self::Disable { .. } => Vec::new(),
             Self::Call { args, .. } => args.clone(),
             Self::Expressions(terms) => terms.iter().map(|term| term.value).collect(),
             Self::Repeat { count, event } => {
@@ -2419,7 +2444,7 @@ impl DigitalWait {
     /// value took its old index.
     pub fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
-            Self::Event(_) | Self::Fork { .. } => {}
+            Self::Event(_) | Self::Fork { .. } | Self::Disable { .. } => {}
             Self::Call { args, .. } => {
                 for arg in args {
                     *arg = map(*arg);
@@ -2443,7 +2468,9 @@ impl DigitalWait {
         match self {
             Self::Event(terms) => Some(terms),
             Self::Delay(_) => Some(&[]),
-            Self::Expressions(_) | Self::Call { .. } | Self::Fork { .. } => None,
+            Self::Expressions(_) | Self::Call { .. } | Self::Fork { .. } | Self::Disable { .. } => {
+                None
+            }
             Self::Repeat { event, .. } => event.sensitivity(),
         }
     }

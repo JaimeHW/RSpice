@@ -2464,3 +2464,52 @@ fn every_site_records_its_source_line() {
     // The module header and three declarations precede the section.
     assert_eq!(lines, [6, 7]);
 }
+
+/// The `disable` waits of a process, by target.
+fn disable_targets(
+    process: &CfgDigitalProcess,
+) -> Vec<rspice_veriloga::canonical_ir::cfg::DigitalDisableTarget> {
+    process
+        .function
+        .blocks
+        .iter()
+        .filter_map(|block| match &block.terminator {
+            CfgTerminator::Wait {
+                wait: DigitalWait::Disable { target },
+                ..
+            } => Some(*target),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `disable` (IEEE 1364-2005 section 10.3). A block only its own thread can
+/// be inside is left by a branch; a block with a `fork` in it hands the
+/// kernel the block's scope, which ends the branches. Every place a thread
+/// can wait inside a disabled block first tests whether it resumed to leave
+/// it.
+#[test]
+fn a_disable_lowers_to_a_branch_or_a_kernel_wait() {
+    let process = only_process(
+        "    integer i;\n\
+         \x20   initial begin : loop forever begin i = i + 1; if (i == 3) disable loop; #1 i = i; end end\n",
+    );
+    assert!(disable_targets(&process).is_empty(), "a branch, not a wait");
+    let tests = kinds(&process)
+        .into_iter()
+        .filter(|kind| matches!(kind, CfgValueKind::DigitalUnwinding { .. }))
+        .count();
+    assert_eq!(tests, 1, "the one wait inside `loop` tests for leaving it");
+
+    let plan = plan(
+        "    reg q;\n\
+         \x20   initial begin : both fork #1 q = 0; #2 disable both; join q = 1; end\n",
+    );
+    let [target] = disable_targets(&plan.processes[0])[..] else {
+        panic!("one disable");
+    };
+    let rspice_veriloga::canonical_ir::cfg::DigitalDisableTarget::Block(scope) = target else {
+        panic!("`both` is a named block");
+    };
+    assert_eq!(plan.scopes[scope.index()].path, "dut.both");
+}

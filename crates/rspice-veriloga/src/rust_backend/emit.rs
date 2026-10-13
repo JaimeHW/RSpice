@@ -2483,6 +2483,7 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalCall { .. }
             | CfgValueKind::DigitalRoutineOutput { .. }
             | CfgValueKind::DigitalRoutineCompleted
+            | CfgValueKind::DigitalUnwinding { .. }
             | CfgValueKind::FrameSlotRead { .. }
             | CfgValueKind::FrameSlotWrite { .. } => {
                 return Err(EmitError::DigitalValueInAnalogEmitter(value));

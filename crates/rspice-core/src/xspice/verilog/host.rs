@@ -60,6 +60,7 @@
 mod analog_sample_tests;
 pub(crate) mod checkpoint;
 mod coupled;
+mod threads;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
 
@@ -71,6 +72,7 @@ use std::{
 };
 
 use rspice_veriloga::canonical_ir::VectorBounds;
+use rspice_veriloga::canonical_ir::cfg::DigitalDisableTarget;
 use rspice_veriloga::canonical_ir::digital::DigitalSystemCallId;
 use rspice_veriloga::canonical_ir::digital::{
     CanonicalDigitalPlan, DigitalProcessKind, DigitalSchedulingRegion, DigitalSensitivityTerm,
@@ -512,6 +514,9 @@ pub(crate) struct DigitalHost {
     /// Child slots whose thread has ended, reused lowest first so that slot
     /// numbers, and with them same-tick order, are deterministic.
     free_threads: BTreeSet<usize>,
+    /// What the thread just run disabled, for [`Self::run_process`] to carry
+    /// out before running it on.
+    disabling: Option<DigitalDisableTarget>,
     /// Net to waiting-process index, ascending within each net.
     waiters: Vec<Vec<usize>>,
     /// Processes deferred to the inactive region, in the order they deferred.
@@ -709,6 +714,7 @@ impl DigitalHost {
             resolution,
             slots: (0..plan.processes.len()).map(ProcessSlot::start).collect(),
             free_threads: BTreeSet::new(),
+            disabling: None,
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             analog_ready: None,
@@ -1400,9 +1406,33 @@ impl DigitalHost {
         Ok(())
     }
 
-    /// Run one process from wherever it stopped, and record where it stops
-    /// next.
+    /// Run one thread from wherever it stopped, and record where it stops
+    /// next. A thread that reaches `disable` goes on once the kernel has
+    /// carried it out, without yielding (IEEE 1364-2005 section 10.3).
     fn run_process(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
+        let mut rounds = 0;
+        loop {
+            self.run_activation(index, tick)?;
+            let Some(target) = self.disabling.take() else {
+                return Ok(());
+            };
+            // Each round is at least one step, so a thread that disables
+            // without end meets the limit a loop without end does.
+            rounds += 1;
+            if rounds > DEFAULT_PROCESS_STEP_LIMIT {
+                return Err(evaluation_error(
+                    &self.plan,
+                    self.describe(index),
+                    DigitalEvalError::StepLimitExceeded(DEFAULT_PROCESS_STEP_LIMIT),
+                ));
+            }
+            if !self.disable(index, target, tick)? {
+                return Ok(());
+            }
+        }
+    }
+
+    fn run_activation(&mut self, index: usize, tick: u64) -> Result<(), DigitalRunError> {
         self.set_event_clock(tick, None)?;
         // The plan, the store and the scratch are three different fields, so
         // an activation borrows all three at once and pays for none of them:
@@ -1492,6 +1522,12 @@ impl DigitalHost {
                 if self.slots[index].parent.is_some() =>
             {
                 self.end_child(index, tick)
+            }
+            DigitalProcessOutcome::Disabling(disable) => {
+                let (target, resume) = disable.into_parts();
+                self.slots[index].resume = Some(resume);
+                self.disabling = Some(target);
+                Ok(())
             }
             DigitalProcessOutcome::Forked(fork) => {
                 let (branches, join) = fork.into_parts();
