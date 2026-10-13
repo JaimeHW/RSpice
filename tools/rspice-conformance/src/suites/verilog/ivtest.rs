@@ -20,11 +20,15 @@
 //!   fixed normalization, compile errors told from refusals, and the racy
 //!   rule.
 //! - [`manifest`] holds the recorded outcomes and ratchets a run against them.
+//! - [`icarus`] runs the selection through Icarus itself, which checks the
+//!   harness: every selected test must pass on the simulator its gold files
+//!   came from.
 //!
 //! The `rspice-ivtest` binary drives all of it:
 //!
 //! ```text
 //! rspice-ivtest run [--jobs N] [--budget-s S] [--only a,b] [--record]
+//! rspice-ivtest oracle [--jobs N] [--only a,b]
 //! rspice-ivtest select
 //! rspice-ivtest worker
 //! ```
@@ -42,6 +46,7 @@
 //! module (`-s`) or a define ([`select::testbench_gap`]). The test still runs,
 //! as the entry point allows, and its outcome is recorded like any other.
 
+pub mod icarus;
 pub mod judge;
 pub mod list;
 pub mod manifest;

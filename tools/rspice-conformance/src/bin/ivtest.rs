@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! rspice-ivtest run [--jobs N] [--budget-s S] [--only a,b] [--record] [--manifest PATH]
+//! rspice-ivtest oracle [--jobs N] [--budget-s S] [--only a,b]
 //! rspice-ivtest select
 //! rspice-ivtest worker
 //! ```
@@ -9,8 +10,11 @@
 //! The checkout is `RSPICE_IVTEST_DIR`; without it the run reports the oracle
 //! absent and succeeds, unless `RSPICE_VERILOG_ORACLES_REQUIRED=1`. `run`
 //! ratchets every outcome against `tests/verilog/ivtest-manifest.tsv` and
-//! exits 1 on any drift; `--record` rewrites the manifest instead. `select`
-//! prints the selection without running it. `worker` is the child `run` starts: it reads one case spec (JSON) per
+//! exits 1 on any drift; `--record` rewrites the manifest instead. `oracle`
+//! runs the selection through Icarus (`iverilog`/`vvp`, or the
+//! `RSPICE_IVERILOG_EXE`/`RSPICE_VVP_EXE` overrides) and exits 1 unless every
+//! selected test passes there. `select` prints the selection without running
+//! it. `worker` is the child `run` starts: it reads one case spec (JSON) per
 //! line and answers each with one result line, which also makes it the way to
 //! run a single case by hand.
 
@@ -52,6 +56,15 @@ enum Commands {
         /// The manifest; the default is `tests/verilog/ivtest-manifest.tsv`.
         #[arg(long)]
         manifest: Option<PathBuf>,
+    },
+    /// Run the selection through Icarus Verilog, which must pass all of it.
+    Oracle {
+        #[arg(long, value_parser = job_count)]
+        jobs: Option<usize>,
+        #[arg(long, default_value_t = runner::DEFAULT_BUDGET.as_secs())]
+        budget_s: u64,
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
     },
     /// Print every candidate with its class, bucket and exclusion.
     Select,
@@ -115,6 +128,16 @@ fn run() -> Result<ExitCode, String> {
             };
             run_selection(root, jobs, budget_s, &only, record, manifest)
         }
+        Commands::Oracle {
+            jobs,
+            budget_s,
+            only,
+        } => {
+            let Some(root) = checkout()? else {
+                return Ok(absent_exit());
+            };
+            run_oracle(root, jobs, budget_s, &only)
+        }
     }
 }
 
@@ -136,6 +159,70 @@ fn chosen(root: &std::path::Path, only: &[String]) -> Result<Vec<select::Candida
         }
     }
     Ok(candidates)
+}
+
+fn run_oracle(
+    root: PathBuf,
+    jobs: Option<usize>,
+    budget_s: u64,
+    only: &[String],
+) -> Result<ExitCode, String> {
+    use rspice_conformance::suites::verilog::VerilogEngine;
+    use rspice_conformance::suites::verilog::oracle::{self, OracleAvailability};
+
+    let tools = match oracle::detect(VerilogEngine::Icarus) {
+        OracleAvailability::Available(tools) => tools,
+        other => {
+            eprintln!("{}", other.diagnostic());
+            return Ok(absent_exit());
+        }
+    };
+    let started = Instant::now();
+    let candidates = chosen(&root, only)?;
+    let jobs = jobs.unwrap_or_else(runner::default_jobs);
+    let reports = ivtest::icarus::run(
+        &root,
+        &tools,
+        &candidates,
+        jobs,
+        Duration::from_secs(budget_s),
+        |report| {
+            if report.outcome != Outcome::Pass {
+                eprintln!(
+                    "icarus: {} {} - {}",
+                    report.name, report.outcome, report.detail
+                );
+            }
+        },
+    )?;
+    let failed: Vec<&str> = reports
+        .iter()
+        .filter(|report| report.outcome != Outcome::Pass)
+        .map(|report| report.name.as_str())
+        .collect();
+    let residual: Vec<&str> = reports
+        .iter()
+        .filter(|report| report.residual)
+        .map(|report| report.name.as_str())
+        .collect();
+    println!(
+        "icarus ({}): {} selected, {} pass, {} not passing, --jobs {jobs}, {:.1} s wall",
+        tools.identity(),
+        reports.len(),
+        reports.len() - failed.len(),
+        failed.len(),
+        started.elapsed().as_secs_f64()
+    );
+    println!(
+        "  gold tests whose Icarus log keeps text past the normalization: {} ({})",
+        residual.len(),
+        residual.join(", ")
+    );
+    Ok(if failed.is_empty() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
 
 /// The checkout, or `None` (with the reason printed) when it is absent.
