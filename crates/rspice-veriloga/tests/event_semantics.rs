@@ -374,6 +374,10 @@ endmodule
 /// HiSIM_HV is the one shipped model whose source names the event: its
 /// degradation report runs `$fopen`/`$fdisplay` under `_AGING_`, which no
 /// compile profile defines, so its stream holds no event at all.
+///
+/// Source discovery and the compile profiles live in the Rust code
+/// generator, so the scan runs wherever that generator is built.
+#[cfg(feature = "rust-codegen")]
 #[test]
 fn generated_builtin_final_step_bodies_feed_no_equations() {
     use rspice_veriloga::preprocessor::MacroDef;
