@@ -34,11 +34,19 @@ fn capacitor_fixture() -> (Engine, Netlist, TransientCheckpoint) {
 /// Rewrite one current-format row for a reader older than format 56. Format 56
 /// appended the accepted charge increment to each solution-dependent capacitor
 /// state behind an availability row, format 57 added the mixed runtime image
-/// row, and format 59 the accepted switch rows; none exists in the legacy
-/// images built below. `None` drops the row.
+/// row, format 59 the accepted switch rows, and format 60 the pending edge
+/// completion rows; none exists in the legacy images built below. `None`
+/// drops the row.
 fn pre_v56_row(line: &str) -> Option<String> {
     if line.starts_with("mixed_runtime_image ") {
         assert_eq!(line, "mixed_runtime_image 0", "these decks are analog-only");
+        return None;
+    }
+    if line.starts_with("pending_edge_completions ") || line.starts_with("edge_crossing ") {
+        assert!(
+            line == "pending_edge_completions 0" || line == "edge_crossing none",
+            "these decks have no D/A edge: {line}"
+        );
         return None;
     }
     if line.starts_with("accepted_switch_") {
@@ -153,7 +161,7 @@ fn capacitor_checkpoint_rejects_malformed_mismatched_and_missing_integrals() {
 
     let mut old = String::new();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 59"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 60"));
     old.push_str("RSPICE-CHECKPOINT 50\n");
     while let Some(line) = lines.next() {
         let Some(line) = pre_v56_row(line) else {
@@ -313,7 +321,7 @@ fn behavioral_checkpoint_legacy_state_remains_unknown() {
     let (engine, netlist, checkpoint) = fixture();
     let text = checkpoint.to_text();
     let mut lines = text.lines();
-    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 59"));
+    assert_eq!(lines.next(), Some("RSPICE-CHECKPOINT 60"));
     let mut old = "RSPICE-CHECKPOINT 49\n".to_owned();
     while let Some(line) = lines.next() {
         let Some(line) = pre_v56_row(line) else {

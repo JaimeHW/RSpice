@@ -143,6 +143,16 @@ struct EdgeCrossing {
     resume: Option<Value>,
 }
 
+/// The part of a [`BreakpointManager`]'s schedule that a checkpoint carries:
+/// the zero-duration edge completions still ahead, ascending, and the edge
+/// being crossed as `(completion, resume)`
+/// ([`BreakpointManager::edge_completion_schedule`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct EdgeCompletionSchedule {
+    pub(crate) completions: Vec<Value>,
+    pub(crate) crossing: Option<(Value, Option<Value>)>,
+}
+
 impl Default for BreakpointManager {
     fn default() -> Self {
         Self::new()
@@ -383,6 +393,63 @@ impl BreakpointManager {
         self.edge_crossing
             .filter(|crossing| self.coincides(time, crossing.completion))
             .and_then(|crossing| crossing.resume)
+    }
+
+    /// The edge completions still ahead of `time` and the edge being crossed,
+    /// for a checkpoint taken at the accepted point `time`.
+    ///
+    /// A model asks for an edge's completion at the edge's own accepted point,
+    /// and that request lives only here from then on: a resumed run evaluates
+    /// no model at its first point, so it cannot ask again.
+    pub(crate) fn edge_completion_schedule(&self, time: Value) -> EdgeCompletionSchedule {
+        EdgeCompletionSchedule {
+            completions: self
+                .edge_completions
+                .iter()
+                .map(|key| key.0)
+                .filter(|completion| *completion > time)
+                .collect(),
+            crossing: self
+                .edge_crossing
+                .filter(|crossing| crossing.completion > time)
+                .map(|crossing| (crossing.completion, crossing.resume)),
+        }
+    }
+
+    /// Reinstate a checkpoint's [`EdgeCompletionSchedule`] when a run resumes:
+    /// each completion at or before `stop` is a runtime breakpoint again, as
+    /// [`Self::replace_runtime_breakpoints`] would have taken it from the
+    /// model's request, and the crossing continues where the checkpoint left
+    /// it.
+    pub(crate) fn restore_edge_completion_schedule(
+        &mut self,
+        schedule: &EdgeCompletionSchedule,
+        stop: Value,
+    ) {
+        for &completion in &schedule.completions {
+            if !completion.is_finite() || completion < 0.0 {
+                continue;
+            }
+            if completion <= stop
+                && !Self::contains_sorted_within_tolerance(
+                    &self.breakpoints[self.current_index..],
+                    completion,
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                )
+            {
+                Self::insert_runtime_unique(
+                    &mut self.runtime_breakpoints,
+                    completion,
+                    self.tolerance,
+                    self.inclusive_tolerance,
+                );
+            }
+            self.edge_completions.insert(BreakpointTimeKey(completion));
+        }
+        self.edge_crossing = schedule
+            .crossing
+            .map(|(completion, resume)| EdgeCrossing { completion, resume });
     }
 
     /// The restart after a landing at `time` that interrupted `approach`.

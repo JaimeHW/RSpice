@@ -1039,6 +1039,8 @@ struct ScheduledCheckpointIntegration<'a> {
     integration_stop_time: Value,
     pending_tline_arrivals: &'a [Value],
     dynamic_tline_breakpoints_added: usize,
+    /// Asked for its edge completions only when a checkpoint is due.
+    breakpoints: &'a BreakpointManager,
 }
 
 /// The device histories it must carry.
@@ -4069,6 +4071,7 @@ impl Engine {
             integration_stop_time,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
+            breakpoints,
         } = integration;
         let ScheduledCheckpointState {
             solution,
@@ -4193,6 +4196,7 @@ impl Engine {
                 integration_continuation,
                 pending_tline_arrivals,
                 dynamic_tline_breakpoints_added,
+                edge_completions: &breakpoints.edge_completion_schedule(accepted_time),
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: Some(
@@ -4536,6 +4540,8 @@ impl Engine {
                         integration_continuation: None,
                         pending_tline_arrivals: &[],
                         dynamic_tline_breakpoints_added: 0,
+                        edge_completions:
+                            &crate::numerics::integration::EdgeCompletionSchedule::default(),
                     },
                     AcceptedTransientRuntime {
                         accepted_solver_state: None,
@@ -5159,6 +5165,12 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         if circuit.has_mixed_signal_hosts() {
             Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
+        }
+        // A checkpoint taken on a zero-duration edge holds the completion the
+        // edge's model asked for there; no model is evaluated at this first
+        // point to ask again.
+        if let Some(checkpoint) = resume {
+            breakpoints.restore_edge_completion_schedule(checkpoint.edge_completions(), tstop);
         }
         let configured_initial_step = self
             .config
@@ -6665,6 +6677,7 @@ impl Engine {
                 integration_stop_time: tstop,
                 pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                 dynamic_tline_breakpoints_added,
+                breakpoints: &breakpoints,
             },
             ScheduledCheckpointHistories {
                 bsim3_history: &bsim3_history,
@@ -11318,6 +11331,7 @@ impl Engine {
                             integration_stop_time: tstop,
                             pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                             dynamic_tline_breakpoints_added,
+                            breakpoints: &breakpoints,
                         },
                         ScheduledCheckpointHistories {
                             bsim3_history: &bsim3_history,
@@ -12114,6 +12128,7 @@ impl Engine {
                     integration_stop_time: tstop,
                     pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                     dynamic_tline_breakpoints_added,
+                    breakpoints: &breakpoints,
                 },
                 ScheduledCheckpointHistories {
                     bsim3_history: &bsim3_history,
@@ -12339,6 +12354,7 @@ impl Engine {
                         integration_continuation: None,
                         pending_tline_arrivals: &pending_dynamic_tline_breakpoints,
                         dynamic_tline_breakpoints_added,
+                        edge_completions: &breakpoints.edge_completion_schedule(t),
                     },
                     AcceptedTransientRuntime {
                         accepted_solver_state: Some(

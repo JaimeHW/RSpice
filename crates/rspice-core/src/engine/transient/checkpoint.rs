@@ -45,6 +45,7 @@ mod behavioral;
 mod bsim3;
 mod bsim4;
 mod capacitor_sdt;
+mod edge;
 mod mixed;
 mod mosfet;
 #[cfg(test)]
@@ -87,6 +88,7 @@ use crate::netlist::{
     Element, ElementKind, Netlist, ParamContext, SourceSpec, SubcircuitDef,
     flatten_netlist_with_models,
 };
+use crate::numerics::integration::EdgeCompletionSchedule;
 use crate::numerics::integration::{
     ACCEPTED_BOUNDARY_LTE_ESTIMATOR_CHECKPOINT_VERSION, AcceptedBoundaryLteEstimatorCheckpoint,
     IntegrationMethod, LteEstimator, TransientLteReference, TrapGearController,
@@ -211,10 +213,12 @@ fn checkpoint_operation_result<T>(
 /// Version 57 retains the unified accepted mixed-runtime image.
 /// Version 58 carries version 2 HDL host images in that mixed-runtime image.
 /// Version 59 retains accepted voltage- and current-controlled switch state.
-const FORMAT_VERSION: u32 = switch::FORMAT_VERSION;
+/// Version 60 retains the pending completions of zero-duration edges.
+const FORMAT_VERSION: u32 = edge::FORMAT_VERSION;
 // The newest section's format is the file format; the sections before it
 // were added in order.
-const _: () = assert!(mixed::FORMAT_VERSION < FORMAT_VERSION);
+const _: () = assert!(mixed::FORMAT_VERSION < switch::FORMAT_VERSION);
+const _: () = assert!(switch::FORMAT_VERSION < FORMAT_VERSION);
 const CAPACITOR_INCREMENT_FORMAT_VERSION: u32 = 56;
 const TLINE_EVENT_FORMAT_VERSION: u32 = 55;
 const MOSFET_STATE_FORMAT_VERSION: u32 = 54;
@@ -354,6 +358,7 @@ pub(super) struct CheckpointIntegrationState<'a> {
     pub integration_continuation: Option<ProposedIntegrationContinuation>,
     pub pending_tline_arrivals: &'a [Value],
     pub dynamic_tline_breakpoints_added: usize,
+    pub edge_completions: &'a EdgeCompletionSchedule,
 }
 
 /// The accepted-step runtime a resumed run reseeds from.
@@ -652,6 +657,10 @@ pub struct TransientCheckpoint {
     /// Preserving this counter keeps the resource cap identical across a
     /// restart seam rather than granting each segment a fresh allowance.
     dynamic_tline_breakpoints_added: usize,
+    /// Completions of zero-duration edges still ahead of `time`, and the edge
+    /// being crossed (see `edge.rs`). Empty in files older than format 60,
+    /// whose producers never asked for one.
+    edge_completions: EdgeCompletionSchedule,
 
     cap_v_prev: Vec<Value>,
     cap_v_prev_prev: Vec<Value>,
@@ -5838,6 +5847,7 @@ impl TransientCheckpoint {
         behavioral::validate(self.behavioral_states.as_deref(), self.time, &mut budget)?;
         capacitor_sdt::validate(self.capacitor_sdt_states.as_deref(), self.time, &mut budget)?;
         switch::validate(self.switch_states.as_deref())?;
+        edge::validate(&self.edge_completions, self.time)?;
         if !self.time.is_finite() || self.time < 0.0 {
             return Err("checkpoint time must be finite and non-negative".to_string());
         }
@@ -6662,6 +6672,7 @@ impl TransientCheckpoint {
                 integration_continuation: None,
                 pending_tline_arrivals: &[],
                 dynamic_tline_breakpoints_added: 0,
+                edge_completions: &EdgeCompletionSchedule::default(),
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: None,
@@ -6704,6 +6715,7 @@ impl TransientCheckpoint {
             integration_continuation,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
+            edge_completions,
         } = integration;
         let CheckpointState {
             time,
@@ -6846,6 +6858,7 @@ impl TransientCheckpoint {
             accepted_solver_state,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
+            edge_completions: edge::capture(edge_completions, time),
             cap_v_prev: circuit.capacitors.v_prev.clone(),
             cap_v_prev_prev: circuit.capacitors.v_prev_prev.clone(),
             cap_v_prev_prev_prev: circuit.capacitors.v_prev_prev_prev.clone(),
@@ -6919,6 +6932,7 @@ impl TransientCheckpoint {
             integration_continuation,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
+            edge_completions,
         } = integration;
         let CheckpointState {
             time,
@@ -6950,6 +6964,7 @@ impl TransientCheckpoint {
                 integration_continuation,
                 pending_tline_arrivals,
                 dynamic_tline_breakpoints_added,
+                edge_completions,
             },
             AcceptedTransientRuntime {
                 accepted_solver_state,
@@ -7805,6 +7820,13 @@ impl TransientCheckpoint {
         self.dynamic_tline_breakpoints_added
     }
 
+    /// Completions of zero-duration edges still ahead of the checkpoint, and
+    /// the edge being crossed, which a resumed run reinstates in its
+    /// breakpoint schedule before it takes a step.
+    pub(crate) fn edge_completions(&self) -> &EdgeCompletionSchedule {
+        &self.edge_completions
+    }
+
     pub(super) fn restore_solver_state(
         &self,
         matrix: &mut crate::solver::StaticMatrix,
@@ -8088,6 +8110,7 @@ impl TransientCheckpoint {
             count = count.saturating_add(image.retained_values());
         }
         count = count.saturating_add(switch::retained_values(self.switch_states.as_deref()));
+        count = count.saturating_add(edge::retained_values(&self.edge_completions));
         for instance in &self.xspice_instance_states {
             count = count
                 .saturating_add(2)
@@ -8867,6 +8890,7 @@ impl TransientCheckpoint {
         out.push_str("runtime_veriloga_states 0\n");
         mixed::write(&mut out, self.mixed_runtime_image.as_ref(), abort)?;
         switch::write(&mut out, self.switch_states.as_deref(), abort)?;
+        edge::write(&mut out, &self.edge_completions, abort)?;
         check_checkpoint_abort(abort)?;
         Ok(out)
     }
@@ -9710,6 +9734,7 @@ impl TransientCheckpoint {
         }
         let mixed_runtime_image = mixed::read(lines, version, budget)?;
         let switch_states = switch::read(lines, version, budget)?;
+        let edge_completions = edge::read(lines, version, budget)?;
         if let Some(extra) = lines.find(|line| !line.trim().is_empty()) {
             return Err(format!("checkpoint has trailing content: '{extra}'"));
         }
@@ -9738,6 +9763,7 @@ impl TransientCheckpoint {
             accepted_solver_state,
             pending_tline_arrivals,
             dynamic_tline_breakpoints_added,
+            edge_completions,
             cap_v_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev: cap_iter.next().unwrap(),
             cap_v_prev_prev_prev: cap_iter.next().unwrap(),
@@ -11819,6 +11845,57 @@ mod tests {
         );
     }
 
+    /// A checkpoint on a zero-duration edge carries the edge's completion and
+    /// the crossing bit for bit; a file from before the section reads as one
+    /// whose run asked for none; and a completion that is not ahead of the
+    /// checkpoint, or a resume step that is not a step, is refused.
+    #[test]
+    fn pending_edge_completions_round_trip_and_read_empty_from_older_files() {
+        let mut checkpoint = sample();
+        let completion = checkpoint.time + 1.0e-12;
+        checkpoint.edge_completions = EdgeCompletionSchedule {
+            completions: vec![completion, 3.0e-6],
+            crossing: Some((completion, Some(2.5e-10))),
+        };
+        for encoding in [
+            TransientCheckpointEncoding::Unpacked,
+            TransientCheckpointEncoding::Packed,
+        ] {
+            let bytes = checkpoint.to_bytes(encoding).unwrap();
+            assert_eq!(TransientCheckpoint::from_bytes(&bytes).unwrap(), checkpoint);
+        }
+        let mut waiting = checkpoint.clone();
+        waiting.edge_completions.crossing = Some((completion, None));
+        assert_eq!(
+            TransientCheckpoint::from_text(&waiting.to_text()).unwrap(),
+            waiting
+        );
+
+        let legacy =
+            TransientCheckpoint::from_text(&legacy_text(&checkpoint, switch::FORMAT_VERSION))
+                .unwrap();
+        assert_eq!(legacy.edge_completions, EdgeCompletionSchedule::default());
+
+        for schedule in [
+            EdgeCompletionSchedule {
+                completions: vec![checkpoint.time],
+                crossing: None,
+            },
+            EdgeCompletionSchedule {
+                completions: vec![3.0e-6, completion],
+                crossing: None,
+            },
+            EdgeCompletionSchedule {
+                completions: Vec::new(),
+                crossing: Some((completion, Some(0.0))),
+            },
+        ] {
+            let mut invalid = checkpoint.clone();
+            invalid.edge_completions = schedule;
+            assert!(TransientCheckpoint::from_text(&invalid.to_text()).is_err());
+        }
+    }
+
     fn sample() -> TransientCheckpoint {
         TransientCheckpoint {
             accepted_solver_state: Some(sample_solver_state(rspice_matrix::RealSolverBackend::Klu)),
@@ -11902,6 +11979,7 @@ mod tests {
             )),
             pending_tline_arrivals: vec![1.5e-6, 2.0e-6],
             dynamic_tline_breakpoints_added: 3,
+            edge_completions: EdgeCompletionSchedule::default(),
             cap_v_prev: vec![0.1, -0.2],
             cap_v_prev_prev: vec![0.09, -0.19],
             cap_v_prev_prev_prev: vec![0.08, -0.18],
@@ -12201,6 +12279,12 @@ mod tests {
         let mut output = String::new();
         let mut lines = text.lines();
         while let Some(line) = lines.next() {
+            if version < edge::FORMAT_VERSION
+                && (line.starts_with("pending_edge_completions ")
+                    || line.starts_with("edge_crossing "))
+            {
+                continue;
+            }
             if version < switch::FORMAT_VERSION && line.starts_with("accepted_switch_") {
                 continue;
             }
@@ -14814,7 +14898,7 @@ mod tests {
     /// asserting current-format behaviour after two renumberings moved it into
     /// the legacy ladder.
     #[cfg(feature = "veriloga")]
-    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 43] = [
+    const RUNTIME_VERILOGA_FORMAT_STATE_CONTRACTS: [(u32, u32); 44] = [
         (17, 1),
         (18, 1),
         (19, 1),
@@ -14858,6 +14942,7 @@ mod tests {
         (57, 13),
         (58, 13),
         (59, 13),
+        (60, 13),
     ];
 
     #[cfg(feature = "veriloga")]
@@ -15367,6 +15452,7 @@ mod tests {
                 integration_continuation: None,
                 pending_tline_arrivals: &[],
                 dynamic_tline_breakpoints_added: 0,
+                edge_completions: &EdgeCompletionSchedule::default(),
             },
             AcceptedTransientRuntime {
                 accepted_solver_state: None,
