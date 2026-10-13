@@ -3768,14 +3768,21 @@ mod tests {
 
     /// A floating source whose low side the rest of the circuit holds at
     /// exactly zero: a controlled source with no small-signal drive (as the
-    /// real-to-voltage converter is), or a resistor that carries no current.
-    /// Equilibrating the gain's column leaves `V(fin)` an ULP off one for about
-    /// a third of these gains; moving both nodes by half of it put the low side
-    /// off zero, which every equation through it rejects with a backward error
-    /// of one.
+    /// real-to-voltage converter is), the same source buffering a DC-only bias,
+    /// or a resistor that carries no current. Equilibrating the gain's column
+    /// leaves `V(fin)` an ULP off one for about a third of these gains; moving
+    /// both nodes by half of it put the low side off zero, which every
+    /// equation through it rejects with a backward error of one. Buffering the
+    /// bias, the whole stack solves an ULP high instead: the projection zeroes
+    /// `V(ctrl)` and the buffer's equation must zero `V(stim)` with it.
     #[test]
     fn ac_floating_source_keeps_a_low_side_the_circuit_holds_at_zero() {
-        for hold in ["E1 stim 0 0 0 1\n", "R1 stim 0 1k\n"] {
+        for hold in [
+            "E1 stim 0 0 0 1\n",
+            "VB ctrl 0 DC 1\nE1 stim 0 ctrl 0 1\n",
+            "VB ctrl 0 DC 1\nE1 stim 0 ctrl 0 2\n",
+            "R1 stim 0 1k\n",
+        ] {
             for step in 101..=400 {
                 let gain = Value::from(step) / 100.0;
                 let netlist = Netlist::parse(&format!(

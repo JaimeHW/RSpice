@@ -265,9 +265,27 @@ impl AcLinearization {
         }
         if !excitation.projection.is_empty() {
             excitation.projection.project(&mut solution)?;
-            ac_matrix
-                .certify_solution(&solution, rhs)
-                .map_err(SimulationError::Solver)?;
+            if let Err(error) = ac_matrix.certify_solution(&solution, rhs) {
+                // The denominator floor admits roundoff leakage on a
+                // homogeneous source row (`V(ctrl) = 0` solved as 2e-16), and
+                // homogeneous equations carry it to the unknowns they tie to
+                // that row (`V(stim) - g*V(ctrl) = 0` of a controlled source).
+                // The projection zeroes the source's node and leaves the tied
+                // node holding the leak, which its equation then rejects with
+                // a backward error of one. Those equations prove every such
+                // unknown zero: set them so and project again.
+                if !matches!(error, SolverError::InaccurateSolution(_))
+                    || !ac_matrix
+                        .canonicalize_homogeneous_zeros(rhs, &mut solution)
+                        .map_err(SimulationError::Solver)?
+                {
+                    return Err(SimulationError::Solver(error));
+                }
+                excitation.projection.project(&mut solution)?;
+                ac_matrix
+                    .certify_solution(&solution, rhs)
+                    .map_err(SimulationError::Solver)?;
+            }
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }

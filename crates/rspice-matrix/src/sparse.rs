@@ -721,6 +721,43 @@ fn canonicalize_real_homogeneous_zero_constraints(
     solution: &mut [Value],
     operation: RealSolveOp,
 ) -> bool {
+    canonicalize_homogeneous_zero_constraints(
+        csc,
+        values,
+        rhs,
+        solution,
+        operation == RealSolveOp::Transpose,
+    )
+}
+
+/// [`canonicalize_real_homogeneous_zero_constraints`] for a complex solve.
+/// The adjoint's equations are the columns, as the transpose's are;
+/// conjugation leaves every zero alone.
+fn canonicalize_complex_homogeneous_zero_constraints(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Complex64],
+    rhs: &[Complex64],
+    solution: &mut [Complex64],
+    operation: ComplexSolveOp,
+) -> bool {
+    canonicalize_homogeneous_zero_constraints(
+        csc,
+        values,
+        rhs,
+        solution,
+        operation != ComplexSolveOp::Normal,
+    )
+}
+
+/// The homogeneous zero projection shared by the real and complex solves. The
+/// equations are the rows of `values`, or its columns when `transposed`.
+fn canonicalize_homogeneous_zero_constraints<T: RemnantScalar>(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[T],
+    rhs: &[T],
+    solution: &mut [T],
+    transposed: bool,
+) -> bool {
     let nrows = csc.nrows();
     let ncols = csc.ncols();
     if nrows != ncols
@@ -741,14 +778,15 @@ fn canonicalize_real_homogeneous_zero_constraints(
     for col in 0..ncols {
         let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
         for (&original_row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
-            if value == 0.0 {
+            if value == T::ZERO {
                 continue;
             }
-            let (equation, unknown) = match operation {
-                RealSolveOp::Normal => (original_row, col),
-                RealSolveOp::Transpose => (col, original_row),
+            let (equation, unknown) = if transposed {
+                (col, original_row)
+            } else {
+                (original_row, col)
             };
-            if rhs[equation] == 0.0 {
+            if rhs[equation] == T::ZERO {
                 remaining[equation] += 1;
                 unknown_xor[equation] ^= unknown;
                 dependent_equations[unknown].push(equation);
@@ -767,14 +805,13 @@ fn canonicalize_real_homogeneous_zero_constraints(
             }
         }
     }
-    let positive_zero_bits = 0.0_f64.to_bits();
     let mut changed = false;
     let mut cursor = 0;
     while cursor < pending.len() {
         let unknown = pending[cursor];
         cursor += 1;
-        if solution[unknown].to_bits() != positive_zero_bits {
-            solution[unknown] = 0.0;
+        if !solution[unknown].is_positive_zero() {
+            solution[unknown] = T::ZERO;
             changed = true;
         }
         for &equation in &dependent_equations[unknown] {
@@ -792,13 +829,20 @@ fn canonicalize_real_homogeneous_zero_constraints(
     changed
 }
 
-/// A scalar of a certified sparse solve, as [`zero_lu_remnants`] weighs it.
+/// A scalar of a certified sparse solve, as [`zero_lu_remnants`] weighs it
+/// and [`canonicalize_homogeneous_zero_constraints`] zeroes it.
 trait RemnantScalar: Copy + PartialEq {
+    /// Positive zero in every component.
     const ZERO: Self;
 
     /// The magnitude the componentwise backward-error check uses: `|x|`
     /// for a real scalar and `|re| + |im|` for a complex one.
     fn magnitude(self) -> Value;
+
+    fn is_finite(self) -> bool;
+
+    /// Bitwise [`Self::ZERO`]: a negative zero is not canonical.
+    fn is_positive_zero(self) -> bool;
 }
 
 impl RemnantScalar for Value {
@@ -808,6 +852,16 @@ impl RemnantScalar for Value {
     fn magnitude(self) -> Value {
         self.abs()
     }
+
+    #[inline]
+    fn is_finite(self) -> bool {
+        Value::is_finite(self)
+    }
+
+    #[inline]
+    fn is_positive_zero(self) -> bool {
+        self.to_bits() == Self::ZERO.to_bits()
+    }
 }
 
 impl RemnantScalar for Complex64 {
@@ -816,6 +870,16 @@ impl RemnantScalar for Complex64 {
     #[inline]
     fn magnitude(self) -> Value {
         complex_abs1(self)
+    }
+
+    #[inline]
+    fn is_finite(self) -> bool {
+        complex_is_finite(self)
+    }
+
+    #[inline]
+    fn is_positive_zero(self) -> bool {
+        self.re.is_positive_zero() && self.im.is_positive_zero()
     }
 }
 
@@ -4615,68 +4679,6 @@ fn complex_componentwise_backward_error(
     )
 }
 
-/// Canonicalize unknowns that are mathematically fixed to zero by an exact
-/// homogeneous singleton equation in the selected operator.
-///
-/// Sparse LU can leave a sub-ulp remnant in an auxiliary MNA coordinate whose
-/// equation is exactly `a*x = 0`. A componentwise certificate quite correctly
-/// assigns that remnant an error of one because its residual and denominator
-/// are both `|a*x|`. Setting `x` to positive zero is not a perturbation or a
-/// tolerance: it is the unique solution of the original equation. Rows with a
-/// nonzero right-hand side, zero coefficients, or more than one coefficient
-/// are deliberately ineligible, and callers must certify the complete system
-/// again after applying any projection.
-fn canonicalize_complex_homogeneous_singletons(
-    csc: &SymbolicSparseColMat<usize>,
-    values: &[Complex64],
-    rhs: &[Complex64],
-    solution: &mut [Complex64],
-    operation: ComplexSolveOp,
-) -> bool {
-    let nrows = csc.nrows();
-    let ncols = csc.ncols();
-    if nrows != ncols
-        || values.len() != csc.row_idx().len()
-        || rhs.len() != nrows
-        || solution.len() != ncols
-    {
-        return false;
-    }
-
-    let mut unique_unknown = vec![None; nrows];
-    let mut multiple = vec![false; nrows];
-    for col in 0..ncols {
-        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
-        for (&original_row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
-            if value == Complex64::new(0.0, 0.0) {
-                continue;
-            }
-            let (equation, unknown) = match operation {
-                ComplexSolveOp::Normal => (original_row, col),
-                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => (col, original_row),
-            };
-            if unique_unknown[equation].replace(unknown).is_some() {
-                multiple[equation] = true;
-            }
-        }
-    }
-
-    let mut changed = false;
-    for equation in 0..nrows {
-        if rhs[equation] != Complex64::new(0.0, 0.0) || multiple[equation] {
-            continue;
-        }
-        let Some(unknown) = unique_unknown[equation] else {
-            continue;
-        };
-        if solution[unknown] != Complex64::new(0.0, 0.0) {
-            solution[unknown] = Complex64::new(0.0, 0.0);
-            changed = true;
-        }
-    }
-    changed
-}
-
 /// [`zero_lu_remnants`] for a complex solve. The adjoint's equations are the
 /// columns, as the transpose's are; conjugation leaves every magnitude alone.
 fn zero_complex_lu_remnants(
@@ -5335,6 +5337,40 @@ impl ComplexMatrix {
         } else {
             Err(SolverError::InaccurateSolution(error.componentwise))
         }
+    }
+
+    /// Set to exact zero every unknown of `A*x = b` that its homogeneous
+    /// equations prove is zero: the one unknown of `a*x = 0`, then the last
+    /// unknown of any `a*x + c*y = 0` whose others are proven, and so on along
+    /// the chain. Returns whether any coordinate changed.
+    ///
+    /// The same projection a solve applies before failing its certificate, for
+    /// a caller that adjusts a certified solution (as an exact-constraint
+    /// canonicalization does) and must not leave a rounding remnant where the
+    /// equations demand zero. It reads only which coefficients and right-hand
+    /// sides are exactly zero; callers certify the complete system again.
+    pub fn canonicalize_homogeneous_zeros(
+        &self,
+        rhs: &[Complex64],
+        solution: &mut [Complex64],
+    ) -> Result<bool, SolverError> {
+        self.check_stamping_error()?;
+        if self.nrows != rhs.len() || self.ncols != solution.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Complex canonicalization dimension mismatch: matrix is {}x{}, solution has {}, RHS has {}",
+                self.nrows,
+                self.ncols,
+                solution.len(),
+                rhs.len()
+            )));
+        }
+        Ok(canonicalize_complex_homogeneous_zero_constraints(
+            &self.csc,
+            &self.values,
+            rhs,
+            solution,
+            ComplexSolveOp::Normal,
+        ))
     }
 
     /// Solve Ax = b for complex values.
@@ -6068,7 +6104,8 @@ impl ComplexMatrix {
             backward_error = refined_error;
         }
 
-        if canonicalize_complex_homogeneous_singletons(csc, values, rhs, solution, operation) {
+        if canonicalize_complex_homogeneous_zero_constraints(csc, values, rhs, solution, operation)
+        {
             let canonical_error = complex_componentwise_backward_error(
                 csc,
                 &ws.scaled_values,
@@ -8848,7 +8885,7 @@ mod tests {
 
         let mut normal = [tiny, one];
         let normal_rhs = [zero, Complex64::new(4.0, 0.0)];
-        assert!(canonicalize_complex_homogeneous_singletons(
+        assert!(canonicalize_complex_homogeneous_zero_constraints(
             &matrix.csc,
             &matrix.values,
             &normal_rhs,
@@ -8876,7 +8913,7 @@ mod tests {
         for operation in [ComplexSolveOp::Transpose, ComplexSolveOp::Adjoint] {
             let mut transposed = [one, tiny];
             let transposed_rhs = [Complex64::new(2.0, 0.0), zero];
-            assert!(canonicalize_complex_homogeneous_singletons(
+            assert!(canonicalize_complex_homogeneous_zero_constraints(
                 &matrix.csc,
                 &matrix.values,
                 &transposed_rhs,
@@ -8903,7 +8940,7 @@ mod tests {
         }
 
         let mut two_term_homogeneous = [one, tiny];
-        assert!(!canonicalize_complex_homogeneous_singletons(
+        assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &matrix.csc,
             &matrix.values,
             &[Complex64::new(2.0, 0.0), zero],
@@ -8913,7 +8950,7 @@ mod tests {
         assert_eq!(two_term_homogeneous, [one, tiny]);
 
         let mut nonhomogeneous_singleton = [tiny, one];
-        assert!(!canonicalize_complex_homogeneous_singletons(
+        assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &matrix.csc,
             &matrix.values,
             &[Complex64::new(1.0, 0.0), Complex64::new(4.0, 0.0)],
@@ -8926,7 +8963,7 @@ mod tests {
         let mut singular = ComplexMatrix::from_real_structure(&singular_real);
         singular.add_real(1, 1, 1.0);
         let mut singular_candidate = [tiny, zero];
-        assert!(!canonicalize_complex_homogeneous_singletons(
+        assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &singular.csc,
             &singular.values,
             &[zero, zero],
@@ -8945,7 +8982,7 @@ mod tests {
         underflow_matrix.add_real(0, 0, 1.0);
         underflow_matrix.add_real(0, 1, f64::from_bits(1));
         let mut physical_coefficient_candidate = [tiny, one];
-        assert!(!canonicalize_complex_homogeneous_singletons(
+        assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &underflow_matrix.csc,
             &underflow_matrix.values,
             &[zero, zero],
@@ -8962,7 +8999,7 @@ mod tests {
         assert_ne!(underflowed_values[secondary_index], zero);
         underflowed_values[secondary_index] = zero;
         let mut erased_coefficient_candidate = [tiny, one];
-        assert!(canonicalize_complex_homogeneous_singletons(
+        assert!(canonicalize_complex_homogeneous_zero_constraints(
             &underflow_matrix.csc,
             &underflowed_values,
             &[zero, zero],
@@ -8976,7 +9013,7 @@ mod tests {
         rhs_matrix.add_real(0, 0, 1.0);
         let physical_rhs = [Complex64::new(f64::from_bits(1), 0.0)];
         let mut physical_rhs_candidate = [tiny];
-        assert!(!canonicalize_complex_homogeneous_singletons(
+        assert!(!canonicalize_complex_homogeneous_zero_constraints(
             &rhs_matrix.csc,
             &rhs_matrix.values,
             &physical_rhs,
@@ -8986,7 +9023,7 @@ mod tests {
         assert_eq!(physical_rhs_candidate, [tiny]);
 
         let mut erased_rhs_candidate = [tiny];
-        assert!(canonicalize_complex_homogeneous_singletons(
+        assert!(canonicalize_complex_homogeneous_zero_constraints(
             &rhs_matrix.csc,
             &rhs_matrix.values,
             &[zero],
@@ -8994,6 +9031,51 @@ mod tests {
             ComplexSolveOp::Normal,
         ));
         assert_eq!(erased_rhs_candidate, [zero]);
+    }
+
+    /// A homogeneous chain from a singleton seed: `x0 = 0` (a grounded source
+    /// row with no AC drive), `x1 - 2*x0 = 0` (a controlled source buffering
+    /// it) and `x2 - x1 = 1` (a source stacked on the buffer). A leak in `x0`
+    /// reaches `x1` through the buffer, and both are proven zero; `x2` is not.
+    #[test]
+    fn complex_homogeneous_zeros_follow_a_chain_from_its_seed() {
+        let structure: [(usize, usize); 5] = [(0, 0), (1, 0), (1, 1), (2, 1), (2, 2)];
+        let real = StaticMatrix::from_triplets(3, 3, &structure.map(|(row, col)| (row, col, 0.0)))
+            .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        for (row, col, value) in [
+            (0, 0, 1.0),
+            (1, 0, -2.0),
+            (1, 1, 1.0),
+            (2, 1, -1.0),
+            (2, 2, 1.0),
+        ] {
+            matrix.add_real(row, col, value);
+        }
+        let zero = Complex64::new(0.0, 0.0);
+        let one = Complex64::new(1.0, 0.0);
+        let rhs = [zero, zero, one];
+        let leak = Complex64::new(2.0_f64.powi(-60), 0.0);
+        let mut solution = [leak, leak * 2.0, one];
+        assert!(!complex_certificate_accepts(&matrix, &solution, &rhs));
+
+        assert!(
+            matrix
+                .canonicalize_homogeneous_zeros(&rhs, &mut solution)
+                .unwrap()
+        );
+        assert_eq!(solution, [zero, zero, one]);
+        assert!(complex_certificate_accepts(&matrix, &solution, &rhs));
+        assert!(
+            !matrix
+                .canonicalize_homogeneous_zeros(&rhs, &mut solution)
+                .unwrap(),
+            "an exact solution has nothing to zero"
+        );
+        assert!(matches!(
+            matrix.canonicalize_homogeneous_zeros(&rhs[..2], &mut solution),
+            Err(SolverError::InvalidCircuit(_))
+        ));
     }
 
     /// Certify a hand-made complex solution of `matrix x = rhs`.
@@ -9091,7 +9173,7 @@ mod tests {
         ];
         let mut singletons = remnants;
         assert!(
-            !canonicalize_complex_homogeneous_singletons(
+            !canonicalize_complex_homogeneous_zero_constraints(
                 &matrix.csc,
                 &matrix.values,
                 &rhs,
