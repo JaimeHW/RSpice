@@ -793,6 +793,22 @@ impl Engine {
             result.push_dc_observable(format!("{}:RBPS", device.name), device.core.model.rbps);
         }
 
+        // A metered Verilog-A terminal publishes the current its meter
+        // solved, under the instance's own spellings: `I(x1)` for the first
+        // terminal of an instance with at most two, and `x1:ia` — what
+        // `@x1[ia]` resolves through — for every metered terminal. Ahead of
+        // the report below, so a generated instance's report of the same
+        // terminal does not shadow it.
+        for meter in circuit.veriloga_terminal_meters() {
+            let current = circuit
+                .veriloga_terminal_meter_current(solution, meter)
+                .map_err(SimulationError::Circuit)?;
+            if meter.instance_current {
+                result.push_dc_observable(format!("I({})", meter.instance), current);
+            }
+            result.push_dc_observable(meter.parameter_name(), current);
+        }
+
         // Publish every value in the canonical device operating-point report
         // through the same registry used by `.PRINT DC @device[param]` and
         // frontend `.SAVE` projection.  Keeping this on SimulationResult is

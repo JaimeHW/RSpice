@@ -40,7 +40,7 @@ impl Engine {
             return;
         }
         for index in 0..circuit.num_nodes() {
-            if !circuit.is_non_electrical_state_matrix_index(index) {
+            if circuit.receives_nodal_gmin(index) {
                 matrix.add(index, index, gmin);
             }
         }

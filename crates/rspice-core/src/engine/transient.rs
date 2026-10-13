@@ -825,7 +825,6 @@ use truncation::{
 };
 mod bjt;
 use bjt::{BjtChargeStep, BjtPredictorHistory};
-mod runtime_veriloga_saves;
 
 pub use self::{
     checkpoint::{
@@ -910,6 +909,8 @@ enum DerivedTransientBranchCurrentKind {
     VoltageControlledCurrentSource,
     CurrentControlledCurrentSource,
     NativeDiode,
+    /// `I(x1)` of a Verilog-A instance read from its first terminal's meter.
+    VerilogATerminalMeter,
     #[cfg(feature = "veriloga-builtins-base")]
     GeneratedVerilogA,
     XyceMemristor,
@@ -2045,6 +2046,21 @@ impl Engine {
                 },
             );
         }
+        // A metered instance's current is its meter's, solved rather than
+        // stamped; considered first, it wins the instance's name over the
+        // generated device's own lead current below.
+        for (index, meter) in circuit.veriloga_terminal_meters().iter().enumerate() {
+            if !meter.instance_current {
+                continue;
+            }
+            consider(
+                &meter.instance,
+                DerivedTransientBranchCurrent {
+                    kind: DerivedTransientBranchCurrentKind::VerilogATerminalMeter,
+                    index,
+                },
+            );
+        }
         #[cfg(feature = "veriloga-builtins-base")]
         for (index, device) in circuit.generated_veriloga_devices().iter().enumerate() {
             if device.external_terminals().len() != 2 {
@@ -2134,6 +2150,9 @@ impl Engine {
             }
             DerivedTransientBranchCurrentKind::NativeDiode => {
                 &circuit.diodes.devices[branch.index].name
+            }
+            DerivedTransientBranchCurrentKind::VerilogATerminalMeter => {
+                &circuit.veriloga_terminal_meters()[branch.index].instance
             }
             #[cfg(feature = "veriloga-builtins-base")]
             DerivedTransientBranchCurrentKind::GeneratedVerilogA => circuit
@@ -2251,6 +2270,12 @@ impl Engine {
                 };
                 diode.stamped_conduction_current(voltage) + displacement_current
             }
+            DerivedTransientBranchCurrentKind::VerilogATerminalMeter => circuit
+                .veriloga_terminal_meter_current(
+                    solution,
+                    &circuit.veriloga_terminal_meters()[branch.index],
+                )
+                .map_err(SimulationError::Circuit)?,
             #[cfg(feature = "veriloga-builtins-base")]
             DerivedTransientBranchCurrentKind::GeneratedVerilogA => circuit
                 .generated_veriloga_devices()
@@ -2633,11 +2658,32 @@ impl Engine {
                             Some(&mosfet_history.accepted_displacement_currents),
                         )
                         .map_err(SimulationError::Circuit)?,
+                    &Self::veriloga_terminal_meter_observables(circuit, solution)?,
                 ),
             );
         }
         circuit.accept_generic_switch_transient_step();
         Ok(added_values)
+    }
+
+    /// The metered Verilog-A terminal currents at `solution`, as the device
+    /// observables an `@x1[ia]` probe reads. Recorded beside every device
+    /// report, so they exist at every sample the report does, the first after a
+    /// checkpoint resume included.
+    fn veriloga_terminal_meter_observables(
+        circuit: &crate::circuit::CircuitData,
+        solution: &[Value],
+    ) -> Result<Vec<(String, String, Value)>, SimulationError> {
+        circuit
+            .veriloga_terminal_meters()
+            .iter()
+            .map(|meter| {
+                circuit
+                    .veriloga_terminal_meter_current(solution, meter)
+                    .map(|current| (meter.instance.clone(), meter.label.clone(), current))
+                    .map_err(SimulationError::Circuit)
+            })
+            .collect()
     }
 
     /// Close an accepted point: record its committed event state, hold the
@@ -4379,7 +4425,6 @@ impl Engine {
         SimulationError,
     > {
         Self::ensure_bjt_transient_phase_support(&prepared.circuit, abort)?;
-        Self::ensure_runtime_veriloga_current_saves(netlist, &prepared.circuit)?;
         let admitted = AdmittedTransientCircuit {
             prepared,
             identity: CheckpointIdentity {
@@ -5677,6 +5722,7 @@ impl Engine {
                 circuit
                     .initial_transient_device_op_report(&solution)
                     .map_err(SimulationError::Circuit)?,
+                &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
             );
         }
         let mut event_changes = Vec::new();
@@ -5882,6 +5928,7 @@ impl Engine {
                     circuit
                         .initial_transient_device_op_report(&solution)
                         .map_err(SimulationError::Circuit)?,
+                    &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
                 ),
             );
             self.ensure_transient_result_limits(&result, retained_result_values)?;
@@ -6403,6 +6450,7 @@ impl Engine {
                             Some(&mosfet_history.accepted_displacement_currents),
                         )
                         .map_err(SimulationError::Circuit)?,
+                    &Self::veriloga_terminal_meter_observables(&circuit, &solution)?,
                 ),
             );
             self.ensure_transient_result_limits(&result, retained_result_values)?;

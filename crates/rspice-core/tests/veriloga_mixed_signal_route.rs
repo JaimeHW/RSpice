@@ -5284,14 +5284,14 @@ endmodule
     }
 }
 
-/// **`.SAVE I(x)` on a runtime Verilog-A instance is refused, not dropped.**
+/// **`.SAVE I(x)` on a runtime Verilog-A instance reports its current.**
 ///
-/// The instance keeps no per-terminal current, so the save would match no
-/// column and the result would silently lack it. Both runtime routes — an
-/// analog-only module and a mixed one — refuse it before solving, as a typed
-/// capability refusal naming the instance.
+/// The instance keeps no per-terminal current of its own, so the saved
+/// terminal is metered. Both runtime routes — an analog-only module and a
+/// mixed one, whose continuous half stamps the same contribution — report the
+/// current into the first terminal, `V(a) / 1 kΩ`, at every sample.
 #[test]
-fn saving_the_current_of_a_runtime_veriloga_instance_is_a_typed_refusal() {
+fn saving_the_current_of_a_runtime_veriloga_instance_reports_it() {
     for (name, source) in [
         (
             "analog_load",
@@ -5318,23 +5318,18 @@ fn saving_the_current_of_a_runtime_veriloga_instance_is_a_typed_refusal() {
             model.deck_path()
         );
         let netlist = Netlist::parse(&deck).expect("the deck parses");
-        let error = Engine::new(SimulationConfig::default())
+        let result = Engine::new(SimulationConfig::default())
             .run_tran(&netlist, 2e-9, 1e-9)
-            .expect_err("the save cannot be honoured");
-        let rspice_core::SimulationError::UnsupportedCapability(refusal) = &error else {
-            panic!("{name}: expected a typed capability refusal, got {error:?}");
-        };
-        assert_eq!(
-            refusal.capability, "output.veriloga.terminal_current",
-            "{error}"
-        );
-        assert!(
-            refusal
-                .instance
-                .as_deref()
-                .is_some_and(|instance| instance.eq_ignore_ascii_case("x1")),
-            "{error}"
-        );
-        assert!(refusal.detail.contains("I(x1)"), "{error}");
+            .unwrap_or_else(|error| panic!("{name}: the save is honoured: {error}"));
+        let current = result
+            .try_branch_current_waveform_named("x1")
+            .unwrap_or_else(|| panic!("{name}: I(x1) is in the result"));
+        assert_eq!(current.len(), result.time.len(), "{name}");
+        for (index, value) in current.iter().enumerate() {
+            assert!(
+                (value - 1e-3).abs() < 1e-15,
+                "{name}: I(x1) at sample {index} is {value}, V(a) / 1 kΩ is 1 mA"
+            );
+        }
     }
 }

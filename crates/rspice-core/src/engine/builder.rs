@@ -96,6 +96,8 @@ mod mixed_boundaries;
 mod mixed_modules;
 #[cfg(feature = "veriloga")]
 mod veriloga_instances;
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+mod veriloga_terminal_meters;
 
 #[cfg(feature = "veriloga")]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -5755,6 +5757,31 @@ impl Engine {
             }
         }
 
+        // A Verilog-A instance's port positions and names are its module's, so
+        // its terminal meters go in once the sources are resolved; and before
+        // the topology walk, the boundary supplies and the devices are built,
+        // all of which must see the meter's private node as the terminal.
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let veriloga_terminal_meters = veriloga_terminal_meters::materialize(
+            netlist,
+            &mut flat_elements,
+            &mut known_device_names,
+            self.config.resource_limits.max_flattened_elements,
+            |element| {
+                let ElementKind::Subcircuit { subckt_name, .. } = &element.kind else {
+                    return None;
+                };
+                #[cfg(feature = "veriloga")]
+                if let Some(binding) = veriloga_models.get(&normalize_model_key(subckt_name)) {
+                    return binding.model.as_ref().map(|entry| {
+                        veriloga_terminal_meters::runtime_instance_ports(element, entry)
+                    });
+                }
+                veriloga_terminal_meters::generated_instance_ports(element, subckt_name)
+            },
+            abort,
+        )?;
+
         let floating_nodes = collect_floating_nodes(
             &flat_elements,
             self.nodal_shunt_conductance() > 0.0,
@@ -9501,6 +9528,11 @@ impl Engine {
             }
         }
 
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        veriloga_terminal_meters::resolve(&mut circuit, veriloga_terminal_meters)?;
+        #[cfg(feature = "veriloga-builtins-base")]
+        veriloga_terminal_meters::refuse_multi_terminal_generated_currents(netlist, &circuit)?;
+
         let scoped_auto_bridge_metadata =
             xspice_auto_bridge_scoped_metadata(&circuit, &flattened.xspice_auto_bridge_node_hints);
         #[cfg_attr(not(feature = "veriloga"), allow(unused_mut))]
@@ -9997,6 +10029,7 @@ impl Engine {
         if let Some(capture) = &mut circuit.parameter_direction {
             capture.owners = flat_elements;
         }
+        circuit.name_metered_discrete_ports_after_their_nets();
         Ok(BuiltRfCircuit {
             circuit,
             rf_ports,

@@ -1255,9 +1255,14 @@ impl TransientResult {
 
     /// Append one accepted device operating-point snapshot. Missing parameters
     /// are padded with NaN so every stored trace remains aligned with `time`.
+    ///
+    /// `observed` holds observables the report cannot carry, as `(device,
+    /// parameter, value)`. They are recorded after it, so one that names a
+    /// reported parameter replaces the report's value.
     pub(crate) fn record_device_op_sample(
         &mut self,
         report: crate::circuit::DeviceOpReport,
+        observed: &[(String, String, Value)],
     ) -> usize {
         if self.time.is_empty() {
             return 0;
@@ -1267,40 +1272,47 @@ impl TransientResult {
         let mut seen = vec![false; self.device_op_traces.len()];
         let mut added_values = 0usize;
 
-        for entry in report.entries {
-            for (parameter, value) in entry.params {
-                let trace_index = self
-                    .device_op_traces
-                    .iter()
-                    .position(|trace| {
-                        trace.device_name.eq_ignore_ascii_case(&entry.name)
-                            && trace.parameter.eq_ignore_ascii_case(parameter)
-                    })
-                    .unwrap_or_else(|| {
-                        let trace_index = self.device_op_traces.len();
-                        self.device_op_traces.push(TransientDeviceOpTrace {
-                            device_name: entry.name.clone(),
-                            parameter: parameter.to_string(),
-                            values: vec![Value::NAN; sample_index],
-                        });
-                        added_values = added_values.saturating_add(sample_index);
-                        seen.push(false);
-                        trace_index
+        let reported = report.entries.iter().flat_map(|entry| {
+            entry
+                .params
+                .iter()
+                .map(|&(parameter, value)| (entry.name.as_str(), parameter, value))
+        });
+        let observed = observed
+            .iter()
+            .map(|(device, parameter, value)| (device.as_str(), parameter.as_str(), *value));
+        for (device, parameter, value) in reported.chain(observed) {
+            let trace_index = self
+                .device_op_traces
+                .iter()
+                .position(|trace| {
+                    trace.device_name.eq_ignore_ascii_case(device)
+                        && trace.parameter.eq_ignore_ascii_case(parameter)
+                })
+                .unwrap_or_else(|| {
+                    let trace_index = self.device_op_traces.len();
+                    self.device_op_traces.push(TransientDeviceOpTrace {
+                        device_name: device.to_owned(),
+                        parameter: parameter.to_owned(),
+                        values: vec![Value::NAN; sample_index],
                     });
+                    added_values = added_values.saturating_add(sample_index);
+                    seen.push(false);
+                    trace_index
+                });
 
-                let trace = &mut self.device_op_traces[trace_index];
-                if trace.values.len() < sample_index {
-                    added_values = added_values.saturating_add(sample_index - trace.values.len());
-                    trace.values.resize(sample_index, Value::NAN);
-                }
-                if trace.values.len() == sample_index {
-                    trace.values.push(value);
-                    added_values = added_values.saturating_add(1);
-                } else if let Some(slot) = trace.values.get_mut(sample_index) {
-                    *slot = value;
-                }
-                seen[trace_index] = true;
+            let trace = &mut self.device_op_traces[trace_index];
+            if trace.values.len() < sample_index {
+                added_values = added_values.saturating_add(sample_index - trace.values.len());
+                trace.values.resize(sample_index, Value::NAN);
             }
+            if trace.values.len() == sample_index {
+                trace.values.push(value);
+                added_values = added_values.saturating_add(1);
+            } else if let Some(slot) = trace.values.get_mut(sample_index) {
+                *slot = value;
+            }
+            seen[trace_index] = true;
         }
 
         for (trace_index, trace) in self.device_op_traces.iter_mut().enumerate() {

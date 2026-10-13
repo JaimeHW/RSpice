@@ -308,7 +308,12 @@ impl CircuitData {
                 } else {
                     0.0
                 };
-                f[node_row] += (shunt + nodal_gmin) * solution[node_row];
+                let floor = if self.receives_nodal_gmin(node_row) {
+                    nodal_gmin
+                } else {
+                    0.0
+                };
+                f[node_row] += (shunt + floor) * solution[node_row];
             }
         }
 

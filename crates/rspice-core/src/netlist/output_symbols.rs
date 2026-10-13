@@ -2229,7 +2229,7 @@ fn resolved_alias_exists(
         .is_some_and(|target| namespace.contains(target))
 }
 
-fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
+pub(crate) fn hierarchy_pattern_matches(pattern: &str, candidate: &str) -> bool {
     let candidate = candidate.chars().collect::<Vec<_>>();
     // `reachable[i]` is true when the pattern consumed so far can end just
     // before `candidate[i]`; the trailing slot is the full-match position.

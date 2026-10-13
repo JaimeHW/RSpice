@@ -84,6 +84,8 @@ pub use initcond::{
 };
 pub use model_resolution::{UnresolvedDeviceModelReference, unresolved_device_model_references};
 pub use mutual_inductor::validate_mutual_inductor_references;
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+pub(crate) use output_symbols::hierarchy_pattern_matches;
 pub use output_symbols::{
     InterfaceNodeAliases, OutputAnalysisKind, OutputDirectiveKind, OutputExpressionIssue,
     OutputExpressionValidationError, OutputRequest, OutputSymbolDependency, OutputSymbolKind,

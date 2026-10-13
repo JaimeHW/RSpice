@@ -40,6 +40,8 @@ pub use model_safety::{
 };
 mod terminals;
 pub use terminals::{BjtTerminalLayout, MosTerminalLayout};
+mod terminal_meters;
+pub(crate) use terminal_meters::VerilogATerminalMeter;
 pub(crate) mod dae;
 pub(crate) mod device_noise;
 mod external_models;
@@ -569,6 +571,9 @@ pub struct CircuitData {
     /// physical shunts and must not become the implicit ground reference.
     pub(crate) terminal_probe_nodes: HashMap<NodeId, NodeId>,
     pub(crate) terminal_probe_source_names: HashSet<String>,
+    /// Meters on the Verilog-A instance terminals whose currents the deck
+    /// names; empty for a deck that names none.
+    pub(crate) veriloga_terminal_meters: Vec<VerilogATerminalMeter>,
     pub(crate) mos_terminal_layouts: HashMap<String, MosTerminalLayout>,
     pub(crate) bjt_terminal_layouts: HashMap<String, BjtTerminalLayout>,
     pub(crate) device_model_safety: HashMap<String, DeviceModelSafety>,

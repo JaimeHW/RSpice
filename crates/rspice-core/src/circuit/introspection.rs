@@ -272,6 +272,21 @@ impl CircuitData {
             && !self.terminal_probe_nodes.contains_key(&(index + 1))
     }
 
+    /// Whether this zero-based matrix row takes the numerical nodal GMIN floor.
+    ///
+    /// A current meter's private node is not a node of the circuit the deck
+    /// describes: it is the deck's node, carried through a zero-volt source to
+    /// the terminal it meters. A floor there would leak current around the
+    /// meter, which would then read the device's current plus that leak. The
+    /// deck's node keeps its own floor, so the conditioned circuit is the
+    /// unmetered one.
+    #[inline]
+    pub(crate) fn receives_nodal_gmin(&self, index: usize) -> bool {
+        !self.is_non_electrical_state_matrix_index(index)
+            && (self.terminal_probe_nodes.is_empty()
+                || !self.terminal_probe_nodes.contains_key(&(index + 1)))
+    }
+
     /// Whether `.OPTIONS RSHUNT` installed a physical shunt on electrical nodes.
     pub fn has_global_shunt(&self) -> bool {
         self.global_shunt_conductance > 0.0
@@ -884,6 +899,7 @@ impl CircuitData {
         let mut report = self.device_op_report();
         self.replace_jfet_report_currents(&mut report, solution, None)?;
         self.replace_mosfet_report_currents(&mut report, solution, None)?;
+        self.apply_veriloga_terminal_meters(&mut report, solution)?;
         self.add_conductive_power_observations(&mut report, solution)?;
         self.add_intrinsic_voltage_observations(&mut report, solution)?;
         Ok(report)

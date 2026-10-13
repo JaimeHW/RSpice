@@ -49,6 +49,7 @@ impl CircuitData {
             global_shunt_conductance: 0.0,
             terminal_probe_nodes: HashMap::new(),
             terminal_probe_source_names: HashSet::new(),
+            veriloga_terminal_meters: Vec::new(),
             mos_terminal_layouts: HashMap::new(),
             bjt_terminal_layouts: HashMap::new(),
             device_model_safety: HashMap::new(),

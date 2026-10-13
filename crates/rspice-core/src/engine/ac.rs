@@ -3125,7 +3125,19 @@ impl Engine {
         let size = circuit.matrix_size();
         engine.ensure_result_shape(frequencies.len(), size.saturating_mul(2).saturating_add(1))?;
         let node_names = circuit.node_names_sorted();
-        let branch_names = circuit.branch_names_sorted();
+        let mut branch_names = circuit.branch_names_sorted();
+        // `I(x1)` of a metered Verilog-A instance is its first terminal's
+        // meter current, published as a branch of the instance's own name
+        // beside the meter's.
+        let instance_currents = circuit
+            .veriloga_terminal_meters()
+            .iter()
+            .filter(|meter| meter.instance_current)
+            .map(|meter| {
+                branch_names.push(meter.instance.clone());
+                (num_nodes + meter.branch).saturating_sub(1)
+            })
+            .collect::<Vec<_>>();
         // Closure to solve at a single frequency. Takes the circuit as a
         // parameter so the parallel path below can hand each worker its own
         // clone (device-evaluation caches are Cell-based and not Sync).
@@ -3150,6 +3162,13 @@ impl Engine {
             circuit
                 .capacitors
                 .project_complex_ic_branch_currents(&solution, &mut currents, omega);
+            for &index in &instance_currents {
+                currents.push(solution.get(index).copied().ok_or_else(|| {
+                    SimulationError::Circuit(
+                        "a Verilog-A terminal meter is outside the AC solution".into(),
+                    )
+                })?);
+            }
 
             Ok(AcResult {
                 frequency: freq,

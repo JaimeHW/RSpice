@@ -281,20 +281,23 @@ pub(super) fn try_build_mixed_signal_instance(
 ///
 /// A real-valued port occupies one event net, despite having no bit width.
 fn declared_node_count(artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact) -> usize {
-    artifact
-        .hir
-        .ports
-        .iter()
-        .map(|port| {
-            artifact
-                .digital
-                .signals
-                .iter()
-                .find(|signal| signal.name == port.name)
-                .filter(|signal| !signal.kind.is_real())
-                .map_or(1, |signal| signal.width.max(1) as usize)
-        })
-        .sum()
+    port_node_widths(artifact).sum()
+}
+
+/// How many consecutive X-card nodes each module port takes, in port order:
+/// one, or one per bit of a vector discrete port.
+pub(super) fn port_node_widths(
+    artifact: &rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+) -> impl Iterator<Item = usize> + '_ {
+    artifact.hir.ports.iter().map(|port| {
+        artifact
+            .digital
+            .signals
+            .iter()
+            .find(|signal| signal.name == port.name)
+            .filter(|signal| !signal.kind.is_real())
+            .map_or(1, |signal| signal.width.max(1) as usize)
+    })
 }
 
 /// Split the module's ports into the analog terminals the continuous half

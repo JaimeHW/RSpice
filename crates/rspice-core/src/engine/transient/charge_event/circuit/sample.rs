@@ -73,7 +73,12 @@ impl PreparedEventCircuit<'_> {
                 } else {
                     0.0
                 };
-                let shunt = sum([(physical, 1.0), (options.nodal_gmin, 1.0)].into_iter())?;
+                let floor = if self.circuit.receives_nodal_gmin(index) {
+                    options.nodal_gmin
+                } else {
+                    0.0
+                };
+                let shunt = sum([(physical, 1.0), (floor, 1.0)].into_iter())?;
                 if shunt != 0.0 {
                     branch(&mut sample.f, state, index + 1, 0, shunt);
                 }
