@@ -3,6 +3,7 @@
 
 use egui::{Response, Sense, Ui, WidgetInfo, WidgetType, vec2};
 
+use crate::panels::PROPERTY_ROW_PAD;
 use crate::theme::{self, FontWeight, mix};
 use crate::tokens::{self, Tokens};
 
@@ -49,28 +50,34 @@ pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<
         return None;
     }
 
+    // The inset every inspector row starts its label at: these headers title
+    // the blocks a result viewer adds to the inspector, under and over the
+    // inspector's own rows.
+    let inset = PROPERTY_ROW_PAD;
     let painter = ui.painter();
     let baseline_y = rect.top() + 9.0;
     let title_right = action_galley
         .as_ref()
-        .map_or(rect.right() - 12.0, |galley| {
-            rect.right() - 12.0 - galley.size().x - 12.0 - 6.0
+        .map_or(rect.right() - inset, |galley| {
+            rect.right() - inset - galley.size().x - 12.0 - 6.0
         });
     let title_rect = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 12.0, rect.top()),
-        egui::pos2(title_right.max(rect.left() + 12.0), rect.bottom()),
+        egui::pos2(rect.left() + inset, rect.top()),
+        egui::pos2(title_right.max(rect.left() + inset), rect.bottom()),
     );
     painter.with_clip_rect(title_rect).galley(
-        egui::pos2(rect.left() + 12.0, baseline_y),
+        egui::pos2(rect.left() + inset, baseline_y),
         title_galley,
         c.text_faint,
     );
 
     let action_label = action?;
     let action_galley = action_galley.expect("an action label always has a measured galley");
+    // The action's text ends on the inset; its hover fill reaches past it by
+    // the padding the button draws around its label.
     let action_rect = egui::Rect::from_min_size(
         egui::pos2(
-            rect.right() - 12.0 - action_galley.size().x - 12.0,
+            rect.right() - inset - action_galley.size().x - 6.0,
             baseline_y - 2.0,
         ),
         action_galley.size() + vec2(12.0, 4.0),

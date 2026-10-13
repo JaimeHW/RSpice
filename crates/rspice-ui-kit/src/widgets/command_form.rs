@@ -361,7 +361,13 @@ fn select_all_on_keyboard_focus(ui: &Ui, response: &Response, value: &str) {
 /// The ends of a path or a name are what identify it; the middle is what a
 /// reader skips. Truncating the tail, as a plain `truncate` does, leaves every
 /// view of the same cell reading identically.
-fn middle_elided(ui: &Ui, text: &str, font: &egui::FontId, color: Color32, width: f32) -> String {
+pub(crate) fn middle_elided(
+    ui: &Ui,
+    text: &str,
+    font: &egui::FontId,
+    color: Color32,
+    width: f32,
+) -> String {
     let measure = |candidate: &str| {
         ui.fonts_mut(|fonts| {
             fonts

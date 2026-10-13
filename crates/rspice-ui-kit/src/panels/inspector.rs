@@ -16,6 +16,13 @@ use egui::{Color32, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 /// of separately tuned boxes, and no section is framed unevenly.
 pub const INSPECTOR_SECTION_PADDING: f32 = 8.0;
 
+/// Where every line of inspector text starts, measured from the panel edge,
+/// and where it stops short of the far one: a property row's own padding.
+///
+/// Blocks that paint their own rows — a viewer's statistics table, a note —
+/// read this rather than restating it, so they stay on the rows' column.
+pub const INSPECTOR_TEXT_INSET: f32 = super::PROPERTY_ROW_PAD;
+
 fn inspector_section_state_id() -> egui::Id {
     egui::Id::new("workbench.inspector.property-list-open")
 }
@@ -67,6 +74,15 @@ pub fn section_block_gap(ui: &mut Ui) {
 pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     close_open_section(ui);
     design_section_header(ui, title, meta);
+    open_section_body(ui);
+}
+
+/// [`section_header`] whose metadata qualifies everything in the section —
+/// how its values were computed, say — and needs a sentence to be read
+/// correctly. The sentence is the header's hover text.
+pub fn section_header_explained(ui: &mut Ui, title: &str, meta: &str, explanation: &str) {
+    close_open_section(ui);
+    super::section_header_explained(ui, title, meta, explanation);
     open_section_body(ui);
 }
 
@@ -182,23 +198,56 @@ pub fn finish_inspector_sections(ui: &mut Ui) {
     }
 }
 
+/// A sentence in an inspector body: what a section's rows mean, rather than
+/// one more of them.
+///
+/// The one place an inspector writes prose. It wraps inside the same left and
+/// right inset a property row gives its label and value, so a note lines up
+/// with the rows around it and never starts on, or runs into, the panel edge
+/// — which is what a bare `Label` added to the body does, because the inset
+/// belongs to the rows rather than to the panel.
 pub fn muted_inspector_copy(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
+    let tone = Tokens::get(ui.ctx()).color.text_dim;
+    toned_inspector_copy(ui, text, tone);
+}
+
+/// [`muted_inspector_copy`] in a tone that carries meaning: a warning a reader
+/// should act on, or a remark quieter than the rows it sits under.
+pub fn toned_inspector_copy(ui: &mut Ui, text: &str, tone: Color32) {
+    let inset = INSPECTOR_TEXT_INSET;
     let galley = ui.painter().layout(
         text.to_owned(),
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        (ui.available_width() - 20.0).max(1.0),
+        tone,
+        (ui.available_width() - 2.0 * inset).max(1.0),
     );
     let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), galley.size().y + 16.0),
+        Vec2::new(
+            ui.available_width(),
+            galley.size().y + 2.0 * INSPECTOR_COPY_PAD_Y,
+        ),
         Sense::hover(),
     );
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
     ui.painter().galley(
-        Pos2::new(rect.left() + 10.0, rect.top() + 8.0),
+        Pos2::new(rect.left() + inset, rect.top() + INSPECTOR_COPY_PAD_Y),
         galley,
-        t.color.text_dim,
+        tone,
     );
+}
+
+/// Space above and below a note's text: the gap a property row leaves between
+/// its own edge and the text centred in it.
+const INSPECTOR_COPY_PAD_Y: f32 = 8.0;
+
+/// A block that is neither a row nor a note — a table, a scrolled list, a
+/// checkbox — placed on the inset the rows' labels start at and stopped at the
+/// inset their values end at.
+pub fn inspector_inset<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let inset = INSPECTOR_TEXT_INSET as i8;
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(inset, 0))
+        .show(ui, add)
+        .inner
 }

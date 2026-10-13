@@ -769,7 +769,13 @@ pub fn labeled_icon_button_sized(
 }
 
 pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    section_header_with_typography(ui, title, meta, tokens::FS_0, 0.0);
+    section_header_with_typography(ui, title, meta, tokens::FS_0, 0.0, None);
+}
+
+/// [`section_header`] whose metadata needs a sentence to be read correctly:
+/// `explanation` is the header's hover text in place of its own words.
+pub fn section_header_explained(ui: &mut Ui, title: &str, meta: &str, explanation: &str) {
+    section_header_with_typography(ui, title, Some(meta), tokens::FS_0, 0.0, Some(explanation));
 }
 
 /// Schematic-dock section heading from the upgraded design mockup.
@@ -783,6 +789,7 @@ pub fn schematic_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
         meta,
         tokens::FS_2,
         SCHEMATIC_SECTION_TITLE_TRACKING,
+        None,
     );
 }
 
@@ -840,6 +847,7 @@ fn section_header_with_typography(
     meta: Option<&str>,
     title_size: f32,
     title_tracking: f32,
+    explanation: Option<&str>,
 ) {
     let t = Tokens::get(ui.ctx());
     let title_font = theme::sans(title_size, FontWeight::SemiBold);
@@ -882,7 +890,7 @@ fn section_header_with_typography(
         node.set_label(accessible_label.clone());
         node.set_level(3);
     });
-    let _ = response.on_hover_text(accessible_label);
+    let _ = response.on_hover_text(explanation.map_or(accessible_label, str::to_owned));
     ui.painter().rect_filled(
         rect,
         0.0,
@@ -1122,7 +1130,12 @@ pub fn schematic_property_row_status(
 }
 
 /// Horizontal padding inside a property row.
-const PROPERTY_ROW_PAD: f32 = 10.0;
+///
+/// Every line of text an inspector paints starts at this inset and stops at
+/// it on the right — section titles, notes and the tables beside the rows
+/// included — so the panel reads as one column rather than as blocks set at
+/// slightly different margins.
+pub(crate) const PROPERTY_ROW_PAD: f32 = 10.0;
 /// Gap between a property row's label and value columns.
 const PROPERTY_ROW_GAP: f32 = 8.0;
 /// Share of the column space the label takes while the row is narrow enough
@@ -1143,7 +1156,7 @@ const PROPERTY_ROW_MIN_H: f32 = 29.0;
 
 /// Column widths shared by every property row so a read-only row and an
 /// editable row in the same list line up to the pixel.
-fn property_row_columns(width: f32) -> (f32, f32, f32) {
+pub(crate) fn property_row_columns(width: f32) -> (f32, f32, f32) {
     let inner_width = (width - 2.0 * PROPERTY_ROW_PAD).max(1.0);
     let gap = PROPERTY_ROW_GAP.min(inner_width);
     let columns_width = (inner_width - gap).max(1.0);
@@ -1441,21 +1454,54 @@ pub fn property_row_input_action(
             rect.center().y + t.metrics.ctl_h * 0.5,
         ),
     );
-    let mut edit = egui::TextEdit::singleline(value)
+    let text_color = if invalid {
+        t.color.err
+    } else {
+        ui.visuals()
+            .override_text_color
+            .unwrap_or_else(|| ui.visuals().widgets.inactive.text_color())
+    };
+    let edit = egui::TextEdit::singleline(value)
         .font(egui::TextStyle::Monospace)
         .desired_width((value_column - action_size - action_gap).max(1.0))
         .margin(egui::Margin::symmetric(7, 3));
-    if invalid {
-        edit = edit.text_color(t.color.err);
-    }
-    let edit_response = ui
+    let (edit_response, elided) = ui
         .scope_builder(
             egui::UiBuilder::new()
                 .max_rect(value_rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
-            |ui| ui.add(edit),
+            |ui| {
+                // The id the field is about to take, so it can be asked
+                // whether it is being edited before it paints anything.
+                let id = ui.next_auto_id();
+                if ui.memory(|memory| memory.has_focus(id)) {
+                    return (edit.text_color(text_color).show(ui).response.response, None);
+                }
+                // At rest the field paints its text itself, shortened from
+                // the middle when it would not fit: a value clipped at its
+                // right edge looks complete and is not. Editing gets the
+                // whole text back, scrolled the way any field scrolls.
+                let output = edit.text_color(Color32::TRANSPARENT).show(ui);
+                let font = egui::TextStyle::Monospace.resolve(ui.style());
+                let full = output.galley.text();
+                let width = output.text_clip_rect.width();
+                let shown = crate::widgets::middle_elided(ui, full, &font, text_color, width);
+                let elided = (shown != full).then(|| full.to_owned());
+                ui.painter().with_clip_rect(output.text_clip_rect).text(
+                    output.galley_pos,
+                    Align2::LEFT_TOP,
+                    shown,
+                    font,
+                    text_color,
+                );
+                (output.response.response, elided)
+            },
         )
         .inner;
+    let edit_response = match elided {
+        Some(full) => edit_response.on_hover_text(full),
+        None => edit_response,
+    };
     ui.ctx().accesskit_node_builder(edit_response.id, |node| {
         node.set_label(label);
         node.set_description(if invalid {

@@ -3,21 +3,22 @@
 
 use egui::{Ui, WidgetInfo, WidgetType, vec2};
 
+use crate::panels::{PROPERTY_ROW_PAD, property_row_columns};
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
 /// Render a measurement table across the available width.
+///
+/// Its columns are a property row's columns: a table of measurements sits in
+/// the same inspector as the rows naming what was measured, and a name or a
+/// value starting a few points off theirs reads as a second, misaligned grid.
 pub fn measurement_table(ui: &mut Ui, rows: &[(&str, &str)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
 
     for (i, (name, value)) in rows.iter().enumerate() {
-        let inner_width = (width - 24.0).max(1.0);
-        let gap = 8.0_f32.min(inner_width);
-        let columns_width = (inner_width - gap).max(1.0);
-        let name_width = columns_width * 0.42;
-        let value_width = (columns_width - name_width).max(1.0);
+        let (name_width, gap, value_width) = property_row_columns(width);
         let name_galley = ui.painter().layout(
             (*name).to_owned(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
@@ -47,12 +48,12 @@ pub fn measurement_table(ui: &mut Ui, rows: &[(&str, &str)]) {
         }
         let painter = ui.painter();
         let name_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + 12.0, rect.top()),
-            egui::pos2(rect.left() + 12.0 + name_width, rect.bottom()),
+            egui::pos2(rect.left() + PROPERTY_ROW_PAD, rect.top()),
+            egui::pos2(rect.left() + PROPERTY_ROW_PAD + name_width, rect.bottom()),
         );
         let value_rect = egui::Rect::from_min_max(
             egui::pos2(name_rect.right() + gap, rect.top()),
-            egui::pos2(rect.right() - 12.0, rect.bottom()),
+            egui::pos2(rect.right() - PROPERTY_ROW_PAD, rect.bottom()),
         );
         painter.with_clip_rect(name_rect).galley(
             egui::pos2(
