@@ -228,3 +228,48 @@ fn functions_recurse_keep_static_state_and_bound_their_depth() {
     .expect_err("unbounded recursion is refused");
     assert_eq!(error, DigitalEvalError::CallDepth);
 }
+
+/// A parameter and a range call functions of their module at elaboration
+/// (section 10.4.5): a static one with a loop and an automatic recursive one
+/// that reads the first one's result. A constant function that reads a
+/// signal is refused for that, as Icarus refuses it.
+#[test]
+fn constant_functions_fold_parameters_and_ranges() {
+    let mut harness = Harness::from_source(
+        "module top;\n\
+         \x20 parameter N = 37;\n\
+         \x20 function integer clog2(input integer v);\n\
+         \x20   integer k;\n\
+         \x20   begin k = v - 1; for (clog2 = 0; k > 0; clog2 = clog2 + 1) k = k >> 1; end\n\
+         \x20 endfunction\n\
+         \x20 function automatic integer fact(input integer n);\n\
+         \x20   fact = (n > 1) ? n * fact(n - 1) : 1;\n\
+         \x20 endfunction\n\
+         \x20 localparam B = clog2(N);\n\
+         \x20 localparam F = fact(B);\n\
+         \x20 reg [B-1:0] r;\n\
+         \x20 integer f;\n\
+         \x20 initial begin r = ~0; f = F; end\n\
+         endmodule\n",
+    );
+    expect_finished(harness.run());
+    assert_eq!(harness.get("r"), "111111");
+    assert_eq!(harness.get("f"), format!("{:032b}", 720));
+
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir(
+            "module top;\n\
+             \x20 reg [3:0] s;\n\
+             \x20 function integer peek(input integer v);\n\
+             \x20   peek = v + s;\n\
+             \x20 endfunction\n\
+             \x20 localparam P = peek(1);\n\
+             \x20 integer q;\n\
+             \x20 initial q = P;\n\
+             endmodule\n",
+        )
+        .expect_err("a constant function may not read a signal")
+        .to_string();
+    assert!(error.contains("parameter `P`"), "{error}");
+    assert!(!error.contains("Internal error"), "{error}");
+}

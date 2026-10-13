@@ -1879,6 +1879,7 @@ pub(crate) fn evaluate_constant_expression(
     function: CfgFunction,
     result: ValueId,
     span: super::SourceSpanRef,
+    routines: Vec<super::digital::DigitalRoutine>,
 ) -> Result<DigitalScalar, DigitalEvalError> {
     struct ConstantEnvironment {
         wrote: bool,
@@ -1920,11 +1921,21 @@ pub(crate) fn evaluate_constant_expression(
         static_sensitivity: None,
         span,
     };
-    let plan = CanonicalDigitalPlan::default();
+    // The functions a constant function call reaches (IEEE 1364-2005 section
+    // 10.4.5); their loops bound the run as a process's do.
+    let step_limit = if routines.is_empty() {
+        process.function.blocks.len()
+    } else {
+        DEFAULT_PROCESS_STEP_LIMIT
+    };
+    let plan = CanonicalDigitalPlan {
+        routines,
+        ..Default::default()
+    };
     let mut environment = ConstantEnvironment { wrote: false };
     let mut scratch = DigitalEvalScratch::new();
     let outcome = Interpreter::new(&plan, &process, &mut environment, &mut scratch)
-        .run(process.function.entry, process.function.blocks.len());
+        .run(process.function.entry, step_limit);
     if !matches!(outcome?, DigitalProcessOutcome::Finished) || environment.wrote {
         return Err(DigitalEvalError::InvalidEventExpression {
             value: result,

@@ -460,3 +460,103 @@ endmodule
     );
     assert_eq!(stdout(&report), "r=0 s=3 t=5\n");
 }
+
+/// A parameter, a range and an initializer call functions of their own
+/// module (IEEE 1364-2005 section 10.4.5): static and automatic, recursive,
+/// through a named block and another function, real-valued, reading a
+/// parameter and an instance override. The system task in `mask` is ignored
+/// (rule d), as Icarus ignores it.
+#[test]
+fn constant_functions_run_as_icarus_runs_them() {
+    let report = bench(
+        r#"module child(w);
+  output [31:0] w;
+  parameter N = 5;
+  function integer clog2(input integer v);
+    integer k;
+    begin
+      k = v - 1;
+      for (clog2 = 0; k > 0; clog2 = clog2 + 1) k = k >> 1;
+    end
+  endfunction
+  localparam B = clog2(N);
+  reg [B-1:0] r;
+  assign w = B;
+  initial begin r = ~0; #1 $display("child N=%0d B=%0d r=%b", N, B, r); end
+endmodule
+
+module top;
+  parameter W = 4;
+  function [7:0] mask(input integer n);
+    begin mask = {W{1'b1}} << n; $display("inside mask"); end
+  endfunction
+  function automatic [15:0] fact(input [15:0] n);
+    fact = (n > 1) ? fact(n - 1) * n : n;
+  endfunction
+  function integer twice(input integer a);
+    begin : named twice = 2 * add1(a) - 2; end
+  endfunction
+  function integer add1(input integer a);
+    add1 = a + 1;
+  endfunction
+  function real half(input real x);
+    half = x / 2.0;
+  endfunction
+  localparam M = mask(1);
+  localparam F5 = fact(5);
+  localparam T = twice(21);
+  localparam real H = half(5.0);
+  localparam G = fact(3) + twice(add1(1));
+  wire [31:0] w1, w2;
+  child #(.N(17)) c1(w1);
+  child c2(w2);
+  reg [7:0] init = mask(2);
+  initial begin
+    #2 $display("M=%b F5=%0d T=%0d H=%f G=%0d init=%b w1=%0d w2=%0d", M, F5, T, H, G, init, w1, w2);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "child N=17 B=5 r=11111\n\
+         child N=5 B=3 r=111\n\
+         M=00011110 F5=120 T=42 H=2.500000 G=10 init=00111100 w1=5 w2=3\n"
+    );
+}
+
+/// `j.set(v)` enables the task `set` of the instance `j`, with that
+/// instance's storage and scope (IEEE 1364-2005 section 12.5).
+#[test]
+fn a_downward_task_name_enables_the_instance_task() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module jobs(out);
+  output out;
+  reg out;
+  task set(input val);
+    begin #1 out = val; $display("%m set %b at %0t", val, $time); end
+  endtask
+endmodule
+
+module top;
+  wire w1, w2;
+  jobs j(w1);
+  jobs k(w2);
+  initial begin
+    j.set(1'b1);
+    k.set(1'b0);
+    #1 $display("w1=%b w2=%b t=%0t", w1, w2, $time);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "top.j.set set 1 at 1\n\
+         top.k.set set 0 at 2\n\
+         w1=1 w2=0 t=3\n"
+    );
+}

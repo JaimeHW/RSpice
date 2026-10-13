@@ -185,6 +185,7 @@ impl ParameterHierarchy {
         let assignments = crate::canonical_ir::digital_lower::parameter_assignments(
             &declarations,
             &parameter_given::GivenParameters::new(source),
+            &crate::semantic::DigitalConstants::functions_of(source),
             source.time_scale,
         )
         .map_err(|errors| {

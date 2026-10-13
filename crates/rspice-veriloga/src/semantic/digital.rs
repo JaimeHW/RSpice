@@ -49,6 +49,10 @@ pub struct AnalyzedDigital {
     pub processes: Vec<AnalyzedDigitalProcess>,
     /// Tasks and functions, in declaration order.
     pub routines: Vec<super::digital_routines::AnalyzedDigitalRoutine>,
+    /// Hierarchical names that may name a task or function of a scope below
+    /// this one (IEEE 1364-2005 section 12.5): the parser's symbol, mapped to
+    /// the instance names and then the routine's name.
+    pub routine_names: std::collections::BTreeMap<SmolStr, Vec<SmolStr>>,
     /// Continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// Instantiated child modules, elaborated flat into this module's scope.
@@ -121,7 +125,14 @@ pub struct DigitalConstants {
     /// what is actually wrong with it — a real with no discrete-domain form —
     /// and not told the name was never declared.
     pub non_finite_reals: HashMap<SmolStr, f64>,
+    /// The module's functions, which a constant expression may call (IEEE
+    /// 1364-2005 section 10.4.5).
+    pub(crate) functions: ConstantFunctions,
 }
+
+/// The functions a constant expression of one module may call, shared by
+/// every copy of that module's constant table.
+pub(crate) type ConstantFunctions = std::sync::Arc<Vec<DigitalRoutine>>;
 
 impl DigitalConstants {
     pub(crate) fn from_module(module: &Module) -> Self {
@@ -133,8 +144,21 @@ impl DigitalConstants {
                 .cloned()
                 .collect(),
             given: super::parameter_given::GivenParameters::new(module),
+            functions: Self::functions_of(module),
             ..Default::default()
         }
+    }
+
+    /// The functions a module declares.
+    pub(crate) fn functions_of(module: &Module) -> ConstantFunctions {
+        std::sync::Arc::new(
+            module
+                .digital_routines
+                .iter()
+                .filter(|routine| routine.is_function())
+                .cloned()
+                .collect(),
+        )
     }
 
     /// The integer a name denotes, if it denotes one.
@@ -541,6 +565,8 @@ pub struct ElaboratedDigitalInstance {
     /// The instance's tasks and functions: each instance has its own static
     /// storage for them (IEEE 1364-2005 section 10.2.3).
     pub routines: Vec<super::digital_routines::AnalyzedDigitalRoutine>,
+    /// The instance's hierarchical routine names, relative to it.
+    pub routine_names: std::collections::BTreeMap<SmolStr, Vec<SmolStr>>,
     /// The instance's continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
     /// The implicit continuous assignments of this instance's variable output
@@ -760,6 +786,20 @@ impl SemanticAnalyzer {
             bit_aliases: Vec::new(),
             processes,
             routines,
+            routine_names: module
+                .hierarchical_names
+                .iter()
+                .filter(|(_, name)| {
+                    !name.absolute
+                        && name.branch.is_none()
+                        && name.segments.len() > 1
+                        && name.segments.iter().all(|segment| segment.index.is_none())
+                })
+                .map(|(symbol, name)| {
+                    let segments = name.segments.iter().map(|segment| segment.name.clone());
+                    (symbol.clone(), segments.collect())
+                })
+                .collect(),
             continuous_assigns,
             // A module is analyzed on its own, so it knows nothing yet about
             // what it instantiates; hierarchy elaboration fills this in on the
@@ -1479,6 +1519,7 @@ impl SemanticAnalyzer {
     fn digital_constants(&self, module: &Module) -> DigitalConstants {
         let mut constants = DigitalConstants {
             given: super::parameter_given::GivenParameters::new(module),
+            functions: DigitalConstants::functions_of(module),
             ..Default::default()
         };
         let declarations = module.parameters.iter().chain(&module.localparams);

@@ -89,6 +89,7 @@
 //! twice.
 
 mod connection_shapes;
+mod constant_functions;
 mod constants;
 mod disable;
 mod expressions;
@@ -180,9 +181,10 @@ pub(crate) use constants::ParameterAssignment;
 pub(crate) fn parameter_assignments(
     declarations: &[&crate::ast::ParameterDecl],
     given: &crate::semantic::parameter_given::GivenParameters,
+    functions: &crate::semantic::ConstantFunctions,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<Vec<ParameterAssignment>, Vec<DigitalLoweringDiagnostic>> {
-    constants::parameter_assignments(declarations, given, time_scale)
+    constants::parameter_assignments(declarations, given, functions, time_scale)
 }
 
 /// Whether a diagnostic is the author's to fix or the compiler's.
@@ -693,13 +695,28 @@ fn lower_with_analog_variables(
     // that a body may call any routine of its scope, itself included.
     let mut routine_count = 0;
     let mut plan_routines = Vec::new();
-    let root_routines = routines::signatures(
+    let mut root_routines = routines::signatures(
         &digital.routines,
         &mut routine_count,
         &module_constants,
         digital.time_scale,
         &mut diagnostics,
     );
+    let mut instance_routines: Vec<_> = digital
+        .instances
+        .iter()
+        .zip(&instance_constants)
+        .map(|(instance, constants)| {
+            routines::signatures(
+                &instance.routines,
+                &mut routine_count,
+                constants,
+                instance.time_scale,
+                &mut diagnostics,
+            )
+        })
+        .collect();
+    routines::bind_downward_names(digital, &mut root_routines, &mut instance_routines);
     for routine in &digital.routines {
         match routines::lower_routine(
             routine,
@@ -716,6 +733,7 @@ fn lower_with_analog_variables(
                 scope: &root_scope,
                 routines: &root_routines,
                 prefix: "",
+                constant: false,
             },
         ) {
             Ok(lowered) => plan_routines.push(lowered),
@@ -762,12 +780,13 @@ fn lower_with_analog_variables(
             Err(mut errors) => diagnostics.append(&mut errors),
         }
     }
-    for (((instance, scope), constants), frame_scope) in digital
+    for ((((instance, scope), constants), frame_scope), frame_routines) in digital
         .instances
         .iter()
         .zip(&frame_scopes)
         .zip(&instance_constants)
         .zip(&frame_scope_frames)
+        .zip(&instance_routines)
     {
         let frame_array_names: HashSet<_> = instance
             .signals
@@ -790,13 +809,6 @@ fn lower_with_analog_variables(
             &instance.event_assigned_variables,
             &instance.immutable_analog_variables,
         );
-        let frame_routines = routines::signatures(
-            &instance.routines,
-            &mut routine_count,
-            constants,
-            instance.time_scale,
-            &mut diagnostics,
-        );
         let prefix = format!("{}.", instance.path);
         for routine in &instance.routines {
             match routines::lower_routine(
@@ -812,8 +824,9 @@ fn lower_with_analog_variables(
                     time_scale: instance.time_scale,
                     calls: &mut calls,
                     scope: frame_scope,
-                    routines: &frame_routines,
+                    routines: frame_routines,
                     prefix: &prefix,
+                    constant: false,
                 },
             ) {
                 Ok(lowered) => plan_routines.push(lowered),
@@ -835,7 +848,7 @@ fn lower_with_analog_variables(
                 instance.time_scale,
                 &mut calls,
                 frame_scope,
-                &frame_routines,
+                frame_routines,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -854,7 +867,7 @@ fn lower_with_analog_variables(
                 &mut drivers,
                 &mut probes,
                 instance.time_scale,
-                &frame_routines,
+                frame_routines,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),

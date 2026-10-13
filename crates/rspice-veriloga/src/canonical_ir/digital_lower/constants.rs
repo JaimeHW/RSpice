@@ -15,6 +15,8 @@ pub(super) struct ResolvedConstants {
     integers: HashMap<SmolStr, i64>,
     reals: HashMap<SmolStr, f64>,
     non_finite_reals: HashMap<SmolStr, f64>,
+    /// The functions a constant expression may call (section 10.4.5).
+    pub functions: crate::semantic::ConstantFunctions,
 }
 
 impl ResolvedConstants {
@@ -73,6 +75,7 @@ fn scalar_impl(
     }) {
         return None;
     }
+    let functions = constant_functions::lower(&[expression], resolved, time_scale).ok()?;
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
     let empty_arrays = HashMap::new();
@@ -83,7 +86,7 @@ fn scalar_impl(
         calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
-        routines: &super::routines::NO_ROUTINES,
+        routines: &functions.table,
         local_arrays: Vec::new(),
         constant_expression: true,
         time_scale,
@@ -124,7 +127,14 @@ fn scalar_impl(
     }
     let (function, outputs) = lowerer.builder.finish_with_outputs(entry, &[value]).ok()?;
     use crate::numeric_literal::NumericLiteralValue::{Integer, Real};
-    match evaluate_constant_expression(function, outputs[0], expression.span().into()).ok()? {
+    match evaluate_constant_expression(
+        function,
+        outputs[0],
+        expression.span().into(),
+        functions.routines,
+    )
+    .ok()?
+    {
         DigitalScalar::FourState(value) => value.bit_index(signed).map(Integer),
         DigitalScalar::Integer(value) => Some(Integer(i64::from(value))),
         DigitalScalar::Real(value) => Some(Real(value)),
@@ -223,7 +233,7 @@ pub(super) fn digital_dependencies<'a>(
     let mut given = HashSet::new();
     for expression in shapes {
         let (folded, reads) = digital.constants.given.fold(expression)?;
-        collect_expression_reads(&folded, &mut required);
+        constant_reads(&folded, &digital.constants.functions, &mut required);
         given.extend(reads);
     }
     dependencies(&digital.constants, digital.time_scale, required, given)
@@ -238,7 +248,7 @@ pub(super) fn expression_dependencies<'a>(
     let mut given = HashSet::new();
     for expression in expressions {
         let (folded, reads) = source.given.fold(expression)?;
-        collect_expression_reads(&folded, &mut required);
+        constant_reads(&folded, &source.functions, &mut required);
         given.extend(reads);
     }
     dependencies(source, time_scale, required, given)
@@ -277,7 +287,7 @@ fn dependencies(
             let (folded, reads) = source.given.fold(expression)?;
             given.extend(reads);
             let mut reads = BTreeSet::new();
-            collect_expression_reads(&folded, &mut reads);
+            constant_reads(&folded, &source.functions, &mut reads);
             pending.extend(reads);
         }
     }
@@ -318,6 +328,7 @@ pub(super) fn resolve<'a>(
         integers: source.integers.clone(),
         reals: source.reals.clone(),
         non_finite_reals: source.non_finite_reals.clone(),
+        functions: source.functions.clone(),
     };
     let mut finished = HashSet::new();
     let mut active = HashSet::new();
@@ -354,11 +365,11 @@ pub(super) fn resolve<'a>(
         pending.push((name, true));
         let mut dependencies = BTreeSet::new();
         if let Some(expression) = &declaration.default {
-            collect_expression_reads(expression, &mut dependencies);
+            constant_reads(expression, &source.functions, &mut dependencies);
         }
         if let Some(range) = &declaration.packed_range {
-            collect_expression_reads(&range.msb, &mut dependencies);
-            collect_expression_reads(&range.lsb, &mut dependencies);
+            constant_reads(&range.msb, &source.functions, &mut dependencies);
+            constant_reads(&range.lsb, &source.functions, &mut dependencies);
         }
         pending.extend(dependencies.into_iter().rev().map(|name| (name, false)));
     }
@@ -375,6 +386,7 @@ pub(crate) struct ParameterAssignment {
 pub(super) fn parameter_assignments(
     declarations: &[&ParameterDecl],
     given: &crate::semantic::parameter_given::GivenParameters,
+    functions: &crate::semantic::ConstantFunctions,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<Vec<ParameterAssignment>, Vec<DigitalLoweringDiagnostic>> {
     let prepared = declarations
@@ -389,22 +401,26 @@ pub(super) fn parameter_assignments(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let declarations: Vec<_> = prepared.iter().map(|value| value.as_ref()).collect();
-    let mut resolved = ResolvedConstants::default();
+    let mut resolved = ResolvedConstants {
+        functions: functions.clone(),
+        ..Default::default()
+    };
     let mut unavailable = HashSet::new();
     let source = DigitalConstants {
         definitions: declarations.iter().map(|value| (*value).clone()).collect(),
         given: given.clone(),
+        functions: functions.clone(),
         ..Default::default()
     };
     let mut result = Vec::with_capacity(declarations.len());
     for declaration in declarations {
         let mut reads = BTreeSet::new();
         if let Some(expression) = &declaration.default {
-            collect_expression_reads(expression, &mut reads);
+            constant_reads(expression, functions, &mut reads);
         }
         if let Some(range) = &declaration.packed_range {
-            collect_expression_reads(&range.msb, &mut reads);
-            collect_expression_reads(&range.lsb, &mut reads);
+            constant_reads(&range.msb, functions, &mut reads);
+            constant_reads(&range.lsb, functions, &mut reads);
         }
         let packed = declaration.packed_range.is_some() || declaration.signedness.is_some();
         let can_resolve = declaration.dimensions.is_empty()
@@ -473,6 +489,15 @@ fn resolve_one(
             "parameter `{name}` has no digital constant default"
         )));
     };
+    let parameter_diagnostics = |mut diagnostics: Vec<DigitalLoweringDiagnostic>| {
+        for diagnostic in &mut diagnostics {
+            diagnostic.diagnostic.message =
+                format!("parameter `{name}`: {}", diagnostic.diagnostic.message);
+        }
+        diagnostics
+    };
+    let functions = constant_functions::lower(&[expression], resolved, time_scale)
+        .map_err(parameter_diagnostics)?;
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
     let empty_arrays = HashMap::new();
@@ -483,7 +508,7 @@ fn resolve_one(
         calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
-        routines: &super::routines::NO_ROUTINES,
+        routines: &functions.table,
         local_arrays: Vec::new(),
         constant_expression: true,
         time_scale,
@@ -551,11 +576,7 @@ fn resolve_one(
     };
     lowerer.builder.set_terminator(entry, CfgTerminator::Return);
     if !lowerer.diagnostics.is_empty() {
-        for diagnostic in &mut lowerer.diagnostics {
-            diagnostic.diagnostic.message =
-                format!("parameter `{name}`: {}", diagnostic.diagnostic.message);
-        }
-        return Err(lowerer.diagnostics);
+        return Err(parameter_diagnostics(lowerer.diagnostics));
     }
     let (function, outputs) = lowerer
         .builder
@@ -565,8 +586,13 @@ fn resolve_one(
                 "parameter `{name}` expression failed validation: {error:?}"
             ))
         })?;
-    let value = evaluate_constant_expression(function, outputs[0], declaration.span.into())
-        .map_err(|error| {
+    let value = evaluate_constant_expression(
+        function,
+        outputs[0],
+        declaration.span.into(),
+        functions.routines,
+    )
+    .map_err(|error| {
             refuse(format!(
                 "parameter `{name}` cannot be evaluated as a digital constant: {error}"
             ))
@@ -683,6 +709,7 @@ pub(super) fn initializer(
             signal.span.into(),
         )]
     };
+    let functions = constant_functions::lower(&[expression], constants, time_scale)?;
     let empty_index = HashMap::new();
     let empty_analog = HashMap::new();
     let empty_arrays = HashMap::new();
@@ -693,7 +720,7 @@ pub(super) fn initializer(
         calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
-        routines: &super::routines::NO_ROUTINES,
+        routines: &functions.table,
         local_arrays: Vec::new(),
         constant_expression: true,
         time_scale,
@@ -728,8 +755,13 @@ pub(super) fn initializer(
         .builder
         .finish_with_outputs(entry, &[value])
         .map_err(|error| refuse(format!("constant expression failed validation: {error:?}")))?;
-    let value = evaluate_constant_expression(function, outputs[0], signal.span.into())
-        .map_err(|error| refuse(format!("cannot evaluate constant expression: {error}")))?;
+    let value = evaluate_constant_expression(
+        function,
+        outputs[0],
+        signal.span.into(),
+        functions.routines,
+    )
+    .map_err(|error| refuse(format!("cannot evaluate constant expression: {error}")))?;
     Ok(Some(match value {
         DigitalScalar::FourState(value) if !signal.class.is_real() => {
             DigitalInitialValue::FourState(value)
@@ -903,6 +935,44 @@ fn collect_visible(value: &Expression, locals: &BTreeSet<String>, reads: &mut BT
     let mut names = BTreeSet::new();
     collect_expression_reads(value, &mut names);
     reads.extend(names.into_iter().filter(|name| !locals.contains(name)));
+}
+
+/// The names a constant expression reads, with the parameters read by the
+/// functions it calls (section 10.4.5 e: they must be resolved first).
+fn constant_reads(
+    expression: &Expression,
+    functions: &[crate::ast::DigitalRoutine],
+    reads: &mut BTreeSet<String>,
+) {
+    collect_expression_reads(expression, reads);
+    for function in constant_functions::reachable(functions, &[expression]) {
+        let mut locals: BTreeSet<String> = function
+            .arguments
+            .iter()
+            .map(|argument| argument.name.to_string())
+            .collect();
+        locals.insert(function.name.to_string());
+        locals.extend(
+            function
+                .variables
+                .iter()
+                .flat_map(|declaration| &declaration.items)
+                .map(|item| item.name.to_string()),
+        );
+        locals.extend(
+            function
+                .digital_variables
+                .iter()
+                .flat_map(|declaration| &declaration.items)
+                .map(|item| item.name.to_string()),
+        );
+        let mut expressions = Vec::new();
+        constant_functions::declaration_expressions(function, &mut expressions);
+        for expression in expressions {
+            collect_visible(expression, &locals, reads);
+        }
+        collect_parameters(&function.body, &locals, reads);
+    }
 }
 
 /// Close an instance override in its parent's scope using the child's declared

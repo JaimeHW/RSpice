@@ -35,6 +35,7 @@ impl ParameterAssignments {
         let assignments = crate::canonical_ir::digital_lower::parameter_assignments(
             &declarations,
             &parameter_given::GivenParameters::new(module),
+            &DigitalConstants::functions_of(module),
             module.time_scale,
         )
         .map_err(|errors| {

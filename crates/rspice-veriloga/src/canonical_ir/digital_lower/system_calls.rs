@@ -237,6 +237,11 @@ impl ProcessLowerer<'_> {
         block: BlockId,
         task: &SystemFunction,
     ) -> BlockId {
+        // IEEE 1364-2005 section 10.4.5 d): a constant function ignores its
+        // system tasks.
+        if self.constant_expression {
+            return block;
+        }
         let Some(kind) = DigitalSystemCallKind::from_name(&task.name) else {
             self.invariant(
                 format!("system task `{}` reached lowering unrecognized", task.name),

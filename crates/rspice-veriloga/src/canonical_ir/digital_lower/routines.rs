@@ -178,6 +178,51 @@ pub(super) fn signatures(
     table
 }
 
+/// Give each scope's table the routines of the scopes below it that its
+/// hierarchical names reach (IEEE 1364-2005 section 12.5): `u1.t(x)` enables
+/// the task `t` of the instance `u1`, with that instance's storage. A name
+/// that reaches no routine stays unbound, and its enable or call is refused.
+pub(super) fn bind_downward_names(
+    digital: &AnalyzedDigital,
+    root: &mut RoutineTable,
+    instances: &mut [RoutineTable],
+) {
+    let path_index: HashMap<&str, usize> = digital
+        .instances
+        .iter()
+        .enumerate()
+        .map(|(index, instance)| (instance.path.as_str(), index))
+        .collect();
+    let scopes = std::iter::once((String::new(), &digital.routine_names)).chain(
+        digital
+            .instances
+            .iter()
+            .map(|instance| (format!("{}.", instance.path), &instance.routine_names)),
+    );
+    let mut bound = Vec::new();
+    for (scope, (prefix, names)) in scopes.enumerate() {
+        for (symbol, segments) in names {
+            let Some((name, path)) = segments.split_last() else {
+                continue;
+            };
+            let path = format!("{prefix}{}", path.join("."));
+            let Some(&target) = path_index.get(path.as_str()) else {
+                continue;
+            };
+            if let Some(signature) = instances[target].get(name) {
+                bound.push((scope, symbol.clone(), signature.clone()));
+            }
+        }
+    }
+    for (scope, symbol, signature) in bound {
+        let table = match scope {
+            0 => &mut *root,
+            scope => &mut instances[scope - 1],
+        };
+        table.insert(symbol, signature);
+    }
+}
+
 /// The signal a static routine variable lives in.
 fn static_signal(
     signals: &mut Vec<DigitalSignal>,
@@ -226,6 +271,9 @@ pub(super) struct RoutineScope<'a> {
     /// The prefix of the scope's elaborated signal names: empty for the
     /// root, `path.` for an instance.
     pub prefix: &'a str,
+    /// Lower for a constant function call (section 10.4.5): every variable
+    /// in a frame slot, and nothing that runs during simulation.
+    pub constant: bool,
 }
 
 /// Lower one routine of a scope.
@@ -251,6 +299,7 @@ pub(super) fn lower_routine(
         scope,
         routines,
         prefix,
+        constant,
     } = scope;
     let mut lowerer = ProcessLowerer {
         calls: calls.tables_for(Some(scope)),
@@ -258,7 +307,7 @@ pub(super) fn lower_routine(
         process: None,
         routines,
         local_arrays: Vec::new(),
-        constant_expression: false,
+        constant_expression: constant,
         time_scale,
         signals,
         arrays,
@@ -328,7 +377,7 @@ pub(super) fn lower_routine(
             bounds: local.bounds,
             signed: local.signed,
         };
-        if routine.automatic {
+        if routine.automatic || constant {
             lowerer.locals[id].slot = Some(frame_slots.len() as u32);
             frame_slots.push(shape.value_type());
         } else {
@@ -418,7 +467,7 @@ pub(super) fn lower_routine(
         id: signature.id,
         name: routine.name.clone(),
         kind: signature.kind,
-        automatic: routine.automatic,
+        automatic: routine.automatic || constant,
         function,
         params,
         result,

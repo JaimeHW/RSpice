@@ -818,7 +818,11 @@ pub(super) fn lower_prepared(
                 pending.push(Work::Conditional(block, value, domain));
                 pending.push(Work::Expression(block, &value.condition, Mode::Condition));
             }
-            Expression::Call(call) if real && lowerer.constant_expression => {
+            Expression::Call(call)
+                if real
+                    && lowerer.constant_expression
+                    && lowerer.user_function(call).is_none() =>
+            {
                 match (constants::math_call(&call.name), call.args.as_slice()) {
                     (Some(constants::MathCall::Unary(op)), [input]) => {
                         push_unary(
@@ -1109,7 +1113,13 @@ pub(super) fn lower_prepared(
                     Mode::Bits(Context::SELF_DETERMINED),
                 );
             }
-            Expression::Call(call) if lowerer.user_function(call).is_some() => {
+            // A call in the other domain converts through the leaf below.
+            Expression::Call(call)
+                if lowerer
+                    .user_function(call)
+                    .and_then(|function| function.result)
+                    .is_some_and(|result| result.real == real) =>
+            {
                 values.push(lowerer.function_call_value(block, call));
             }
             _ => values.push(if real {
