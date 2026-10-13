@@ -163,6 +163,15 @@ impl Parser<'_> {
     /// each with optional unpacked dimensions and an optional initializer.
     pub(super) fn parse_digital_decl_items(&mut self) -> Result<Vec<DigitalDeclItem>, ParseError> {
         let mut items = Vec::new();
+        if self.check(TokenKind::Hash) {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "net declaration".to_string(),
+                    found: "a net delay (IEEE 1364-2005 section 6.1.3)".to_string(),
+                },
+                self.current_span(),
+            ));
+        }
         loop {
             let item_start = self.current_span();
             let name: SmolStr = self.expect_identifier("declared name")?.into();
@@ -1200,6 +1209,17 @@ impl Parser<'_> {
                     ParseErrorKind::UnsupportedConstruct {
                         context: "delay control".to_string(),
                         found: "a min:typ:max delay; write a single delay expression instead"
+                            .to_string(),
+                    },
+                    self.current_span(),
+                ));
+            }
+            if self.check(TokenKind::Comma) {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: "delay control".to_string(),
+                        found: "separate rise, fall and turn-off delays (IEEE 1364-2005 section \
+                                7.14); write a single delay expression instead"
                             .to_string(),
                     },
                     self.current_span(),

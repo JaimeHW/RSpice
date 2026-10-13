@@ -72,6 +72,16 @@ impl Parser<'_> {
     ) -> Result<(), ParseError> {
         if self.digital_keyword_is("realtime") {
             variables.push(self.parse_variable_decl()?);
+        } else if self.digital_keyword_is("event") {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "event".to_string(),
+                    found: "a named event declared inside a task, function or block; declare \
+                            it in the module"
+                        .to_string(),
+                },
+                self.current_span(),
+            ));
         } else {
             digital_variables.push(self.parse_keyword_variable_decl()?);
         }
@@ -144,6 +154,7 @@ impl Parser<'_> {
                 _ => break,
             }
         }
+        type_arguments(&mut arguments, &mut variables, &mut digital_variables);
 
         let end = if is_task {
             TokenKind::Endtask
@@ -249,10 +260,19 @@ impl Parser<'_> {
                 || self.digital_keyword_is("time")
                 || self.digital_keyword_is("realtime")
             {
-                // IEEE 1800 lets the first argument omit its direction, which
-                // is then `input`; a type keyword restates the type.
-                let direction = current.as_ref().map_or(PortDirection::Input, |c| c.0);
-                current = Some((direction, self.parse_routine_argument_type()?));
+                // IEEE 1364-2005 section 10.2.1 (syntax 10-1): every port
+                // declaration starts with its direction; only a further name
+                // continues the previous one. Defaulting to `input`, or
+                // restating a type alone, is IEEE 1800.
+                return Err(ParseError::new(
+                    ParseErrorKind::Expected {
+                        expected: "`input`, `output` or `inout` before a routine argument \
+                                   declaration (IEEE 1364-2005 section 10.2.1)"
+                            .to_string(),
+                        found: format!("{:?}", self.current().kind),
+                    },
+                    self.current_span(),
+                ));
             }
             let span = self.current_span();
             let name: SmolStr = self.expect_identifier("argument name")?.into();
@@ -326,6 +346,23 @@ impl Parser<'_> {
                 ));
             }
             self.parse_attributes()?;
+            let declaration = matches!(
+                self.current().kind,
+                TokenKind::Real | TokenKind::Integer | TokenKind::String | TokenKind::Reg
+            ) || self.keyword_declaration_follows();
+            if declaration && name.is_none() {
+                // IEEE 1364-2005 section 9.8.2 (syntax 9-14): only a named
+                // block declares; IEEE 1800 relaxed this.
+                return Err(ParseError::new(
+                    ParseErrorKind::Expected {
+                        expected: "a statement: an unnamed `fork` block declares nothing \
+                                   (IEEE 1364-2005 section 9.8.2)"
+                            .to_string(),
+                        found: format!("{:?}", self.current().kind),
+                    },
+                    self.current_span(),
+                ));
+            }
             match self.current().kind {
                 TokenKind::Real | TokenKind::Integer | TokenKind::String => {
                     variables.push(self.parse_variable_decl()?);
@@ -437,6 +474,76 @@ impl Parser<'_> {
             span: start.extend(self.previous_span()),
         })))
     }
+}
+
+/// `input x; real x;`: a variable declaration that names an argument declared
+/// without a type gives the argument its type (IEEE 1364-2005 section 12.3.3,
+/// which section 10.2.1 applies to routine ports), rather than declaring a
+/// second `x`.
+fn type_arguments(
+    arguments: &mut [DigitalRoutineArgument],
+    variables: &mut Vec<VariableDecl>,
+    digital_variables: &mut Vec<DigitalVariableDecl>,
+) {
+    // A `reg` redeclaration repeats the port's range; any other type needs
+    // a port declared with none.
+    fn untyped<'a>(
+        arguments: &'a mut [DigitalRoutineArgument],
+        name: &SmolStr,
+        reg: bool,
+    ) -> Option<&'a mut DigitalRoutineArgument> {
+        arguments.iter_mut().find(|argument| {
+            argument.name == *name
+                && argument.ty.kind == DigitalRoutineValueKind::Reg
+                && (reg || (argument.ty.range.is_none() && !argument.ty.signedness.is_signed()))
+        })
+    }
+    for declaration in variables.iter_mut() {
+        let kind = match declaration.var_type {
+            VarType::Real => DigitalRoutineValueKind::Real,
+            VarType::Integer => DigitalRoutineValueKind::Integer,
+            VarType::String => continue,
+        };
+        declaration.items.retain(|item| {
+            if !item.dimensions.is_empty() {
+                return true;
+            }
+            let Some(argument) = untyped(arguments, &item.name, false) else {
+                return true;
+            };
+            argument.ty = DigitalRoutineType {
+                kind,
+                signedness: Signedness::Signed,
+                range: None,
+            };
+            false
+        });
+    }
+    variables.retain(|declaration| !declaration.items.is_empty());
+    for declaration in digital_variables.iter_mut() {
+        let kind = match declaration.kind {
+            DigitalVariableKind::Reg => DigitalRoutineValueKind::Reg,
+            DigitalVariableKind::Integer => DigitalRoutineValueKind::Integer,
+            DigitalVariableKind::Real => DigitalRoutineValueKind::Real,
+            _ => continue,
+        };
+        declaration.items.retain(|item| {
+            if !item.dimensions.is_empty() || item.init.is_some() {
+                return true;
+            }
+            let reg = kind == DigitalRoutineValueKind::Reg;
+            let Some(argument) = untyped(arguments, &item.name, reg) else {
+                return true;
+            };
+            argument.ty = DigitalRoutineType {
+                kind,
+                signedness: declaration.signedness,
+                range: declaration.range.clone(),
+            };
+            false
+        });
+    }
+    digital_variables.retain(|declaration| !declaration.items.is_empty());
 }
 
 /// `[63:0]`, the range a `time` variable is declared over.

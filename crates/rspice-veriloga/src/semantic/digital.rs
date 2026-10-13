@@ -847,8 +847,10 @@ impl SemanticAnalyzer {
                     self.errors.push(error);
                 }
             }
+            // The digital lowering refused the constant, as lowering the
+            // module would.
             Err(message) => {
-                self.record_error_at(SemanticErrorKind::InvalidExpression(message), module.span)
+                self.record_error_at(SemanticErrorKind::UnsupportedFeature(message), module.span)
             }
         }
         self.discrete_projection
@@ -1329,6 +1331,10 @@ impl SemanticAnalyzer {
         // module.
         let mut analog_writes = std::collections::HashSet::new();
         let mut analog_reads = std::collections::HashSet::new();
+        let reads_stay_analog = module.analog_block.is_some()
+            || module.analog_initial.is_some()
+            || module.analog_final.is_some()
+            || module.digital_processes.is_empty();
         for block in [
             module.analog_block.as_ref(),
             module.analog_initial.as_ref(),
@@ -1361,7 +1367,10 @@ impl SemanticAnalyzer {
                             .find(|port| port.names.contains(&item.name))
                     })
                     .flatten();
-                if (!written.contains(&item.name) && integer_port.is_none())
+                // A module with processes and no analog block gives the
+                // continuous domain nothing that could own the variable, so
+                // the discrete one does even when it only reads it.
+                if (!written.contains(&item.name) && integer_port.is_none() && reads_stay_analog)
                     || seen.contains_key(&item.name)
                 {
                     continue;
@@ -1985,6 +1994,7 @@ impl SemanticAnalyzer {
                     );
                     continue;
                 }
+                self.check_event_declared_before(&identifier.name, term.span, signals, index);
                 resolved.push(AnalyzedSensitivity {
                     edge: None,
                     signal: identifier.name.clone(),

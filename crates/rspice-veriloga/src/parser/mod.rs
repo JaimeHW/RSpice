@@ -748,7 +748,29 @@ impl<'a> Parser<'a> {
             TokenKind::AmsDigital
                 if self.digital_keyword_is("time") || self.digital_keyword_is("event") =>
             {
+                let time = self.digital_keyword_is("time");
                 let variable = self.parse_keyword_variable_decl()?;
+                // IEEE 1364-2005 section 12.3.3: a port that a `time` (or
+                // `integer`) declaration types is declared without a range.
+                if time
+                    && let Some(item) = variable.items.iter().find(|item| {
+                        module.port_declarations.iter().any(|port| {
+                            port.range.is_some() && port.names.contains(&item.name)
+                        })
+                    })
+                {
+                    return Err(ParseError::new(
+                        ParseErrorKind::Expected {
+                            expected: format!(
+                                "a port `{}` declared without a range, as a `time` declaration \
+                                 of it requires (IEEE 1364-2005 section 12.3.3)",
+                                item.name
+                            ),
+                            found: "a ranged port declaration".to_string(),
+                        },
+                        item.span,
+                    ));
+                }
                 module.digital_variables.push(variable);
             }
             TokenKind::Identifier => {
@@ -2794,6 +2816,18 @@ impl<'a> Parser<'a> {
         let mut left = self.parse_multiplicative()?;
 
         loop {
+            if matches!(self.current().kind, TokenKind::Plus | TokenKind::Minus)
+                && self.peek_is(TokenKind::Colon)
+            {
+                return Err(ParseError::new(
+                    ParseErrorKind::UnsupportedConstruct {
+                        context: "part-select".to_string(),
+                        found: "an indexed part-select `+:` or `-:` (IEEE 1364-2005 section 5.2.1)"
+                            .to_string(),
+                    },
+                    self.current_span(),
+                ));
+            }
             let op = match self.current().kind {
                 TokenKind::Plus => {
                     self.advance();
@@ -3027,6 +3061,12 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Identifier | TokenKind::EscapedIdentifier | TokenKind::SystemIdentifier => {
                 let name = self.parse_reference_name("identifier")?;
+                // IEEE 1364-2005 A.8.2: attributes may stand between a
+                // function's name and its arguments; they carry no meaning
+                // here.
+                if self.check(TokenKind::LParen) && self.peek_is(TokenKind::Star) {
+                    self.parse_attributes()?;
+                }
 
                 // Check if it's a function call or branch access
                 if self.check(TokenKind::LParen) {

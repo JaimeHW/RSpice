@@ -622,7 +622,7 @@ impl<'a> HierarchyElaborator<'a> {
             .or_else(|| shared.as_deref().map(|module| &module.source))
             .ok_or_else(|| {
                 semantic_error(
-                    SemanticErrorKind::UndefinedModule(instance.module.to_string()),
+                    super::digital_elaborate::undefined_module(&instance.module),
                     instance.span,
                 )
             })?;

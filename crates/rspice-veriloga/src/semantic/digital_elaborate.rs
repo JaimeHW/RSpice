@@ -484,12 +484,7 @@ impl DigitalElaborator<'_> {
                 .map(|module| &module.analyzed)
                 .or_else(|| bound.as_deref().map(|module| &module.analyzed))
                 .or_else(|| self.analyzed.modules.get(&instance.module))
-                .ok_or_else(|| {
-                    semantic_error(
-                        SemanticErrorKind::UndefinedModule(instance.module.to_string()),
-                        instance.span,
-                    )
-                })?;
+                .ok_or_else(|| semantic_error(undefined_module(&instance.module), instance.span))?;
             stack.push(frame);
             if connection.is_none() && bound.is_none() && !self.required.contains(&instance.module)
             {
@@ -1356,6 +1351,23 @@ const fn direction_keyword(direction: PortDirection) -> &'static str {
 
 fn semantic_error(kind: SemanticErrorKind, span: Span) -> CompileError {
     SemanticError::new(kind, span).into()
+}
+
+/// An instance of a module nothing defines. A switch, pull or three-state
+/// gate primitive (IEEE 1364-2005 sections 7.1 and 7.6-7.8) is named as the
+/// unsupported construct it is rather than as a missing module.
+pub(super) fn undefined_module(module: &str) -> SemanticErrorKind {
+    const PRIMITIVES: [&str; 18] = [
+        "cmos", "rcmos", "nmos", "pmos", "rnmos", "rpmos", "tran", "tranif0", "tranif1", "rtran",
+        "rtranif0", "rtranif1", "pullup", "pulldown", "bufif0", "bufif1", "notif0", "notif1",
+    ];
+    if PRIMITIVES.contains(&module) {
+        SemanticErrorKind::UnsupportedFeature(format!(
+            "the gate primitive `{module}` (IEEE 1364-2005 section 7) has no executable form yet"
+        ))
+    } else {
+        SemanticErrorKind::UndefinedModule(module.to_string())
+    }
 }
 
 fn internal_error(message: String) -> CompileError {

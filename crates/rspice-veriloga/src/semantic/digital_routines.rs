@@ -113,6 +113,38 @@ impl SemanticAnalyzer {
             }
             self.check_digital_statement(&routine.body, signals, index);
             self.digital_scopes.clear();
+            if routine.automatic {
+                let mut locals: HashSet<SmolStr> = routine
+                    .arguments
+                    .iter()
+                    .map(|argument| argument.name.clone())
+                    .collect();
+                locals.extend(
+                    routine
+                        .variables
+                        .iter()
+                        .flat_map(|declaration| &declaration.items)
+                        .map(|item| item.name.clone()),
+                );
+                locals.extend(
+                    routine
+                        .digital_variables
+                        .iter()
+                        .flat_map(|declaration| &declaration.items)
+                        .map(|item| item.name.clone()),
+                );
+                if let Some((name, span)) = automatic_nonblocking(&routine.body, &mut locals) {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "a nonblocking assignment cannot write `{name}`, a variable of the \
+                             automatic {} `{}` (IEEE 1364-2005 section 10.2.1)",
+                            if routine.is_function() { "function" } else { "task" },
+                            routine.name
+                        )),
+                        span,
+                    );
+                }
+            }
             analyzed.push(AnalyzedDigitalRoutine {
                 suspends: self
                     .digital_routines
@@ -379,6 +411,29 @@ impl SemanticAnalyzer {
         })
     }
 
+    /// A named event is declared before it is used: only a net can be
+    /// declared implicitly (IEEE 1364-2005 section 4.5).
+    pub(super) fn check_event_declared_before(
+        &mut self,
+        name: &SmolStr,
+        used: crate::source::Span,
+        signals: &[AnalyzedDigitalSignal],
+        index: &HashMap<SmolStr, usize>,
+    ) {
+        let Some(declared) = index.get(name).map(|position| signals[*position].span) else {
+            return;
+        };
+        if declared.source == used.source && declared.start > used.start {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "the named event `{name}` is used before its declaration (IEEE 1364-2005 \
+                     section 4.5 declares only nets implicitly)"
+                )),
+                used,
+            );
+        }
+    }
+
     /// `-> event`: the target is a named event.
     pub(super) fn check_event_trigger(
         &mut self,
@@ -398,8 +453,11 @@ impl SemanticAnalyzer {
                 return;
             }
         };
-        if name.starts_with("$rspice_reference_") || self.names_digital_event(name, signals, index)
-        {
+        if name.starts_with("$rspice_reference_") {
+            return;
+        }
+        if self.names_digital_event(name, signals, index) {
+            self.check_event_declared_before(name, trigger.span, signals, index);
             return;
         }
         self.record_error_at(
@@ -473,13 +531,70 @@ fn statement_suspends(
         DigitalStatement::While(statement) => nested(&statement.body),
         DigitalStatement::Repeat(statement) => nested(&statement.body),
         DigitalStatement::Forever(statement) => nested(&statement.body),
-        DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign) => {
-            assign.timing.is_some()
-        }
-        DigitalStatement::SystemTask(_)
+        // A nonblocking assignment's timing control delays the update, not
+        // the process (section 9.2.2).
+        DigitalStatement::BlockingAssign(assign) => assign.timing.is_some(),
+        DigitalStatement::NonblockingAssign(_)
+        | DigitalStatement::SystemTask(_)
         | DigitalStatement::Disable(_)
         | DigitalStatement::EventTrigger(_)
         | DigitalStatement::Null(_) => false,
+    }
+}
+
+/// The first nonblocking write of an automatic variable: the update would
+/// land after the activation that owns the variable may be gone. `locals`
+/// grows by each block's declarations, which are automatic too.
+fn automatic_nonblocking(
+    statement: &DigitalStatement,
+    locals: &mut HashSet<SmolStr>,
+) -> Option<(SmolStr, crate::source::Span)> {
+    if let DigitalStatement::Block(block) | DigitalStatement::Fork(block) = statement {
+        locals.extend(
+            block
+                .variables
+                .iter()
+                .flat_map(|declaration| &declaration.items)
+                .map(|item| item.name.clone()),
+        );
+        locals.extend(
+            block
+                .digital_variables
+                .iter()
+                .flat_map(|declaration| &declaration.items)
+                .map(|item| item.name.clone()),
+        );
+    }
+    let mut nested = |statement: &DigitalStatement| automatic_nonblocking(statement, locals);
+    match statement {
+        DigitalStatement::NonblockingAssign(assign) => assign
+            .target
+            .written_names()
+            .into_iter()
+            .find(|(name, _)| locals.contains(*name))
+            .map(|(name, span)| (name.clone(), span)),
+        DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
+            block.statements.iter().find_map(nested)
+        }
+        DigitalStatement::Conditional(conditional) => nested(&conditional.then_branch)
+            .or_else(|| conditional.else_branch.as_deref().and_then(nested)),
+        DigitalStatement::Case(case) => case
+            .items
+            .iter()
+            .find_map(|item| nested(&item.statement))
+            .or_else(|| case.default.as_deref().and_then(nested)),
+        DigitalStatement::For(statement) => nested(&statement.body),
+        DigitalStatement::While(statement) => nested(&statement.body),
+        DigitalStatement::Repeat(statement) => nested(&statement.body),
+        DigitalStatement::Forever(statement) => nested(&statement.body),
+        DigitalStatement::Timing(timing) => timing.statement.as_deref().and_then(nested),
+        DigitalStatement::Wait(wait) => wait.statement.as_deref().and_then(nested),
+        DigitalStatement::BlockingAssign(_)
+        | DigitalStatement::SystemTask(_)
+        | DigitalStatement::TaskEnable(_)
+        | DigitalStatement::Disable(_)
+        | DigitalStatement::EventTrigger(_)
+        | DigitalStatement::Null(_) => None,
     }
 }
 

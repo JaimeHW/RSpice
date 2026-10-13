@@ -3324,6 +3324,15 @@ fn routines_and_events_are_checked_where_they_are_used() {
         ("initial -> r;", "not a named event"),
         ("initial disable nowhere;", "nowhere"),
         ("task t; r = 0; endtask always t;", "no timing control"),
+        ("always r <= @go 1'b1;", "no timing control"),
+        (
+            "task automatic t; reg l; l <= #1 0; endtask",
+            "a nonblocking assignment cannot write `l`",
+        ),
+        (
+            "initial -> late; event late;",
+            "used before its declaration",
+        ),
     ] {
         let message = analyze_error(&format!(
             "module top; reg r; event go;\n{body}\nendmodule\n"
@@ -3333,4 +3342,54 @@ fn routines_and_events_are_checked_where_they_are_used() {
             "expected {expected:?} for {body:?}, got {message:?}"
         );
     }
+}
+
+/// IEEE 1364-2005 forms Icarus `-g2005` also rejects: a routine port with no
+/// direction (section 10.2.1), a declaration in an unnamed `fork` (section
+/// 9.8.2) and a `time` redeclaration of a ranged port (section 12.3.3). A
+/// later `real x;` types the port `input x;` instead (section 12.3.3), and an
+/// attribute may stand between a function's name and its arguments.
+#[test]
+fn routine_ports_and_fork_declarations_follow_ieee_1364() {
+    for (source, expected) in [
+        ("module m; task t(a, b); endtask endmodule", "section 10.2.1"),
+        (
+            "module m; task t(input integer a, integer b); endtask endmodule",
+            "section 10.2.1",
+        ),
+        ("module m; initial fork integer x; join endmodule", "section 9.8.2"),
+        (
+            "module m(x); output [63:0] x; time x; endmodule",
+            "section 12.3.3",
+        ),
+        (
+            "module m; task t; event e; endtask endmodule",
+            "a named event declared inside a task",
+        ),
+        ("module m; reg [3:0] a; initial a[0 +: 2] = 0; endmodule", "`+:`"),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir(source)
+            .expect_err("the form must be rejected")
+            .to_string();
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+    let file = parse(
+        "module m; reg r;\n\
+         \x20 task t; input x; real x; input y; reg [3:0] y; endtask\n\
+         \x20 function f(input a); f = a; endfunction\n\
+         \x20 initial r = f (* keep *) (1'b1);\n\
+         endmodule\n",
+    );
+    let Item::Module(module) = &file.items[0] else {
+        panic!("a module");
+    };
+    let routine = &module.digital_routines[0];
+    assert_eq!(routine.arguments.len(), 2);
+    assert!(routine.variables.is_empty() && routine.digital_variables.is_empty());
+    assert_eq!(
+        routine.arguments[0].ty.kind,
+        DigitalRoutineValueKind::Real
+    );
+    assert!(routine.arguments[1].ty.range.is_some());
 }
