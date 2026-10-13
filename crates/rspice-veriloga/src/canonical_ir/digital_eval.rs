@@ -3461,10 +3461,18 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 Ok(DigitalScalar::Real(value))
             }
             CfgValueKind::DigitalRealToInteger { input, width } => {
-                let value =
-                    FourStateValue::from_real(*width, self.real(*input)?).map_err(|detail| {
-                        DigitalEvalError::InvalidNumericConversion { value: id, detail }
-                    })?;
+                let real = self.real(*input)?;
+                // An infinity or NaN has no integer: it converts to all `x`,
+                // as Icarus converts it, rather than stopping the process.
+                if !real.is_finite() {
+                    return Ok(DigitalScalar::FourState(FourStateValue::splat(
+                        *width,
+                        FourStateBit::Unknown,
+                    )));
+                }
+                let value = FourStateValue::from_real(*width, real).map_err(|detail| {
+                    DigitalEvalError::InvalidNumericConversion { value: id, detail }
+                })?;
                 Ok(DigitalScalar::FourState(value))
             }
             CfgValueKind::DigitalSystemTask { site, args } => {

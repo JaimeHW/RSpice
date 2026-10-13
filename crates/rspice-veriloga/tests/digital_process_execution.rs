@@ -6328,7 +6328,7 @@ endmodule
 }
 
 #[test]
-fn numeric_conversion_zeroes_unknown_bits_and_reports_nonfinite_integer_inputs() {
+fn numeric_conversion_zeroes_unknown_bits_and_makes_nonfinite_reals_unknown() {
     // IEEE 1364-2005 section 4.8.2: converting to real treats x and z bits as
     // 0, here the sign bit of a signed value and a low bit (Icarus agrees).
     for digit in ["x", "z"] {
@@ -6339,20 +6339,16 @@ fn numeric_conversion_zeroes_unknown_bits_and_reports_nonfinite_integer_inputs()
         expect_finished(harness.start(0));
         assert_eq!(harness.get_real("r"), 2.0, "{digit}");
     }
+    // An infinity or NaN has no integer and converts to all x; Icarus 13
+    // prints `xxxxxxxx` for each of these.
     let mut harness = Harness::from_source(
-        "module invalid; reg [7:0] q; real r; initial begin r=1.0/0.0; q=r; end endmodule",
+        "module invalid; reg [7:0] q, n, m; real r;
+         initial begin r=1.0/0.0; q=r; n=-r; m=r-r; end endmodule",
     );
-    let error = start(
-        &harness.plan,
-        &harness.plan.processes[0],
-        &mut harness.store,
-    )
-    .unwrap_err();
-    assert!(
-        matches!(error, DigitalEvalError::InvalidNumericConversion { .. }),
-        "{error}"
-    );
-    assert!(error.to_string().contains("finite"));
+    expect_finished(harness.start(0));
+    for name in ["q", "n", "m"] {
+        assert_eq!(harness.get(name), "xxxxxxxx", "{name}");
+    }
 }
 
 #[test]
