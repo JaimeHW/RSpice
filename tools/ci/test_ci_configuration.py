@@ -1097,6 +1097,34 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("RSPICE_MIXED_ROUTE: ${{ matrix.route }}", job)
         self.assertNotIn("continue-on-error", job)
 
+    def test_ivtest_runs_nightly_on_icarus_built_from_its_source_tag(self) -> None:
+        """The Icarus ivtest selection is a nightly gate, never a push one.
+
+        Icarus Verilog and ivtest are GPL: the job builds the v13_0 tag outside
+        the repository for that run only, and the repository keeps only test
+        names and RSpice's outcomes. The suite runs where `RSPICE_IVTEST_DIR`
+        names the checkout, and `RSPICE_VERILOG_ORACLES_REQUIRED` turns a
+        missing checkout or simulator into a failure. The harness checks itself
+        on Icarus before it judges RSpice.
+        """
+        ci_workflow = read_text(".github/workflows/ci.yml")
+        nightly_workflow = read_text(".github/workflows/nightly.yml")
+
+        self.assertNotIn("--test verilog_ivtest", ci_workflow)
+
+        job = nightly_workflow.split("\n  ivtest:\n", 1)[1]
+        job = re.split(r"\n  [a-z][a-z0-9-]*:\n", job, maxsplit=1)[0]
+        self.assertIn(
+            "git clone --depth 1 --branch v13_0 https://github.com/steveicarus/iverilog.git",
+            job,
+        )
+        self.assertIn('RSPICE_IVTEST_DIR=$RUNNER_TEMP/iverilog/ivtest', job)
+        self.assertIn('RSPICE_VERILOG_ORACLES_REQUIRED: "1"', job)
+        self.assertIn("--bin rspice-ivtest -- oracle", job)
+        self.assertIn("--test verilog_ivtest", job)
+        self.assertEqual(job.count("--release"), 2)
+        self.assertNotIn("continue-on-error", job)
+
     def test_nightly_qualifies_shipped_models_through_native_x64(self) -> None:
         nightly_workflow = read_text(".github/workflows/nightly.yml")
 

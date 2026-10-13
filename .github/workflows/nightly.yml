@@ -409,6 +409,53 @@ jobs:
           ${{ matrix.route == 'native' && '--features veriloga-native' || '' }}
           --test mixed_corpus -- --nocapture --test-threads 1
 
+  ivtest:
+    name: Icarus ivtest selection
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "2"
+      # A missing checkout or simulator fails the job instead of skipping.
+      RSPICE_VERILOG_ORACLES_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust toolchain
+        run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          key: ivtest
+      # Icarus Verilog and its ivtest suite are GPL. The job builds the v13_0
+      # source tag outside the repository for this run only; nothing of it is
+      # redistributed, and the repository keeps only test names and RSpice's
+      # outcomes (tests/verilog/ivtest-manifest.tsv). The suite's gold files
+      # are pinned to that release, so the simulator is built from the same
+      # tag rather than taken from the distribution.
+      - name: Build Icarus Verilog v13_0 from its source tag
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y autoconf gperf flex bison make g++ libbz2-dev zlib1g-dev
+          git clone --depth 1 --branch v13_0 https://github.com/steveicarus/iverilog.git "$RUNNER_TEMP/iverilog"
+          cd "$RUNNER_TEMP/iverilog"
+          sh autoconf.sh
+          ./configure --prefix="$RUNNER_TEMP/iverilog-install"
+          make -j"$(nproc)"
+          make install
+          "$RUNNER_TEMP/iverilog-install/bin/iverilog" -V
+          echo "$RUNNER_TEMP/iverilog-install/bin" >> "$GITHUB_PATH"
+          echo "RSPICE_IVTEST_DIR=$RUNNER_TEMP/iverilog/ivtest" >> "$GITHUB_ENV"
+      # The harness checks itself first: every selected test must pass on the
+      # simulator its gold files came from, judged by the harness's own rules.
+      - name: ivtest selection through Icarus (harness check, release)
+        run: >-
+          cargo run --locked -p rspice-conformance --release
+          --bin rspice-ivtest -- oracle
+      # Every selected test through RSpice against the manifest; a regressed
+      # outcome, or an improved one not re-recorded, fails the step.
+      - name: ivtest selection through RSpice (release)
+        run: >-
+          cargo test --locked -p rspice-conformance --release
+          --test verilog_ivtest -- --nocapture
+
   release-build:
     name: Release build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
