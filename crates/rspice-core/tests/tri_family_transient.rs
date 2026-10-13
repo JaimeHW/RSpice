@@ -43,7 +43,7 @@ mod digital_trace_invariants;
 
 use determinism_fingerprint::{
     EMIT_ENV, Fingerprint, assert_fingerprints_survive_new_processes, emitting, fingerprint,
-    pin_fingerprint,
+    pin_fingerprint, pin_grid,
 };
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
@@ -121,41 +121,16 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 const DECK_A_POINTS: usize = 1157;
 const DECK_A_GRID_HASH: u64 = 0xf90b_311b_de64_ddd7;
 
-/// Deck A's node waveforms, re-measured after R2.15 took the digital-only nets
-/// out of the analog namespace.
-///
-/// `d_clk` and `d_inv` are the adc output and the inverter output. Nothing
-/// analog touches either, so the only thing the MNA system held for them was
-/// the placeholder row every assembly closes with `v = 0` to restore rank, and
-/// this hash was including two columns of 1132 zeros each. They are empty now,
-/// and the hash moved by exactly that much: `DECK_A_POINTS` and
-/// `DECK_A_GRID_HASH` did not move at all, which is the proof the change is
-/// results-only and left the accepted grid and every solved level alone. The
-/// structure assertions beside the pin say the same thing by name.
-///
-/// Re-measured with the grid for P0.10: all 90 digital trace points are
-/// bit-identical to main's, `q` against its 10k-loaded drive, held from before
-/// each edge on the edge's own point, errs at most 6.6e-14 V where main's
-/// right-limit edges erred 3.2934 V, and the analog solution at every pinned
-/// digital instant is unchanged to 1 uV
-/// (`deck_a_digital_instants_keep_their_pre_fix_analog_solution`).
-///
-/// Re-measured with the grid for the picosecond edge completion, which moves
-/// no digital trace point and keeps that pinned analog solution.
-///
-/// Re-measured when the default dialect stopped solving every breakpoint
-/// landing at order one and began solving it with the sources at their left
-/// limit: `DECK_A_POINTS` and `DECK_A_GRID_HASH` did not move, no digital
-/// trace point moved, and the analog solution at every pinned digital instant
-/// still holds to 1 uV; only the analog samples on the landing points moved.
-const DECK_A_VOLT_HASH: u64 = 0xf719_57e0_0972_fbf6;
-
-/// Deck A's fingerprint, from the three constants above.
-const DECK_A_FINGERPRINT: Fingerprint = Fingerprint {
-    points: DECK_A_POINTS,
-    grid_hash: DECK_A_GRID_HASH,
-    volt_hash: DECK_A_VOLT_HASH,
-};
+// Deck A pins its point count and grid hash, not a hash of its node waveforms.
+// Its generated diode and its sources run through the platform's libm, which
+// glibc and the Windows CRT do not round alike: once the default dialect began
+// solving breakpoint landings with the sources at their left limit, the
+// Windows and Linux waveform hashes parted (f71957e00972fbf6 against
+// 8deca2f75d04a324) on the same 1157 points and the same grid. The waveforms
+// are held instead by value:
+// `deck_a_digital_instants_keep_their_pre_fix_analog_solution` pins the
+// analog solution at every digital instant to 1 uV, and the fresh-process
+// check below still compares all three records on the platform that runs it.
 
 const DECK_C2_POINTS: usize = 275;
 
@@ -517,7 +492,7 @@ fn deck_a_tri_family_transient_sequence_golden() {
         result.time.windows(2).all(|pair| pair[1] > pair[0]),
         "the accepted grid must be strictly increasing"
     );
-    // What `DECK_A_VOLT_HASH` hashes, stated structurally so the hash cannot
+    // What deck A's waveform hash covers, stated structurally so the hash cannot
     // quietly go back to including two columns of zeros. `d_clk` and `d_inv`
     // are the adc output and the inverter output: nothing analog touches
     // either, so neither has a voltage, and both reach the result as logic.
@@ -547,7 +522,7 @@ fn deck_a_tri_family_transient_sequence_golden() {
         println!("TRIFAMILY deck_a_points_no_diode_cmc={}", observed.points);
         return;
     }
-    pin_fingerprint("deck_a", observed, DECK_A_FINGERPRINT);
+    pin_grid("deck_a", observed, DECK_A_POINTS, DECK_A_GRID_HASH);
 }
 
 /// A digital edge must not restart the analog stepper anywhere near its floor.

@@ -105,6 +105,29 @@ pub fn fingerprint(result: &TransientResult) -> Fingerprint {
 
 /// Print `key`'s three records, and assert them unless this run is emitting.
 pub fn pin_fingerprint(key: &str, observed: Fingerprint, expected: Fingerprint) {
+    pin_grid(key, observed, expected.points, expected.grid_hash);
+    if emitting() {
+        return;
+    }
+    assert_eq!(
+        observed.volt_hash, expected.volt_hash,
+        "{key}_volt_hash moved off its pinned value ({:016x} vs {:016x}); \
+         re-measure with {EMIT_ENV}=1",
+        observed.volt_hash, expected.volt_hash
+    );
+}
+
+/// Print `key`'s three records, and assert its point count and grid hash
+/// unless this run is emitting.
+///
+/// For a deck whose waveforms run through the platform's libm (`exp`, `sin`):
+/// glibc and the Windows CRT do not round every argument alike, so a hash of
+/// the voltage bits is a pin per platform, and no one platform can measure the
+/// others'. The accepted grid does not depend on those last bits, so it stays
+/// pinned; the deck's own value assertions guard the waveforms, and the
+/// fresh-process check still compares all three records on the platform
+/// that runs it.
+pub fn pin_grid(key: &str, observed: Fingerprint, points: usize, grid_hash: u64) {
     for (record, value) in observed.records(key) {
         println!("TRIFAMILY {record}={value}");
     }
@@ -112,20 +135,14 @@ pub fn pin_fingerprint(key: &str, observed: Fingerprint, expected: Fingerprint) 
         return;
     }
     assert_eq!(
-        observed.points, expected.points,
+        observed.points, points,
         "{key}_points moved off its pinned value; re-measure with {EMIT_ENV}=1"
     );
     assert_eq!(
-        observed.grid_hash, expected.grid_hash,
+        observed.grid_hash, grid_hash,
         "{key}_grid_hash moved off its pinned value ({:016x} vs {:016x}); \
          re-measure with {EMIT_ENV}=1",
-        observed.grid_hash, expected.grid_hash
-    );
-    assert_eq!(
-        observed.volt_hash, expected.volt_hash,
-        "{key}_volt_hash moved off its pinned value ({:016x} vs {:016x}); \
-         re-measure with {EMIT_ENV}=1",
-        observed.volt_hash, expected.volt_hash
+        observed.grid_hash, grid_hash
     );
 }
 
