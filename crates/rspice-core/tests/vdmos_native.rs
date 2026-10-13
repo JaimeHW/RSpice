@@ -2521,16 +2521,153 @@ fn ngspice_vdmos_noise_matches_the_ngspice46_oracle() {
                 m1 d g 0 0 vd\n\
                 .model vd vdmos (vto=2 kp=0.5 rd=0.5 rs=0.2 lambda=0.01 kf=1e-25 af=1.2)\n\
                 .end\n";
+    assert_vdmos_noise_matches_ngspice46(deck, &VDMOS_NOISE_NGSPICE46);
+}
+
+/// ngspice-46 `.noise` of VDMOS stages with quasi-saturation (`RQ` and
+/// `VQ`): the drain resistance is `RD + RQ·Vds/(Vds + |VQ|)` at the bias
+/// (`vdmosload.c`), 2.0214 Ω here where the card's `RD` is 0.5 Ω, and RD's
+/// thermal noise is that resistance's (`vdmosnoi.c` reads the conductance
+/// the last load left). Columns as [`VDMOS_NOISE_NGSPICE46`].
+const VDMOS_QUASI_SATURATION_NOISE_NGSPICE46: [[f64; 6]; 6] = [
+    [
+        1.0,
+        3.587_853_878_063_638e-9,
+        6.688_644_215_221_191e-10,
+        3.656_689_434_096_881e-12,
+        2.648_401_119_159_41e-10,
+        3.492_271_181_267_578e-9,
+    ],
+    [
+        1.0e1,
+        1.377_074_161_828_399e-9,
+        6.688_644_215_221_083e-10,
+        3.656_689_434_133_271e-12,
+        2.648_401_119_159_368e-10,
+        1.104_353_113_977_212e-9,
+    ],
+    [
+        1.0e2,
+        8.936_985_100_450_032e-10,
+        6.688_644_215_209_735e-10,
+        3.656_689_437_784_862e-12,
+        2.648_401_119_154_833e-10,
+        3.492_271_181_261_596e-10,
+    ],
+    [
+        1.0e3,
+        8.300_201_230_058_844e-10,
+        6.688_644_214_075_583e-10,
+        3.656_689_802_942_797e-12,
+        2.648_401_118_701_703e-10,
+        1.104_353_113_788_08e-10,
+    ],
+    [
+        1.0e4,
+        8.233_814_545_489_42e-10,
+        6.688_644_100_659_711e-10,
+        3.656_726_318_552_719e-12,
+        2.648_401_073_388_382e-10,
+        3.492_271_121_452_8e-11,
+    ],
+    [
+        1.0e5,
+        8.227_132_654_974_21e-10,
+        6.688_632_759_101_252e-10,
+        3.660_376_027_449_451e-12,
+        2.648_396_542_067_789e-10,
+        1.104_351_222_472_565e-11,
+    ],
+];
+
+/// The p-channel twin: `RD = 0.3`, `RQ = 3`, `VQ = 2`, a drift resistance of
+/// 2.6594 Ω at the bias.
+const PVDMOS_QUASI_SATURATION_NOISE_NGSPICE46: [[f64; 6]; 6] = [
+    [
+        1.0,
+        1.983_185_772_595_544e-8,
+        9.968_992_850_299_948e-10,
+        1.497_294_519_199_747e-11,
+        2.836_022_789_976_225e-10,
+        1.979_933_524_660_165e-8,
+    ],
+    [
+        1.0e1,
+        6.363_196_702_597_099e-9,
+        9.968_992_850_299_267e-10,
+        1.497_294_519_206_104e-11,
+        2.836_022_789_976_032e-10,
+        6.261_099_553_650_852e-9,
+    ],
+    [
+        1.0e2,
+        2.282_332_451_072_354e-9,
+        9.968_992_850_231_627e-10,
+        1.497_294_519_841_855e-11,
+        2.836_022_789_956_779e-10,
+        1.979_933_524_646_596e-9,
+    ],
+    [
+        1.0e3,
+        1.296_502_344_441_361e-9,
+        9.968_992_843_467_262e-10,
+        1.497_294_583_416_456e-11,
+        2.836_022_788_031_335e-10,
+        6.261_099_549_359_958e-10,
+    ],
+    [
+        1.0e4,
+        1.152_434_745_690_102e-9,
+        9.968_992_167_031_412e-10,
+        1.497_300_940_861_361e-11,
+        2.836_022_595_487_274e-10,
+        1.979_933_388_956_759e-10,
+    ],
+    [
+        1.0e5,
+        1.137_016_842_252_041e-9,
+        9.968_924_524_139_556e-10,
+        1.497_936_540_383_99e-11,
+        2.836_003_341_278_405e-10,
+        6.261_056_640_901_84e-11,
+    ],
+];
+
+#[test]
+fn ngspice_vdmos_quasi_saturation_noise_matches_the_ngspice46_oracle() {
+    assert_vdmos_noise_matches_ngspice46(
+        "* vdmos noise with quasi-saturation\n\
+         vdd vdd 0 dc 12\n\
+         vin g 0 dc 3 ac 1\n\
+         rl vdd d 10\n\
+         m1 d g 0 0 vd\n\
+         .model vd vdmos (vto=2 kp=0.5 rd=0.5 rs=0.2 rq=2 vq=3 lambda=0.01 kf=1e-25 af=1.2)\n\
+         .end\n",
+        &VDMOS_QUASI_SATURATION_NOISE_NGSPICE46,
+    );
+    assert_vdmos_noise_matches_ngspice46(
+        "* p-channel vdmos noise with quasi-saturation\n\
+         vdd vdd 0 dc -12\n\
+         vin g 0 dc -3.2 ac 1\n\
+         rl vdd d 15\n\
+         m1 d g 0 0 vp\n\
+         .model vp vdmos (pchan vto=-2 kp=0.4 rd=0.3 rs=0.1 rq=3 vq=2 lambda=0.02 kf=1e-24 af=1.1)\n\
+         .end\n",
+        &PVDMOS_QUASI_SATURATION_NOISE_NGSPICE46,
+    );
+}
+
+fn assert_vdmos_noise_matches_ngspice46(deck: &str, table: &[[f64; 6]; 6]) {
     let netlist = Netlist::parse(deck).expect("VDMOS noise deck parses");
-    let frequencies: Vec<f64> = VDMOS_NOISE_NGSPICE46.iter().map(|row| row[0]).collect();
+    let frequencies: Vec<f64> = table.iter().map(|row| row[0]).collect();
     let results = Engine::new(SimulationConfig {
         spice_dialect: rspice_core::engine::SpiceDialect::Ngspice,
         ..Default::default()
     })
     .run_noise_named_with_input_source(&netlist, "d", None, "vin", &frequencies, 300.15)
     .expect("VDMOS noise analysis runs");
-    assert_eq!(results.len(), VDMOS_NOISE_NGSPICE46.len());
-    for (result, row) in results.iter().zip(VDMOS_NOISE_NGSPICE46) {
+    assert_eq!(results.len(), table.len());
+    for (result, row) in results.iter().zip(table) {
         let frequency = row[0];
         let mechanism = |name: &str| {
             result

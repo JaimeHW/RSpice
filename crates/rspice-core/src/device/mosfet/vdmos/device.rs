@@ -31,7 +31,8 @@ pub struct VdmosIndices {
 /// The quantities ngspice's VDMOS noise sources are evaluated from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct VdmosNoiseOperatingPoint {
-    /// `(pos, neg, RD)` of the series drain resistor, when it is a branch.
+    /// `(pos, neg, R)` of the series drain resistor, when it is a branch: `RD`,
+    /// or the quasi-saturation drift resistance at the bias.
     pub(crate) drain_resistor: Option<(NodeId, NodeId, Value)>,
     /// `(pos, neg, RS)` of the series source resistor, when it is a branch.
     pub(crate) source_resistor: Option<(NodeId, NodeId, Value)>,
@@ -1528,6 +1529,46 @@ impl Vdmos {
         (current, derivative.max(1.0e-12))
     }
 
+    /// Whether the card selects ngspice's quasi-saturation model: an
+    /// ngspice/LTspice `VDMOS` card naming both `RQ` and `VQ`
+    /// (`vdmosset.c`, `VDMOSqsGiven`). ngspice ignores either one alone.
+    #[inline]
+    fn uses_ngspice_quasi_saturation(&self) -> bool {
+        self.ngspice_qs_given && !self.xyce_level18
+    }
+
+    /// Conductance of the series drain resistor at `voltages`, whose channel
+    /// runs in forward mode when `forward`.
+    ///
+    /// Without quasi-saturation it is `1/RD`. With it, ngspice makes the
+    /// drift resistance depend on the external drain-source voltage in
+    /// forward mode (`vdmosload.c`, after D'Alessandro, Frisina and Rinaldi):
+    /// `rd = RD + RQ·vds/(vds + |VQ|)`, with `1/RD` again in reverse mode or
+    /// where that law leaves no positive resistance. ngspice re-evaluates it
+    /// at every load from the previous iterate and stamps it as a plain
+    /// conductance, so the converged operating point, the small-signal stamp
+    /// and the resistor's thermal noise all use its value at the solution.
+    /// ngspice also adds `GMIN` here; beside a conductance of at least
+    /// `1/(RD + RQ)` that is a relative change below 1e-9 for any drain
+    /// resistance under 1 kΩ, and it is left out.
+    fn drain_conductance_at(&self, voltages: &[Value], forward: bool) -> Value {
+        if self.uses_ngspice_quasi_saturation() && forward {
+            let voltage = |node: NodeId| {
+                if node == 0 {
+                    0.0
+                } else {
+                    voltages.get(node - 1).copied().unwrap_or(Value::NAN)
+                }
+            };
+            let vds = self.polarity() * (voltage(self.drain) - voltage(self.source));
+            let rd = self.rd + self.rq * (vds / (vds + self.vq.abs()));
+            if rd > 0.0 {
+                return 1.0 / rd;
+            }
+        }
+        1.0 / self.rd
+    }
+
     /// What ngspice's VDMOS noise (`vdmos/vdmosnoi.c`) is evaluated from at
     /// `solution`: the series drain and source resistors where the builder
     /// put them on internal nodes, and the channel's internal terminal pair
@@ -1545,17 +1586,23 @@ impl Vdmos {
         let drain_drift = self.drain_drift_node();
         let source_prime = self.source_int.unwrap_or(self.source);
         let vsi = voltage(source_prime);
+        let vds = voltage(drain_prime) - vsi;
         let (drain_current, _, transconductance, _, _, _) = self.linearized_operating_point(
             voltage(self.gate) - vsi,
-            voltage(drain_prime) - vsi,
+            vds,
             voltage(self.bulk) - vsi,
         );
+        // `vdmosnoi.c` takes RD's thermal noise from the drain conductance
+        // the last load left, which under quasi-saturation is bias-dependent.
+        let forward = self.polarity() * vds >= 0.0;
         VdmosNoiseOperatingPoint {
-            drain_resistor: (self.rd > 1e-12 && drain_prime != drain_drift).then_some((
-                drain_drift,
-                drain_prime,
-                self.rd,
-            )),
+            drain_resistor: (self.rd > 1e-12 && drain_prime != drain_drift).then(|| {
+                (
+                    drain_drift,
+                    drain_prime,
+                    1.0 / self.drain_conductance_at(solution, forward),
+                )
+            }),
             source_resistor: (self.rs > 1e-12 && source_prime != self.source).then_some((
                 self.source,
                 source_prime,
@@ -2011,7 +2058,10 @@ impl Vdmos {
         let mobility_denominator = (1.0 + self.ngspice_theta * vdsat).max(1.0e-12);
         let beta = self.kp * (1.0 + self.lambda * vds) / mobility_denominator;
 
-        let (mut current, region) = if overdrive <= scaled_vds {
+        // Quasi-saturation does not reduce the channel current here: ngspice
+        // models it as the bias-dependent drain resistance that
+        // `drain_conductance_at` stamps.
+        if overdrive <= scaled_vds {
             (
                 0.5 * beta * overdrive * overdrive,
                 if raw_overdrive <= 0.0 {
@@ -2029,14 +2079,6 @@ impl Vdmos {
                     VdmosRegion::Triode
                 },
             )
-        };
-
-        if vds > self.vq && self.rq > 0.0 {
-            let excess = vds - self.vq;
-            current /= 1.0 + current * self.rq / excess.max(0.001);
-            (current, VdmosRegion::QuasiSaturation)
-        } else {
-            (current, region)
         }
     }
 
@@ -2983,7 +3025,8 @@ impl Vdmos {
             Self::stamp_direct_rhs(rhs, d, dd, ieq);
         }
         if self.rd > 1e-12 && di != dd {
-            let gd = 1.0 / self.rd;
+            let forward = self.polarity() * vds_int >= 0.0;
+            let gd = self.drain_conductance_at(voltages, forward);
             Self::stamp_direct_conductance(matrix, dd, di, gd);
         }
 
@@ -3221,7 +3264,8 @@ impl NonlinearDevice for Vdmos {
             matrix.stamp_rhs(dd, ieq);
         }
         if self.rd > 1e-12 && di != dd {
-            let gd = 1.0 / self.rd;
+            let forward = self.polarity() * eval_vds >= 0.0;
+            let gd = self.drain_conductance_at(voltages, forward);
             matrix.stamp(dd, dd, gd);
             matrix.stamp(dd, di, -gd);
             matrix.stamp(di, dd, -gd);

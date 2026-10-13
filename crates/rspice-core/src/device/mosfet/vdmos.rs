@@ -16,8 +16,12 @@
 //! | RG | Gate resistance | 1Ω |
 //! | LAMBDA | Channel length modulation | 0.01 V⁻¹ |
 //! | MTRIODE | Triode region exponent | 1.5 |
-//! | RQ | Quasi-saturation resistance | 0.5Ω |
-//! | VQ | Quasi-saturation voltage | 5.0V |
+//! | RQ | Quasi-saturation drift resistance (with VQ) | 0Ω |
+//! | VQ | Quasi-saturation voltage (with RQ) | 5.0V |
+//!
+//! A `VDMOS` card naming both `RQ` and `VQ` takes ngspice's quasi-saturation
+//! model: the drain resistance becomes `RD + RQ·Vds/(Vds + |VQ|)` in forward
+//! mode, from the external drain-source voltage (`vdmosload.c`).
 //! | CGS | Gate-source capacitance | 1nF |
 //! | CGD | Gate-drain (Miller) capacitance | 100pF |
 //! | IS | Body diode saturation current | 1e-14A |
