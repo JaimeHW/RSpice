@@ -1078,13 +1078,14 @@ impl Engine {
         }
     }
 
-    /// Device junction GMIN for a GMIN-stepping stage at nodal `gmin`.
+    /// Device junction GMIN for a GMIN-stepping stage at nodal `gmin`, in DC
+    /// and in the transient step rescue alike.
     ///
     /// Above the floor the junctions carry the stage's gmin, as ngspice's
     /// stepping moves `CKTgmin` itself. They never go below the value the
     /// direct solve uses, so the last stage is the circuit's own system even
     /// where the nodal floor is zero.
-    pub(in crate::engine::convergence) fn gmin_stage_junction_gmin(&self, gmin: Value) -> Value {
+    pub(in crate::engine) fn gmin_stage_junction_gmin(&self, gmin: Value) -> Value {
         self.effective_device_junction_gmin(gmin.max(self.config.convergence_config.gmin_target))
     }
 

@@ -144,10 +144,11 @@ impl Engine {
             // ngspice gmin stepping moves `CKTgmin` itself, so the junction
             // parallels inside the compact models ramp with the level — that
             // is what flattens an exponential's knife edge; the diagonal
-            // shunt alone regularizes only the node rows. The zero level
-            // resolves to the configured floor, i.e. the genuine system.
-            circuit
-                .set_semiconductor_junction_gmin(self.effective_device_junction_gmin(extra_gmin));
+            // shunt alone regularizes only the node rows. They never go below
+            // the junction GMIN the direct solve stamps, so the zero level is
+            // the genuine step system, as the last stage of DC GMIN stepping
+            // is.
+            circuit.set_semiconductor_junction_gmin(self.gmin_stage_junction_gmin(extra_gmin));
             let mut level_converged = false;
             for _ in 0..budget {
                 if abort.is_aborted() {
@@ -557,5 +558,96 @@ mod tests {
                 expected_cache
             );
         }
+    }
+
+    /// The rescue's last level solves the system the direct solve stamps.
+    ///
+    /// Its zero level adds no extra shunt, but the diode's junction GMIN
+    /// must still be the transient's own, `effective(gmin_target)`. With
+    /// `gmin_target` above the junction floor, a level that set
+    /// `effective(0)` solved a diode without that conductance, a candidate
+    /// off the true step by `gmin_target * v`. So the source's 1 uA must
+    /// equal the diode's stamped current, junction GMIN included, at the
+    /// junction GMIN the transient runs with.
+    #[test]
+    fn gmin_rescue_final_level_solves_the_direct_step_system() {
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.gmin_initial = 1e-6;
+        config.convergence_config.gmin_target = 1e-6;
+        let engine = Engine::new(config);
+        let netlist =
+            Netlist::parse("rescue floor\nI1 0 a DC 1u\nD1 a 0 dm\n.model dm D(IS=1e-14)\n.end\n")
+                .unwrap();
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let direct =
+            engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target);
+        assert!(
+            direct > engine.effective_device_junction_gmin(0.0),
+            "the case needs a transient junction GMIN above the floor"
+        );
+        circuit.set_semiconductor_junction_gmin(direct);
+        // The rescue starts from the last accepted point, whose bias the
+        // diode already holds; a fresh one would open at its critical voltage.
+        let seed = [0.45];
+        circuit.diodes.devices[0].seed_accepted_periodic_bias(seed[0]);
+        let diode_history =
+            Engine::initialize_diode_history(&circuit, &seed, ReactiveHistorySeed::SolvedBias);
+        let coeff = CompanionCoefficients::backward_euler();
+        let ctx = residual::TransientSystemContext {
+            #[cfg(feature = "veriloga")]
+            abort: &crate::abort_signal::NoAbort,
+            bjt_phase: Default::default(),
+            source_time_side: crate::circuit::SourceTimeSide::Published,
+            coeff: &coeff,
+            xyce_one_step: false,
+            xyce_one_step_order2: false,
+            xyce_static_history: None,
+            bsim4_trnqs_coeff: &coeff,
+            bjt_history: &Default::default(),
+            jfet_history: &Default::default(),
+            diode_history: &diode_history,
+            diode_attempt_cache: None,
+            mosfet_history: &Default::default(),
+            mosfet_companion_slots: &[],
+            vdmos_history: &Default::default(),
+            vdmos_companion_slots: &[],
+            b3soi_history: &Default::default(),
+            b3soi_zero_first_transient_charge_derivative: false,
+            bsim3_history: &Default::default(),
+            bsim4_history: &Default::default(),
+            ekv26_history: &Default::default(),
+            suppress_gate_charge: false,
+            baseline_diag_gmin: 0.0,
+            tline_dc_refs: &[],
+            coupled_tline_refs: &[],
+            analysis_initial_step: false,
+            analysis_final_step: false,
+        };
+        let solution = engine
+            .rescue_transient_step_with_gmin_continuation(
+                &mut circuit,
+                &mut matrix,
+                &mut [0.0],
+                &seed,
+                1e-9,
+                1e-9,
+                &ctx,
+                &mut [],
+                &crate::abort_signal::NoAbort,
+            )
+            .unwrap()
+            .expect("the rescue converges");
+        // The rescue restores the transient's junction GMIN on the way out,
+        // so the diode stamps the direct solve's current here. Within the
+        // residual acceptance, RELTOL of the 1 uA; the wrong level misses
+        // by `gmin_target * v`, about 0.47 uA.
+        let current = circuit.diodes.devices[0].stamped_conduction_current(solution[0]);
+        assert!(
+            (current - 1e-6).abs() < 1e-9,
+            "the diode carries {current:e} A at V(a) = {} V, not the source's 1 uA",
+            solution[0]
+        );
     }
 }
