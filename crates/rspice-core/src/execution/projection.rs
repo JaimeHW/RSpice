@@ -1269,7 +1269,55 @@ fn resolve_complex_operand(
             validity: vec![true; length],
         });
     }
+    if let SaveSignal::DeviceParam { device, param } = signal
+        && let Some(column) = device_lead_branch(source, device, param)
+    {
+        let descriptor = signal_descriptor(
+            authored,
+            authored,
+            SignalKind::Current,
+            SignalValueType::Complex,
+        )
+        .map_err(|error| {
+            SimulationError::Netlist(format!(
+                "terminal current '{authored}' cannot be described: {error}"
+            ))
+        })?;
+        let ProjectionSourceSignal {
+            values, validity, ..
+        } = column;
+        let length = values.len();
+        return Ok(ProjectedSignal {
+            descriptor,
+            values: values.into_owned(),
+            validity: validity.map_or_else(|| vec![true; length], Cow::into_owned),
+        });
+    }
     Err(source.unavailable(authored))
+}
+
+/// The branch a terminal current `@device[param]` is solved in.
+///
+/// A metered Verilog-A terminal's current is the branch current of a meter
+/// named `device:param`; a complex result carries it under that name, and
+/// the device-parameter spelling selects it.
+fn device_lead_branch<'a>(
+    source: &ProjectionSource<'a>,
+    device: &str,
+    param: &str,
+) -> Option<ProjectionSourceSignal<'a>> {
+    let branch = crate::netlist::canonical_symbol(&format!("{device}:{param}"));
+    source
+        .signals
+        .iter()
+        .find(|candidate| {
+            candidate.descriptor.kind() == SignalKind::Current
+                && candidate.values.value_type() == SignalValueType::Complex
+                && crate::netlist::canonical_symbol(registry_name(
+                    candidate.descriptor.display_name(),
+                )) == branch
+        })
+        .cloned()
 }
 
 /// The materialized complex column one authored accessor addresses.
@@ -1531,6 +1579,46 @@ mod tests {
         let (real, imag) = projected.signals()[0].complex().expect("complex column");
         assert_eq!(real, [0.5, 0.5]);
         assert_eq!(imag, [-0.25, -0.25]);
+    }
+
+    /// A terminal current `@x1[ia]` is solved in the branch of the meter on
+    /// that terminal, `x1:ia`, and a complex result selects it under the
+    /// spelling the deck wrote, as a current.
+    #[test]
+    fn a_terminal_current_selects_its_meters_complex_branch() {
+        let netlist = parse(
+            "terminal current\nV1 a 0 AC 1\nX1 a 0 dev\n.AC DEC 1 1 10\n.SAVE @x1[ia]\n.END\n",
+        );
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let source = ProjectionSource::new(AnalysisResultKind::Ac, "AC")
+            .with_axis(vec![1.0, 10.0])
+            .with_signals(vec![
+                complex_signal(
+                    "V(a)",
+                    "a",
+                    SignalKind::Voltage,
+                    vec![1.0, 1.0],
+                    vec![0.0, 0.0],
+                ),
+                complex_signal(
+                    "I(X1:IA)",
+                    "X1:IA",
+                    SignalKind::Current,
+                    vec![1e-3, 1e-3],
+                    vec![2e-6, 2e-5],
+                ),
+            ]);
+        let projected = projection
+            .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+            .expect("the terminal current resolves");
+        assert_eq!(names(&projected), ["@x1[ia]"]);
+        assert_eq!(
+            projected.signals()[0].descriptor().kind(),
+            SignalKind::Current
+        );
+        let (real, imag) = projected.signals()[0].complex().expect("complex column");
+        assert_eq!(real, [1e-3, 1e-3]);
+        assert_eq!(imag, [2e-6, 2e-5]);
     }
 
     #[test]
