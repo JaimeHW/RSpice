@@ -560,3 +560,30 @@ endmodule
          w1=1 w2=0 t=3\n"
     );
 }
+
+/// A task name that reaches another root module is refused by what it is,
+/// never by the symbol the parser stood in for it.
+#[test]
+fn a_cross_module_task_name_is_refused_in_source_terms() {
+    let error = super::run_digital_testbench(
+        &[(
+            "tb.v".into(),
+            "module main;
+  initial other.passed;
+endmodule
+module other;
+  task passed; $display(\"PASSED\"); endtask
+endmodule
+"
+            .into(),
+        )],
+        &super::HdlTestbenchOptions::default(),
+    )
+    .expect_err("a cross-module task name is not supported yet");
+    let text = error.to_string();
+    assert!(
+        text.contains("an upward or cross-module task name is not supported yet"),
+        "{text}"
+    );
+    assert!(!text.contains("rspice_reference"), "{text}");
+}
