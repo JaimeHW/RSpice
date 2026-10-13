@@ -341,10 +341,29 @@ impl<'a> Context<'a> {
 }
 
 /// Bytecode virtual machine
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Vm {
     stack: Vec<Value>,
     sdt_states: Vec<SdtState>,
+}
+
+/// Written out so that `clone_from` reuses both buffers: a behavioral source's
+/// rollback image refreshes its VM every attempted transient step. Both bodies
+/// destructure, so a new field cannot be left out of either.
+impl Clone for Vm {
+    fn clone(&self) -> Self {
+        let Self { stack, sdt_states } = self;
+        Self {
+            stack: stack.clone(),
+            sdt_states: sdt_states.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self { stack, sdt_states } = source;
+        self.stack.clone_from(stack);
+        self.sdt_states.clone_from(sdt_states);
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]

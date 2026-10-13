@@ -229,7 +229,7 @@ struct BehavioralDerivativeContext<'a> {
 }
 
 /// Compiled behavioral voltage source
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BehavioralVoltageSource {
     /// Device name
     pub name: String,
@@ -285,6 +285,117 @@ pub struct BehavioralVoltageSource {
     transient_voltage_lte_excluded: bool,
     /// Partials of an expression that are constants. See [`ConstantPartials`].
     constant_partials: ConstantPartials,
+}
+
+/// Field by field, so that `clone_from` keeps the destination's name and
+/// scratch buffers: the transient's rollback image of the behavioral family is
+/// refreshed with `clone_from` at every attempted step, and a derived `Clone`
+/// would reallocate all of them each time. Both bodies destructure, so a new
+/// field cannot be left out of either.
+impl Clone for BehavioralVoltageSource {
+    fn clone(&self) -> Self {
+        let Self {
+            name,
+            node_pos,
+            node_neg,
+            branch_ordinal,
+            ast,
+            program,
+            integral_equations,
+            vm,
+            node_bindings,
+            branch_bindings,
+            node_values,
+            branch_values,
+            node_partials,
+            branch_partials,
+            linearized_affine,
+            cached_exact_constraint,
+            temperature,
+            frequency,
+            frequency_dependent,
+            gmin,
+            expression_dialect,
+            transient_voltage_lte_excluded,
+            constant_partials,
+        } = self;
+        Self {
+            name: name.clone(),
+            node_pos: *node_pos,
+            node_neg: *node_neg,
+            branch_ordinal: *branch_ordinal,
+            ast: Arc::clone(ast),
+            program: Arc::clone(program),
+            integral_equations: integral_equations.clone(),
+            vm: vm.clone(),
+            node_bindings: node_bindings.clone(),
+            branch_bindings: branch_bindings.clone(),
+            node_values: node_values.clone(),
+            branch_values: branch_values.clone(),
+            node_partials: node_partials.clone(),
+            branch_partials: branch_partials.clone(),
+            linearized_affine: *linearized_affine,
+            cached_exact_constraint: *cached_exact_constraint,
+            temperature: *temperature,
+            frequency: *frequency,
+            frequency_dependent: *frequency_dependent,
+            gmin: *gmin,
+            expression_dialect: *expression_dialect,
+            transient_voltage_lte_excluded: *transient_voltage_lte_excluded,
+            constant_partials: constant_partials.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            name,
+            node_pos,
+            node_neg,
+            branch_ordinal,
+            ast,
+            program,
+            integral_equations,
+            vm,
+            node_bindings,
+            branch_bindings,
+            node_values,
+            branch_values,
+            node_partials,
+            branch_partials,
+            linearized_affine,
+            cached_exact_constraint,
+            temperature,
+            frequency,
+            frequency_dependent,
+            gmin,
+            expression_dialect,
+            transient_voltage_lte_excluded,
+            constant_partials,
+        } = source;
+        self.name.clone_from(name);
+        self.node_pos = *node_pos;
+        self.node_neg = *node_neg;
+        self.branch_ordinal = *branch_ordinal;
+        self.ast.clone_from(ast);
+        self.program.clone_from(program);
+        self.integral_equations.clone_from(integral_equations);
+        self.vm.clone_from(vm);
+        self.node_bindings.clone_from(node_bindings);
+        self.branch_bindings.clone_from(branch_bindings);
+        self.node_values.clone_from(node_values);
+        self.branch_values.clone_from(branch_values);
+        self.node_partials.clone_from(node_partials);
+        self.branch_partials.clone_from(branch_partials);
+        self.linearized_affine = *linearized_affine;
+        self.cached_exact_constraint = *cached_exact_constraint;
+        self.temperature = *temperature;
+        self.frequency = *frequency;
+        self.frequency_dependent = *frequency_dependent;
+        self.gmin = *gmin;
+        self.expression_dialect = *expression_dialect;
+        self.transient_voltage_lte_excluded = *transient_voltage_lte_excluded;
+        self.constant_partials.clone_from(constant_partials);
+    }
 }
 
 impl BehavioralVoltageSource {
@@ -2260,7 +2371,7 @@ fn linearization_values_converged(
 }
 
 /// Compiled behavioral current source
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BehavioralCurrentSource {
     /// Device name
     pub name: String,
@@ -2308,6 +2419,106 @@ pub struct BehavioralCurrentSource {
     two_terminal_observables: bool,
     /// Partials of an expression that are constants. See [`ConstantPartials`].
     constant_partials: ConstantPartials,
+}
+
+/// Field by field, for the reason given on [`BehavioralVoltageSource`]'s
+/// `Clone`: the per-step rollback image is refreshed with `clone_from`.
+impl Clone for BehavioralCurrentSource {
+    fn clone(&self) -> Self {
+        let Self {
+            name,
+            node_pos,
+            node_neg,
+            ast,
+            program,
+            integral_equations,
+            vm,
+            node_bindings,
+            branch_bindings,
+            node_values,
+            branch_values,
+            node_partials,
+            branch_partials,
+            linearized_affine,
+            temperature,
+            frequency,
+            frequency_dependent,
+            gmin,
+            expression_dialect,
+            two_terminal_observables,
+            constant_partials,
+        } = self;
+        Self {
+            name: name.clone(),
+            node_pos: *node_pos,
+            node_neg: *node_neg,
+            ast: Arc::clone(ast),
+            program: Arc::clone(program),
+            integral_equations: integral_equations.clone(),
+            vm: vm.clone(),
+            node_bindings: node_bindings.clone(),
+            branch_bindings: branch_bindings.clone(),
+            node_values: node_values.clone(),
+            branch_values: branch_values.clone(),
+            node_partials: node_partials.clone(),
+            branch_partials: branch_partials.clone(),
+            linearized_affine: *linearized_affine,
+            temperature: *temperature,
+            frequency: *frequency,
+            frequency_dependent: *frequency_dependent,
+            gmin: *gmin,
+            expression_dialect: *expression_dialect,
+            two_terminal_observables: *two_terminal_observables,
+            constant_partials: constant_partials.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            name,
+            node_pos,
+            node_neg,
+            ast,
+            program,
+            integral_equations,
+            vm,
+            node_bindings,
+            branch_bindings,
+            node_values,
+            branch_values,
+            node_partials,
+            branch_partials,
+            linearized_affine,
+            temperature,
+            frequency,
+            frequency_dependent,
+            gmin,
+            expression_dialect,
+            two_terminal_observables,
+            constant_partials,
+        } = source;
+        self.name.clone_from(name);
+        self.node_pos = *node_pos;
+        self.node_neg = *node_neg;
+        self.ast.clone_from(ast);
+        self.program.clone_from(program);
+        self.integral_equations.clone_from(integral_equations);
+        self.vm.clone_from(vm);
+        self.node_bindings.clone_from(node_bindings);
+        self.branch_bindings.clone_from(branch_bindings);
+        self.node_values.clone_from(node_values);
+        self.branch_values.clone_from(branch_values);
+        self.node_partials.clone_from(node_partials);
+        self.branch_partials.clone_from(branch_partials);
+        self.linearized_affine = *linearized_affine;
+        self.temperature = *temperature;
+        self.frequency = *frequency;
+        self.frequency_dependent = *frequency_dependent;
+        self.gmin = *gmin;
+        self.expression_dialect = *expression_dialect;
+        self.two_terminal_observables = *two_terminal_observables;
+        self.constant_partials.clone_from(constant_partials);
+    }
 }
 
 impl BehavioralCurrentSource {
@@ -2966,10 +3177,35 @@ impl BehavioralCurrentSource {
 }
 
 /// Storage for behavioral sources (not SoA due to compiled programs)
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct BehavioralSources {
     pub voltage_sources: Vec<BehavioralVoltageSource>,
     pub current_sources: Vec<BehavioralCurrentSource>,
+}
+
+/// Written out so that `clone_from` reaches each source's own `clone_from`:
+/// a derived `clone_from` is `*self = source.clone()`, which would rebuild
+/// every source of the transient's per-step rollback image.
+impl Clone for BehavioralSources {
+    fn clone(&self) -> Self {
+        let Self {
+            voltage_sources,
+            current_sources,
+        } = self;
+        Self {
+            voltage_sources: voltage_sources.clone(),
+            current_sources: current_sources.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            voltage_sources,
+            current_sources,
+        } = source;
+        self.voltage_sources.clone_from(voltage_sources);
+        self.current_sources.clone_from(current_sources);
+    }
 }
 
 /// Evaluated operator frames for an unchanged behavioral-source topology.
