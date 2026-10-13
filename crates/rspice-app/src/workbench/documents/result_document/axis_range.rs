@@ -3,24 +3,26 @@
 //! One spelling serves the editable range field, the read-only viewport rows
 //! above it and the status bar, so the three never state the same interval
 //! two ways. It reads the way the axis ticks do — the shortest engineering
-//! form with the axis unit, `0 … 1 ms`, `4 … 6 V` — and it is exact: the text
-//! goes back through [`parse_axis_range`] to the very `f64`s it was written
-//! from, bit for bit. Where no engineering form is exact, the shortest plain
-//! decimal that is takes its place. A rounded value is never written, because
-//! the field would commit it the moment the reader tabbed through.
+//! form with the axis unit, `0 … 1 ms`, `4 … 6 V`. Each end is written to six
+//! significant digits of the smaller of itself and the interval's width: an
+//! autofit's padding leaves `f64` noise such as `3.9559999999999995`, which
+//! reads `3.956`, while a typed `1786.13` still reads as typed. The field
+//! commits only text the reader edited, so the rounding never moves an axis.
 //!
 //! The digits are the app's own engineering formatter and parser; this module
-//! only chooses between the forms they produce and carries the unit.
+//! only chooses the precision and carries the unit.
 
 use crate::quantity::engineering::{
     EngineeringPrecision, format_engineering_value_with, parse_engineering_value,
 };
 use rspice_results_ui::waves::unit_carries_its_decade;
 
-/// Most decimals the engineering formatter is asked for. Seventeen
-/// significant digits name any `f64`, and a mantissa below 1000 never needs
-/// more decimals than that.
-const MAX_DECIMALS: u8 = 17;
+/// Significant digits each end keeps of the smaller of its own magnitude and
+/// the interval's width.
+const SIGNIFICANT_DIGITS: i32 = 6;
+
+/// Most decimals any mantissa is written with.
+const MAX_DECIMALS: i32 = 17;
 
 /// `(minimum, maximum)` as the range field writes it.
 ///
@@ -30,8 +32,9 @@ const MAX_DECIMALS: u8 = 17;
 /// unity minimum under a prefixed maximum, `2 V … 1.5 kV`, which would
 /// otherwise read as kilovolts too.
 pub(crate) fn format_axis_range((minimum, maximum): (f64, f64), unit: &str) -> String {
-    let low = AxisValue::of(minimum, unit);
-    let high = AxisValue::of(maximum, unit);
+    let width = (maximum - minimum).abs();
+    let low = AxisValue::of(minimum, width, unit);
+    let high = AxisValue::of(maximum, width, unit);
     let low_text = if low.is_zero || (low.prefix.is_empty() && high.prefix.is_empty()) {
         low.mantissa.clone()
     } else {
@@ -103,41 +106,35 @@ struct AxisValue {
 }
 
 impl AxisValue {
-    fn of(value: f64, unit: &str) -> Self {
-        // A signed zero is written, and so reads back, as zero.
-        let value = if value == 0.0 { 0.0 } else { value };
-        let plain = shortest_plain(value);
-        let exact = |text: &str| {
-            parse_axis_value(text, unit).is_some_and(|parsed| parsed.to_bits() == value.to_bits())
+    fn of(value: f64, width: f64, unit: &str) -> Self {
+        let step = step_exponent(value, width);
+        let rounded = (value / 10f64.powi(step)).round() * 10f64.powi(step);
+        // A signed zero, or an end that rounds to zero, is written as zero.
+        let value = if rounded == 0.0 || !rounded.is_finite() {
+            if value.is_finite() { 0.0 } else { value }
+        } else {
+            rounded
         };
         if value.is_finite() && !unit_carries_its_decade(unit) {
-            let budget = significant_digits(&plain);
-            for decimals in 0..=MAX_DECIMALS {
-                let spice =
-                    format_engineering_value_with(value, EngineeringPrecision::UpTo(decimals));
-                let mantissa = spice.trim_end_matches(char::is_alphabetic);
-                // More digits than the plain form needs is the scaling's own
-                // rounding showing through, not more of the value.
-                if significant_digits(mantissa) > budget {
-                    break;
-                }
-                let candidate = Self {
-                    mantissa: mantissa.to_owned(),
-                    // The parser folds `µ` back to `u`; `Meg` stays as it is,
-                    // because a bare `M` is milli to every SPICE reader.
-                    prefix: match &spice[mantissa.len()..] {
-                        "u" => "\u{b5}".to_owned(),
-                        prefix => prefix.to_owned(),
-                    },
-                    is_zero: value == 0.0,
-                };
-                if exact(&candidate.text(unit)) {
-                    return candidate;
-                }
-            }
+            let decimals = (decade_of(value) - step).clamp(0, MAX_DECIMALS);
+            let spice = format_engineering_value_with(
+                value,
+                EngineeringPrecision::UpTo(u8::try_from(decimals).unwrap_or(0)),
+            );
+            let mantissa = spice.trim_end_matches(char::is_alphabetic);
+            return Self {
+                mantissa: mantissa.to_owned(),
+                // The parser folds `µ` back to `u`; `Meg` stays as it is,
+                // because a bare `M` is milli to every SPICE reader.
+                prefix: match &spice[mantissa.len()..] {
+                    "u" => "\u{b5}".to_owned(),
+                    prefix => prefix.to_owned(),
+                },
+                is_zero: value == 0.0,
+            };
         }
         Self {
-            mantissa: plain,
+            mantissa: plain_text(value, step),
             prefix: String::new(),
             is_zero: value == 0.0,
         }
@@ -152,29 +149,57 @@ impl AxisValue {
     }
 }
 
-/// The shortest decimal that reads back as `value`: Rust's own shortest
-/// round-trip forms, positional or with an exponent, whichever is shorter.
-fn shortest_plain(value: f64) -> String {
-    let positional = format!("{value}");
-    let exponent = format!("{value:e}");
-    if exponent.len() < positional.len() {
-        exponent
+/// `value` without a decade, to the power of ten `step`: positional where that
+/// reads, `1786.13`, and with an exponent outside it, `4e-21`.
+fn plain_text(value: f64, step: i32) -> String {
+    let trim = |digits: &str| -> String {
+        if digits.contains('.') {
+            digits.trim_end_matches('0').trim_end_matches('.').to_owned()
+        } else {
+            digits.to_owned()
+        }
+    };
+    let decade = if value == 0.0 {
+        0
     } else {
-        positional
+        value.abs().log10().floor() as i32
+    };
+    if (-6..15).contains(&decade) && -step <= MAX_DECIMALS {
+        let decimals = usize::try_from(-step).unwrap_or(0);
+        return trim(&format!("{value:.decimals$}"));
+    }
+    let digits = usize::try_from((decade - step).clamp(0, MAX_DECIMALS)).unwrap_or(0);
+    let text = format!("{value:.digits$e}");
+    match text.split_once('e') {
+        Some((mantissa, exponent)) => format!("{}e{exponent}", trim(mantissa)),
+        None => text,
     }
 }
 
-/// How many significant digits a mantissa writes: its digits before any
-/// exponent, less the zeros that only place the point.
-fn significant_digits(mantissa: &str) -> usize {
-    let digits: String = mantissa
-        .split(['e', 'E'])
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .filter(char::is_ascii_digit)
-        .collect();
-    digits.trim_start_matches('0').len().max(1)
+/// The power of ten an end is rounded to: [`SIGNIFICANT_DIGITS`] of the
+/// smaller of its magnitude and the interval's width. The width alone would
+/// round a log axis's `1 kHz` end to zero under a `1 GHz` one; the magnitude
+/// alone would write a narrow zoom's two ends identically.
+fn step_exponent(value: f64, width: f64) -> i32 {
+    let scale = [value.abs(), width]
+        .into_iter()
+        .filter(|magnitude| magnitude.is_finite() && *magnitude > 0.0)
+        .reduce(f64::min);
+    // An `f64` decade lies between -324 and 308, so each cast is exact.
+    scale.map_or(0, |scale| {
+        scale.log10().floor() as i32 - (SIGNIFICANT_DIGITS - 1)
+    })
+}
+
+/// The decade the engineering formatter writes `value`'s mantissa on: `k` is
+/// 3, `m` is -3, and below femto the formatter writes a plain exponent.
+fn decade_of(value: f64) -> i32 {
+    let magnitude = value.abs();
+    if magnitude == 0.0 || !magnitude.is_finite() {
+        return 0;
+    }
+    let decade = magnitude.log10().floor() as i32;
+    (decade.div_euclid(3) * 3).clamp(-15, 12)
 }
 
 #[cfg(test)]
@@ -192,13 +217,9 @@ mod tests {
             format_axis_range((1.0e-6, 2.0e-3), "s"),
             "1 \u{b5}s \u{2026} 2 ms"
         );
-        // The field's parser reads `500 µ` as 500 × 1e-6, which is not the
-        // `f64` nearest 5e-4, so the engineering form of 5e-4 would commit a
-        // different number than the one the axis holds. The shortest exact
-        // form stands in for it.
         assert_eq!(
             format_axis_range((5.0e-4, 2.0e-3), "s"),
-            "5e-4 s \u{2026} 2 ms"
+            "500 \u{b5}s \u{2026} 2 ms"
         );
         assert_eq!(format_axis_range((2.0, 1500.0), "V"), "2 V \u{2026} 1.5 kV");
         assert_eq!(format_axis_range((-2.5, 2.5), "A"), "-2.5 \u{2026} 2.5 A");
@@ -214,21 +235,42 @@ mod tests {
         );
     }
 
-    /// The field commits what it shows, so what it shows has to be the value
-    /// itself. Each of these needs more than the short form, and none of them
-    /// may come back as a neighbouring `f64`.
+    /// An autofit pads the data by a fraction of its span, and the sum is
+    /// `f64` noise. The ends read as the numbers they are near, never as
+    /// seventeen digits, and a typed end still reads as typed.
     #[test]
-    fn a_range_reads_back_as_the_exact_values_it_was_written_from() {
-        let awkward = [
+    fn a_range_hides_floating_point_noise_but_keeps_typed_digits() {
+        assert_eq!(
+            format_axis_range((3.955_999_999_999_999_5, 6.044_000_000_000_000_5), "V"),
+            "3.956 \u{2026} 6.044 V"
+        );
+        assert_eq!(
+            format_axis_range((0.1 + 0.2, 0.9), "A"),
+            "300 mA \u{2026} 900 mA"
+        );
+        assert_eq!(
+            format_axis_range((0.0, 1786.13), "nV/\u{221a}Hz"),
+            "0 \u{2026} 1786.13 nV/\u{221a}Hz"
+        );
+        assert_eq!(
+            format_axis_range((1.234_5e-3, 1.234_6e-3), "s"),
+            "1.2345 ms \u{2026} 1.2346 ms"
+        );
+    }
+
+    /// What the field shows reads back through its own parser to within the
+    /// precision it was written to, whatever the value and the unit.
+    #[test]
+    fn a_range_reads_back_to_within_its_written_precision() {
+        let awkward: [f64; 8] = [
             1.0 / 3.0,
             1.0e-15,
             123_456.789,
             2.0 / 3.0 * 1.0e-3,
             0.1 + 0.2,
             -1.0e-15,
-            6.02214076e23,
+            6.022_140_76e23,
             4.0e-21,
-            1.0e-3 + f64::EPSILON * 1.0e-3,
         ];
         for unit in ["s", "V", "Hz", "", "K", "\u{b0}", "nV/\u{221a}Hz"] {
             for value in awkward {
@@ -236,11 +278,14 @@ mod tests {
                     let text = format_axis_range(range, unit);
                     let parsed = parse_axis_range(&text, unit)
                         .unwrap_or_else(|| panic!("{text:?} did not read back in {unit:?}"));
-                    assert_eq!(
-                        (parsed.0.to_bits(), parsed.1.to_bits()),
-                        (range.0.to_bits(), range.1.to_bits()),
-                        "{range:?} in {unit:?} was written {text:?} and read back as {parsed:?}"
-                    );
+                    let width = (range.1 - range.0).abs();
+                    for (written, read) in [(range.0, parsed.0), (range.1, parsed.1)] {
+                        let tolerance = written.abs().min(width) * 1.0e-5;
+                        assert!(
+                            (read - written).abs() <= tolerance,
+                            "{range:?} in {unit:?} was written {text:?} and read back as {parsed:?}"
+                        );
+                    }
                 }
             }
         }

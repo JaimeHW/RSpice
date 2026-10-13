@@ -1832,7 +1832,12 @@ fn axis_limit_row(
     // a legal prefix of "1.2m" and three orders of magnitude away from it.
     if edit.lost_focus() {
         let tokens = Tokens::get(ui.ctx());
-        if text.trim().is_empty() {
+        if text == committed {
+            // The field shows the interval to six significant digits. Read
+            // back unedited, that would pin an autofitting axis, or nudge a
+            // pinned one, by the rounding alone.
+            app.state.ui.results.session.axis_limit_draft = None;
+        } else if text.trim().is_empty() {
             set_active_axis_range(&tokens, &mut app.state, axis, None);
             app.state.ui.results.session.axis_limit_draft = None;
         } else if let Some(range) = parse_axis_range(&text, unit) {
