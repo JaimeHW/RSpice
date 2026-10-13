@@ -352,6 +352,15 @@ impl SimulationController {
         self.runner.engine_availability()
     }
 
+    /// The deck the next dispatch consumes, as preflight retained it, and the
+    /// digest of the snapshot it seals: what a run started now executes.
+    #[cfg(test)]
+    pub(crate) fn retained_run_deck(&self) -> Option<(&str, crate::product::ContentDigest)> {
+        self.run_authorization
+            .retained_snapshot()
+            .map(|snapshot| (snapshot.executable_netlist(), snapshot.digest()))
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn set_engine_wakeup(&mut self, wakeup: std::sync::Arc<dyn Fn() + Send + Sync>) {
         self.runner
