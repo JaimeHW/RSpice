@@ -616,6 +616,30 @@ fn a_new_projects_plan_owns_its_variables_outputs_and_specifications() {
     );
 }
 
+/// A project with no technology opens without claiming its runs are blocked
+/// when the run gate lets its plan run: the open warning asked whether the
+/// project had a technology binding at all, and told every project without
+/// one that execution was blocked.
+#[test]
+fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning() {
+    let mut state = AppState::default();
+
+    assert!(apply_loaded_project(
+        &mut state,
+        project_named("no-technology.rspiceproj"),
+        ProjectLoadOrigin::BrowserImport("no-technology.rspiceproj"),
+    ));
+
+    assert!(state.technology_gate_block_reason().is_ok());
+    let blocked = state
+        .log_buffer
+        .entries()
+        .filter(|entry| entry.message.contains("simulation execution blocked"))
+        .map(|entry| entry.message.clone())
+        .collect::<Vec<_>>();
+    assert!(blocked.is_empty(), "{blocked:#?}");
+}
+
 #[test]
 fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
     use crate::simulation::dialog::IntegrationMethod;

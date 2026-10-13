@@ -1162,7 +1162,11 @@ fn apply_loaded_project_authorized(
     state.model_library_manager = model_library_manager;
     state.restore_active_schematic_from_workspace();
     state.simulation = crate::state::SimulationState::default();
-    if let Err(error) = state.validate_project_technology_contract() {
+    // Asked of the one gate a run asks: a project with no technology runs
+    // whatever its plan does not need one for. Asking whether it had a
+    // binding at all told every such project its runs were blocked, and they
+    // were not.
+    if let Err(error) = state.technology_gate_block_reason() {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Project opened with simulation execution blocked: {error}. Review Project \u{00b7} Dependencies and attach an exact trusted signed PDK revision before running or governed saving"
         )));
