@@ -106,6 +106,16 @@ struct AcVoltageConstraintComponent {
 /// that the raw residual is only solver-sized. A whole connected component is
 /// projected together; pairwise snapping would break earlier constraints in a
 /// stack of ideal sources.
+///
+/// Each component is anchored at one node that keeps its solved potential:
+/// ground when the component reaches it, otherwise the node of smallest
+/// magnitude. The other nodes move only by the raw residuals of the source
+/// equations between them and the anchor, each a rounding of potentials no
+/// smaller than the anchor's. The componentwise certificate of the whole
+/// system needs exactly that: a node whose exact potential is zero (a source's
+/// low side held by a controlled source, or by a resistor that carries no
+/// current) cannot move at all without violating every equation through it
+/// outright, which is what centering a floating component on its mean did.
 #[derive(Debug)]
 struct AcVoltageConstraintProjection {
     constraints: Vec<AcVoltageConstraint>,
@@ -235,30 +245,22 @@ impl AcVoltageConstraintProjection {
         // so an overflow or malformed solution cannot leave a partial
         // projection behind.
         for component in &self.components {
-            let common_mode = if component.grounded {
-                Complex64::new(0.0, 0.0)
-            } else {
-                compensated_common_mode(solution, &component.nodes)?
-            };
+            let (anchor, anchor_relative) = component_anchor(solution, component);
             for &(node, relative) in &component.nodes {
-                if node > 0 && !complex_is_finite(common_mode + relative) {
+                if node > 0 && !complex_is_finite(anchor + (relative - anchor_relative)) {
                     return Err(SolverError::Overflow.into());
                 }
             }
         }
         for component in &self.components {
-            let common_mode = if component.grounded {
-                Complex64::new(0.0, 0.0)
-            } else {
-                // The validation pass above established that this identical,
-                // deterministic calculation and every projected value are
-                // finite. Components are disjoint, so earlier publication
-                // cannot change a later component's mean.
-                compensated_common_mode(solution, &component.nodes)?
-            };
+            // The validation pass above established that this identical,
+            // deterministic calculation and every projected value are finite.
+            // Components are disjoint, so earlier publication cannot change a
+            // later component's anchor.
+            let (anchor, anchor_relative) = component_anchor(solution, component);
             for &(node, relative) in &component.nodes {
                 if node > 0 {
-                    solution[node - 1] = common_mode + relative;
+                    solution[node - 1] = anchor + (relative - anchor_relative);
                 }
             }
         }
@@ -336,51 +338,25 @@ fn complex_max_norm(value: Complex64) -> Value {
     value.re.abs().max(value.im.abs())
 }
 
-fn compensated_common_mode(
+/// The potential a source component keeps and its offset from the component
+/// root: ground for a grounded component, otherwise the solved node of
+/// smallest magnitude (the first in traversal order on a tie).
+fn component_anchor(
     solution: &[Complex64],
-    nodes: &[(NodeId, Complex64)],
-) -> Result<Complex64, SimulationError> {
-    let mut scale: Value = 0.0;
-    for &(node, relative) in nodes {
+    component: &AcVoltageConstraintComponent,
+) -> (Complex64, Complex64) {
+    if component.grounded {
+        return (Complex64::new(0.0, 0.0), Complex64::new(0.0, 0.0));
+    }
+    let mut anchor: Option<(Complex64, Complex64)> = None;
+    for &(node, relative) in &component.nodes {
         debug_assert!(node > 0);
-        let sample = solution[node - 1] - relative;
-        if !complex_is_finite(sample) {
-            return Err(SolverError::Overflow.into());
+        let potential = solution[node - 1];
+        if anchor.is_none_or(|(kept, _)| complex_max_norm(potential) < complex_max_norm(kept)) {
+            anchor = Some((potential, relative));
         }
-        scale = scale.max(complex_max_norm(sample));
     }
-    if scale == 0.0 {
-        return Ok(Complex64::new(0.0, 0.0));
-    }
-
-    // Sum normalized samples with Kahan compensation. Scaling first prevents
-    // same-sign finite common modes from overflowing while retaining the
-    // minimum-L2 translation to substantially better than a naive mean.
-    let mut sum_re = 0.0;
-    let mut compensation_re = 0.0;
-    let mut sum_im = 0.0;
-    let mut compensation_im = 0.0;
-    for &(node, relative) in nodes {
-        debug_assert!(node > 0);
-        let raw = (solution[node - 1] - relative) / scale;
-
-        let adjusted_re = raw.re - compensation_re;
-        let next_re = sum_re + adjusted_re;
-        compensation_re = (next_re - sum_re) - adjusted_re;
-        sum_re = next_re;
-
-        let adjusted_im = raw.im - compensation_im;
-        let next_im = sum_im + adjusted_im;
-        compensation_im = (next_im - sum_im) - adjusted_im;
-        sum_im = next_im;
-    }
-    let count = nodes.len() as Value;
-    let mean = Complex64::new(sum_re / count, sum_im / count) * scale;
-    if complex_is_finite(mean) {
-        Ok(mean)
-    } else {
-        Err(SolverError::Overflow.into())
-    }
+    anchor.unwrap_or_default()
 }
 
 struct AcImagStamper<'a> {
@@ -3790,6 +3766,38 @@ mod tests {
         );
     }
 
+    /// A floating source whose low side the rest of the circuit holds at
+    /// exactly zero: a controlled source with no small-signal drive (as the
+    /// real-to-voltage converter is), or a resistor that carries no current.
+    /// Equilibrating the gain's column leaves `V(fin)` an ULP off one for about
+    /// a third of these gains; moving both nodes by half of it put the low side
+    /// off zero, which every equation through it rejects with a backward error
+    /// of one.
+    #[test]
+    fn ac_floating_source_keeps_a_low_side_the_circuit_holds_at_zero() {
+        for hold in ["E1 stim 0 0 0 1\n", "R1 stim 0 1k\n"] {
+            for step in 101..=400 {
+                let gain = Value::from(step) / 100.0;
+                let netlist = Netlist::parse(&format!(
+                    "Floating AC source on a held node\n{hold}VAC fin stim AC 1\nE2 out 0 fin 0 {gain}\nRO out 0 1k\n.END\n"
+                ))
+                .expect("deck parses");
+                let point = Engine::default()
+                    .run_ac(&netlist, &[1.0e3])
+                    .unwrap_or_else(|error| panic!("{hold:?} with gain {gain}: {error}"))
+                    .remove(0);
+
+                assert_eq!(voltage_at(&point, "stim"), Complex64::new(0.0, 0.0));
+                assert_eq!(voltage_at(&point, "fin"), Complex64::new(1.0, 0.0));
+                assert!(
+                    (voltage_at(&point, "out") - gain).norm() <= 4.0 * Value::EPSILON * gain,
+                    "{hold:?} with gain {gain}: {}",
+                    voltage_at(&point, "out")
+                );
+            }
+        }
+    }
+
     #[test]
     fn ac_zero_volt_probe_remains_exact_while_carrying_current() {
         let netlist = Netlist::parse(
@@ -3892,19 +3900,68 @@ mod tests {
         assert_eq!(solution, [Complex64::new(1.0 + 1.0e-8, 0.0)]);
     }
 
+    fn floating_pair(target: Complex64, root_is_low_side: bool) -> AcVoltageConstraintProjection {
+        // V(2) - V(1) = target, traversed from either end.
+        let nodes = if root_is_low_side {
+            vec![(1, Complex64::new(0.0, 0.0)), (2, target)]
+        } else {
+            vec![(2, Complex64::new(0.0, 0.0)), (1, -target)]
+        };
+        AcVoltageConstraintProjection {
+            constraints: vec![AcVoltageConstraint {
+                node_pos: 2,
+                node_neg: 1,
+                target,
+            }],
+            components: vec![AcVoltageConstraintComponent {
+                grounded: false,
+                nodes,
+            }],
+        }
+    }
+
     #[test]
-    fn floating_common_mode_mean_stays_finite_near_numeric_limits() {
+    fn floating_projection_keeps_its_smallest_node_and_moves_the_other() {
+        let one = Complex64::new(1.0, 0.0);
+        let below_one = Complex64::new(1.0 - Value::EPSILON / 2.0, 0.0);
+        for root_is_low_side in [true, false] {
+            let projection = floating_pair(one, root_is_low_side);
+
+            // The solve of the C8 converter deck at 1590 Hz: the low side is
+            // held at exactly zero and the high side lands an ULP below one.
+            let mut solution = [Complex64::new(0.0, 0.0), below_one];
+            projection
+                .project(&mut solution)
+                .expect("solver-sized residual");
+            assert_eq!(solution, [Complex64::new(0.0, 0.0), one]);
+
+            let mut solution = [
+                Complex64::new(-0.25, 0.0),
+                Complex64::new(0.75 + Value::EPSILON, 0.0),
+            ];
+            projection
+                .project(&mut solution)
+                .expect("solver-sized residual");
+            assert_eq!(
+                solution,
+                [Complex64::new(-0.25, 0.0), Complex64::new(0.75, 0.0)]
+            );
+        }
+    }
+
+    #[test]
+    fn floating_projection_stays_finite_near_numeric_limits() {
         let magnitude = Value::MAX / 4.0;
-        let solution = [
+        let raw = [
             Complex64::new(magnitude, magnitude),
             Complex64::new(magnitude, magnitude),
         ];
-        let nodes = [(1, Complex64::new(0.0, 0.0)), (2, Complex64::new(0.0, 0.0))];
+        let mut solution = raw;
 
-        assert_eq!(
-            compensated_common_mode(&solution, &nodes).expect("finite mean"),
-            Complex64::new(magnitude, magnitude)
-        );
+        floating_pair(Complex64::new(0.0, 0.0), true)
+            .project(&mut solution)
+            .expect("finite projection");
+        assert_eq!(solution, raw);
     }
 
     #[test]

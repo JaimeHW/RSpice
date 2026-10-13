@@ -1176,3 +1176,67 @@ fn nested_ddx_laplace_model_solves_through_the_engine() {
         }
     }
 }
+
+/// Corpus design C8's Verilog-A rung in AC: a wreal level crosses into the
+/// analog domain through the built-in real-to-voltage converter, an AC source
+/// rides on the converter's output, and a second-order `laplace_nd` low-pass
+/// (10 kHz, Q = 1/sqrt(2)) drives a 1 kOhm load. The converter is an ideal
+/// voltage source with no small-signal drive, so `V(stim)` is exactly zero and
+/// the filter's ideal output ignores the load: `V(out) = H(j*omega)`. Fourteen
+/// of these points (1584.89 Hz among them) used to fail the AC solve with a
+/// backward error of one.
+#[test]
+fn laplace_filter_behind_a_converter_driven_ac_source_matches_its_closed_form() {
+    let level = write_model(
+        "converter_level",
+        "module converter_level(stim); output stim; wreal stim; real v; assign stim = v; initial v = 0.0; endmodule",
+    );
+    let (a1, a2) = (2.2507907903927653e-05, 2.5330295910584445e-10);
+    let filter = write_model(
+        "converter_laplace",
+        &format!(
+            "module converter_laplace(in, out); input in; output out; electrical in, out;
+             analog V(out) <+ laplace_nd(V(in), '{{1.0}}, '{{1.0, {a1:e}, {a2:e}}});
+             endmodule"
+        ),
+    );
+    let netlist = Netlist::parse(&format!(
+        "* C8 Laplace rung in AC\nxtb stim converter_level\nvac fin stim dc 0 ac 1\nxflt fin out converter_laplace\nro out 0 1k\n.va \"{}\" converter_level\n.va \"{}\" converter_laplace\n.end\n",
+        deck_path(&level),
+        deck_path(&filter),
+    ))
+    .unwrap();
+    // .ac dec 200 100 1meg
+    let frequencies: Vec<f64> = (0..=800)
+        .map(|k| 100.0 * 10f64.powf(f64::from(k) / 200.0))
+        .collect();
+    let points = Engine::default()
+        .run_ac(&netlist, &frequencies)
+        .expect("every point of the sweep solves");
+    assert_eq!(points.len(), frequencies.len());
+    let voltage = |point: &rspice_core::analysis::ac::AcResult, node: &str| {
+        let index = point
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("node {node} is reported"));
+        point.voltages[index]
+    };
+    for point in &points {
+        let s = rspice_core::Complex64::new(0.0, 2.0 * std::f64::consts::PI * point.frequency);
+        let expected = rspice_core::Complex64::new(1.0, 0.0) / (1.0 + a1 * s + a2 * s * s);
+        let out = voltage(point, "out");
+        assert_eq!(
+            voltage(point, "stim"),
+            rspice_core::Complex64::new(0.0, 0.0)
+        );
+        assert_eq!(voltage(point, "fin"), rspice_core::Complex64::new(1.0, 0.0));
+        assert!(
+            (out - expected).norm() <= 1e-12 * expected.norm(),
+            "f = {} Hz: V(out) = {out}, expected {expected}",
+            point.frequency
+        );
+    }
+    let _ = std::fs::remove_file(level);
+    let _ = std::fs::remove_file(filter);
+}
