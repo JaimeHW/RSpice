@@ -5,14 +5,23 @@
 //! models to be source modules of that crate. This dependency-neutral package
 //! is the artifact boundary that lets model shards compile once and be reused
 //! by desktop, browser, mobile, and command-line products.
+//!
+//! It also hosts the dense eigensolve shared by the periodic analyses, so that
+//! faer's generic eigen code is compiled in a package the development profile
+//! optimizes.
 
 #![deny(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![doc = include_str!("../README.md")]
 
+mod dense_eigen;
 mod klu;
 mod sparse;
 
+pub use dense_eigen::{
+    DenseEigenspectrumError, DenseSchurForm, QualifiedDenseEigenspectrum,
+    qualified_dense_eigenspectrum,
+};
 pub use klu::{KluDiagnostics, KluNumericCheckpoint, KluSolver};
 pub use sparse::{
     ComplexMatrix, ComplexTransposeBackwardErrorReport, CscIndex, CscPatternToken, SparseLuSolver,

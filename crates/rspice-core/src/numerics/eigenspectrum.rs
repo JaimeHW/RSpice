@@ -1,17 +1,19 @@
 //! Strict ordinary eigenspectrum extraction shared by periodic analyses.
 //!
 //! A successful result is complete and carries a normwise residual
-//! certificate.  The faer eigensolve itself is an atomic call, so cooperative
-//! cancellation is checked immediately before and after it and throughout the
-//! surrounding validation, conversion, and qualification work.
+//! certificate. The eigensolve and its O(n³) residual qualification run in
+//! [`rspice_matrix::qualified_dense_eigenspectrum`], which the development and
+//! test profiles optimize; faer's eigen code is generic and would otherwise be
+//! compiled unoptimized here. Cooperative cancellation is polled before and
+//! after the atomic eigensolve and throughout the surrounding validation,
+//! extraction and qualification work.
 
 use crate::Value;
 use crate::abort_signal::AbortSignal;
-use faer::Mat;
-use faer::linalg::solvers::Eigen;
 use num_complex::Complex64;
+use rspice_matrix::{DenseSchurForm, qualified_dense_eigenspectrum};
 
-const ABORT_POLL_STRIDE: usize = 64;
+pub(crate) use rspice_matrix::DenseEigenspectrumError as OrdinarySpectrumError;
 
 /// Residual certificate for one complete ordinary Floquet eigenspectrum.
 ///
@@ -74,107 +76,16 @@ pub(crate) struct QualifiedOrdinarySpectrum {
     pub(crate) certificate: FloquetSpectrumCertificate,
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq)]
-pub(crate) enum OrdinarySpectrumError {
-    #[error("eigenspectrum computation was aborted")]
-    Aborted,
-    #[error("eigenproblem matrix must be non-empty")]
-    EmptyMatrix,
-    #[error(
-        "eigenproblem matrix must be square: row {row} has {actual} columns, expected {expected}"
-    )]
-    NonSquare {
-        row: usize,
-        expected: usize,
-        actual: usize,
-    },
-    #[error("eigenproblem matrix entry ({row}, {col}) is non-finite")]
-    NonFiniteInput { row: usize, col: usize },
-    #[error("faer ordinary eigenspectrum extraction failed")]
-    SolverFailure,
-    #[error(
-        "ordinary eigenspectrum is incomplete: expected {expected} eigenpairs, received {eigenvalues} eigenvalues and a {vector_rows}x{vector_cols} eigenvector matrix"
-    )]
-    IncompleteSpectrum {
-        expected: usize,
-        eigenvalues: usize,
-        vector_rows: usize,
-        vector_cols: usize,
-    },
-    #[error("ordinary eigenvalue {index} is non-finite")]
-    NonFiniteEigenvalue { index: usize },
-    #[error("ordinary right eigenvector {index} is non-finite or zero")]
-    InvalidEigenvector { index: usize },
-    #[error(
-        "ordinary eigenpair {index} failed residual qualification (backward error {backward_error:.3e}, maximum {maximum:.3e})"
-    )]
-    NumericalQualification {
-        index: usize,
-        backward_error: Value,
-        maximum: Value,
-    },
-}
-
-#[inline]
-fn ensure_not_aborted(abort: &dyn AbortSignal) -> Result<(), OrdinarySpectrumError> {
-    if abort.is_aborted() {
-        Err(OrdinarySpectrumError::Aborted)
-    } else {
-        Ok(())
-    }
-}
-
-#[inline]
-fn poll_periodically(
-    abort: &dyn AbortSignal,
-    operation_index: usize,
-) -> Result<(), OrdinarySpectrumError> {
-    if operation_index.is_multiple_of(ABORT_POLL_STRIDE) {
-        ensure_not_aborted(abort)?;
-    }
-    Ok(())
-}
-
 #[inline]
 pub(crate) fn qualification_tolerance(problem_order: usize) -> Value {
     FloquetSpectrumCertificate::canonical_qualification_tolerance(problem_order)
-}
-
-fn eigenpair_backward_error(
-    matrix: &[Vec<Value>],
-    matrix_norm: Value,
-    lambda: Complex64,
-    vector: &[Complex64],
-    vector_norm: Value,
-    abort: &dyn AbortSignal,
-    operation_index: &mut usize,
-) -> Result<Value, OrdinarySpectrumError> {
-    let mut residual_norm = 0.0_f64;
-    for row in 0..matrix.len() {
-        let mut product = Complex64::new(0.0, 0.0);
-        for col in 0..matrix.len() {
-            poll_periodically(abort, *operation_index)?;
-            *operation_index = operation_index.wrapping_add(1);
-            product += matrix[row][col] * vector[col];
-        }
-        residual_norm = residual_norm.hypot((product - lambda * vector[row]).norm());
-    }
-
-    let denominator = matrix_norm * vector_norm;
-    Ok(if denominator > 0.0 {
-        residual_norm / denominator
-    } else if residual_norm == 0.0 {
-        0.0
-    } else {
-        Value::INFINITY
-    })
 }
 
 pub(crate) fn qualified_real_eigenspectrum(
     matrix: &[Vec<Value>],
     abort: &dyn AbortSignal,
 ) -> Result<QualifiedOrdinarySpectrum, OrdinarySpectrumError> {
-    match qualified_eigenspectrum_impl(matrix, abort, false) {
+    match qualified_eigenspectrum_impl(matrix, abort, DenseSchurForm::Real) {
         // Nearly defective real Schur blocks can lose accuracy during the
         // real-to-complex eigenvector back substitution, including zero or
         // nonfinite vectors for a defective block. Retry a
@@ -183,7 +94,7 @@ pub(crate) fn qualified_real_eigenspectrum(
         Err(
             OrdinarySpectrumError::NumericalQualification { .. }
             | OrdinarySpectrumError::InvalidEigenvector { .. },
-        ) => qualified_eigenspectrum_impl(matrix, abort, true),
+        ) => qualified_eigenspectrum_impl(matrix, abort, DenseSchurForm::Complex),
         result => result,
     }
 }
@@ -191,142 +102,20 @@ pub(crate) fn qualified_real_eigenspectrum(
 fn qualified_eigenspectrum_impl(
     matrix: &[Vec<Value>],
     abort: &dyn AbortSignal,
-    complex_schur: bool,
+    form: DenseSchurForm,
 ) -> Result<QualifiedOrdinarySpectrum, OrdinarySpectrumError> {
-    ensure_not_aborted(abort)?;
     let n = matrix.len();
-    if n == 0 {
-        return Err(OrdinarySpectrumError::EmptyMatrix);
-    }
-
-    let mut max_abs = 0.0_f64;
-    let mut operation_index = 0usize;
-    for (row_index, row) in matrix.iter().enumerate() {
-        poll_periodically(abort, operation_index)?;
-        if row.len() != n {
-            return Err(OrdinarySpectrumError::NonSquare {
-                row: row_index,
-                expected: n,
-                actual: row.len(),
-            });
-        }
-        for (col_index, &value) in row.iter().enumerate() {
-            poll_periodically(abort, operation_index)?;
-            operation_index = operation_index.wrapping_add(1);
-            if !value.is_finite() {
-                return Err(OrdinarySpectrumError::NonFiniteInput {
-                    row: row_index,
-                    col: col_index,
-                });
-            }
-            max_abs = max_abs.max(value.abs());
-        }
-    }
-
-    let scale = if max_abs > 0.0 { max_abs } else { 1.0 };
-    let mut scaled = vec![vec![0.0; n]; n];
-    let mut faer_matrix = Mat::zeros(n, n);
-    let mut matrix_norm = 0.0_f64;
-    for row in 0..n {
-        for col in 0..n {
-            poll_periodically(abort, operation_index)?;
-            operation_index = operation_index.wrapping_add(1);
-            let value = matrix[row][col] / scale;
-            scaled[row][col] = value;
-            faer_matrix[(row, col)] = value;
-            matrix_norm = matrix_norm.hypot(value);
-        }
-    }
-
-    ensure_not_aborted(abort)?;
-    let eigen = if complex_schur {
-        let complex = Mat::from_fn(n, n, |row, col| {
-            Complex64::new(faer_matrix[(row, col)], 0.0)
-        });
-        Eigen::<f64>::new(complex.as_ref())
-    } else {
-        Eigen::<f64>::new_from_real(faer_matrix.as_ref())
-    };
-    ensure_not_aborted(abort)?;
-    let eigen = eigen.map_err(|_| OrdinarySpectrumError::SolverFailure)?;
-
-    let spectrum = eigen.S().column_vector();
-    let eigenvectors = eigen.U();
-    if spectrum.nrows() != n || eigenvectors.nrows() != n || eigenvectors.ncols() != n {
-        return Err(OrdinarySpectrumError::IncompleteSpectrum {
-            expected: n,
-            eigenvalues: spectrum.nrows(),
-            vector_rows: eigenvectors.nrows(),
-            vector_cols: eigenvectors.ncols(),
-        });
-    }
-
     let tolerance = qualification_tolerance(n);
-    let mut eigenvalues = Vec::with_capacity(n);
-    let mut right_eigenvectors = Vec::with_capacity(n);
-    let mut max_backward_error = 0.0_f64;
-
-    for index in 0..n {
-        poll_periodically(abort, operation_index)?;
-        let value = *spectrum.get(index);
-        if !value.re.is_finite() || !value.im.is_finite() {
-            return Err(OrdinarySpectrumError::NonFiniteEigenvalue { index });
-        }
-
-        let mut vector = Vec::with_capacity(n);
-        let mut vector_norm = 0.0_f64;
-        for row in 0..n {
-            poll_periodically(abort, operation_index)?;
-            operation_index = operation_index.wrapping_add(1);
-            let component = eigenvectors[(row, index)];
-            if !component.re.is_finite() || !component.im.is_finite() {
-                return Err(OrdinarySpectrumError::InvalidEigenvector { index });
-            }
-            vector_norm = vector_norm.hypot(component.norm());
-            vector.push(Complex64::new(component.re, component.im));
-        }
-        if !vector_norm.is_finite() || vector_norm == 0.0 {
-            return Err(OrdinarySpectrumError::InvalidEigenvector { index });
-        }
-
-        let lambda = Complex64::new(value.re, value.im);
-        let backward_error = eigenpair_backward_error(
-            &scaled,
-            matrix_norm,
-            lambda,
-            &vector,
-            vector_norm,
-            abort,
-            &mut operation_index,
-        )?;
-        if !backward_error.is_finite() || backward_error > tolerance {
-            return Err(OrdinarySpectrumError::NumericalQualification {
-                index,
-                backward_error,
-                maximum: tolerance,
-            });
-        }
-
-        let root = Complex64::new(value.re * scale, value.im * scale);
-        if !root.re.is_finite() || !root.im.is_finite() {
-            return Err(OrdinarySpectrumError::NonFiniteEigenvalue { index });
-        }
-        max_backward_error = max_backward_error.max(backward_error);
-        eigenvalues.push(root);
-        right_eigenvectors.push(vector);
-    }
-
-    ensure_not_aborted(abort)?;
-    let certificate = FloquetSpectrumCertificate::new(n, max_backward_error, tolerance).ok_or(
-        OrdinarySpectrumError::NumericalQualification {
+    let spectrum = qualified_dense_eigenspectrum(matrix, form, tolerance, &|| abort.is_aborted())?;
+    let certificate = FloquetSpectrumCertificate::new(n, spectrum.max_backward_error, tolerance)
+        .ok_or(OrdinarySpectrumError::NumericalQualification {
             index: n.saturating_sub(1),
-            backward_error: max_backward_error,
+            backward_error: spectrum.max_backward_error,
             maximum: tolerance,
-        },
-    )?;
+        })?;
     Ok(QualifiedOrdinarySpectrum {
-        eigenvalues,
-        right_eigenvectors,
+        eigenvalues: spectrum.eigenvalues,
+        right_eigenvectors: spectrum.right_eigenvectors,
         certificate,
     })
 }
@@ -393,30 +182,5 @@ mod tests {
             qualified_real_eigenspectrum(&[vec![1.0]], &ImmediateAbort).unwrap_err(),
             OrdinarySpectrumError::Aborted
         );
-    }
-
-    #[test]
-    fn residual_qualification_rejects_a_bad_non_normal_eigenpair() {
-        // A wrong vector for this strongly non-normal Jordan block can have a
-        // plausible eigenvalue while its normwise residual remains O(1).
-        let matrix = vec![vec![1.0, 1.0e12], vec![0.0, 1.0]];
-        let matrix_norm = matrix
-            .iter()
-            .flatten()
-            .fold(0.0_f64, |norm, value| norm.hypot(*value));
-        let vector = vec![Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)];
-        let mut operation_index = 0;
-        let error = eigenpair_backward_error(
-            &matrix,
-            matrix_norm,
-            Complex64::new(1.0, 0.0),
-            &vector,
-            1.0,
-            &NoAbort,
-            &mut operation_index,
-        )
-        .unwrap();
-
-        assert!(error > qualification_tolerance(2));
     }
 }

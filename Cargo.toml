@@ -254,6 +254,17 @@ debug = 0
 [profile.dev.package."*"]
 opt-level = 2
 
+# The one workspace member optimized in debug builds. faer's dense eigen code
+# is generic, so it is compiled in whichever crate calls it, and called from
+# rspice-core it ran at `opt-level = 0`. rspice-matrix instantiates it, with
+# the O(n³) residual qualification, behind the concrete
+# `qualified_dense_eigenspectrum`. Measured in a debug test build: the
+# cascaded-delay-line PSS case, whose 592-state Floquet spectrum dominated it,
+# fell from 40 s to 6 s; this package's non-incremental build went from 3 s
+# to 10 s.
+[profile.dev.package.rspice-matrix]
+opt-level = 2
+
 [profile.release]
 # Keep full per-function LLVM optimization while compiling independent solver
 # and generated-device units in parallel. Whole-program fat LTO plus one
