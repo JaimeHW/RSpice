@@ -156,6 +156,7 @@ pub(super) fn math_call(name: &str) -> Option<MathCall> {
 fn required_parameters<'a>(
     processes: &[AnalyzedDigitalProcess],
     assignments: &[crate::semantic::AnalyzedContinuousAssign],
+    routines: &[crate::semantic::AnalyzedDigitalRoutine],
     initializers: impl IntoIterator<Item = &'a Expression>,
 ) -> BTreeSet<String> {
     let mut required = BTreeSet::new();
@@ -164,6 +165,30 @@ fn required_parameters<'a>(
     }
     for process in processes {
         collect_parameters(&process.body, &BTreeSet::new(), &mut required);
+    }
+    for routine in routines {
+        let routine = &routine.routine;
+        collect_parameters(&routine.body, &BTreeSet::new(), &mut required);
+        let result = match &routine.kind {
+            crate::ast::DigitalRoutineKind::Function(ty) => Some(ty.as_ref()),
+            crate::ast::DigitalRoutineKind::Task => None,
+        };
+        let ranges = routine
+            .arguments
+            .iter()
+            .map(|argument| &argument.ty)
+            .chain(result)
+            .filter_map(|ty| ty.range.as_ref())
+            .chain(
+                routine
+                    .digital_variables
+                    .iter()
+                    .filter_map(|declaration| declaration.range.as_ref()),
+            );
+        for range in ranges {
+            collect_expression_reads(&range.msb, &mut required);
+            collect_expression_reads(&range.lsb, &mut required);
+        }
     }
     for assignment in assignments {
         collect_expression_reads(&assignment.assignment.value, &mut required);
@@ -189,6 +214,7 @@ pub(super) fn digital_dependencies<'a>(
     let mut required = required_parameters(
         &digital.processes,
         &digital.continuous_assigns,
+        &digital.routines,
         digital
             .signals
             .iter()
@@ -255,7 +281,7 @@ fn dependencies(
             pending.extend(reads);
         }
     }
-    let resolved = resolve(source, time_scale, &[], &[], &identifiers)
+    let resolved = resolve(source, time_scale, &[], &[], &[], &identifiers)
         .map_err(|errors| errors[0].diagnostic.message.clone())?;
     let values = identifiers
         .iter()
@@ -277,9 +303,10 @@ pub(super) fn resolve<'a>(
     time_scale: crate::time_scale::ModuleTimeScale,
     processes: &[AnalyzedDigitalProcess],
     assignments: &[crate::semantic::AnalyzedContinuousAssign],
+    routines: &[crate::semantic::AnalyzedDigitalRoutine],
     initializers: impl IntoIterator<Item = &'a Expression>,
 ) -> Result<ResolvedConstants, Vec<DigitalLoweringDiagnostic>> {
-    let required = required_parameters(processes, assignments, initializers);
+    let required = required_parameters(processes, assignments, routines, initializers);
     let definitions: HashMap<_, _> = source
         .definitions
         .iter()
@@ -393,7 +420,7 @@ pub(super) fn parameter_assignments(
                 name: declaration.name.clone(),
                 span: declaration.span,
             });
-            let complete = resolve(&source, time_scale, &[], &[], [&root])?;
+            let complete = resolve(&source, time_scale, &[], &[], &[], [&root])?;
             resolved.bits.extend(complete.bits);
             resolved.bounds.extend(complete.bounds);
             resolved.integers.extend(complete.integers);
@@ -907,7 +934,7 @@ pub(super) fn override_literal(
     if let Some(range) = &declaration.packed_range {
         required.extend([&range.msb, &range.lsb]);
     }
-    let mut resolved = resolve(source, time_scale, &[], &[], required).map_err(diagnostic)?;
+    let mut resolved = resolve(source, time_scale, &[], &[], &[], required).map_err(diagnostic)?;
     if !declaration.dimensions.is_empty() {
         let Expression::ArrayLiteral(pattern) = expression else {
             return Err("array parameter overrides require an assignment pattern".into());

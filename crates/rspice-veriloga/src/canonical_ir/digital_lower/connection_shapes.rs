@@ -24,6 +24,7 @@ impl<'a> ConnectionShapes<'a> {
             digital.time_scale,
             &[],
             &[],
+            &[],
             source.instances.iter().flat_map(|instance| {
                 instance
                     .connections

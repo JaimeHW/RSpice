@@ -135,7 +135,7 @@ pub(crate) fn selector_constant(
     source: &DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Option<crate::numeric_literal::NumericLiteralValue> {
-    let resolved = constants::resolve(source, time_scale, &[], &[], [expression]).ok()?;
+    let resolved = constants::resolve(source, time_scale, &[], &[], &[], [expression]).ok()?;
     constants::scalar(expression, &resolved, time_scale)
 }
 
@@ -450,6 +450,7 @@ fn lower_with_analog_variables(
         digital.time_scale,
         &digital.processes,
         &digital.continuous_assigns,
+        &digital.routines,
         digital
             .signals
             .iter()
@@ -464,6 +465,7 @@ fn lower_with_analog_variables(
                 instance.time_scale,
                 &instance.processes,
                 &instance.continuous_assigns,
+                &instance.routines,
                 instance
                     .signals
                     .iter()
