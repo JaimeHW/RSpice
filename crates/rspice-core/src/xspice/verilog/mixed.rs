@@ -1374,6 +1374,11 @@ struct DiscreteAnalogInput {
     /// The digital edge an analog event control waits on. Such an input is
     /// a flag rather than a value; see `digital_edges.rs`.
     edge: Option<rspice_veriloga::canonical_ir::digital::DigitalEdge>,
+    /// Whether this input reads the signal's left limit — its value before
+    /// the open transient trial's digital activity — as a `slew` operand
+    /// does, so the ramp starts at the edge rather than at the previous
+    /// timepoint. See [`left_limit_image`].
+    left_limit: bool,
     signed: bool,
     real: bool,
     name: String,
@@ -1671,6 +1676,7 @@ impl MixedSignalHost {
                     selection: selection
                         .map(|selection| (selection.lsb, selection.width, selection.encoded)),
                     edge,
+                    left_limit: canonical_ir.hir.discrete_left_limits.contains(value),
                     // A narrow packed grouping is zero-extended whatever its
                     // signedness (Verilog-AMS 2023 Table 7-1); one of 32 bits
                     // or more keeps the sign it was declared with.
@@ -3095,8 +3101,12 @@ impl MixedSignalHost {
 
     fn sample_discrete_inputs(&mut self) -> Result<bool, MixedSignalError> {
         let mut changed = false;
+        let left = left_limit_image(self.trial.as_ref());
         for input in &self.discrete_inputs {
-            let sampled = read_discrete_input(&self.state, input);
+            let sampled = match left {
+                Some(left) if input.left_limit => read_discrete_value(left, input),
+                _ => read_discrete_input(&self.state, input),
+            };
             changed |= input.sample(self.analog.make_mut(), sampled)?;
         }
         Ok(changed)
@@ -5111,6 +5121,16 @@ fn dac_bits_differ(
 /// invent a numeric value or reject a trial.
 fn read_discrete_input(state: &MixedState, input: &DiscreteAnalogInput) -> Option<f64> {
     read_discrete_value(&state.digital, input)
+}
+
+/// The discrete half as it stood when an open transient trial began: the left
+/// limit at the trial's timepoint, which a `slew` operand reads — one rule for
+/// every digital-to-analog path, as `stamp_dac_bridges` states it. An
+/// operating point has no "before" and reads the settled state.
+fn left_limit_image(trial: Option<&ActiveTrial>) -> Option<&MixedDigital> {
+    trial
+        .filter(|trial| trial.timestep_seconds > 0.0)
+        .map(|trial| &*trial.rollback)
 }
 
 /// [`read_discrete_input`] against one image of the discrete half.

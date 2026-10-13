@@ -1112,6 +1112,7 @@ impl DigitalActiveParticipant for CircuitAnalogParticipant<'_, '_> {
                 solution: self.solution,
                 signals: Some(&map.signals),
                 probe_ids: Some(&map.analog_probes),
+                left: left_limit_image(host.trial.as_ref()),
             };
             producer.sample_into(exchange, &requested, &mut samples)?;
         }

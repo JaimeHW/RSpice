@@ -165,6 +165,9 @@ pub struct AnalyzedModule {
     /// signal). The variable is the port's one driver; the mixed host
     /// publishes its value into the signal in the coupled trial that set it.
     pub analog_drivers: Vec<(usize, SmolStr)>,
+    /// Discrete input value slots that read their signal's left limit — the
+    /// value before the coupled trial's digital activity — for `slew`.
+    pub discrete_left_limits: Vec<usize>,
 }
 
 /// One digital edge an analog event control waits on.

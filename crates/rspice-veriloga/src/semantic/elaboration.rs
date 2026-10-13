@@ -1036,6 +1036,12 @@ impl<'a> HierarchyElaborator<'a> {
                 .analog_drivers
                 .push((variable_base + variable, signal));
         }
+        self.flattened.discrete_left_limits.extend(
+            child
+                .discrete_left_limits
+                .iter()
+                .map(|value| variable_base + value),
+        );
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
         for &slot in &child.switch_branch_variables {

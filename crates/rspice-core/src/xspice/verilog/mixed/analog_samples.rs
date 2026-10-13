@@ -121,6 +121,9 @@ pub(super) struct AnalogModelParticipant<'a> {
     pub(super) solution: &'a [f64],
     pub(super) signals: Option<&'a [DigitalSignalId]>,
     pub(super) probe_ids: Option<&'a [DigitalAnalogProbeId]>,
+    /// The instance's discrete half as its open transient trial began, which
+    /// a left-limit input reads; `None` outside one.
+    pub(super) left: Option<&'a MixedDigital>,
 }
 
 impl AnalogModelParticipant<'_> {
@@ -157,7 +160,9 @@ impl AnalogModelParticipant<'_> {
                     let signal = self
                         .signals
                         .map_or(input.signal, |map| map[usize::from(input.signal)]);
-                    let value = if let Some(edge) = input.edge {
+                    let value = if let Some(left) = self.left.filter(|_| input.left_limit) {
+                        read_discrete_value(left, input)
+                    } else if let Some(edge) = input.edge {
                         Some(super::digital_edges::flag(
                             exchange.analog_edge(signal),
                             edge,
@@ -268,6 +273,7 @@ impl MixedSignalHost {
             solution,
             signals: None,
             probe_ids: None,
+            left: left_limit_image(self.trial.as_ref()),
         };
         let MixedDigital::Owned(digital) = self.state.digital.make_mut() else {
             return Err(MixedSignalError::TrialProtocol {

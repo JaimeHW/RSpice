@@ -5077,3 +5077,50 @@ endmodule
         "a process reading the port follows it"
     );
 }
+
+/// **`slew` on a digitally driven value ramps from the edge (O6).**
+///
+/// `d` steps from 0 to 1 at 10 ns, and `slew(d, 1e9)` rises at 1 V/ns: the
+/// output is 0 up to and including 10 ns, `(t - 10 ns) * 1e9` on the way
+/// up, and 1 from 11 ns on — start and duration exact to rounding.
+#[test]
+fn slew_of_a_digitally_driven_value_ramps_from_the_edge() {
+    let model = ModelFile::new(
+        "digital_slew",
+        r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module digital_slew(out);
+    inout out;
+    electrical out;
+    reg d;
+    initial begin d = 1'b0; #10 d = 1'b1; end
+    analog V(out) <+ slew(d, 1e9, -1e9);
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* slew of a digitally driven value\n\
+         x1 out digital_slew\n\
+         rout out 0 1k\n\
+         .va \"{}\" digital_slew\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 20.0e-9, 0.25e-9);
+    let out = waveform(&result, "out");
+    let analytic = |time: f64| ((time - 10.0e-9) * 1e9).clamp(0.0, 1.0);
+    for (time, value) in result.time.iter().zip(&out) {
+        assert!(
+            (value - analytic(*time)).abs() < 1e-9,
+            "V(out) at {time:e} s is {value}, the ramp is {}",
+            analytic(*time)
+        );
+    }
+    for corner in [10.0e-9, 11.0e-9] {
+        assert!(
+            result.time.iter().any(|time| (time - corner).abs() < 1e-18),
+            "the ramp's corner at {corner:e} s is a timepoint"
+        );
+    }
+}

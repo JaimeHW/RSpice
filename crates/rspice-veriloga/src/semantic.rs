@@ -387,6 +387,7 @@ mod constant_dependencies;
 mod digital;
 mod digital_elaborate;
 mod digital_walk;
+mod discrete_left_limit;
 mod discrete_projection;
 mod elaboration;
 mod flow_probes;
@@ -497,6 +498,9 @@ pub struct SemanticAnalyzer {
     /// Integer output ports the module's analog body writes and no discrete
     /// process does: the analog variable drives the port's discrete net.
     analog_owned_ports: HashSet<SmolStr>,
+    /// Discrete reads inside `slew` operands, rewritten to their left limits.
+    /// Storage is allocated after the body's locals.
+    left_limits: Vec<discrete_left_limit::LeftLimit>,
     /// Public parameter-array declarations. Until element lowering is wired
     /// through every backend, these names must never acquire scalar semantics.
     parameter_arrays: HashSet<SmolStr>,
@@ -577,6 +581,7 @@ impl SemanticAnalyzer {
             discrete_projection: Default::default(),
             digital_edges: Vec::new(),
             analog_owned_ports: HashSet::new(),
+            left_limits: Vec::new(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
             task_resets: Vec::new(),
@@ -1121,6 +1126,7 @@ impl SemanticAnalyzer {
             discrete_selections: Vec::new(),
             discrete_edges: Vec::new(),
             analog_drivers: Vec::new(),
+            discrete_left_limits: Vec::new(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
         // can recurse into their own sinks without aliasing the module
@@ -1138,6 +1144,7 @@ impl SemanticAnalyzer {
         self.discrete_projection = Default::default();
         self.digital_edges.clear();
         self.analog_owned_ports.clear();
+        self.left_limits.clear();
         self.task_vars.clear();
         self.task_resets.clear();
 
@@ -2361,6 +2368,7 @@ impl SemanticAnalyzer {
 
         self.finish_discrete_projections(&mut analyzed);
         self.finish_digital_edges(&mut analyzed);
+        self.finish_discrete_left_limits(&mut analyzed);
         self.finish_implicit_integrators(&mut analyzed);
         analyzed.statements = statements;
         analyzed.body = self.take_body();
@@ -7462,6 +7470,11 @@ impl SemanticAnalyzer {
                         .collect::<CompileResult<Vec<_>>>()?;
                     if call.name.eq_ignore_ascii_case("transition") {
                         self.materialize_transition_defaults(&mut args, call.span);
+                    }
+                    if call.name.eq_ignore_ascii_case("slew")
+                        && let Some(operand) = args.first_mut()
+                    {
+                        self.read_discrete_left_limits(operand)?;
                     }
                     // Materialize the declaration-order-scoped default now.
                     // Hierarchy flattening may later combine modules authored

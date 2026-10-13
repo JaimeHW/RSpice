@@ -368,11 +368,13 @@ use super::*;
 // (`HirModel::discrete_edges`); a version-140 record of a module whose operand
 // was a discrete `reg` or `wire` with no discrete discipline holds a `cross`
 // detector on that signal's value instead, which compiles and never fires as
-// an edge. A packed grouping or part-select of 32 bits or more now reads as a
-// real, and an analog-owned integer output port carries its driver
-// (`HirModel::analog_drivers`); both were refused before, so no record holds
-// one. The stale reading is not recoverable from the record, so it is
-// rebuilt.
+// an edge. A `slew` operand now reads a discrete value's left limit
+// (`HirModel::discrete_left_limits`); a version-140 record reads the value
+// itself and ramps from the timepoint before the edge. A packed grouping or
+// part-select of 32 bits or more now reads as a real, and an analog-owned
+// integer output port carries its driver (`HirModel::analog_drivers`); both
+// were refused before, so no record holds one. The stale readings are not
+// recoverable from the record, so it is rebuilt.
 pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 141;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";

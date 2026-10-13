@@ -3010,6 +3010,41 @@ fn an_analog_owned_integer_output_port_records_its_driver() {
     );
 }
 
+/// A `slew` operand reads each discrete value's left limit, a second input on
+/// the same signal, while a direct read keeps the value itself; an indexed
+/// array read has no fixed element to hold and is refused inside `slew`.
+#[test]
+fn a_slew_operand_reads_the_left_limit_of_a_discrete_value() {
+    let module = analyze_one(&module_src(
+        r#"
+        reg d;
+        initial d = 0;
+        analog begin
+            V(p, n) <+ slew(d, 1e9) + 0.5 * slew(d, 2e9) + d;
+        end
+    "#,
+    ));
+    let [limit] = module.discrete_left_limits.as_slice() else {
+        panic!("one left limit, got {:?}", module.discrete_left_limits);
+    };
+    assert_eq!(module.discrete_bindings[limit], "d");
+    assert!(
+        module
+            .discrete_inputs
+            .iter()
+            .any(|(value, _)| module.variables[*value].name == "d"),
+        "the direct read keeps its own input"
+    );
+    let error = analyze(&module_src(
+        "reg m[0:3]; integer i; initial begin i = 0; m[0] = 0; end \
+         analog V(p, n) <+ slew(m[i], 1e9);",
+    ))
+    .map(|_| ())
+    .expect_err("an indexed discrete read inside slew")
+    .to_string();
+    assert!(error.contains("indexed discrete read"), "{error}");
+}
+
 #[test]
 fn parameter_defaults_and_array_bounds_can_read_earlier_localparams() {
     let module = analyze_one(&module_src(
