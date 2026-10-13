@@ -330,37 +330,10 @@ impl PyEngine {
         sweep: &PyDcSweep,
         sweep2: Option<&PyDcSweep>,
     ) -> PyResult<Py<PyDcSweepResult>> {
-        if let Some(outer) = sweep2
-            && outer.source.eq_ignore_ascii_case(&sweep.source)
-        {
-            return Err(crate::errors::value_error(format!(
-                "a nested sweep must vary two different sources, but both axes sweep '{}'",
-                sweep.source
-            )));
-        }
-
-        directives::run_one_card(
-            self,
-            py,
-            netlist,
-            AnalysisCommand::Dc {
-                source: sweep.source.clone(),
-                start: sweep.spec.start,
-                stop: sweep.spec.stop,
-                step: sweep.spec.step,
-                mode: sweep.spec.mode.clone(),
-                sweep2: sweep2.map(|outer| DcSecondSweep {
-                    source: outer.source.clone(),
-                    start: outer.spec.start,
-                    stop: outer.spec.stop,
-                    step: outer.spec.step,
-                    mode: outer.spec.mode.clone(),
-                }),
-                restart: sweep.spec.restart,
-            },
-        )?
-        .dc
-        .into_single(".dc")
+        let card = dc_sweep_card(sweep, sweep2)?;
+        directives::run_one_card(self, py, netlist, card)?
+            .dc
+            .into_single(".dc")
     }
 
     /// Run AC small-signal analysis at explicit frequencies

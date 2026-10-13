@@ -129,6 +129,40 @@ pub(super) fn pole_zero_card(
     })
 }
 
+/// Build the `.DC` card a `DcSweep` axis, nested inside an optional outer
+/// axis, describes.
+///
+/// The two axes of a nested sweep must vary different sources: one source
+/// cannot hold two values at the same grid point.
+pub(super) fn dc_sweep_card(
+    sweep: &PyDcSweep,
+    sweep2: Option<&PyDcSweep>,
+) -> PyResult<AnalysisCommand> {
+    if let Some(outer) = sweep2
+        && outer.source.eq_ignore_ascii_case(&sweep.source)
+    {
+        return Err(crate::errors::value_error(format!(
+            "a nested sweep must vary two different sources, but both axes sweep '{}'",
+            sweep.source
+        )));
+    }
+    Ok(AnalysisCommand::Dc {
+        source: sweep.source.clone(),
+        start: sweep.spec.start,
+        stop: sweep.spec.stop,
+        step: sweep.spec.step,
+        mode: sweep.spec.mode.clone(),
+        sweep2: sweep2.map(|outer| DcSecondSweep {
+            source: outer.source.clone(),
+            start: outer.spec.start,
+            stop: outer.spec.stop,
+            step: outer.spec.step,
+            mode: outer.spec.mode.clone(),
+        }),
+        restart: sweep.spec.restart,
+    })
+}
+
 /// Validate a `(stop_time, max_step)` pair and resolve the default ceiling.
 ///
 /// The default is `stop_time / 50`, the same fraction of the analysis window
