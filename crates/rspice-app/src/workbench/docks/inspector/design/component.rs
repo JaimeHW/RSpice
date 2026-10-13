@@ -124,6 +124,18 @@ pub(super) fn component_view_contract(component: &Component) -> String {
     )
 }
 
+/// The View row: the view an instance binds, and what it is. A Verilog-A view
+/// is a module the deck instantiates, which the Module row names; "spice"
+/// there named nothing the instance is.
+pub(super) fn instance_view_contract(state: &AppState, component: &Component) -> String {
+    match component.library_cell.as_ref() {
+        Some(binding) if crate::workbench::app::instantiates_veriloga_view(state, component) => {
+            format!("{} · Verilog-A", binding.view.trim())
+        }
+        _ => component_view_contract(component),
+    }
+}
+
 pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
     let editable = !app.state.schematic_edit_read_only();
     let properties = schematic_section_header_action(ui, "Identity", "Properties…", editable);
@@ -154,7 +166,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
         |binding| format!("{}/{}", binding.library, binding.cell),
     );
     property_row(ui, "Library cell", &library_cell);
-    property_row(ui, "View", &component_view_contract(component));
+    property_row(ui, "View", &instance_view_contract(&app.state, component));
     sheet_row(ui, &app.state, component.id);
     if editable {
         rejection_slot(
@@ -229,7 +241,13 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
             }
 
             if let Some(target) = model_source.as_ref() {
-                let response = Button::new("Open model source…").ghost().show(ui);
+                // A module's source is its cell view, which opens as a tab, so
+                // the button says so in the canvas menu's words.
+                let label = match target {
+                    ComponentModelSourceTarget::Catalog { .. } => "Open model source…",
+                    ComponentModelSourceTarget::VerilogA(_) => "Open Verilog-A view",
+                };
+                let response = Button::new(label).ghost().show(ui);
                 if response.clicked() {
                     if !app.state.commit_pending_inspector_edit() {
                         return;
@@ -514,13 +532,19 @@ pub(super) fn parameters_section(
         "Simulation parameters",
         Some(if editable { "editable" } else { "read-only" }),
     );
+    // A Verilog-A instance runs its view's module: that is the one fact to
+    // state here. A model card and a library section are model-library
+    // ideas, and the deck gives a module neither.
+    let runs_module = crate::workbench::app::instantiates_veriloga_view(&app.state, component);
     let model_choices = bound_model_choices(&app.state, component, &evidence.model);
     let mut selected_model = component
         .library_cell
         .as_ref()
         .and_then(|binding| binding.module_name.clone())
         .unwrap_or_else(|| evidence.model.clone());
-    if model_choices.len() > 1 {
+    if runs_module {
+        property_row(ui, "Module", &evidence.model);
+    } else if model_choices.len() > 1 {
         if property_row_combo(
             ui,
             "Model",
@@ -541,7 +565,11 @@ pub(super) fn parameters_section(
         property_row(ui, "Model", &evidence.model);
     }
 
-    let section_choices = bound_model_section_choices(&app.state, component, &selected_model);
+    let section_choices = if runs_module {
+        Vec::new()
+    } else {
+        bound_model_section_choices(&app.state, component, &selected_model)
+    };
     let mut selected_section = component
         .library_cell
         .as_ref()
@@ -558,7 +586,7 @@ pub(super) fn parameters_section(
         ) {
             apply_bound_model_section(app, component.id, &selected_section);
         }
-    } else {
+    } else if !runs_module {
         property_row(ui, "Section", &evidence.section);
     }
 

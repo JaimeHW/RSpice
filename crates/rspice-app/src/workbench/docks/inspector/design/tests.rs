@@ -1931,6 +1931,68 @@ fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
     (app, component)
 }
 
+/// An instance of a module says what it is and nothing a model library
+/// would: its view is a Verilog-A module, it runs that module, and no model
+/// card or library section is offered. A current compile is not a warning.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
+    let (mut app, component) = app_with_owned_veriloga_instance();
+
+    let evidence = super::super::component_model_evidence(&app.state, &component);
+    assert_eq!(
+        (evidence.status.as_str(), evidence.model.as_str()),
+        ("Verilog-A module compiled", "amp")
+    );
+    assert_eq!(evidence.tone, super::super::ModelEvidenceTone::Info);
+
+    let identity = painted_panel(|ui| identity_section(ui, &mut app, &component));
+    assert!(
+        identity.lines().any(|line| line == "veriloga · Verilog-A"),
+        "{identity}"
+    );
+    assert!(!identity.contains("spice"), "{identity}");
+    assert!(
+        identity.lines().any(|line| line == "Open Verilog-A view")
+            && !identity.contains("model source"),
+        "{identity}"
+    );
+    let parameters = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
+    let labels = parameters.lines().collect::<Vec<_>>();
+    assert!(
+        labels.contains(&"Module") && labels.contains(&"amp"),
+        "{parameters}"
+    );
+    assert!(
+        !labels.contains(&"Model") && !labels.contains(&"Section"),
+        "{parameters}"
+    );
+
+    // An edit since the compile is worth a look, and says so.
+    let bundle = app
+        .state
+        .workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
+            CellViewRef::new("behavioral", "amp", "veriloga"),
+        ))
+        .expect("the bundle")
+        .id();
+    app.state
+        .workspace
+        .content
+        .project_sources
+        .replace_bundle_file_content(
+            bundle,
+            "amp.va",
+            "module amp(p, n);\nendmodule\n".to_owned(),
+        )
+        .expect("the edit applies");
+    let evidence = super::super::component_model_evidence(&app.state, &component);
+    assert_eq!(evidence.tone, super::super::ModelEvidenceTone::Warn);
+}
+
 /// The hero pictures a cell instance with the symbol the canvas draws for it.
 /// It used to look its kind up among the canonical device artwork, where a
 /// cell instance has none, and painted "missing canonical SVG" for every one.

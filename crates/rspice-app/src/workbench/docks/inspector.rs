@@ -959,6 +959,51 @@ struct ComponentModelEvidence {
     tone: ModelEvidenceTone,
 }
 
+/// What an instance of a project-owned Verilog-A view runs: the module its
+/// view names, and whether its source has a compile that is still current.
+/// No model catalog is involved, so none is reported as unverified, and a
+/// model-library section does not apply.
+fn project_module_evidence(
+    state: &AppState,
+    binding: &crate::state::LibraryCellInstance,
+) -> Option<ComponentModelEvidence> {
+    let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+    let view = state
+        .library_manager
+        .get_library(&reference.library)?
+        .get_cell(&reference.cell)?
+        .get_view(&reference.view)?;
+    if view.view_type != ViewType::VerilogA {
+        return None;
+    }
+    let model = view
+        .metadata
+        .get("veriloga.module")
+        .cloned()
+        .unwrap_or_else(|| binding.cell.clone());
+    let bundle = state
+        .workspace
+        .content
+        .project_sources
+        .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(reference));
+    let (status, tone) = match bundle {
+        Some(bundle) if bundle.validation_is_current() => {
+            ("Verilog-A module compiled", ModelEvidenceTone::Info)
+        }
+        Some(_) => ("module edited since its compile", ModelEvidenceTone::Warn),
+        None => ("Verilog-A view has no source", ModelEvidenceTone::Error),
+    };
+    Some(ComponentModelEvidence {
+        status: status.to_owned(),
+        model,
+        source: bundle.map_or_else(String::new, |bundle| {
+            bundle.root().logical_path().to_owned()
+        }),
+        section: "Not applicable".to_owned(),
+        tone,
+    })
+}
+
 fn component_model_evidence(state: &AppState, component: &Component) -> ComponentModelEvidence {
     if let Some(binding) = component.library_cell.as_ref() {
         if binding.is_builtin_xspice() {
@@ -996,6 +1041,9 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
                     tone: ModelEvidenceTone::Error,
                 },
             };
+        }
+        if let Some(evidence) = project_module_evidence(state, binding) {
+            return evidence;
         }
         if let Some(library) = state.model_library_manager.get_library(&binding.library) {
             let candidates = [
