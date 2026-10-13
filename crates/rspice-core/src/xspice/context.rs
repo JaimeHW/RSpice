@@ -2699,6 +2699,21 @@ impl CmContext {
 
     pub fn advance_state(&mut self) {
         self.state_prev.clone_from(&self.state);
+        // Asked first through the shared view: an accepted point whose outputs
+        // already carry their value as the previous one -- every output that
+        // did not move -- would otherwise copy a map a rollback image shares
+        // only to write back the bits it holds.
+        let outputs_settled = self.outputs.values().all(|output| match output {
+            OutputValue::Analog(value) => value.prev_value.same_bits(&value.value),
+            OutputValue::AnalogVector(values) => values
+                .iter()
+                .all(|value| value.prev_value.same_bits(&value.value)),
+            _ => true,
+        });
+        if outputs_settled {
+            self.time_prev = self.time;
+            return;
+        }
         for output in self.outputs.values_mut() {
             match output {
                 OutputValue::Analog(value) => {
