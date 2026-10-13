@@ -277,7 +277,56 @@ fn an_empty_generated_symbol_resolves_from_the_bound_interface() {
             .collect::<Vec<_>>(),
         ["p", "n"]
     );
-    assert!(matches!(resolved.source(), ResolvedSymbolSource::Generated));
+    assert_eq!(
+        resolved.source(),
+        ResolvedSymbolSource::Authored,
+        "it is the cell's symbol view, regenerated, and drawn as one"
+    );
+    assert_eq!(
+        resolved.document(),
+        &SymbolDocument::generated_from_ports(&[
+            port("p", PortDirection::InOut),
+            port("n", PortDirection::InOut),
+        ])
+    );
+}
+
+/// A compiled module's generated symbol is the cell's symbol: the stored
+/// document, typed pins and all, resolved as a view the canvas draws. Read as
+/// a fallback derived from the ports, every instance of the module drew as an
+/// unresolved cell.
+#[test]
+fn a_generated_symbol_that_states_the_interface_is_drawn_as_stored() {
+    let ports = [
+        port("inp", PortDirection::In),
+        port("clk", PortDirection::In),
+        port("out", PortDirection::Out),
+    ];
+    let mut symbol = View::new(generated::GENERATED_SYMBOL_VIEW, ViewType::Symbol);
+    generated::store_generated_symbol(&mut symbol, &ports, |port| {
+        (port.name == "clk").then_some(rspice_design_model::symbol_pin::SymbolElectricalType::Logic)
+    })
+    .expect("symbol stores");
+    let stored = SymbolDocument::load_from_view(&symbol).expect("the stored document loads");
+    let (libraries, buffers) =
+        library_with_dev(vec![View::new("veriloga", ViewType::VerilogA), symbol]);
+    let mut binding = LibraryCellInstance::new("work", "dev", "veriloga");
+    binding.bind_interface(&ports);
+
+    let resolved = SymbolResolver::new(&libraries, &buffers)
+        .resolve_binding(&binding)
+        .expect("symbol resolves");
+
+    assert_eq!(resolved.source(), ResolvedSymbolSource::Authored);
+    assert!(resolved.issues().is_empty(), "{:?}", resolved.issues());
+    assert_eq!(resolved.document(), &stored);
+    assert_eq!(
+        resolved
+            .connectable_pins()
+            .map(|pin| pin.name.as_str())
+            .collect::<Vec<_>>(),
+        ["inp", "clk", "out"]
+    );
 }
 
 /// A bus pin in a generated symbol's `ports` keeps its whole name.

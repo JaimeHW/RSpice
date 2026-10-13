@@ -74,13 +74,24 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
             port_preference,
         );
 
-        // A generated symbol is derived from the interface, whatever document
-        // it last stored. New Cell stores an empty one for a cell with no
-        // ports yet, and reading that as authored left every port unplaced.
+        // A generated symbol follows the interface it is resolved against. Its
+        // stored document is drawn while it states that interface; a stale
+        // one is regenerated from it, because New Cell stores an empty one
+        // for a cell with no ports yet and reading that left every port
+        // unplaced. Either way it is the cell's symbol view, so it resolves
+        // as one: the canvas draws only a symbol the cell has, and reading a
+        // generated view as a fallback drew every compiled module's instance
+        // as an unresolved cell.
         if let Some(ports) = ports.as_deref().filter(|ports| !ports.is_empty())
-            && symbol_view.is_some_and(generated::is_generated_symbol)
+            && let Some(view) = symbol_view.filter(|view| generated::is_generated_symbol(view))
         {
-            return Some(ResolvedCellSymbol::from_generated(ports));
+            let document = match authored_document(Some(view)) {
+                AuthoredDocument::Loaded(document) if states_interface(&document, ports) => {
+                    document
+                }
+                _ => SymbolDocument::generated_from_ports(ports),
+            };
+            return Some(ResolvedCellSymbol::from_authored_document(document, ports));
         }
 
         match authored_document(symbol_view) {
@@ -198,6 +209,16 @@ fn authored_document(view: Option<&View>) -> AuthoredDocument {
         Ok(document) => AuthoredDocument::Loaded(document),
         Err(message) => AuthoredDocument::Invalid(message),
     }
+}
+
+/// Whether `document` places a pin for each of `ports` and has no other.
+fn states_interface(document: &SymbolDocument, ports: &[PortSpec]) -> bool {
+    document.pins.len() == ports.len()
+        && ports.iter().all(|port| {
+            document
+                .pin(&port.name)
+                .is_some_and(|pin| pin.position.is_some())
+        })
 }
 
 fn find_symbol_view<'a>(cell: &'a Cell, requested_view: Option<&str>) -> Option<&'a View> {
