@@ -377,6 +377,31 @@ fn ideal_threshold_approach_limit(
     (limit.is_finite() && limit > 0.0).then_some(limit)
 }
 
+/// The state a switch with a positive hysteresis band takes at `control`:
+/// on above `upper`, off below `lower`, and inside the band the state it
+/// `held` at the last accepted point.
+///
+/// The state at a candidate is decided by the control's path across the
+/// step, and a Newton iterate is not on that path. `swload.c` and
+/// `cswload.c` hold the previous iterate's state inside the band, which is
+/// the accepted state wherever a step's first iterate is the accepted
+/// solution, as it is in ngspice. This solver's first iterate is extrapolated
+/// from the accepted history; an extrapolation that overshoots the band would
+/// otherwise latch a state that no solution of the step reached and that the
+/// converged control, inside the band, never asks for. Before the first
+/// accepted transient point there is no accepted state, and the caller holds
+/// the iterate's.
+#[inline]
+fn banded_state(control: Value, upper: Value, lower: Value, held: SwitchState) -> SwitchState {
+    if control > upper {
+        SwitchState::On
+    } else if control < lower {
+        SwitchState::Off
+    } else {
+        held
+    }
+}
+
 #[inline]
 fn switch_state_for_normalized_control(state: Value) -> SwitchState {
     if state >= 1.0 {
@@ -680,6 +705,9 @@ pub struct VoltageSwitch {
     // State
     state: SwitchState,
     prev_state: SwitchState,
+    /// The state at the last accepted transient point, `None` before one;
+    /// see [`Self::stepped_since_accepted`].
+    accepted_state: Option<SwitchState>,
     in_hysteresis_band: bool,
     current_resistance: Value,
     prev_resistance: Value,
@@ -734,6 +762,7 @@ impl VoltageSwitch {
             xyce_curve: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
+            accepted_state: None,
             in_hysteresis_band: false,
             current_resistance: 1e6,
             prev_resistance: 1e6,
@@ -1030,6 +1059,7 @@ impl VoltageSwitch {
                 .restored(&self.name, SwitchCheckpointKind::Voltage, checkpoint)?;
         self.state = runtime.state;
         self.prev_state = runtime.prev_state;
+        self.accepted_state = Some(runtime.state);
         self.in_hysteresis_band = runtime.in_hysteresis_band;
         self.current_resistance = runtime.current_resistance;
         self.prev_resistance = runtime.prev_resistance;
@@ -1124,6 +1154,18 @@ impl VoltageSwitch {
         self.smooth == 0.0 && self.xyce_curve.is_none()
     }
 
+    /// Whether this is an ideal switch whose state differs from its state at
+    /// the last accepted transient point: its conductance stepped between
+    /// RON and ROFF inside the step to the present candidate. The step lands
+    /// where the candidate does, so the circuit's solution steps there too;
+    /// nothing inside the interval passed between the two.
+    pub(crate) fn stepped_since_accepted(&self) -> bool {
+        self.is_ideal()
+            && self
+                .accepted_state
+                .is_some_and(|accepted| accepted != self.state)
+    }
+
     #[inline]
     fn geometric_mean_resistance(&self) -> Value {
         (0.5 * self.ron.ln() + 0.5 * self.roff.ln()).exp()
@@ -1131,6 +1173,7 @@ impl VoltageSwitch {
 
     /// Commit hysteresis-side state after an accepted transient timestep.
     pub fn commit_transient_hysteresis(&mut self) {
+        self.accepted_state = Some(self.state);
         if let Some(curve) = &mut self.xyce_curve {
             curve.commit_pending_side();
         }
@@ -1236,25 +1279,12 @@ impl VoltageSwitch {
         }
 
         self.in_hysteresis_band = false;
-        match self.state {
-            SwitchState::Off => {
-                if vctrl > self.vt + self.vh {
-                    self.state = SwitchState::On;
-                }
-            }
-            SwitchState::On => {
-                if vctrl < self.vt - self.vh {
-                    self.state = SwitchState::Off;
-                }
-            }
-            SwitchState::Transitioning => {
-                if vctrl > self.vt + self.vh {
-                    self.state = SwitchState::On;
-                } else if vctrl < self.vt - self.vh {
-                    self.state = SwitchState::Off;
-                }
-            }
-        }
+        self.state = banded_state(
+            vctrl,
+            self.vt + self.vh,
+            self.vt - self.vh,
+            self.accepted_state.unwrap_or(self.state),
+        );
     }
 
     fn update_from_solution(&mut self, voltages: &[Value]) {
@@ -1405,6 +1435,9 @@ pub struct CurrentSwitch {
     // State
     state: SwitchState,
     prev_state: SwitchState,
+    /// The state at the last accepted transient point, `None` before one;
+    /// see [`VoltageSwitch::stepped_since_accepted`].
+    accepted_state: Option<SwitchState>,
     in_hysteresis_band: bool,
     current_resistance: Value,
     prev_resistance: Value,
@@ -1433,6 +1466,7 @@ impl CurrentSwitch {
             xyce_curve: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
+            accepted_state: None,
             in_hysteresis_band: false,
             current_resistance: 1e6,
             prev_resistance: 1e6,
@@ -1702,6 +1736,7 @@ impl CurrentSwitch {
                 .restored(&self.name, SwitchCheckpointKind::Current, checkpoint)?;
         self.state = runtime.state;
         self.prev_state = runtime.prev_state;
+        self.accepted_state = Some(runtime.state);
         self.in_hysteresis_band = runtime.in_hysteresis_band;
         self.current_resistance = runtime.current_resistance;
         self.prev_resistance = runtime.prev_resistance;
@@ -1714,9 +1749,18 @@ impl CurrentSwitch {
 
     /// Commit hysteresis-side state after an accepted transient timestep.
     pub fn commit_transient_hysteresis(&mut self) {
+        self.accepted_state = Some(self.state);
         if let Some(curve) = &mut self.xyce_curve {
             curve.commit_pending_side();
         }
+    }
+
+    /// See [`VoltageSwitch::stepped_since_accepted`].
+    pub(crate) fn stepped_since_accepted(&self) -> bool {
+        self.is_ideal()
+            && self
+                .accepted_state
+                .is_some_and(|accepted| accepted != self.state)
     }
 
     /// Whether the switch is ideal: exactly `RON` or `ROFF` by state, with
@@ -1820,25 +1864,12 @@ impl CurrentSwitch {
         }
 
         self.in_hysteresis_band = false;
-        match self.state {
-            SwitchState::Off => {
-                if ictrl > self.it + self.ih {
-                    self.state = SwitchState::On;
-                }
-            }
-            SwitchState::On => {
-                if ictrl < self.it - self.ih {
-                    self.state = SwitchState::Off;
-                }
-            }
-            SwitchState::Transitioning => {
-                if ictrl > self.it + self.ih {
-                    self.state = SwitchState::On;
-                } else if ictrl < self.it - self.ih {
-                    self.state = SwitchState::Off;
-                }
-            }
-        }
+        self.state = banded_state(
+            ictrl,
+            self.it + self.ih,
+            self.it - self.ih,
+            self.accepted_state.unwrap_or(self.state),
+        );
     }
 
     fn update_from_solution(&mut self, voltages: &[Value]) {

@@ -1351,6 +1351,19 @@ impl CircuitData {
         }
     }
 
+    /// Whether an ideal switch changed state between the last accepted
+    /// transient point and the present candidate, so that the solution
+    /// stepped at the candidate: see `VoltageSwitch::stepped_since_accepted`.
+    pub(crate) fn ideal_switch_stepped_since_accepted(&self) -> bool {
+        self.vswitches
+            .iter()
+            .any(crate::device::VoltageSwitch::stepped_since_accepted)
+            || self
+                .iswitches
+                .iter()
+                .any(crate::device::CurrentSwitch::stepped_since_accepted)
+    }
+
     /// Re-linearize JFET/MESFET devices directly at a static probe solution.
     ///
     /// Normal nonlinear updates intentionally apply ngspice-style branch

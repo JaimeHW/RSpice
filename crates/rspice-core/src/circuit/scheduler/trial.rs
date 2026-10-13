@@ -332,6 +332,15 @@ impl Trial<'_> {
                 host.note_scheduled_activation();
             }
         }
+        // A circuit fact, told to every instance: an ideal switch that
+        // changed state over this interval stepped the analog solution at the
+        // candidate, wherever the switch sits relative to an instance's
+        // bridges. An operating point has no interval to step across.
+        if self.candidate.dt > 0.0 && self.circuit.ideal_switch_stepped_since_accepted() {
+            for host in self.hosts.iter_mut() {
+                host.note_analog_step();
+            }
+        }
         Ok(())
     }
 

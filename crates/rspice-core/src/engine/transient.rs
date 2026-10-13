@@ -10254,8 +10254,19 @@ impl Engine {
                 .uses_accepted_solution_reference()
                 && !first_accepted_transient_step
                 && lte_estimator.predictor_is_constant();
+            // An ideal switch that changed state over this step stepped the
+            // nodes it drives at the candidate. The voltage estimate measures
+            // the candidate against a predictor through the accepted history,
+            // so it reads that step as truncation error, and the step is as
+            // large at any dt: retries end at the floor, where force-accepts
+            // walk the nodes across it in bounded increments, one accepted
+            // point each. The reactive elements' charge truncation still
+            // bounds this step, as ngspice's does, which forms no voltage
+            // estimate at all.
+            let ideal_switch_stepped = circuit.ideal_switch_stepped_since_accepted();
             let device_or_startup_controls_lte = first_accepted_transient_step
                 || candidate_model_discontinuity
+                || ideal_switch_stepped
                 || legacy_xyce_breakpoint_restart_controls_lte
                 || native_breakpoint_restart_controls_lte
                 || (!lte_estimator.uses_accepted_solution_reference()
@@ -11094,6 +11105,12 @@ impl Engine {
                         lte_estimator.restart_history_from(&new_solution);
                         xyce_lte_restart_first_step =
                             lte_estimator.uses_accepted_solution_reference();
+                    } else if ideal_switch_stepped
+                        && !lte_estimator.uses_accepted_solution_reference()
+                    {
+                        // An ideal switch's change of state steps the solution
+                        // too: see the ordinary acceptance's restart.
+                        lte_estimator.restart_history_from(&new_solution);
                     }
                     lte_estimator.set_method_order(effective_method_order(
                         method_after_step,
@@ -11691,13 +11708,17 @@ impl Engine {
                 // Commit predictor-local history after XSPICE has projected
                 // accepted voltage outputs into the solution vector.
                 lte_estimator.record(&new_solution, dt);
-                if hit_breakpoint {
+                if hit_breakpoint || ideal_switch_stepped {
                     // Restart the predictor with the integrator, for the reason
                     // spelled out at the force-accepted acceptance above: history
                     // from before a discontinuity predicts a solution the next
                     // step never had, and the estimate that follows falls with
                     // the candidate width rather than with its cube, so the
                     // controller answers it by shrinking to the solver floor.
+                    // An ideal switch's change of state steps the solution the
+                    // same way. It steps no reactive state, whose charges are
+                    // continuous across it, so the integrator runs on through
+                    // it, as ngspice's does.
                     lte_estimator.restart_history_from(&new_solution);
                 }
                 lte_estimator

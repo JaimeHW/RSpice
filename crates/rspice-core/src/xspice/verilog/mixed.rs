@@ -1149,6 +1149,20 @@ struct ActiveTrial {
     /// tick. Both events are inside one step and no second solve can separate
     /// them, because re-solving lands on the movement again.
     digital_feedback: bool,
+    /// Whether the analog solution itself stepped over this trial's interval:
+    /// an ideal switch of the circuit changed state between the accepted
+    /// point and this candidate. Its conductance changes at the candidate,
+    /// where the step put the change, so an A/D threshold the solution then
+    /// crosses was crossed by that change, as for `digital_feedback`: no
+    /// solution of the interval passed through the threshold, and a chord
+    /// across the step dates the crossing wherever the accepted sample sat
+    /// relative to it. A comparator output resting near its converter's
+    /// threshold puts that date one solver floor past the accepted point; a
+    /// landing there finds the switch not yet changed, and the next interval
+    /// changes it again at its own end. So the crossing is dated at the
+    /// endpoint. The circuit reports it through
+    /// [`MixedSignalHost::note_analog_step`].
+    analog_step: bool,
     /// Whether the discrete half had an activation of its own due at or before
     /// this trial's tick when the trial opened.
     ///
@@ -2981,6 +2995,7 @@ impl MixedSignalHost {
             observation_refinement: None,
             start_digital,
             digital_feedback: false,
+            analog_step: false,
             scheduled_activation,
             rollback,
             analog_inputs: previous_inputs,
@@ -3039,6 +3054,16 @@ impl MixedSignalHost {
     pub(crate) fn note_scheduled_activation(&mut self) {
         if let Some(trial) = self.trial.as_mut() {
             trial.scheduled_activation = true;
+        }
+    }
+
+    /// Record that the analog solution stepped over this trial's interval:
+    /// an ideal switch of the circuit changed state at the candidate. An
+    /// instance cannot see the circuit's switches, so the circuit reports it.
+    /// See [`ActiveTrial::analog_step`].
+    pub(crate) fn note_analog_step(&mut self) {
+        if let Some(trial) = self.trial.as_mut() {
+            trial.analog_step = true;
         }
     }
 
@@ -3600,6 +3625,7 @@ impl MixedSignalHost {
             .trial
             .as_ref()
             .is_some_and(|trial| trial.digital_feedback);
+        let analog_step = self.trial.as_ref().is_some_and(|trial| trial.analog_step);
         // Latched the first time this candidate is seen to have been fed back
         // into, because the trial that sees it is not the trial the effect is
         // dated in: the solver rolls this one back and solves the moved problem
@@ -3667,8 +3693,12 @@ impl MixedSignalHost {
             //
             // The endpoint is also the only instant for a crossing that
             // leaves a threshold the accepted sample sat on exactly by no more
-            // than floating-point resolution: see `crossing_below_resolution`.
+            // than floating-point resolution: see `crossing_below_resolution`,
+            // and for one across an ideal switch's change of state, which
+            // steps the analog solution at the endpoint itself: see
+            // `ActiveTrial::analog_step`.
             let carried = digital_feedback
+                || analog_step
                 || scratch.ledger.carries(time_seconds, index)
                 || (self.state.started
                     && crossing_below_resolution(

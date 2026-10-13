@@ -853,9 +853,13 @@ endmodule
 /// however short the step; read as a rate, it would ask the same tenth of
 /// every retry until the step collapsed. The limit takes its reference after
 /// the jump instead. With the edge a 1 ps ramp the control is continuous.
-/// Either way the switch turns on within the 1 ns maximum step of 14 ns
-/// (ngspice-46 on the deck with the edges as 1 ps PWL ramps: 14.56 ns), and
-/// off at the falling edge.
+/// The step after the edge starts Newton from an extrapolation through the
+/// jump, far above the band; inside the band the switch holds the state it
+/// was accepted in, not that iterate's. Either way the switch turns on within
+/// the 1 ns maximum step of 14 ns (ngspice-46 on the deck with the edges as
+/// 1 ps PWL ramps: 14.56 ns, in 90 points), and off at the falling edge, and
+/// its change of state is one step of the solution, not a run of points
+/// forced across it.
 #[test]
 fn a_drive_step_onto_a_switch_control_is_not_read_as_a_rate() {
     const MODULE: &str = "`timescale 1ns/1ps
@@ -913,9 +917,71 @@ endmodule
             tran.time[after_fall]
         );
         assert!(
-            tran.time.len() < 400,
+            tran.time.len() < 150,
             "ramp {ramp:?}: {} points",
             tran.time.len()
         );
     }
+}
+
+/// A comparator output resting on its converter's threshold while switches
+/// change state, as the SAR's does at the end of sampling: the top plate is
+/// grounded by one switch, the output sits 2 nV below `vcc/2`, and one control
+/// opens that switch and closes another that pulls the plate down, so the
+/// output leaves the threshold the instant they change state. A chord across
+/// that step dates the crossing at the accepted point, one solver floor past
+/// it; a landing there finds the switches not yet changed, and the next step
+/// changes them again at its own end. The control then closed on its
+/// threshold one floor-wide landing at a time (here 40 points less than an
+/// attosecond apart; in the SAR, with more going on, until the stepper
+/// refused the run as pinned at the floor). The crossing belongs to the endpoint, where the step put the
+/// change. The control crosses at 10 ns + ln(1.8/0.85) ns = 10.750 ns, and
+/// the switch's step limit lets the step that changes it overshoot by up to
+/// 50 mV of control, about 60 ps here, as ngspice's does.
+#[test]
+fn a_crossing_across_a_switch_change_of_state_is_dated_at_the_step() {
+    let model = ModelFile::new(
+        "`timescale 1ns/1ps
+module watch(cmp);
+  input cmp; reg seen;
+  initial seen = 0;
+  always @(posedge cmp) seen = 1;
+endmodule
+",
+    );
+    let deck = format!(
+        "* a comparator resting on its converter threshold as switches change state\n\
+         .param vcc=1.8\nvs s 0 pwl(0 1.8 10n 1.8 10.001n 0)\nrs s sd 1k\ncsd sd 0 1p\n\
+         stop top 0 sd 0 swh\nspull m vneg csel 0 swh\nbsel csel 0 v = 1.8 - v(sd)\n\
+         vneg vneg 0 -1\nrm m 0 1k\ncc top m 1p\n\
+         bcmp cmp 0 v = 0.9*(1 - tanh(1000*v(top))) - 2n\n\
+         .model swh sw vt=0.9 vh=0.05 ron=50 roff=1e12\n\
+         x1 cmp watch\n.va \"{}\" watch\n.end\n",
+        model.path()
+    );
+    let tran = Engine::default()
+        .run_tran(&Netlist::parse(&deck).unwrap(), 20.0e-9, 1.0e-9)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let cmp = tran.try_voltage_waveform_named("cmp").expect("v(cmp)");
+    let rise = tran.time[cmp
+        .iter()
+        .position(|&v| v > 1.0)
+        .expect("the comparator leaves the threshold")];
+    let floor_wide = tran
+        .time
+        .windows(2)
+        .filter(|pair| (10.7e-9..=10.9e-9).contains(&pair[1]) && pair[1] - pair[0] < 1.0e-18)
+        .count();
+    println!(
+        "{} points, {floor_wide} floor-wide near the change, comparator up at {rise:e} s",
+        tran.time.len()
+    );
+    assert!(
+        (10.75e-9..=10.81e-9).contains(&rise),
+        "the comparator left the threshold at {rise:e} s"
+    );
+    assert_eq!(
+        floor_wide, 0,
+        "steps shorter than 1 as at the switches' change of state"
+    );
 }
