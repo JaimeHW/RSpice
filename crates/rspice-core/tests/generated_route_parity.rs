@@ -185,6 +185,59 @@ fn transient_trace(
     entries
 }
 
+/// The small-signal response at each frequency, as an AC plot reads it: every
+/// named node voltage and branch current in decibels and degrees.
+fn ac_trace(deck: &str, frequencies: &[f64], nodes: &[&str], branches: &[&str]) -> Vec<Entry> {
+    let netlist = match Netlist::parse_validated(deck) {
+        Ok(netlist) => netlist,
+        Err(err) => return vec![text("ac", format!("parse: {err}"))],
+    };
+    let points = match Engine::default().run_ac(&netlist, frequencies) {
+        Ok(points) => points,
+        Err(err) => return vec![text("ac", err.to_string())],
+    };
+    let mut entries = vec![text("ac", "ok")];
+    for (index, point) in points.iter().enumerate() {
+        entries.push(num(format!("ac[{index}].f"), point.frequency));
+        let named = |names: &[String], values: &[rspice_core::Complex64], name: &str| {
+            names
+                .iter()
+                .position(|candidate| candidate.eq_ignore_ascii_case(name))
+                .and_then(|position| values.get(position).copied())
+        };
+        let observations = nodes
+            .iter()
+            .map(|node| {
+                (
+                    format!("v({node})"),
+                    named(&point.node_names, &point.voltages, node),
+                )
+            })
+            .chain(branches.iter().map(|branch| {
+                (
+                    format!("i({branch})"),
+                    named(&point.branch_names, &point.currents, branch),
+                )
+            }));
+        for (label, value) in observations {
+            match value {
+                Some(value) => {
+                    entries.push(num(
+                        format!("ac[{index}].db({label})"),
+                        20.0 * value.norm().log10(),
+                    ));
+                    entries.push(num(
+                        format!("ac[{index}].ph({label})"),
+                        value.arg().to_degrees(),
+                    ));
+                }
+                None => entries.push(text(format!("ac[{index}].{label}"), "absent")),
+            }
+        }
+    }
+    entries
+}
+
 fn agrees(generated: f64, runtime: f64) -> bool {
     if generated.to_bits() == runtime.to_bits() {
         return true;
@@ -329,6 +382,24 @@ impl Row<'_> {
         );
         assert_traces_agree(self.label, &generated, &runtime);
     }
+
+    fn compare_ac(&self, frequencies: &[f64]) {
+        self.assert_routes_differ();
+        let generated = ac_trace(
+            &self.generated_deck(),
+            frequencies,
+            self.nodes,
+            self.branches,
+        );
+        let runtime = ac_trace(&self.runtime_deck(), frequencies, self.nodes, self.branches);
+        assert_eq!(
+            generated.first().and_then(|entry| entry.text.as_deref()),
+            Some("ok"),
+            "{}: the generated route must run the AC analysis: {generated:?}",
+            self.label
+        );
+        assert_traces_agree(self.label, &generated, &runtime);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +448,14 @@ fn diode_cmc_operating_point_agrees_across_routes() {
 #[test]
 fn diode_cmc_transient_agrees_across_routes() {
     diode_cmc_row("V1 in 0 SIN(0 1 5e7)\nR1 in a 1k\nX1 a 0 DIODE_CMC").compare_transient();
+}
+
+/// The small-signal response, in decibels and degrees, from the conduction
+/// knee to where the junction capacitance carries the current.
+#[test]
+fn diode_cmc_ac_agrees_across_routes() {
+    diode_cmc_row("V1 in 0 DC 0.7 AC 1\nR1 in a 1k\nX1 a 0 DIODE_CMC")
+        .compare_ac(&[1.0e3, 1.0e6, 1.0e8, 1.0e9, 1.0e10]);
 }
 
 // ---------------------------------------------------------------------------

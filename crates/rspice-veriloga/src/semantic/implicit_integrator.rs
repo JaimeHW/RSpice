@@ -145,6 +145,10 @@ impl SemanticAnalyzer {
 // with its branch conditions. Only instance-static guards reach this lowering,
 // so their original expressions can also guard the final solver equation.
 // Resolve definitions against preceding statements to keep this walk acyclic.
+//
+// A snapshot nested in a block is `enclosing ? condition : 0`, so the walk goes
+// through a conditional as well: its condition names the enclosing block's own
+// snapshots, which the final equation can no more read than this one's.
 fn expand_static_guard(
     expression: &Expression,
     statements: &[AnalyzedStatement],
@@ -155,6 +159,14 @@ fn expand_static_guard(
             OperatorRewrite::Binary(binary) => Ok(Expression::Binary(binary)),
             OperatorRewrite::Unary(unary) => Ok(Expression::Unary(unary)),
         });
+    }
+    if let Expression::Conditional(conditional) = expression {
+        return Ok(Expression::Conditional(ConditionalExpr {
+            condition: Box::new(expand_static_guard(&conditional.condition, statements)?),
+            then_expr: Box::new(expand_static_guard(&conditional.then_expr, statements)?),
+            else_expr: Box::new(expand_static_guard(&conditional.else_expr, statements)?),
+            span: conditional.span,
+        }));
     }
     if let Expression::Identifier(identifier) = expression
         && let Some(index) = statements.iter().rposition(|statement| {

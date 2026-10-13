@@ -1723,13 +1723,14 @@ fn nested_rebuilt_sweep_uses_flattened_public_point_boundaries() {
 
 /// A hoisted inner-`if` snapshot does not leak across Newton evaluations.
 ///
-/// The frontend snapshots every non-trivial `if` condition into an
-/// unconditional `__guardN` assignment; inside an untaken block the snapshot
-/// reads whatever the block did not write, which on the bytecode route is the
-/// previous evaluation's value of `t` (3.0, so `t > 0.1` reads true from the
-/// second evaluation on) and on the JIT route is zero. Its only consumer is
-/// ANDed with the block's own condition, so `g` stays 1.0 on both routes and
-/// the operating point is the same whichever route this build selects:
+/// The frontend snapshots every non-trivial `if` condition into a `__guardN`
+/// assignment, which inside a block is evaluated only under that block's
+/// guard. Before that gate an untaken block's snapshot read whatever the block
+/// did not write: on the bytecode route the previous evaluation's value of `t`
+/// (3.0, so `t > 0.1` read true from the second evaluation on), on the JIT
+/// route zero. Its only consumer is ANDed with the block's own condition, so
+/// `g` stays 1.0 on both routes and the operating point is the same whichever
+/// route this build selects:
 /// `--features veriloga` evaluates the bytecode, `--features veriloga-native`
 /// the x64 JIT. The finite oracle in `rspice-veriloga` pins the snapshot
 /// itself; this pins that the engine never sees it.

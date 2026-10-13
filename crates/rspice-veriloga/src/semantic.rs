@@ -4203,18 +4203,28 @@ impl SemanticAnalyzer {
             attrs: Default::default(),
         })?;
 
-        // The snapshot assignment itself is unconditional: guard
-        // expressions are pure, and enclosing guards already gate every
-        // consumer of this variable.
+        // The snapshot is evaluated where the source evaluates the condition:
+        // under the guards of every block around it, and otherwise holds zero.
+        // Every consumer is gated by those same guards, so the fallback is
+        // never read; what the gate removes is the evaluation itself. Taken
+        // out of its block, a condition reads whatever that block did not
+        // write — on a block that never runs, a local nothing ever writes.
+        // diode_cmc's `expl` snapshot `abs(-fbbt / Fmaxr) < se05` sits in a
+        // juncap block its default parameters never enter, so it divided by
+        // that zero: real arithmetic makes the quotient an infinity the
+        // comparison discards, and the small-signal replay's complex
+        // arithmetic makes it NaN and refuses the device.
+        let expression_guard = self.active_site_guard();
+        let expression = self.apply_guard(condition, Self::number_expr(0.0, span));
         let site = self.next_analog_site();
         sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             occurrence_source: None,
             target: name.clone(),
             var_index,
             index: None,
-            expression: condition,
+            expression,
             site,
-            expression_guard: AnalogSiteGuard::None,
+            expression_guard,
             expr_type: ValueType::Real,
             span,
             unfiltered_initial_step_guard: None,

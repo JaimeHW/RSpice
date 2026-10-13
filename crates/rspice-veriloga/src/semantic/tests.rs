@@ -807,6 +807,90 @@ fn filter_replication_counts_and_operand_budgets_fail_before_allocation() {
     assert!(error.contains("instance-invariant"), "{error}");
 }
 
+/// A condition nested in a block is snapshotted under that block's guard, so
+/// it is evaluated exactly where the source evaluates it. Hoisted out of the
+/// block, `abs(1.0 / den)` divided by a local the untaken block never wrote.
+#[test]
+fn a_nested_condition_snapshot_is_gated_by_its_enclosing_block() {
+    let m = analyze_one(&module_src(
+        r#"
+            real g, den;
+            analog begin
+                g = 1.0;
+                if (V(p, n) > 10.0) begin
+                    den = V(p, n);
+                    if (abs(1.0 / den) < 10.0) g = 2.0;
+                end
+                I(p, n) <+ g * V(p, n);
+            end
+            "#,
+    ));
+    let snapshots = flat_assignments(&m)
+        .into_iter()
+        .filter(|assignment| assignment.target.starts_with("__guard"))
+        .collect::<Vec<_>>();
+    let [outer, inner] = snapshots.as_slice() else {
+        panic!("two condition snapshots, got {snapshots:?}");
+    };
+    // The outer condition sits at the top level and is evaluated on every
+    // path, as written.
+    assert_eq!(outer.expression_guard, AnalogSiteGuard::None);
+    assert!(matches!(outer.expression, Expression::Binary(_)));
+    // The inner one is `outer ? condition : 0`.
+    assert_eq!(inner.expression_guard, AnalogSiteGuard::Select);
+    let Expression::Conditional(gate) = &inner.expression else {
+        panic!("the nested snapshot is gated: {:?}", inner.expression);
+    };
+    assert!(
+        matches!(&*gate.condition, Expression::Identifier(guard) if guard.name == outer.target),
+        "gated by the enclosing block's own snapshot: {:?}",
+        gate.condition
+    );
+    assert!(matches!(&*gate.then_expr, Expression::Binary(_)));
+    assert!(matches!(&*gate.else_expr, Expression::Number(zero) if zero.value == 0.0));
+}
+
+/// The equation `idt` appends after the analog body is guarded by the
+/// conditions around the call, spelled out in the parameters they read: no
+/// condition snapshot of the body is readable there. A `case` nested in an
+/// `if` snapshots its selector as `outer ? enabled : 0`, so the outer
+/// snapshot sits inside a conditional and is expanded there too.
+#[test]
+fn a_nested_integrator_guard_reads_no_condition_snapshot() {
+    let m = analyze_one(&module_src(
+        r#"
+            parameter integer enabled = 1;
+            real result;
+            analog begin
+                if (enabled > 0) begin
+                    case (enabled)
+                        1: result = idt(V(p, n));
+                        default: result = 0.25;
+                    endcase
+                end else result = 0.25;
+                I(p, n) <+ result;
+            end
+            "#,
+    ));
+    let equation = m
+        .contributions
+        .iter()
+        .find(|contribution| contribution.branch.starts_with("__idt_out"))
+        .expect("the integrator's equation");
+    let Expression::Conditional(guarded) = &equation.expression else {
+        panic!("the equation is guarded: {:?}", equation.expression);
+    };
+    let mut snapshots = Vec::new();
+    visit_expression(&guarded.condition, &mut |expression| {
+        if let Expression::Identifier(identifier) = expression
+            && identifier.name.starts_with("__guard")
+        {
+            snapshots.push(identifier.name.clone());
+        }
+    });
+    assert!(snapshots.is_empty(), "the guard reads {snapshots:?}");
+}
+
 #[test]
 fn conditional_assignment_lowered_to_guarded_expression() {
     let m = analyze_one(&module_src(

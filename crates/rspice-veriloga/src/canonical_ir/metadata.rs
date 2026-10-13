@@ -14,6 +14,9 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 163 evaluates a condition snapshot nested in another block only
+/// under that block's guards, and holds zero otherwise; earlier artifacts
+/// evaluate it on every path, over values the untaken block never wrote.
 /// Version 162 reads every discrete value an analog block reads at its left
 /// limit during a transient trial, and binds the reads inside analog event
 /// bodies to twins sampled at the settled value
@@ -166,7 +169,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 162;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 163;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

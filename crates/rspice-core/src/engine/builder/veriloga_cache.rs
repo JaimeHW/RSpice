@@ -397,7 +397,18 @@ use super::*;
 // record lists twins for `slew` operands instead and has none for event
 // bodies, so its event bodies would read the value before the edge that fired
 // them. Rebuilding is the only reading.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 143;
+//
+// Version 144 follows the canonical IR's schema to 163, which changes what a
+// cached model's condition snapshots compute. A `__guardN` snapshot of an `if`,
+// `case` or event condition nested in another block is now evaluated only under
+// that block's guards and holds zero otherwise; a version-143 record evaluates
+// it on every path, reading whatever the untaken block did not write. Its
+// consumers are gated either way, so the scalar answer is the same, but the
+// small-signal replay evaluates the stale snapshot in complex arithmetic, where
+// diode_cmc's `abs(-fbbt / Fmaxr)` over a never-written `Fmaxr` is NaN and the
+// device refuses AC. The record runs; it is wrong, not unreadable, so it is
+// rebuilt.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 144;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

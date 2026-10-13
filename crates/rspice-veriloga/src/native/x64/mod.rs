@@ -5300,14 +5300,15 @@ endmodule
     /// `__guardN` reds on diode_cmc (`__guard81`), bsimcmg (`__guard777`),
     /// l_utsoi102 (`__guard532`) and hisimsoi (`__guard26`).
     ///
-    /// `t` is assigned inside the block and re-assigned after it; the inner
-    /// `if (t > 0.1)` is snapshotted unconditionally by `snapshot_guard`
-    /// (`semantic.rs`), so when the block is not taken the snapshot reads `t`
-    /// from the slot: the previous pass's `3.0` on the bytecode route, which
-    /// never clears a slot, and `0.0` on an observation image that has run
-    /// once. Its only consumer is the guarded `g = 2.0`, ANDed with the
-    /// block's own condition, so the stamp is the same on both routes however
-    /// the snapshot reads.
+    /// `t` is assigned inside the block and re-assigned after it. The inner
+    /// `if (t > 0.1)` is snapshotted by `snapshot_guard` (`semantic.rs`)
+    /// under the block's own guard, so when the block is not taken the
+    /// snapshot holds zero and reads nothing. It used to be evaluated on every
+    /// path and read `t` from the slot: the previous pass's `3.0` on the
+    /// bytecode route, which never clears a slot, and `0.0` on an observation
+    /// image that has run once. Its only consumer is the guarded `g = 2.0`,
+    /// ANDed with the block's own condition, so the stamp was the same on both
+    /// routes either way.
     const CONDITION_SNAPSHOT_SOURCE: &str = r#"
 module condition_snapshot_untaken(p, n);
   inout p, n;
@@ -5387,11 +5388,11 @@ endmodule
         );
         assert!(stats.stamps >= 1, "the fixture must compare a stamp");
 
-        // (b) The mechanism, so the skip stays justified. After two passes the
-        //     bytecode's snapshot has read the previous pass's `t = 3.0` as
-        //     true; the observation image, run once, has read the slot's zero
-        //     as false; `g` is 1.0 on both because the consumer is ANDed with
-        //     the untaken block's condition.
+        // (b) The mechanism. The snapshot is gated by the untaken block's
+        //     condition, so after two bytecode passes and after the
+        //     observation image's one run it holds zero without reading `t`;
+        //     `g` is 1.0 on both because the consumer is ANDed with the same
+        //     condition.
         let mut bytecode = native_model_benchmark_context(model, name);
         resolve_native_parameter_defaults(model, &native, &mut bytecode);
         let mut observed = bytecode.clone();
@@ -5420,12 +5421,12 @@ endmodule
         );
         require_clean_native_context(&ctx, "fixture observation").expect("observation");
         assert_eq!(
-            bytecode.variables[snapshot], 1.0,
-            "bytecode: the second pass reads the previous pass's t = 3.0, so t > 0.1"
+            bytecode.variables[snapshot], 0.0,
+            "bytecode: the untaken block's guard keeps the second pass from reading t = 3.0"
         );
         assert_eq!(
             observed.variables[snapshot], 0.0,
-            "observation image: its one run reads the slot's zero, so t > 0.1 is false"
+            "observation image: the untaken block's guard holds the snapshot at zero"
         );
         assert_eq!(bytecode.variables[g], 1.0);
         assert_eq!(observed.variables[g], 1.0);
@@ -5933,19 +5934,20 @@ endmodule
     /// Whether a compared variable is a frontend condition snapshot.
     ///
     /// `snapshot_guard` (`semantic.rs`) hoists every non-trivial `if` condition
-    /// into an unconditional `__guardN = condition` assignment so the guarded
-    /// statements read one evaluation of it. Hoisted means computed on every
-    /// path, including the paths where the block it came from is not taken,
-    /// and there its operands are whatever the block did not write: on the
-    /// bytecode route the slot holds the *previous* evaluation's value, on an
-    /// observation image, which runs once, it holds zero. The source gives that
-    /// value no meaning — every consumer of the snapshot is ANDed with the
-    /// enclosing guards — so it cannot reach a stamp, a Jacobian, a static
-    /// condition or an observable variable, all of which this oracle compares
-    /// directly. diode_cmc, bsimcmg, l_utsoi102 and hisimsoi were red on
+    /// into a `__guardN = condition` assignment so the guarded statements read
+    /// one evaluation of it. Nested in a block, the snapshot is evaluated only
+    /// under that block's guards and holds zero otherwise. Before that gate it
+    /// was computed on every path, and where the block was not taken its
+    /// operands were whatever the block did not write: on the bytecode route
+    /// the *previous* evaluation's value, on an observation image, which runs
+    /// once, zero. diode_cmc, bsimcmg, l_utsoi102 and hisimsoi were red on
     /// exactly such a snapshot under the two-pass protocol with every entry
-    /// agreeing; `condition_snapshot_of_an_untaken_block_stays_out_of_the_physics`
-    /// pins the shape.
+    /// agreeing. The value is still compared to nothing: every consumer of the
+    /// snapshot is ANDed with the enclosing guards, so it cannot reach a stamp,
+    /// a Jacobian, a static condition or an observable variable, all of which
+    /// this oracle compares directly.
+    /// `condition_snapshot_of_an_untaken_block_stays_out_of_the_physics` pins
+    /// the shape.
     fn variable_is_condition_snapshot(name: &str) -> bool {
         name.starts_with("__guard")
     }

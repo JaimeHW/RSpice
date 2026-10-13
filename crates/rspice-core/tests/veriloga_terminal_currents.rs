@@ -1045,12 +1045,6 @@ mod generated {
             assert_waveform("tran I(x1)", &derived(&tran, "x1"), &native);
             assert_waveform("tran @x1[ia]", &lead(&tran, "x1", "ia"), &native);
 
-            // The runtime lowering of this source has no small-signal form
-            // (its `abs` of a frequency-domain value is refused), so AC is
-            // the generated route's alone.
-            if !include.is_empty() {
-                continue;
-            }
             for point in ac(
                 &deck(include, "dc 0.7 ac 1", saves, ".ac dec 1 1meg 1g"),
                 &[1e8],

@@ -1062,6 +1062,66 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+/// A condition inside a block the operating point never enters is not
+/// evaluated by the small-signal replay.
+///
+/// The front end snapshots each `if` condition into a variable. Evaluated on
+/// every path, the inner snapshot here divided by `den`, which the untaken
+/// block never writes: the scalar pass made `1/0` an infinity its comparison
+/// discarded, and the AC replay's complex arithmetic made it NaN, which `abs`
+/// refused, failing the analysis. This is diode_cmc's `expl` macro inside its
+/// juncap-express block, which the default `SWJUNEXP = 0` never enters. With
+/// the snapshot gated by its block, the device is the conductance and
+/// capacitance it contributes: at `ωRC = 1` the divider is `1 / (2 + j)`.
+#[test]
+fn a_condition_in_an_untaken_block_is_not_evaluated_in_ac() {
+    let model = write_model(
+        "untaken_quotient",
+        r#"
+`include "disciplines.vams"
+module va_untaken_quotient(p, n);
+    inout p, n;
+    electrical p, n;
+    real g, den;
+    analog begin
+        g = 1m;
+        if (V(p, n) > 10.0) begin
+            den = V(p, n);
+            if (abs(1.0 / den) < 10.0) g = 2m;
+        end
+        I(p, n) <+ g * V(p, n) + ddt(1n * V(p, n));
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* condition in an untaken block\n\
+         V1 in 0 DC 1 AC 1\n\
+         R1 in out 1k\n\
+         X1 out 0 va_untaken_quotient\n\
+         .va \"{}\" va_untaken_quotient\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let corner = 1.0 / (2.0 * std::f64::consts::PI * 1.0e3 * 1.0e-9);
+    let points = Engine::default()
+        .run_ac(&netlist, &[corner])
+        .expect("the small-signal replay never evaluates the untaken condition");
+    let out = points[0]
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out node");
+    let expected = rspice_core::Complex64::new(1.0, 0.0) / rspice_core::Complex64::new(2.0, 1.0);
+    let actual = points[0].voltages[out];
+    assert!(
+        (actual - expected).norm() < 1e-8,
+        "V(out) = {actual}, expected {expected}"
+    );
+    let _ = std::fs::remove_file(model);
+}
+
 #[test]
 fn nested_ddx_laplace_model_solves_through_the_engine() {
     for (operator, numerator, denominator) in [
