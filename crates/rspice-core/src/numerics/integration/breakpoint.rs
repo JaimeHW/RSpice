@@ -62,6 +62,36 @@ pub(crate) fn coincides_before(earlier: Value, later: Value, floor: Value) -> bo
     floor.is_finite() && floor > 0.0 && earlier < later && later - earlier < floor
 }
 
+/// How many units in the last place of the clock its resolution spans: the
+/// `zi_*` sample comparison's window (`rspice_veriloga::zfilter`), so a
+/// sampled filter accepts every timepoint this resolution reconciles onto its
+/// sample instant.
+const CLOCK_RESOLUTION_ULPS: Value = 8.0;
+
+/// The shortest interval the transient clock resolves at `time`.
+///
+/// A solver floor below this is not an interval at that clock: `time + floor`
+/// rounds back to `time`, or onto a neighbour a different distance away, so a
+/// step at the floor cannot advance the clock or does not end where its
+/// coefficients were formed for. A floor fixed when the run starts — ngspice's
+/// `1e-11 * TMAX` — reaches that point late in a run whose maximum step is
+/// small against its stop time: `1e-17` at a 1 µs maximum is a third of an ulp
+/// at 0.128 s. Two clocks computed two ways for one instant — `0.8m` parsed as
+/// `0.8 * 1e-3` and the 25600th tick of a 31.25 ns clock — then differ by more
+/// than that floor, are treated as distinct, and the one-ulp interval between
+/// them is left to a step that cannot take it.
+///
+/// The transient stepper's hard minimum is therefore never below this at its
+/// accepted clock. It is constant within a binade, so a run of floor landings
+/// stays on one grid between powers of two.
+pub(crate) fn clock_resolution(time: Value) -> Value {
+    let magnitude = time.abs();
+    if !magnitude.is_finite() {
+        return 0.0;
+    }
+    CLOCK_RESOLUTION_ULPS * (magnitude.next_up() - magnitude)
+}
+
 /// Dialect-specific behavior for approaching and leaving breakpoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BreakpointStepPolicy {
@@ -1159,6 +1189,39 @@ mod breakpoint_manager_tests {
             breakpoints.mark_breakpoint_solved(completion),
             2.0 * restart
         );
+    }
+
+    /// A floor of [`clock_resolution`] always advances the clock and joins
+    /// two clocks computed two ways for one instant: C6's `0.8m` stop time
+    /// and its 25600th 31.25 ns tick, one ulp apart, which its 2e-20 s floor
+    /// held apart and could not step between.
+    #[test]
+    fn the_clock_resolution_joins_one_instant_computed_two_ways_and_always_advances() {
+        let stop: Value = 0.8 * 1.0e-3;
+        let tick: Value = 8.0e8 * 1.0e-12;
+        assert_eq!(tick.next_up(), stop, "the C6 pair");
+        assert!(!coincides_before(tick, stop, 2.0e-20));
+        assert!(
+            tick + 2.0e-20 == tick,
+            "the old floor cannot advance the clock"
+        );
+        let resolution = clock_resolution(stop);
+        assert_eq!(resolution, 8.0 * (stop.next_up() - stop));
+        assert!(coincides_before(tick, stop, resolution));
+        for time in [1.0e-12, 3.0e-9, 1.0e-4, 0.128_016_059_41, 1.0, 1.0e3_f64] {
+            let floor = clock_resolution(time);
+            assert!(
+                time + floor > time,
+                "a floor step advances the clock at {time:e}"
+            );
+            assert_eq!(
+                floor,
+                clock_resolution(time.next_up()),
+                "one value per binade"
+            );
+        }
+        assert_eq!(clock_resolution(0.0), 8.0 * 0.0_f64.next_up());
+        assert_eq!(clock_resolution(Value::INFINITY), 0.0);
     }
 
     #[test]

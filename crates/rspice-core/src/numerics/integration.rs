@@ -27,7 +27,9 @@ mod lte;
 mod timestep;
 
 pub use breakpoint::{BreakpointManager, BreakpointStepPolicy};
-pub(crate) use breakpoint::{EdgeCompletionSchedule, XYCE_BREAKPOINT_TOLERANCE, coincides_before};
+pub(crate) use breakpoint::{
+    EdgeCompletionSchedule, XYCE_BREAKPOINT_TOLERANCE, clock_resolution, coincides_before,
+};
 pub(crate) use charge::{
     BranchChargeHistory, TwoTerminalChargeHistory, integrated_charge_current,
     nonlinear_charge_companion_terms,

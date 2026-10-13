@@ -407,6 +407,15 @@ fn coalesced_with_horizon(landed: Value, stop_time: Value, hard_min_dt: Value) -
     }
 }
 
+/// The solver's hard minimum at an accepted clock: the dialect's and the
+/// models' floors, never below what the clock resolves there
+/// ([`crate::numerics::integration::clock_resolution`]).
+fn hard_min_at_clock(dialect_min_dt: Value, model_min_dt: Value, time: Value) -> Value {
+    dialect_min_dt
+        .max(model_min_dt)
+        .max(crate::numerics::integration::clock_resolution(time))
+}
+
 /// The clock a physical source, delay or line event lands on.
 ///
 /// Physical clocks are exact, and the solver lands on each one; but two owners
@@ -5269,7 +5278,7 @@ impl Engine {
         } else {
             Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt)
         };
-        let hard_min_dt = dialect_min_dt.max(model_min_dt);
+        let hard_min_dt = hard_min_at_clock(dialect_min_dt, model_min_dt, resume_time);
         // A mixed module's discrete half schedules on its own declared
         // precision, which can be far finer than this. Tell it what the analog
         // side can resolve so an activation inside that window is landed
@@ -7208,6 +7217,26 @@ impl Engine {
         {
             tstop = t;
         }
+        // A floor fixed when the run started falls below what the clock
+        // resolves once the clock is large against the maximum step
+        // (`clock_resolution`); from there the floor moves with the clock's
+        // binade, as the startup floor was taken at the run's first time. It is
+        // raised as each point is accepted, so the floor at an accepted point,
+        // which its checkpoint carries in the mixed modules' copy, is the one a
+        // run resumed from that point starts with. Xyce's floor already spans
+        // ten machine epsilons of the clock.
+        macro_rules! raise_floor_to_accepted_clock {
+            () => {
+                if self.config.spice_dialect != SpiceDialect::Xyce {
+                    let floor = hard_min_at_clock(dialect_min_dt, model_min_dt, t);
+                    if floor > timestep.hard_min_dt() {
+                        timestep.set_hard_min_dt(floor);
+                        #[cfg(feature = "veriloga")]
+                        circuit.set_analog_step_floor(timestep.hard_min_dt());
+                    }
+                }
+            };
+        }
         while t < tstop {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
@@ -7221,6 +7250,8 @@ impl Engine {
                 // Stiff state devices can legitimately require steps far below
                 // ngspice's max-step-derived `delmin` while crossing a narrow
                 // physical boundary layer.
+                // It spans ten machine epsilons of the clock, so it is never
+                // below the clock's resolution either.
                 dialect_min_dt = xyce_hard_min_timestep(t);
                 timestep.set_hard_min_dt(dialect_min_dt.max(model_min_dt));
                 // Xyce's floor moves with the clock, so the mixed modules'
@@ -10734,6 +10765,7 @@ impl Engine {
                             .map_or(timestep.dt(), |step| step.max(timestep.dt()));
                         timestep.force_step(restart_dt.min(controller_dt).min(max_step));
                     }
+                    raise_floor_to_accepted_clock!();
                     if !landed_device_event {
                         // A step that is not one of the chase's own landings
                         // ends it, whether or not it hit a breakpoint.
@@ -11575,6 +11607,7 @@ impl Engine {
                     t = snapped;
                 }
             }
+            raise_floor_to_accepted_clock!();
             bjt::arrival::validate_clock(has_exact_transient_history, step_time, t)?;
             let method_after_step = current_integration_method(&trapgear);
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
@@ -13561,6 +13594,71 @@ mod tests {
         let error = landed_veriloga_event_time(grid, 1.25, 1.0, Value::NAN, NO_HORIZON)
             .expect_err("an unusable hard minimum has no instant to land on");
         assert!(error.to_string().contains("invalid solver hard minimum"));
+    }
+
+    /// C6 under `.tran 50n 0.8m 0 2n`: its 25600th 31.25 ns tick converts to
+    /// `7.999999999999999e-4`, one ulp below the `0.8m` stop time, and the
+    /// floor fixed when the run started, `1e-11` of the 2 ns maximum step, is
+    /// a fifth of that ulp. At that floor the tick is a landing of its own,
+    /// and the one-ulp sliver after it is a step the clock cannot take: the
+    /// run was refused there, 4e5 maximum steps in. At the floor the stepper
+    /// holds at the accepted clock, the tick is the stop time, and a run
+    /// already on the tick reaches the stop time in one step.
+    #[test]
+    fn a_tick_one_ulp_before_the_stop_time_is_the_stop_time_at_the_clocks_floor() {
+        let stop: Value = 0.8 * 1.0e-3;
+        let tick: Value = 8.0e8 * 1.0e-12;
+        assert_eq!(tick.next_up(), stop, "the C6 pair");
+        let max_step = 2.0e-9;
+        let accepted = tick - max_step;
+        let dialect_floor = Engine::ngspice_hard_min_timestep(max_step, 1.0e-15);
+        assert!(dialect_floor < 0.5 * (stop - tick), "the case under test");
+
+        let started = hard_min_at_clock(dialect_floor, 0.0, 0.0);
+        assert_eq!(started, dialect_floor, "the startup floor is the dialect's");
+        assert_eq!(
+            landed_veriloga_event_time(
+                &mut FloorLandingGrid::default(),
+                tick,
+                accepted,
+                started,
+                stop
+            )
+            .expect("the tick lands"),
+            tick,
+            "the startup floor keeps the tick apart from the stop time"
+        );
+        let error =
+            breakpoints::fit_model_interval(tick, stop, started, started, max_step, max_step, true)
+                .expect_err("a floor step cannot advance the clock off the tick");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot integrate to mandatory time"),
+            "{error}"
+        );
+
+        let floor = hard_min_at_clock(dialect_floor, 0.0, accepted);
+        assert_eq!(floor, crate::numerics::integration::clock_resolution(stop));
+        assert_eq!(
+            landed_veriloga_event_time(
+                &mut FloorLandingGrid::default(),
+                tick,
+                accepted,
+                floor,
+                stop
+            )
+            .expect("the tick lands"),
+            stop,
+            "the floor at the accepted clock lands the tick on the stop time"
+        );
+        let step =
+            breakpoints::fit_model_interval(tick, stop, floor, floor, max_step, max_step, true)
+                .expect("a run on the tick fits the step to the stop time");
+        assert!(
+            tick + step >= stop,
+            "the step reaches the stop time: {step:e}"
+        );
     }
 
     /// BUG 662's pulse corner at 25.1 ns and its line arrival, the corner

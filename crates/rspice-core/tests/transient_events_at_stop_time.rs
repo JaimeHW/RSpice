@@ -173,9 +173,11 @@ fn an_event_at_the_stop_time_is_processed_there() {
         value.starts_with('1'),
         "the tenth tick sets q, at the stop time: {q:?}"
     );
-    assert!(
-        (time - stop).abs() <= 1.0e-12 && *time <= stop,
-        "q's last event is the stop-time tick: {q:?}"
+    // The tick is solved at the stop time, one ulp after it, and its event
+    // record keeps the tick's own instant.
+    assert_eq!(
+        *time, 1.0e-7,
+        "q's last event is the stop-time tick, at its own instant: {q:?}"
     );
 }
 
