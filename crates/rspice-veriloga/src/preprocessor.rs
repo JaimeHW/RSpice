@@ -441,12 +441,6 @@ impl MacroDef {
     }
 
     fn expand_bounded(&self, args: &[String], max_bytes: usize) -> Result<String, ()> {
-        if self.params.is_empty() {
-            return (self.body.len() <= max_bytes)
-                .then(|| self.body.clone())
-                .ok_or(());
-        }
-
         if self.body.len() > max_bytes {
             return Err(());
         }
@@ -458,7 +452,7 @@ impl MacroDef {
                 result = Self::replace_identifier_bounded(&result, param, arg, max_bytes)?;
             }
         }
-        Ok(result)
+        Ok(apply_text_operators(result))
     }
 
     /// Replace identifier occurrences respecting word boundaries.
@@ -538,6 +532,40 @@ impl MacroDef {
 
         Ok(result)
     }
+}
+
+/// Apply the macro text operators of IEEE 1800-2017 section 22.5.1, which
+/// Icarus also accepts for 1364-2005 sources, to an expanded macro body:
+/// `` `" `` is a quote that leaves the text between it and the next one open
+/// to argument substitution, `` `\`" `` an escaped quote inside such text,
+/// and ```` `` ```` joins the text on either side of it.
+///
+/// Arguments are substituted first, so `` `"val`" `` with `val` bound to `x`
+/// becomes the string literal `"x"`. The result is never longer than `text`.
+fn apply_text_operators(text: String) -> String {
+    if !text.contains('`') {
+        return text;
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find('`') {
+        out.push_str(&rest[..at]);
+        let tail = &rest[at..];
+        if let Some(after) = tail.strip_prefix("`\"") {
+            out.push('"');
+            rest = after;
+        } else if let Some(after) = tail.strip_prefix("`\\`\"") {
+            out.push_str("\\\"");
+            rest = after;
+        } else if let Some(after) = tail.strip_prefix("``") {
+            rest = after;
+        } else {
+            out.push('`');
+            rest = &tail[1..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn push_str_bounded(result: &mut String, value: &str, max_bytes: usize) -> Result<(), ()> {
@@ -2030,6 +2058,29 @@ value = `KEEP("a, \"quoted\", {braces}, [brackets], (parentheses)");
     fn macro_not_expanded_inside_string() {
         let out = pp("`define NAME bob\ns = \"`NAME\";\n");
         assert!(out.contains("\"`NAME\""), "got: {out}");
+    }
+
+    #[test]
+    fn macro_text_operators_quote_escape_and_join() {
+        // Icarus 13 (`-g2005`) prints `FAILED. x: expected 0111` for the
+        // first use; the others follow IEEE 1800-2017 section 22.5.1.
+        let out = pp(concat!(
+            "`define check(val, exp) $display(\"%s: %b\", `\"val`\", exp);\n",
+            "`check(x, 4'b0111)\n",
+            "`define Q(a) `\"a says `\\`\"hi`\\`\"`\"\n",
+            "s = `Q(bob);\n",
+            "`define J(p, q) p``_``q\n",
+            "y = `J(left, right);\n",
+            "`define PLAIN `\"text`\"\n",
+            "t = `PLAIN;\n",
+        ));
+        assert!(
+            out.contains("$display(\"%s: %b\", \"x\", 4'b0111);"),
+            "got: {out}"
+        );
+        assert!(out.contains("s = \"bob says \\\"hi\\\"\";"), "got: {out}");
+        assert!(out.contains("y = left_right;"), "got: {out}");
+        assert!(out.contains("t = \"text\";"), "got: {out}");
     }
 
     #[test]
