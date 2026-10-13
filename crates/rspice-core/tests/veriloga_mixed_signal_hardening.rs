@@ -230,6 +230,17 @@ fn digital_points(result: &TransientResult, net: &str) -> Vec<(f64, String)> {
 /// coalesced onto the same ten-picosecond floor grid, so the two runs accept
 /// the same fourteen points at the same levels and differ only in how many
 /// publications the trace keeps.
+///
+/// # One fixture is pinned by its point count instead
+///
+/// [`TWO_CROSSINGS_PIN`]'s deck drives a node from a `sin` source, and Rust's `f64::sin`
+/// is the platform's libm, which does not round every angle the same way on
+/// every target: Linux and Windows traces of that deck once differed in two
+/// `clk` samples by one ULP each. A hash of those bits is a pin per platform,
+/// and the one no Windows run can measure was only ever reconstructed. So its
+/// case pins the point count, and every node waveform against its own
+/// analytic form at a tolerance; the fresh-process check still compares all
+/// three of its records child against child, on whichever platform runs it.
 const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     (
         "a_mixed_checkpoint_restores_external_clock_state_without_initial_replay",
@@ -304,49 +315,6 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
             points: 36,
             grid_hash: 0xde34_c01f_9d47_f6dd,
             volt_hash: 0x3300_2d53_5f8d_efc7,
-        },
-    ),
-    (
-        "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
-        "hardening_two_crossings",
-        // Re-measured for P0.10. The restart after a landing no longer
-        // doubles out of the solver floor (D10): of the 22 accepted steps
-        // below 1e-14 s around `clk`'s 2/3 ns fall, the 3 landings of the
-        // root chase itself remain and the 19 doubling rungs after them are
-        // gone, 88 -> 65 points. The left-limit D/A drive (D9) holds QA/QB at
-        // their old level on each edge's own point: against their 1k-loaded
-        // drives, worst 0.980 V -> 1.9e-14 V. Every event is bit-identical but
-        // that fall, dated 1.0000e-20 s past the exact 2/3 ns before and
-        // 0.9988e-20 s past it now. All the crossing assertions of the case
-        // are unchanged.
-        Fingerprint {
-            points: 65,
-            grid_hash: 0xee86_6d7c_e348_7336,
-            // Raw binary64 self-agreement is qualified per platform: Rust's
-            // f64::sin does not promise identical platform math. At 88 points
-            // Linux x64 GNU and Windows x64 MSVC traces had the same time/step
-            // words, events and CA/QA/QB voltages, and only CLK samples 38 and
-            // 55 differed by one ULP: at angles 0x4002bb2ea8b66d08 and
-            // 0x4004f1a6ca8803ce, independent 100-digit sine evaluation rounds
-            // to Linux's 0x3fe6f5b1bdc3a35a and 0x3fdfffffe224cbe2, and Windows
-            // is <0.558 ULP from that high-precision value. On the 65-point
-            // grid the first of those angles is sample 37 and the second is
-            // no longer sampled. The Linux hash below is the Windows trace with
-            // every CLK sample replaced by the correctly rounded sine of its own
-            // angle; the same reconstruction of the 88-point trace reproduces
-            // the Linux pin it replaces, 0xcf573f880596171d, exactly. Both
-            // Linux execution routes agreed before. Keep exact child-process
-            // checks and crossing physics; do not quantize waveforms or widen
-            // the solver's tolerances.
-            volt_hash: if cfg!(all(
-                target_os = "linux",
-                target_arch = "x86_64",
-                target_env = "gnu"
-            )) {
-                0x5489_3dae_0a25_7514
-            } else {
-                0x83fa_7abb_88bd_1fc3
-            },
         },
     ),
     (
@@ -431,37 +399,43 @@ fn pin_fixture(key: &str, result: &TransientResult) {
         .unwrap_or_else(|| panic!("no fingerprint table entry for {key}"));
     let observed = fingerprint(result);
     if observed != *expected || determinism_fingerprint::emitting() {
-        // A hash cannot locate a changed sample. Preserve binary64 words and
-        // event histories so failures on another target can be compared with
-        // a local emission before deciding whether a baseline may move.
-        let bits = |values: &[f64]| {
-            values
-                .iter()
-                .map(|value| format!("{:016x}", value.to_bits()))
-                .collect::<Vec<_>>()
-        };
-        let events = result
-            .digital_traces
-            .iter()
-            .map(|trace| {
-                serde_json::json!({
-                    "node": trace.node_name,
-                    "points": trace.points.iter().map(|point| {
-                        (format!("{:016x}", point.time.to_bits()), format!("{:?}", point.value))
-                    }).collect::<Vec<_>>(),
-                })
-            })
-            .collect::<Vec<_>>();
-        let trace = serde_json::json!({
-            "node_names": result.node_names,
-            "time_bits": bits(&result.time),
-            "step_bits": bits(&result.step_sizes),
-            "voltage_bits": result.voltages.iter().map(|values| bits(values)).collect::<Vec<_>>(),
-            "digital_events": events,
-        });
-        println!("TRIFAMILY_TRACE {key}={trace}");
+        print_trace(key, result);
     }
     pin_fingerprint(key, observed, *expected);
+}
+
+/// Print `result` word for word under `key`.
+///
+/// A hash cannot locate a changed sample. Preserve binary64 words and event
+/// histories so failures on another target can be compared with a local
+/// emission before deciding whether a baseline may move.
+fn print_trace(key: &str, result: &TransientResult) {
+    let bits = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| format!("{:016x}", value.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    let events = result
+        .digital_traces
+        .iter()
+        .map(|trace| {
+            serde_json::json!({
+                "node": trace.node_name,
+                "points": trace.points.iter().map(|point| {
+                    (format!("{:016x}", point.time.to_bits()), format!("{:?}", point.value))
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let trace = serde_json::json!({
+        "node_names": result.node_names,
+        "time_bits": bits(&result.time),
+        "step_bits": bits(&result.step_sizes),
+        "voltage_bits": result.voltages.iter().map(|values| bits(values)).collect::<Vec<_>>(),
+        "digital_events": events,
+    });
+    println!("TRIFAMILY_TRACE {key}={trace}");
 }
 
 /// Every hashed fixture, re-run in fresh processes.
@@ -475,15 +449,52 @@ fn pin_fixture(key: &str, result: &TransientResult) {
 /// six seconds against the suite's own half-minute.
 #[test]
 fn mixed_fixture_hashes_are_identical_across_processes() {
+    let (name, key, points) = TWO_CROSSINGS_PIN;
     let fixtures: Vec<&str> = FINGERPRINTED_FIXTURES
         .iter()
         .map(|(name, _, _)| *name)
+        .chain([name])
         .collect();
     let pinned: Vec<(String, String)> = FINGERPRINTED_FIXTURES
         .iter()
         .flat_map(|(_, key, expected)| expected.records(key))
+        .chain([(format!("{key}_points"), points.to_string())])
         .collect();
     assert_fingerprints_survive_new_processes("hardening", &fixtures, 8, &pinned);
+}
+
+/// The fixture pinned by point count alone, as `(test name, key, points)`:
+/// see "One fixture is pinned by its point count instead" on
+/// [`FINGERPRINTED_FIXTURES`].
+///
+/// Re-measured for P0.10 (88 -> 65): the restart after a landing no longer
+/// doubles out of the solver floor (D10). Of the 22 accepted steps below
+/// 1e-14 s around `clk`'s 2/3 ns fall, the 3 landings of the root chase
+/// itself remain and the 19 doubling rungs after them are gone.
+const TWO_CROSSINGS_PIN: (&str, &str, usize) = (
+    "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
+    "hardening_two_crossings",
+    65,
+);
+
+/// Print `result`'s fingerprint under `key`, and assert its point count
+/// unless this run is emitting.
+fn pin_points(key: &str, result: &TransientResult, expected: usize) {
+    let observed = fingerprint(result);
+    if observed.points != expected || determinism_fingerprint::emitting() {
+        print_trace(key, result);
+    }
+    for (record, value) in observed.records(key) {
+        println!("TRIFAMILY {record}={value}");
+    }
+    if !determinism_fingerprint::emitting() {
+        assert_eq!(
+            observed.points,
+            expected,
+            "{key}_points moved off its pinned value; re-measure with {}=1",
+            determinism_fingerprint::EMIT_ENV
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3482,23 +3493,7 @@ endmodule
         model.deck_path()
     );
     let result = run(&deck, 1.0e-9, 75.0e-12);
-
-    // Independent waveform form, including phase-rounding error near zero.
-    // This remains a physical check on CLK on every platform; the raw hash
-    // separately checks reproducibility of the platform's source evaluation.
-    let clock = result
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case("clk"))
-        .expect("CLK has an analog voltage");
-    assert_eq!(result.voltages[clock].len(), result.time.len());
-    for (&time, &voltage) in result.time.iter().zip(&result.voltages[clock]) {
-        let expected = -(std::f64::consts::TAU * 1.0e9 * time).cos();
-        assert!(
-            (voltage - expected).abs() <= 8.0 * f64::EPSILON,
-            "CLK at {time:e}: {voltage:e}, expected {expected:e}"
-        );
-    }
+    pin_points(TWO_CROSSINGS_PIN.1, &result, TWO_CROSSINGS_PIN.2);
 
     let rising = |net: &str| -> f64 {
         let points = digital_points(&result, net);
@@ -3538,7 +3533,50 @@ endmodule
              not an accepted timepoint"
         );
     }
-    pin_fixture("hardening_two_crossings", &result);
+
+    // Every node against its own analytic form, at a tolerance rather than by
+    // its bits (see `TWO_CROSSINGS_PIN`): `clk` is the platform's `cos`, so a few
+    // ULPs, phase rounding near zero included; `ca` is its ramp; `qa` and `qb`
+    // are the converter's 1 V level through its 20 ohm into 1k, held from
+    // before each edge on the edge's own point and at the new level from the
+    // first instant after it.
+    let high = 1000.0 / 1020.0;
+    let edge = |net: &str| -> f64 {
+        digital_points(&result, net)
+            .iter()
+            .find(|(_, state)| state.as_str() == "One")
+            .unwrap_or_else(|| panic!("`{net}` never rose"))
+            .0
+    };
+    let (qa_edge, qb_edge) = (edge("qa"), edge("qb"));
+    let analytic = |node: &str, time: f64| -> (f64, f64) {
+        match node {
+            "CLK" => (
+                -(std::f64::consts::TAU * 1.0e9 * time).cos(),
+                8.0 * f64::EPSILON,
+            ),
+            "CA" => ((time / 0.668e-9).min(1.0), 4.0 * f64::EPSILON),
+            "QA" => (if time > qa_edge { high } else { 0.0 }, 1.0e-12),
+            "QB" => (if time > qb_edge { high } else { 0.0 }, 1.0e-12),
+            other => panic!("node {other} has no analytic form; add one"),
+        }
+    };
+    let mut checked = Vec::new();
+    for (name, values) in result.node_names.iter().zip(&result.voltages) {
+        if values.is_empty() {
+            continue;
+        }
+        assert_eq!(values.len(), result.time.len(), "{name}");
+        for (&time, &voltage) in result.time.iter().zip(values) {
+            let (expected, tolerance) = analytic(&name.to_ascii_uppercase(), time);
+            assert!(
+                (voltage - expected).abs() <= tolerance,
+                "{name} at {time:e}: {voltage:e}, expected {expected:e}"
+            );
+        }
+        checked.push(name.to_ascii_uppercase());
+    }
+    assert_eq!(checked, ["CLK", "CA", "QA", "QB"]);
 }
 
 /// A five-nanosecond HDL clock, declared in nanoseconds.
