@@ -825,6 +825,7 @@ use truncation::{
 };
 mod bjt;
 use bjt::{BjtChargeStep, BjtPredictorHistory};
+mod runtime_veriloga_saves;
 
 pub use self::{
     checkpoint::{
@@ -4337,6 +4338,7 @@ impl Engine {
         SimulationError,
     > {
         Self::ensure_bjt_transient_phase_support(&prepared.circuit, abort)?;
+        Self::ensure_runtime_veriloga_current_saves(netlist, &prepared.circuit)?;
         let admitted = AdmittedTransientCircuit {
             prepared,
             identity: CheckpointIdentity {
