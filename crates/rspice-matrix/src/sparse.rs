@@ -711,7 +711,8 @@ impl BackwardError {
 /// voltage sources without inferring anything from a candidate's magnitude.
 ///
 /// Only finite nonzero coefficients and exact-zero right-hand sides take part.
-/// Unseeded cycles and nonhomogeneous equations cannot prove a zero. Callers
+/// Unseeded cycles and nonhomogeneous equations cannot prove a zero; the LU
+/// remnants of an unexcited cycle are left to [`zero_lu_remnants`]. Callers
 /// must still certify the complete original system after this projection.
 fn canonicalize_real_homogeneous_zero_constraints(
     csc: &SymbolicSparseColMat<usize>,
@@ -789,6 +790,157 @@ fn canonicalize_real_homogeneous_zero_constraints(
         }
     }
     changed
+}
+
+/// A scalar of a certified sparse solve, as [`zero_lu_remnants`] weighs it.
+trait RemnantScalar: Copy + PartialEq {
+    const ZERO: Self;
+
+    /// The magnitude the componentwise backward-error check uses: `|x|`
+    /// for a real scalar and `|re| + |im|` for a complex one.
+    fn magnitude(self) -> Value;
+}
+
+impl RemnantScalar for Value {
+    const ZERO: Self = 0.0;
+
+    #[inline]
+    fn magnitude(self) -> Value {
+        self.abs()
+    }
+}
+
+impl RemnantScalar for Complex64 {
+    const ZERO: Self = Complex64 { re: 0.0, im: 0.0 };
+
+    #[inline]
+    fn magnitude(self) -> Value {
+        complex_abs1(self)
+    }
+}
+
+/// A copy of `solution` with its LU rounding remnants set to zero, or `None`
+/// when it has none. The equations are the rows of `values`, or its columns
+/// when `transposed`.
+///
+/// A block of the circuit that no excitation reaches solves to exactly zero,
+/// and LU can leave rounding remnants there (1e-33 beside unit-scale
+/// unknowns). Each equation of the block has a zero right-hand side and only
+/// remnants in it, so its componentwise error is one however small they are;
+/// refinement cannot remove them (the correction is a remnant too), and the
+/// homogeneous projections reach only an equation with one unknown, or a
+/// chain from one: the block is a cycle, such as `x - y = 0, x + y = 0`.
+///
+/// A remnant is a coordinate negligible beside the solution's scale
+/// (`256·eps·max|x|`) that no equation needs. An equation needs a coordinate
+/// when it is open — it has a right-hand side, or a coordinate that is not
+/// negligible or is needed itself — and the coordinate's term in it is above
+/// one rounding of the equation's own magnitude `|b| + |A||x|`. So a small
+/// coordinate an equation is made of is kept however small it is, with every
+/// small coordinate it is made of in turn, while the equations of an
+/// unexcited block, whose every coordinate is a remnant, need none of them.
+/// Zeroing the remnants makes those equations hold exactly, and the caller
+/// certifies the whole system again, so a projection that removed anything an
+/// equation needed still fails.
+///
+/// The rule is the same for real and complex solves; a solve reaches it only
+/// after its certificate has failed, so a solve that certifies is untouched.
+fn zero_lu_remnants<T: RemnantScalar>(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[T],
+    rhs: &[T],
+    solution: &[T],
+    transposed: bool,
+) -> Option<Vec<T>> {
+    let n = rhs.len();
+    if csc.nrows() != n
+        || csc.ncols() != n
+        || solution.len() != n
+        || values.len() != csc.row_idx().len()
+    {
+        return None;
+    }
+    let bound = solution
+        .iter()
+        .fold(0.0_f64, |scale, &value| scale.max(value.magnitude()))
+        * 256.0
+        * Value::EPSILON;
+    let mut candidate: Vec<bool> = solution
+        .iter()
+        .map(|&value| value != T::ZERO && value.magnitude() <= bound)
+        .collect();
+    if !candidate.contains(&true) {
+        return None;
+    }
+
+    // Each equation's terms `(unknown, |a|·|x|)`, the equations each unknown
+    // appears in, and each equation's magnitude.
+    let mut terms: Vec<Vec<(usize, Value)>> = vec![Vec::new(); n];
+    let mut appears_in: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut magnitude: Vec<Value> = rhs.iter().map(|&value| value.magnitude()).collect();
+    for col in 0..n {
+        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
+        for (&row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
+            if value == T::ZERO {
+                continue;
+            }
+            let (equation, unknown) = if transposed { (col, row) } else { (row, col) };
+            let term = value.magnitude() * solution[unknown].magnitude();
+            terms[equation].push((unknown, term));
+            appears_in[unknown].push(equation);
+            magnitude[equation] += term;
+        }
+    }
+
+    let mut open: Vec<bool> = (0..n)
+        .map(|equation| {
+            rhs[equation] != T::ZERO
+                || terms[equation]
+                    .iter()
+                    .any(|&(unknown, _)| solution[unknown] != T::ZERO && !candidate[unknown])
+        })
+        .collect();
+    let mut pending: Vec<usize> = (0..n).filter(|&equation| open[equation]).collect();
+    while let Some(equation) = pending.pop() {
+        for &(unknown, term) in &terms[equation] {
+            if candidate[unknown] && term > Value::EPSILON * magnitude[equation] {
+                candidate[unknown] = false;
+                for &other in &appears_in[unknown] {
+                    if !open[other] {
+                        open[other] = true;
+                        pending.push(other);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut projected = solution.to_vec();
+    let mut changed = false;
+    for (value, &remnant) in projected.iter_mut().zip(&candidate) {
+        if remnant {
+            *value = T::ZERO;
+            changed = true;
+        }
+    }
+    changed.then_some(projected)
+}
+
+/// [`zero_lu_remnants`] for a real solve.
+fn zero_real_lu_remnants(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Value],
+    rhs: &[Value],
+    solution: &[Value],
+    operation: RealSolveOp,
+) -> Option<Vec<Value>> {
+    zero_lu_remnants(
+        csc,
+        values,
+        rhs,
+        solution,
+        operation == RealSolveOp::Transpose,
+    )
 }
 
 /// Compute componentwise backward error in the supplied coordinates.
@@ -3468,6 +3620,41 @@ impl StaticMatrix {
             backward_error = canonical_error;
         }
 
+        // An unexcited cycle has no singleton to seed the projection above.
+        // Weigh its remnants in the scaled coordinates the certificate uses.
+        if let Some(projected) =
+            zero_real_lu_remnants(csc, &ws.scaled_values, &ws.scaled_rhs, solution, operation)
+        {
+            let projected_error = componentwise_backward_error_with_layout_and_floors(
+                csc,
+                residual_layout,
+                &ws.scaled_values,
+                &projected,
+                &ws.scaled_rhs,
+                scaled_denominator_floor,
+                residual_scratch,
+                residual_gross_scratch,
+                residual_compensation_scratch,
+                residual_row_nnz_scratch,
+                operation,
+            )?;
+            if projected_error.accepted() {
+                let solution_scale = match operation {
+                    RealSolveOp::Normal => &ws.col_scale,
+                    RealSolveOp::Transpose => &ws.row_scale,
+                };
+                solution.clear();
+                for (&value, &scale) in projected.iter().zip(solution_scale) {
+                    let value = value * scale;
+                    if !value.is_finite() {
+                        return Err(SolverError::Overflow);
+                    }
+                    solution.push(value);
+                }
+                return Ok(());
+            }
+        }
+
         Err(SolverError::InaccurateSolution(
             backward_error.componentwise,
         ))
@@ -3680,6 +3867,9 @@ impl StaticMatrix {
                 return Ok(true);
             }
         }
+        // An unexcited cycle's LU remnants are left to the faer fallback,
+        // which projects them only once its own certificate has failed.
+        // Projecting them here would replace a solve that faer certifies.
         Ok(false)
     }
 
@@ -3698,7 +3888,19 @@ impl StaticMatrix {
             )));
         }
 
-        let mut solution = solve_gauss(self.to_dense_real(), rhs.to_vec())?;
+        let solution = solve_gauss(self.to_dense_real(), rhs.to_vec())?;
+        self.certify_dense_solution(rhs, solution)
+    }
+
+    /// Certify a dense solution of `A*x = b` against the original sparse
+    /// system. Only after that certificate fails are the zeros an equation
+    /// proves (a homogeneous chain, then an unexcited block's LU remnants)
+    /// projected, each followed by a certificate of the whole system.
+    fn certify_dense_solution(
+        &self,
+        rhs: &[Value],
+        mut solution: Vec<Value>,
+    ) -> Result<Vec<Value>, SolverError> {
         let mut residual = Vec::new();
         let mut denominator = Vec::new();
         let mut compensation = Vec::new();
@@ -3716,36 +3918,53 @@ impl StaticMatrix {
             RealSolveOp::Normal,
         )?;
         if backward_error.accepted() {
-            Ok(solution)
-        } else {
-            if canonicalize_real_homogeneous_zero_constraints(
-                &self.csc,
-                &self.values,
-                rhs,
-                &mut solution,
-                RealSolveOp::Normal,
-            ) {
-                let canonical_error = componentwise_backward_error_with_layout(
-                    &self.csc,
-                    &self.residual_layout,
-                    &self.values,
-                    &solution,
-                    rhs,
-                    &mut residual,
-                    &mut denominator,
-                    &mut compensation,
-                    &mut row_nnz,
-                    RealSolveOp::Normal,
-                )?;
-                if canonical_error.accepted() {
-                    return Ok(solution);
-                }
-                backward_error = canonical_error;
-            }
-            Err(SolverError::InaccurateSolution(
-                backward_error.componentwise,
-            ))
+            return Ok(solution);
         }
+        if canonicalize_real_homogeneous_zero_constraints(
+            &self.csc,
+            &self.values,
+            rhs,
+            &mut solution,
+            RealSolveOp::Normal,
+        ) {
+            let canonical_error = componentwise_backward_error_with_layout(
+                &self.csc,
+                &self.residual_layout,
+                &self.values,
+                &solution,
+                rhs,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                RealSolveOp::Normal,
+            )?;
+            if canonical_error.accepted() {
+                return Ok(solution);
+            }
+            backward_error = canonical_error;
+        }
+        if let Some(projected) =
+            zero_real_lu_remnants(&self.csc, &self.values, rhs, &solution, RealSolveOp::Normal)
+            && componentwise_backward_error_with_layout(
+                &self.csc,
+                &self.residual_layout,
+                &self.values,
+                &projected,
+                rhs,
+                &mut residual,
+                &mut denominator,
+                &mut compensation,
+                &mut row_nnz,
+                RealSolveOp::Normal,
+            )?
+            .accepted()
+        {
+            return Ok(projected);
+        }
+        Err(SolverError::InaccurateSolution(
+            backward_error.componentwise,
+        ))
     }
 
     /// Solve a small, ill-conditioned real system with extended-precision
@@ -3828,7 +4047,7 @@ impl StaticMatrix {
             }
         }
 
-        let mut solution: Vec<Value> = scaled_solution
+        let solution: Vec<Value> = scaled_solution
             .iter()
             .zip(&col_scale)
             .map(|(&value, &scale)| {
@@ -3839,54 +4058,7 @@ impl StaticMatrix {
         if solution.iter().any(|value| !value.is_finite()) {
             return Err(SolverError::Overflow);
         }
-
-        let mut residual = Vec::new();
-        let mut denominator = Vec::new();
-        let mut compensation = Vec::new();
-        let mut row_nnz = Vec::new();
-        let mut backward_error = componentwise_backward_error_with_layout(
-            &self.csc,
-            &self.residual_layout,
-            &self.values,
-            &solution,
-            rhs,
-            &mut residual,
-            &mut denominator,
-            &mut compensation,
-            &mut row_nnz,
-            RealSolveOp::Normal,
-        )?;
-        if backward_error.accepted() {
-            Ok(solution)
-        } else {
-            if canonicalize_real_homogeneous_zero_constraints(
-                &self.csc,
-                &self.values,
-                rhs,
-                &mut solution,
-                RealSolveOp::Normal,
-            ) {
-                let canonical_error = componentwise_backward_error_with_layout(
-                    &self.csc,
-                    &self.residual_layout,
-                    &self.values,
-                    &solution,
-                    rhs,
-                    &mut residual,
-                    &mut denominator,
-                    &mut compensation,
-                    &mut row_nnz,
-                    RealSolveOp::Normal,
-                )?;
-                if canonical_error.accepted() {
-                    return Ok(solution);
-                }
-                backward_error = canonical_error;
-            }
-            Err(SolverError::InaccurateSolution(
-                backward_error.componentwise,
-            ))
-        }
+        self.certify_dense_solution(rhs, solution)
     }
 }
 
@@ -4505,27 +4677,8 @@ fn canonicalize_complex_homogeneous_singletons(
     changed
 }
 
-/// A copy of `solution` with its LU rounding remnants set to zero, or `None`
-/// when it has none.
-///
-/// A block of the circuit that no excitation reaches solves to exactly zero,
-/// and LU can leave rounding remnants there (1e-33 beside unit-scale
-/// unknowns). Each equation of the block has a zero right-hand side and only
-/// remnants in it, so its componentwise error is one however small they are;
-/// refinement cannot remove them (the correction is a remnant too), and the
-/// singleton projection reaches only an equation with one unknown.
-///
-/// A remnant is a coordinate negligible beside the solution's scale
-/// (`256·eps·max|x|`) that no equation needs. An equation needs a coordinate
-/// when it is open — it has a right-hand side, or a coordinate that is not
-/// negligible or is needed itself — and the coordinate's term in it is above
-/// one rounding of the equation's own magnitude `|b| + |A||x|`. So a small
-/// coordinate an equation is made of is kept however small it is, with every
-/// small coordinate it is made of in turn, while the equations of an
-/// unexcited block, whose every coordinate is a remnant, need none of them.
-/// Zeroing the remnants makes those equations hold exactly, and the caller
-/// certifies the whole system again, so a projection that removed anything an
-/// equation needed still fails.
+/// [`zero_lu_remnants`] for a complex solve. The adjoint's equations are the
+/// columns, as the transpose's are; conjugation leaves every magnitude alone.
 fn zero_complex_lu_remnants(
     csc: &SymbolicSparseColMat<usize>,
     values: &[Complex64],
@@ -4533,82 +4686,13 @@ fn zero_complex_lu_remnants(
     solution: &[Complex64],
     operation: ComplexSolveOp,
 ) -> Option<Vec<Complex64>> {
-    let n = rhs.len();
-    if csc.nrows() != n
-        || csc.ncols() != n
-        || solution.len() != n
-        || values.len() != csc.row_idx().len()
-    {
-        return None;
-    }
-    let zero = Complex64::new(0.0, 0.0);
-    let bound = solution
-        .iter()
-        .fold(0.0_f64, |scale, &value| scale.max(complex_abs1(value)))
-        * 256.0
-        * Value::EPSILON;
-    let mut candidate: Vec<bool> = solution
-        .iter()
-        .map(|&value| value != zero && complex_abs1(value) <= bound)
-        .collect();
-    if !candidate.contains(&true) {
-        return None;
-    }
-
-    // Each equation's terms `(unknown, |a|·|x|)`, the equations each unknown
-    // appears in, and each equation's magnitude.
-    let mut terms: Vec<Vec<(usize, Value)>> = vec![Vec::new(); n];
-    let mut appears_in: Vec<Vec<usize>> = vec![Vec::new(); n];
-    let mut magnitude: Vec<Value> = rhs.iter().map(|&value| complex_abs1(value)).collect();
-    for col in 0..n {
-        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
-        for (&row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
-            if value == zero {
-                continue;
-            }
-            let (equation, unknown) = match operation {
-                ComplexSolveOp::Normal => (row, col),
-                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => (col, row),
-            };
-            let term = complex_abs1(value) * complex_abs1(solution[unknown]);
-            terms[equation].push((unknown, term));
-            appears_in[unknown].push(equation);
-            magnitude[equation] += term;
-        }
-    }
-
-    let mut open: Vec<bool> = (0..n)
-        .map(|equation| {
-            rhs[equation] != zero
-                || terms[equation]
-                    .iter()
-                    .any(|&(unknown, _)| solution[unknown] != zero && !candidate[unknown])
-        })
-        .collect();
-    let mut pending: Vec<usize> = (0..n).filter(|&equation| open[equation]).collect();
-    while let Some(equation) = pending.pop() {
-        for &(unknown, term) in &terms[equation] {
-            if candidate[unknown] && term > Value::EPSILON * magnitude[equation] {
-                candidate[unknown] = false;
-                for &other in &appears_in[unknown] {
-                    if !open[other] {
-                        open[other] = true;
-                        pending.push(other);
-                    }
-                }
-            }
-        }
-    }
-
-    let mut projected = solution.to_vec();
-    let mut changed = false;
-    for (value, &remnant) in projected.iter_mut().zip(&candidate) {
-        if remnant {
-            *value = zero;
-            changed = true;
-        }
-    }
-    changed.then_some(projected)
+    zero_lu_remnants(
+        csc,
+        values,
+        rhs,
+        solution,
+        operation != ComplexSolveOp::Normal,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6950,6 +7034,355 @@ mod tests {
                 operation,
             ));
         }
+    }
+
+    /// `equations`, given as `(equation, unknown, coefficient)`, as the
+    /// matrix whose `operation` solve has them: a transpose solve's equations
+    /// are the stored matrix's columns.
+    fn real_matrix_with_equations(
+        n: usize,
+        equations: &[(usize, usize, Value)],
+        operation: RealSolveOp,
+        backend: RealSolverBackend,
+    ) -> StaticMatrix {
+        let triplets: Vec<_> = equations
+            .iter()
+            .map(|&(equation, unknown, value)| match operation {
+                RealSolveOp::Normal => (equation, unknown, value),
+                RealSolveOp::Transpose => (unknown, equation, value),
+            })
+            .collect();
+        StaticMatrix::from_triplets_with_options(
+            n,
+            n,
+            &triplets,
+            SolverOptions {
+                real_backend: backend,
+                ..SolverOptions::default()
+            },
+        )
+        .unwrap()
+    }
+
+    /// Certify a hand-made real solution of the `operation` system.
+    fn real_certificate_accepts(
+        matrix: &StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+        operation: RealSolveOp,
+    ) -> bool {
+        componentwise_backward_error_with_layout(
+            &matrix.csc,
+            &matrix.residual_layout,
+            &matrix.values,
+            solution,
+            rhs,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            operation,
+        )
+        .unwrap()
+        .accepted()
+    }
+
+    /// Project `solution` of the `operation` system.
+    fn real_remnant_projection(
+        matrix: &StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+        operation: RealSolveOp,
+    ) -> Option<Vec<Value>> {
+        zero_real_lu_remnants(&matrix.csc, &matrix.values, rhs, solution, operation)
+    }
+
+    /// LU rounding remnants in an unexcited real cycle fail the certificate
+    /// however small they are, and the homogeneous zero-constraint
+    /// projection cannot reach them: no equation of `x2 + x3 = 0`,
+    /// `x2 - x3 = 0` has one unknown. Beside the cycle, `x0 = 1`,
+    /// `x1 - x0/2 = 0` and `x4 - x1/2 = 0` give the exact solution
+    /// `[1, 1/2, 0, 0, 1/4]`. Zeroing the remnants makes the cycle hold
+    /// exactly, and the whole system then certifies.
+    #[test]
+    fn real_remnant_two_cycle_is_projected_to_zero_and_then_certified() {
+        let equations = [
+            (0, 0, 1.0),
+            (1, 0, -0.5),
+            (1, 1, 1.0),
+            (2, 1, -0.5),
+            (2, 4, 1.0),
+            (3, 2, 1.0),
+            (3, 3, 1.0),
+            (4, 2, 1.0),
+            (4, 3, -1.0),
+        ];
+        let rhs = [1.0, 0.0, 0.0, 0.0, 0.0];
+        let exact = [1.0, 0.5, 0.0, 0.0, 0.25];
+        let remnants = [1.0, 0.5, 1.0e-33, -2.0e-33, 0.25];
+        for operation in [RealSolveOp::Normal, RealSolveOp::Transpose] {
+            let matrix =
+                real_matrix_with_equations(5, &equations, operation, RealSolverBackend::Auto);
+            let mut chained = remnants;
+            assert!(
+                !canonicalize_real_homogeneous_zero_constraints(
+                    &matrix.csc,
+                    &matrix.values,
+                    &rhs,
+                    &mut chained,
+                    operation,
+                ),
+                "no equation seeds a chain into the cycle"
+            );
+            assert_eq!(chained, remnants);
+            assert!(
+                !real_certificate_accepts(&matrix, &remnants, &rhs, operation),
+                "the remnants fail the certificate before the projection"
+            );
+
+            let projected = real_remnant_projection(&matrix, &remnants, &rhs, operation)
+                .expect("the cycle's coordinates are remnants");
+            assert_eq!(projected, exact);
+            assert!(
+                real_certificate_accepts(&matrix, &projected, &rhs, operation),
+                "the projected solution is exact and certifies"
+            );
+            assert_eq!(
+                real_remnant_projection(&matrix, &projected, &rhs, operation),
+                None,
+                "an exact solution has nothing to project"
+            );
+
+            // The projection repairs rounding remnants only: a solution that
+            // is wrong in a coordinate that matters still fails after it.
+            let mut inaccurate = remnants;
+            inaccurate[0] = 1.0 + 1.0e-9;
+            let projected = real_remnant_projection(&matrix, &inaccurate, &rhs, operation)
+                .expect("the cycle's coordinates are remnants");
+            assert_eq!(&projected[2..4], [0.0, 0.0]);
+            assert!(
+                !real_certificate_accepts(&matrix, &projected, &rhs, operation),
+                "x0 is wrong by 1e-9 and stays wrong"
+            );
+        }
+    }
+
+    /// A longer unexcited cycle that live equations read is zeroed whole.
+    /// The four-cycle `x2 + x3 = 0`, `x3 + 2*x4 = 0`, `x4 - x5 = 0`,
+    /// `x5 + 3*x2 = 0` forces `7*x2 = 0`; its remnants are negligible in the
+    /// live equations `x0 + x3 = 1` and `x1 - x0 + 4*x5 = 0` too.
+    #[test]
+    fn real_remnants_of_a_longer_cycle_the_live_equations_read_are_zeroed() {
+        let equations = [
+            (0, 0, 1.0),
+            (0, 3, 1.0),
+            (1, 1, 1.0),
+            (1, 0, -1.0),
+            (1, 5, 4.0),
+            (2, 2, 1.0),
+            (2, 3, 1.0),
+            (3, 3, 1.0),
+            (3, 4, 2.0),
+            (4, 4, 1.0),
+            (4, 5, -1.0),
+            (5, 5, 1.0),
+            (5, 2, 3.0),
+        ];
+        let rhs = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let exact = [1.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+        let remnants = [1.0, 1.0, 3.0e-33, -1.0e-33, 5.0e-34, 5.0e-34];
+        for operation in [RealSolveOp::Normal, RealSolveOp::Transpose] {
+            let matrix =
+                real_matrix_with_equations(6, &equations, operation, RealSolverBackend::Auto);
+            let mut chained = remnants;
+            assert!(!canonicalize_real_homogeneous_zero_constraints(
+                &matrix.csc,
+                &matrix.values,
+                &rhs,
+                &mut chained,
+                operation,
+            ));
+            assert!(!real_certificate_accepts(
+                &matrix, &remnants, &rhs, operation
+            ));
+            let projected = real_remnant_projection(&matrix, &remnants, &rhs, operation)
+                .expect("the cycle's coordinates are remnants");
+            assert_eq!(projected, exact);
+            assert!(real_certificate_accepts(
+                &matrix, &projected, &rhs, operation
+            ));
+        }
+    }
+
+    /// A cycle the live block drives through a tiny coefficient is not a
+    /// remnant, however far below `256·eps·max|x|` it lies: `x1 + x2 =
+    /// 1e-20*x0` and `x1 - x2 = 0` give `x1 = x2 = 5e-21` beside `x0 = 1`.
+    /// Both are kept, while the unexcited cycle `x3 + x4 = 0`, `x3 - x4 = 0`
+    /// beside them is zeroed, and every backend returns the driven cycle.
+    #[test]
+    fn real_projection_keeps_a_cycle_a_tiny_coefficient_drives() {
+        let tiny = 1.0e-20;
+        let equations = [
+            (0, 0, 1.0),
+            (1, 1, 1.0),
+            (1, 2, 1.0),
+            (1, 0, -tiny),
+            (2, 1, 1.0),
+            (2, 2, -1.0),
+            (3, 3, 1.0),
+            (3, 4, 1.0),
+            (4, 3, 1.0),
+            (4, 4, -1.0),
+        ];
+        let rhs = [1.0, 0.0, 0.0, 0.0, 0.0];
+        let half = 0.5 * tiny;
+        let exact = [1.0, half, half, 0.0, 0.0];
+        for operation in [RealSolveOp::Normal, RealSolveOp::Transpose] {
+            let matrix =
+                real_matrix_with_equations(5, &equations, operation, RealSolverBackend::Auto);
+            assert!(real_certificate_accepts(&matrix, &exact, &rhs, operation));
+            assert_eq!(
+                real_remnant_projection(&matrix, &exact, &rhs, operation),
+                None,
+                "every small coordinate of the exact solution is needed"
+            );
+
+            let mut with_remnants = exact;
+            with_remnants[3] = 1.0e-33;
+            with_remnants[4] = -2.0e-33;
+            assert!(!real_certificate_accepts(
+                &matrix,
+                &with_remnants,
+                &rhs,
+                operation
+            ));
+            let projected = real_remnant_projection(&matrix, &with_remnants, &rhs, operation)
+                .expect("the unexcited cycle's coordinates are remnants");
+            assert_eq!(projected, exact, "only the unexcited cycle is zeroed");
+            assert!(real_certificate_accepts(
+                &matrix, &projected, &rhs, operation
+            ));
+
+            // Zeroing the driven cycle as well would not have certified: the
+            // whole-system certificate is what refuses a wrong projection.
+            let mut overzeroed = exact;
+            overzeroed[1] = 0.0;
+            overzeroed[2] = 0.0;
+            assert!(!real_certificate_accepts(
+                &matrix,
+                &overzeroed,
+                &rhs,
+                operation
+            ));
+        }
+
+        for backend in [
+            RealSolverBackend::Auto,
+            RealSolverBackend::Klu,
+            RealSolverBackend::Faer,
+        ] {
+            let mut matrix =
+                real_matrix_with_equations(5, &equations, RealSolveOp::Normal, backend);
+            assert_relative_solution(&matrix.solve(&rhs).expect("well posed"), &exact);
+            assert_relative_solution(&matrix.solve_dense(&rhs).expect("well posed"), &exact);
+        }
+    }
+
+    /// Real solves that leave LU remnants in an unexcited cycle now return
+    /// it as exactly zero; each of these failed its backward-error check
+    /// with an error near one. The live unknown is `x = 1/10`.
+    ///
+    /// - faer, `A*x = b`: the three-cycle `-0.01*x1 + 2.2*x0 = 0`,
+    ///   `47*x0 + 1000*x3 = 0`, `-2.2*x3 - 10*x1 = 0`, which the live
+    ///   equation `10*x2 + 1000*x1 - x3 = 1` reads;
+    /// - faer, `A^T*x = b`: the two-cycle `-1000*x1 - 2.2*x2 = 0`,
+    ///   `0.5*x1 - 3*x2 = 0`, read by `10*x0 - 1000*x1 - 1000*x2 = 1`;
+    /// - dense elimination: the two-cycle `10*x2 + 0.01*x0 = 0`,
+    ///   `x0 + 2.2*x2 = 0`, read by `10*x1 - 2.2*x0 = 1`;
+    /// - extended dense elimination: the three-cycle `0.001*x0 - x3 = 0`,
+    ///   `1000*x3 + 0.33*x1 = 0`, `-0.001*x1 - 47*x0 = 0`, read by
+    ///   `10*x2 - 47*x0 - x3 - 10*x1 = 1`.
+    #[test]
+    fn real_solves_zero_the_lu_remnants_of_an_unexcited_cycle() {
+        let faer_normal = [
+            (2, 2, 10.0),
+            (2, 1, 1000.0),
+            (2, 3, -1.0),
+            (1, 1, -0.01),
+            (1, 0, 2.2),
+            (0, 0, 47.0),
+            (0, 3, 1000.0),
+            (3, 3, -2.2),
+            (3, 1, -10.0),
+        ];
+        let mut matrix = real_matrix_with_equations(
+            4,
+            &faer_normal,
+            RealSolveOp::Normal,
+            RealSolverBackend::Faer,
+        );
+        assert_relative_solution(
+            &matrix.solve(&[0.0, 0.0, 1.0, 0.0]).expect("faer solve"),
+            &[0.0, 0.0, 0.1, 0.0],
+        );
+
+        let faer_transpose = [
+            (0, 0, 10.0),
+            (0, 1, -1000.0),
+            (0, 2, -1000.0),
+            (1, 1, -1000.0),
+            (1, 2, -2.2),
+            (2, 1, 0.5),
+            (2, 2, -3.0),
+        ];
+        let mut matrix = real_matrix_with_equations(
+            3,
+            &faer_transpose,
+            RealSolveOp::Transpose,
+            RealSolverBackend::Faer,
+        );
+        assert_relative_solution(
+            &matrix
+                .solve_transpose(&[1.0, 0.0, 0.0])
+                .expect("faer transpose solve"),
+            &[0.1, 0.0, 0.0],
+        );
+
+        let dense = [
+            (1, 1, 10.0),
+            (1, 0, -2.2),
+            (2, 2, 10.0),
+            (2, 0, 0.01),
+            (0, 0, 1.0),
+            (0, 2, 2.2),
+        ];
+        let matrix =
+            real_matrix_with_equations(3, &dense, RealSolveOp::Normal, RealSolverBackend::Auto);
+        assert_relative_solution(
+            &matrix.solve_dense(&[0.0, 1.0, 0.0]).expect("dense solve"),
+            &[0.0, 0.1, 0.0],
+        );
+
+        let extended = [
+            (2, 2, 10.0),
+            (2, 0, -47.0),
+            (2, 3, -1.0),
+            (2, 1, -10.0),
+            (0, 0, 0.001),
+            (0, 3, -1.0),
+            (3, 3, 1000.0),
+            (3, 1, 0.33),
+            (1, 1, -0.001),
+            (1, 0, -47.0),
+        ];
+        let matrix =
+            real_matrix_with_equations(4, &extended, RealSolveOp::Normal, RealSolverBackend::Auto);
+        assert_relative_solution(
+            &matrix
+                .solve_dense_extended(&[0.0, 0.0, 1.0, 0.0])
+                .expect("extended dense solve"),
+            &[0.0, 0.0, 0.1, 0.0],
+        );
     }
 
     #[test]
