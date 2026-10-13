@@ -9,7 +9,7 @@ features = []
 [[variant]]
 name = "full"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
-today = "parse:P2.3"
+today = "runs"
 
 # unrolled: the same sequence as straight-line code, no system tasks.
 [[variant]]

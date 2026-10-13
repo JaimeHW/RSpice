@@ -15,7 +15,7 @@ today = "runs"
 [[variant]]
 name = "tasks"
 families = ["spice", "xspice", "vams-digital"]
-today = "parse:P2.2"
+today = "runs"
 
 # Contention: i2c_dev51 drives SDA push-pull high while the controller holds
 # it low.
