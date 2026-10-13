@@ -16,16 +16,25 @@ fn run_rspice(args: &[&str]) -> std::process::Output {
 #[test]
 fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destination() {
     let dir = test_dir("checkpoint_preflight_preserves_destination");
+    // An XSPICE digital source's event-node values are state a transient
+    // checkpoint cannot carry yet, so this deck is the one the preflight
+    // refuses. (Switches used to be the example; they checkpoint now.)
+    let events = dir.join("events.txt");
+    std::fs::write(&events, "0 0s\n1n 1s\n").expect("write d_source events");
     let deck = dir.join("stateful.cir");
     std::fs::write(
         &deck,
-        "checkpoint preflight blocker\n\
-         V1 in 0 1\n\
-         S1 out 0 in 0 switchmod\n\
-         R1 out 0 1k\n\
-         .model switchmod sw (ron=1 roff=1meg vt=0.5 vh=0.1)\n\
-         .TRAN 1n 10n\n\
-         .END\n",
+        format!(
+            "checkpoint preflight blocker\n\
+             a_src [d] src\n\
+             a_dac [d] [out] dac\n\
+             .model src d_source (input_file=\"{}\")\n\
+             .model dac dac_bridge (out_low=0 out_high=5 out_undef=2.5 t_rise=1p t_fall=1p)\n\
+             rload out 0 1k\n\
+             .TRAN 100p 2n\n\
+             .END\n",
+            events.to_string_lossy().replace('\\', "/")
+        ),
     )
     .expect("write blocked checkpoint deck");
     let checkpoint = dir.join("state.chk");
@@ -52,7 +61,7 @@ fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destinatio
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("checkpoint capability preflight failed")
-            && stderr.contains("voltage-controlled switch"),
+            && stderr.contains("event node values"),
         "CLI must surface core checkpoint capability failure: {stderr}"
     );
     assert_eq!(
