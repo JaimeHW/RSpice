@@ -7,6 +7,7 @@
 //! time, so a code model's event instant crosses into the kernel and back with
 //! nothing done to it.
 
+use super::copy_on_write::CopyOnWrite;
 use super::digital::DigitalValue;
 use super::event_scheduler::{
     EventScheduler, EventTarget, Instant, SchedulerError, SchedulerLimits, SchedulerRegion,
@@ -352,10 +353,16 @@ pub(crate) type XspiceDriverId = (String, String, usize);
 // summing real drivers in randomized HashMap order changes cancellation after
 // rebuilding a circuit. Keep every fold, including inout other-driver views,
 // in this stable identity order without sorting or allocating during resolution.
+//
+// Each node's bank is copy-on-write. A copy of the event world -- every
+// rollback image that a drain later writes through -- shares every bank and
+// copies only the ones that drain touches, rather than every driver's two
+// `String`s on every node of the design.
 /// Per-node digital drive state, one entry per driver of the node.
-pub(crate) type XspiceDigitalDrivers = HashMap<NodeId, BTreeMap<XspiceDriverId, DigitalValue>>;
+pub(crate) type XspiceDigitalDrivers =
+    HashMap<NodeId, CopyOnWrite<BTreeMap<XspiceDriverId, DigitalValue>>>;
 /// Per-node real-valued drive state, one entry per driver of the node.
-pub(crate) type XspiceRealDrivers = HashMap<NodeId, BTreeMap<XspiceDriverId, Value>>;
+pub(crate) type XspiceRealDrivers = HashMap<NodeId, CopyOnWrite<BTreeMap<XspiceDriverId, Value>>>;
 
 /// What every event-driven net of one circuit currently carries.
 ///

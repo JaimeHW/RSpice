@@ -317,7 +317,8 @@ impl XspiceEventCheckpoint {
                                     };
                                     (id.clone(), *value)
                                 })
-                                .collect(),
+                                .collect::<BTreeMap<_, _>>()
+                                .into(),
                         );
                     }
                 }
@@ -341,7 +342,8 @@ impl XspiceEventCheckpoint {
                                     };
                                     (id.clone(), f64::from_bits(*value))
                                 })
-                                .collect(),
+                                .collect::<BTreeMap<_, _>>()
+                                .into(),
                         );
                     }
                 }

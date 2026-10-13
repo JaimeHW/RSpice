@@ -154,7 +154,8 @@ fn instance_runtime_checkpoint_checks_inverted_inputs_inout_ownership_and_real_p
         std::collections::BTreeMap::from([
             (("A".into(), "io".into(), 0), own),
             (("other".into(), "out".into(), 0), DigitalValue::one()),
-        ]),
+        ])
+        .into(),
     )]);
     instance.update_inputs(&[], 0, inputs(), &[]).unwrap();
     instance.update_committed_digital_outputs(&drivers, 2e-9, |_| false);
