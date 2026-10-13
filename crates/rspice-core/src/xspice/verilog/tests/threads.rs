@@ -561,6 +561,52 @@ endmodule
     );
 }
 
+/// A thread disabled after the same edge woke it, but before it ran, stays
+/// disabled: the wake it had is withdrawn, not run on its old state (and not
+/// rerun from the top once the thread has ended). On the reverse schedule the
+/// checker runs first at 5, as Icarus 13 runs it, and prints Icarus's text.
+#[test]
+fn a_thread_disabled_after_its_wake_does_not_run_on() {
+    let source = r#"module bug;
+reg clock = 0;
+always begin
+  #1 clock = 1;
+  #1 clock = 0;
+end
+integer count = 0;
+initial begin:counter
+  forever begin
+    @(posedge clock);
+    count = count + 1;
+    $display("count %0d at %0t", count, $time);
+  end
+end
+initial begin
+  repeat (3) @(posedge clock);
+  $display("disable at %0t", $time);
+  disable counter;
+  repeat (2) @(posedge clock);
+  $display("end count=%0d", count);
+  $finish;
+end
+endmodule
+"#;
+    let report = testbench(
+        &[("bug.v", source)],
+        &HdlTestbenchOptions {
+            schedule: HdlSchedule::ReverseActive,
+            ..HdlTestbenchOptions::default()
+        },
+    );
+    assert_eq!(
+        stdout(&report),
+        "count 1 at 1\n\
+         count 2 at 3\n\
+         disable at 5\n\
+         end count=2\n"
+    );
+}
+
 /// A task name that reaches another root module is refused by what it is,
 /// never by the symbol the parser stood in for it.
 #[test]

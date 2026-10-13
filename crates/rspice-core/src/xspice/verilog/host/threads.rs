@@ -81,6 +81,11 @@ impl DigitalHost {
     }
 
     /// Withdraw whatever a thread waits on, leaving it queued in name only.
+    ///
+    /// A queued thread whose activation the kernel no longer holds has had
+    /// it drained into the batch being run, behind the disabler: that
+    /// activation would run the thread's old state, or restart an ended
+    /// thread, so the batch is told to skip it.
     fn cancel_wait(&mut self, index: usize) {
         match &self.slots[index].status {
             ProcessStatus::AwaitingEvent(_) => self.unsubscribe(index),
@@ -95,9 +100,14 @@ impl DigitalHost {
             ProcessStatus::Inactive => self.inactive.retain(|waiter| *waiter != index),
             ProcessStatus::Queued => {
                 let target = self.targets[index];
-                self.scheduler.cancel_target(target);
+                let mut withdrawn = self.scheduler.cancel_target(target);
                 if let Some(ready) = self.analog_ready.as_mut() {
+                    let before = ready.len();
                     ready.retain(|ready| *ready != target);
+                    withdrawn += before - ready.len();
+                }
+                if withdrawn == 0 {
+                    self.withdrawn.insert(index);
                 }
             }
             ProcessStatus::AwaitingJoin | ProcessStatus::Finished => {}

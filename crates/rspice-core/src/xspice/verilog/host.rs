@@ -517,6 +517,10 @@ pub(crate) struct DigitalHost {
     /// What the thread just run disabled, for [`Self::run_process`] to carry
     /// out before running it on.
     disabling: Option<DigitalDisableTarget>,
+    /// Threads a `disable` unwound or ended after their activation was
+    /// drained into the batch being run: that activation is stale, and the
+    /// batch skips it. Empty outside a batch, so never in a checkpoint.
+    withdrawn: BTreeSet<usize>,
     /// Net to waiting-process index, ascending within each net.
     waiters: Vec<Vec<usize>>,
     /// Processes deferred to the inactive region, in the order they deferred.
@@ -715,6 +719,7 @@ impl DigitalHost {
             slots: (0..plan.processes.len()).map(ProcessSlot::start).collect(),
             free_threads: BTreeSet::new(),
             disabling: None,
+            withdrawn: BTreeSet::new(),
             waiters: vec![Vec::new(); plan.signals.len()],
             inactive: Vec::new(),
             analog_ready: None,
@@ -1239,9 +1244,13 @@ impl DigitalHost {
                         continue;
                     }
                     let index = self.process_of_target[usize::from(*target)];
+                    if self.withdrawn.remove(&index) {
+                        continue;
+                    }
                     self.run_process(index, tick)?;
                     self.dispatch(tick)?;
                 }
+                self.withdrawn.clear();
             }
 
             // External Active work and its HDL consequences must quiet before
