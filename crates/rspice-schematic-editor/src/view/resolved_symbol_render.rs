@@ -51,7 +51,15 @@ pub fn draw_resolved_symbol_with_visibility(
     parameter_labels: SchematicParameterLabelVisibility,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
-    draw_symbol_pins(painter, origin, scale, component, symbol, stroke.color);
+    draw_symbol_pins(
+        painter,
+        origin,
+        scale,
+        component,
+        symbol,
+        stroke.color,
+        true,
+    );
     draw_symbol_labels(
         painter,
         origin,
@@ -60,6 +68,29 @@ pub fn draw_resolved_symbol_with_visibility(
         symbol,
         stroke.color,
         parameter_labels,
+    );
+}
+
+/// The symbol's artwork without its type: body and pin leads, and no pin,
+/// instance or value names. For a thumbnail too small to letter, where names
+/// would be noise rather than type.
+pub fn draw_resolved_symbol_artwork(
+    painter: &Painter,
+    origin: Pos2,
+    scale: f32,
+    component: &Component,
+    symbol: &ResolvedCellSymbol,
+    stroke: Stroke,
+) {
+    draw_symbol_body(painter, origin, scale, component, symbol, stroke);
+    draw_symbol_pins(
+        painter,
+        origin,
+        scale,
+        component,
+        symbol,
+        stroke.color,
+        false,
     );
 }
 
@@ -83,6 +114,14 @@ pub fn resolved_symbol_world_bounds(
         let world = component.pos + component.transform_point(point);
         bounds.include(world);
     });
+    bounds.finish()
+}
+
+/// The symbol's own extent in its upright frame, pins and body only: what a
+/// thumbnail fits, where the instance's name and value are not drawn.
+pub fn resolved_symbol_artwork_bounds(symbol: &ResolvedCellSymbol) -> Option<(Point, Point)> {
+    let mut bounds = BoundsAccumulator::default();
+    fold_symbol_artwork_points(symbol, |point| bounds.include(point));
     bounds.finish()
 }
 
@@ -194,6 +233,7 @@ fn draw_symbol_pins(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     color: Color32,
+    named: bool,
 ) {
     let stroke = Stroke::new(1.1 * scale, color);
     let font_size = GENERATED_PIN_LABEL_SIZE * scale;
@@ -205,7 +245,7 @@ fn draw_symbol_pins(
         painter.circle_filled(terminal, 1.6 * scale, color);
         draw_direction_mark(painter, terminal, inner, pin.direction, scale, color);
 
-        if font_size >= LEGIBLE_TYPE_PX {
+        if named && font_size >= LEGIBLE_TYPE_PX {
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
             painter.text(
                 anchor,
@@ -687,7 +727,12 @@ fn fold_symbol_extent_points(symbol: &ResolvedCellSymbol, mut include: impl FnMu
     include(Point::origin());
     include(symbol.effective_point(symbol.document().name_anchor));
     include(symbol.effective_point(symbol.document().value_anchor));
+    fold_symbol_artwork_points(symbol, include);
+}
 
+/// The extent of what [`draw_resolved_symbol_artwork`] paints: pins and
+/// body, and none of the instance's labels.
+fn fold_symbol_artwork_points(symbol: &ResolvedCellSymbol, mut include: impl FnMut(Point)) {
     for pin in symbol.connectable_pins() {
         include(symbol.effective_pin_offset(pin));
         include(symbol.pin_lead_inner(pin));

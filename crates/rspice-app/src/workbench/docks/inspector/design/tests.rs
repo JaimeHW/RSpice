@@ -1883,3 +1883,118 @@ fn an_undeclared_parameter_value_is_flagged_and_removable() {
     assert_eq!(removed.params, "gain=3");
     assert!(app.state.schematic.can_undo());
 }
+
+/// [`app_with_compiled_veriloga_instance`] whose view owns its module's
+/// source, compiled, and whose cell has the symbol a compile generates.
+fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
+    let (mut app, component) = app_with_compiled_veriloga_instance(
+        &[module_parameter("gain", Some("10"), Some("V/V"), None)],
+        "gain=5",
+    );
+    let reference = CellViewRef::new("behavioral", "amp", "veriloga");
+    let ports = [
+        crate::state::PortSpec {
+            name: "p".to_owned(),
+            direction: PortDirection::InOut,
+        },
+        crate::state::PortSpec {
+            name: "n".to_owned(),
+            direction: PortDirection::InOut,
+        },
+    ];
+    let mut symbol = View::new("symbol", ViewType::Symbol);
+    rspice_design::symbol::generated::store_generated_symbol(&mut symbol, &ports, |_| None)
+        .expect("the symbol stores");
+    app.state
+        .library_manager
+        .get_library_mut("behavioral")
+        .and_then(|library| library.get_cell_mut("amp"))
+        .expect("the cell")
+        .add_view(symbol);
+    let bundle = crate::state::ProjectSourceBundle::try_new(
+        crate::state::ProjectSourceOwner::cell_view(reference),
+        crate::state::ProjectSourceLanguage::VerilogA,
+        "amp.va",
+        "module amp(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real gain = 10;\n  analog I(p, n) <+ gain * V(p, n);\nendmodule\n",
+        [],
+        [],
+    )
+    .expect("a cell-view bundle");
+    let id = bundle.id();
+    let sources = &mut app.state.workspace.content.project_sources;
+    sources
+        .insert_bundle(bundle)
+        .expect("one bundle per cell view");
+    sources
+        .mark_bundle_validated(id)
+        .expect("the module compiled");
+    (app, component)
+}
+
+/// The hero pictures a cell instance with the symbol the canvas draws for it.
+/// It used to look its kind up among the canonical device artwork, where a
+/// cell instance has none, and painted "missing canonical SVG" for every one.
+#[test]
+fn a_cell_instances_hero_is_its_resolved_symbol() {
+    let (app, component) = app_with_owned_veriloga_instance();
+    let ctx = egui::Context::default();
+    assert!(matches!(
+        component_hero_preview(&ctx, &app.state, &component),
+        HeroPreview::Cell(_)
+    ));
+    let resistor = Component::new(9, ComponentType::Resistor, Point::origin());
+    assert!(matches!(
+        component_hero_preview(&ctx, &app.state, &resistor),
+        HeroPreview::Symbol(ComponentType::Resistor)
+    ));
+}
+
+/// A picture that cannot be drawn says why inside its own square, never over
+/// the subtitle beside it.
+#[test]
+fn a_hero_picture_that_cannot_draw_keeps_its_reason_in_its_square() {
+    fn reason_clip(shape: &egui::epaint::ClippedShape) -> Option<egui::Rect> {
+        fn holds_reason(shape: &egui::epaint::Shape) -> bool {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    text.galley.job.text.contains("missing canonical SVG")
+                }
+                egui::epaint::Shape::Vec(shapes) => shapes.iter().any(holds_reason),
+                _ => false,
+            }
+        }
+        holds_reason(&shape.shape).then_some(shape.clip_rect)
+    }
+
+    let mut app = RSpiceApp::test_instance();
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.set_width(312.0);
+                hero(
+                    ui,
+                    &mut app,
+                    Hero {
+                        preview: HeroPreview::Symbol(ComponentType::CellInstance),
+                        eyebrow: "X1 · /".to_owned(),
+                        title: "amp".to_owned(),
+                        subtitle: "Cell Instance".to_owned(),
+                        statuses: Vec::new(),
+                        open_properties: None,
+                    },
+                );
+            });
+    });
+    let clip = output
+        .shapes
+        .iter()
+        .find_map(reason_clip)
+        .expect("the reason is painted");
+    assert!(
+        clip.max.x <= HERO_PREVIEW_W && clip.max.y <= HERO_H,
+        "the reason is clipped to the {HERO_PREVIEW_W} px square, not {clip:?}"
+    );
+}

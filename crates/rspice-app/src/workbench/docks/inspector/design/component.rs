@@ -49,7 +49,7 @@ pub(super) fn component_panel(
         ui,
         app,
         Hero {
-            preview: HeroPreview::Symbol(component.kind),
+            preview: component_hero_preview(ui.ctx(), &app.state, &component),
             eyebrow: format!(
                 "{} · {}",
                 component.name,

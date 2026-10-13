@@ -48,6 +48,10 @@ use rspice_design::connectivity::extract_with_hierarchy as extract;
 use rspice_design::connectivity::summary::{DesignNet, NetClass};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
+use rspice_design::resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolSource};
+use rspice_schematic_editor::view::resolved_symbol_render::{
+    draw_resolved_symbol_artwork, resolved_symbol_artwork_bounds,
+};
 
 use super::{
     ComponentModelEvidence, component_model_evidence, muted_inspector_copy,
@@ -490,7 +494,83 @@ fn unresolved_projection_note(ui: &mut Ui, reason: &str) {
 
 enum HeroPreview {
     Symbol(ComponentType),
+    /// A cell instance, drawn with the symbol the canvas resolves for it.
+    Cell(std::sync::Arc<ResolvedCellSymbol>),
     Icon(WorkbenchIcon),
+}
+
+/// The hero's picture of `component`: a cell instance's resolved symbol, the
+/// one the canvas draws, else its kind's canonical artwork. Resolving reads
+/// the symbol view, so a resolution is held for as long as the canvas would
+/// hold its own: one symbol-context revision.
+fn component_hero_preview(
+    ctx: &egui::Context,
+    state: &AppState,
+    component: &Component,
+) -> HeroPreview {
+    let Some(binding) = component
+        .library_cell
+        .as_ref()
+        .filter(|_| component.kind == ComponentType::CellInstance)
+    else {
+        return HeroPreview::Symbol(component.kind);
+    };
+    let revision = crate::workbench::app::symbol_context_revision(state);
+    let id = egui::Id::new((
+        "design-inspector.hero-symbol",
+        &binding.library,
+        &binding.cell,
+        &binding.view,
+        &binding.terminal_order,
+    ));
+    type Held = (u64, Option<std::sync::Arc<ResolvedCellSymbol>>);
+    let held = ctx
+        .data(|data| data.get_temp::<Held>(id))
+        .filter(|(at, _)| *at == revision);
+    let symbol = held.map_or_else(
+        || {
+            let symbol = rspice_design::symbol_resolver::SymbolResolver::new(
+                state.library_manager.catalog(),
+                &state.workspace.content.schematic_buffers,
+            )
+            .resolve_binding(binding)
+            .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)
+            .map(std::sync::Arc::new);
+            ctx.data_mut(|data| data.insert_temp::<Held>(id, (revision, symbol.clone())));
+            symbol
+        },
+        |(_, symbol)| symbol,
+    );
+    symbol.map_or(HeroPreview::Symbol(component.kind), HeroPreview::Cell)
+}
+
+/// `symbol` upright and fitted to `rect`, as artwork without type: at a
+/// thumbnail's scale pin names are noise.
+fn paint_cell_preview(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    symbol: &ResolvedCellSymbol,
+    color: Color32,
+) {
+    let upright = Component::new(
+        0,
+        ComponentType::CellInstance,
+        crate::state::Point::origin(),
+    );
+    let Some((min, max)) = resolved_symbol_artwork_bounds(symbol) else {
+        return;
+    };
+    let extent = egui::vec2((max.x - min.x).max(1) as f32, (max.y - min.y).max(1) as f32);
+    let scale = (rect.width() / extent.x).min(rect.height() / extent.y);
+    let center = egui::vec2((min.x + max.x) as f32, (min.y + max.y) as f32) * 0.5;
+    draw_resolved_symbol_artwork(
+        painter,
+        rect.center() - center * scale,
+        scale,
+        &upright,
+        symbol,
+        egui::Stroke::new(1.4, color),
+    );
 }
 
 struct Hero {
@@ -532,16 +612,22 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
         egui::Stroke::new(1.0, t.color.border),
     );
 
+    // The picture keeps to its own square: a symbol that cannot be drawn
+    // states why in there, never over the lines beside it.
+    let stage = ui.painter().with_clip_rect(preview.shrink(1.0));
     match spec.preview {
         HeroPreview::Symbol(kind) => rspice_schematic_editor::symbols::draw_symbol_preview(
-            ui.painter(),
+            &stage,
             preview.shrink(12.0),
             kind,
             t.color.symbol,
             app.symbol_library.as_ref(),
         ),
+        HeroPreview::Cell(symbol) => {
+            paint_cell_preview(&stage, preview.shrink(12.0), &symbol, t.color.symbol);
+        }
         HeroPreview::Icon(icon) => {
-            icon.paint(ui.painter(), preview.shrink(28.0), t.color.text_faint);
+            icon.paint(&stage, preview.shrink(28.0), t.color.text_faint);
         }
     }
 
