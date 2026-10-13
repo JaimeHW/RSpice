@@ -6325,23 +6325,16 @@ endmodule
 }
 
 #[test]
-fn numeric_conversion_reports_unknown_bits_and_nonfinite_integer_inputs() {
+fn numeric_conversion_zeroes_unknown_bits_and_reports_nonfinite_integer_inputs() {
+    // IEEE 1364-2005 section 4.8.2: converting to real treats x and z bits as
+    // 0, here the sign bit of a signed value and a low bit (Icarus agrees).
     for digit in ["x", "z"] {
         let mut harness = Harness::from_source(
-            "module unknown; reg [95:0] data; real r; initial r=data+1.0; endmodule",
+            "module unknown; reg signed [95:0] data; real r; initial r=data+1.0; endmodule",
         );
-        harness.set("data", &format!("{digit}{}", "0".repeat(95)));
-        let error = start(
-            &harness.plan,
-            &harness.plan.processes[0],
-            &mut harness.store,
-        )
-        .unwrap_err();
-        assert!(
-            matches!(error, DigitalEvalError::InvalidNumericConversion { .. }),
-            "{error}"
-        );
-        assert!(error.to_string().contains("X/Z"));
+        harness.set("data", &format!("{digit}{}{digit}1", "0".repeat(93)));
+        expect_finished(harness.start(0));
+        assert_eq!(harness.get_real("r"), 2.0, "{digit}");
     }
     let mut harness = Harness::from_source(
         "module invalid; reg [7:0] q; real r; initial begin r=1.0/0.0; q=r; end endmodule",
@@ -6472,8 +6465,11 @@ fn real_conditionals_apply_ambiguous_rule_and_report_selected_errors() {
         ("c ? 2.5 : poison", "z"),
     ] {
         let mut h = Harness::from_source(&format!(
-            "module selected; reg c; reg [95:0] poison; real r; initial r={expression}; endmodule"
+            "module selected; reg c; reg [1199:0] poison; real r; initial r={expression}; endmodule"
         ));
+        // Past the finite real range: converting it fails (section 4.8.2
+        // makes x and z bits 0, so an unknown poison would convert).
+        h.set("poison", &"1".repeat(1200));
         h.set("c", condition);
         assert!(
             matches!(
@@ -6631,7 +6627,7 @@ fn four_state_conditionals_skip_inactive_real_reads_and_capture_before_wait() {
     let mut h = Harness::from_source(
         r#"
       module lazy_bits(p); inout p; electrical p;
-        reg select; reg [95:0] poison;
+        reg select; reg [1199:0] poison;
         reg [63:0] q,converted,held,after;
         initial begin
           q=select ? 64'h55 : $realtobits(V(p));
@@ -8117,10 +8113,12 @@ fn comparisons_contextualize_arithmetic_before_evaluation() {
 fn logical_short_circuit_skips_invalid_real_operands() {
     for (operator, controlling, expected) in [("&&", "0", "0"), ("||", "1", "1")] {
         let source = format!(
-            "module lazy_logical; reg gate,q; reg [95:0] poison;\n\
+            "module lazy_logical; reg gate,q; reg [1199:0] poison;\n\
              initial q=gate {operator} (poison+0.0); endmodule"
         );
         let mut h = Harness::from_source(&source);
+        // Past the finite real range, so converting it fails.
+        h.set("poison", &"1".repeat(1200));
         h.set("gate", controlling);
         expect_finished(h.start(0));
         assert_eq!(
@@ -8227,9 +8225,10 @@ endmodule
 fn logical_short_circuit_lowers_long_chains_iteratively() {
     let chain = vec!["gate"; 600].join("&&");
     let source = format!(
-        "module logical_chain; reg gate,q; reg [95:0] poison; initial q=({chain}) && (poison+0.0); endmodule"
+        "module logical_chain; reg gate,q; reg [1199:0] poison; initial q=({chain}) && (poison+0.0); endmodule"
     );
     let mut h = Harness::from_source(&source);
+    h.set("poison", &"1".repeat(1200));
     h.set("gate", "0");
     expect_finished(h.start(0));
     assert_eq!(h.get("q"), "0");
@@ -8541,11 +8540,13 @@ fn iterative_concat_rejects_invalid_counts_and_unbounded_widths() {
 #[test]
 fn iterative_concat_zero_count_preserves_operand_errors() {
     let mut h = Harness::from_source(
-        "module zero_errors; reg q; reg [95:0] poison;\n\
+        "module zero_errors; reg q; reg [1199:0] poison;\n\
          initial q={{0{$realtobits(poison+0.0)}},1'b1}; endmodule",
     );
     h.plan = serde_json::from_slice(&serde_json::to_vec(&h.plan).unwrap()).unwrap();
     h.plan.validate().unwrap();
+    // Past the finite real range, so converting it fails.
+    h.set("poison", &"1".repeat(1200));
     assert!(matches!(
         start(&h.plan, &h.plan.processes[0], &mut h.store),
         Err(DigitalEvalError::InvalidNumericConversion { .. })

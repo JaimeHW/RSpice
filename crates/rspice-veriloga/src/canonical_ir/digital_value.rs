@@ -652,6 +652,25 @@ impl FourStateValue {
         Some(magnitude)
     }
 
+    /// IEEE 1364-2005 section 4.8.2: the digital domain's conversion to real,
+    /// at the operand's own width and sign, treats each `x` or `z` bit as 0.
+    ///
+    /// [`Self::to_real`] keeps Verilog-AMS 2023 section 4.2.1.2's error for the
+    /// analog domain's reading of a discrete value.
+    pub fn to_real_unknown_as_zero(&self, signed: bool) -> Result<f64, &'static str> {
+        if !self.has_unknown() {
+            return self.to_real(signed);
+        }
+        let aval: Vec<u32> = self
+            .aval()
+            .iter()
+            .zip(self.bval())
+            .map(|(aval, bval)| aval & !bval)
+            .collect();
+        let bval = vec![0; aval.len()];
+        Self::from_planes(self.width, &aval, &bval).to_real(signed)
+    }
+
     /// VAMS-2023 4.2.1.2/3: numeric conversion at the operand's own width/sign.
     /// X/Z is an error; it is never reinterpreted as a floating-point bit pattern.
     pub fn to_real(&self, signed: bool) -> Result<f64, &'static str> {

@@ -3427,7 +3427,8 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             }
             CfgValueKind::DigitalIntegerToReal { input, signed } => {
                 let value = match self.scalar(*input)? {
-                    ScalarRef::FourState(value) => value.to_real(*signed),
+                    // A digital-domain conversion: x and z bits read as 0.
+                    ScalarRef::FourState(value) => value.to_real_unknown_as_zero(*signed),
                     ScalarRef::Integer(value) => Ok(value as f64),
                     ScalarRef::Real(_) => return Err(DigitalEvalError::MixedValueDomains(*input)),
                     ScalarRef::Effect => return Err(DigitalEvalError::EffectValueRead(*input)),
