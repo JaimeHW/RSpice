@@ -684,24 +684,6 @@ pub struct DigitalCallerFrame {
     pub(crate) slots: Vec<DigitalScalar>,
 }
 
-impl DigitalCallerFrame {
-    pub fn routine(&self) -> Option<DigitalRoutineId> {
-        self.routine
-    }
-
-    pub fn ret(&self) -> BlockId {
-        self.ret
-    }
-
-    pub fn arguments(&self) -> &[DigitalScalar] {
-        &self.arguments
-    }
-
-    pub fn slots(&self) -> &[DigitalScalar] {
-        &self.slots
-    }
-}
-
 impl DigitalResumeState {
     /// The routine the suspended frame runs, if it is not the process's own.
     pub fn routine(&self) -> Option<DigitalRoutineId> {

@@ -657,7 +657,7 @@ impl FourStateValue {
     ///
     /// [`Self::to_real`] keeps Verilog-AMS 2023 section 4.2.1.2's error for the
     /// analog domain's reading of a discrete value.
-    pub fn to_real_unknown_as_zero(&self, signed: bool) -> Result<f64, &'static str> {
+    pub(crate) fn to_real_unknown_as_zero(&self, signed: bool) -> Result<f64, &'static str> {
         if !self.has_unknown() {
             return self.to_real(signed);
         }

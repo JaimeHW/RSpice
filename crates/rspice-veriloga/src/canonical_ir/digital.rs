@@ -1685,7 +1685,7 @@ pub struct DigitalRoutineParam {
 
 impl DigitalRoutineParam {
     /// Copied in at the call (section 10.2.2).
-    pub const fn is_input(&self) -> bool {
+    pub(crate) const fn is_input(&self) -> bool {
         matches!(
             self.direction,
             crate::ast::PortDirection::Input | crate::ast::PortDirection::Inout
@@ -1693,7 +1693,7 @@ impl DigitalRoutineParam {
     }
 
     /// Copied back when the task completes (section 10.2.2).
-    pub const fn is_output(&self) -> bool {
+    pub(crate) const fn is_output(&self) -> bool {
         matches!(
             self.direction,
             crate::ast::PortDirection::Output | crate::ast::PortDirection::Inout
