@@ -353,6 +353,16 @@ impl CanonicalIrArtifact {
                 )));
             }
         }
+        for driver in &self.hir.analog_drivers {
+            if signals.get(&driver.signal).is_none_or(|signal| {
+                signal.kind.is_real() || !signal.integer || !signal.procedurally_assignable
+            }) {
+                diagnostics.push(artifact_error(format!(
+                    "analog driver of '{}' needs a discrete integer variable",
+                    driver.signal
+                )));
+            }
+        }
         let mut observed = std::collections::BTreeSet::new();
         for probe in &self.digital.analog_probes {
             if let super::digital::DigitalAnalogProbeTarget::Variable { name } = &probe.target {

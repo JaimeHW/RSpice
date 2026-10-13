@@ -326,6 +326,10 @@ pub fn link_digital_plans(
         let mut signal = slots[first].clone();
         signal.name = net.name.clone().into();
         signal.procedurally_assignable = false;
+        // The resolved net of an `integer` variable port is a net, not an
+        // integer variable: its connection process copies the variable's
+        // signed [31:0] value onto it.
+        signal.integer = false;
         // A variable port retains its initializer on its own storage. Its
         // connection process drives this resolved net after initialization.
         signal.initial_value = None;

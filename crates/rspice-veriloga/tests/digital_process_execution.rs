@@ -7548,8 +7548,16 @@ fn integer_output_ports_reject_invalid_declarations_and_keep_ownership_diagnosti
             .to_string();
         assert!(!error.contains("Internal error"), "{source}: {error}");
     }
+    // Written by the analog body alone, the port is driven by it.
+    let owned = VerilogACompiler::default()
+        .compile_canonical_ir("module owned(output integer q); analog q=1; endmodule")
+        .unwrap();
+    let [driver] = owned.hir.analog_drivers.as_slice() else {
+        panic!("one analog driver: {:?}", owned.hir.analog_drivers);
+    };
+    assert_eq!(driver.signal, "q");
+    assert_eq!(owned.hir.variables[usize::from(driver.variable)].name, "q");
     for (body, expected) in [
-        ("analog q=1;", "analog-owned integer output port"),
         (
             "analog q=1; initial q=2;",
             "written by both the analog body and a discrete process",

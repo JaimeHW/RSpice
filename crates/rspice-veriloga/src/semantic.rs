@@ -494,6 +494,9 @@ pub struct SemanticAnalyzer {
     /// Digital edges the module's analog event controls wait on, as (flag
     /// name, signal, edge). Storage is allocated after the body's locals.
     digital_edges: Vec<(SmolStr, SmolStr, DigitalEdge)>,
+    /// Integer output ports the module's analog body writes and no discrete
+    /// process does: the analog variable drives the port's discrete net.
+    analog_owned_ports: HashSet<SmolStr>,
     /// Public parameter-array declarations. Until element lowering is wired
     /// through every backend, these names must never acquire scalar semantics.
     parameter_arrays: HashSet<SmolStr>,
@@ -573,6 +576,7 @@ impl SemanticAnalyzer {
             discrete_validity: HashMap::new(),
             discrete_projection: Default::default(),
             digital_edges: Vec::new(),
+            analog_owned_ports: HashSet::new(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
             task_resets: Vec::new(),
@@ -1116,6 +1120,7 @@ impl SemanticAnalyzer {
             discrete_bindings: HashMap::new(),
             discrete_selections: Vec::new(),
             discrete_edges: Vec::new(),
+            analog_drivers: Vec::new(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
         // can recurse into their own sinks without aliasing the module
@@ -1132,6 +1137,7 @@ impl SemanticAnalyzer {
         self.discrete_validity.clear();
         self.discrete_projection = Default::default();
         self.digital_edges.clear();
+        self.analog_owned_ports.clear();
         self.task_vars.clear();
         self.task_resets.clear();
 

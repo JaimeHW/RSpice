@@ -136,6 +136,7 @@
 //! circuit's first node on the other; a bridge referred to ground then stamped
 //! its Thevenin conductance onto whichever node happened to occupy row zero.
 
+mod analog_drivers;
 mod analog_events;
 mod analog_samples;
 pub(crate) mod checkpoint;
@@ -1343,6 +1344,9 @@ pub struct MixedSignalHost {
     /// nothing.
     analog_probes: Vec<AnalogProbeWiring>,
     discrete_inputs: Vec<DiscreteAnalogInput>,
+    /// Analog-owned integer output ports; see `analog_drivers.rs`. Empty for
+    /// every module whose analog body writes no port.
+    analog_drivers: Vec<analog_drivers::AnalogDriver>,
     /// Every vector boundary port, as a bus over the deck nodes its bits
     /// landed on. Empty for a module whose discrete ports are all scalar,
     /// which is every module this route carried before vectors were bridged.
@@ -1705,6 +1709,7 @@ impl MixedSignalHost {
             .map(|probe| probe.sample(&[]))
             .collect::<Vec<_>>();
         digital.sample_analog_probes(&initial_probe_values);
+        let analog_drivers = analog_drivers::wire(canonical_ir)?;
         let source_digest = canonical_ir.metadata.source_digest.to_string();
         let mut host = Self {
             prepared_analog: PreparedAnalogStamp::default(),
@@ -1734,6 +1739,7 @@ impl MixedSignalHost {
             trial: None,
             analog_probes,
             discrete_inputs,
+            analog_drivers,
             boundary_buses: Vec::new(),
             event_ports: Vec::new(),
             event_nodes: Vec::new(),

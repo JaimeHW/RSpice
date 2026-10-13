@@ -1468,6 +1468,17 @@ impl MixedDigitalCoordinator {
                             .collect::<Vec<_>>()
                     }),
             );
+            // Analog-owned integer ports publish in the same lane, as one
+            // co-timed group per instance; see `analog_drivers.rs`.
+            let driven = host.analog_driver_targets(solution)?;
+            if !driven.is_empty() {
+                targets.push(
+                    driven
+                        .into_iter()
+                        .map(|(signal, value)| (map.signals[usize::from(signal)], value))
+                        .collect(),
+                );
+            }
         }
         if !targets.is_empty() {
             let tick = hdl_tick(cursor.time, |at| at.nearest_tick(self.resolution))?;

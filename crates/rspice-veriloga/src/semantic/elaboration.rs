@@ -1030,6 +1030,12 @@ impl<'a> HierarchyElaborator<'a> {
             edge.signal = self.digital_signal_name(relative, &edge.signal)?;
             self.flattened.discrete_edges.push(edge);
         }
+        for (variable, signal) in &child.analog_drivers {
+            let signal = self.digital_signal_name(relative, signal)?;
+            self.flattened
+                .analog_drivers
+                .push((variable_base + variable, signal));
+        }
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
         for &slot in &child.switch_branch_variables {

@@ -901,6 +901,16 @@ pub struct HirDiscreteEdge {
     pub edge: super::digital::DigitalEdge,
 }
 
+/// An analog-owned integer output port: the analog `integer` variable that is
+/// the one driver of a discrete signal (Verilog-AMS LRM 2.4 section 7.3 lets
+/// only its own domain write it). The mixed host publishes the variable's
+/// candidate value into the signal in the coupled trial that produced it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HirAnalogDriver {
+    pub variable: VariableId,
+    pub signal: SmolStr,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirModel {
     pub module_id: ModuleId,
@@ -933,6 +943,9 @@ pub struct HirModel {
     /// discrete input bound to the edge's signal.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discrete_edges: Vec<HirDiscreteEdge>,
+    /// Analog `integer` variables that drive discrete output ports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub analog_drivers: Vec<HirAnalogDriver>,
     /// Sorted names whose values must be published during ordinary analog
     /// evaluation for discrete-domain readers. They are not electrical unknowns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1236,6 +1249,14 @@ impl HirModel {
                     edge: edge.edge,
                 })
                 .collect(),
+            analog_drivers: module
+                .analog_drivers
+                .iter()
+                .map(|(variable, signal)| HirAnalogDriver {
+                    variable: VariableId::from(*variable),
+                    signal: signal.clone(),
+                })
+                .collect(),
             discrete_bindings: module
                 .discrete_inputs
                 .iter()
@@ -1427,6 +1448,23 @@ impl HirModel {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
                 "digital edge events must name unique, unselected integer input slots bound to their signals",
+            ));
+        }
+        let mut driving = HashSet::new();
+        let mut driven = HashSet::new();
+        if self.analog_drivers.iter().any(|driver| {
+            !driving.insert(driver.variable)
+                || !driven.insert(&driver.signal)
+                || driver.signal.is_empty()
+                || input_slots.contains(&driver.variable)
+                || self
+                    .variables
+                    .get(usize::from(driver.variable))
+                    .is_none_or(|variable| variable.value_type != CanonicalValueType::Integer)
+        }) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "analog drivers must be distinct integer variables, not discrete inputs, each driving one signal",
             ));
         }
         validate_dense_array_ids(&mut diagnostics, &self.arrays);

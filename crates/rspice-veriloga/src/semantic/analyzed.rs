@@ -161,6 +161,10 @@ pub struct AnalyzedModule {
     /// discrete signal). Each value slot is also a discrete input, bound to the
     /// edge's signal through [`Self::discrete_bindings`].
     pub discrete_edges: Vec<AnalyzedDiscreteEdge>,
+    /// Analog-owned integer output ports: (analog variable slot, discrete
+    /// signal). The variable is the port's one driver; the mixed host
+    /// publishes its value into the signal in the coupled trial that set it.
+    pub analog_drivers: Vec<(usize, SmolStr)>,
 }
 
 /// One digital edge an analog event control waits on.

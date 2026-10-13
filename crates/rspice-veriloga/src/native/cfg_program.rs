@@ -2051,6 +2051,7 @@ mod tests {
             discrete_bindings: Default::default(),
             discrete_selections: Vec::new(),
             discrete_edges: Vec::new(),
+            analog_drivers: Vec::new(),
             switch_branch_variables: Vec::new(),
             module_id: crate::canonical_ir::ModuleId::from(0usize),
             module_name: "cfg-program-test".into(),

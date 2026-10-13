@@ -5005,3 +5005,75 @@ endmodule
         }
     }
 }
+
+/// **An integer output port the analog body writes is driven by it.**
+///
+/// The analog half counts upward threshold crossings into `code`; the port's
+/// discrete net carries each count from the coupled trial that assigned it,
+/// and a process reading the port sees it there. The deck names one node per
+/// bit of the 32-bit port.
+#[test]
+fn an_analog_owned_integer_output_port_drives_its_discrete_net() {
+    let model = ModelFile::new(
+        "crossing_counter",
+        r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module crossing_counter(in, code, odd);
+    input in;
+    electrical in;
+    output code;
+    integer code;
+    output odd;
+    reg odd;
+    analog begin
+        @(cross(V(in) - 0.5, +1)) code = code + 1;
+    end
+    always @(code) odd = code[0];
+endmodule
+"#,
+    );
+    let bits: Vec<String> = (0..32).rev().map(|bit| format!("c{bit}")).collect();
+    let deck = format!(
+        "* an analog-owned integer output port\n\
+         .param vcc=1\n\
+         vin in 0 pwl(0 0 10n 1 20n 0 30n 1)\n\
+         x1 in {} odd crossing_counter\n\
+         rodd odd 0 1k\n\
+         .va \"{}\" crossing_counter\n\
+         .end\n",
+        bits.join(" "),
+        model.deck_path()
+    );
+    let result = run(&deck, 40.0e-9, 1.0e-9);
+    // Upward crossings of 0.5 V at 5 ns and 25 ns: the count goes 0, 1, 2.
+    let low = change_times(&result, "c0");
+    let high = change_times(&result, "c1");
+    assert_eq!(
+        low.len(),
+        2,
+        "bit 0 rises at the first crossing and falls at the second: {low:?}"
+    );
+    assert_eq!(
+        high.len(),
+        1,
+        "bit 1 rises at the second crossing: {high:?}"
+    );
+    for (time, expected) in [(low[0], 5.0e-9), (low[1], 25.0e-9), (high[0], 25.0e-9)] {
+        assert!(
+            (time - expected).abs() < 2.0e-12,
+            "a count lands at {time:e} s, its crossing is at {expected:e} s"
+        );
+    }
+    assert!(
+        (low[1] - high[0]).abs() < 1e-18,
+        "the whole count is one co-timed publication"
+    );
+    let initial = result.digital_trace_named("c0").unwrap()[0].value.state;
+    assert_eq!(initial, rspice_core::xspice::DigitalState::Zero);
+    assert_eq!(
+        change_times(&result, "odd"),
+        low,
+        "a process reading the port follows it"
+    );
+}

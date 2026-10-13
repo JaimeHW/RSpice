@@ -247,7 +247,13 @@ impl MixedSignalHost {
         if self.state.digital.is_view() {
             return Ok(false);
         }
-        let targets = self.analog_event_targets(solution)?;
+        let mut targets = self.analog_event_targets(solution)?;
+        // Analog-owned integer ports publish in the same lane; see
+        // `analog_drivers.rs`.
+        let driven = self.analog_driver_targets(solution)?;
+        if !driven.is_empty() {
+            targets.push(driven);
+        }
         if targets.is_empty() {
             return Ok(false);
         }

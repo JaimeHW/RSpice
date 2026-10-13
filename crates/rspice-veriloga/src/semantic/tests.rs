@@ -2973,6 +2973,43 @@ fn an_analog_part_select_of_32_bits_or_more_is_a_real_with_a_note() {
     assert_eq!(widths, [(31, ValueType::Integer), (40, ValueType::Real)]);
 }
 
+/// An integer output port only the analog body writes is driven by it: the
+/// port stays a discrete signal, and the analog variable of the same name is
+/// recorded as its driver rather than refused.
+#[test]
+fn an_analog_owned_integer_output_port_records_its_driver() {
+    let module = analyze_one(
+        r#"
+        module counter(p, code);
+        inout p; electrical p;
+        output code; integer code;
+        analog begin
+            @(cross(V(p) - 0.5, +1)) code = code + 1;
+        end
+        endmodule
+    "#,
+    );
+    assert!(
+        module
+            .digital
+            .signals
+            .iter()
+            .any(|signal| signal.name == "code" && signal.redeclares_port)
+    );
+    let [(variable, signal)] = module.analog_drivers.as_slice() else {
+        panic!("one analog driver, got {:?}", module.analog_drivers);
+    };
+    assert_eq!(signal, "code");
+    assert_eq!(module.variables[*variable].name, "code");
+    assert!(
+        module
+            .discrete_inputs
+            .iter()
+            .all(|(value, _)| value != variable),
+        "the analog half reads its own variable, not the discrete net"
+    );
+}
+
 #[test]
 fn parameter_defaults_and_array_bounds_can_read_earlier_localparams() {
     let module = analyze_one(&module_src(

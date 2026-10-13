@@ -838,6 +838,28 @@ impl SemanticAnalyzer {
             }
         }
         for signal in &analyzed.digital.signals {
+            // An analog-owned integer port is the analog variable of the same
+            // name, which the analog body reads and writes as its own; the
+            // discrete net only follows it.
+            if self.analog_owned_ports.contains(&signal.name) {
+                match analyzed
+                    .variables
+                    .iter()
+                    .position(|variable| variable.name == signal.name)
+                {
+                    Some(variable) => analyzed
+                        .analog_drivers
+                        .push((variable, signal.name.clone())),
+                    None => self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "analog-owned integer port `{}` has no analog variable",
+                            signal.name
+                        )),
+                        signal.span,
+                    ),
+                }
+                continue;
+            }
             if writes.contains(&signal.name) {
                 self.record_error_at(
                     SemanticErrorKind::InvalidExpression(format!(
@@ -1320,19 +1342,33 @@ impl SemanticAnalyzer {
                             continue;
                         }
                     }
+                    // Written by the analog body alone, the variable is the
+                    // port's one driver (Verilog-AMS LRM 2.4 section 7.3: its
+                    // own domain writes it). The discrete net carries the
+                    // value the analog half assigned, published in the coupled
+                    // trial that assigned it.
                     if analog_writes.contains(&item.name) && !written.contains(&item.name) {
-                        self.record_error_at(SemanticErrorKind::UnsupportedFeature(format!(
-                            "analog-owned integer output port `{}` requires continuous-to-discrete port driving",
-                            item.name
-                        )), item.span);
-                        continue;
+                        if !item.dimensions.is_empty() {
+                            self.record_error_at(
+                                SemanticErrorKind::UnsupportedFeature(format!(
+                                    "analog-owned integer output port `{}` is an array; only \
+                                     a scalar integer port can be driven from the analog body",
+                                    item.name
+                                )),
+                                item.span,
+                            );
+                            continue;
+                        }
+                        self.analog_owned_ports.insert(item.name.clone());
                     }
                 }
                 // Verilog-AMS LRM 2.4 section 7.3: a variable's own domain is
                 // the only one that may write it. Two writers is a program the
                 // standard does not admit, and no scheduling rule would make
                 // it one.
-                if analog_writes.contains(&item.name) {
+                if analog_writes.contains(&item.name)
+                    && !self.analog_owned_ports.contains(&item.name)
+                {
                     self.record_error_at(
                         SemanticErrorKind::InvalidExpression(format!(
                             "`{}` is written by both the analog body and a discrete process; \
