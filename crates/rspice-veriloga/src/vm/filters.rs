@@ -882,7 +882,7 @@ mod tests {
     }
 
     #[test]
-    fn cross_interpolation_is_overflow_safe_and_unrepresentable_roots_fail_closed() {
+    fn cross_interpolation_is_overflow_safe() {
         let mut extreme = CrossDetector::default();
         extreme.eval(-f64::MAX, 0.0, 1).unwrap();
         extreme.commit();
@@ -891,15 +891,50 @@ mod tests {
             extreme.candidate_refinement_time(),
             Some(0.5000000000000001)
         );
+    }
 
+    /// A crossing whose root estimate lands in the last float interval before
+    /// the candidate is bracketed by the float just before it, and a crossing
+    /// in an interval with no float inside is located: it fires at the end.
+    ///
+    /// The first case is the corpus PLL's VCO, `@(cross(ph - 0.5, 0))` with
+    /// `ph` near 0.5. The solver lands on the crossing, the expression reads
+    /// one ulp of 0.5 there, and that is far above a tolerance scaled by the
+    /// expression's own value (3.9e-4 at the accepted point). The root
+    /// estimate is the last float before the candidate, which used to refuse
+    /// the run as unrefinable.
+    #[test]
+    fn a_crossing_in_the_last_float_interval_is_bracketed_and_then_located() {
+        let start = 6.202_420_706_862_774e-9;
+        let end = 6.204_860_122_698_261e-9;
+        let mut detector = CrossDetector::default();
+        detector.eval(-3.931_437_199_186_094e-4, start, 0).unwrap();
+        detector.commit();
+        let ulp_of_half = 0.5 * f64::EPSILON;
+        assert_eq!(detector.eval(ulp_of_half, end, 0), Ok(1.0));
+        let last = f64::from_bits(end.to_bits() - 1);
+        assert_eq!(
+            detector.candidate_refinement_time(),
+            Some(last),
+            "the float just before the candidate brackets the crossing"
+        );
+
+        // The bracket held: the crossing is in the last float interval.
+        let mut located = CrossDetector::default();
+        located.eval(-ulp_of_half, last, 0).unwrap();
+        located.commit();
+        assert_eq!(located.eval(ulp_of_half, end, 0), Ok(1.0));
+        assert_eq!(located.candidate_refinement_time(), None);
+        let crossing = located.candidate.last_crossing_time;
+        assert!((last..=end).contains(&crossing), "{crossing:e}");
+
+        // So is a jump between adjacent floats, whatever its height.
         let mut adjacent = CrossDetector::default();
         adjacent.eval(-1.0, 1.0, 1).unwrap();
         adjacent.commit();
         let next_time = f64::from_bits(1.0_f64.to_bits() + 1);
-        let error = adjacent
-            .eval(1.0, next_time, 1)
-            .expect_err("an interval without an interior float must not accept an inaccurate root");
-        assert!(error.contains("representable interior time"), "{error}");
+        assert_eq!(adjacent.eval(1.0, next_time, 1), Ok(1.0));
+        assert_eq!(adjacent.candidate_refinement_time(), None);
     }
 }
 
@@ -1986,15 +2021,8 @@ impl CrossDetector {
             let time_error = (time - crossing_time).max(0.0);
             let converged = time_error <= effective_time_tol && value.abs() <= effective_expr_tol;
             if !converged {
-                self.candidate_refinement_time = Some(
-                    Self::strictly_interior_time(self.committed.time, crossing_time, time)
-                        .ok_or_else(|| {
-                            format!(
-                                "crossing in ({}, {time}) cannot be refined to a representable interior time",
-                                self.committed.time
-                            )
-                        })?,
-                );
+                self.candidate_refinement_time =
+                    Self::refinement_time(self.committed.time, crossing_time, time);
             }
         }
 
@@ -2050,12 +2078,28 @@ impl CrossDetector {
         }
     }
 
-    fn strictly_interior_time(start: f64, estimate: f64, end: f64) -> Option<f64> {
+    /// Where an unconverged crossing in `(start, end)` is resolved next, or
+    /// `None` when it already is resolved as finely as time can be written.
+    ///
+    /// Normally the first float after the root estimate. An estimate in the
+    /// last float interval before `end` has no such point inside, and it is
+    /// the common case of a crossing solved to the expression's rounding
+    /// floor: `ph - 0.5` with `ph` near 0.5 cannot come nearer zero than one
+    /// ulp of 0.5, far above a tolerance scaled by the expression's own small
+    /// value. The float just before `end` brackets it instead: the crossing is
+    /// either before that point, and resolution continues, or in the last
+    /// float interval. An interval with no float inside it has located the
+    /// crossing to the resolution of time itself, so the crossing is `end`.
+    fn refinement_time(start: f64, estimate: f64, end: f64) -> Option<f64> {
         if !estimate.is_finite() || end <= start {
             return None;
         }
         let target = Self::next_time_after(estimate.max(start));
-        (target > start && target < end).then_some(target)
+        if target > start && target < end {
+            return Some(target);
+        }
+        let last = f64::from_bits(end.to_bits() - 1);
+        (last > start).then_some(last)
     }
 
     fn next_time_after(time: f64) -> f64 {

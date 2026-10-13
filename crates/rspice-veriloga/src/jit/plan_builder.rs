@@ -3104,6 +3104,7 @@ pub(crate) fn live_canonical_assignment_slots(
         AssignmentRootPolicy::PostfixEntries => {
             mark_observable_variable_roots(model, &mut live);
             mark_canonical_entry_variable_roots(model, mir, limits, true, &mut live)?;
+            mark_event_detector_assignment_roots(&model.assignment_steps, &mut live);
         }
         AssignmentRootPolicy::CfgPreludeSlots => {
             mark_cfg_plan_variable_roots(model, mir, limits, &mut live)?;
@@ -4410,7 +4411,60 @@ pub(crate) fn native_assignment_roots(model: &CompiledModel) -> Vec<bool> {
     let mut live = vec![false; model.num_variables];
     mark_observable_variable_roots(model, &mut live);
     mark_bytecode_entry_variable_roots(model, &mut live);
+    mark_event_detector_assignment_roots(&model.assignment_steps, &mut live);
     live
+}
+
+/// Every slot whose assignment runs an event detector: `cross`, `above` or
+/// `timer`.
+///
+/// A detector is evaluated for what it asks of the stepper — a refinement
+/// point at a crossing, a timer's next breakpoint — whether or not anything
+/// reads its value. `@(cross(e));` reads nothing: the flattened stream holds
+/// the detector only in the event's guard snapshot, which has no consumer
+/// when the body is empty. A plan that runs that stream would drop the
+/// snapshot as dead and put no point at the crossing, where the interpreter,
+/// which drops nothing, does. The CFG plan keeps the same detectors through
+/// its own dead-code roots.
+fn mark_event_detector_assignment_roots(steps: &[AssignmentStep], live: &mut [bool]) {
+    fn runs_detector(program: &BytecodeProgram) -> bool {
+        program.instructions.iter().any(|instruction| {
+            matches!(
+                instruction,
+                Instruction::CrossState(_)
+                    | Instruction::AboveState(_)
+                    | Instruction::TimerState(_)
+            )
+        })
+    }
+    for step in steps {
+        match step {
+            AssignmentStep::Initialization { .. } | AssignmentStep::Task(_) => {}
+            AssignmentStep::Assign(assignment) => {
+                if runs_detector(&assignment.program)
+                    && let Some(slot) = live.get_mut(assignment.var_index)
+                {
+                    *slot = true;
+                }
+            }
+            AssignmentStep::AssignIndexed {
+                base,
+                len,
+                index,
+                value,
+                ..
+            } => {
+                if runs_detector(index) || runs_detector(value) {
+                    let end = base.saturating_add(*len).min(live.len());
+                    live.iter_mut()
+                        .take(end)
+                        .skip(*base)
+                        .for_each(|slot| *slot = true);
+                }
+            }
+            AssignmentStep::Loop { body, .. } => mark_event_detector_assignment_roots(body, live),
+        }
+    }
 }
 
 /// Every variable a caller can name through
@@ -5142,6 +5196,71 @@ endmodule
             bytecode.published_current_pairs,
             canonical.published_current_pairs
         );
+    }
+
+    /// `@(cross(e));` and `@(timer(t));` read nothing: in the flattened stream
+    /// each detector lives only in its event's guard snapshot, which nothing
+    /// consumes when the body is empty. The postfix plan runs that stream, so
+    /// unless the snapshot is a root the detector never runs and the stepper
+    /// is asked for no point at the crossing or the timer.
+    #[test]
+    fn an_event_detector_with_an_empty_body_stays_in_the_postfix_assignment_pass() {
+        const BARE_EVENTS: &str = r#"
+`include "disciplines.vams"
+module plan_bare_events(p, n);
+  inout p, n;
+  electrical p, n;
+  analog begin
+    @(cross(V(p, n) - 0.5, 0));
+    @(timer(1.0e-9));
+    I(p, n) <+ V(p, n) / 1.0e3;
+  end
+endmodule
+"#;
+        let (model, plan) = plan(BARE_EVENTS, "plan_bare_events");
+        let detector_slots: Vec<usize> = model
+            .assignment_steps
+            .iter()
+            .filter_map(|step| match step {
+                AssignmentStep::Assign(assignment)
+                    if assignment.program.instructions.iter().any(|instruction| {
+                        matches!(
+                            instruction,
+                            Instruction::CrossState(_) | Instruction::TimerState(_)
+                        )
+                    }) =>
+                {
+                    Some(assignment.var_index)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            detector_slots.len(),
+            2,
+            "each detector is one guard snapshot in the flattened stream"
+        );
+        let emitted: Vec<usize> = plan
+            .assignments
+            .iter()
+            .chain(&plan.post_assignments)
+            .filter_map(|assignment| match assignment {
+                NativeAssignment::Direct { var_index, .. } => Some(*var_index),
+                _ => None,
+            })
+            .collect();
+        let roots = native_assignment_roots(&model);
+        for slot in detector_slots {
+            let name = &model.variable_names[slot];
+            assert!(
+                emitted.contains(&slot),
+                "the postfix pass must run the detector snapshot `{name}`"
+            );
+            assert!(
+                roots[slot],
+                "the bytecode-only plan must root the detector snapshot `{name}`"
+            );
+        }
     }
 
     /// A model whose expressions read no earlier contribution must be eligible

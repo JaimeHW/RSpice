@@ -375,7 +375,20 @@ use super::*;
 // integer output port carries its driver (`HirModel::analog_drivers`); both
 // were refused before, so no record holds one. The stale readings are not
 // recoverable from the record, so it is rebuilt.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 141;
+//
+// Version 142 follows the canonical IR's schema to 161, which changes what a
+// cached CFG means for an event control with nothing in its body. The
+// optimizer now keeps every `cross`, `above` and `timer` detector as a root,
+// because the detector is evaluated for what it asks of the stepper — a point
+// at the crossing, the timer's next breakpoint — whether or not anything reads
+// its value. A version-141 record compiled `@(cross(e));` with the detector
+// pruned alongside the empty branch it guards, so on the compiled route the
+// run put no point at the crossing that the interpreter, and this build, put
+// there. The record deserializes and runs; it is wrong, not unreadable, and no
+// field of it says whether a pruned detector is inside. Rebuilding is the only
+// reading, so this constant moves with the schema and the record is refused at
+// the cache boundary.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 142;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

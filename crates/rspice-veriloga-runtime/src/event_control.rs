@@ -165,7 +165,6 @@ pub enum GeneratedEventControlError {
     InvalidLastCrossingDirection,
     NonIntegerEnable,
     InvalidAcceptedState,
-    UnrepresentableRefinement,
 }
 
 impl std::fmt::Display for GeneratedEventControlError {
@@ -182,9 +181,6 @@ impl std::fmt::Display for GeneratedEventControlError {
             Self::InvalidLastCrossingDirection => "last_crossing direction must be -1, 0, or 1",
             Self::NonIntegerEnable => "event enable must be a finite integer",
             Self::InvalidAcceptedState => "accepted crossing state is malformed",
-            Self::UnrepresentableRefinement => {
-                "crossing cannot be refined to a representable interior time"
-            }
         };
         f.write_str(message)
     }
@@ -266,12 +262,22 @@ fn generated_next_time_after(time: Value) -> Value {
     }
 }
 
-fn generated_strictly_interior_time(start: Value, estimate: Value, end: Value) -> Option<Value> {
+/// Where an unconverged crossing in `(start, end)` is resolved next, or `None`
+/// when it is resolved as finely as time can be written. The portable VM's
+/// rule (`CrossDetector::refinement_time`): the first float after the root
+/// estimate; for an estimate in the last float interval, the float just
+/// before `end`, which brackets it; for an interval with no float inside,
+/// nothing, because the crossing is located at `end`.
+fn generated_refinement_time(start: Value, estimate: Value, end: Value) -> Option<Value> {
     if !estimate.is_finite() || end <= start {
         return None;
     }
     let target = generated_next_time_after(estimate.max(start));
-    (target > start && target < end).then_some(target)
+    if target > start && target < end {
+        return Some(target);
+    }
+    let last = Value::from_bits(end.to_bits() - 1);
+    (last > start).then_some(last)
 }
 
 fn generated_crossing_time(accepted: GeneratedCrossState, value: Value, time: Value) -> Value {
@@ -459,10 +465,7 @@ fn evaluate_generated_cross_impl(
             generated_event_effective_tolerance(expr_tol, accepted.value.abs().max(value.abs()));
         let time_error = (time - crossing_time).max(0.0);
         if time_error > effective_time_tol || value.abs() > effective_expr_tol {
-            Some(
-                generated_strictly_interior_time(accepted.time, crossing_time, time)
-                    .ok_or(GeneratedEventControlError::UnrepresentableRefinement)?,
-            )
+            generated_refinement_time(accepted.time, crossing_time, time)
         } else {
             None
         }
@@ -606,6 +609,60 @@ mod tests {
         let crossing =
             evaluate_generated_last_crossing(initial, Value::MAX, Value::MAX, 0.0).unwrap();
         assert_eq!(crossing.last_crossing_time, Value::MAX / 2.0);
+    }
+
+    /// The portable VM's refinement rule, on the generated route: the first
+    /// float after the root estimate; for an estimate in the last float
+    /// interval, the float just before the candidate, which brackets it; for
+    /// an interval with no float inside, nothing, so the crossing fires at the
+    /// candidate, located to the resolution of time.
+    #[test]
+    fn refinement_brackets_the_last_float_interval_and_then_locates_the_crossing() {
+        let next = |time: Value| Value::from_bits(time.to_bits() + 1);
+        let previous = |time: Value| Value::from_bits(time.to_bits() - 1);
+        assert_eq!(generated_refinement_time(0.0, 0.25, 1.0), Some(next(0.25)));
+        assert_eq!(
+            generated_refinement_time(0.0, previous(1.0), 1.0),
+            Some(previous(1.0)),
+            "an estimate in the last float interval is bracketed by the float before the end"
+        );
+        assert_eq!(generated_refinement_time(previous(1.0), 1.0, 1.0), None);
+        assert_eq!(generated_refinement_time(0.0, Value::NAN, 1.0), None);
+        assert_eq!(generated_refinement_time(1.0, 0.5, 1.0), None);
+
+        // The corpus PLL's VCO, `@(cross(ph - 0.5, 0))` with `ph` near 0.5:
+        // the solver lands on the crossing, where the expression reads one
+        // ulp of 0.5, far above a tolerance scaled by its own small value.
+        let start = 6.202_420_706_862_774e-9;
+        let end = 6.204_860_122_698_261e-9;
+        let ulp_of_half = 0.5 * Value::EPSILON;
+        let cross = |accepted, value, time| {
+            evaluate_generated_cross(accepted, value, time, 0.0, 0.0, 0.0, 1.0, true).unwrap()
+        };
+        let initial = cross(
+            GeneratedCrossState::INITIAL,
+            -3.931_437_199_186_094e-4,
+            start,
+        );
+        let bracketed = cross(initial.candidate, ulp_of_half, end);
+        assert!(bracketed.fired);
+        assert_eq!(bracketed.refinement_time, Some(previous(end)));
+
+        let before = cross(GeneratedCrossState::INITIAL, -ulp_of_half, previous(end));
+        let located = cross(before.candidate, ulp_of_half, end);
+        assert!(located.fired);
+        assert_eq!(located.refinement_time, None);
+        assert!(
+            (previous(end)..=end).contains(&located.candidate.last_crossing_time),
+            "{:e}",
+            located.candidate.last_crossing_time
+        );
+
+        // So is a jump between adjacent floats, whatever its height.
+        let before = cross(GeneratedCrossState::INITIAL, -1.0, 1.0);
+        let jump = cross(before.candidate, 1.0, next(1.0));
+        assert!(jump.fired);
+        assert_eq!(jump.refinement_time, None);
     }
 
     #[test]

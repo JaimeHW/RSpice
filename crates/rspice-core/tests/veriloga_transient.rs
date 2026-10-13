@@ -401,6 +401,54 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+/// A crossing with nothing in its body still puts a point at its root.
+///
+/// `@(cross(e));` reads nothing, and the compiled route used to drop the
+/// detector as dead code with the empty body it guards: the run then had no
+/// point at the crossing, where the interpreter, which drops nothing, had
+/// one. The detector is evaluated for what it asks of the stepper, so every
+/// route lands on the root.
+#[test]
+fn veriloga_cross_with_an_empty_body_still_lands_a_point_at_its_root() {
+    let model = write_model(
+        "cross_empty_body",
+        r#"
+`include "disciplines.vams"
+module va_cross_empty_body(input_node);
+    inout input_node;
+    electrical input_node;
+    analog begin
+        @(cross(V(input_node), +1, 1.0e-12, 1.0e-6));
+        I(input_node) <+ V(input_node) / 1.0e6;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* Verilog-A cross with an empty body\n\
+         V1 input 0 PWL(0 -1 1u 2)\n\
+         X1 input va_cross_empty_body\n\
+         .va \"{}\" va_cross_empty_body\n\
+         .end\n",
+        deck_path(&model)
+    );
+    let netlist = Netlist::parse(&deck).expect("parse empty-body cross deck");
+    let result = Engine::default()
+        .run_tran(&netlist, 1.0e-6, 8.0e-7)
+        .expect("empty-body cross transient run");
+    // On no step lattice: a point there is the detector's.
+    let root = 1.0e-6 / 3.0;
+    assert!(
+        result
+            .time
+            .iter()
+            .any(|time| (root..=root + 1.0e-12).contains(time)),
+        "the crossing at {root:e} s must be a timepoint within its time_tol: {:?}",
+        result.time
+    );
+    let _ = std::fs::remove_file(model);
+}
+
 #[test]
 fn veriloga_zi_commits_t0_and_lands_on_sample_lattice() {
     let model = write_model(

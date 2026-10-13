@@ -756,6 +756,13 @@ impl Optimizer {
             }
         };
 
+        // Some values are live for their effect, not for any reader. Among
+        // them, an event detector is evaluated for what it asks of the
+        // stepper — a refinement point at a crossing, a timer's next
+        // breakpoint — whether or not anything reads its value. `@(cross(e));`
+        // reads nothing: its empty branch collapses, and pruning the detector
+        // with it put no point at the crossing, where the interpreter, which
+        // prunes nothing, does.
         for block in &self.blocks {
             for instruction in &block.instructions {
                 if matches!(
@@ -766,6 +773,9 @@ impl Optimizer {
                             op: CfgBinaryOp::DiscreteValue,
                             ..
                         }
+                        | CfgValueKind::Cross { .. }
+                        | CfgValueKind::Above { .. }
+                        | CfgValueKind::Timer { .. }
                 ) {
                     mark(instruction.result, &mut live, &mut worklist);
                 }
