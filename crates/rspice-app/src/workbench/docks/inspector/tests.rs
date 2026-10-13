@@ -1,9 +1,8 @@
 //! The inspector edits a binding, never a copy of one.
 //!
-//! A typed interval must survive the field that shows it, in the separators an
-//! engineer would actually paste, and a reversed or degenerate one is refused
-//! rather than quietly sorted. Scroll memory is per subject and bounded, so
-//! two schematic subjects cannot inherit each other's offset.
+//! The axis-range field's text and parser are pinned beside them, in
+//! `documents/result_document/axis_range.rs`. Scroll memory is per subject and
+//! bounded, so two schematic subjects cannot inherit each other's offset.
 
 use super::*;
 
@@ -195,50 +194,6 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
     );
 }
 
-#[test]
-fn a_typed_interval_round_trips_through_the_field_that_shows_it() {
-    for range in [
-        (0.0, 5.0),
-        (-1.5e-3, 2.25e-3),
-        (1.0e6, 1.0e9),
-        (-1.0e-15, 1.0e-14),
-    ] {
-        let text = format_axis_range(range);
-        let parsed = parse_axis_range(&text)
-            .unwrap_or_else(|| panic!("{text} did not read back as an interval"));
-        assert!(
-            (parsed.0 - range.0).abs() <= range.0.abs() * 1.0e-6
-                && (parsed.1 - range.1).abs() <= range.1.abs() * 1.0e-6,
-            "{range:?} rendered as {text} and read back as {parsed:?}"
-        );
-    }
-}
-
-#[test]
-fn an_interval_parses_from_the_separators_an_engineer_would_paste() {
-    for text in ["1m … 5m", "1m..5m", "1m,5m", "1m 5m", "  1m   5m  "] {
-        assert_eq!(
-            parse_axis_range(text),
-            Some((1.0e-3, 5.0e-3)),
-            "failed on {text:?}"
-        );
-    }
-    assert_eq!(parse_axis_range("-2.5 -1.5"), Some((-2.5, -1.5)));
-}
-
-#[test]
-fn a_reversed_or_degenerate_interval_is_refused_rather_than_sorted() {
-    // On a log axis "5m … 1m" is not the same request as "1m … 5m", and
-    // quietly swapping them would hide the typo behind a correct-looking
-    // plot.
-    assert_eq!(parse_axis_range("5m … 1m"), None);
-    assert_eq!(parse_axis_range("1m … 1m"), None);
-    assert_eq!(parse_axis_range("1m"), None);
-    assert_eq!(parse_axis_range("1m … 2m … 3m"), None);
-    assert_eq!(parse_axis_range(""), None);
-    assert_eq!(parse_axis_range("wide open"), None);
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn inspector_header_exposes_its_workspace_heading() {
@@ -271,15 +226,17 @@ fn inspector_header_exposes_its_workspace_heading() {
 #[test]
 fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly() {
     use crate::state::{AnalysisResult, AnalysisType, TransientConvergenceEvidence};
-    for expected in [
-        "Unknown · no solver evidence retained",
-        "No forced LTE acceptances recorded",
-        "Forced LTE acceptances recorded",
+    // Each status is a row on the section's label/value grid — a fact with a
+    // name — never a sentence added to the panel body on its own edge.
+    for (label, expected) in [
+        ("Solver evidence", "not retained"),
+        ("LTE acceptances", "none forced"),
+        ("LTE acceptances", "1 forced"),
     ] {
         let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "Transient");
-        if !expected.starts_with("Unknown") {
+        if expected != "not retained" {
             let mut quality = rspice_core::diagnostics::ConvergenceQuality::default();
-            if expected.starts_with("Forced") {
+            if expected == "1 forced" {
                 quality.record_force_accept(1);
             }
             analysis.convergence = Some(std::sync::Arc::new(
@@ -302,10 +259,10 @@ fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly
         });
         let nodes = output.platform_output.accesskit_update.unwrap().nodes;
         assert!(
-            nodes.iter().any(|(_, node)| {
-                node.role() == egui::accesskit::Role::Label && node.value() == Some(expected)
-            }),
-            "Missing accessible quality status: {expected}"
+            nodes
+                .iter()
+                .any(|(_, node)| { node.label() == Some(label) && node.value() == Some(expected) }),
+            "Missing accessible quality row: {label} = {expected}"
         );
     }
 }
@@ -927,5 +884,678 @@ fn the_result_inspector_routes_through_the_workspace_memos() {
         !shipped.contains("validate_retained_evidence()"),
         "the inspector walks the retained evidence itself instead of resolving the \
          one memo that owns the verdict"
+    );
+}
+
+/// A finished 1 ms transient on the Waves sheet, the way James had it open:
+/// `V(out)` swinging inside 4…6 V with its pane active, the trace selected,
+/// and the solver's convergence evidence retained with no forced points.
+fn waves_details_app() -> RSpiceApp {
+    use crate::state::{AnalysisResult, AnalysisType, TransientConvergenceEvidence, WaveformData};
+    let quality = rspice_core::diagnostics::ConvergenceQuality::default();
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    app.state.workbench.activate(Workspace::Results);
+    let time: Vec<f64> = (0..=200).map(|step| f64::from(step) * 5.0e-6).collect();
+    let volts: Vec<f64> = time
+        .iter()
+        .map(|t| 5.0 + 0.9 * (std::f64::consts::TAU * 2.0e3 * t).sin())
+        .collect();
+    let mut analysis =
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new("V(out)", time.clone(), volts, "#ffbd2e"),
+        ]);
+    analysis.convergence = Some(std::sync::Arc::new(
+        TransientConvergenceEvidence::capture(quality, &time, &rspice_core::abort_signal::NoAbort)
+            .expect("convergence evidence"),
+    ));
+    app.state.simulation.start_run().add_analysis(analysis);
+    app.state.simulation.view.active_analysis_idx = Some(0);
+    let run = app.state.simulation.active_run().expect("retained run");
+    let analysis_key = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        run.dataset_id,
+        &run.analyses[0],
+    );
+    let selected = rspice_results_ui::selection::SelectedResultTrace::from_run_indices(run, 0, 0)
+        .expect("selected retained trace");
+    app.state.ui.results.session.selected_trace = Some(selected);
+    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    app.state.ui.results.session.active_wave_pane = Some(
+        crate::workbench::documents::result_document::WavePanePresentationKey {
+            analysis: analysis_key,
+            unit: "V".to_owned(),
+        },
+    );
+    // Y held at the 4…6 V the field showed James as `4.0000000 … 6.000`.
+    crate::workbench::documents::result_document::set_active_axis_range(
+        &Tokens::default(),
+        &mut app.state,
+        PaneAxis::Y,
+        Some((4.0, 6.0)),
+    );
+    app
+}
+
+/// The inspector's default width on a wide window and its floor in every
+/// window class (`workbench::layout::inspector_width_bounds`).
+const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
+const INSPECTOR_MIN_WIDTH: f32 = 278.0;
+
+/// Run the whole inspector at `width` the way the raster harness does — three
+/// passes, the last one kept — and return what it painted and published.
+fn run_inspector(
+    app: &mut RSpiceApp,
+    width: f32,
+    height: f32,
+) -> (
+    Vec<egui::epaint::ClippedShape>,
+    Vec<(egui::accesskit::NodeId, egui::accesskit::Node)>,
+) {
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let input = || egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(width, height))),
+        ..Default::default()
+    };
+    let mut last = None;
+    for _ in 0..3 {
+        last = Some(ctx.run_ui(input(), |ui| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| show(ui, app));
+        }));
+    }
+    let output = last.expect("three passes ran");
+    let nodes = output
+        .platform_output
+        .accesskit_update
+        .map(|update| update.nodes)
+        .unwrap_or_default();
+    (output.shapes, nodes)
+}
+
+/// One run of text the inspector painted: where its layout box landed, the
+/// rectangle it was clipped to, and whether anything of it is visible.
+#[derive(Debug)]
+struct PaintedText {
+    text: String,
+    rect: Rect,
+    clip: Rect,
+}
+
+fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> Vec<PaintedText> {
+    fn walk(shape: &egui::Shape, clip: Rect, out: &mut Vec<PaintedText>) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, clip, out);
+                }
+            }
+            egui::Shape::Text(text) => {
+                let color = text.override_text_color.unwrap_or_else(|| {
+                    text.galley
+                        .job
+                        .sections
+                        .iter()
+                        .map(|section| section.format.color)
+                        .find(|color| *color != Color32::PLACEHOLDER)
+                        .unwrap_or(text.fallback_color)
+                });
+                let rect = Rect::from_min_size(text.pos, text.galley.size());
+                let visible = color.a() > 0
+                    && text.opacity_factor > 0.0
+                    && !text.galley.text().trim().is_empty()
+                    && rect.intersects(clip);
+                if visible {
+                    out.push(PaintedText {
+                        text: text.galley.text().to_owned(),
+                        rect,
+                        clip,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for shape in shapes {
+        walk(&shape.shape, shape.clip_rect, &mut out);
+    }
+    out
+}
+
+/// Every line the Waves details panel paints starts on the rows' inset and
+/// ends inside it, and none of it is cut off by the box it was clipped to —
+/// at the inspector's default width and at its minimum.
+///
+/// What James saw was two lines at x = 0 beside rows at x = 10, and a Y range
+/// field whose padded text ran out of the field. The measured numbers this
+/// prints are the report; the assertions keep them.
+#[test]
+fn the_waves_details_panel_keeps_every_line_inside_the_row_inset() {
+    // Where a property row starts its label, read from the rows themselves.
+    let (inset, _) =
+        super::super::super::design_system::property_row_control_columns(INSPECTOR_MIN_WIDTH);
+    for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {
+        let mut app = waves_details_app();
+        let (shapes, _) = run_inspector(&mut app, width, 2400.0);
+        let lines = painted_text(&shapes);
+        assert!(
+            !lines.is_empty(),
+            "the inspector painted no text at {width}"
+        );
+        let left = lines
+            .iter()
+            .map(|line| line.rect.left())
+            .fold(f32::INFINITY, f32::min);
+        let right = lines
+            .iter()
+            .map(|line| line.rect.right())
+            .fold(f32::NEG_INFINITY, f32::max);
+        eprintln!(
+            "width {width}: {} text runs; leftmost starts at {left:.1}, rightmost ends at \
+             {right:.1} (right inset {:.1})",
+            lines.len(),
+            width - right
+        );
+        let mut off_inset = Vec::new();
+        let mut clipped = Vec::new();
+        for line in &lines {
+            if line.rect.left() < inset - 0.01 || line.rect.right() > width - inset + 0.01 {
+                off_inset.push(format!(
+                    "{:?} spans {:.1}..{:.1}",
+                    line.text,
+                    line.rect.left(),
+                    line.rect.right()
+                ));
+            }
+            if line.rect.left() < line.clip.left() - 0.01
+                || line.rect.right() > line.clip.right() + 0.01
+            {
+                clipped.push(format!(
+                    "{:?} spans {:.1}..{:.1}, clipped to {:.1}..{:.1}",
+                    line.text,
+                    line.rect.left(),
+                    line.rect.right(),
+                    line.clip.left(),
+                    line.clip.right()
+                ));
+            }
+        }
+        assert!(
+            off_inset.is_empty(),
+            "at {width} px these lines leave the {inset} px row inset:\n{}",
+            off_inset.join("\n")
+        );
+        assert!(
+            clipped.is_empty(),
+            "at {width} px these lines are cut off:\n{}",
+            clipped.join("\n")
+        );
+    }
+}
+
+/// What James read off the panel, pinned on the panel: each range field shows
+/// the shortest form of its axis interval with the unit, the convergence
+/// status is a row, and how the measurements were computed is their section
+/// header's metadata.
+#[test]
+fn the_waves_details_panel_states_ranges_status_and_method_as_rows_and_meta() {
+    let mut app = waves_details_app();
+    let (_, nodes) = run_inspector(&mut app, INSPECTOR_DEFAULT_WIDTH, 2400.0);
+    let value_of = |label: &str| {
+        nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label) && node.value().is_some())
+            .and_then(|(_, node)| node.value())
+            .unwrap_or_else(|| panic!("no {label:?} row or field"))
+            .to_owned()
+    };
+    assert_eq!(value_of("X range"), "0 \u{2026} 1 ms");
+    assert_eq!(value_of("Y range"), "4 \u{2026} 6 V");
+    assert_eq!(value_of("LTE acceptances"), "none forced");
+    assert!(
+        nodes.iter().any(|(_, node)| {
+            node.role() == egui::accesskit::Role::Heading
+                && node.label() == Some("MEASUREMENTS, linear interpolation")
+        }),
+        "the measurements header does not carry its method as metadata"
+    );
+}
+
+/// The Waves details panel as PNGs for a person to look at, at the
+/// inspector's default and minimum widths. `RSPICE_RASTER_DIR` names the
+/// directory; the system temp directory otherwise.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_waves_details_panel() {
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let height = 1400.0;
+    for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {
+        let mut app = waves_details_app();
+        let canvas = crate::ui::raster::render(Vec2::new(width, height), |ui, _| {
+            // The dock's own fill, so the render reads the way the panel does.
+            let panel = Tokens::get(ui.ctx()).color.bg_panel;
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(panel))
+                .show(ui, |ui| show(ui, &mut app));
+        });
+        std::fs::write(
+            directory.join(format!("waves-details-{width}.png")),
+            canvas.png(height as usize),
+        )
+        .expect("write inspector render");
+    }
+}
+
+/// Calls that put text straight into whatever `Ui` they are given. In an
+/// inspector body that is the panel itself, and the panel has no inset: the
+/// inset belongs to the rows, so a bare label starts on the panel edge.
+const BARE_TEXT_CALLS: [&str; 10] = [
+    "ui.label(",
+    "Label::new(",
+    "ui.add(egui::Label",
+    "ui.monospace(",
+    "ui.small(",
+    "ui.weak(",
+    "ui.strong(",
+    "ui.colored_label(",
+    "ui.collapsing(",
+    "CollapsingHeader::new(",
+];
+
+/// Where a bare text call is right, how many lines of them, and why.
+///
+/// The count is part of the entry: a new bare label in an allowlisted
+/// function is the defect this guard exists for, not one more cell.
+const BARE_TEXT_ALLOWED: [(&str, &str, usize, &str); 9] = [
+    (
+        "inspector/design.rs",
+        "drawing_sheet_title_block_substitution",
+        2,
+        "inside the warning callout, whose frame margin is the row inset",
+    ),
+    (
+        "inspector/design.rs",
+        "drawing_sheet_overflow_advisory",
+        2,
+        "inside the warning callout, whose frame margin is the row inset",
+    ),
+    (
+        "inspector/design/inline_instance.rs",
+        "rejection_slot",
+        1,
+        "put into the slot shrunk by the row padding on both sides, truncated with \
+         the whole reason on hover",
+    ),
+    (
+        "inspector/stimulus.rs",
+        "caption",
+        1,
+        "one line naming the card well under it, already on the rows' inset",
+    ),
+    (
+        "results-ui/sensitivity.rs",
+        "right_panel",
+        8,
+        "header and cells of the ranked table, which scrolls inside inspector_inset",
+    ),
+    (
+        "results-ui/sensitivity/study.rs",
+        "right_panel",
+        10,
+        "header and cells of the ranked table, which scrolls inside inspector_inset",
+    ),
+    (
+        "results-ui/sensitivity/mismatch.rs",
+        "right_panel",
+        9,
+        "header and cells of the ranked table, which scrolls inside inspector_inset",
+    ),
+    (
+        "results-ui/noise_contrib/figure.rs",
+        "show",
+        2,
+        "the folded list of exact samples, which sits inside inspector_inset",
+    ),
+    (
+        "results-ui/phase_noise.rs",
+        "right_panel",
+        1,
+        "the fold of device noise shares, which sits inside inspector_inset",
+    ),
+];
+
+/// Every inspector panel, as source: the app's own inspector modules whole,
+/// and the result viewers' inspector halves by the functions the inspector
+/// reaches. A viewer file that also draws a central sheet is scoped, because
+/// labels inside a sheet's own layout are not on the inspector's edge.
+fn inspector_panel_sources() -> Vec<(&'static str, &'static str, Option<&'static [&'static str]>)> {
+    macro_rules! results_ui {
+        ($path:literal) => {
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../rspice-results-ui/src/",
+                $path
+            ))
+        };
+    }
+    macro_rules! adapter {
+        ($path:literal) => {
+            (
+                concat!("result_document/", $path),
+                include_str!(concat!("../../documents/result_document/", $path)),
+                Some(RIGHT_PANEL),
+            )
+        };
+    }
+    const RIGHT_PANEL: &[&str] = &["right_panel"];
+    fn only(names: &'static [&'static str]) -> Option<&'static [&'static str]> {
+        Some(names)
+    }
+    let mut sources = vec![
+        adapter!("bode.rs"),
+        adapter!("box_violin.rs"),
+        adapter!("events.rs"),
+        adapter!("eye.rs"),
+        adapter!("fft.rs"),
+        adapter!("harmonic_balance.rs"),
+        adapter!("hist.rs"),
+        adapter!("noise_contrib.rs"),
+        adapter!("nyquist.rs"),
+        adapter!("op_inspector.rs"),
+        adapter!("optimization.rs"),
+        adapter!("phase_noise.rs"),
+        adapter!("polar.rs"),
+        adapter!("pz.rs"),
+        adapter!("scatter.rs"),
+        adapter!("sensitivity.rs"),
+        adapter!("smith.rs"),
+        adapter!("soa.rs"),
+        adapter!("specs.rs"),
+        adapter!("table.rs"),
+        adapter!("transfer_function.rs"),
+    ];
+    sources.extend([
+        ("inspector.rs", include_str!("../inspector.rs"), None),
+        ("inspector/design.rs", include_str!("design.rs"), None),
+        (
+            "inspector/design/component.rs",
+            include_str!("design/component.rs"),
+            None,
+        ),
+        (
+            "inspector/design/inline_instance.rs",
+            include_str!("design/inline_instance.rs"),
+            None,
+        ),
+        (
+            "inspector/executed_deck.rs",
+            include_str!("executed_deck.rs"),
+            None,
+        ),
+        ("inspector/models.rs", include_str!("models.rs"), None),
+        (
+            "inspector/result_authority.rs",
+            include_str!("result_authority.rs"),
+            None,
+        ),
+        (
+            "inspector/simulation.rs",
+            include_str!("simulation.rs"),
+            None,
+        ),
+        ("inspector/stimulus.rs", include_str!("stimulus.rs"), None),
+        ("inspector/symbol.rs", include_str!("symbol.rs"), None),
+        ("inspector/veriloga.rs", include_str!("veriloga.rs"), None),
+        (
+            "result_document.rs",
+            include_str!("../../documents/result_document.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "result_document/waves/readout.rs",
+            include_str!("../../documents/result_document/waves/readout.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/waves/dock.rs",
+            results_ui!("waves/dock.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/waves/readout.rs",
+            results_ui!("waves/readout.rs"),
+            only(&["measurement_panel", "measurement_rows"]),
+        ),
+        (
+            "results-ui/presentation.rs",
+            results_ui!("presentation.rs"),
+            only(&["stat_table", "panel_note"]),
+        ),
+        ("results-ui/qpnoise.rs", results_ui!("qpnoise.rs"), None),
+        (
+            "results-ui/bode/inspector.rs",
+            results_ui!("bode/inspector.rs"),
+            None,
+        ),
+        (
+            "results-ui/box_violin.rs",
+            results_ui!("box_violin.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/events.rs",
+            results_ui!("events.rs"),
+            only(&["right_panel", "selection_absent"]),
+        ),
+        (
+            "results-ui/eye_diagram/view.rs",
+            results_ui!("eye_diagram/view.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/fft/view.rs",
+            results_ui!("fft/view.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/harmonic_balance.rs",
+            results_ui!("harmonic_balance.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/histogram/view.rs",
+            results_ui!("histogram/view.rs"),
+            only(&["right_panel", "range_controls", "bound_row"]),
+        ),
+        (
+            "results-ui/network_matrix.rs",
+            results_ui!("network_matrix.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/noise_contrib.rs",
+            results_ui!("noise_contrib.rs"),
+            only(&["right_panel", "contributor_table"]),
+        ),
+        (
+            "results-ui/noise_contrib/figure.rs",
+            results_ui!("noise_contrib/figure.rs"),
+            only(&["show"]),
+        ),
+        (
+            "results-ui/nyquist/view.rs",
+            results_ui!("nyquist/view.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/op_inspector.rs",
+            results_ui!("op_inspector.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/optimization.rs",
+            results_ui!("optimization.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/phase_noise.rs",
+            results_ui!("phase_noise.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/polar.rs",
+            results_ui!("polar.rs"),
+            only(&["right_panel", "register_table"]),
+        ),
+        (
+            "results-ui/pole_zero.rs",
+            results_ui!("pole_zero.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/scatter.rs",
+            results_ui!("scatter.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/sensitivity.rs",
+            results_ui!("sensitivity.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/sensitivity/mismatch.rs",
+            results_ui!("sensitivity/mismatch.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/sensitivity/study.rs",
+            results_ui!("sensitivity/study.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/smith_chart/view.rs",
+            results_ui!("smith_chart/view.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/soa.rs",
+            results_ui!("soa.rs"),
+            only(&["right_panel", "selection_note"]),
+        ),
+        (
+            "results-ui/specs.rs",
+            results_ui!("specs.rs"),
+            Some(RIGHT_PANEL),
+        ),
+        (
+            "results-ui/table.rs",
+            results_ui!("table.rs"),
+            only(&["operating_point_panel", "sample_panel"]),
+        ),
+        (
+            "results-ui/transfer_function.rs",
+            results_ui!("transfer_function.rs"),
+            Some(RIGHT_PANEL),
+        ),
+    ]);
+    sources
+}
+
+/// The function each line of `source` sits in, by the last `fn` opened above
+/// it. Closures are not functions here, which is what is wanted: a label in a
+/// closure is drawn by the function that wrote the closure.
+fn enclosing_functions(source: &str) -> Vec<Option<String>> {
+    let mut current: Option<String> = None;
+    source
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let declaration = ["pub(crate) fn ", "pub(super) fn ", "pub fn ", "fn "]
+                .iter()
+                .find_map(|prefix| trimmed.strip_prefix(prefix));
+            if let Some(rest) = declaration {
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    current = Some(name);
+                }
+            }
+            current.clone()
+        })
+        .collect()
+}
+
+/// No inspector panel adds text straight to its body.
+///
+/// James found two lines on the Waves details panel sitting on the panel's
+/// left edge — "Linear interpolation" and "No forced LTE acceptances
+/// recorded" — while every row around them was inset. A row paints its own
+/// inset; a bare label added to the panel body gets none. Every fact is a row,
+/// every qualifier is its section header's metadata, every sentence goes
+/// through the inspector's note, and a table or a fold sits inside
+/// `inspector_inset`. What is left is listed above with its reason and count.
+#[test]
+fn no_inspector_panel_adds_text_to_its_body_without_an_inset() {
+    let mut found: std::collections::BTreeMap<(&str, String), Vec<usize>> = Default::default();
+    for (path, source, scope) in inspector_panel_sources() {
+        let shipped = crate::source_guard::without_test_items(source);
+        let functions = enclosing_functions(&shipped);
+        if let Some(scope) = scope {
+            for name in scope {
+                assert!(
+                    functions.iter().flatten().any(|function| function == name),
+                    "{path} no longer declares `{name}`; the guard would scan nothing there"
+                );
+            }
+        }
+        for (index, line) in shipped.lines().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") || !BARE_TEXT_CALLS.iter().any(|call| line.contains(call))
+            {
+                continue;
+            }
+            let function = functions[index].clone().unwrap_or_default();
+            if scope.is_some_and(|scope| !scope.contains(&function.as_str())) {
+                continue;
+            }
+            found.entry((path, function)).or_default().push(index + 1);
+        }
+    }
+    let mut unexplained = Vec::new();
+    for ((path, function), lines) in &found {
+        let allowed = BARE_TEXT_ALLOWED
+            .iter()
+            .find(|(allowed_path, allowed_function, _, _)| {
+                allowed_path == path && allowed_function == function
+            })
+            .map_or(0, |(_, _, count, _)| *count);
+        if lines.len() != allowed {
+            unexplained.push(format!(
+                "{path} `{function}`: {} bare text line(s) at {lines:?}, {allowed} allowed",
+                lines.len()
+            ));
+        }
+    }
+    for (path, function, count, _) in BARE_TEXT_ALLOWED {
+        if count > 0 && !found.contains_key(&(path, function.to_owned())) {
+            unexplained.push(format!(
+                "{path} `{function}` is allowed {count} bare text line(s) and has none; \
+                 drop the entry"
+            ));
+        }
+    }
+    assert!(
+        unexplained.is_empty(),
+        "text added straight to an inspector body starts on the panel edge; make it a \
+         row, its section header's metadata, the inspector note, or inset it:\n{}",
+        unexplained.join("\n")
     );
 }

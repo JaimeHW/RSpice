@@ -15,7 +15,7 @@ mod veriloga;
 #[cfg(test)]
 use rspice_ui_kit::panels::inspector::INSPECTOR_SECTION_PADDING;
 use rspice_ui_kit::panels::inspector::{
-    begin_inspector_sections, finish_inspector_sections, muted_inspector_copy,
+    begin_inspector_sections, finish_inspector_sections, inspector_inset, muted_inspector_copy,
     schematic_section_header, schematic_section_header_action, section_block_gap, section_header,
 };
 
@@ -1523,7 +1523,7 @@ fn selected_result_artifact(
     property_row(ui, "Integrity", &integrity);
     property_row(ui, "Dataset", &dataset);
     ui.add_space(6.0);
-    if ui.button("Copy stable source path").clicked() {
+    if inspector_inset(ui, |ui| ui.button("Copy stable source path")).clicked() {
         ui.ctx().copy_text(stable_path);
     }
     ui.add_space(8.0);
@@ -1548,6 +1548,24 @@ fn selected_result_trace(
     let sample_count = waveform.x.len().min(waveform.y.len());
     let statistics = finite_trace_statistics(&waveform.y);
     let available_sample_count = waveform.y.iter().filter(|value| value.is_finite()).count();
+    // The statistics are measurements of the trace, so they read the way the
+    // Measurements section reads them: in the trace's own unit, to the number
+    // of significant digits the reader chose for result readouts.
+    let unit = crate::workbench::documents::result_document::browser_signal_unit(
+        &waveform.name,
+        waveform.unit.as_deref(),
+        crate::workbench::documents::result_document::analysis_default_unit(analysis.analysis_type),
+    )
+    .to_owned();
+    let digits = usize::from(
+        app.state
+            .ui
+            .preferences
+            .result_presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
+    let measured = |value: f64| rspice_results_ui::waves::fmt_in_unit(value, &unit, digits);
 
     section_header(ui, "Selected trace", None);
     property_row(ui, "Name", &waveform_name);
@@ -1567,13 +1585,13 @@ fn selected_result_trace(
         },
     );
     if let Some(statistics) = statistics {
-        property_row(ui, "Minimum", &format_result_scalar(statistics.minimum));
-        property_row(ui, "Maximum", &format_result_scalar(statistics.maximum));
-        property_row(ui, "Mean", &format_result_scalar(statistics.mean));
+        property_row(ui, "Minimum", &measured(statistics.minimum));
+        property_row(ui, "Maximum", &measured(statistics.maximum));
+        property_row(ui, "Mean", &measured(statistics.mean));
         property_row(
             ui,
             "Peak-to-peak",
-            &format_result_scalar(statistics.maximum - statistics.minimum),
+            &measured(statistics.maximum - statistics.minimum),
         );
     }
 
@@ -1582,76 +1600,61 @@ fn selected_result_trace(
         &waveform_color,
         t.color.traces[waveform_index % t.color.traces.len()],
     );
-    ui.horizontal(|ui| {
-        ui.label("Colour");
-        if egui::color_picker::color_edit_button_srgba(
-            ui,
-            &mut color,
-            egui::color_picker::Alpha::Opaque,
-        )
-        .changed()
-        {
-            set_selected_trace_color(&mut app.state, selected, color);
-        }
-        ui.label(
-            egui::RichText::new(format!(
-                "#{:02X}{:02X}{:02X}",
-                color.r(),
-                color.g(),
-                color.b()
-            ))
-            .monospace(),
-        );
-    });
+    if trace_colour_row(ui, &mut color) {
+        set_selected_trace_color(&mut app.state, selected, color);
+    }
 
-    ui.horizontal_wrapped(|ui| {
-        if ui
-            .button(if waveform_visible {
-                "Hide trace"
-            } else {
-                "Show trace"
-            })
-            .clicked()
-        {
-            crate::workbench::documents::result_document::toggle_visibility(
-                &mut app.state,
-                analysis_index,
-                waveform_index,
-            );
-        }
-
-        if is_schematic_cross_probe_candidate(selected.source_name()) {
-            let signal = selected.source_name().to_owned();
-            let unavailable = schematic_cross_probe_unavailability(&app.state, selected, &signal);
-            let mut response =
-                ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
-            if let Some(reason) = unavailable {
-                response = response.on_hover_text(reason);
+    inspector_inset(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .button(if waveform_visible {
+                    "Hide trace"
+                } else {
+                    "Show trace"
+                })
+                .clicked()
+            {
+                crate::workbench::documents::result_document::toggle_visibility(
+                    &mut app.state,
+                    analysis_index,
+                    waveform_index,
+                );
             }
-            if response.clicked() {
-                match cross_probe_trace_to_design(app, &signal) {
-                    Ok(net) => {
-                        app.state.ui.toasts.success(
-                            ui.ctx(),
-                            "Schematic net located",
-                            format!("{signal} cross-probed to {net}."),
-                        );
-                        app.state.push_user_message(ConsoleMessage::info(format!(
-                            "Selected conductor {net} from {signal}."
-                        )));
-                    }
-                    Err(message) => {
-                        app.state.ui.toasts.warn_with_title(
-                            ui.ctx(),
-                            "Cannot cross-probe",
-                            message.clone(),
-                        );
-                        app.state
-                            .push_user_message(ConsoleMessage::warning(message));
+
+            if is_schematic_cross_probe_candidate(selected.source_name()) {
+                let signal = selected.source_name().to_owned();
+                let unavailable =
+                    schematic_cross_probe_unavailability(&app.state, selected, &signal);
+                let mut response =
+                    ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
+                if let Some(reason) = unavailable {
+                    response = response.on_hover_text(reason);
+                }
+                if response.clicked() {
+                    match cross_probe_trace_to_design(app, &signal) {
+                        Ok(net) => {
+                            app.state.ui.toasts.success(
+                                ui.ctx(),
+                                "Schematic net located",
+                                format!("{signal} cross-probed to {net}."),
+                            );
+                            app.state.push_user_message(ConsoleMessage::info(format!(
+                                "Selected conductor {net} from {signal}."
+                            )));
+                        }
+                        Err(message) => {
+                            app.state.ui.toasts.warn_with_title(
+                                ui.ctx(),
+                                "Cannot cross-probe",
+                                message.clone(),
+                            );
+                            app.state
+                                .push_user_message(ConsoleMessage::warning(message));
+                        }
                     }
                 }
             }
-        }
+        })
     });
 }
 
@@ -1752,9 +1755,10 @@ fn active_result_pane(
     } else {
         "Fit active pane"
     };
-    if ui
-        .add_enabled(pinned, egui::Button::new(fit_label))
-        .clicked()
+    if inspector_inset(ui, |ui| {
+        ui.add_enabled(pinned, egui::Button::new(fit_label))
+    })
+    .clicked()
     {
         crate::workbench::documents::result_document::request_view_gesture(
             &mut app.state,
@@ -1775,6 +1779,9 @@ fn axis_limit_row(
     axis: PaneAxis,
     label: &str,
 ) {
+    use crate::workbench::documents::result_document::axis_range::{
+        format_axis_range, parse_axis_range,
+    };
     use crate::workbench::documents::result_document::{
         active_axis_is_pinned, active_axis_range, set_active_axis_range,
     };
@@ -1782,7 +1789,18 @@ fn axis_limit_row(
     let viewer = app.state.ui.results.session.viewer;
     let current = active_axis_range(&app.state, facts, axis);
     let pinned = active_axis_is_pinned(&app.state, axis);
-    let committed = current.map(format_axis_range).unwrap_or_default();
+    // The unit the field writes after its numbers, and strips before reading
+    // them back. Only the waveform stack knows its axes' units; every other
+    // sheet's field states bare engineering numbers, as it always has.
+    let unit = match axis {
+        PaneAxis::X => facts.x_unit.as_deref(),
+        PaneAxis::Y => facts.unit.as_deref(),
+    }
+    .filter(|_| crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer))
+    .unwrap_or_default();
+    let committed = current
+        .map(|range| format_axis_range(range, unit))
+        .unwrap_or_default();
     let mut text = match app.state.ui.results.session.axis_limit_draft.as_ref() {
         Some((draft_viewer, draft_axis, text))
             if *draft_viewer == viewer && *draft_axis == axis =>
@@ -1792,7 +1810,7 @@ fn axis_limit_row(
         _ => committed.clone(),
     };
 
-    let parsed = parse_axis_range(&text);
+    let parsed = parse_axis_range(&text, unit);
     let invalid = !text.trim().is_empty() && parsed.is_none();
     let (edit, reset) = property_row_input_action(
         ui,
@@ -1817,7 +1835,7 @@ fn axis_limit_row(
         if text.trim().is_empty() {
             set_active_axis_range(&tokens, &mut app.state, axis, None);
             app.state.ui.results.session.axis_limit_draft = None;
-        } else if let Some(range) = parse_axis_range(&text) {
+        } else if let Some(range) = parse_axis_range(&text, unit) {
             set_active_axis_range(&tokens, &mut app.state, axis, Some(range));
             app.state.ui.results.session.axis_limit_draft = None;
         }
@@ -1827,32 +1845,6 @@ fn axis_limit_row(
         set_active_axis_range(&tokens, &mut app.state, axis, None);
         app.state.ui.results.session.axis_limit_draft = None;
     }
-}
-
-/// Render an interval the field can read back without loss.
-fn format_axis_range((minimum, maximum): (f64, f64)) -> String {
-    format!(
-        "{} … {}",
-        format_result_scalar(minimum),
-        format_result_scalar(maximum)
-    )
-}
-
-/// Read an interval typed as `min … max`, in engineering notation.
-///
-/// Accepts the ellipsis this writes back, plus `..`, a comma or plain space,
-/// so a value pasted from a datasheet or a netlist parses without reformatting.
-/// A reversed or degenerate interval is refused rather than silently sorted:
-/// on a log axis the two are not the same request.
-pub(crate) fn parse_axis_range(text: &str) -> Option<(f64, f64)> {
-    let cleaned = text.replace('…', " ").replace("..", " ").replace(',', " ");
-    let mut parts = cleaned.split_whitespace();
-    let minimum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
-    let maximum = crate::quantity::engineering::parse_engineering_value(parts.next()?).ok()?;
-    if parts.next().is_some() {
-        return None;
-    }
-    (minimum.is_finite() && maximum.is_finite() && maximum > minimum).then_some((minimum, maximum))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1880,14 +1872,57 @@ fn finite_trace_statistics(values: &[f64]) -> Option<TraceStatistics> {
     })
 }
 
-fn format_result_scalar(value: f64) -> String {
-    if value == 0.0 {
-        "0".to_owned()
-    } else if (1.0e-3..1.0e6).contains(&value.abs()) {
-        format!("{value:.7}")
-    } else {
-        format!("{value:.7e}")
-    }
+/// The trace's colour as one more property row: its name in the label column,
+/// and in the value column the swatch that opens the picker beside the hex
+/// value it holds. Returns whether the reader picked a different colour.
+fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
+    use super::super::design_system::{
+        PROPERTY_ROW_TRAILING_PAD, property_row_control_columns, property_row_height,
+    };
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (label_left, value_left) = property_row_control_columns(width);
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, property_row_height(ui)), Sense::hover());
+    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    ui.painter().text(
+        Pos2::new(rect.left() + label_left, rect.center().y),
+        Align2::LEFT_CENTER,
+        "Colour",
+        label_font,
+        t.color.text_dim,
+    );
+    let value_rect = Rect::from_min_max(
+        Pos2::new(rect.left() + value_left, rect.top()),
+        Pos2::new(rect.right() - PROPERTY_ROW_TRAILING_PAD, rect.bottom()),
+    );
+    let swatch = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(value_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                egui::color_picker::color_edit_button_srgba(
+                    ui,
+                    color,
+                    egui::color_picker::Alpha::Opaque,
+                )
+            },
+        )
+        .inner;
+    let hex = format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b());
+    ui.painter().with_clip_rect(value_rect).text(
+        Pos2::new(swatch.rect.right() + 8.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        &hex,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text,
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Colour");
+        node.set_value(hex.as_str());
+    });
+    swatch.changed()
 }
 
 fn set_selected_trace_color(
@@ -2157,7 +2192,11 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Marker database", "unavailable");
             property_row(ui, "Sign-off", "blocked");
             section_header(ui, "Release consumption", None);
-            ui.label("Physical verification owns marker disposition. Release closure consumes this exact database and cannot override it.");
+            muted_inspector_copy(
+                ui,
+                "Physical verification owns marker disposition. Release closure consumes this \
+                 exact database and cannot override it.",
+            );
         }
     }
 }

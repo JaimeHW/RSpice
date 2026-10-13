@@ -30,7 +30,7 @@ use crate::workbench::{AppState, MessageId};
 use super::super::super::design_system::{
     card_well, property_row, property_row_input_with_hint, property_row_wrapped,
 };
-use super::section_header;
+use super::{muted_inspector_copy, section_header};
 
 /// Air between two adopter cards, and the inset one keeps.
 const CARD_GAP: f32 = 8.0;
@@ -114,7 +114,7 @@ fn adopters_section(
         Some(&adopters.len().to_string()),
     );
     if adopters.is_empty() {
-        note(ui, &messages.text(MessageId::StimulusAdoptersNone));
+        muted_inspector_copy(ui, &messages.text(MessageId::StimulusAdoptersNone));
         return;
     }
     for (index, adopter) in adopters.iter().enumerate() {
@@ -233,7 +233,7 @@ fn adopter_card(
                 }
             });
             if !adopter.on_this_sheet {
-                note(ui, &messages.text(MessageId::StimulusAdopterElsewhere));
+                muted_inspector_copy(ui, &messages.text(MessageId::StimulusAdopterElsewhere));
             }
         });
 }
@@ -392,7 +392,7 @@ fn contract_section(ui: &mut Ui, state: &AppState, definition: &StimulusDefiniti
         .map(|record| stimulus_actions::contract_findings(state, &record))
         .unwrap_or_default();
     if findings.is_empty() {
-        note(
+        muted_inspector_copy(
             ui,
             &messages.format(
                 MessageId::StimulusContractClean,
@@ -519,24 +519,6 @@ fn action(ui: &mut Ui, label: &str, width: f32) -> bool {
         ),
     )
     .clicked()
-}
-
-/// One sentence in the dock's own quiet register, wrapped into its width and
-/// inset to the column every property row's label starts in.
-fn note(ui: &mut Ui, text: &str) {
-    let palette = Tokens::get(ui.ctx()).color;
-    ui.horizontal(|ui| {
-        ui.add_space(SECTION_PAD);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(text)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(palette.text_dim),
-            )
-            .wrap(),
-        );
-    });
-    ui.add_space(4.0);
 }
 
 /// Carry out one thing the reader asked for.

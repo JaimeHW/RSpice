@@ -57,6 +57,7 @@ use super::{
     ComponentModelEvidence, component_model_evidence, muted_inspector_copy,
     schematic_section_header as section_header, schematic_section_header_action, section_block_gap,
 };
+use rspice_ui_kit::panels::inspector::{inspector_inset, toned_inspector_copy};
 
 /// The mockup's `.inspector-hero` is an 82 px band: an 82 px square symbol
 /// stage beside four stacked text lines.
@@ -322,10 +323,17 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         if session.candidate.as_ref() == Some(&session.expected) {
             app.state.workbench.inline_edit.end();
         } else {
-            ui.label("The document changed while this inspector edit was open. The draft has not been applied.");
-            ui.add(
-                egui::Label::new(format!("{}: {}", session.expected.name, session.buffer))
-                    .selectable(true),
+            muted_inspector_copy(
+                ui,
+                "The document changed while this inspector edit was open. The draft has not \
+                 been applied.",
+            );
+            // Wrapped rather than elided: the draft is the reader's own unsaved
+            // text, and all of it has to stay readable until it is discarded.
+            crate::workbench::design_system::property_row_wrapped(
+                ui,
+                &session.expected.name,
+                &session.buffer,
             );
             if ui.button("Discard inspector draft").clicked() {
                 app.state.workbench.inline_edit.end();
@@ -475,17 +483,8 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
 /// connectivity rows would have been. An inspector that silently showed the
 /// editor buffer's nets instead would name conductors the run will not have.
 fn unresolved_projection_note(ui: &mut Ui, reason: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(6.0);
-    ui.add(
-        egui::Label::new(
-            RichText::new(reason)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.warn),
-        )
-        .wrap(),
-    );
-    ui.add_space(6.0);
+    let warn = Tokens::get(ui.ctx()).color.warn;
+    toned_inspector_copy(ui, reason, warn);
 }
 
 // =============================================================================
@@ -1338,16 +1337,8 @@ fn drawing_sheet_overflow_advisory(
 }
 
 fn drawing_sheet_lock_note(ui: &mut Ui, message: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(6.0);
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(message)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_faint),
-        )
-        .wrap(),
-    );
+    let faint = Tokens::get(ui.ctx()).color.text_faint;
+    toned_inspector_copy(ui, message, faint);
 }
 
 fn schematic_grid_label(pitch: crate::state::SchematicGridPitch) -> &'static str {
@@ -1653,21 +1644,27 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
 
     let writable = !app.state.schematic_edit_read_only();
     let mut enabled = probe.enabled;
-    let enabled_response = ui.add_enabled(
-        writable,
-        egui::Checkbox::new(&mut enabled, "Include this probe in future runs"),
-    );
+    // On the rows' inset: a checkbox added to the body bare puts its box on
+    // the panel edge.
+    let enabled_response = inspector_inset(ui, |ui| {
+        ui.add_enabled(
+            writable,
+            egui::Checkbox::new(&mut enabled, "Include this probe in future runs"),
+        )
+    });
     if !writable {
         enabled_response.on_disabled_hover_text("The active schematic is read-only.");
     }
     let mut plot_on_materialization = probe.plot_on_materialization;
-    let plot_response = ui.add_enabled(
-        writable && enabled,
-        egui::Checkbox::new(
-            &mut plot_on_materialization,
-            "Show automatically when the next run materializes it",
-        ),
-    );
+    let plot_response = inspector_inset(ui, |ui| {
+        ui.add_enabled(
+            writable && enabled,
+            egui::Checkbox::new(
+                &mut plot_on_materialization,
+                "Show automatically when the next run materializes it",
+            ),
+        )
+    });
     if !writable {
         plot_response.on_disabled_hover_text("The active schematic is read-only.");
     } else if !enabled {

@@ -8,8 +8,27 @@
 
 use egui::Ui;
 
-use super::super::super::design_system::property_row;
-use super::{executed_deck, inspector_disclosure, section_header};
+use super::super::super::design_system::{
+    property_row, property_row_height, property_row_toned, property_row_wrapped,
+};
+use super::{
+    executed_deck, inspector_disclosure, inspector_inset, muted_inspector_copy, section_header,
+};
+use crate::ui::tokens::Tokens;
+
+/// A virtualized list of property rows, for a record that runs to more rows
+/// than a section should show at once.
+fn scrolled_rows(ui: &mut Ui, count: usize, mut row: impl FnMut(&mut Ui, usize)) {
+    let row_height = property_row_height(ui);
+    egui::ScrollArea::vertical()
+        .max_height(160.0)
+        .auto_shrink([false, true])
+        .show_rows(ui, row_height, count, |ui, range| {
+            for index in range {
+                row(ui, index);
+            }
+        });
+}
 
 pub(super) fn result_dc_sweep(ui: &mut Ui, analysis: &crate::state::AnalysisResult) {
     use crate::state::{AnalysisResultPayload, AnalysisType, DcCurveSelection, DcSweepFamily};
@@ -18,7 +37,8 @@ pub(super) fn result_dc_sweep(ui: &mut Ui, analysis: &crate::state::AnalysisResu
     }
     section_header(ui, "DC sweep", None);
     let Some(AnalysisResultPayload::DcSweep { evidence }) = &analysis.result_payload else {
-        ui.label("Curve identity and traversal were not recorded for this result.");
+        property_row(ui, "Curve identity", "not recorded");
+        property_row(ui, "Traversal", "not recorded");
         return;
     };
     property_row(ui, "Primary source", &evidence.source);
@@ -50,20 +70,20 @@ pub(super) fn result_dc_sweep(ui: &mut Ui, analysis: &crate::state::AnalysisResu
                 "Secondary coordinates",
                 "executed order",
             ) {
-                egui::ScrollArea::both().max_height(160.0).show_rows(
-                    ui,
-                    ui.text_style_height(&egui::TextStyle::Body),
-                    values.len(),
-                    |ui, range| {
-                        for index in range {
-                            ui.monospace(format!("{}: {:.16e}", index + 1, values[index]));
-                        }
-                    },
-                );
+                scrolled_rows(ui, values.len(), |ui, index| {
+                    property_row(
+                        ui,
+                        &format!("Point {}", index + 1),
+                        &format!("{:.16e}", values[index]),
+                    );
+                });
             }
         }
     }
-    ui.label("Curves use ascending display axes; traversal records the order actually solved.");
+    muted_inspector_copy(
+        ui,
+        "Curves use ascending display axes; traversal records the order actually solved.",
+    );
 }
 
 /// Solver evidence belongs to the selected result, including after project reload.
@@ -79,21 +99,31 @@ pub(super) fn result_convergence(ui: &mut Ui, analysis: &crate::state::AnalysisR
                 | AnalysisType::Soa
         ) {
             section_header(ui, "Transient convergence", None);
-            ui.add(egui::Label::new("Unknown · no solver evidence retained").wrap());
+            property_row(ui, "Solver evidence", "not retained");
         }
         return;
     };
     section_header(ui, "Transient convergence", None);
-    let label = if quality.has_lte_exceptions() {
-        "Forced LTE acceptances recorded"
+    let forced = forced_lte_acceptances(quality);
+    if forced == 0 {
+        property_row(ui, "LTE acceptances", "none forced");
     } else {
-        "No forced LTE acceptances recorded"
-    };
-    ui.add(egui::Label::new(label).wrap());
+        property_row_toned(
+            ui,
+            "LTE acceptances",
+            &format!("{forced} forced"),
+            Tokens::get(ui.ctx()).color.warn,
+        );
+    }
     if !inspector_disclosure(ui, "result-convergence", "Convergence details", "recorded") {
         return;
     }
-    ui.label("LTE is local truncation error. A forced acceptance passed Newton convergence but exceeded the LTE criterion. These statistics do not establish overall numerical accuracy.");
+    muted_inspector_copy(
+        ui,
+        "LTE is local truncation error. A forced acceptance passed Newton convergence but \
+         exceeded the LTE criterion. These statistics do not establish overall numerical \
+         accuracy.",
+    );
     convergence_report(ui, &quality.transient, "Source transient");
     if let Some(initialization) = &quality.initialization {
         let phase = match initialization.method {
@@ -115,9 +145,22 @@ pub(super) fn result_convergence(ui: &mut Ui, analysis: &crate::state::AnalysisR
             "Final periodic residual",
             &format!("{:.6e}", initialization.final_residual),
         );
-        ui.label("The counters below cover recorded helper solves during initialization; they are separate from the periodic solver's iteration count.");
+        muted_inspector_copy(
+            ui,
+            "The counters below cover recorded helper solves during initialization; they are \
+             separate from the periodic solver's iteration count.",
+        );
         convergence_report(ui, &initialization.report, "Initialization helper solves");
     }
+}
+
+/// Every point any phase of the run accepted past its LTE criterion: the
+/// source transient's and, for a periodic run, its initialization's.
+fn forced_lte_acceptances(quality: &crate::state::TransientConvergenceEvidence) -> u64 {
+    quality.transient.force_accepted_points
+        + quality.initialization.as_ref().map_or(0, |initialization| {
+            initialization.report.force_accepted_points
+        })
 }
 
 fn convergence_report(ui: &mut Ui, report: &crate::state::ConvergenceReport, phase: &str) {
@@ -147,7 +190,11 @@ fn convergence_report(ui: &mut Ui, report: &crate::state::ConvergenceReport, pha
         property_row(ui, "Source samples", &basis.sample_count.to_string());
         property_row(ui, "Source start", &format!("{:.16e} s", basis.start_s));
         property_row(ui, "Source stop", &format!("{:.16e} s", basis.stop_s));
-        ui.label("Affected times refer to the original solver trajectory, before cropping, envelope extraction or Fourier analysis.");
+        muted_inspector_copy(
+            ui,
+            "Affected times refer to the original solver trajectory, before cropping, envelope \
+             extraction or Fourier analysis.",
+        );
     } else {
         property_row(
             ui,
@@ -155,37 +202,37 @@ fn convergence_report(ui: &mut Ui, report: &crate::state::ConvergenceReport, pha
             "Not available for the internal initialization trajectory",
         );
     }
-    if !report.force_accepted_indices.is_empty() {
+    let forced = &report.force_accepted_indices;
+    if !forced.is_empty()
+        && inspector_disclosure(
+            ui,
+            &format!("forced-lte-locations-{phase}"),
+            "Forced LTE locations",
+            &forced.len().to_string(),
+        )
+    {
+        // Each location is a row: the source sample it was forced at, and
+        // when that sample was, where the trajectory kept a time basis.
         ui.push_id(phase, |ui| {
-            ui.collapsing("Forced LTE acceptance locations", |ui| {
-                egui::ScrollArea::both().max_height(160.0).show_rows(
-                    ui,
-                    ui.text_style_height(&egui::TextStyle::Body),
-                    report.force_accepted_indices.len(),
-                    |ui, range| {
-                        for position in range {
-                            let index = report.force_accepted_indices[position];
-                            let location = report.time_basis.as_ref().map_or_else(
-                                || format!("Source index {index} (zero based)"),
-                                |basis| {
-                                    format!(
-                                        "{:.16e} s · source index {index}",
-                                        basis.force_accepted_times_s[position]
-                                    )
-                                },
-                            );
-                            ui.add(egui::Label::new(location).extend());
-                        }
-                    },
+            scrolled_rows(ui, forced.len(), |ui, position| {
+                let index = forced[position];
+                let time = report.time_basis.as_ref().map_or_else(
+                    || "zero based · time not retained".to_owned(),
+                    |basis| format!("{:.16e} s", basis.force_accepted_times_s[position]),
                 );
+                property_row(ui, &format!("Source index {index}"), &time);
             });
         });
     }
     if let Some(diagnostic) = &report.failure_diagnostic {
-        ui.label("An attempted solve left this diagnostic; a later convergence aid may have recovered it.");
-        ui.label(diagnostic.summary());
+        muted_inspector_copy(
+            ui,
+            "An attempted solve left this diagnostic; a later convergence aid may have \
+             recovered it.",
+        );
+        property_row_wrapped(ui, "Diagnostic", &diagnostic.summary());
         if !diagnostic.failure_message.is_empty() {
-            ui.label(&diagnostic.failure_message);
+            property_row_wrapped(ui, "Solver message", &diagnostic.failure_message);
         }
     }
 }
@@ -304,9 +351,12 @@ pub(super) fn result_dataset_authority(
         // this is the route back to the surface that owns it. Refusals are
         // stated on the disabled control, in the same words the dispatcher
         // would have used, so the reason is visible before the click.
-        let route = crate::ui::widgets::Button::new("Open producing plan")
-            .enabled(plan_block.is_none())
-            .show(ui);
+        let route = inspector_inset(ui, |ui| {
+            crate::ui::widgets::Button::new("Open producing plan")
+                .min_width(ui.available_width())
+                .enabled(plan_block.is_none())
+                .show(ui)
+        });
         match plan_block {
             None => {
                 open_producing_plan = route
