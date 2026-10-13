@@ -72,6 +72,9 @@ pub(super) struct CurrentRequests {
     exact_currents: Vec<String>,
     /// `@device[param]` probes: canonical device, lower-case parameter.
     parameters: Vec<(String, String)>,
+    /// Bare `device:param` probes, in the same form. A bare name may also be
+    /// a node, so one that names no terminal is not refused here.
+    bare_parameters: Vec<(String, String)>,
     /// Device accessors inside output cards and measurements: upper-case
     /// operator, canonical symbol (possibly a pattern).
     accessors: Vec<(String, String)>,
@@ -83,6 +86,7 @@ impl CurrentRequests {
             currents: SaveSet::default(),
             exact_currents: Vec::new(),
             parameters: Vec::new(),
+            bare_parameters: Vec::new(),
             accessors: Vec::new(),
         };
         let probes = netlist.saves.signals.iter().chain(
@@ -106,6 +110,16 @@ impl CurrentRequests {
                 SaveSignal::DeviceParam { device, param } => requests
                     .parameters
                     .push((canonical_symbol(device), param.trim().to_ascii_lowercase())),
+                SaveSignal::Raw(name) => {
+                    if let Some((device, param)) = name.trim().rsplit_once(':')
+                        && !device.trim().is_empty()
+                        && !param.trim().is_empty()
+                    {
+                        requests
+                            .bare_parameters
+                            .push((canonical_symbol(device), param.trim().to_ascii_lowercase()));
+                    }
+                }
                 _ => {}
             }
         }
@@ -129,7 +143,10 @@ impl CurrentRequests {
     }
 
     fn is_empty(&self) -> bool {
-        self.currents.signals.is_empty() && self.parameters.is_empty() && self.accessors.is_empty()
+        self.currents.signals.is_empty()
+            && self.parameters.is_empty()
+            && self.bare_parameters.is_empty()
+            && self.accessors.is_empty()
     }
 
     /// Whether `I(instance)` — or a projection of it such as `IM(instance)` —
@@ -158,6 +175,7 @@ impl CurrentRequests {
         let canonical = canonical_symbol(instance);
         self.parameters
             .iter()
+            .chain(&self.bare_parameters)
             .any(|(device, param)| *device == canonical && param == label)
             || self.accessors.iter().any(|(operator, symbol)| {
                 !is_current_projection_accessor(operator)

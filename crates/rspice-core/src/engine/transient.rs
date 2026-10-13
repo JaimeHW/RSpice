@@ -4499,7 +4499,10 @@ impl Engine {
             netlist.options.xspice_event_trace_save,
             Some(crate::netlist::EventSaveSelection::None)
         );
-        let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist);
+        // A metered Verilog-A terminal is read as a device trace, whichever
+        // spelling (`@x1[iout]`, `x1:iout`, `IA(x1)`) put the meter there.
+        let record_device_op_traces = Self::should_record_transient_device_op_traces(netlist)
+            || !circuit.veriloga_terminal_meters().is_empty();
         // Pre-simulation effects also belong to models with no matrix unknowns.
         // Run them before the empty-circuit shortcut can manufacture a trace.
         if resume.is_none() {

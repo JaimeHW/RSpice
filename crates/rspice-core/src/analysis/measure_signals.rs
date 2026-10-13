@@ -2292,7 +2292,36 @@ fn resolved_output_column_kind(
     {
         return OutputColumnKind::Voltage;
     }
+    if names_solved_branch(signal, signals) {
+        return OutputColumnKind::Current;
+    }
     output_column_kind(signal)
+}
+
+/// Whether a device-parameter probe names a branch the result solved.
+///
+/// A metered Verilog-A terminal is the branch of the zero-volt meter named
+/// `x1:iout`, so `@x1[iout]`, `N(x1:iout)` and `x1:iout` are that branch's
+/// current whatever the length of the port's name; Xyce's two-letter rule for
+/// a device lead current only covers a one-letter port. A plain `a:b` that is
+/// also a node stays the node, as `N(...)` does.
+fn names_solved_branch(signal: &SaveSignal, signals: &CanonicalMeasureSignalIndex<'_>) -> bool {
+    let branch = match signal {
+        SaveSignal::DeviceParam { device, param } => format!("{}:{}", device.trim(), param.trim()),
+        SaveSignal::Raw(name)
+            if name.contains(':')
+                && !name.starts_with('@')
+                && signals
+                    .get(&format!("V({})", name.trim()))
+                    .is_ok_and(|value| value.is_none()) =>
+        {
+            name.trim().to_string()
+        }
+        _ => return false,
+    };
+    signals
+        .get(&format!("I({branch})"))
+        .is_ok_and(|value| value.is_some())
 }
 
 fn expression_output_column_kind(
@@ -2303,7 +2332,7 @@ fn expression_output_column_kind(
         && let Some(signal @ SaveSignal::DeviceParam { .. }) =
             crate::netlist::parse_save_probe(name)
     {
-        return output_column_kind(&signal);
+        return resolved_output_column_kind(name, &signal, signals);
     }
     let NetExpr::FnCall { name, args } = expression else {
         return OutputColumnKind::Scalar;

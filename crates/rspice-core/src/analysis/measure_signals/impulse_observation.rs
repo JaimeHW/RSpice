@@ -242,7 +242,9 @@ impl<'a> Resolver<'a, '_> {
                     is_current_output_accessor(&prefix.to_ascii_uppercase())
                 })
                 || match crate::netlist::parse_save_probe(authored) {
-                    Some(SaveSignal::DeviceParam { param, .. }) => current_parameter(&param),
+                    Some(SaveSignal::DeviceParam { param, .. }) => {
+                        current_parameter(&param) || self.retained_currents.contains(&canonical)
+                    }
                     _ => self.retained_currents.contains(&canonical),
                 };
             if current && self.current_recorded {
@@ -557,21 +559,52 @@ pub(crate) fn resolve_with_coverage<'a>(
                 .ok_or_else(|| failure("current trace alias capacity overflow"))?,
         )
         .map_err(|_| failure("cannot allocate current trace aliases"))?;
+    // A device parameter whose `device:param` names a solved branch is that
+    // branch's current: a metered Verilog-A terminal, `@x1[iout]`, is the
+    // branch of its zero-volt meter `x1:iout`, whatever the port name's length.
+    let mut solved_branches = HashSet::new();
+    if !result.device_op_traces.is_empty() {
+        solved_branches
+            .try_reserve(result.branch_names.len())
+            .map_err(|_| failure("cannot allocate solved branch names"))?;
+        for name in &result.branch_names {
+            if abort.is_aborted() {
+                return Err(ImpulseObservationError::Aborted);
+            }
+            solved_branches.insert(canonical_measure_signal_name(&format!("I({name})")));
+        }
+    }
     for trace in &result.device_op_traces {
         if abort.is_aborted() {
             return Err(ImpulseObservationError::Aborted);
         }
-        if current_parameter(&trace.parameter) {
-            let device = &trace.device_name;
-            let param = &trace.parameter;
-            for alias in [
-                format!("@{device}[{param}]"),
-                format!("{device}:{param}"),
-                format!("{param}({device})"),
-                format!("N({device}:{param})"),
-            ] {
-                retained_currents.insert(canonical_measure_signal_name(&alias));
+        let device = &trace.device_name;
+        let param = &trace.parameter;
+        let branch = canonical_measure_signal_name(&format!("I({device}:{param})"));
+        let metered = solved_branches.contains(&branch);
+        if !metered && !current_parameter(param) {
+            continue;
+        }
+        // The meter's own impulse history is the terminal's.
+        let branch_history = if metered {
+            aliases.get(&branch).copied()
+        } else {
+            None
+        };
+        for alias in [
+            format!("@{device}[{param}]"),
+            format!("{device}:{param}"),
+            format!("{param}({device})"),
+            format!("N({device}:{param})"),
+        ] {
+            let alias = canonical_measure_signal_name(&alias);
+            if let Some(history) = branch_history {
+                aliases
+                    .try_reserve(1)
+                    .map_err(|_| failure("cannot allocate current impulse aliases"))?;
+                aliases.entry(alias.clone()).or_insert(history);
             }
+            retained_currents.insert(alias);
         }
     }
     let params = netlist.map_or(&empty_params, |netlist| &netlist.params);
@@ -764,6 +797,47 @@ mod tests {
             close(output.dc_component, -0.002);
             close(output.harmonics[1].magnitude, 0.004);
             close(output.harmonics[1].phase, 90.0);
+        }
+    }
+
+    /// A metered Verilog-A terminal is the branch of its zero-volt meter, so
+    /// `@x1[iout]` — longer than Xyce's two-letter lead form — reads the
+    /// meter's impulse history under every spelling, and a missing history is
+    /// refused as it is for any other current instead of being read as none.
+    #[test]
+    fn a_metered_terminal_current_reads_its_meters_impulse_history() {
+        let mut result = fixture();
+        result.branch_names = vec!["X1:IOUT".into()];
+        result.device_op_traces = vec![TransientDeviceOpTrace {
+            device_name: "X1".into(),
+            parameter: "iout".into(),
+            values: vec![0.0; result.time.len()],
+        }];
+        result.current_impulses = Some(vec![CurrentImpulseTrace {
+            derivatives: Vec::new(),
+            owner: CurrentImpulseOwner::Branch {
+                branch_name: "X1:IOUT".into(),
+            },
+            complete: true,
+            points: vec![CurrentImpulsePoint {
+                time: 1.25,
+                charge_coulombs: 0.002,
+            }],
+        }]);
+        for spec in ["I(X1:IOUT)", "@X1[iout]", "x1:iout", "N(x1:iout)"] {
+            let output = spectrum(&result, spec, None).unwrap();
+            close(output.dc_component, 0.002);
+            close(output.harmonics[1].magnitude, 0.004);
+        }
+        result.current_impulses = Some(vec![]);
+        for spec in ["@x1[iout]", "x1:iout"] {
+            assert!(
+                spectrum(&result, spec, None)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no complete impulse history"),
+                "{spec}"
+            );
         }
     }
 

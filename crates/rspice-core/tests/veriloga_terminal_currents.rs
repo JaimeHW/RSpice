@@ -17,8 +17,15 @@
 
 use rspice_core::analysis::AcResult;
 use rspice_core::engine::TransientResult;
+use rspice_core::execution::{
+    AnalysisResultKind, ProjectedSignals, ProjectionSource, ProjectionSourceSignal,
+    ProjectionValues, SignalKind, SignalProjection, SignalUnit, dc_sweep_observable_series,
+    observable_lookup, operating_point_observable_series, operating_point_projection_signals,
+    transient_projection_signals,
+};
 use rspice_core::solver::SimulationResult;
-use rspice_core::{Engine, Netlist};
+use rspice_core::{Engine, Netlist, NoAbort};
+use std::borrow::Cow;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -61,6 +68,12 @@ impl Drop for ModelFile {
 const RESISTOR: &str = "`include \"disciplines.vams\"\n\
 module va_res(p, n); inout p, n; electrical p, n; parameter real r = 1k;\n\
 analog I(p, n) <+ V(p, n) / r;\n\
+endmodule\n";
+
+/// The same resistor with ports named as a real module names them.
+const PORTS_RESISTOR: &str = "`include \"disciplines.vams\"\n\
+module va_ports(inp, out); inout inp, out; electrical inp, out; parameter real r = 1k;\n\
+analog I(inp, out) <+ V(inp, out) / r;\n\
 endmodule\n";
 
 /// The native diode's equation with its thermal voltage and GMIN written
@@ -184,6 +197,197 @@ fn assert_complex(label: &str, actual: rspice_core::Complex64, expected: rspice_
     );
 }
 
+/// Project a result onto the deck's `.SAVE` contract, as an export does.
+fn project(netlist: &Netlist, source: &ProjectionSource<'_>) -> ProjectedSignals {
+    SignalProjection::from_netlist(netlist)
+        .expect("projection builds")
+        .project(&netlist.params, source, &NoAbort)
+        .unwrap_or_else(|error| panic!("the saved signals project: {error}"))
+}
+
+fn real_column<'a>(
+    display: String,
+    registry: &str,
+    kind: SignalKind,
+    values: Vec<f64>,
+) -> ProjectionSourceSignal<'a> {
+    ProjectionSourceSignal::new(
+        display,
+        registry,
+        kind,
+        ProjectionValues::Real(Cow::Owned(values)),
+    )
+    .expect("valid column")
+}
+
+fn op_projection(netlist: &Netlist, op: &SimulationResult) -> ProjectedSignals {
+    let observables = operating_point_observable_series(op);
+    let source = ProjectionSource::new(AnalysisResultKind::OperatingPoint, "DC OP")
+        .with_axis(vec![0.0])
+        .with_signals(operating_point_projection_signals(op).expect("op inventory"))
+        .with_lookup(observable_lookup(&observables));
+    project(netlist, &source)
+}
+
+/// Project a real-valued result whose deck may carry ordered `.PRINT`
+/// columns, which the core resolver evaluates before the `.SAVE` ones.
+fn project_ordered(
+    netlist: &Netlist,
+    source: ProjectionSource<'_>,
+    ordered: impl FnOnce(&SignalProjection) -> Option<Vec<rspice_core::execution::ProjectedSignal>>,
+) -> ProjectedSignals {
+    let projection = SignalProjection::from_netlist(netlist).expect("projection builds");
+    let source = source.with_ordered_print_columns(ordered(&projection));
+    project(netlist, &source)
+}
+
+fn dc_projection(netlist: &Netlist, sweep: &[(f64, SimulationResult)]) -> ProjectedSignals {
+    let first = &sweep[0].1;
+    let mut signals = Vec::new();
+    for (index, node) in first.node_names.iter().enumerate() {
+        let values = sweep
+            .iter()
+            .map(|(_, point)| point.node_voltages[index])
+            .collect();
+        signals.push(real_column(
+            format!("V({node})"),
+            node,
+            SignalKind::Voltage,
+            values,
+        ));
+    }
+    for (index, branch) in first.branch_names.iter().enumerate() {
+        let values = sweep
+            .iter()
+            .map(|(_, point)| point.branch_currents[index])
+            .collect();
+        signals.push(real_column(
+            format!("I({branch})"),
+            branch,
+            SignalKind::Current,
+            values,
+        ));
+    }
+    let observables = dc_sweep_observable_series(sweep);
+    let axis = sweep.iter().map(|(value, _)| *value).collect::<Vec<_>>();
+    let source = ProjectionSource::new(AnalysisResultKind::DcSweep, "DC")
+        .with_axis(axis)
+        .with_signals(signals)
+        .with_lookup(observable_lookup(&observables));
+    project_ordered(netlist, source, |projection| {
+        projection
+            .ordered_dc_columns(netlist, sweep, Default::default(), &NoAbort)
+            .expect("the DC print cards evaluate")
+    })
+}
+
+fn tran_projection(netlist: &Netlist, tran: &TransientResult) -> ProjectedSignals {
+    let source = ProjectionSource::new(AnalysisResultKind::Transient, "TRAN")
+        .with_axis(tran.time.as_slice())
+        .with_signals(transient_projection_signals(tran).expect("transient inventory"))
+        .with_lookup(rspice_core::analysis::measure_signals::transient_signal_map(tran));
+    project_ordered(netlist, source, |projection| {
+        projection
+            .ordered_transient_columns(netlist, tran, Default::default(), &NoAbort)
+            .expect("the TRAN print cards evaluate")
+    })
+}
+
+fn complex_column<'a>(
+    points: &[AcResult],
+    display: String,
+    registry: &str,
+    kind: SignalKind,
+    pick: impl Fn(&AcResult) -> rspice_core::Complex64,
+) -> ProjectionSourceSignal<'a> {
+    ProjectionSourceSignal::new(
+        display,
+        registry,
+        kind,
+        ProjectionValues::Complex {
+            real: Cow::Owned(points.iter().map(|point| pick(point).re).collect()),
+            imag: Cow::Owned(points.iter().map(|point| pick(point).im).collect()),
+        },
+    )
+    .expect("valid complex column")
+}
+
+fn ac_projection(netlist: &Netlist, points: &[AcResult]) -> ProjectedSignals {
+    let first = &points[0];
+    let mut signals = Vec::new();
+    for (index, node) in first.node_names.iter().enumerate() {
+        signals.push(complex_column(
+            points,
+            format!("V({node})"),
+            node,
+            SignalKind::Voltage,
+            |point| point.voltages[index],
+        ));
+    }
+    for (index, branch) in first.branch_names.iter().enumerate() {
+        signals.push(complex_column(
+            points,
+            format!("I({branch})"),
+            branch,
+            SignalKind::Current,
+            |point| point.currents[index],
+        ));
+    }
+    let axis = points
+        .iter()
+        .map(|point| point.frequency)
+        .collect::<Vec<_>>();
+    let source = ProjectionSource::new(AnalysisResultKind::Ac, "AC")
+        .with_axis(axis)
+        .with_signals(signals);
+    project(netlist, &source)
+}
+
+/// Each named column is exported as a current in amperes, with these values.
+fn assert_amperes(label: &str, projected: &ProjectedSignals, name: &str, expected: &[f64]) {
+    let signal = projected
+        .signals()
+        .iter()
+        .find(|signal| {
+            signal
+                .descriptor()
+                .display_name()
+                .eq_ignore_ascii_case(name)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "{label}: {name} is exported; have {:?}",
+                projected
+                    .signals()
+                    .iter()
+                    .map(|signal| signal.descriptor().display_name())
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        signal.descriptor().kind(),
+        SignalKind::Current,
+        "{label}: {name}"
+    );
+    assert_eq!(
+        signal.descriptor().unit(),
+        &SignalUnit::Ampere,
+        "{label}: {name}"
+    );
+    let values = signal
+        .real()
+        .map(<[f64]>::to_vec)
+        .or_else(|| signal.complex().map(|(real, _)| real.to_vec()))
+        .expect("a column of values");
+    assert_eq!(values.len(), expected.len(), "{label}: {name}");
+    for (actual, expected) in values.iter().zip(expected) {
+        assert!(
+            agrees(*actual, *expected, STATIC_RELATIVE),
+            "{label}: {name} is {actual:e}, expected {expected:e}"
+        );
+    }
+}
+
 /// A Verilog-A resistor reports the native resistor's current in every
 /// analysis: `I(x1)` and `@x1[ip]` name the current into `p`, `@x1[in]` the
 /// current into `n`.
@@ -251,6 +455,143 @@ fn a_verilog_a_resistor_reports_the_native_resistors_current() {
         assert_complex("ac @x1[ip]", ac_branch(&point, "x1:ip"), native);
         assert_complex("ac @x1[in]", ac_branch(&point, "x1:in"), -native);
     }
+}
+
+/// A port named with more than one letter gives a longer label — `out` gives
+/// `@x1[iout]` — and every spelling of it (`@x1[iout]`, `x1:iout`,
+/// `N(x1:iinp)`) is exported as a current in amperes in every analysis, as a
+/// one-letter port's is, never as a dimensionless device parameter.
+#[test]
+fn a_multi_letter_port_is_a_current_in_amperes() {
+    let model = ModelFile::new("va_ports", PORTS_RESISTOR);
+    let deck = |source: &str, saves: &str, analysis: &str| {
+        format!(
+            "* Verilog-A resistor with multi-letter ports against a native one\n\
+             v1 in 0 {source}\n\
+             x1 in a va_ports r=1k\n\
+             rl1 a 0 2k\n\
+             vm in b 0\n\
+             r1 b c 1k\n\
+             rl2 c 0 2k\n\
+             .save i(x1) @x1[iinp] @x1[iout] x1:iout i(vm) {saves}\n\
+             {analysis}\n\
+             .va \"{}\" va_ports\n\
+             .end\n",
+            model.deck_path()
+        )
+    };
+    let reversed = |values: &[f64]| values.iter().map(|value| -value).collect::<Vec<_>>();
+    // `N(x1:iinp)` is the same signal as the saved `@x1[iinp]`, so where a
+    // `.PRINT` card spells it the export carries it under that spelling.
+    let out = ["@x1[iout]", "x1:iout"];
+
+    let source = deck("dc 1.5", "i(r1)", ".op");
+    let op = operating_point(&source);
+    let native = observable(&op, "I(r1)");
+    assert_static("op I(x1)", observable(&op, "I(x1)"), native);
+    assert_static("op @x1[iinp]", observable(&op, "x1:iinp"), native);
+    assert_static("op @x1[iout]", observable(&op, "x1:iout"), -native);
+    let projected = op_projection(&netlist(&source), &op);
+    assert_amperes("op", &projected, "@x1[iinp]", &[native]);
+    for name in out {
+        assert_amperes("op", &projected, name, &[-native]);
+    }
+
+    let source = deck("dc 0", "i(r1)", ".dc v1 -2 2 1\n.print dc n(x1:iinp)");
+    let sweep = Engine::default()
+        .run_dc_sweep(&netlist(&source), "v1", -2.0, 2.0, 1.0)
+        .expect("DC sweep solves");
+    let native = sweep
+        .iter()
+        .map(|(_, point)| observable(point, "I(r1)"))
+        .collect::<Vec<_>>();
+    for ((value, point), native) in sweep.iter().zip(&native) {
+        assert_static(
+            &format!("dc {value} @x1[iout]"),
+            observable(point, "x1:iout"),
+            -native,
+        );
+    }
+    let projected = dc_projection(&netlist(&source), &sweep);
+    assert_amperes("dc", &projected, "n(x1:iinp)", &native);
+    for name in out {
+        assert_amperes("dc", &projected, name, &reversed(&native));
+    }
+
+    let source = deck(
+        "sin(0 1 10meg)",
+        "i(r1)",
+        ".tran 1n 100n\n.print tran n(x1:iinp)",
+    );
+    let tran = transient(&source, 100e-9, 1e-9);
+    let native = derived(&tran, "r1");
+    assert_waveform("tran @x1[iinp]", &lead(&tran, "x1", "iinp"), &native);
+    assert_waveform(
+        "tran @x1[iout]",
+        &lead(&tran, "x1", "iout"),
+        &reversed(&native),
+    );
+    let projected = tran_projection(&netlist(&source), &tran);
+    assert_amperes("tran", &projected, "n(x1:iinp)", &lead(&tran, "x1", "iinp"));
+    for name in out {
+        assert_amperes("tran", &projected, name, &lead(&tran, "x1", "iout"));
+    }
+
+    // AC reports no resistor current, so the native side is the meter `vm`.
+    let source = deck("dc 0 ac 1", "", ".ac dec 2 1k 1meg\n.print ac n(x1:iinp)");
+    let points = ac(&source, &[1e3, 1e6]);
+    for point in &points {
+        assert_complex(
+            "ac @x1[iout]",
+            ac_branch(point, "x1:iout"),
+            -ac_branch(point, "vm"),
+        );
+    }
+    let projected = ac_projection(&netlist(&source), &points);
+    let expected = |branch: &str| {
+        points
+            .iter()
+            .map(|point| ac_branch(point, branch).re)
+            .collect::<Vec<_>>()
+    };
+    assert_amperes("ac", &projected, "n(x1:iinp)", &expected("vm"));
+    for name in out {
+        assert_amperes("ac", &projected, name, &expected("x1:iout"));
+    }
+}
+
+/// A terminal current saved only by its bare `x1:iout` spelling — Spectre's
+/// `save x1:p` form — is metered and exported like the bracketed one.
+#[test]
+fn a_bare_terminal_current_spelling_alone_is_metered() {
+    let model = ModelFile::new("va_ports_bare", PORTS_RESISTOR);
+    let deck = |analysis: &str| {
+        format!(
+            "* only the bare spelling names the terminal\n\
+             v1 in 0 sin(0 1 10meg)\n\
+             x1 in a va_ports r=1k\n\
+             r1 a 0 1k\n\
+             .save x1:iout i(r1)\n\
+             {analysis}\n\
+             .va \"{}\" va_ports\n\
+             .end\n",
+            model.deck_path()
+        )
+    };
+    let source = deck(".tran 1n 100n");
+    let tran = transient(&source, 100e-9, 1e-9);
+    let into_terminal = derived(&tran, "r1")
+        .iter()
+        .map(|value| -value)
+        .collect::<Vec<_>>();
+    assert_waveform("bare x1:iout", &lead(&tran, "x1", "iout"), &into_terminal);
+    let projected = tran_projection(&netlist(&source), &tran);
+    assert_amperes(
+        "bare tran",
+        &projected,
+        "x1:iout",
+        &lead(&tran, "x1", "iout"),
+    );
 }
 
 /// A Verilog-A diode reports the native diode's current, where the current
@@ -630,14 +971,6 @@ fn a_mixed_instance_reports_the_current_its_boundary_drives() {
     let into_terminal = load.iter().map(|value| -value).collect::<Vec<_>>();
     assert_waveform("mixed I(x1)", &derived(&tran, "x1"), &into_terminal);
     assert_waveform("mixed @x1[iq]", &lead(&tran, "x1", "iq"), &into_terminal);
-    eprintln!(
-        "digital traces: {:?}; nodes: {:?}",
-        tran.digital_traces
-            .iter()
-            .map(|trace| trace.node_name.as_str())
-            .collect::<Vec<_>>(),
-        tran.node_names
-    );
     assert!(
         tran.digital_traces
             .iter()
@@ -732,5 +1065,111 @@ mod generated {
             agrees(op_currents[0], op_currents[1], 1e-12),
             "the two routes agree: {op_currents:?}"
         );
+    }
+}
+
+/// The generated route labels a terminal as its catalog does, and a catalog
+/// label longer than two letters is a current all the same: R2_CMC's ports
+/// `n1` and `n2` give `@x1[in1]` and `@x1[in2]`.
+#[cfg(feature = "veriloga-model-r2-cmc")]
+mod generated_multi_letter {
+    use super::*;
+
+    fn deck(source: &str, analysis: &str) -> String {
+        format!(
+            "* generated R2_CMC terminal currents\n\
+             v1 in 0 {source}\n\
+             x1 in a r2_cmc r=1k\n\
+             vm a b 0\n\
+             rl b 0 2k\n\
+             .save i(x1) @x1[in1] @x1[in2] x1:in2 i(vm)\n\
+             {analysis}\n\
+             .end\n"
+        )
+    }
+
+    #[test]
+    fn a_generated_instance_with_multi_letter_labels_reports_currents_in_amperes() {
+        // A `.PRINT` card's `N(x1:in1)` is the saved `@x1[in1]`, exported
+        // under the card's spelling.
+        let spellings = ["@x1[in2]", "x1:in2"];
+        let gmin = rspice_core::SimulationConfig::default()
+            .convergence_config
+            .gmin_target;
+
+        // KCL at `a`: what the instance drives out of `n2` leaves through the
+        // meter `vm` and the node's GMIN floor.
+        let kcl = |point: &SimulationResult| {
+            point.branch_current_named("vm").expect("I(vm)")
+                + gmin * point.try_voltage_named("a").expect("V(a)")
+        };
+        let source = deck("dc 1.5", ".op");
+        let op = operating_point(&source);
+        let native = kcl(&op);
+        assert!(
+            (native - 1.5 / 3000.0).abs() < 1e-9,
+            "the instance is 1k: {native}"
+        );
+        assert_static("op I(x1)", observable(&op, "I(x1)"), native);
+        assert_static("op @x1[in1]", observable(&op, "x1:in1"), native);
+        assert_static("op @x1[in2]", observable(&op, "x1:in2"), -native);
+        let projected = op_projection(&netlist(&source), &op);
+        assert_amperes("op", &projected, "@x1[in1]", &[native]);
+        for name in spellings {
+            assert_amperes("op", &projected, name, &[-native]);
+        }
+
+        let source = deck("dc 0", ".dc v1 -1 1 1\n.print dc n(x1:in1)");
+        let sweep = Engine::default()
+            .run_dc_sweep(&netlist(&source), "v1", -1.0, 1.0, 1.0)
+            .expect("DC sweep solves");
+        let mut native = Vec::new();
+        for (value, point) in &sweep {
+            let current = kcl(point);
+            assert_static(
+                &format!("dc {value} @x1[in2]"),
+                observable(point, "x1:in2"),
+                -current,
+            );
+            native.push(current);
+        }
+        let reversed = native.iter().map(|value| -value).collect::<Vec<_>>();
+        let projected = dc_projection(&netlist(&source), &sweep);
+        assert_amperes("dc", &projected, "n(x1:in1)", &native);
+        for name in spellings {
+            assert_amperes("dc", &projected, name, &reversed);
+        }
+
+        let source = deck("sin(0 1 10meg)", ".tran 1n 100n\n.print tran n(x1:in1)");
+        let tran = transient(&source, 100e-9, 1e-9);
+        let native = derived(&tran, "vm");
+        assert_waveform("tran I(x1)", &derived(&tran, "x1"), &native);
+        assert_waveform("tran @x1[in1]", &lead(&tran, "x1", "in1"), &native);
+        let projected = tran_projection(&netlist(&source), &tran);
+        assert_amperes("tran", &projected, "n(x1:in1)", &lead(&tran, "x1", "in1"));
+        for name in spellings {
+            assert_amperes("tran", &projected, name, &lead(&tran, "x1", "in2"));
+        }
+
+        let source = deck("dc 0 ac 1", ".ac dec 2 1k 1meg\n.print ac n(x1:in1)");
+        let points = ac(&source, &[1e3, 1e6]);
+        for point in &points {
+            assert_complex(
+                "ac @x1[in1]",
+                ac_branch(point, "x1:in1"),
+                ac_branch(point, "vm"),
+            );
+        }
+        let projected = ac_projection(&netlist(&source), &points);
+        let expected = |branch: &str| {
+            points
+                .iter()
+                .map(|point| ac_branch(point, branch).re)
+                .collect::<Vec<_>>()
+        };
+        assert_amperes("ac", &projected, "n(x1:in1)", &expected("x1:in1"));
+        for name in spellings {
+            assert_amperes("ac", &projected, name, &expected("x1:in2"));
+        }
     }
 }

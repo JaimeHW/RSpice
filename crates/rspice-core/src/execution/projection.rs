@@ -1269,8 +1269,15 @@ fn resolve_complex_operand(
             validity: vec![true; length],
         });
     }
-    if let SaveSignal::DeviceParam { device, param } = signal
-        && let Some(column) = device_lead_branch(source, device, param)
+    let lead = match signal {
+        SaveSignal::DeviceParam { device, param } => Some(format!("{device}:{param}")),
+        SaveSignal::Raw(name) if name.contains(':') && !name.trim_start().starts_with('@') => {
+            Some(name.trim().to_owned())
+        }
+        _ => None,
+    };
+    if let Some(lead) = lead
+        && let Some(column) = device_lead_branch(source, &lead)
     {
         let descriptor = signal_descriptor(
             authored,
@@ -1296,17 +1303,17 @@ fn resolve_complex_operand(
     Err(source.unavailable(authored))
 }
 
-/// The branch a terminal current `@device[param]` is solved in.
+/// The branch a terminal current `@device[param]` (or `device:param`) is
+/// solved in.
 ///
 /// A metered Verilog-A terminal's current is the branch current of a meter
 /// named `device:param`; a complex result carries it under that name, and
 /// the device-parameter spelling selects it.
 fn device_lead_branch<'a>(
     source: &ProjectionSource<'a>,
-    device: &str,
-    param: &str,
+    lead: &str,
 ) -> Option<ProjectionSourceSignal<'a>> {
-    let branch = crate::netlist::canonical_symbol(&format!("{device}:{param}"));
+    let branch = crate::netlist::canonical_symbol(lead);
     source
         .signals
         .iter()
@@ -1619,6 +1626,44 @@ mod tests {
         let (real, imag) = projected.signals()[0].complex().expect("complex column");
         assert_eq!(real, [1e-3, 1e-3]);
         assert_eq!(imag, [2e-6, 2e-5]);
+    }
+
+    /// A port name longer than one letter gives a longer label, `@x1[iout]`,
+    /// and its `x1:iinp` spelling selects the meter's branch the same way.
+    #[test]
+    fn a_multi_letter_terminal_current_selects_its_meters_complex_branch() {
+        let netlist = parse(
+            "terminal current\nV1 a 0 AC 1\nX1 a 0 dev\n.AC DEC 1 1 10\n\
+             .SAVE @x1[iout] x1:iinp\n.END\n",
+        );
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let source = ProjectionSource::new(AnalysisResultKind::Ac, "AC")
+            .with_axis(vec![1.0])
+            .with_signals(vec![
+                complex_signal(
+                    "I(X1:IINP)",
+                    "X1:IINP",
+                    SignalKind::Current,
+                    vec![2.0],
+                    vec![0.5],
+                ),
+                complex_signal(
+                    "I(X1:IOUT)",
+                    "X1:IOUT",
+                    SignalKind::Current,
+                    vec![-2.0],
+                    vec![-0.5],
+                ),
+            ]);
+        let projected = projection
+            .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+            .expect("both terminal currents resolve");
+        assert_eq!(names(&projected), ["@x1[iout]", "x1:iinp"]);
+        for (signal, expected) in projected.signals().iter().zip([-2.0, 2.0]) {
+            assert_eq!(signal.descriptor().kind(), SignalKind::Current);
+            assert_eq!(signal.descriptor().unit(), &SignalUnit::Ampere);
+            assert_eq!(signal.complex().expect("complex column").0, [expected]);
+        }
     }
 
     #[test]
