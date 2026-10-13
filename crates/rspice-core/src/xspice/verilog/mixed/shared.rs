@@ -19,6 +19,9 @@ pub(super) struct SignalView {
     plan: Arc<CanonicalDigitalPlan>,
     bits: Vec<FourStateValue>,
     reals: Vec<f64>,
+    /// The circuit latch's digital edges for this instance's signals, for its
+    /// analog event controls; see `digital_edges.rs`. Empty when none.
+    edges: Vec<u8>,
 }
 
 impl SignalView {
@@ -41,6 +44,7 @@ impl SignalView {
             reals: vec![0.0; plan.signals.len()],
             plan,
             bits,
+            edges: Vec::new(),
         }
     }
 
@@ -140,6 +144,25 @@ impl MixedDigital {
         self.plan()
             .signal(signal)
             .is_some_and(|signal| signal.kind.is_real())
+    }
+    /// The watched digital edges seen on a signal in the open trial.
+    pub(super) fn analog_edge(&self, signal: DigitalSignalId) -> u8 {
+        match self {
+            Self::Owned(host) => host.analog_edges().seen(signal),
+            Self::View(view) => view.edges.get(usize::from(signal)).copied().unwrap_or(0),
+        }
+    }
+    pub(super) fn has_analog_edges(&self) -> bool {
+        match self {
+            Self::Owned(host) => host.analog_edges().is_raised(),
+            Self::View(view) => !view.edges.is_empty(),
+        }
+    }
+    pub(super) fn clear_analog_edges(&mut self) {
+        match self {
+            Self::Owned(host) => host.analog_edges_mut().clear(),
+            Self::View(view) => view.edges.clear(),
+        }
     }
     pub(super) fn declared_range(&self, signal: DigitalSignalId) -> VectorBounds {
         match self {
@@ -585,6 +608,7 @@ impl MixedDigitalCoordinator {
             })
             .collect();
         digital.bind_analog_variable_inputs(&dependencies)?;
+        super::digital_edges::watch_enrolled(&mut digital, hosts, &maps);
         if !bit_groups.is_empty() {
             digital.connect_bits(&bit_groups)?;
         }
@@ -986,6 +1010,7 @@ impl MixedDigitalCoordinator {
         // Read before the queue is drained, and reported to the instances by
         // the circuit trial: see `ActiveTrial::scheduled_activation`.
         let scheduled_activation = self.digital.next_tick().is_some_and(|next| next <= tick);
+        super::digital_edges::open_trial(&mut self.digital);
         let rollback = self.digital.clone();
         let cursor = SharedTrialCursor {
             observers: self.accepted_observers.clone(),
@@ -1494,7 +1519,18 @@ impl MixedDigitalCoordinator {
                     host.state.digital.read(local) != self.digital.read(global)
                 }
             });
-            if !differs {
+            // A digital edge an analog event control waits on can move the
+            // analog inputs with no net change of value: a pulse inside one
+            // settle.
+            let edges_differ = match &*host.state.digital {
+                MixedDigital::View(view) => super::digital_edges::view_differs(
+                    &view.edges,
+                    &map.signals,
+                    self.digital.analog_edges(),
+                ),
+                MixedDigital::Owned(_) => false,
+            };
+            if !differs && !edges_differ {
                 continue;
             }
             let mut dac_moved = Vec::new();
@@ -1525,6 +1561,13 @@ impl MixedDigitalCoordinator {
                 {
                     view.bits[local].clone_from(value);
                 }
+            }
+            if edges_differ {
+                super::digital_edges::refresh_view(
+                    &mut view.edges,
+                    &map.signals,
+                    self.digital.analog_edges(),
+                );
             }
             if let Some(trial) = &mut host.trial {
                 for index in dac_moved {

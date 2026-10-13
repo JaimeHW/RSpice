@@ -435,17 +435,27 @@ endmodule
 
 /// On a discrete-discipline signal the `cross` reading is simply wrong: a
 /// digital net carries no continuous value to cross zero, so the event would
-/// never fire. Refuse it instead of stamping a detector that does nothing.
+/// never fire.
 ///
-/// The construct itself is legal — Verilog-AMS LRM 2.4 section 7.3.4's
+/// The construct is legal — Verilog-AMS LRM 2.4 section 7.3.4's
 /// `analog_event_expression` lists `posedge expression` beside the analog event
 /// functions, and its worked example declares the operand a `wire`; section
 /// 7.3.6.2 runs the guarded statement "at the time corresponding to a real
-/// promotion of the digital time". So the message names the seam that is
-/// missing rather than the construct, and cites the clauses it is short of.
+/// promotion of the digital time". It lowers to a digital edge event the mixed
+/// host raises, and is never a `cross`: the continuous-only compiler refuses
+/// the module for its discrete content, and the mixed compile carries the edge.
 #[test]
-fn edge_events_on_discrete_signals_are_refused() {
-    for keyword in ["posedge", "negedge"] {
+fn edge_events_on_discrete_signals_are_digital_edge_events() {
+    for (keyword, edge) in [
+        (
+            "posedge",
+            rspice_veriloga::canonical_ir::digital::DigitalEdge::Posedge,
+        ),
+        (
+            "negedge",
+            rspice_veriloga::canonical_ir::digital::DigitalEdge::Negedge,
+        ),
+    ] {
         let source = format!(
             r#"
 `include "disciplines.vams"
@@ -465,28 +475,16 @@ module edge_on_discrete(p, n);
 endmodule
 "#
         );
-        let error = rspice_veriloga::VerilogACompiler::default()
-            .compile_module(&source, Some("edge_on_discrete"))
-            .expect_err("a digital edge event must not compile to a cross detector");
-        let message = error.to_string();
-        assert!(
-            message.contains(&format!("`{keyword} clk`")),
-            "expected the refused construct to be named, got {message:?}"
-        );
-        assert!(
-            message.contains("discrete-discipline"),
-            "expected the discipline domain to be named, got {message:?}"
-        );
+        assert_digital_edge(&source, "edge_on_discrete", edge);
     }
 }
 
-/// The built-in `logic` discipline is discrete too, and reaches the same
-/// refusal without any user discipline declaration.
+/// The built-in `logic` discipline is discrete too, and its edge is the same
+/// digital edge event without any user discipline declaration.
 #[test]
-fn edge_events_on_the_builtin_logic_discipline_are_refused() {
-    let error = rspice_veriloga::VerilogACompiler::default()
-        .compile_module(
-            r#"
+fn edge_events_on_the_builtin_logic_discipline_are_digital_edge_events() {
+    assert_digital_edge(
+        r#"
 `include "disciplines.vams"
 module edge_on_logic(p, n);
     inout p, n;
@@ -500,8 +498,46 @@ module edge_on_logic(p, n);
     end
 endmodule
 "#,
-            Some("edge_on_logic"),
-        )
+        "edge_on_logic",
+        rspice_veriloga::canonical_ir::digital::DigitalEdge::Posedge,
+    );
+}
+
+/// The continuous-only compiler refuses the module for its discrete content,
+/// with no `cross` reading reported; the mixed compile carries one edge on
+/// `clk`.
+fn assert_digital_edge(
+    source: &str,
+    module: &str,
+    edge: rspice_veriloga::canonical_ir::digital::DigitalEdge,
+) {
+    let error = rspice_veriloga::VerilogACompiler::default()
+        .compile_module(source, Some(module))
         .expect_err("a digital edge event must not compile to a cross detector");
-    assert!(error.to_string().contains("`posedge clk`"), "{error}");
+    assert!(
+        error.to_string().contains("no executable form"),
+        "the continuous-only compiler refuses the discrete content: {error}"
+    );
+    let runtime = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    })
+    .compile_runtime(source, Some(module))
+    .unwrap_or_else(|error| panic!("the mixed compile carries the edge: {error}"));
+    assert!(
+        runtime
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "VA-SEM-EDGE-EVENT-AS-CROSS"),
+        "{:?}",
+        runtime.diagnostics
+    );
+    let edges: Vec<_> = runtime
+        .canonical_ir
+        .hir
+        .discrete_edges
+        .iter()
+        .map(|discrete| (discrete.signal.as_str(), discrete.edge))
+        .collect();
+    assert_eq!(edges, [("clk", edge)]);
 }

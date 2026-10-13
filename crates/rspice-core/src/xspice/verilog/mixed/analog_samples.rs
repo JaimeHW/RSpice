@@ -157,7 +157,12 @@ impl AnalogModelParticipant<'_> {
                     let signal = self
                         .signals
                         .map_or(input.signal, |map| map[usize::from(input.signal)]);
-                    let value = if input.real {
+                    let value = if let Some(edge) = input.edge {
+                        Some(super::digital_edges::flag(
+                            exchange.analog_edge(signal),
+                            edge,
+                        ))
+                    } else if input.real {
                         exchange.read_real_signal(signal)
                     } else {
                         exchange

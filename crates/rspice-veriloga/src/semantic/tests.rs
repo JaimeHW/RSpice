@@ -2819,6 +2819,86 @@ fn a_runtime_loop_keeps_its_body_as_a_region() {
     );
 }
 
+/// Verilog-AMS LRM 2.4 section 7.3.4: an analog `@(posedge d)` on a discrete
+/// signal is a digital edge event. Every control on one edge of one signal
+/// shares one integer flag, a discrete input bound to that signal; the other
+/// edge of the same signal is a second flag.
+#[test]
+fn an_analog_edge_on_a_discrete_signal_lowers_to_a_digital_edge_flag() {
+    let file = analyze(&module_src(
+        r#"
+        reg clk;
+        real hits, falls;
+        initial clk = 0;
+        always #5 clk = ~clk;
+        analog begin
+            @(posedge clk) hits = hits + 1;
+            @(posedge clk or negedge clk) falls = falls + 1;
+            I(p, n) <+ (hits + falls) * V(p, n);
+        end
+    "#,
+    ))
+    .expect("an edge on a discrete reg is a digital edge event");
+    assert!(
+        file.warnings
+            .iter()
+            .all(|warning| warning.code != EDGE_EVENT_AS_CROSS_CODE),
+        "a digital edge is not compiled as `cross`: {:?}",
+        file.warnings
+    );
+    let module = file.modules.into_values().next().unwrap();
+    let edges: Vec<_> = module
+        .discrete_edges
+        .iter()
+        .map(|edge| (edge.signal.as_str(), edge.edge))
+        .collect();
+    assert_eq!(
+        edges,
+        [("clk", DigitalEdge::Posedge), ("clk", DigitalEdge::Negedge)]
+    );
+    for edge in &module.discrete_edges {
+        let flag = &module.variables[edge.value];
+        assert!(flag.is_state && flag.is_event_controlled, "{flag:?}");
+        assert_eq!(flag.value_type, ValueType::Integer);
+        assert!(module.event_state_variables.contains(&edge.value));
+        assert!(
+            module
+                .discrete_inputs
+                .iter()
+                .any(|(value, _)| *value == edge.value)
+        );
+        assert_eq!(module.discrete_bindings[&edge.value], "clk");
+    }
+}
+
+/// What an analog edge event cannot be: an edge of a real-valued discrete
+/// signal, and an edge of an expression computed over a discrete one. Both
+/// are refused by name rather than compiled into a `cross` that never fires.
+#[test]
+fn analog_edges_of_reals_and_of_discrete_expressions_are_refused() {
+    for (declaration, event, expected) in [
+        ("real r; initial r = 1.0;", "posedge r", "has no edges"),
+        (
+            "reg [3:0] bus; initial bus = 0;",
+            "posedge bus[1]",
+            "takes a discrete signal by name",
+        ),
+        (
+            "reg a, b; initial begin a = 0; b = 0; end",
+            "negedge (a & b)",
+            "takes a discrete signal by name",
+        ),
+    ] {
+        let error = analyze(&module_src(&format!(
+            "{declaration} real x; analog begin @({event}) x = 1; I(p, n) <+ x * V(p, n); end"
+        )))
+        .map(|_| ())
+        .expect_err(event)
+        .to_string();
+        assert!(error.contains(expected), "{event}: {error}");
+    }
+}
+
 #[test]
 fn parameter_defaults_and_array_bounds_can_read_earlier_localparams() {
     let module = analyze_one(&module_src(

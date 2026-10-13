@@ -99,6 +99,9 @@ impl DigitalActiveExchange<'_> {
     pub(crate) fn read_real_signal(&self, signal: DigitalSignalId) -> Option<f64> {
         self.host.read_real(signal)
     }
+    pub(crate) fn analog_edge(&self, signal: DigitalSignalId) -> u8 {
+        self.host.analog_edges().seen(signal)
+    }
     pub(crate) fn analog_sample_requests(&self) -> Vec<DigitalAnalogProbeId> {
         let mut probes = BTreeSet::new();
         for index in &self.host.analog_waiters {

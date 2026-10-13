@@ -139,6 +139,7 @@
 mod analog_events;
 mod analog_samples;
 pub(crate) mod checkpoint;
+pub(super) mod digital_edges;
 mod shared;
 mod standalone;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
@@ -1366,6 +1367,9 @@ struct DiscreteAnalogInput {
     validity: usize,
     /// (least-significant storage position, width, encoded chunk), before numeric conversion.
     selection: Option<(i64, u32, bool)>,
+    /// The digital edge an analog event control waits on. Such an input is
+    /// a flag rather than a value; see `digital_edges.rs`.
+    edge: Option<rspice_veriloga::canonical_ir::digital::DigitalEdge>,
     signed: bool,
     real: bool,
     name: String,
@@ -1617,12 +1621,19 @@ impl MixedSignalHost {
             .iter()
             .map(|selection| (selection.value, selection))
             .collect();
+        let edges: std::collections::HashMap<_, _> = canonical_ir
+            .hir
+            .discrete_edges
+            .iter()
+            .map(|edge| (edge.value, edge.edge))
+            .collect();
         let discrete_inputs = canonical_ir
             .hir
             .discrete_inputs
             .iter()
             .map(|[value, validity]| {
                 let selection = selections.get(value);
+                let edge = edges.get(value).copied();
                 let signal_name = canonical_ir
                     .hir
                     .discrete_bindings
@@ -1643,6 +1654,7 @@ impl MixedSignalHost {
                     validity: usize::from(*validity),
                     selection: selection
                         .map(|selection| (selection.lsb, selection.width, selection.encoded)),
+                    edge,
                     signed: signal.integer && selection.is_none(),
                     real: signal.kind.is_real(),
                     name: signal.name.to_string(),
@@ -1678,7 +1690,7 @@ impl MixedSignalHost {
             .collect::<Vec<_>>();
         digital.sample_analog_probes(&initial_probe_values);
         let source_digest = canonical_ir.metadata.source_digest.to_string();
-        Ok(Self {
+        let mut host = Self {
             prepared_analog: PreparedAnalogStamp::default(),
             standalone: None,
             instance: instance.to_string(),
@@ -1712,7 +1724,9 @@ impl MixedSignalHost {
             max_circuit_node,
             max_bridge_iterations,
             analog_step_floor: 0.0,
-        })
+        };
+        host.watch_own_digital_edges();
+        Ok(host)
     }
 
     /// Reset both domains for a fresh analysis, retaining compiled code and
@@ -3928,6 +3942,8 @@ impl MixedSignalHost {
         self.scratch.trial = trial.vectors;
         // A new accepted point is a new interval: see [`CandidateLedger::clear`].
         self.scratch.ledger.clear();
+        drop(trial.rollback);
+        self.lower_digital_edges();
     }
 
     /// Whether the open trial can be kept as the held equilibrium.
@@ -3996,6 +4012,8 @@ impl MixedSignalHost {
         );
         self.scratch.trial = trial.vectors;
         self.scratch.ledger.clear();
+        drop(trial.rollback);
+        self.lower_digital_edges();
     }
 
     /// This instance's half of a held-equilibrium image: its boundary
@@ -5070,11 +5088,18 @@ fn dac_bits_differ(
 /// only an executed analog read diagnoses it. Unselected/untaken reads do not
 /// invent a numeric value or reject a trial.
 fn read_discrete_input(state: &MixedState, input: &DiscreteAnalogInput) -> Option<f64> {
-    let value = if state.digital.is_real(input.signal) {
-        state.digital.read_real(input.signal)
+    read_discrete_value(&state.digital, input)
+}
+
+/// [`read_discrete_input`] against one image of the discrete half.
+fn read_discrete_value(digital: &MixedDigital, input: &DiscreteAnalogInput) -> Option<f64> {
+    if let Some(edge) = input.edge {
+        return Some(digital_edges::flag(digital.analog_edge(input.signal), edge));
+    }
+    let value = if digital.is_real(input.signal) {
+        digital.read_real(input.signal)
     } else {
-        state
-            .digital
+        digital
             .read(input.signal)
             .and_then(|value| input.four_state_value(value))
     };

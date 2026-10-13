@@ -885,6 +885,22 @@ pub struct HirDiscreteSelection {
     pub width: u32,
 }
 
+/// An analog event control on a digital edge: `@(posedge d)` or
+/// `@(negedge d)` on a discrete signal inside an `analog` block (Verilog-AMS
+/// LRM 2.4 section 7.3.4).
+///
+/// The guarded statement reads `value`, an integer discrete input the mixed
+/// host raises to one for the coupled trial whose digital settle produced the
+/// edge, and holds at zero otherwise. Section 7.3.6.2 runs the statement at
+/// the real promotion of the digital time; the engine lands an accepted
+/// timepoint on every digital tick, so that trial is the one at the edge.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HirDiscreteEdge {
+    pub value: VariableId,
+    pub signal: SmolStr,
+    pub edge: super::digital::DigitalEdge,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HirModel {
     pub module_id: ModuleId,
@@ -913,6 +929,10 @@ pub struct HirModel {
     pub discrete_bindings: std::collections::BTreeMap<VariableId, SmolStr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discrete_selections: Vec<HirDiscreteSelection>,
+    /// Digital edges analog event controls wait on; each value slot is also a
+    /// discrete input bound to the edge's signal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discrete_edges: Vec<HirDiscreteEdge>,
     /// Sorted names whose values must be published during ordinary analog
     /// evaluation for discrete-domain readers. They are not electrical unknowns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1207,6 +1227,15 @@ impl HirModel {
                     width: selection.width,
                 })
                 .collect(),
+            discrete_edges: module
+                .discrete_edges
+                .iter()
+                .map(|edge| HirDiscreteEdge {
+                    value: VariableId::from(edge.value),
+                    signal: edge.signal.clone(),
+                    edge: edge.edge,
+                })
+                .collect(),
             discrete_bindings: module
                 .discrete_inputs
                 .iter()
@@ -1375,6 +1404,22 @@ impl HirModel {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
                 "packed discrete selections must name unique integer input slots and 1..31 bits for numeric groups or 1..15 bits for encoded chunks",
+            ));
+        }
+        let mut edged = HashSet::new();
+        if self.discrete_edges.iter().any(|edge| {
+            !input_values.contains(&edge.value)
+                || !edged.insert(edge.value)
+                || selected.contains(&edge.value)
+                || self.discrete_bindings.get(&edge.value) != Some(&edge.signal)
+                || self
+                    .variables
+                    .get(usize::from(edge.value))
+                    .is_none_or(|variable| variable.value_type != CanonicalValueType::Integer)
+        }) {
+            diagnostics.push(IrDiagnostic::global_error(
+                CompilerPhase::HirValidation,
+                "digital edge events must name unique, unselected integer input slots bound to their signals",
             ));
         }
         validate_dense_array_ids(&mut diagnostics, &self.arrays);

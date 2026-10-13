@@ -1024,6 +1024,12 @@ impl<'a> HierarchyElaborator<'a> {
                 .insert(selection.value, selection.signal.clone());
             self.flattened.discrete_selections.push(selection);
         }
+        for edge in &child.discrete_edges {
+            let mut edge = edge.clone();
+            edge.value += variable_base;
+            edge.signal = self.digital_signal_name(relative, &edge.signal)?;
+            self.flattened.discrete_edges.push(edge);
+        }
         self.flattened.event_state_variables.sort_unstable();
         self.flattened.event_state_variables.dedup();
         for &slot in &child.switch_branch_variables {

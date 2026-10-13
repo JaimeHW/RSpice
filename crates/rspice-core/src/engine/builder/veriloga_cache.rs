@@ -361,7 +361,16 @@ use super::*;
 // so rebuilding is the only reading; this constant moves with the schema so
 // the refusal happens at the cache boundary, where the diagnostic names the
 // cache file.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 140;
+//
+// Version 141 follows the canonical IR's schema from 159 to 160, which changes
+// what a cached analog half means. An analog `@(posedge d)` or `@(negedge d)`
+// on a discrete signal now reads a digital edge flag the mixed host raises
+// (`HirModel::discrete_edges`); a version-140 record of a module whose operand
+// was a discrete `reg` or `wire` with no discrete discipline holds a `cross`
+// detector on that signal's value instead, which compiles and never fires as
+// an edge. The stale reading is not recoverable from the record, so it is
+// rebuilt.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 141;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

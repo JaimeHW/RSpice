@@ -309,6 +309,12 @@ impl CanonicalIrArtifact {
             .iter()
             .map(|selection| selection.value)
             .collect();
+        let edges: std::collections::HashSet<_> = self
+            .hir
+            .discrete_edges
+            .iter()
+            .map(|edge| edge.value)
+            .collect();
         for [value, _] in &self.hir.discrete_inputs {
             let Some(name) = self.hir.discrete_bindings.get(value) else {
                 continue;
@@ -319,7 +325,9 @@ impl CanonicalIrArtifact {
                 )));
                 continue;
             };
-            let expected = if signal.kind.is_real() {
+            // An edge flag is an integer whatever width it watches.
+            let edge = edges.contains(value);
+            let expected = if !edge && signal.kind.is_real() {
                 super::hir::CanonicalValueType::Real
             } else {
                 super::hir::CanonicalValueType::Integer
@@ -329,8 +337,10 @@ impl CanonicalIrArtifact {
                 .variables
                 .get(usize::from(*value))
                 .is_none_or(|variable| variable.value_type != expected)
-                || (selections.contains(value) && signal.kind.is_real())
-                || (!selections.contains(value)
+                || (selections.contains(value) && (signal.kind.is_real() || edge))
+                || (edge && signal.kind.is_real())
+                || (!edge
+                    && !selections.contains(value)
                     && !signal.kind.is_real()
                     && !signal.integer
                     && signal.width > 31)

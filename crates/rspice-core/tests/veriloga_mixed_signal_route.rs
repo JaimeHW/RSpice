@@ -4740,3 +4740,193 @@ fn an_unsupported_system_call_is_a_typed_capability_refusal() {
     );
     assert!(!error.to_string().contains("lane"), "{error}");
 }
+
+// ---------------------------------------------------------------------------
+// Cross-domain events and values
+// ---------------------------------------------------------------------------
+
+/// Two counters in the analog half, one per edge kind of two digital clocks.
+/// `rise` rises and `fall` falls at 5, 15, 25 and 35 ns, and neither has an
+/// edge of its own kind at time zero (x to 0 is not a rising edge, x to 1 is
+/// not a falling one).
+const ANALOG_EDGE_EVENTS: &str = r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module analog_edge_events(up, down);
+    inout up, down;
+    electrical up, down;
+    reg rise, fall;
+    real ups, downs;
+    initial begin rise = 1'b0; fall = 1'b1; end
+    always #5 begin rise = ~rise; fall = ~fall; end
+    analog begin
+        @(posedge rise) ups = ups + 1.0;
+        @(negedge fall) downs = downs + 1.0;
+        V(up) <+ ups;
+        V(down) <+ downs;
+    end
+endmodule
+"#;
+
+/// **An analog `@(posedge d)` on a discrete signal fires at the edge's tick.**
+///
+/// Verilog-AMS LRM 2.4 section 7.3.6.2 runs the guarded statement at the real
+/// promotion of the digital time. Each counter is the number of edges at or
+/// before a timepoint: the accepted point on the edge's tick already holds
+/// the new count, every point before it the old one, and no edge is counted
+/// twice. The RC loading the outputs makes the step controller reject
+/// timepoints around each jump, and a rejected trial must take its edge back.
+#[test]
+fn an_analog_edge_event_on_a_digital_signal_fires_at_the_edge_tick() {
+    let model = ModelFile::new("analog_edge_events", ANALOG_EDGE_EVENTS);
+    let deck = format!(
+        "* analog event controls on digital edges\n\
+         x1 up down analog_edge_events\n\
+         rup up mid 1k\n\
+         cmid mid 0 2p\n\
+         rdown down 0 1k\n\
+         .va \"{}\" analog_edge_events\n\
+         .end\n",
+        model.deck_path()
+    );
+    let edges = [5.0e-9, 15.0e-9, 25.0e-9, 35.0e-9];
+    for max_step in [4.0e-9, 0.25e-9] {
+        let result = run(&deck, 40.0e-9, max_step);
+        for edge in edges {
+            assert!(
+                result.time.iter().any(|time| (time - edge).abs() < 1e-18),
+                "the stepper lands on the digital edge at {edge:e} s"
+            );
+        }
+        for node in ["up", "down"] {
+            let values = waveform(&result, node);
+            for (time, value) in result.time.iter().zip(&values) {
+                let expected = edges.iter().filter(|edge| **edge <= *time + 1e-18).count();
+                assert!(
+                    (value - expected as f64).abs() < 1e-9,
+                    "{node} at {time:e} s with max step {max_step:e}: {value}, expected \
+                     {expected}"
+                );
+            }
+        }
+    }
+}
+
+/// **An initialization from x is an edge, and it fires at the operating point.**
+///
+/// IEEE 1364-2005 section 9.7.2 counts x to 1 as a rising edge and x to 0 as
+/// a falling one, and the initial blocks' assignments happen at time zero,
+/// before the operating point is solved. So each control has run once at the
+/// operating point — the `.op` answer and the transient's first point — and
+/// never again: the edge is not counted a second time by the first step.
+#[test]
+fn an_initialization_from_x_is_an_edge_that_fires_at_the_operating_point() {
+    let model = ModelFile::new(
+        "initial_edges",
+        r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module initial_edges(up, down);
+    inout up, down;
+    electrical up, down;
+    reg high, low;
+    real ups, downs;
+    initial begin high = 1'b1; low = 1'b0; end
+    analog begin
+        @(posedge high) ups = ups + 1.0;
+        @(negedge low) downs = downs + 1.0;
+        V(up) <+ ups;
+        V(down) <+ downs;
+    end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* edges from x at time zero\n\
+         x1 up down initial_edges\n\
+         rup up 0 1k\n\
+         rdown down 0 1k\n\
+         .va \"{}\" initial_edges\n\
+         .end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).expect("the deck parses");
+    let op = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("the operating point solves");
+    for node in ["up", "down"] {
+        let index = op
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("node {node} is absent from {:?}", op.node_names));
+        let value = op.node_voltages[index];
+        assert!(
+            (value - 1.0).abs() < 1e-9,
+            "V({node}) at the operating point is {value}; the edge from x fires once"
+        );
+    }
+    let result = run(&deck, 10.0e-9, 1.0e-9);
+    for node in ["up", "down"] {
+        for (time, value) in result.time.iter().zip(waveform(&result, node)) {
+            assert!(
+                (value - 1.0).abs() < 1e-9,
+                "V({node}) at {time:e} s is {value}; the edge from x fires once, at t = 0"
+            );
+        }
+    }
+}
+
+/// **An edge an A/D crossing causes runs the analog statement at the crossing.**
+///
+/// The edge is published at the crossing's refined instant, so the accepted
+/// timepoint whose settle produced it is that instant, and `$abstime` there
+/// is the crossing's time.
+#[test]
+fn an_analog_edge_event_caused_by_a_threshold_crossing_runs_at_the_crossing() {
+    let model = ModelFile::new(
+        "crossing_edge",
+        r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module crossing_edge(d, at);
+    input d;
+    wire d;
+    inout at;
+    electrical at;
+    real seen;
+    analog begin
+        @(posedge d) seen = $abstime;
+        V(at) <+ seen * 1e9;
+    end
+endmodule
+"#,
+    );
+    // A 0 to 2 V ramp over 100 ns; with a 2 V supply the A/D threshold is
+    // 1 V, crossed at 50 ns.
+    let deck = format!(
+        "* an analog event on an edge an A/D crossing caused\n\
+         .param vcc=2\n\
+         vin in 0 pwl(0 0 100n 2)\n\
+         x1 in at crossing_edge\n\
+         rat at 0 1k\n\
+         .va \"{}\" crossing_edge\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 100.0e-9, 2.0e-9);
+    let at = waveform(&result, "at");
+    let last = *at.last().unwrap();
+    assert!(
+        (last - 50.0).abs() < 1e-3,
+        "the statement ran at {last} ns; the threshold is crossed at 50 ns"
+    );
+    for (time, value) in result.time.iter().zip(&at) {
+        if *time < 49.999e-9 {
+            assert_eq!(
+                *value, 0.0,
+                "nothing fires before the crossing, saw {value} at {time:e}"
+            );
+        }
+    }
+}

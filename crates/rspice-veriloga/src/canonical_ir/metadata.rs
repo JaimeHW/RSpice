@@ -14,6 +14,9 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 160 lowers an analog `@(posedge d)`/`@(negedge d)` on a discrete
+/// signal to a digital edge event (`HirModel::discrete_edges`) where it was a
+/// `cross` detector.
 /// Version 159 gives the digital plan a system-call site table, `%m` scopes
 /// and observer functions, four process value kinds (system task, system
 /// function, call output, pure function), and relocates sites and renames
@@ -151,7 +154,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 159;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 160;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

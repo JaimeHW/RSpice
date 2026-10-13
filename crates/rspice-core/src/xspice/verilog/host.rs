@@ -833,6 +833,16 @@ impl DigitalHost {
         self.store.real_value(signal)
     }
 
+    /// Digital edges analog event controls wait on; see
+    /// `mixed/digital_edges.rs`.
+    pub(crate) fn analog_edges(&self) -> &super::mixed::digital_edges::AnalogEdgeLatch {
+        self.store.analog_edges()
+    }
+
+    pub(crate) fn analog_edges_mut(&mut self) -> &mut super::mixed::digital_edges::AnalogEdgeLatch {
+        self.store.analog_edges_mut()
+    }
+
     pub(crate) fn checkpoint_other_drivers(
         &self,
         driver: ExternalBitDriverId,

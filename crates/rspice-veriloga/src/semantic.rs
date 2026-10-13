@@ -8,6 +8,7 @@
 //! - Parameter range checking
 
 use crate::ast::*;
+use crate::canonical_ir::digital::DigitalEdge;
 use crate::disciplines::{Discipline, DisciplineDb, Domain, Nature};
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
 use crate::integer_runtime::{IntegerBinaryOperation, integer_binary, real_to_integer};
@@ -490,6 +491,9 @@ pub struct SemanticAnalyzer {
     arrays: HashMap<SmolStr, AnalyzedArray>,
     discrete_validity: HashMap<SmolStr, SmolStr>,
     discrete_projection: discrete_projection::ProjectionBuilder,
+    /// Digital edges the module's analog event controls wait on, as (flag
+    /// name, signal, edge). Storage is allocated after the body's locals.
+    digital_edges: Vec<(SmolStr, SmolStr, DigitalEdge)>,
     /// Public parameter-array declarations. Until element lowering is wired
     /// through every backend, these names must never acquire scalar semantics.
     parameter_arrays: HashSet<SmolStr>,
@@ -568,6 +572,7 @@ impl SemanticAnalyzer {
             arrays: HashMap::new(),
             discrete_validity: HashMap::new(),
             discrete_projection: Default::default(),
+            digital_edges: Vec::new(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
             task_resets: Vec::new(),
@@ -1110,6 +1115,7 @@ impl SemanticAnalyzer {
             discrete_inputs: Vec::new(),
             discrete_bindings: HashMap::new(),
             discrete_selections: Vec::new(),
+            discrete_edges: Vec::new(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
         // can recurse into their own sinks without aliasing the module
@@ -1125,6 +1131,7 @@ impl SemanticAnalyzer {
         self.arrays.clear();
         self.discrete_validity.clear();
         self.discrete_projection = Default::default();
+        self.digital_edges.clear();
         self.task_vars.clear();
         self.task_resets.clear();
 
@@ -2347,6 +2354,7 @@ impl SemanticAnalyzer {
         }
 
         self.finish_discrete_projections(&mut analyzed);
+        self.finish_digital_edges(&mut analyzed);
         self.finish_implicit_integrators(&mut analyzed);
         analyzed.statements = statements;
         analyzed.body = self.take_body();
@@ -4555,23 +4563,19 @@ impl SemanticAnalyzer {
                     span: *span,
                 }))
             }
-            EventExpr::Posedge { signal, span } => {
-                self.qualify_edge_event_operand("posedge", signal, *span)?;
+            EventExpr::Posedge { signal, span } | EventExpr::Negedge { signal, span } => {
+                let (edge, direction) = match event {
+                    EventExpr::Posedge { .. } => (DigitalEdge::Posedge, 1.0),
+                    _ => (DigitalEdge::Negedge, -1.0),
+                };
+                if let Some(flag) = self.qualify_edge_event_operand(edge, signal, *span, module)? {
+                    return Ok(EventLowering::Guard(flag));
+                }
                 let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
                 EventLowering::Guard(Expression::Call(CallExpr {
                     resolved_builtin: false,
                     name: "cross".into(),
-                    args: vec![signal, Self::number_expr(1.0, *span)],
-                    span: *span,
-                }))
-            }
-            EventExpr::Negedge { signal, span } => {
-                self.qualify_edge_event_operand("negedge", signal, *span)?;
-                let signal = self.lower_expression_with_side_effects(signal, module, sink)?;
-                EventLowering::Guard(Expression::Call(CallExpr {
-                    resolved_builtin: false,
-                    name: "cross".into(),
-                    args: vec![signal, Self::number_expr(-1.0, *span)],
+                    args: vec![signal, Self::number_expr(direction, *span)],
                     span: *span,
                 }))
             }
@@ -4665,30 +4669,81 @@ impl SemanticAnalyzer {
     /// a detector on a quantity the solver never integrates and the event would
     /// never fire at all.
     ///
-    /// What this compiler is short of is the seam rather than the semantics.
-    /// The engine already breakpoints a digital event's tick and already runs
-    /// the discrete half at the accepted timepoint that lands on it, so the
-    /// instant section 7.3.6.2 names exists and is reached; what does not exist
-    /// is a way for the compiled analog body to be told an edge happened at it.
-    /// The refusal names that rather than the construct.
+    /// So an edge on a discrete signal of this module's digital half lowers to
+    /// a digital edge event: the guard is an integer flag the mixed host raises
+    /// for the coupled trial whose digital settle produced the edge (an
+    /// IEEE 1364-2005 section 9.7.2 edge on the signal's least significant
+    /// bit), which the engine lands on the edge's tick. Returns that guard, or
+    /// `None` when the operand is continuous and the `cross` reading applies.
+    ///
+    /// Refused instead: an edge on a real-valued discrete signal, which has
+    /// none; a discrete-discipline net with no digital storage here; and an
+    /// operand that computes over a discrete signal rather than naming one,
+    /// which `cross` would otherwise turn into a detector that never fires.
     fn qualify_edge_event_operand(
         &mut self,
-        keyword: &str,
+        edge: DigitalEdge,
         signal: &Expression,
         span: Span,
-    ) -> CompileResult<()> {
-        if let Some(net) = self.discrete_net_operand(signal) {
-            return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "`{keyword} {net}` in an analog event control is a digital edge event on a \
-                     discrete-discipline signal; Verilog-AMS LRM 2.4 section 7.3.4 allows it and \
-                     section 7.3.6.2 runs the guarded statement at the real promotion of the \
-                     digital time, but the compiled analog body has no route to the digital \
-                     event yet, and the analog `cross` operator is not a substitute — a discrete \
-                     net has no continuous value to cross"
-                )),
+        module: &AnalyzedModule,
+    ) -> CompileResult<Option<Expression>> {
+        let keyword = edge.keyword();
+        let refuse = |detail: String| {
+            Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UnsupportedFeature(detail),
                 span,
-            )));
+            )))
+        };
+        let declared = |name: &str| {
+            module
+                .digital
+                .signals
+                .iter()
+                .find(|declared| declared.name == name)
+        };
+        if let Expression::Identifier(identifier) = signal {
+            if let Some(declared) = declared(&identifier.name) {
+                if declared.class.is_real() {
+                    return refuse(format!(
+                        "`{keyword} {}` in an analog event control names a real-valued discrete \
+                         signal, which has no edges; Verilog-AMS LRM 2.4 section 3.7 gives a real \
+                         net value changes only",
+                        identifier.name
+                    ));
+                }
+                return self
+                    .digital_edge_flag(edge, &identifier.name, span)
+                    .map(Some);
+            }
+            if let Some(net) = self.discrete_net_operand(signal) {
+                return refuse(format!(
+                    "`{keyword} {net}` in an analog event control is a digital edge event on a \
+                     discrete-discipline signal that has no digital storage in this module; \
+                     declare it as a net or variable of the module's discrete half, or use the \
+                     analog `cross` operator on a continuous quantity"
+                ));
+            }
+        } else {
+            let mut named = None;
+            visit_expression(signal, &mut |expression| {
+                let name = match expression {
+                    Expression::Identifier(identifier) => &identifier.name,
+                    Expression::ArrayAccess(access) => &access.array,
+                    _ => return,
+                };
+                if named.is_none() && (declared(name).is_some() || self.is_discrete_net(name)) {
+                    named = Some(name.clone());
+                }
+            });
+            if let Some(name) = named {
+                return refuse(format!(
+                    "`{keyword}` in an analog event control takes a discrete signal by name, and \
+                     this operand computes over the discrete signal `{name}`; IEEE 1364-2005 \
+                     section 9.7.2 detects an edge on one signal's least significant bit, and \
+                     the analog `cross` operator is not a substitute — a discrete value has no \
+                     continuous value to cross"
+                ));
+            }
         }
         self.warn(
             EDGE_EVENT_AS_CROSS_CODE,
@@ -4698,7 +4753,84 @@ impl SemanticAnalyzer {
             ),
             span,
         );
-        Ok(())
+        Ok(None)
+    }
+
+    /// The flag an analog event control on `edge` of `signal` reads, shared by
+    /// every control on the same edge of the same signal. Its storage — the
+    /// flag and the validity lane every discrete input carries — is allocated
+    /// by [`Self::finish_digital_edges`] after the body's locals.
+    fn digital_edge_flag(
+        &mut self,
+        edge: DigitalEdge,
+        signal: &SmolStr,
+        span: Span,
+    ) -> CompileResult<Expression> {
+        let existing = self
+            .digital_edges
+            .iter()
+            .find(|(_, watched, kind)| watched == signal && *kind == edge)
+            .map(|(name, _, _)| name.clone());
+        let name = match existing {
+            Some(name) => name,
+            None => {
+                let mut suffix = self.digital_edges.len();
+                let name: SmolStr = loop {
+                    let name = format!("__rspice_digital_edge_{suffix}");
+                    if self.symbols.lookup(&name).is_none()
+                        && self.symbols.lookup(&format!("{name}_valid")).is_none()
+                    {
+                        break name.into();
+                    }
+                    suffix += 1;
+                };
+                self.digital_edges
+                    .push((name.clone(), signal.clone(), edge));
+                name
+            }
+        };
+        // Storage is module-owned; a control first met in a nested block whose
+        // symbol scope has since closed defines the names again.
+        for symbol in [name.clone(), format!("{name}_valid").into()] {
+            if self.symbols.lookup(&symbol).is_none() {
+                self.define_symbol(Symbol {
+                    name: symbol,
+                    kind: SymbolKind::Variable,
+                    value_type: ValueType::Integer,
+                    span,
+                    attrs: Default::default(),
+                })?;
+            }
+        }
+        Ok(Expression::Identifier(Identifier { name, span }))
+    }
+
+    /// Allocate each digital edge flag as a discrete input bound to the signal
+    /// it watches, with the edge it watches for.
+    fn finish_digital_edges(&mut self, module: &mut AnalyzedModule) {
+        for (name, signal, edge) in std::mem::take(&mut self.digital_edges) {
+            let value = module.variables.len();
+            for variable in [name.clone(), format!("{name}_valid").into()] {
+                module.variables.push(AnalyzedVariable {
+                    name: variable,
+                    var_type: VarType::Integer,
+                    value_type: ValueType::Integer,
+                    is_state: true,
+                    retains_input: false,
+                    is_event_controlled: true,
+                });
+            }
+            module.event_state_variables.extend([value, value + 1]);
+            module.discrete_inputs.push((value, value + 1));
+            module.discrete_bindings.insert(value, signal.clone());
+            module.discrete_edges.push(AnalyzedDiscreteEdge {
+                value,
+                signal,
+                edge,
+            });
+        }
+        module.event_state_variables.sort_unstable();
+        module.event_state_variables.dedup();
     }
 
     /// The name of the operand when it is a net or port of a discrete-domain
@@ -4708,21 +4840,27 @@ impl SemanticAnalyzer {
         let Expression::Identifier(identifier) = signal else {
             return None;
         };
-        let symbol = self.symbols.lookup(identifier.name.as_str())?;
+        self.is_discrete_net(&identifier.name)
+            .then(|| identifier.name.clone())
+    }
+
+    fn is_discrete_net(&self, name: &str) -> bool {
+        let Some(symbol) = self.symbols.lookup(name) else {
+            return false;
+        };
         // A discrete net or port that analog code reads is rebound as a
         // `Variable` carrying the projected value (`bind_discrete_read_symbol`),
         // and keeps its discipline. It is still the discrete signal, so an edge
         // on it is still a digital edge. An ordinary variable has no discipline.
-        if !matches!(
+        matches!(
             symbol.kind,
             SymbolKind::Node | SymbolKind::Port | SymbolKind::Variable
-        ) {
-            return None;
-        }
-        let discipline = self
-            .disciplines
-            .get_discipline(symbol.attrs.discipline.as_deref()?)?;
-        (discipline.domain == Domain::Discrete).then(|| identifier.name.clone())
+        ) && symbol
+            .attrs
+            .discipline
+            .as_deref()
+            .and_then(|discipline| self.disciplines.get_discipline(discipline))
+            .is_some_and(|discipline| discipline.domain == Domain::Discrete)
     }
 
     fn filter_step_event(phase: Expression, analyses: &[StringLit], span: Span) -> Expression {

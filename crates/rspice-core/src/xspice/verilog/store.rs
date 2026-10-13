@@ -395,6 +395,9 @@ pub(crate) struct DigitalSignalStore {
         Option<Arc<std::collections::HashMap<DigitalSignalId, Vec<DigitalAnalogProbeId>>>>,
     activation_clock: Option<DigitalClock>,
     traces: traces::StoreTraces,
+    /// Digital edges analog event controls wait on; see
+    /// `mixed/digital_edges.rs`. Trial-scoped and never checkpointed.
+    analog_edges: super::mixed::digital_edges::AnalogEdgeLatch,
 }
 
 impl DigitalSignalStore {
@@ -606,6 +609,7 @@ impl DigitalSignalStore {
             analog_variable_inputs: None,
             activation_clock: None,
             traces: traces::StoreTraces::default(),
+            analog_edges: Default::default(),
             plan,
             connected: None,
             external_reals: None,
@@ -667,8 +671,18 @@ impl DigitalSignalStore {
         self.analog_variable_inputs = Some(Arc::new(inputs));
     }
 
+    /// Also keeps the analog edge watch list, which is wiring of the same kind.
     pub(crate) fn inherit_analog_variable_inputs(&mut self, source: &Self) {
         self.analog_variable_inputs = source.analog_variable_inputs.clone();
+        self.analog_edges.inherit(&source.analog_edges);
+    }
+
+    pub(crate) fn analog_edges(&self) -> &super::mixed::digital_edges::AnalogEdgeLatch {
+        &self.analog_edges
+    }
+
+    pub(crate) fn analog_edges_mut(&mut self) -> &mut super::mixed::digital_edges::AnalogEdgeLatch {
+        &mut self.analog_edges
     }
 
     fn invalidate_analog_variables(&mut self, signal: DigitalSignalId) {
@@ -913,6 +927,7 @@ impl DigitalSignalStore {
             return;
         }
         self.trace_transition(signal, &values);
+        self.analog_edges.observe(signal, &values);
         self.invalidate_analog_variables(signal);
         let sequence = self.next_sequence();
         let expressions = self.observe_expressions(signal);
