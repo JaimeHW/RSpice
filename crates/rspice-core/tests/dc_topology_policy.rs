@@ -196,6 +196,51 @@ fn zero_residual_does_not_admit_an_underdetermined_dc_bias() {
     }
 }
 
+/// A loop that nothing drives and the rest of the circuit only senses has
+/// the unique bias zero: `a = -k*b` (E1), `c = a` (R5 carries no current)
+/// and `b/R4 + gm*c = 0` (G1), so `b*(1/R4 - gm*k) = 0`. No equation of the
+/// loop has one unknown, and faer's LU leaves remnants near 1e-33 there
+/// beside the 1 V drive. The first deck failed the sparse backward-error
+/// check at 1.0 for them; the second was then answered by gmin stepping
+/// with every node shunted to ground, and `out` read 0.476 V. Both now
+/// solve directly.
+#[test]
+fn a_sensed_loop_that_nothing_drives_solves_to_zero_on_the_faer_backend() {
+    for (title, values, expected_out) in [
+        (
+            "Sensed undriven loop",
+            "R1 in 0 3.46\nR2 out 0 99.1\nR3 in out 66.6\nE1 a 0 b 0 -10.4\nG1 b 0 c 0 2.33m\nR4 b 0 1540\nR5 c a 16.4\nG2 out 0 a 0 -0.176\n",
+            99.1 / (99.1 + 66.6),
+        ),
+        (
+            "Sensed undriven loop, rounded",
+            "R2 out 0 100\nR3 in out 100\nE1 a 0 b 0 -10\nG1 b 0 c 0 2.2m\nR4 b 0 1.5k\nR5 c a 15\nG2 out 0 a 0 -0.18\n",
+            0.5,
+        ),
+    ] {
+        let netlist = parse(&format!(
+            "{title}\nV1 in 0 DC 1\n{values}.options solver=faer\n.op\n.end\n"
+        ));
+        let engine = engine();
+        let result = engine
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|error| panic!("{title}: {error}"));
+        for node in ["a", "b", "c"] {
+            assert_eq!(voltage(&result, node), 0.0, "{title}: v({node})");
+        }
+        let out = voltage(&result, "out");
+        assert!(
+            (out - expected_out).abs() <= 1e-12 * expected_out,
+            "{title}: v(out) = {out:e}, expected {expected_out:e}"
+        );
+        assert_eq!(
+            engine.convergence_quality().gmin_stepping_count,
+            0,
+            "{title}: the bias needs no continuation"
+        );
+    }
+}
+
 #[test]
 fn internal_current_source_preserves_physical_differential_solution() {
     let netlist = parse(
