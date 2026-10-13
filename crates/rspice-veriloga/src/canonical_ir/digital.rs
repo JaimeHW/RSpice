@@ -1464,6 +1464,11 @@ pub enum DigitalSystemArgument {
         operand: u32,
         class: DigitalValueClass,
     },
+    /// A bare `$realtime` call among a formatting call's arguments: a real
+    /// operand that, when no format specification consumes it, prints with as
+    /// many decimals as the calling module's unit has over its precision
+    /// (Icarus: `1.5` under `` `timescale 1ns/100ps ``).
+    RealTime { operand: u32 },
     /// A variable written back through `DigitalCallOutput { index: output }`.
     /// `operand` is the value read first, for an in-out argument.
     Output {

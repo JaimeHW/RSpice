@@ -566,6 +566,7 @@ pub fn link_digital_plans(
                     DigitalSystemArgument::Empty
                     | DigitalSystemArgument::String(_)
                     | DigitalSystemArgument::Value { .. }
+                    | DigitalSystemArgument::RealTime { .. }
                     | DigitalSystemArgument::Output { .. } => {}
                 }
             }

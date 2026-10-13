@@ -310,15 +310,27 @@ impl ProcessLowerer<'_> {
     }
 
     /// An input argument: an empty position, a string literal, or a value.
+    /// `formats` says the call formats its arguments, where a bare
+    /// `$realtime` has a default format of its own.
     fn input_argument(
         &mut self,
         block: BlockId,
         argument: &Expression,
         operands: &mut Vec<ValueId>,
+        formats: bool,
     ) -> DigitalSystemArgument {
         match argument {
             Expression::NullArgument(_) => DigitalSystemArgument::Empty,
             Expression::StringLit(literal) => DigitalSystemArgument::String(literal.value.clone()),
+            Expression::SystemFunction(function)
+                if formats && function.name == "$realtime" && function.args.is_empty() =>
+            {
+                let value = self.real_expression(block, argument);
+                operands.push(value);
+                DigitalSystemArgument::RealTime {
+                    operand: (operands.len() - 1) as u32,
+                }
+            }
             _ => {
                 let shape = expressions::shape(self, argument);
                 let (value, class) = if shape.real {
@@ -464,7 +476,8 @@ impl ProcessLowerer<'_> {
         for (position, argument) in call.args.iter().enumerate().skip(skip) {
             match kind.argument_use(position) {
                 DigitalArgumentUse::Input => {
-                    let argument = self.input_argument(block, argument, &mut operands);
+                    let argument =
+                        self.input_argument(block, argument, &mut operands, kind.formats());
                     arguments.push(argument);
                 }
                 DigitalArgumentUse::Reference => {
@@ -614,7 +627,7 @@ impl ProcessLowerer<'_> {
         let mut operands = Vec::new();
         let mut arguments = Vec::with_capacity(task.args.len());
         for argument in &task.args {
-            let argument = self.input_argument(entry, argument, &mut operands);
+            let argument = self.input_argument(entry, argument, &mut operands, kind.formats());
             arguments.push(argument);
         }
         self.builder.push(

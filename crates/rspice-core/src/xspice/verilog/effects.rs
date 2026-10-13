@@ -262,6 +262,21 @@ impl HdlEffects {
                     let signed = matches!(class, DigitalValueClass::FourState { signed: true, .. });
                     FormatArgument::Value(value, signed)
                 }
+                DigitalSystemArgument::RealTime { operand } => {
+                    let value = args.get(*operand as usize).ok_or_else(|| {
+                        DigitalEvalError::SystemCallFailed {
+                            site: site.id,
+                            detail: "an operand the site names is missing".into(),
+                        }
+                    })?;
+                    let decimals = site
+                        .time_scale
+                        .unit_exponent()
+                        .saturating_sub(site.time_scale.precision_exponent())
+                        .max(0)
+                        .unsigned_abs();
+                    FormatArgument::RealTime(value, decimals)
+                }
                 // A display-family call has no other argument kinds.
                 _ => FormatArgument::Empty,
             });

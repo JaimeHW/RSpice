@@ -1460,6 +1460,7 @@ impl CanonicalDigitalPlan {
                         matches!(
                             argument,
                             DigitalSystemArgument::Value { .. }
+                                | DigitalSystemArgument::RealTime { .. }
                                 | DigitalSystemArgument::Output {
                                     operand: Some(_),
                                     ..
@@ -1490,6 +1491,9 @@ impl CanonicalDigitalPlan {
                 for argument in &entry.arguments {
                     let (operand, class) = match argument {
                         DigitalSystemArgument::Value { operand, class } => (*operand, *class),
+                        DigitalSystemArgument::RealTime { operand } => {
+                            (*operand, DigitalValueClass::Real)
+                        }
                         DigitalSystemArgument::Output {
                             operand: Some(operand),
                             class,
@@ -1642,6 +1646,13 @@ impl CanonicalDigitalPlan {
                     DigitalSystemArgument::Signal(signal) => {
                         if self.signal(*signal).is_none() {
                             return Err(error("digital system call names an undeclared signal"));
+                        }
+                    }
+                    DigitalSystemArgument::RealTime { .. } => {
+                        if !site.kind.formats() {
+                            return Err(error(
+                                "a bare `$realtime` argument belongs to a formatting call",
+                            ));
                         }
                     }
                     DigitalSystemArgument::Empty

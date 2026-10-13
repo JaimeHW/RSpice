@@ -50,6 +50,9 @@ pub(crate) enum FormatArgument<'a> {
     Literal(&'a str),
     /// An evaluated value and whether it is signed.
     Value(&'a DigitalScalar, bool),
+    /// A bare `$realtime` and the decimals it prints with when no
+    /// specification consumes it; a specification reads it as a real.
+    RealTime(&'a DigitalScalar, u8),
 }
 
 /// What a format reads besides its arguments.
@@ -91,6 +94,11 @@ pub(crate) fn format(arguments: &[FormatArgument<'_>], context: &FormatContext<'
                 } else {
                     render(&spec, argument_of(value, signed), &mut out, context);
                 }
+            }
+            FormatArgument::RealTime(value, decimals) => {
+                let mut spec = Spec::natural('f');
+                spec.precision = Some(usize::from(decimals));
+                render(&spec, argument_of(value, true), &mut out, context);
             }
         }
     }
@@ -260,6 +268,16 @@ fn real_as_integer(value: f64) -> Option<BigInt> {
     BigInt::parse_bytes(format!("{rounded:.0}").as_bytes(), 10)
 }
 
+/// What a radix specification prints for a real's rounded `integer`: a
+/// negative value a 64-bit integer holds as its two's complement in 64 bits,
+/// anything else as itself.
+fn radix_operand(integer: &BigInt) -> BigInt {
+    match i64::try_from(integer) {
+        Ok(negative) if negative < 0 => BigInt::from(negative as u64),
+        _ => integer.clone(),
+    }
+}
+
 fn render(
     spec: &Spec,
     argument: FormatArgument<'_>,
@@ -287,6 +305,7 @@ fn render(
             return;
         }
         FormatArgument::Value(value, signed) => (value, signed),
+        FormatArgument::RealTime(value, _) => (value, true),
     };
     render_value(spec, value, signed, out, context);
 }
@@ -349,12 +368,14 @@ fn render_value(
                 }
                 DigitalScalar::Real(real) => {
                     // Icarus prints a real under an integral specification as
-                    // its rounded integer at its minimal width.
+                    // its rounded integer at its minimal width. In a radix, a
+                    // negative one prints as the 64-bit two's complement the
+                    // real converts to: `%0x` of -1.0 is `ffffffffffffffff`.
                     let text = match real_as_integer(*real) {
                         Some(integer) => match spec.conversion {
-                            'h' => integer.to_str_radix(16),
-                            'o' => integer.to_str_radix(8),
-                            'b' => integer.to_str_radix(2),
+                            'h' => radix_operand(&integer).to_str_radix(16),
+                            'o' => radix_operand(&integer).to_str_radix(8),
+                            'b' => radix_operand(&integer).to_str_radix(2),
                             'c' => char::from(
                                 (integer.to_u32_digits().1.first().copied().unwrap_or(0) & 0xff)
                                     as u8,
@@ -745,7 +766,7 @@ mod tests {
         )
     }
 
-    use FormatArgument::{Empty, Literal, Value};
+    use FormatArgument::{Empty, Literal, RealTime, Value};
 
     #[test]
     fn decimal_widths_follow_the_value_width_and_signedness() {
@@ -911,6 +932,52 @@ mod tests {
             "pct:[%][\\][\"][\t]"
         );
         assert_eq!(run(&[Literal("m:[%m]")]), "m:[f1]");
+    }
+
+    #[test]
+    fn negative_reals_print_in_a_radix_as_their_64_bit_complement() {
+        // Icarus 13: -1.0 and -2.6 print as 64-bit two's complements under
+        // `%x`/`%b`, at their minimal width with or without `0`; 2.6 as 3.
+        let (minus_one, minus_more, plus) = (
+            DigitalScalar::Real(-1.0),
+            DigitalScalar::Real(-2.6),
+            DigitalScalar::Real(2.6),
+        );
+        assert_eq!(
+            run(&[
+                Literal("[%x][%0b][%0x][%x][%0d]"),
+                Value(&minus_one, true),
+                Value(&minus_more, true),
+                Value(&minus_more, true),
+                Value(&plus, true),
+                Value(&minus_more, true)
+            ]),
+            format!(
+                "[ffffffffffffffff][{}01][fffffffffffffffd][3][-3]",
+                "1".repeat(62)
+            )
+        );
+    }
+
+    #[test]
+    fn a_bare_realtime_prints_with_its_modules_precision_digits() {
+        // Icarus 13 under `timescale 1ns/100ps at 1.5 ns:
+        // `$display("g:", $realtime)` prints `g:1.5`, `"%f"` reads it as a
+        // real, and `$realtime + 1.0` is no longer bare.
+        let now = DigitalScalar::Real(1.5);
+        let sum = DigitalScalar::Real(2.5);
+        assert_eq!(
+            run(&[
+                Literal("g:"),
+                RealTime(&now, 1),
+                Literal("|f:%f|"),
+                RealTime(&now, 1),
+                Value(&sum, true),
+                Literal("|"),
+                RealTime(&now, 0)
+            ]),
+            "g:1.5|f:1.500000|2.50000|2"
+        );
     }
 
     #[test]
