@@ -47,9 +47,9 @@ fn foundation_family(kind: ComponentType) -> Option<FoundationDeviceFamily> {
 /// A ` NAME=value` fragment for a switch model parameter the user left blank,
 /// or nothing at all.
 ///
-/// Omission is not the same as a written default here: the engine's own
-/// default for SMOOTH differs between the voltage and current switches, so
-/// writing one would silently retune every deck that never asked for it.
+/// Omission is not the same as a written default here: a switch with no
+/// SMOOTH is the engine's ideal SPICE3 switch, and any written width would
+/// silently turn every deck that never asked for one into a smooth switch.
 fn optional_model_param(
     params: &std::collections::HashMap<String, String>,
     key: &str,

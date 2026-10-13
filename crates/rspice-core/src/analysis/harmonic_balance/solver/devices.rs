@@ -735,8 +735,8 @@ impl NonlinearDeviceInstance {
         if !p.vh.is_finite() || p.vh != 0.0 {
             return Some("voltage-switch exact HB requires zero finite hysteresis");
         }
-        if !p.smooth.is_finite() || p.smooth <= 0.0 {
-            return Some("voltage-switch SMOOTH must be finite and positive");
+        if !p.smooth.is_finite() || p.smooth < 0.0 {
+            return Some("voltage-switch SMOOTH must be finite and nonnegative");
         }
         for (resistance, resistance_error, conductance_error) in [
             (
@@ -763,7 +763,7 @@ impl NonlinearDeviceInstance {
         let log_roff = p.roff.ln();
         let m = 0.5 * log_ron + 0.5 * log_roff;
         let h = 0.5 * (log_roff - log_ron).abs();
-        if h > 0.0 {
+        if h > 0.0 && p.smooth > 0.0 {
             let z = h / (h.hypot(1.0) + 1.0);
             let log_max_slope = -m + h * z + h.ln() - p.smooth.ln() + (-z * z).ln_1p();
             let max_slope = log_max_slope.exp();
@@ -1132,14 +1132,17 @@ impl NonlinearDeviceInstance {
     }
 
     fn switch_conductance_and_derivative(&self, vctrl: Value) -> (Value, Value) {
-        // HB uses a memoryless smooth switch characteristic. Hysteresis parameter
-        // is retained in params for compatibility with shared model cards.
+        // HB evaluates the memoryless switch law; exact HB admits only a zero
+        // hysteresis band. A zero SMOOTH is the ideal switch: exactly RON at
+        // or above the threshold and ROFF below it, with no control
+        // derivative, as the transient switch stamps it (an off switch whose
+        // control reaches the zero-width band exactly turns on).
         let smooth = self.params.smooth;
         let ron = self.params.ron;
         let roff = self.params.roff;
         if !vctrl.is_finite()
             || !smooth.is_finite()
-            || smooth <= 0.0
+            || smooth < 0.0
             || !ron.is_finite()
             || ron <= 0.0
             || !roff.is_finite()
@@ -1149,6 +1152,10 @@ impl NonlinearDeviceInstance {
             // a typed solve error. Do not replace invalid authored parameters
             // with a different physical switch law.
             return (Value::NAN, Value::NAN);
+        }
+        if smooth == 0.0 {
+            let resistance = if vctrl >= self.params.vth { ron } else { roff };
+            return (1.0 / resistance, 0.0);
         }
         let x = (vctrl - self.params.vth) / smooth;
         let tanh_x = x.tanh();
@@ -1889,12 +1896,46 @@ mod tests {
         assert!(conductance < 1.0e-12);
     }
 
+    /// A zero `SMOOTH` is the ideal switch the transient stamps: exactly
+    /// `1/RON` from the threshold up and `1/ROFF` below it, with no control
+    /// derivative.
+    #[test]
+    fn voltage_switch_without_smooth_is_the_ideal_step() {
+        let switch = NonlinearDeviceInstance::voltage_switch(
+            HbSwitchNodes {
+                node_pos: 0,
+                node_neg: 1,
+                ctrl_pos: 2,
+                ctrl_neg: 3,
+            },
+            HbVoltageSwitchModel {
+                vt: 0.5,
+                vh: 0.0,
+                ron: 3.0,
+                roff: 1.0e12,
+                smooth: 0.0,
+            },
+        );
+        assert_eq!(switch.voltage_switch_parameter_error(), None);
+        for (control, expected) in [
+            (0.0, 1.0 / 1.0e12),
+            (0.499_999, 1.0 / 1.0e12),
+            (0.5, 1.0 / 3.0),
+            (0.500_001, 1.0 / 3.0),
+            (5.0, 1.0_f64 / 3.0),
+        ] {
+            let (conductance, derivative) = switch.switch_conductance_and_derivative(control);
+            assert_eq!(conductance.to_bits(), expected.to_bits(), "at {control} V");
+            assert_eq!(derivative, 0.0, "at {control} V");
+        }
+    }
+
     #[test]
     fn voltage_switch_invalid_physical_parameters_fail_closed() {
         for (ron, roff, smooth) in [
             (0.0, 1.0e6, 0.1),
             (1.0, 0.0, 0.1),
-            (1.0, 1.0e6, 0.0),
+            (1.0, 1.0e6, -0.1),
             (Value::NAN, 1.0e6, 0.1),
         ] {
             let switch = NonlinearDeviceInstance::voltage_switch(

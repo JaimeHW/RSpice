@@ -10019,6 +10019,16 @@ impl Engine {
             };
             #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
             let veriloga_truncation_limit: Option<Value> = None;
+            // ngspice's CKTtrunc walks the switches too: an ideal switch's
+            // control may close on its threshold only geometrically.
+            let switch_truncation_limit = if use_ngspice_charge_truncation
+                && !first_accepted_transient_step
+                && (!circuit.vswitches.is_empty() || !circuit.iswitches.is_empty())
+            {
+                Self::switch_threshold_truncation_limit(&circuit, &solution, &new_solution, dt)
+            } else {
+                None
+            };
             let device_truncation_limit = Self::min_truncation_limit(
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(
@@ -10044,7 +10054,7 @@ impl Engine {
                 ),
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
-                    veriloga_truncation_limit,
+                    Self::min_truncation_limit(veriloga_truncation_limit, switch_truncation_limit),
                 ),
             );
             let ltra_truncation_limit = if !first_accepted_transient_step {

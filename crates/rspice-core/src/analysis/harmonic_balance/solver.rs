@@ -78,7 +78,8 @@ pub struct HbSwitchNodes {
 }
 
 /// A voltage switch's model card: the threshold and hysteresis voltages, the
-/// on and off resistances, and the smoothing width.
+/// on and off resistances, and the smoothing width (zero for the ideal
+/// switch).
 #[derive(Clone, Copy)]
 pub struct HbVoltageSwitchModel {
     pub vt: Value,

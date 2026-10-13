@@ -2844,6 +2844,26 @@ impl Engine {
         (max_delta > bound).then(|| dt * bound / max_delta)
     }
 
+    /// The tightest step ngspice's switch truncation (`sw/swtrunc.c`,
+    /// `csw/cswtrunc.c`) allows over every ideal switch after the step `dt`
+    /// from `accepted_solution` to `candidate_solution`, each switch in the
+    /// state the candidate left it. `None` when no control is closing on the
+    /// threshold that would change its switch.
+    pub(super) fn switch_threshold_truncation_limit(
+        circuit: &crate::circuit::CircuitData,
+        accepted_solution: &[Value],
+        candidate_solution: &[Value],
+        dt: Value,
+    ) -> Option<Value> {
+        let voltage_limits = circuit.vswitches.iter().filter_map(|switch| {
+            switch.threshold_approach_step_limit(accepted_solution, candidate_solution, dt)
+        });
+        let current_limits = circuit.iswitches.iter().filter_map(|switch| {
+            switch.threshold_approach_step_limit(accepted_solution, candidate_solution, dt)
+        });
+        voltage_limits.chain(current_limits).reduce(Value::min)
+    }
+
     #[inline]
     pub(super) fn min_truncation_limit(
         first: Option<Value>,

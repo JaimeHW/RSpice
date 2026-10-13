@@ -32,7 +32,7 @@ fn voltage_switch_rejects_invalid_or_nonrepresentable_conductances() {
     for (parameters, expected) in [
         ("RON=0", "RON must be finite and positive"),
         ("ROFF=-1", "ROFF must be finite and positive"),
-        ("SMOOTH=0", "SMOOTH must be finite and positive"),
+        ("SMOOTH=-0.1", "SMOOTH must be finite and nonnegative"),
         ("RON=1e-320", "1/RON must be finite and positive"),
         (
             "RON=1e-300 ROFF=1e300 SMOOTH=1e-300",

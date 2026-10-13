@@ -1431,6 +1431,33 @@ pub(super) fn insert_default_switch_off_resistance(
     params.insert("ROFF".to_owned(), roff);
     Ok(())
 }
+
+/// Give a Xyce `W` card on an `ISWITCH` model its `ON`/`OFF` curve even when
+/// it names none.
+///
+/// Xyce reads `W` as an `S` switch controlled by `I(Vname)`
+/// (`N_IO_DeviceBlock.C`, `extractSwitchDeviceData`), and every Xyce switch
+/// follows the cubic log-resistance law between `OFF` and `ON`, which for an
+/// `ISWITCH` model default to `IOFF = 0` and `ION = 1 mA` (`N_DEV_SW.C:116`,
+/// `:127`). Xyce has no threshold (`IT`/`IH`) form, so an `ISWITCH` card
+/// naming neither a curve value nor a threshold takes that curve rather than
+/// the SPICE3 law.
+pub(super) fn insert_xyce_current_switch_curve(
+    params: &mut HashMap<String, Value>,
+    dialect: SpiceDialect,
+    model_type: &str,
+) {
+    const FORM_KEYS: [&str; 10] = [
+        "ION", "IOFF", "IHON", "IHOFF", "ON", "OFF", "ONH", "OFFH", "IT", "IH",
+    ];
+    if dialect == SpiceDialect::Xyce
+        && model_type.eq_ignore_ascii_case("ISWITCH")
+        && !FORM_KEYS.iter().any(|key| params.contains_key(*key))
+    {
+        params.insert("ION".to_owned(), 1.0e-3);
+        params.insert("IOFF".to_owned(), 0.0);
+    }
+}
 pub(super) const XYCE_TEAM_MODEL_PARAMS: &[&str] = &[
     "LEVEL",
     "KON",

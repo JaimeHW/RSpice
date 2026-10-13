@@ -34,11 +34,24 @@
 //! `insert_default_switch_off_resistance`).
 //!
 //! # Implementation
-//! Uses a smooth transition function to avoid discontinuities:
+//! A `VT`/`VH` (`IT`/`IH`) switch is ideal, as ngspice's SPICE3 switches are
+//! (`sw/swload.c`, `csw/cswload.c`): its resistance is exactly `RON` in the
+//! on state and exactly `ROFF` in the off state, and the state changes only
+//! when the control leaves the hysteresis band. A zero or negative `VH`
+//! (`IH`) takes ngspice's inverted-band rule, under which a control that
+//! enters the band toggles the state; with `VH = 0` the band is the threshold
+//! itself.
+//!
+//! `SMOOTH` (an RSpice extension) replaces the step with a smooth transition
+//! of that width, interpolated in log resistance:
 //! ```text
-//! R = RON + (ROFF - RON) * f(x)
+//! ln R = ln RON + (ln ROFF - ln RON) * (1 - tanh((x - xt) / SMOOTH)) / 2
 //! ```
-//! where f(x) is a smooth step function.
+//! where `xt` is the threshold the present hysteresis state crosses.
+//!
+//! An `ON`/`OFF` (`VON`/`VOFF`, `ION`/`IOFF`) card follows Xyce's and
+//! PSpice's cubic log-resistance law between the two control values, again
+//! exactly `RON`/`ROFF` outside them.
 
 use super::behavioral::BehavioralEnvironment;
 use super::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
@@ -312,6 +325,56 @@ impl XyceSwitchCurve {
             }
         }
     }
+}
+
+/// The ideal switch's resistance in `state`: `RON` on, `ROFF` otherwise.
+#[inline]
+fn ideal_resistance(state: SwitchState, ron: Value, roff: Value) -> Value {
+    if state == SwitchState::On { ron } else { roff }
+}
+
+/// The ideal switch's conductance in `state`: `1/RON` on, `1/ROFF` otherwise,
+/// the two values `swload.c`/`cswload.c` stamp.
+#[inline]
+fn ideal_conductance(state: SwitchState, ron: Value, roff: Value) -> Value {
+    1.0 / ideal_resistance(state, ron, roff)
+}
+
+/// The step ngspice's switch truncation allows an ideal switch whose control
+/// is closing on the threshold that would change its state (`sw/swtrunc.c`,
+/// `csw/cswtrunc.c`).
+///
+/// An off switch whose control rose by `last_change` over the step `dt` to
+/// `control`, still below `VT + VH`, may move it by at most three quarters of
+/// the remaining distance plus `margin` in the next step; an on switch
+/// falling toward `VT - VH` likewise. The step is scaled from the last one
+/// by that ratio, so the control closes on the threshold geometrically and
+/// the step that crosses it overshoots by about `margin` at most. `None`
+/// when the control is not approaching the threshold it would cross.
+fn ideal_threshold_approach_limit(
+    state: SwitchState,
+    threshold: Value,
+    hysteresis: Value,
+    control: Value,
+    last_change: Value,
+    margin: Value,
+    dt: Value,
+) -> Option<Value> {
+    let max_change = if state == SwitchState::On {
+        let reference = threshold - hysteresis;
+        if !(control > reference && last_change < 0.0) {
+            return None;
+        }
+        (reference - control) * 0.75 - margin
+    } else {
+        let reference = threshold + hysteresis;
+        if !(control < reference && last_change > 0.0) {
+            return None;
+        }
+        (reference - control) * 0.75 + margin
+    };
+    let limit = max_change / last_change * dt;
+    (limit.is_finite() && limit > 0.0).then_some(limit)
 }
 
 #[inline]
@@ -609,7 +672,8 @@ pub struct VoltageSwitch {
     pub ron: Value,
     /// Off resistance
     pub roff: Value,
-    /// Smoothness factor (controls transition steepness)
+    /// Width of the smooth transition (`SMOOTH`, an RSpice extension); zero,
+    /// the default, is the ideal SPICE3 switch.
     pub smooth: Value,
     xyce_curve: Option<XyceSwitchCurve>,
 
@@ -666,7 +730,7 @@ impl VoltageSwitch {
             vh: 0.0,
             ron: 1.0,
             roff: 1e6,
-            smooth: 0.1,
+            smooth: 0.0,
             xyce_curve: None,
             state: SwitchState::Off,
             prev_state: SwitchState::Off,
@@ -889,6 +953,43 @@ impl VoltageSwitch {
             .0
     }
 
+    /// The next step `SWtrunc` (`sw/swtrunc.c`) allows this switch after the
+    /// step `dt` from `accepted` to `candidate`, with the switch in the state
+    /// the candidate left it: the control may close on the threshold it would
+    /// cross by three quarters of the remaining distance plus 50 mV. Only the
+    /// ideal switch has an instant to resolve; a smooth or curve switch's
+    /// transition is resolved by the truncation error of what it drives.
+    pub(crate) fn threshold_approach_step_limit(
+        &self,
+        accepted: &[Value],
+        candidate: &[Value],
+        dt: Value,
+    ) -> Option<Value> {
+        if !self.is_ideal() {
+            return None;
+        }
+        let control = |solution: &[Value]| {
+            let voltage = |node: NodeId| {
+                if node == 0 {
+                    0.0
+                } else {
+                    solution.get(node - 1).copied().unwrap_or(Value::NAN)
+                }
+            };
+            voltage(self.ctrl_pos) - voltage(self.ctrl_neg)
+        };
+        let now = control(candidate);
+        ideal_threshold_approach_limit(
+            self.state,
+            self.vt,
+            self.vh,
+            now,
+            now - control(accepted),
+            0.05,
+            dt,
+        )
+    }
+
     fn runtime(&self) -> SwitchRuntime {
         SwitchRuntime {
             state: self.state,
@@ -954,8 +1055,8 @@ impl VoltageSwitch {
         if !self.vh.is_finite() {
             return Some("VH must be finite");
         }
-        if !self.smooth.is_finite() || self.smooth <= 0.0 {
-            return Some("SMOOTH must be finite and positive");
+        if !self.smooth.is_finite() || self.smooth < 0.0 {
+            return Some("SMOOTH must be finite and nonnegative");
         }
         for (name, resistance) in [("RON", self.ron), ("ROFF", self.roff)] {
             if !resistance.is_finite() || resistance <= 0.0 {
@@ -994,13 +1095,14 @@ impl VoltageSwitch {
     /// `exp(-m + h*y) * h * (1-y^2) / SMOOTH` for `y` in `[-1, 1]`. It reaches
     /// its maximum at `y = h/(hypot(h, 1) + 1)`. Keeping the calculation in
     /// log space avoids overflowing while deciding whether the Jacobian is
-    /// representable.
+    /// representable. Without `SMOOTH` there is no such transition and no
+    /// slope.
     fn max_transition_slope_log(&self) -> Value {
         let log_ron = self.ron.ln();
         let log_roff = self.roff.ln();
         let m = 0.5 * log_ron + 0.5 * log_roff;
         let h = 0.5 * (log_roff - log_ron).abs();
-        if h == 0.0 {
+        if h == 0.0 || self.smooth == 0.0 {
             return Value::NEG_INFINITY;
         }
 
@@ -1015,6 +1117,13 @@ impl VoltageSwitch {
         self.xyce_curve.is_some()
     }
 
+    /// Whether the switch is ideal: exactly `RON` or `ROFF` by state, with
+    /// no transition between them (no `SMOOTH`, no `ON`/`OFF` curve).
+    #[inline]
+    pub(crate) fn is_ideal(&self) -> bool {
+        self.smooth == 0.0 && self.xyce_curve.is_none()
+    }
+
     #[inline]
     fn geometric_mean_resistance(&self) -> Value {
         (0.5 * self.ron.ln() + 0.5 * self.roff.ln()).exp()
@@ -1027,8 +1136,11 @@ impl VoltageSwitch {
         }
     }
 
-    /// Calculate resistance based on control voltage using smooth transition
+    /// Calculate resistance based on control voltage and the present state.
     fn calculate_resistance(&self, vctrl: Value) -> Value {
+        if self.is_ideal() && self.physical_parameter_error().is_none() {
+            return ideal_resistance(self.state, self.ron, self.roff);
+        }
         let (g, _) = self.control_sensitivity(vctrl);
         1.0 / g
     }
@@ -1052,7 +1164,9 @@ impl VoltageSwitch {
 
     /// Evaluate main-branch conductance and its control derivative.
     ///
-    /// Returns `(g, dg/dvctrl)` for the current hysteresis state.
+    /// Returns `(g, dg/dvctrl)` for the current hysteresis state. The ideal
+    /// switch's conductance is `1/RON` or `1/ROFF` by state alone, with no
+    /// control derivative, as `swload.c` stamps it.
     fn control_sensitivity(&self, vctrl: Value) -> (Value, Value) {
         if !vctrl.is_finite() {
             return (Value::NAN, Value::NAN);
@@ -1063,6 +1177,9 @@ impl VoltageSwitch {
         }
         if self.xyce_curve.is_some() {
             return (1.0 / self.current_resistance, self.current_dg_dcontrol);
+        }
+        if self.is_ideal() {
+            return (ideal_conductance(self.state, self.ron, self.roff), 0.0);
         }
 
         let vt_eff = self.effective_threshold();
@@ -1094,9 +1211,11 @@ impl VoltageSwitch {
         (g, dg_dvctrl)
     }
 
-    /// Update state based on control voltage (with hysteresis)
+    /// Update state based on control voltage (with hysteresis). As in
+    /// `swload.c`, only a positive `VH` holds the state inside its band; a
+    /// zero or negative one toggles it on entering the band.
     fn update_state(&mut self, vctrl: Value) {
-        if self.vh < 0.0 {
+        if self.vh <= 0.0 {
             let lower = self.vt + self.vh;
             let upper = self.vt - self.vh;
             if vctrl > upper {
@@ -1274,7 +1393,8 @@ pub struct CurrentSwitch {
     pub ron: Value,
     /// Off resistance
     pub roff: Value,
-    /// Smoothness factor
+    /// Width of the smooth transition (`SMOOTH`, an RSpice extension); zero,
+    /// the default, is the ideal SPICE3 switch.
     pub smooth: Value,
     /// Xyce-style full-on current control value from ION/ON.
     pub on_current: Option<Value>,
@@ -1307,7 +1427,7 @@ impl CurrentSwitch {
             ih: 0.0,
             ron: 1.0,
             roff: 1e6,
-            smooth: 0.001, // 1mA smooth region
+            smooth: 0.0,
             on_current: None,
             off_current: None,
             xyce_curve: None,
@@ -1343,7 +1463,10 @@ impl CurrentSwitch {
             self.roff = v.max(1e-6);
         }
         if let Some(&v) = params.get("SMOOTH") {
-            self.smooth = v.max(1e-9);
+            // Zero keeps the ideal switch; a positive width keeps its old
+            // 1 nA floor. A negative or non-finite one is refused by
+            // `physical_parameter_error`.
+            self.smooth = if v > 0.0 { v.max(1e-9) } else { v };
         }
         if params.contains_key("ION")
             || params.contains_key("IOFF")
@@ -1497,11 +1620,46 @@ impl CurrentSwitch {
     /// `solution`: the switch's present conductance, and so the resistor
     /// whose Johnson noise `.NOISE` and transient noise inject.
     pub(crate) fn small_signal_conductance(&self, solution: &[Value]) -> Value {
-        let ictrl = match self.ctrl_branch {
+        self.control_sensitivity(self.control_current(solution)).0
+    }
+
+    fn control_current(&self, solution: &[Value]) -> Value {
+        match self.ctrl_branch {
             Some(branch) if branch > 0 && branch <= solution.len() => solution[branch - 1],
             _ => 0.0,
-        };
-        self.control_sensitivity(ictrl).0
+        }
+    }
+
+    /// The next step `CSWtrunc` (`csw/cswtrunc.c`) means to allow this switch
+    /// after the step `dt` from `accepted` to `candidate`: the control
+    /// current may close on the threshold it would cross by three quarters
+    /// of the remaining distance plus 50 µA.
+    ///
+    /// ngspice-46 never stores the control current that routine reads (the
+    /// store is commented out in `cswload.c`, marked FIXME), so its limit is
+    /// always inert and a current switch's change of state lands wherever
+    /// the step happens to fall. That is a reference defect; the limit is
+    /// applied here as written, so the instant a current switch changes
+    /// state is resolved as a voltage switch's is.
+    pub(crate) fn threshold_approach_step_limit(
+        &self,
+        accepted: &[Value],
+        candidate: &[Value],
+        dt: Value,
+    ) -> Option<Value> {
+        if !self.is_ideal() {
+            return None;
+        }
+        let now = self.control_current(candidate);
+        ideal_threshold_approach_limit(
+            self.state,
+            self.it,
+            self.ih,
+            now,
+            now - self.control_current(accepted),
+            5.0e-5,
+            dt,
+        )
     }
 
     fn runtime(&self) -> SwitchRuntime {
@@ -1561,8 +1719,25 @@ impl CurrentSwitch {
         }
     }
 
-    /// Calculate resistance based on control current
+    /// Whether the switch is ideal: exactly `RON` or `ROFF` by state, with
+    /// no transition between them (no `SMOOTH`, no `ON`/`OFF` curve).
+    #[inline]
+    pub(crate) fn is_ideal(&self) -> bool {
+        self.smooth == 0.0 && self.xyce_curve.is_none()
+    }
+
+    /// Why the card's transition width cannot describe a switch, if it
+    /// cannot: `SMOOTH` is a width, so it is finite and nonnegative.
+    pub(crate) fn physical_parameter_error(&self) -> Option<&'static str> {
+        (!self.smooth.is_finite() || self.smooth < 0.0)
+            .then_some("SMOOTH must be finite and nonnegative")
+    }
+
+    /// Calculate resistance based on control current and the present state.
     fn calculate_resistance(&self, ictrl: Value) -> Value {
+        if self.is_ideal() {
+            return ideal_resistance(self.state, self.ron, self.roff);
+        }
         let (g, _) = self.control_sensitivity(ictrl);
         1.0 / g.max(1e-30)
     }
@@ -1586,13 +1761,18 @@ impl CurrentSwitch {
 
     /// Evaluate main-branch conductance and its control derivative.
     ///
-    /// Returns `(g, dg/dictrl)` for the current hysteresis state.
+    /// Returns `(g, dg/dictrl)` for the current hysteresis state. The ideal
+    /// switch's conductance is `1/RON` or `1/ROFF` by state alone, with no
+    /// control derivative, as `cswload.c` stamps it.
     fn control_sensitivity(&self, ictrl: Value) -> (Value, Value) {
         if self.xyce_curve.is_some() {
             return (
                 1.0 / self.current_resistance.max(1.0e-30),
                 self.current_dg_dictrl,
             );
+        }
+        if self.is_ideal() {
+            return (ideal_conductance(self.state, self.ron, self.roff), 0.0);
         }
 
         let it_eff = self.effective_threshold();
@@ -1615,9 +1795,11 @@ impl CurrentSwitch {
         (g, dg_dictrl)
     }
 
-    /// Update state with hysteresis
+    /// Update state with hysteresis. As in `cswload.c`, only a positive `IH`
+    /// holds the state inside its band; a zero or negative one toggles it on
+    /// entering the band.
     fn update_state(&mut self, ictrl: Value) {
-        if self.ih < 0.0 {
+        if self.ih <= 0.0 {
             let lower = self.it + self.ih;
             let upper = self.it - self.ih;
             if ictrl > upper {
@@ -2959,6 +3141,51 @@ mod tests {
         assert_eq!(
             switch.physical_parameter_error(),
             Some("maximum |dg/dVctrl| must be finite and representable")
+        );
+    }
+
+    /// `SWtrunc` (`sw/swtrunc.c`): a control closing on the threshold that
+    /// would change the state may cover three quarters of the remaining
+    /// distance plus 50 mV in the next step; receding or past it, no limit.
+    #[test]
+    fn ideal_voltage_switch_limits_the_step_that_closes_on_its_threshold() {
+        let switch = VoltageSwitch::new("s1".to_string(), 1, 0, 2, 0)
+            .with_thresholds(2.0, 0.5)
+            .with_resistances(1.0, 1.0e6)
+            .with_initial_state(SwitchState::Off);
+        let dt = 1.0e-9;
+        // Off, rising from 1.5 V to 2.0 V toward VT + VH = 2.5 V.
+        let limit = switch
+            .threshold_approach_step_limit(&[0.0, 1.5], &[0.0, 2.0], dt)
+            .expect("an off switch closing on VT + VH is limited");
+        assert_eq!(limit.to_bits(), ((0.5 * 0.75 + 0.05) / 0.5 * dt).to_bits());
+        // Off and falling: nothing to resolve.
+        assert_eq!(
+            switch.threshold_approach_step_limit(&[0.0, 2.0], &[0.0, 1.5], dt),
+            None
+        );
+
+        let on = VoltageSwitch::new("s2".to_string(), 1, 0, 2, 0)
+            .with_thresholds(2.0, 0.5)
+            .with_resistances(1.0, 1.0e6)
+            .with_initial_state(SwitchState::On);
+        // On, falling from 2.5 V to 2.0 V toward VT - VH = 1.5 V.
+        let limit = on
+            .threshold_approach_step_limit(&[0.0, 2.5], &[0.0, 2.0], dt)
+            .expect("an on switch closing on VT - VH is limited");
+        assert_eq!(
+            limit.to_bits(),
+            ((-0.5 * 0.75 - 0.05) / -0.5 * dt).to_bits()
+        );
+
+        // A SMOOTH switch has no instant to resolve.
+        let params = std::collections::HashMap::from([("SMOOTH".to_string(), 0.1)]);
+        let smooth = VoltageSwitch::new("s3".to_string(), 1, 0, 2, 0)
+            .with_params(&params)
+            .with_thresholds(2.0, 0.5);
+        assert_eq!(
+            smooth.threshold_approach_step_limit(&[0.0, 1.5], &[0.0, 2.0], dt),
+            None
         );
     }
 

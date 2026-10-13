@@ -8816,6 +8816,11 @@ impl Engine {
                         &element.name,
                         model,
                     )?;
+                    insert_xyce_current_switch_curve(
+                        &mut params_map,
+                        self.config.spice_dialect,
+                        &model_def.model_type,
+                    );
 
                     let mut sw = crate::device::CurrentSwitch::new(
                         element.name.clone(),
@@ -8824,6 +8829,13 @@ impl Engine {
                         control_element.clone(), // Control source name
                     )
                     .with_params(&params_map);
+                    if let Some(reason) = sw.physical_parameter_error() {
+                        return Err(SimulationError::Circuit(format!(
+                            "Current-controlled switch '{}' model '{}' has invalid physical \
+                             parameters: {reason} (SMOOTH={})",
+                            element.name, model, sw.smooth
+                        )));
+                    }
                     if let Some(state) = initial_state {
                         sw = sw.with_initial_state(map_switch_state(*state));
                     }
