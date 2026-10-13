@@ -7,7 +7,11 @@ use crate::xspice::{
     EvaluationPhase, ParamSpec, PortDirection, PortSpec, PortType, XspiceCheckpointSupport,
 };
 
-const OFFICIAL_BRIDGE_TIMING_MIN: Value = 1.0e-12;
+/// The shortest transition the stock bridges admit, and the width over which
+/// a zero-duration digital-to-analog step completes — a D/A edge here, and a
+/// discrete value a mixed module's analog block reads
+/// (`MixedSignalHost::read_step_completion`).
+pub(crate) const OFFICIAL_BRIDGE_TIMING_MIN: Value = 1.0e-12;
 const OFFICIAL_BRIDGE_RESISTANCE_MIN: Value = 1.0e-6;
 const OFFICIAL_BRIDGE_CONTROL_MIN: i64 = 0;
 const OFFICIAL_BRIDGE_CONTROL_MAX: i64 = 2;

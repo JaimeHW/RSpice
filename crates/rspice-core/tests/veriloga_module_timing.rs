@@ -69,9 +69,11 @@ endmodule
         .iter()
         .position(|node| node.eq_ignore_ascii_case("p"))
         .unwrap();
+    // `selected` steps at 0.5 ns and acts from the first instant after it:
+    // the breakpoint itself solves the conductance that held up to it.
     let mut phases = [0; 2];
     for (&time, &voltage) in result.time.iter().zip(&result.voltages[p]) {
-        let phase = usize::from(time >= 0.5e-9 - 1e-20);
+        let phase = usize::from(time > 0.5e-9 + 1e-20);
         phases[phase] += 1;
         let expected = if phase == 0 { 0.25 } else { 1.0 / 3.0 };
         assert!(
@@ -121,11 +123,13 @@ fn module_timescales_drive_exact_mixed_breakpoints_from_file_and_sealed_sources(
             .iter()
             .position(|node| node.eq_ignore_ascii_case("p"))
             .unwrap_or_else(|| panic!("missing p in {:?}", result.node_names));
+        // Each step acts from the first instant after its breakpoint, which
+        // solves the conductance that held up to it.
         let mut phases = [0; 3];
         for (&time, &voltage) in result.time.iter().zip(&result.voltages[p]) {
-            let phase = if time < 0.451e-9 - 1e-20 {
+            let phase = if time <= 0.451e-9 + 1e-20 {
                 0
-            } else if time < 1.3e-9 - 1e-20 {
+            } else if time <= 1.3e-9 + 1e-20 {
                 1
             } else {
                 2

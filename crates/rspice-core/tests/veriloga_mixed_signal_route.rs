@@ -2673,7 +2673,9 @@ module variable_sampler(p,q);
    gain[index]=local_gain[1]**1; selection_bit=2;
    local_gain[1][selection_bit]=1; gain[index][selection_bit]=local_gain[1][selection_bit]; index=-1;
    selected[-1][15]=1; selection_word=-1; selection_bit=15;
-   q=startup_ok && (count==-3) && (adjustment[-2]==-1)
+   // The analog block reads these writes from the first instant after this
+   // tick, so what it computed from them is sampled a tick later.
+   #1 q=startup_ok && (count==-3) && (adjustment[-2]==-1)
      && count[31] && (count[3:0]==13)
      && codes[-2][31] && (codes[-2][3:0]==12) && (codes[index][3:0]==4)
      && (measured[index]+16*LOAD/(1000+LOAD)<1e-8)
@@ -2686,7 +2688,7 @@ endmodule
         "* retained variables and coupled discrete inputs\n.param vcc=1\nXa pa qa variable_sampler LOAD=1000\nXb pb qb variable_sampler LOAD=2000\nRa pa 0 1k\nRb pb 0 2k\nRqa qa 0 1k\nRqb qb 0 1k\nCqa qa 0 1p\nCqb qb 0 1p\n.va \"{}\" variable_sampler\n.end\n",
         model.deck_path()
     );
-    let result = run(&deck, 2e-9, 0.1e-9);
+    let result = run(&deck, 3e-9, 0.1e-9);
     let timer_error = result
         .time
         .iter()
@@ -2709,7 +2711,7 @@ endmodule
             events[1].value.state,
             rspice_core::xspice::DigitalState::One
         );
-        assert!((events[1].time - 1e-9).abs() < 1e-22, "{node}: {events:?}");
+        assert!((events[1].time - 2e-9).abs() < 1e-22, "{node}: {events:?}");
         assert!(
             (waveform(&result, node).last().unwrap() - 1.0 / 1.02).abs() < 1e-8,
             "{node}"
@@ -5282,6 +5284,250 @@ endmodule
             "the ramp's corner at {corner:e} s is a timepoint"
         );
     }
+}
+
+/// The instant a test's `d` steps from 0 to 1: `#10` under `1ns/1ps`.
+const DISCRETE_EDGE: f64 = 10.0e-9;
+
+/// A closed-form response to the step at [`DISCRETE_EDGE`], over time.
+type Response<'a> = &'a dyn Fn(f64) -> f64;
+
+/// A module whose analog `body` reads `reg d`, which steps from 0 to 1 at
+/// [`DISCRETE_EDGE`], instantiated as `x1 out` beside `netlist`, and run to
+/// `tstop` with steps of at most 1 ns — so the step that ends on the edge is
+/// most of a nanosecond long, and an operator that takes the new value over it
+/// errs by that much.
+fn discrete_edge_run(name: &str, body: &str, netlist: &str, tstop: f64) -> TransientResult {
+    let model = ModelFile::new(
+        name,
+        &format!(
+            "`timescale 1ns/1ps\n`include \"disciplines.vams\"\n\
+             module {name}(out);\n    inout out;\n    electrical out;\n    reg d;\n    real v;\n\
+             initial begin d = 1'b0; #10 d = 1'b1; end\n\
+             analog begin\n{body}\nend\nendmodule\n"
+        ),
+    );
+    run(
+        &format!(
+            "* {name}: an analog read of a discrete step\n\
+             x1 out {name}\n{netlist}\n.va \"{}\" {name}\n.end\n",
+            model.deck_path()
+        ),
+        tstop,
+        1.0e-9,
+    )
+}
+
+/// The sample at exactly [`DISCRETE_EDGE`], which every run lands on.
+fn at_discrete_edge(result: &TransientResult, values: &[f64]) -> f64 {
+    let index = result
+        .time
+        .iter()
+        .position(|time| *time == DISCRETE_EDGE)
+        .expect("the edge is a timepoint");
+    values[index]
+}
+
+/// **Every continuous read of a discrete value takes its left limit at the
+/// edge.**
+///
+/// The step that ends on the edge's timepoint is solved with the value before
+/// the edge, and the new value acts from the first instant after it — the D/A
+/// rule. So an integral, a filter and a delay of `d` each match the response
+/// to a step at the edge itself, whether the operator reads `d` or a variable
+/// set from it. Read with the new value over that step, `idt(d)` gained the
+/// whole step's area (0.98 ns of it here) and `laplace_nd` stood at 0.32 at
+/// the edge. `transition` dates the change it first sees after the edge at
+/// the edge, so its ramp starts there either way.
+#[test]
+fn continuous_operators_read_a_discrete_step_at_its_left_limit() {
+    let ramp = |time: f64| ((time - DISCRETE_EDGE) * 1e9).max(0.0);
+    let unit_ramp = |time: f64| ramp(time).min(1.0);
+    let delayed = |time: f64| f64::from(time > DISCRETE_EDGE + 2.0e-9);
+    let exact: [(&str, &str, Response); 7] = [
+        ("edge_idt", "V(out) <+ 1e9 * idt(d, 0);", &ramp),
+        (
+            "edge_idt_variable",
+            "v = d; V(out) <+ 1e9 * idt(v, 0);",
+            &ramp,
+        ),
+        ("edge_idtmod", "V(out) <+ 1e9 * idtmod(d, 0, 1e3);", &ramp),
+        ("edge_absdelay", "V(out) <+ absdelay(d, 2e-9);", &delayed),
+        (
+            "edge_transition",
+            "V(out) <+ transition(d, 0, 1e-9);",
+            &unit_ramp,
+        ),
+        (
+            "edge_transition_variable",
+            "v = d ? 1.0 : 0.0; V(out) <+ transition(v, 0, 1e-9);",
+            &unit_ramp,
+        ),
+        ("edge_slew", "V(out) <+ slew(d, 1e9, -1e9);", &unit_ramp),
+    ];
+    for (name, body, closed) in exact {
+        let result = discrete_edge_run(name, body, "rout out 0 1k", 20.0e-9);
+        for (time, value) in result.time.iter().zip(waveform(&result, "out")) {
+            assert!(
+                (value - closed(*time)).abs() < 1e-9,
+                "{name}: V(out) at {time:e} s is {value}, the response to a step at the edge \
+                 is {}",
+                closed(*time)
+            );
+        }
+    }
+    // A first-order lag integrated from the edge lags the exact response and
+    // never leads it; read with the new value over the step into the edge,
+    // it led by 0.32.
+    let lag = |time: f64| {
+        if time > DISCRETE_EDGE {
+            1.0 - (-(time - DISCRETE_EDGE) / 2.0e-9).exp()
+        } else {
+            0.0
+        }
+    };
+    for (name, body) in [
+        ("edge_laplace", "V(out) <+ laplace_nd(d, '{1}, '{1, 2e-9});"),
+        (
+            "edge_laplace_variable",
+            "v = d; V(out) <+ laplace_nd(v, '{1}, '{1, 2e-9});",
+        ),
+    ] {
+        let result = discrete_edge_run(name, body, "rout out 0 1k", 20.0e-9);
+        let out = waveform(&result, "out");
+        assert_eq!(at_discrete_edge(&result, &out), 0.0, "{name} at the edge");
+        for (time, value) in result.time.iter().zip(&out) {
+            assert!(
+                *value <= lag(*time) + 1e-12,
+                "{name}: V(out) at {time:e} s is {value}, ahead of the exact lag {}",
+                lag(*time)
+            );
+        }
+    }
+}
+
+/// **A discrete step reaches a capacitor of the netlist from the edge.**
+///
+/// Whether the charge comes from `ddt` of the value or from an instantaneous
+/// contribution of it into an RC, none of it may arrive before the edge: the
+/// capacitor holds its old voltage at the edge and the response then follows
+/// the closed form to integration accuracy. Read with the new value over the
+/// step into the edge, both delivered half their charge before it — 0.51 V and
+/// 0.49 V at the edge.
+#[test]
+fn a_discrete_step_charges_a_netlist_capacitor_from_the_edge() {
+    let decay = |time: f64| {
+        if time > DISCRETE_EDGE {
+            (-(time - DISCRETE_EDGE) / 1.0e-9).exp()
+        } else {
+            0.0
+        }
+    };
+    let charge = |time: f64| {
+        if time > DISCRETE_EDGE {
+            1.0 - (-(time - DISCRETE_EDGE) / 1.0e-9).exp()
+        } else {
+            0.0
+        }
+    };
+    let cases: [(&str, &str, &str, &str, Response); 3] = [
+        (
+            "edge_ddt",
+            "I(out) <+ -1e-12 * ddt(d);",
+            "rout out 0 1k\ncout out 0 1p",
+            "out",
+            &decay,
+        ),
+        (
+            "edge_ddt_variable",
+            "v = d; I(out) <+ -1e-12 * ddt(v);",
+            "rout out 0 1k\ncout out 0 1p",
+            "out",
+            &decay,
+        ),
+        (
+            "edge_source_rc",
+            "V(out) <+ d;",
+            "rout out mid 1k\ncmid mid 0 1p",
+            "mid",
+            &charge,
+        ),
+    ];
+    for (name, body, netlist, node, closed) in cases {
+        let result = discrete_edge_run(name, body, netlist, 20.0e-9);
+        let values = waveform(&result, node);
+        assert_eq!(
+            at_discrete_edge(&result, &values),
+            0.0,
+            "{name} at the edge"
+        );
+        for (time, value) in result.time.iter().zip(&values) {
+            assert!(
+                (value - closed(*time)).abs() < 0.02,
+                "{name}: V({node}) at {time:e} s is {value}, the closed form is {}",
+                closed(*time)
+            );
+        }
+    }
+}
+
+/// **An instantaneous read and a sampler take the left limit; an event body
+/// takes the new value.**
+///
+/// `I(out) <+ -d * 1m` into 1 kΩ holds the old value at the edge, as a D/A
+/// bridge does, and the new one from the first point after it. A `zi_nd`
+/// sampling at the edge itself captures the value before it, a sampler with
+/// no hold time, so its output moves one period later. An `@(posedge d)` body
+/// runs because of the edge and reads what it settled: `v = d` there is 1 at
+/// the edge.
+#[test]
+fn instantaneous_reads_and_samplers_take_the_left_limit_and_event_bodies_the_new_value() {
+    let result = discrete_edge_run(
+        "edge_resistive",
+        "I(out) <+ -d * 1e-3;",
+        "rout out 0 1k",
+        20.0e-9,
+    );
+    let out = waveform(&result, "out");
+    assert_eq!(at_discrete_edge(&result, &out), 0.0);
+    for (time, value) in result.time.iter().zip(&out) {
+        if *time > DISCRETE_EDGE {
+            assert!(
+                (value - 1.0).abs() < 1e-9,
+                "V(out) at {time:e} s is {value}"
+            );
+        }
+    }
+
+    // Samples at every nanosecond; the one at the edge holds 0, the next 1,
+    // and each sample's output ramps over the default transition, one period.
+    let result = discrete_edge_run(
+        "edge_sampler",
+        "V(out) <+ zi_nd(d, '{1}, '{1}, 1e-9);",
+        "rout out 0 1k",
+        14.5e-9,
+    );
+    let sampled = |time: f64| (time - (DISCRETE_EDGE + 1.0e-9)).clamp(0.0, 1.0e-9) * 1e9;
+    for (time, value) in result.time.iter().zip(waveform(&result, "out")) {
+        assert!(
+            (value - sampled(*time)).abs() < 1e-9,
+            "zi_nd output at {time:e} s is {value}, sampling the left limit at the edge gives {}",
+            sampled(*time)
+        );
+    }
+
+    let result = discrete_edge_run(
+        "edge_event_body",
+        "@(posedge d) v = d; V(out) <+ v;",
+        "rout out 0 1k",
+        20.0e-9,
+    );
+    let out = waveform(&result, "out");
+    assert_eq!(
+        at_discrete_edge(&result, &out),
+        1.0,
+        "the event body reads 1"
+    );
 }
 
 /// **`.SAVE I(x)` on a runtime Verilog-A instance reports its current.**

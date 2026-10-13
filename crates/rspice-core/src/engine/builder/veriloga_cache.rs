@@ -388,7 +388,16 @@ use super::*;
 // field of it says whether a pruned detector is inside. Rebuilding is the only
 // reading, so this constant moves with the schema and the record is refused at
 // the cache boundary.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 142;
+//
+// Version 143 follows the canonical IR's schema to 162, which changes what a
+// cached analog half's discrete inputs mean. Every discrete value an analog
+// block reads is now sampled at its left limit during a transient trial, and
+// only the reads inside analog event bodies see the settled value, through
+// twins the record lists (`HirModel::discrete_event_reads`). A version-142
+// record lists twins for `slew` operands instead and has none for event
+// bodies, so its event bodies would read the value before the edge that fired
+// them. Rebuilding is the only reading.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 143;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

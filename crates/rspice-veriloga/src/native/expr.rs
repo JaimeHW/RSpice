@@ -10201,7 +10201,7 @@ mod tests {
             discrete_selections: Vec::new(),
             discrete_edges: Vec::new(),
             analog_drivers: Vec::new(),
-            discrete_left_limits: Vec::new(),
+            discrete_event_reads: Vec::new(),
         };
         let metadata = CanonicalMetadata::for_source("fixture", module_name);
         HirModel::from_analyzed_module(&metadata, &analyzed)

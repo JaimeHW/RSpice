@@ -498,9 +498,10 @@ pub struct SemanticAnalyzer {
     /// Integer output ports the module's analog body writes and no discrete
     /// process does: the analog variable drives the port's discrete net.
     analog_owned_ports: HashSet<SmolStr>,
-    /// Discrete reads inside `slew` operands, rewritten to their left limits.
-    /// Storage is allocated after the body's locals.
-    left_limits: Vec<discrete_left_limit::LeftLimit>,
+    /// Discrete reads inside analog event bodies, rewritten to twins the host
+    /// samples from the settled state. Storage is allocated after the body's
+    /// locals.
+    event_reads: Vec<discrete_left_limit::EventRead>,
     /// Public parameter-array declarations. Until element lowering is wired
     /// through every backend, these names must never acquire scalar semantics.
     parameter_arrays: HashSet<SmolStr>,
@@ -581,7 +582,7 @@ impl SemanticAnalyzer {
             discrete_projection: Default::default(),
             digital_edges: Vec::new(),
             analog_owned_ports: HashSet::new(),
-            left_limits: Vec::new(),
+            event_reads: Vec::new(),
             parameter_arrays: HashSet::new(),
             task_vars: HashMap::new(),
             task_resets: Vec::new(),
@@ -1126,7 +1127,7 @@ impl SemanticAnalyzer {
             discrete_selections: Vec::new(),
             discrete_edges: Vec::new(),
             analog_drivers: Vec::new(),
-            discrete_left_limits: Vec::new(),
+            discrete_event_reads: Vec::new(),
         };
         // Evaluation statements accumulate in a local sink so loop bodies
         // can recurse into their own sinks without aliasing the module
@@ -1144,7 +1145,7 @@ impl SemanticAnalyzer {
         self.discrete_projection = Default::default();
         self.digital_edges.clear();
         self.analog_owned_ports.clear();
-        self.left_limits.clear();
+        self.event_reads.clear();
         self.task_vars.clear();
         self.task_resets.clear();
 
@@ -2368,7 +2369,7 @@ impl SemanticAnalyzer {
 
         self.finish_discrete_projections(&mut analyzed);
         self.finish_digital_edges(&mut analyzed);
-        self.finish_discrete_left_limits(&mut analyzed);
+        self.finish_discrete_event_reads(&mut analyzed);
         self.finish_implicit_integrators(&mut analyzed);
         analyzed.statements = statements;
         analyzed.body = self.take_body();
@@ -3249,7 +3250,12 @@ impl SemanticAnalyzer {
                 self.analyze_contribution(contrib, module, sink)?;
             }
             AnalogStatement::Assignment(assign) => {
-                self.analyze_assignment(assign, module, sink)?;
+                let operand =
+                    usize::from(self.assignment_events.synthesizes_operand(&assign.target));
+                self.assignment_events.operand_depth += operand;
+                let result = self.analyze_assignment(assign, module, sink);
+                self.assignment_events.operand_depth -= operand;
+                result?;
             }
             AnalogStatement::Block(block) => {
                 self.symbols.enter_scope();
@@ -3743,8 +3749,15 @@ impl SemanticAnalyzer {
                     &event_ctrl.event,
                     EventExpr::InitialStep { analyses, .. } if analyses.is_empty()
                 );
-                let EventLowering::Guard(guard) =
-                    self.event_guard(&event_ctrl.event, module, sink)?;
+                let operand = usize::from(matches!(
+                    &*event_ctrl.statement,
+                    AnalogStatement::Assignment(assign)
+                        if self.assignment_events.synthesizes_operand(&assign.target)
+                ));
+                self.assignment_events.operand_depth += operand;
+                let guard = self.event_guard(&event_ctrl.event, module, sink);
+                self.assignment_events.operand_depth -= operand;
+                let EventLowering::Guard(guard) = guard?;
                 // The canonical HIR must retain the event predicate as
                 // structured control flow. The snapshot below exists only for
                 // the legacy flattened assignment stream; recording event-body
@@ -7251,6 +7264,12 @@ impl SemanticAnalyzer {
     }
 
     fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
+        let mut lowered = self.lower_non_operator_node(expr)?;
+        self.read_settled_discrete_values(&mut lowered)?;
+        Ok(lowered)
+    }
+
+    fn lower_non_operator_node(&mut self, expr: &Expression) -> CompileResult<Expression> {
         if let Expression::ArrayAccess(access) = expr {
             if !access.normalized
                 && self
@@ -7470,11 +7489,6 @@ impl SemanticAnalyzer {
                         .collect::<CompileResult<Vec<_>>>()?;
                     if call.name.eq_ignore_ascii_case("transition") {
                         self.materialize_transition_defaults(&mut args, call.span);
-                    }
-                    if call.name.eq_ignore_ascii_case("slew")
-                        && let Some(operand) = args.first_mut()
-                    {
-                        self.read_discrete_left_limits(operand)?;
                     }
                     // Materialize the declaration-order-scoped default now.
                     // Hierarchy flattening may later combine modules authored

@@ -520,6 +520,48 @@ mod tests {
         assert_eq!(filter.next_event_time(4.0), None);
     }
 
+    /// A discrete input that stepped at the accepted point is first seen one
+    /// interval later; with the step's origin stated, the change starts its
+    /// transition (and its delay) at the origin, and the output moves with
+    /// its destination by the fraction of the ramp elapsed. Without one, or
+    /// once the change has been seen, a change starts where it is seen.
+    #[test]
+    fn transition_dates_a_change_at_the_stated_step_origin() {
+        let accepted_at_one = |delay: f64| {
+            let mut filter = seeded_transition(0.0);
+            filter.eval(0.0, 1.0, delay, 1.0, 1.0).unwrap();
+            filter.commit();
+            filter
+        };
+        let mut dated = accepted_at_one(0.0);
+        dated.set_input_step_origin(Some(1.0));
+        let evaluation = dated
+            .eval_with_input_coefficient(1.0, 1.25, 0.0, 1.0, 1.0)
+            .unwrap();
+        assert_eq!(evaluation.output, 0.25);
+        assert_eq!(evaluation.input_coefficient, 0.25);
+        dated.commit();
+        assert_eq!(dated.next_event_time(1.25), Some(2.0));
+        assert_eq!(dated.eval(1.0, 1.5, 0.0, 1.0, 1.0), Ok(0.5));
+
+        let mut delayed = accepted_at_one(0.5);
+        delayed.set_input_step_origin(Some(1.0));
+        assert_eq!(delayed.eval(1.0, 1.25, 0.5, 1.0, 1.0), Ok(0.0));
+        delayed.commit();
+        assert_eq!(delayed.next_event_time(1.25), Some(1.5));
+
+        let mut undated = accepted_at_one(0.0);
+        assert_eq!(undated.eval(1.0, 1.25, 0.0, 1.0, 1.0), Ok(0.0));
+        undated.commit();
+        assert_eq!(undated.next_event_time(1.25), Some(2.25));
+
+        // An origin before the filter's own accepted time explains nothing
+        // this filter has not already seen.
+        let mut seen = accepted_at_one(0.0);
+        seen.set_input_step_origin(Some(0.5));
+        assert_eq!(seen.eval(1.0, 1.25, 0.0, 1.0, 1.0), Ok(0.0));
+    }
+
     #[test]
     fn transition_rejects_invalid_timing_without_mutating_accepted_history() {
         let mut filter = seeded_transition(0.0);
@@ -994,11 +1036,35 @@ pub struct TransitionFilter {
     candidate: TransitionState,
     candidate_time: f64,
     candidate_valid: bool,
+    /// The accepted time a discrete value the analog block reads stepped at,
+    /// while the interval leaving it is solved; see
+    /// [`Self::set_input_step_origin`]. An input of the trial, not accepted
+    /// history.
+    input_step_origin: Option<f64>,
 }
 
 impl TransitionFilter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// State that the discrete values the analog block reads stepped at the
+    /// accepted time `origin`, or that none did (`None`).
+    ///
+    /// A discrete value that steps at a timepoint is read at its left limit
+    /// there, and the new value from the first instant after it, so the
+    /// filter first sees the change one interval later. The change belongs to
+    /// the accepted point: dating it at the evaluation time would start the
+    /// transition one step late, where a D/A bridge's ramp starts at its edge.
+    /// So an input change seen while `origin` is stated, and not already seen
+    /// at `origin` itself, starts its transition at `origin` (plus the delay).
+    /// A change the continuous solution makes in that one interval is dated
+    /// there too, which is within the interval it was seen in.
+    /// Answers whether the stated origin changed.
+    pub(crate) fn set_input_step_origin(&mut self, origin: Option<f64>) -> bool {
+        let changed = self.input_step_origin.map(f64::to_bits) != origin.map(f64::to_bits);
+        self.input_step_origin = origin;
+        changed
     }
 
     /// Update the filter with new input and return filtered output.
@@ -1157,7 +1223,12 @@ impl TransitionFilter {
             ));
         }
 
-        Self::advance_to(&mut state, time)?;
+        // A change the stated step origin explains starts there; see
+        // `set_input_step_origin`.
+        let dated = self
+            .input_step_origin
+            .filter(|origin| input != state.input && *origin >= state.time && *origin < time);
+        Self::advance_to(&mut state, dated.unwrap_or(time))?;
         let input_changed = input != state.input;
         let mut input_coefficient = if delay == 0.0
             && rise_time == 0.0
@@ -1171,7 +1242,7 @@ impl TransitionFilter {
             0.0
         };
         if input_changed {
-            let start_time = time + delay;
+            let start_time = dated.unwrap_or(time) + delay;
             if !start_time.is_finite() {
                 return Err("transition delay produces a non-finite event time".into());
             }
@@ -1195,6 +1266,19 @@ impl TransitionFilter {
                 }
                 pending.push_back(event);
             }
+        }
+        if dated.is_some() {
+            Self::advance_to(&mut state, time)?;
+            // The output now lies part-way along the dated segment: it moves
+            // with its destination by the fraction of the segment elapsed.
+            input_coefficient = match state.active {
+                Some(active) if active.destination == input => ((time - active.origin_time)
+                    / (active.end_time - active.origin_time))
+                    .clamp(0.0, 1.0),
+                Some(_) => 0.0,
+                None if state.pending.is_empty() && state.output == input => 1.0,
+                None => 0.0,
+            };
         }
         state.time = time;
         Ok((

@@ -614,10 +614,10 @@ mod tests {
                         integral
                     };
                     let prior_voltage = if time == 1e-9 { 0.0 } else { 2.0 };
-                    // `q` moves at both timepoints. The analog block reads the
-                    // new bit at once; the D/A bridge drives the solution at
-                    // the timepoint with the bit from before it and the new
-                    // one only from the first instant after.
+                    // `q` moves at both timepoints. The analog block reads it
+                    // and the D/A bridge drives it the same way: the solution
+                    // at the timepoint takes the bit from before it, and the
+                    // new one acts only from the first instant after.
                     let drive = if time == 1e-9 { 0.0 } else { 1.0 };
                     let ddt_gain = if weighted { 6.0 } else { 3.0 };
                     let idt_gain = if weighted { 0.5 } else { 1.0 };
@@ -644,10 +644,10 @@ mod tests {
                     let jacobian = matrix.values_mut()[slot.offset()];
                     let weight = if weighted { 0.5 } else { 1.0 };
                     assert!(
-                        (jacobian - weight * (2.0 * (digital + 1.0) + ddt_gain + idt_gain)).abs()
+                        (jacobian - weight * (2.0 * (drive + 1.0) + ddt_gain + idt_gain)).abs()
                             < 1e-12
                     );
-                    let expected = 2.0 * (digital + 1.0) * voltage
+                    let expected = 2.0 * (drive + 1.0) * voltage
                         + ddt_gain * (voltage - prior_voltage)
                         + integral;
                     assert!(
@@ -677,7 +677,7 @@ mod tests {
                         "runtime history={history:?}"
                     );
                     assert!(
-                        (history[mixed - 1] - ((2.0 * (digital + 1.0) + 0.5) * voltage + integral))
+                        (history[mixed - 1] - ((2.0 * (drive + 1.0) + 0.5) * voltage + integral))
                             .abs()
                             < 1e-12,
                         "mixed history={history:?}"

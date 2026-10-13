@@ -2003,6 +2003,18 @@ impl VmContext {
         self.timestep
     }
 
+    /// State the accepted time at which a discrete value the analog block
+    /// reads stepped, while the interval leaving it is solved, or `None`. Every
+    /// `transition` dates an input change that step explains at that time; see
+    /// [`TransitionFilter::set_input_step_origin`].
+    pub fn set_transition_input_step_origin(&mut self, origin: Option<f64>) {
+        for filter in &mut self.transition_filters {
+            if filter.set_input_step_origin(origin) {
+                self.numerical_evaluation_valid = false;
+            }
+        }
+    }
+
     /// Set the timestep for transient analysis.
     pub fn set_timestep(&mut self, dt: f64) {
         self.try_set_timestep(dt)

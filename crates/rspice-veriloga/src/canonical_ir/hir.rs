@@ -946,11 +946,13 @@ pub struct HirModel {
     /// Analog `integer` variables that drive discrete output ports.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub analog_drivers: Vec<HirAnalogDriver>,
-    /// Discrete input value slots that read the signal's left limit: the value
-    /// before the coupled trial's digital activity, which a `slew` operand
-    /// reads so its ramp starts at the edge.
+    /// Discrete input value slots read inside analog event bodies. A transient
+    /// trial samples them at the value the trial's digital activity settled;
+    /// every other discrete input reads its left limit, the value before that
+    /// activity, so a value that steps at a timepoint acts from the first
+    /// instant after it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub discrete_left_limits: Vec<VariableId>,
+    pub discrete_event_reads: Vec<VariableId>,
     /// Sorted names whose values must be published during ordinary analog
     /// evaluation for discrete-domain readers. They are not electrical unknowns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1262,8 +1264,8 @@ impl HirModel {
                     signal: signal.clone(),
                 })
                 .collect(),
-            discrete_left_limits: module
-                .discrete_left_limits
+            discrete_event_reads: module
+                .discrete_event_reads
                 .iter()
                 .map(|&value| VariableId::from(value))
                 .collect(),
@@ -1477,13 +1479,13 @@ impl HirModel {
                 "analog drivers must be distinct integer variables, not discrete inputs, each driving one signal",
             ));
         }
-        let mut limited = HashSet::new();
-        if self.discrete_left_limits.iter().any(|value| {
-            !input_values.contains(value) || !limited.insert(*value) || edged.contains(value)
+        let mut settled = HashSet::new();
+        if self.discrete_event_reads.iter().any(|value| {
+            !input_values.contains(value) || !settled.insert(*value) || edged.contains(value)
         }) {
             diagnostics.push(IrDiagnostic::global_error(
                 CompilerPhase::HirValidation,
-                "discrete left limits must name unique discrete input values that are not edge flags",
+                "discrete event-body reads must name unique discrete input values that are not edge flags",
             ));
         }
         validate_dense_array_ids(&mut diagnostics, &self.arrays);

@@ -1036,9 +1036,9 @@ impl<'a> HierarchyElaborator<'a> {
                 .analog_drivers
                 .push((variable_base + variable, signal));
         }
-        self.flattened.discrete_left_limits.extend(
+        self.flattened.discrete_event_reads.extend(
             child
-                .discrete_left_limits
+                .discrete_event_reads
                 .iter()
                 .map(|value| variable_base + value),
         );

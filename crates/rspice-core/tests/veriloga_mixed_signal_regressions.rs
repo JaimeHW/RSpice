@@ -246,8 +246,11 @@ fn digital_switch_branches_preserve_both_source_modes() {
             .iter()
             .position(|name| name.eq_ignore_ascii_case("out"))
             .unwrap();
+        // `state` steps at 1 ns and 2 ns, and each step acts from the first
+        // instant after its edge: the edge's own timepoint solves the mode
+        // that held up to it.
         for (time, voltage) in result.time.iter().zip(&result.voltages[out]) {
-            let expected = if *time >= 1e-9 - 1e-18 && *time < 2e-9 - 1e-18 {
+            let expected = if *time > 1e-9 + 1e-18 && *time <= 2e-9 + 1e-18 {
                 2.0
             } else {
                 1.0 / 3.0
@@ -272,8 +275,10 @@ fn digital_state_controls_analog_conductance_and_its_jacobian() {
         .iter()
         .position(|node| node.eq_ignore_ascii_case("p"))
         .unwrap();
+    // `state` steps at 1 ns and acts from the first instant after it: the
+    // edge's own timepoint solves the open circuit that held up to it.
     for (time, voltage) in result.time.iter().zip(&result.voltages[p]) {
-        let expected = if *time < 1e-9 - 1e-18 { 1.0 } else { 0.5 };
+        let expected = if *time <= 1e-9 + 1e-18 { 1.0 } else { 0.5 };
         assert!((voltage - expected).abs() < 1e-7, "t={time}, p={voltage}");
     }
 }

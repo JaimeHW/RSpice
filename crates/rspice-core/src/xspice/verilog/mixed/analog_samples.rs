@@ -160,21 +160,22 @@ impl AnalogModelParticipant<'_> {
                     let signal = self
                         .signals
                         .map_or(input.signal, |map| map[usize::from(input.signal)]);
-                    let value = if let Some(left) = self.left.filter(|_| input.left_limit) {
-                        read_discrete_value(left, input)
-                    } else if let Some(edge) = input.edge {
-                        Some(super::digital_edges::flag(
-                            exchange.analog_edge(signal),
-                            edge,
-                        ))
-                    } else if input.real {
-                        exchange.read_real_signal(signal)
-                    } else {
-                        exchange
-                            .read_signal(signal)
-                            .and_then(|value| input.four_state_value(value))
-                    }
-                    .filter(|value| value.is_finite());
+                    let value =
+                        if let Some(left) = self.left.filter(|_| input.reads_left_limit()) {
+                            read_discrete_value(left, input)
+                        } else if let Some(edge) = input.edge {
+                            Some(super::digital_edges::flag(
+                                exchange.analog_edge(signal),
+                                edge,
+                            ))
+                        } else if input.real {
+                            exchange.read_real_signal(signal)
+                        } else {
+                            exchange
+                                .read_signal(signal)
+                                .and_then(|value| input.four_state_value(value))
+                        }
+                        .filter(|value| value.is_finite());
                     input.sample(analog, value)?;
                 }
                 self.prepared
@@ -359,8 +360,11 @@ endmodule
         assert_eq!(host.prepared_analog.evaluations, 2);
         host.accept_trial().unwrap();
         let accepted = host.checkpoint().unwrap();
+        // `gain` steps to 3 at 1 ns, and `captured` reads `measured` in the
+        // same tick: the analog evaluation at the step's own timepoint reads
+        // the left limit, 2, as the solution there does.
         begin(&mut host, 1e-9);
-        assert_eq!(sample(&mut host, 2.25), 6.75);
+        assert_eq!(sample(&mut host, 2.25), 4.5);
         host.reject_trial().unwrap();
         assert!(!host.prepared_analog.valid);
         assert_eq!(
@@ -369,11 +373,11 @@ endmodule
         );
 
         begin(&mut host, 1e-9);
-        assert_eq!(sample(&mut host, 4.0), 12.0);
+        assert_eq!(sample(&mut host, 4.0), 8.0);
         host.accept_trial().unwrap();
         host.restore(&accepted).unwrap();
         begin(&mut host, 1e-9);
-        assert_eq!(sample(&mut host, 2.0), 6.0);
+        assert_eq!(sample(&mut host, 2.0), 4.0);
         host.accept_trial().unwrap();
 
         let accepted_transient = host.checkpoint().unwrap();

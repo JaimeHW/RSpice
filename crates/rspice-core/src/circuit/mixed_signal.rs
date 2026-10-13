@@ -218,6 +218,15 @@ impl CircuitData {
             .any(MixedSignalHost::accepted_point_stepped_a_drive)
     }
 
+    /// The edge completion each instance asks for: the end of a step a
+    /// discrete value its analog block reads took at the accepted point. See
+    /// `MixedSignalHost::read_step_completion`.
+    pub(crate) fn mixed_read_step_completions(&self) -> impl Iterator<Item = Value> + '_ {
+        self.mixed_signal_hosts
+            .iter()
+            .filter_map(MixedSignalHost::read_step_completion)
+    }
+
     /// Register one elaborated mixed module.
     pub(crate) fn add_mixed_signal_host(
         &mut self,

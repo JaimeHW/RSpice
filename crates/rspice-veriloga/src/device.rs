@@ -4547,6 +4547,15 @@ impl VerilogADevice {
         self.context.try_set_timestep(dt)
     }
 
+    /// State the accepted time at which a discrete value this device's analog
+    /// block reads stepped, while the interval leaving it is solved, or
+    /// `None`: each `transition` dates an input change that step explains at
+    /// that time rather than one interval late. The mixed host states it for
+    /// every transient trial.
+    pub fn set_transition_input_step_origin(&mut self, origin: Option<f64>) {
+        self.context.set_transition_input_step_origin(origin);
+    }
+
     /// Whether the full model permits the externally weighted F/Q formulation.
     /// False selects ordinary companions without changing the authored equations.
     pub fn one_step_dae_split_safe(&self) -> bool {

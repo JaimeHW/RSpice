@@ -324,31 +324,40 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     // YB flip at one instant, which adds that completion, every event is
     // bit-identical, and both cross half their level 0.5 ps after the edge
     // rather than 40 ps after; a 1 ps PWL edge crosses at 0.5 ps.
+    //
+    // And together again, 37 -> 38, when every analog read of a discrete
+    // value began taking its left limit at the edge's own timepoint. `gain`
+    // steps at `ca`'s 10.6 ns crossing and acts from the first instant after
+    // it, so P holds gain one's 0.999 V on the crossing's own point where it
+    // held gain two's 1.998 V, and `cb`, which crosses on the step `gain`
+    // took, is landed one solver floor past the crossing (10.6 ns + 1e-20 s)
+    // as a crossing a D/A step caused is: that landing is the added point.
+    // YA and YB still rise together, once, at 12 ns.
     (
         "the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing",
         "hardening_feedback",
         Fingerprint {
-            points: 37,
-            grid_hash: 0xda88_27dc_ffe8_7235,
-            volt_hash: 0x885f_95b9_2c3a_3489,
+            points: 38,
+            grid_hash: 0x1ee9_2097_1999_277d,
+            volt_hash: 0x7405_6288_fe3a_5a5d,
         },
     ),
     (
         "a_crossing_carried_between_two_instances_is_landed_on_once",
         "hardening_feedback_split",
         Fingerprint {
-            points: 37,
-            grid_hash: 0xda88_27dc_ffe8_7235,
-            volt_hash: 0x3317_6bb3_ba0a_ecf8,
+            points: 38,
+            grid_hash: 0x1ee9_2097_1999_277d,
+            volt_hash: 0x1da7_e029_ee0d_5667,
         },
     ),
     (
         "a_carried_crossing_wakes_its_process_after_the_write_that_caused_it",
         "hardening_feedback_order",
         Fingerprint {
-            points: 37,
-            grid_hash: 0xda88_27dc_ffe8_7235,
-            volt_hash: 0x885f_95b9_2c3a_3489,
+            points: 38,
+            grid_hash: 0x1ee9_2097_1999_277d,
+            volt_hash: 0x7405_6288_fe3a_5a5d,
         },
     ),
     (
@@ -3067,8 +3076,10 @@ endmodule
 /// The standalone cases hand the host two iterates. This one makes the engine
 /// produce them: the ramp on `ca` crosses half the supply at 10.6 ns, R2.2's
 /// boundary refinement lands the step there, the `posedge ca` process writes
-/// `gain`, the re-solve at that same endpoint lifts `q` past its threshold,
-/// and `cb` crosses on it.
+/// `gain`, and `gain` lifts `q` past its threshold from the first instant
+/// after that endpoint — the endpoint itself solves the left limit — so `cb`
+/// crosses on the step `gain` took and is landed one solver floor past it,
+/// as a crossing a D/A step caused is, rather than interpolated into.
 ///
 /// What is pinned here is the consequence the deck can see: cause and effect
 /// are published into one tick, so both reactions come due together and `yb`
@@ -3211,15 +3222,43 @@ fn a_feedback_carried_crossing_is_landed_on_once_rather_than_bisected_into() {
     // A rung is what a bisection leaves behind: two accepted points a fraction
     // of the interval apart, each one nearer the same root. The approach and
     // the restart after the landing are both whole steps of the controller.
-    let closest = accepted
-        .windows(2)
-        .map(|pair| pair[1] - pair[0])
-        .fold(f64::INFINITY, f64::min);
+    let closest = closest_steps(&accepted, CROSSING);
     assert!(
         closest > 1.0e-12,
         "the nearest two accepted points are {closest:e} s apart, which is a \
          bisection rung rather than a step: {accepted:?}"
     );
+}
+
+/// The nearest two of `accepted`, leaving out the one landing a solver floor
+/// past the point landed on `crossing`.
+///
+/// `gain` steps at the crossing and acts from the first instant after it, as
+/// a D/A step does, so `cb` crosses on the interval leaving the crossing and
+/// is landed on that interval's first allowed instant, one floor (1e-20 s)
+/// past it. That landing is the step's own, not a bisection rung, and at most
+/// one is allowed; any other pair closer than a step still is a rung.
+fn closest_steps(accepted: &[f64], crossing: f64) -> f64 {
+    // The landing is a few ulps off the decimal instant, so the floor is
+    // measured from the accepted point itself.
+    let landed = accepted
+        .iter()
+        .copied()
+        .find(|time| (time - crossing).abs() <= 1.0e-20)
+        .unwrap_or(crossing);
+    let floor_landing = |time: f64| time > landed && time - landed < 2.0e-20;
+    assert!(
+        accepted.iter().filter(|time| floor_landing(**time)).count() <= 1,
+        "a read step adds one floor landing past the crossing, not more: {accepted:?}"
+    );
+    accepted
+        .iter()
+        .copied()
+        .filter(|time| !floor_landing(*time))
+        .collect::<Vec<_>>()
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// [`FEEDBACK_DECK`]'s feedback reduced to one source, its `gain` declared
@@ -3318,10 +3357,33 @@ fn a_real_a_process_writes_is_a_step_of_the_analog_equations_like_an_integer() {
             "V({node}) must not depend on whether `gain` is a real"
         );
     }
+    // `gain` steps at the crossing and acts from the first instant after it,
+    // and the step completes as a zero-time D/A edge does, one picosecond
+    // past the point landed on the crossing: that completion is one accepted
+    // point of the step's own, allowed once. The rest still is a handful.
+    let landed = real
+        .time
+        .iter()
+        .copied()
+        .find(|time| (time - 10.6e-9).abs() <= 1.0e-20)
+        .expect("the crossing itself is an accepted point");
+    let completion = |time: f64| (time - (landed + 1.0e-12)).abs() < 1.0e-18;
+    let completions = real.time.iter().filter(|time| completion(**time)).count();
+    let nearby: Vec<f64> = real
+        .time
+        .iter()
+        .copied()
+        .filter(|time| (time - 10.6e-9).abs() < 1.0e-9)
+        .collect();
     assert!(
-        near_crossing(&real) <= 8,
-        "one crossing costs a handful of accepted points, not a ladder: {}",
-        near_crossing(&real)
+        completions <= 1,
+        "a read step completes once, not {completions} times: {nearby:?}"
+    );
+    assert!(
+        near_crossing(&real) - completions <= 8,
+        "one crossing costs a handful of accepted points, not a ladder: {} besides \
+         the read step's completion, {nearby:?}",
+        near_crossing(&real) - completions
     );
 }
 
@@ -3448,10 +3510,7 @@ fn a_crossing_carried_between_two_instances_is_landed_on_once() {
             .any(|time| (time - CROSSING).abs() <= 1.0e-20),
         "the crossing itself must be one of the accepted points: {accepted:?}"
     );
-    let closest = accepted
-        .windows(2)
-        .map(|pair| pair[1] - pair[0])
-        .fold(f64::INFINITY, f64::min);
+    let closest = closest_steps(&accepted, CROSSING);
     assert!(
         closest > 1.0e-12,
         "the nearest two accepted points are {closest:e} s apart, which is a \

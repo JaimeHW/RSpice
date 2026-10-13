@@ -165,6 +165,7 @@ use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use super::host::DigitalHost;
 use super::{DigitalRunError, parse_four_state};
 use crate::xspice::event_scheduler::{Instant, SchedulerError, SchedulerLimits, TimeResolution};
+use crate::xspice::models::OFFICIAL_BRIDGE_TIMING_MIN;
 use crate::xspice::settle_cost;
 use crate::xspice::threshold_crossing::threshold_crossing_time;
 
@@ -1388,11 +1389,11 @@ struct DiscreteAnalogInput {
     /// The digital edge an analog event control waits on. Such an input is
     /// a flag rather than a value; see `digital_edges.rs`.
     edge: Option<rspice_veriloga::canonical_ir::digital::DigitalEdge>,
-    /// Whether this input reads the signal's left limit — its value before
-    /// the open transient trial's digital activity — as a `slew` operand
-    /// does, so the ramp starts at the edge rather than at the previous
-    /// timepoint. See [`left_limit_image`].
-    left_limit: bool,
+    /// Whether this input is read inside an analog event body, which sees the
+    /// value the open transient trial's digital activity settled rather than
+    /// the left limit every other read takes. See
+    /// [`DiscreteAnalogInput::reads_left_limit`].
+    event_read: bool,
     signed: bool,
     real: bool,
     name: String,
@@ -1444,15 +1445,41 @@ impl DiscreteAnalogInput {
         value.to_real(self.signed).ok()
     }
 
+    /// Whether an open transient trial samples this input at its left limit:
+    /// the value before the trial's digital activity (see
+    /// [`left_limit_image`]).
+    ///
+    /// Every digital-to-analog path obeys one rule at a timepoint where a
+    /// discrete value steps: the solution there is the left limit, and the new
+    /// value acts from the first instant after it, so the step leaving the
+    /// point restarts integration from it ([`MixedSignalHost::
+    /// candidate_discontinuity`]). A D/A bridge drives that way, and so does
+    /// every analog read of a discrete value, whatever reads it — `idt` and
+    /// `laplace_*` integrate the old value up to the edge, a contribution
+    /// charges a capacitor of the netlist from it — and through whatever
+    /// variables the value flows on the way. Three reads are not steps of
+    /// that kind and see the settled value: an analog event body's (it runs
+    /// because of the activity), a digital edge flag (it *is* the activity),
+    /// and a real a code model samples off the analog solution, which is
+    /// continuous across the timepoint.
+    fn reads_left_limit(&self) -> bool {
+        !self.event_read && self.edge.is_none() && !self.analog_sample
+    }
+
+    /// The value and validity lanes the analog device holds for one sample.
+    fn lanes(sampled: Option<f64>) -> [f64; 2] {
+        [
+            sampled.unwrap_or(0.0),
+            f64::from(u8::from(sampled.is_some())),
+        ]
+    }
+
     fn sample(
         &self,
         analog: &mut VerilogADevice,
         sampled: Option<f64>,
     ) -> Result<bool, MixedSignalError> {
-        let lanes = [
-            sampled.unwrap_or(0.0),
-            f64::from(u8::from(sampled.is_some())),
-        ];
+        let lanes = Self::lanes(sampled);
         let mut changed = false;
         for (slot, value) in [self.variable, self.validity].into_iter().zip(lanes) {
             if analog.discrete_state_value(slot).map(f64::to_bits) != Some(value.to_bits()) {
@@ -1690,7 +1717,7 @@ impl MixedSignalHost {
                     selection: selection
                         .map(|selection| (selection.lsb, selection.width, selection.encoded)),
                     edge,
-                    left_limit: canonical_ir.hir.discrete_left_limits.contains(value),
+                    event_read: canonical_ir.hir.discrete_event_reads.contains(value),
                     // A narrow packed grouping is zero-extended whatever its
                     // signedness (Verilog-AMS 2023 Table 7-1); one of 32 bits
                     // or more keeps the sign it was declared with.
@@ -2901,6 +2928,10 @@ impl MixedSignalHost {
             &mut self.scratch.trial.discrete_at_trial_start,
         );
         self.prepare_analog_event_trial()?;
+        // Read before anything in this trial can sample the inputs again: the
+        // device still holds what the accepted point read.
+        let input_step_origin = (timestep_seconds > 0.0 && self.accepted_point_stepped_a_read())
+            .then(|| self.accepted_analog_time());
         let rollback = self.state.digital.clone();
         let previous_inputs = self.analog_inputs;
         self.analog
@@ -2947,6 +2978,9 @@ impl MixedSignalHost {
             return Err(error);
         }
         self.analog_inputs = inputs;
+        self.analog
+            .make_mut()
+            .set_transition_input_step_origin(input_step_origin);
         let start_digital =
             time_seconds == 0.0 && !self.state.started && self.state.initial_digital.is_some();
         if start_digital {
@@ -3129,7 +3163,7 @@ impl MixedSignalHost {
         let left = left_limit_image(self.trial.as_ref());
         for input in &self.discrete_inputs {
             let sampled = match left {
-                Some(left) if input.left_limit => read_discrete_value(left, input),
+                Some(left) if input.reads_left_limit() => read_discrete_value(left, input),
                 _ => read_discrete_input(&self.state, input),
             };
             changed |= input.sample(self.analog.make_mut(), sampled)?;
@@ -4659,18 +4693,20 @@ impl MixedSignalHost {
     }
 
     /// Whether the accepted point stepped a digital-to-analog drive: a D/A
-    /// bridge or a converted output port whose bit moved there.
+    /// bridge or a converted output port whose bit moved there, or a discrete
+    /// value the analog equations read at its left limit
+    /// ([`Self::accepted_point_stepped_a_read`]).
     ///
     /// A drive moved at a timepoint changes the analog problem from the first
-    /// instant after it (`stamp_dac_bridges`, and the shared converter's own
-    /// ramp), so the solution accepted there is the left limit and the interval
-    /// leaving it starts from a right limit no accepted sample holds. An A/D
-    /// crossing found on that interval cannot be interpolated from the accepted
-    /// sample: the step the drive took is inside the chord, and the chord dates
-    /// a crossing the drive caused at its first instant somewhere in the middle
-    /// of the interval — a root the refinement would then walk towards the
-    /// accepted point one halving at a time. See
-    /// [`Self::trial_boundary_refinement_time`].
+    /// instant after it (`stamp_dac_bridges`, the shared converter's own ramp,
+    /// and [`DiscreteAnalogInput::reads_left_limit`]), so the solution accepted
+    /// there is the left limit and the interval leaving it starts from a right
+    /// limit no accepted sample holds. An A/D crossing found on that interval
+    /// cannot be interpolated from the accepted sample: the step the drive took
+    /// is inside the chord, and the chord dates a crossing the drive caused at
+    /// its first instant somewhere in the middle of the interval — a root the
+    /// refinement would then walk towards the accepted point one halving at a
+    /// time. See [`Self::trial_boundary_refinement_time`].
     ///
     /// Read from the accepted histories: their two newest values are the bit
     /// before and after the accepted point.
@@ -4689,6 +4725,57 @@ impl MixedSignalHost {
                         && port.converted_bit().is_some()
                         && stepped(entry)
                 })
+            || self.accepted_point_stepped_a_read()
+    }
+
+    /// The edge completion this instance asks the stepper for: the end of the
+    /// step a discrete value its analog block reads took at the accepted
+    /// point, or `None` when none did.
+    ///
+    /// The accepted point solved the left limit, and the new value acts from
+    /// the first instant after it, so it is first solved at whichever point
+    /// comes next — left to the stepper, the restart a tenth of the step
+    /// before the edge, which put `V(out) <+ d` half its swing 50 ps late on
+    /// a 1 ns step. The step is a zero-duration edge, and it completes as a
+    /// built-in D/A edge does ([`OFFICIAL_BRIDGE_TIMING_MIN`] after its
+    /// instant, `xspice::models::bridges`), so the new value is reported
+    /// within a picosecond of the edge and the stepper crosses the
+    /// realization and restarts once. Asked again after every acceptance; a
+    /// point accepted inside the realization already reports the new value,
+    /// and the step out of it is an ordinary one.
+    pub(crate) fn read_step_completion(&self) -> Option<f64> {
+        (self.state.started && self.accepted_point_stepped_a_read())
+            .then_some(self.state.accepted_time + OFFICIAL_BRIDGE_TIMING_MIN)
+    }
+
+    /// Whether a discrete value the analog equations read at its left limit
+    /// stepped at the accepted point: the value the accepted solution read
+    /// there differs from the value the discrete half settled to there, which
+    /// is what the interval leaving the point reads.
+    ///
+    /// Read off what the device holds against the settled store, so it needs
+    /// no record of its own and a checkpoint restores it with both. While a
+    /// trial is open the device may already hold the trial's own sample, so
+    /// the pair is the one the trial opened with: what the device held, and
+    /// the store's rollback image.
+    fn accepted_point_stepped_a_read(&self) -> bool {
+        let stepped = |input: &DiscreteAnalogInput, held: [f64; 2], settled: &MixedDigital| {
+            input.reads_left_limit()
+                && DiscreteAnalogInput::lanes(read_discrete_value(settled, input)).map(f64::to_bits)
+                    != held.map(f64::to_bits)
+        };
+        match &self.trial {
+            Some(trial) => self
+                .discrete_inputs
+                .iter()
+                .zip(&trial.vectors.discrete_inputs)
+                .any(|(input, held)| stepped(input, *held, &trial.rollback)),
+            None => self.discrete_inputs.iter().any(|input| {
+                let held = [input.variable, input.validity]
+                    .map(|slot| self.analog.discrete_state_value(slot).unwrap_or(f64::NAN));
+                stepped(input, held, &self.state.digital)
+            }),
+        }
     }
 
     /// The diagnostic for a boundary that has moved at every accepted timepoint
@@ -5154,9 +5241,10 @@ fn read_discrete_input(state: &MixedState, input: &DiscreteAnalogInput) -> Optio
 }
 
 /// The discrete half as it stood when an open transient trial began: the left
-/// limit at the trial's timepoint, which a `slew` operand reads — one rule for
-/// every digital-to-analog path, as `stamp_dac_bridges` states it. An
-/// operating point has no "before" and reads the settled state.
+/// limit at the trial's timepoint, which every analog read but an event body's
+/// takes — one rule for every digital-to-analog path, as `stamp_dac_bridges`
+/// states it (see [`DiscreteAnalogInput::reads_left_limit`]). An operating
+/// point has no "before" and reads the settled state.
 fn left_limit_image(trial: Option<&ActiveTrial>) -> Option<&MixedDigital> {
     trial
         .filter(|trial| trial.timestep_seconds > 0.0)
@@ -5634,6 +5722,8 @@ endmodule
         // This crossing reports tick 1 while its physical time is 0.65 ns.
         // X delay becomes inactive-region zero; the following real delay rounds
         // 0.5 module units to one tick. The independent tick-1 timer stays queued.
+        // What the crossing's process writes acts from the first instant after
+        // it, so the crossing's own timepoint still solves the left limit.
         for reject in [true, false] {
             host.begin_trial(
                 0.65e-9,
@@ -5643,7 +5733,7 @@ endmodule
                 false,
             )
             .unwrap();
-            assert!((stamp(&mut host) + 3.65e-3).abs() < 1e-12);
+            assert!(stamp(&mut host).abs() < 1e-12);
             assert_eq!(host.read_digital("unrelated").unwrap(), "0");
             assert!((host.next_event_time().unwrap().unwrap() - 1e-9).abs() < 1e-20);
             if reject {
@@ -5655,18 +5745,37 @@ endmodule
             }
         }
         let checkpoint = host.checkpoint().unwrap();
-        begin(&mut host, 1);
-        assert!((stamp(&mut host) + 3.65e-3).abs() < 1e-12);
-        assert_eq!(host.read_digital("unrelated").unwrap(), "1");
-        host.accept_trial().unwrap();
+        // The next trial is the one whose analog lanes take the writes, so it
+        // is the one a rejection must restore them from.
+        for reject in [true, false] {
+            begin(&mut host, 1);
+            assert!((stamp(&mut host) + 3.65e-3).abs() < 1e-12);
+            assert_eq!(host.read_digital("unrelated").unwrap(), "1");
+            if reject {
+                host.reject_trial().unwrap();
+                assert_eq!(
+                    host.analog.checkpoint_state().unwrap(),
+                    checkpoint.analog_checkpoint
+                );
+            } else {
+                host.accept_trial().unwrap();
+            }
+        }
+        // The `#($realtime/2.0)` resume writes `absolute` at tick 2, and the
+        // analog equations read it from the timepoint after.
         begin(&mut host, 2);
+        assert!((stamp(&mut host) + 3.65e-3).abs() < 1e-12);
+        host.accept_trial().unwrap();
+        begin(&mut host, 3);
         assert!((stamp(&mut host) + 5e-3).abs() < 1e-12);
         host.accept_trial().unwrap();
         // Restoring accepted state must also discard the later activation clock.
         host.restore(&checkpoint).unwrap();
-        begin(&mut host, 1);
-        settle_and_accept(&mut host, &[0.0, 0.6]);
-        begin(&mut host, 2);
+        for tick in 1..=2 {
+            begin(&mut host, tick);
+            settle_and_accept(&mut host, &[0.0, 0.6]);
+        }
+        begin(&mut host, 3);
         assert!((stamp(&mut host) + 5e-3).abs() < 1e-12);
         host.accept_trial().unwrap();
     }
@@ -5712,9 +5821,11 @@ endmodule
                 false,
             )
             .unwrap();
+            // The crossing's own timepoint solves the left limit: what its
+            // process writes acts from the first instant after it.
             assert!(
-                (stamp(&mut host) + 1e-3).abs() < 1e-12,
-                "continuation runs immediately, held value waits"
+                stamp(&mut host).abs() < 1e-12,
+                "the crossing's own timepoint reads what stood before it"
             );
             assert_eq!(host.read_digital("issued").unwrap(), "1");
             assert_eq!(
@@ -5735,17 +5846,32 @@ endmodule
             if replay == 1 {
                 host.restore(&checkpoint).unwrap();
             }
-            begin(&mut host, 1);
-            assert!((stamp(&mut host) + 1e-3).abs() < 1e-12);
-            assert_eq!(host.read_digital("independent").unwrap(), "1");
-            host.accept_trial().unwrap();
+            // The analog lanes take `issued` here, so a rejection here is the
+            // one that must put them back.
+            for reject in [true, false] {
+                begin(&mut host, 1);
+                assert!(
+                    (stamp(&mut host) + 1e-3).abs() < 1e-12,
+                    "continuation ran at the crossing, held value waits"
+                );
+                assert_eq!(host.read_digital("independent").unwrap(), "1");
+                if reject {
+                    host.reject_trial().unwrap();
+                    assert_eq!(
+                        host.analog.checkpoint_state().unwrap(),
+                        checkpoint.analog_checkpoint
+                    );
+                } else {
+                    host.accept_trial().unwrap();
+                }
+            }
             assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
+            // The update is delivered at 2 ns and read from the timepoint
+            // after, so a rejection at 2 ns must keep it pending and one at
+            // 3 ns must take it out of the analog lanes again.
             for reject in [true, false] {
                 begin(&mut host, 2);
-                assert!(
-                    (stamp(&mut host) + 1.65e-3).abs() < 1e-12,
-                    "delivered RHS keeps the captured 0.65 ns physical time"
-                );
+                assert!((stamp(&mut host) + 1e-3).abs() < 1e-12);
                 if reject {
                     host.reject_trial().unwrap();
                 } else {
@@ -5753,6 +5879,23 @@ endmodule
                 }
             }
             assert!(host.next_event_time().unwrap().is_none());
+            let delivered = host.checkpoint().unwrap();
+            for reject in [true, false] {
+                begin(&mut host, 3);
+                assert!(
+                    (stamp(&mut host) + 1.65e-3).abs() < 1e-12,
+                    "delivered RHS keeps the captured 0.65 ns physical time"
+                );
+                if reject {
+                    host.reject_trial().unwrap();
+                    assert_eq!(
+                        host.analog.checkpoint_state().unwrap(),
+                        delivered.analog_checkpoint
+                    );
+                } else {
+                    host.accept_trial().unwrap();
+                }
+            }
         }
     }
 
@@ -5808,7 +5951,9 @@ endmodule
                     false,
                 )
                 .unwrap();
-                assert!((stamp(&mut host, 0.0) + 1e-3).abs() < 1e-12);
+                // `requested` acts from the first instant after the edge that
+                // wrote it, so the edge's own timepoint solves the left limit.
+                assert!(stamp(&mut host, 0.0).abs() < 1e-12);
                 assert_eq!(
                     host.read_digital("requested").unwrap(),
                     "1",
@@ -5826,6 +5971,8 @@ endmodule
                 if replay == 1 {
                     host.restore(&checkpoint).unwrap();
                 }
+                // The analog lanes take `requested` here, and the captures the
+                // `adc` edge completes here act from the timepoint after it.
                 for reject in [true, false] {
                     host.begin_trial(
                         1.65e-9,
@@ -5835,10 +5982,7 @@ endmodule
                         false,
                     )
                     .unwrap();
-                    assert!(
-                        (stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12,
-                        "both captures retain their original real RHS"
-                    );
+                    assert!((stamp(&mut host, 0.6) + 1e-3).abs() < 1e-12);
                     assert_eq!(
                         host.read_digital("independent").unwrap(),
                         "0",
@@ -5846,22 +5990,40 @@ endmodule
                     );
                     if reject {
                         host.reject_trial().unwrap();
+                        assert_eq!(
+                            host.analog.checkpoint_state().unwrap(),
+                            checkpoint.analog_checkpoint
+                        );
                     } else {
                         host.accept_trial().unwrap();
                     }
                 }
                 assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
-                host.begin_trial(
-                    2e-9,
-                    0.35e-9,
-                    IntegrationCoefficients::inactive(),
-                    false,
-                    false,
-                )
-                .unwrap();
-                assert!((stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12);
-                assert_eq!(host.read_digital("independent").unwrap(), "1");
-                host.accept_trial().unwrap();
+                let captured = host.checkpoint().unwrap();
+                for reject in [true, false] {
+                    host.begin_trial(
+                        2e-9,
+                        0.35e-9,
+                        IntegrationCoefficients::inactive(),
+                        false,
+                        false,
+                    )
+                    .unwrap();
+                    assert!(
+                        (stamp(&mut host, 0.6) + 1.9e-3).abs() < 1e-12,
+                        "both captures retain their original real RHS"
+                    );
+                    assert_eq!(host.read_digital("independent").unwrap(), "1");
+                    if reject {
+                        host.reject_trial().unwrap();
+                        assert_eq!(
+                            host.analog.checkpoint_state().unwrap(),
+                            captured.analog_checkpoint
+                        );
+                    } else {
+                        host.accept_trial().unwrap();
+                    }
+                }
                 assert!(host.next_event_time().unwrap().is_none());
             }
         }
@@ -5924,10 +6086,14 @@ endmodule
                 false,
             )
             .unwrap();
-            assert!((stamp(&mut host, 0.0) + 1e-3).abs() < 1e-12);
+            // `requested` acts from the first instant after the edge that
+            // wrote it, so the edge's own timepoint solves the left limit.
+            assert!(stamp(&mut host, 0.0).abs() < 1e-12);
             host.accept_trial().unwrap();
-            // The first occurrence changes only the pending count. Rejection
-            // must restore it without discarding the captured RHS or baseline.
+            // The first occurrence changes only the pending count, and this is
+            // the trial whose analog lanes take `requested`. Rejection must
+            // restore both without discarding the captured RHS or baseline.
+            let armed = host.checkpoint().unwrap();
             for reject in [true, false] {
                 host.begin_trial(
                     1.15e-9,
@@ -5941,6 +6107,10 @@ endmodule
                 assert_eq!(host.read_digital("done").unwrap(), "0");
                 if reject {
                     host.reject_trial().unwrap();
+                    assert_eq!(
+                        host.analog.checkpoint_state().unwrap(),
+                        armed.analog_checkpoint
+                    );
                 } else {
                     host.accept_trial().unwrap();
                 }
@@ -5960,6 +6130,8 @@ endmodule
                 .unwrap();
                 assert!((stamp(&mut host, 0.0) + 1e-3).abs() < 1e-12);
                 host.accept_trial().unwrap();
+                // The second occurrence completes all three captures, which
+                // act from the timepoint after it.
                 for reject in [true, false] {
                     host.begin_trial(
                         1.65e-9,
@@ -5969,7 +6141,7 @@ endmodule
                         false,
                     )
                     .unwrap();
-                    assert!((stamp(&mut host, 0.6) + 2.55e-3).abs() < 1e-12);
+                    assert!((stamp(&mut host, 0.6) + 1e-3).abs() < 1e-12);
                     assert_eq!(host.read_digital("done").unwrap(), "1");
                     assert_eq!(host.read_digital("independent").unwrap(), "0");
                     if reject {
@@ -5979,17 +6151,28 @@ endmodule
                     }
                 }
                 assert!((host.next_event_time().unwrap().unwrap() - 2e-9).abs() < 1e-20);
-                host.begin_trial(
-                    2e-9,
-                    0.35e-9,
-                    IntegrationCoefficients::inactive(),
-                    false,
-                    false,
-                )
-                .unwrap();
-                assert!((stamp(&mut host, 0.6) + 2.55e-3).abs() < 1e-12);
-                assert_eq!(host.read_digital("independent").unwrap(), "1");
-                host.accept_trial().unwrap();
+                let captured = host.checkpoint().unwrap();
+                for reject in [true, false] {
+                    host.begin_trial(
+                        2e-9,
+                        0.35e-9,
+                        IntegrationCoefficients::inactive(),
+                        false,
+                        false,
+                    )
+                    .unwrap();
+                    assert!((stamp(&mut host, 0.6) + 2.55e-3).abs() < 1e-12);
+                    assert_eq!(host.read_digital("independent").unwrap(), "1");
+                    if reject {
+                        host.reject_trial().unwrap();
+                        assert_eq!(
+                            host.analog.checkpoint_state().unwrap(),
+                            captured.analog_checkpoint
+                        );
+                    } else {
+                        host.accept_trial().unwrap();
+                    }
+                }
             }
         }
     }
@@ -6034,7 +6217,7 @@ module shared(p);
    index=-2; sample=observed[index];
    sample_ok=(sample==0.25) && (codes[1]<0) && (codes[2]==5);
    #1 bias[1]=-3; packed[-2]=18; index=-1;
-   @(state[3]); sample=observed[index];
+   @(state[3]) #1 sample=observed[index];
    sample_ok=(sample==-1.25) && (observed[-1.5]==1.25) && (state[4]==9);
  end
  analog begin
@@ -6057,8 +6240,14 @@ endmodule
         assert_eq!(stamp(&mut host), -0.25);
         assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
         host.accept_trial().unwrap();
-        let checkpoint = host.checkpoint().unwrap();
+        // The writes at 1 ns act from the first instant after it: that
+        // timepoint solves the left limit, and the next one takes them. The
+        // process samples `observed` a tick later for the same reason.
         begin(&mut host, 1);
+        assert_eq!(stamp(&mut host), -0.25);
+        host.accept_trial().unwrap();
+        let checkpoint = host.checkpoint().unwrap();
+        begin(&mut host, 2);
         assert_eq!(stamp(&mut host), -1.25);
         assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
         host.reject_trial().unwrap();
@@ -6076,12 +6265,12 @@ endmodule
             host.analog.checkpoint_state().unwrap(),
             checkpoint.analog_checkpoint
         );
-        begin(&mut host, 1);
+        begin(&mut host, 2);
         assert_eq!(stamp(&mut host), -1.25);
         assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
         host.accept_trial().unwrap();
         host.restore(&checkpoint).unwrap();
-        begin(&mut host, 1);
+        begin(&mut host, 2);
         assert_eq!(stamp(&mut host), -1.25);
         assert_eq!(host.read_digital("sample_ok").unwrap(), "1");
     }
@@ -6169,14 +6358,27 @@ endmodule
         assert_eq!(stamp(&mut host).unwrap(), -51.0);
         host.accept_trial().unwrap();
         let checkpoint = host.checkpoint().unwrap();
-        begin(&mut host, 1);
+        // A forced value acts from the first instant after the trial that
+        // forced it: that trial solves the left limit, and the next one reads
+        // it. Returns the accepted state the reading trial opens from.
+        let force = |host: &mut MixedSignalHost, tick: u64, drives: &[(&str, &str)]| {
+            begin(host, tick);
+            host.force_digital(drives).unwrap();
+            stamp(host).unwrap();
+            host.accept_trial().unwrap();
+            let forced = host.checkpoint().unwrap();
+            begin(host, tick + 1);
+            forced
+        };
         // Unselected bits and an unselected array cell may remain unavailable.
         let known_low = format!("{}1010", "z".repeat(92));
-        host.force_digital(&[("data[-1]", &known_low)]).unwrap();
+        force(&mut host, 1, &[("data[-1]", &known_low)]);
         assert_eq!(stamp(&mut host).unwrap(), -51.0);
-        // Changing a selected known zero into X must invalidate the cached stamp.
+        // Changing a selected known zero into X must fail the read that takes
+        // it rather than reuse the stamp cached for the known value.
         let selected_x = format!("{}101x", "z".repeat(92));
-        host.force_digital(&[("data[-1]", &selected_x)]).unwrap();
+        host.accept_trial().unwrap();
+        let forced = force(&mut host, 3, &[("data[-1]", &selected_x)]);
         let error = stamp(&mut host).unwrap_err();
         assert!(
             error.to_string().contains("analog read of discrete input"),
@@ -6187,15 +6389,17 @@ endmodule
         }
         assert_eq!(
             host.analog.checkpoint_state().unwrap(),
-            checkpoint.analog_checkpoint
+            forced.analog_checkpoint
         );
         host.restore(&checkpoint).unwrap();
-        begin(&mut host, 1);
-        assert_eq!(stamp(&mut host).unwrap(), -51.0);
-        host.force_digital(&[("index", &"0".repeat(32)), ("enabled", "0")])
-            .unwrap();
+        force(
+            &mut host,
+            1,
+            &[("index", &"0".repeat(32)), ("enabled", "0")],
+        );
         assert_eq!(stamp(&mut host).unwrap(), -7.0);
-        host.force_digital(&[("enabled", "1")]).unwrap();
+        host.accept_trial().unwrap();
+        force(&mut host, 3, &[("enabled", "1")]);
         assert!(
             stamp(&mut host).is_err(),
             "selected unknown neighbor must fail"
@@ -6204,8 +6408,7 @@ endmodule
             host.reject_trial().unwrap();
         }
         host.restore(&checkpoint).unwrap();
-        begin(&mut host, 1);
-        host.force_digital(&[("bad", "1")]).unwrap();
+        force(&mut host, 1, &[("bad", "1")]);
         assert!(
             stamp(&mut host).is_err(),
             "selected out-of-range bits must fail"
@@ -6245,30 +6448,43 @@ endmodule
         assert_eq!(stamp(&mut host).unwrap(), -2.0);
         host.accept_trial().unwrap();
         let checkpoint = host.checkpoint().unwrap();
-        begin(&mut host, 1);
-        host.force_digital(&[("selector", &format!("{:032b}", 15))])
-            .unwrap();
+        // A forced value acts from the first instant after the trial that
+        // forced it: that trial solves the left limit, and the next one reads
+        // it. Returns the accepted state the reading trial opens from.
+        let force = |host: &mut MixedSignalHost, tick: u64, drives: &[(&str, &str)]| {
+            begin(host, tick);
+            host.force_digital(drives).unwrap();
+            stamp(host).unwrap();
+            host.accept_trial().unwrap();
+            let forced = host.checkpoint().unwrap();
+            begin(host, tick + 1);
+            forced
+        };
+        let forced = force(&mut host, 1, &[("selector", &format!("{:032b}", 15))]);
         assert_eq!(stamp(&mut host).unwrap(), -1.0);
         host.reject_trial().unwrap();
         assert_eq!(
             host.analog.checkpoint_state().unwrap(),
-            checkpoint.analog_checkpoint
+            forced.analog_checkpoint
         );
         for (word, selector) in [(-1i32, 13), (0, 14), (-1, 96)] {
             host.restore(&checkpoint).unwrap();
-            begin(&mut host, 1);
-            host.force_digital(&[
-                ("word", &format!("{word:032b}")),
-                ("selector", &format!("{selector:032b}")),
-                ("enabled", "0"),
-            ])
-            .unwrap();
+            force(
+                &mut host,
+                1,
+                &[
+                    ("word", &format!("{word:032b}")),
+                    ("selector", &format!("{selector:032b}")),
+                    ("enabled", "0"),
+                ],
+            );
             assert_eq!(
                 stamp(&mut host).unwrap(),
                 -7.0,
                 "inactive selections remain unevaluated"
             );
-            host.force_digital(&[("enabled", "1")]).unwrap();
+            host.accept_trial().unwrap();
+            force(&mut host, 3, &[("enabled", "1")]);
             assert!(stamp(&mut host).is_err(), "{word}[{selector}]");
             if host.trial_active() {
                 host.reject_trial().unwrap();
@@ -6309,6 +6525,13 @@ endmodule
         while host.settle_analog_bridges(&[0.0]).unwrap() {}
         assert_eq!(host.read_digital("sampled").unwrap(), "1");
         host.force_digital(&[("data[0]", "xxxxxxxx")]).unwrap();
+        while host.settle_analog_bridges(&[0.0]).unwrap() {}
+        // The forced X acts from the first instant after this trial, which
+        // solves the left limit; the next trial is the one that reads it.
+        host.stamp(&[0.0], |_, _, _| {}, |_, _| {}).unwrap();
+        host.accept_trial().unwrap();
+        let checkpoint = host.checkpoint().unwrap();
+        begin(&mut host, 2);
         while host.settle_analog_bridges(&[0.0]).unwrap() {}
         let error = host.stamp(&[0.0], |_, _, _| {}, |_, _| {}).unwrap_err();
         assert!(
@@ -6890,6 +7113,11 @@ endmodule
     /// `gain` is written on `posedge ca` either way, so the discrete halves are
     /// identical and only the feedback path differs. Node 3 carries `ca`, node
     /// 4 carries `cb`.
+    ///
+    /// The analog block takes `gain` in an event body on the same edge: a
+    /// continuous read of it would see its left limit at the edge's own
+    /// timepoint and move nothing there, and an event body is the path that
+    /// feeds a write back into the timepoint it was made at.
     const LANDING_FEEDBACK: &str = r#"
 module landing_feedback(p, n, ca, cb);
   inout p, n;
@@ -6897,13 +7125,19 @@ module landing_feedback(p, n, ca, cb);
   input ca, cb;
   wire ca, cb;
   integer gain;
+  real g;
   initial gain = 1;
   always @(posedge ca) gain = 2;
-  analog I(p, n) <+ gain * V(p, n) / 1000.0;
+  analog begin
+    @(initial_step) g = gain;
+    @(posedge ca) g = gain;
+    I(p, n) <+ g * V(p, n) / 1000.0;
+  end
 endmodule
 "#;
 
-    /// [`LANDING_FEEDBACK`] with the read deleted and nothing else changed.
+    /// [`LANDING_FEEDBACK`] with the analog block's read of `gain` deleted and
+    /// nothing else changed.
     const LANDING_NO_FEEDBACK: &str = r#"
 module landing_no_feedback(p, n, ca, cb);
   inout p, n;

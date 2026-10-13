@@ -3010,39 +3010,76 @@ fn an_analog_owned_integer_output_port_records_its_driver() {
     );
 }
 
-/// A `slew` operand reads each discrete value's left limit, a second input on
-/// the same signal, while a direct read keeps the value itself; an indexed
-/// array read has no fixed element to hold and is refused inside `slew`.
+/// An analog read of a discrete value reads its own input — the host samples
+/// it at its left limit — wherever it is, `slew` operand included. A read in
+/// an analog event body reads a twin bound to the same signal, which the host
+/// samples at the settled value; an indexed read's twin mirrors the whole
+/// array, element by element, and each twin is made once however often it is
+/// read.
 #[test]
-fn a_slew_operand_reads_the_left_limit_of_a_discrete_value() {
+fn an_event_body_reads_settled_twins_of_discrete_values() {
     let module = analyze_one(&module_src(
         r#"
         reg d;
-        initial d = 0;
+        reg m[0:3];
+        integer i;
+        real x, y;
+        initial begin d = 0; i = 0; m[0] = 0; end
         analog begin
-            V(p, n) <+ slew(d, 1e9) + 0.5 * slew(d, 2e9) + d;
+            @(cross(V(p, n), +1)) begin x = d + d; y = m[i]; end
+            V(p, n) <+ slew(d, 1e9) + d + x + y + m[i];
         end
     "#,
     ));
-    let [limit] = module.discrete_left_limits.as_slice() else {
-        panic!("one left limit, got {:?}", module.discrete_left_limits);
-    };
-    assert_eq!(module.discrete_bindings[limit], "d");
+    let twins: Vec<&str> = module
+        .discrete_event_reads
+        .iter()
+        .map(|slot| module.variables[*slot].name.as_str())
+        .collect();
+    assert_eq!(twins.len(), 6, "d, i and the four elements of m: {twins:?}");
+    let bindings: Vec<&str> = module
+        .discrete_event_reads
+        .iter()
+        .map(|slot| module.discrete_bindings[slot].as_str())
+        .collect();
+    for signal in ["d", "i", "m[0]", "m[1]", "m[2]", "m[3]"] {
+        assert!(
+            bindings.contains(&signal),
+            "{signal} has a twin: {bindings:?}"
+        );
+    }
+    let elements: Vec<usize> = module
+        .discrete_event_reads
+        .iter()
+        .copied()
+        .filter(|slot| module.discrete_bindings[slot].starts_with('m'))
+        .collect();
+    assert!(
+        elements.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "the array twin is contiguous: {elements:?}"
+    );
+    let twin_array = module.variables[elements[0]]
+        .name
+        .split('[')
+        .next()
+        .expect("element name");
+    assert_eq!(module.arrays[twin_array].base, elements[0]);
+    for slot in &module.discrete_event_reads {
+        assert!(
+            module
+                .discrete_inputs
+                .iter()
+                .any(|(value, _)| value == slot),
+            "each twin is a discrete input"
+        );
+    }
     assert!(
         module
             .discrete_inputs
             .iter()
             .any(|(value, _)| module.variables[*value].name == "d"),
-        "the direct read keeps its own input"
+        "the reads outside the event body keep their own input"
     );
-    let error = analyze(&module_src(
-        "reg m[0:3]; integer i; initial begin i = 0; m[0] = 0; end \
-         analog V(p, n) <+ slew(m[i], 1e9);",
-    ))
-    .map(|_| ())
-    .expect_err("an indexed discrete read inside slew")
-    .to_string();
-    assert!(error.contains("indexed discrete read"), "{error}");
 }
 
 #[test]

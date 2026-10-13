@@ -347,6 +347,15 @@ impl Engine {
             },
             |time| edge_completions.push(time),
         );
+        // A discrete value a mixed module's analog block read at its left
+        // limit completes its step as a D/A edge does.
+        #[cfg(feature = "veriloga")]
+        for time in circuit.mixed_read_step_completions() {
+            if time.is_finite() && time >= 0.0 && time <= tstop {
+                runtime_breakpoints.push(time);
+                edge_completions.push(time);
+            }
+        }
         breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
         breakpoints.replace_edge_completions(edge_completions);
         Ok(())

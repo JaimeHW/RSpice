@@ -173,6 +173,8 @@ pub use analog::{
     Limiter, Multiplier, SampleHold, SlewRateFollower, Summer,
 };
 
+#[cfg(feature = "veriloga")]
+pub(crate) use bridges::OFFICIAL_BRIDGE_TIMING_MIN;
 pub use bridges::{AdcBridge, BidiBridge, DacBridge};
 #[cfg(feature = "veriloga")]
 pub(crate) use bridges::{MixedAdcBridge, MixedDacBridge};

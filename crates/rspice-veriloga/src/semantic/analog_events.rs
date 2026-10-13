@@ -728,6 +728,14 @@ fn reserve_locals(statements: &[AnalogStatement], reserved: &mut BTreeSet<SmolSt
 #[derive(Default)]
 pub(super) struct AssignmentEvents {
     pub event_depth: usize,
+    /// Nesting of the analog statements a digital process's event control
+    /// synthesized (see `synthesized`).
+    pub operand_depth: usize,
+    /// The targets of those statements: the occurrence counter an event
+    /// function's guard increments, and the `$operandK` observations of an
+    /// `absdelta`. Their operands are the process's own event expression,
+    /// which waits on what the process settled, not on the analog left limit.
+    synthesized: BTreeSet<SmolStr>,
     writes: BTreeMap<SmolStr, Writes>,
     counters: BTreeMap<SmolStr, SmolStr>,
     arrays: BTreeMap<SmolStr, Vec<SmolStr>>,
@@ -757,6 +765,16 @@ impl AssignmentEvents {
         };
         Self {
             event_depth: 0,
+            operand_depth: 0,
+            synthesized: lowered
+                .bindings
+                .iter()
+                .filter(|binding| binding.source_variable.is_none())
+                .flat_map(|binding| match &binding.observation {
+                    Some(operands) => operands.to_vec(),
+                    None => vec![binding.variable.clone()],
+                })
+                .collect(),
             arrays: BTreeMap::new(),
             array_targets: BTreeMap::new(),
             writes: lowered
@@ -811,6 +829,16 @@ impl AssignmentEvents {
     }
     pub fn has_counter(&self, name: &SmolStr) -> bool {
         self.counters.contains_key(name)
+    }
+    /// Whether an analog statement assigning `target` was synthesized from a
+    /// digital process's event control.
+    pub fn synthesizes_operand(&self, target: &LValue) -> bool {
+        matches!(target, LValue::Variable { name, .. } if self.synthesized.contains(name))
+    }
+    /// Discrete reads take settled-value twins: inside an analog event body,
+    /// and in the operands of a digital process's event control.
+    pub fn reads_settled(&self) -> bool {
+        self.event_depth > 0 || self.operand_depth > 0
     }
     pub fn record_indexed(
         &mut self,

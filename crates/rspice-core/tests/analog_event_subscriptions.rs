@@ -1453,7 +1453,16 @@ endmodule
             .map(|(_, (&t, _))| t)
             .collect();
         assert_eq!(times.len(), expected_times.len(), "{name}: {times:?}");
-        for (&actual, expected) in times.iter().zip(expected_times) {
+        // The counts step at each event's own timepoint, which the analog
+        // block reads at the left limit; the new count acts from the first
+        // instant after it and is first solved at the step's completion, one
+        // picosecond on, as a D/A edge's is.
+        for (index, (&actual, expected)) in times.iter().zip(expected_times).enumerate() {
+            let expected = if index == 0 {
+                expected
+            } else {
+                expected + 1e-12
+            };
             assert!(
                 (actual - expected).abs() < 2e-15,
                 "{name}: {actual} != {expected}"
@@ -1639,6 +1648,52 @@ endmodule
         settle_standalone_observer(&mut host, &[0.5]);
         host.accept_trial().unwrap();
         assert_eq!(count(&host), 2);
+    }
+}
+
+/// A process's event expression waits on what the process settled. Its body
+/// moves a module-scope threshold at the crossing, and the very next timepoint
+/// must compare against the moved one: read at its left limit, the threshold
+/// would leave the expression at zero across the edge and the next crossing
+/// would never arm.
+#[test]
+fn a_process_event_operand_reads_the_value_its_own_body_settled() {
+    use rspice_core::xspice::event_scheduler::SchedulerLimits;
+    use rspice_core::xspice::verilog::MixedSignalHost;
+    use rspice_veriloga::vm::IntegrationCoefficients;
+    let source = r#"
+`timescale 1ps/1ps
+module stair(a);
+ input a; electrical a; integer count=0; real threshold=0.25;
+ always @(above(V(a)-threshold)) begin
+   count=count+1; threshold=threshold+0.25;
+ end
+endmodule
+"#;
+    let mut host =
+        MixedSignalHost::compile(source, None, "stair", &[1], SchedulerLimits::default()).unwrap();
+    let read = |host: &MixedSignalHost, name| {
+        u32::from_str_radix(&host.read_digital(name).unwrap(), 2).unwrap()
+    };
+    host.begin_trial(0.0, 0.0, IntegrationCoefficients::inactive(), true, false)
+        .unwrap();
+    settle_standalone_observer(&mut host, &[0.0]);
+    host.accept_trial().unwrap();
+    // Each timepoint lands exactly on the next threshold: every one is a
+    // crossing only if the previous one's write is already in the guard.
+    for (index, (level, count)) in [(0.25, 1), (0.5, 2), (0.75, 3)].into_iter().enumerate() {
+        let time = (index + 1) as f64 * 1e-9;
+        host.begin_trial(
+            time,
+            1e-9,
+            IntegrationCoefficients::inactive(),
+            false,
+            false,
+        )
+        .unwrap();
+        settle_standalone_observer(&mut host, &[level]);
+        host.accept_trial().unwrap();
+        assert_eq!(read(&host, "count"), count, "count at {time}");
     }
 }
 
