@@ -1302,6 +1302,9 @@ impl DigitalHost {
                 for index in std::mem::take(&mut self.inactive) {
                     self.queue_ready(index, tick)?;
                 }
+                // Work a `#0` deferred resumes: what follows is progress the
+                // design asked for, not events waking each other.
+                self.scheduler.note_zero_delay();
                 promoted = true;
             }
 

@@ -458,7 +458,7 @@ impl CompiledDigitalDesign {
         let mut host = DigitalHost::from_plan(
             Arc::clone(&self.plan),
             self.resolution,
-            SchedulerLimits::default(),
+            SchedulerLimits::HDL,
         );
         host.start()?;
 
@@ -865,7 +865,7 @@ pub fn run_digital_testbench(
             .plan
     };
     let resolution = TimeResolution::new(plan.timing.precision_exponent)?;
-    let mut host = DigitalHost::from_plan(Arc::new(plan), resolution, SchedulerLimits::default());
+    let mut host = DigitalHost::from_plan(Arc::new(plan), resolution, SchedulerLimits::HDL);
     host.configure_effects(effects::HdlEffectsConfig {
         plusargs: options.plusargs.clone(),
         seed: options.seed,

@@ -704,6 +704,35 @@ impl Default for SchedulerLimits {
     }
 }
 
+impl SchedulerLimits {
+    /// The ceilings for an HDL design, alone or inside a circuit.
+    ///
+    /// They detect hangs, so they must not stop a legal program. The most any
+    /// ivtest needs at one tick is about 2.0 million delta cycles and 1.3
+    /// million events (`pow_ca_signed`: one `initial` steps through a `#0`
+    /// per power it checks); these are ten times that and more. A loop with no
+    /// `#0` in it is caught long before, at
+    /// [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`].
+    #[cfg(feature = "veriloga")]
+    pub(crate) const HDL: Self = Self {
+        max_delta_cycles_per_tick: 20_000_000,
+        max_events_per_tick: 16_000_000,
+        max_reported_oscillating_entities: 16,
+    };
+}
+
+/// Delta cycles allowed in a row at one tick with no zero-delay (`#0`)
+/// resumption between them (see [`EventScheduler::note_zero_delay`]), when the
+/// per-tick ceiling is larger.
+///
+/// The per-tick ceiling has to admit a legal program that steps through
+/// millions of `#0` waits at one tick. Events that wake each other with no
+/// such wait between them — a combinational loop, two processes triggering
+/// each other — never settle, and are caught here in well under a second.
+/// The longest such run a legal design needs is far shorter: 12 delta cycles
+/// in the ivtest selection and 76 in the mixed-signal corpus.
+const MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY: u32 = 10_000;
+
 /// What one settled instant did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TimeSlotReport {
@@ -1238,6 +1267,9 @@ pub struct EventScheduler {
     /// uses this; [`Self::run_time_slot`] settles an instant inside one call
     /// and counts in a local.
     slot_delta_cycles: u32,
+    /// Of those, the delta cycles since the slot's last zero-delay
+    /// resumption (see [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`]).
+    slot_delta_chain: u32,
     /// Events executed against the open due slot, for the same reason.
     slot_events_executed: u64,
     /// A failed slot is not an accepted checkpoint boundary.
@@ -1253,6 +1285,7 @@ impl EventScheduler {
             current: Instant::ZERO,
             started: false,
             slot_delta_cycles: 0,
+            slot_delta_chain: 0,
             slot_events_executed: 0,
             failed_slot: false,
         }
@@ -1576,18 +1609,7 @@ impl EventScheduler {
             self.check_sequence_state()?;
             let Some(event) = self.queues.pop_active() else {
                 if self.queues.promote() {
-                    self.slot_delta_cycles = self
-                        .slot_delta_cycles
-                        .checked_add(1)
-                        .ok_or_else(|| self.accounting_failure())?;
-                    if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
-                        return Err(self.oscillation(
-                            bound,
-                            OscillationCause::DeltaCycleLimit,
-                            self.slot_delta_cycles,
-                            self.slot_events_executed,
-                        ));
-                    }
+                    self.count_delta_cycle(bound)?;
                     continue;
                 }
                 // The current instant has gone quiet in every region, so the
@@ -1640,19 +1662,45 @@ impl EventScheduler {
     pub fn note_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
         self.check_sequence_state()?;
         self.open_due_slot(bound);
+        self.count_delta_cycle(bound)
+    }
+
+    /// Record that the open slot resumed work deferred by a zero delay
+    /// (`#0`): the delta cycles after it are a new run as far as
+    /// [`MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY`] is concerned.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn note_zero_delay(&mut self) {
+        self.slot_delta_chain = 0;
+    }
+
+    /// Count one delta cycle of the open slot against both of its ceilings.
+    fn count_delta_cycle(&mut self, bound: Instant) -> Result<(), SchedulerError> {
         self.slot_delta_cycles = self
             .slot_delta_cycles
             .checked_add(1)
             .ok_or_else(|| self.accounting_failure())?;
-        if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
-            return Err(self.oscillation(
-                bound,
-                OscillationCause::DeltaCycleLimit,
-                self.slot_delta_cycles,
-                self.slot_events_executed,
-            ));
+        self.slot_delta_chain = self.slot_delta_chain.saturating_add(1);
+        let chain_limit = self
+            .limits
+            .max_delta_cycles_per_tick
+            .min(MAX_DELTA_CYCLES_WITHOUT_ZERO_DELAY);
+        let limit = if self.slot_delta_cycles > self.limits.max_delta_cycles_per_tick {
+            self.limits.max_delta_cycles_per_tick
+        } else if self.slot_delta_chain > chain_limit {
+            chain_limit
+        } else {
+            return Ok(());
+        };
+        let mut error = self.oscillation(
+            bound,
+            OscillationCause::DeltaCycleLimit,
+            self.slot_delta_cycles,
+            self.slot_events_executed,
+        );
+        if let SchedulerError::Oscillation(diagnostic) = &mut error {
+            diagnostic.delta_cycle_limit = limit;
         }
-        Ok(())
+        Err(error)
     }
 
     /// Open the due slot at `bound`, resetting per-slot accounting when
@@ -1664,6 +1712,7 @@ impl EventScheduler {
         self.current = bound;
         self.started = true;
         self.slot_delta_cycles = 0;
+        self.slot_delta_chain = 0;
         self.slot_events_executed = 0;
         self.queues.clear_activations();
     }
@@ -1696,6 +1745,7 @@ impl EventScheduler {
         // per-slot fields are cleared so that a scheduler driven both ways
         // does not carry one mode's accounting into the other's.
         self.slot_delta_cycles = 0;
+        self.slot_delta_chain = 0;
         self.slot_events_executed = 0;
         let mut delta_cycles: u32 = 0;
         let mut events_executed: u64 = 0;

@@ -1133,7 +1133,12 @@ impl std::error::Error for DigitalEvalError {}
 /// an `always` process whose back edge carries no `Wait`, reports instead of
 /// hanging the simulator. IEEE 1364-2005 section 9.9.2 calls the latter a hang;
 /// a refusal naming the process is more use than one.
-pub const DEFAULT_PROCESS_STEP_LIMIT: usize = 100_000;
+///
+/// A hang detector, so it must not stop a legal program: the most any ivtest
+/// needs is under 6 million blocks (`pow_reg_signed`, one `initial` looping
+/// over every 16-bit base without suspending), and this is over ten times
+/// that. A loop that never suspends reaches it in under ten seconds.
+pub const DEFAULT_PROCESS_STEP_LIMIT: usize = 64_000_000;
 
 /// The deepest a thread's task and function calls may nest (design P2 §4.1).
 pub const MAX_CALL_DEPTH: usize = 100_000;

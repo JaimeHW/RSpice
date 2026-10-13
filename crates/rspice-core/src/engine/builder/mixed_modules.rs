@@ -189,7 +189,7 @@ pub(super) fn try_build_mixed_signal_instance(
         artifact,
         &layout.analog_terminals,
         &prepared.overrides,
-        SchedulerLimits::default(),
+        SchedulerLimits::HDL,
         circuit.generated_simulation_parameters,
         &super::veriloga_cache::VerilogACompileControl { abort },
         &mut |device| {

@@ -1850,3 +1850,63 @@ endmodule
          x1 1.500000\n"
     );
 }
+
+/// A legal program may loop 200,000 times without suspending and step
+/// through 30,000 `#0` waits at one tick: both are past the circuit-side
+/// ceilings and well inside the HDL ones. Icarus 13 prints
+/// `s=-1474936480 n=30000 t=0`.
+#[test]
+fn long_loops_and_zero_delay_chains_run_to_completion() {
+    let report = bench(
+        "module tb;
+  integer i, s, n;
+  reg [7:0] a;
+  wire [7:0] na = ~a;
+  initial begin
+    s = 0;
+    for (i = 0; i < 200000; i = i + 1) s = s + i;
+    n = 0;
+    for (i = 0; i < 30000; i = i + 1) begin
+      a = i;
+      #0;
+      if (na === ~a) n = n + 1;
+    end
+    $display(\"s=%0d n=%0d t=%0t\", s, n, $time);
+  end
+endmodule
+",
+        &[],
+    );
+    assert_eq!(stdout(&report), "s=-1474936480 n=30000 t=0\n");
+}
+
+/// Two processes that wake each other with no `#0` between them never settle
+/// (Icarus 13 runs the same source forever); the run reports the oscillation
+/// at the ten-thousandth delta cycle, not at the per-tick ceiling.
+#[test]
+fn processes_waking_each_other_report_an_oscillation_promptly() {
+    let error = run_digital_testbench(
+        &[(
+            "tb.v".into(),
+            "module tb;
+  reg a = 0, b = 0;
+  always @(a) b = a;
+  always @(b) a = ~b;
+  initial #1 a = 1;
+endmodule
+"
+            .into(),
+        )],
+        &HdlTestbenchOptions::default(),
+    )
+    .expect_err("the two processes never settle");
+    let DigitalRunError::Scheduler(SchedulerError::Oscillation(diagnostic)) = &error else {
+        panic!("expected an oscillation, got {error:?}");
+    };
+    assert_eq!(diagnostic.cause, OscillationCause::DeltaCycleLimit);
+    assert_eq!(diagnostic.delta_cycle_limit, 10_000);
+    assert!(
+        error.to_string().contains("within 10000 delta cycles"),
+        "{error}"
+    );
+}

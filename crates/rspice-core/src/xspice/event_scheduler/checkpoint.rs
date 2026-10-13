@@ -277,6 +277,9 @@ impl EventScheduler {
         restored.current = current;
         restored.started = image.started;
         restored.slot_delta_cycles = image.delta_cycles;
+        // The run of delta cycles since the slot's last zero delay is not in
+        // the image and restarts here: that can delay its ceiling, never trip
+        // it, and the per-tick ceiling above still holds.
         restored.slot_events_executed = image.events_executed;
         restored.queues.next_sequence = image.next_sequence;
         for (index, target) in image.targets.iter().enumerate() {
