@@ -1386,8 +1386,17 @@ impl Engine {
         }
 
         let zero_seed = vec![0.0; solution.len()];
+        // A B3SOI direct Newton that fails against the floating-body DC floor
+        // (SmartVbs holds the evaluated Vbs at 0 while the node keeps moving)
+        // leaves the body node wherever the limited steps carried it, which
+        // can be hundreds of volts below the source; no aid's step limit walks
+        // it back. ngspice starts each operating-point aid afresh, zeroing the
+        // node vector and the device state (cktop.c: dynamic_gmin, new_gmin,
+        // gillespie_src), so the aids here restart from the direct Newton's
+        // own seed; GMIN and source stepping also return the B3SOI devices to
+        // their junction start.
         let mut fallback_seed = if circuit.has_b3soi_devices() {
-            Self::sanitize_initial_guess(&solution, solution.len())
+            Self::sanitize_initial_guess(&startup_seed, solution.len())
         } else {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0)
         };

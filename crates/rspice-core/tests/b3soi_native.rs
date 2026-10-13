@@ -1497,6 +1497,51 @@ fn native_soi_dd_inverse_mode_terminal_currents_match_ngspice46_op() {
     }
 }
 
+/// A floating-body B3SOIDD gain stage at vin = 0.3 V. Its direct Newton
+/// fails in both simulators: the body node runs away below the source (to
+/// -9.7 kV in ngspice-46). ngspice restarts each operating-point aid from a
+/// fresh vector and converges; restarting the aids from the runaway iterate
+/// ended in ConvergenceFailed(2000).
+#[test]
+fn native_soi_dd_floating_body_gain_stage_op_matches_ngspice46() {
+    let deck = format!(
+        "* B3SOIDD gain stage, floating body, vin 0.3 V\n\
+         m1 out in 0 e n1 w=4u l=1u\n\
+         rload out vdd 25k\n\
+         vdd vdd 0 5\n\
+         vin in 0 0.3\n\
+         ve e 0 1.25\n\
+         .option gmin=1e-20 itl1=200\n\
+         .op\n\
+         {}\n\
+         .end\n",
+        b3soidd_n1_model_card()
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let op = engine()
+        .run_dc_op(&netlist)
+        .expect("the floating-body gain stage converges");
+    assert_rel(
+        "V(out)",
+        op.try_voltage_named("out").expect("output node"),
+        4.840294351021,
+        1.0e-10,
+    );
+    assert_rel(
+        "V(body)",
+        op.try_voltage_named("M1.__body.internal")
+            .expect("floating body node"),
+        8.163575553944e-1,
+        1.0e-10,
+    );
+    assert_rel(
+        "I(vdd)",
+        op.branch_current_named("vdd").expect("VDD branch current"),
+        -6.38822595917e-6,
+        1.0e-10,
+    );
+}
+
 #[test]
 fn native_soi_dd_rsh_series_resistance_matches_ngspice46_op() {
     let deck = "\
