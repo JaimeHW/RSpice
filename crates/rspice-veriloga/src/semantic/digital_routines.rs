@@ -138,7 +138,11 @@ impl SemanticAnalyzer {
                         SemanticErrorKind::InvalidExpression(format!(
                             "a nonblocking assignment cannot write `{name}`, a variable of the \
                              automatic {} `{}` (IEEE 1364-2005 section 10.2.1)",
-                            if routine.is_function() { "function" } else { "task" },
+                            if routine.is_function() {
+                                "function"
+                            } else {
+                                "task"
+                            },
                             routine.name
                         )),
                         span,

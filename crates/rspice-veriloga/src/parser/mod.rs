@@ -754,9 +754,10 @@ impl<'a> Parser<'a> {
                 // `integer`) declaration types is declared without a range.
                 if time
                     && let Some(item) = variable.items.iter().find(|item| {
-                        module.port_declarations.iter().any(|port| {
-                            port.range.is_some() && port.names.contains(&item.name)
-                        })
+                        module
+                            .port_declarations
+                            .iter()
+                            .any(|port| port.range.is_some() && port.names.contains(&item.name))
                     })
                 {
                     return Err(ParseError::new(

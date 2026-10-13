@@ -542,8 +542,8 @@ fn type_arguments(
             .range
             .as_ref()
             .is_some_and(|range| range.span == range.msb.span());
-        let reg_range = (kind == DigitalRoutineValueKind::Reg && !time)
-            .then_some(declaration.range.as_ref());
+        let reg_range =
+            (kind == DigitalRoutineValueKind::Reg && !time).then_some(declaration.range.as_ref());
         declaration.items.retain(|item| {
             if !item.dimensions.is_empty() || item.init.is_some() {
                 return true;
@@ -575,15 +575,14 @@ fn same_range(port: Option<&VectorRange>, redeclared: Option<&VectorRange>) -> b
     };
     match (port, redeclared) {
         (None, None) => true,
-        (Some(port), Some(redeclared)) => [
-            (&port.msb, &redeclared.msb),
-            (&port.lsb, &redeclared.lsb),
-        ]
-        .into_iter()
-        .all(|(a, b)| match (literal(a), literal(b)) {
-            (Some(a), Some(b)) => a == b,
-            _ => true,
-        }),
+        (Some(port), Some(redeclared)) => {
+            [(&port.msb, &redeclared.msb), (&port.lsb, &redeclared.lsb)]
+                .into_iter()
+                .all(|(a, b)| match (literal(a), literal(b)) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => true,
+                })
+        }
         _ => false,
     }
 }

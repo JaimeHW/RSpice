@@ -593,10 +593,10 @@ fn resolve_one(
         functions.routines,
     )
     .map_err(|error| {
-            refuse(format!(
-                "parameter `{name}` cannot be evaluated as a digital constant: {error}"
-            ))
-        })?;
+        refuse(format!(
+            "parameter `{name}` cannot be evaluated as a digital constant: {error}"
+        ))
+    })?;
     resolved.bounds.remove(name);
     if let Some(bounds) = bounds {
         resolved.bounds.insert(name.into(), bounds);
@@ -755,13 +755,9 @@ pub(super) fn initializer(
         .builder
         .finish_with_outputs(entry, &[value])
         .map_err(|error| refuse(format!("constant expression failed validation: {error:?}")))?;
-    let value = evaluate_constant_expression(
-        function,
-        outputs[0],
-        signal.span.into(),
-        functions.routines,
-    )
-    .map_err(|error| refuse(format!("cannot evaluate constant expression: {error}")))?;
+    let value =
+        evaluate_constant_expression(function, outputs[0], signal.span.into(), functions.routines)
+            .map_err(|error| refuse(format!("cannot evaluate constant expression: {error}")))?;
     Ok(Some(match value {
         DigitalScalar::FourState(value) if !signal.class.is_real() => {
             DigitalInitialValue::FourState(value)

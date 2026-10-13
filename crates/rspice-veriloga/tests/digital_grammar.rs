@@ -3352,12 +3352,18 @@ fn routines_and_events_are_checked_where_they_are_used() {
 #[test]
 fn routine_ports_and_fork_declarations_follow_ieee_1364() {
     for (source, expected) in [
-        ("module m; task t(a, b); endtask endmodule", "section 10.2.1"),
+        (
+            "module m; task t(a, b); endtask endmodule",
+            "section 10.2.1",
+        ),
         (
             "module m; task t(input integer a, integer b); endtask endmodule",
             "section 10.2.1",
         ),
-        ("module m; initial fork integer x; join endmodule", "section 9.8.2"),
+        (
+            "module m; initial fork integer x; join endmodule",
+            "section 9.8.2",
+        ),
         (
             "module m(x); output [63:0] x; time x; endmodule",
             "section 12.3.3",
@@ -3398,9 +3404,6 @@ fn routine_ports_and_fork_declarations_follow_ieee_1364() {
     let routine = &module.digital_routines[0];
     assert_eq!(routine.arguments.len(), 2);
     assert!(routine.variables.is_empty() && routine.digital_variables.is_empty());
-    assert_eq!(
-        routine.arguments[0].ty.kind,
-        DigitalRoutineValueKind::Real
-    );
+    assert_eq!(routine.arguments[0].ty.kind, DigitalRoutineValueKind::Real);
     assert!(routine.arguments[1].ty.range.is_some());
 }

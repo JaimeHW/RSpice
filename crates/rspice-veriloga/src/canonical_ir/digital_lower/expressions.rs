@@ -819,9 +819,7 @@ pub(super) fn lower_prepared(
                 pending.push(Work::Expression(block, &value.condition, Mode::Condition));
             }
             Expression::Call(call)
-                if real
-                    && lowerer.constant_expression
-                    && lowerer.user_function(call).is_none() =>
+                if real && lowerer.constant_expression && lowerer.user_function(call).is_none() =>
             {
                 match (constants::math_call(&call.name), call.args.as_slice()) {
                     (Some(constants::MathCall::Unary(op)), [input]) => {
