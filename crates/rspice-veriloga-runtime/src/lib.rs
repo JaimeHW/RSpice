@@ -25,6 +25,7 @@ pub mod arithmetic;
 pub mod array_index;
 mod compatibility_catalog;
 mod event_control;
+mod ground_reference;
 pub mod integer;
 mod integration;
 mod integration_state;
@@ -33,6 +34,10 @@ pub mod polynomial;
 mod simparam;
 pub mod transport_delay;
 
+pub use ground_reference::{
+    GroundGuardOp, GroundJoin, GroundReference, GroundReferenceGraph, GroundReferenceInputs,
+    evaluate_guard as evaluate_ground_guard,
+};
 pub use simparam::{GeneratedSimulationParameters, SimulationParameter};
 
 pub use analog_effects::{

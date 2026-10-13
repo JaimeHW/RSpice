@@ -2997,6 +2997,50 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
+    out.push_str(
+        "    /// Whether the model's contributions connect an electrical port to node\n    /// 0; see [`super::GroundReference`].\n",
+    );
+    out.push_str("    pub fn ground_reference(&self) -> super::GroundReference<'static> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = self;\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no ground reference\")\n",
+        );
+    } else {
+        out.push_str("        match self {\n");
+        for (index, (device, feature)) in devices.iter().zip(&feature_names).enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(_) => {}::Instance::GROUND_REFERENCE,",
+                device.folder_name,
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    /// A public parameter's effective value, by name or alias, and whether\n    /// the card gave it.\n",
+    );
+    out.push_str("    pub fn parameter_state(&self, name: &str) -> Option<(f64, bool)> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, name);\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no parameters\")\n",
+        );
+    } else {
+        out.push_str("        let _ = &name;\n");
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.parameter_state(name),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str("    pub fn accepted_state_shape_identity(&self) -> super::GeneratedVerilogAAcceptedStateShapeIdentity {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");

@@ -3977,6 +3977,26 @@ impl VerilogADevice {
         self.node_mapping.get(terminal).copied().unwrap_or(0)
     }
 
+    /// A scalar public parameter's effective value, by name or alias, and
+    /// whether the instance gave it.
+    pub fn parameter_state(&self, name: &str) -> Option<(f64, bool)> {
+        let index = self.model.parameter_index(name)?;
+        if self.model.parameters[index].is_array {
+            return None;
+        }
+        let value = self.context.parameters.get(index).copied()?;
+        Some((value, self.context.is_param_given(index)))
+    }
+
+    /// Whether the card connects terminal `terminal`, as `$port_connected`
+    /// answers it.
+    pub fn port_connected(&self, terminal: usize) -> Option<bool> {
+        self.context
+            .port_connected
+            .get(terminal)
+            .map(|connected| *connected != 0)
+    }
+
     /// Set a parameter value by name
     ///
     /// aliasparam names resolve to their target parameter, so setting an

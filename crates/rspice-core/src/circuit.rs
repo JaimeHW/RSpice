@@ -489,8 +489,9 @@ impl ResistorNoiseTemperatureProvenance {
 
 /// Whether a Verilog-A or Verilog-AMS instance built so far connects node 0
 /// through its own contributions, while the build still has to decide the
-/// reference of a deck that names no node 0.
-#[cfg(feature = "veriloga")]
+/// reference of a deck that names no node 0. A generated model's instance
+/// counts as its `.va` source's would.
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) enum GroundCensus {
     /// Nothing to decide: the deck names node 0, or its reference is chosen.
@@ -735,7 +736,7 @@ pub struct CircuitData {
     #[cfg(feature = "veriloga")]
     pub(crate) mixed_signal_hosts: Vec<crate::xspice::verilog::MixedSignalHost>,
     /// See [`GroundCensus`]; the build alone writes and reads it.
-    #[cfg(feature = "veriloga")]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     pub(crate) ground_census: GroundCensus,
     #[cfg(feature = "veriloga-builtins-base")]
     pub(crate) generated_veriloga_devices: crate::device::veriloga_builtins::BuiltinVerilogADevices,

@@ -495,6 +495,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
+	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Never;
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "4dad6b58874ab87b9c29e0014005a3b84934fcc3577db43066c0ad948fd340bc";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
@@ -727,6 +728,15 @@ impl Instance {
 	pub fn has_parameter(name: &str) -> bool {
 		let lower = name.to_ascii_lowercase();
 		parameter_index_for_name(lower.as_str()).is_some()
+	}
+
+	/// A scalar parameter's effective value, by name or alias, and whether the
+	/// card gave it.
+	pub fn parameter_state(&self, name: &str) -> Option<(f64, bool)> {
+		let lower = name.to_ascii_lowercase();
+		let index = parameter_index_for_name(lower.as_str())?;
+		if PARAMETER_ARRAY_FLAGS[index] { return None; }
+		Some((self.params.values[index], self.param_given[index]))
 	}
 
 	/// Atomically apply model-card and instance parameter assignments.

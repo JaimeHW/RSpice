@@ -460,6 +460,13 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str(&format!(
         "    pub const REQUIRES_NODESET_PHASE: bool = {requires_nodeset_phase};\n"
     ));
+    writeln!(
+        out,
+        "    pub const GROUND_REFERENCE: {}::GroundReference<'static> = {};",
+        options.runtime_path,
+        ground_reference_literal(artifact, &options.runtime_path)
+    )
+    .unwrap();
     out.push_str(&format!(
         "    pub const CHECKPOINT_MODEL_IDENTITY: &'static str = {checkpoint_model_identity:?};\n"
     ));
@@ -875,6 +882,21 @@ pub(super) fn generate_state_file_with_extensions(
     } else {
         out.push_str("        let lower = name.to_ascii_lowercase();\n");
         out.push_str("        parameter_index_for_name(lower.as_str()).is_some()\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str(
+        "    /// A scalar parameter's effective value, by name or alias, and whether the\n",
+    );
+    out.push_str("    /// card gave it.\n");
+    out.push_str("    pub fn parameter_state(&self, name: &str) -> Option<(f64, bool)> {\n");
+    if artifact.mir.parameters.is_empty() {
+        out.push_str("        let _ = name;\n");
+        out.push_str("        None\n");
+    } else {
+        out.push_str("        let lower = name.to_ascii_lowercase();\n");
+        out.push_str("        let index = parameter_index_for_name(lower.as_str())?;\n");
+        out.push_str("        if PARAMETER_ARRAY_FLAGS[index] { return None; }\n");
+        out.push_str("        Some((self.params.values[index], self.param_given[index]))\n");
     }
     out.push_str("    }\n\n");
     out.push_str("    /// Atomically apply model-card and instance parameter assignments.\n");
@@ -1307,6 +1329,61 @@ pub(super) fn generate_state_file_with_extensions(
         out.push_str(&format!("use {}::integer;\n", options.runtime_path));
     }
     Ok(compact_generated_indentation(&out))
+}
+
+/// The module's [`crate::canonical_ir::ground_reference`] as a constant of the
+/// runtime's type, named through `runtime`, so the generated model answers it
+/// as the `.va` route does.
+fn ground_reference_literal(artifact: &CanonicalIrArtifact, runtime: &str) -> String {
+    use rspice_veriloga_runtime::{GroundGuardOp as Op, GroundReference};
+
+    let summary = crate::canonical_ir::ground_reference(artifact);
+    let graph = match summary.view() {
+        GroundReference::Never => return format!("{runtime}::GroundReference::Never"),
+        GroundReference::Always => return format!("{runtime}::GroundReference::Always"),
+        GroundReference::Conditional(graph) => graph,
+    };
+    let number = |value: f64| {
+        if value.is_nan() {
+            "f64::NAN".to_string()
+        } else if value == f64::INFINITY {
+            "f64::INFINITY".to_string()
+        } else if value == f64::NEG_INFINITY {
+            "f64::NEG_INFINITY".to_string()
+        } else {
+            format!("{value:?}")
+        }
+    };
+    let ops: Vec<String> = graph
+        .guards
+        .iter()
+        .map(|op| match op {
+            Op::Number(value) => format!("{runtime}::GroundGuardOp::Number({})", number(*value)),
+            Op::Parameter(name) => format!("{runtime}::GroundGuardOp::Parameter({name:?})"),
+            Op::ParameterGiven(name) => {
+                format!("{runtime}::GroundGuardOp::ParameterGiven({name:?})")
+            }
+            Op::PortConnected(port) => format!("{runtime}::GroundGuardOp::PortConnected({port})"),
+            other => format!("{runtime}::GroundGuardOp::{other:?}"),
+        })
+        .collect();
+    let joins: Vec<String> = graph
+        .joins
+        .iter()
+        .map(|join| {
+            format!(
+                "{runtime}::GroundJoin {{ groups: {:?}, guard: {:?} }}",
+                join.groups, join.guard
+            )
+        })
+        .collect();
+    format!(
+        "{runtime}::GroundReference::Conditional({runtime}::GroundReferenceGraph {{ group_count: {}, port_groups: &{:?}, joins: &[{}], guards: &[{}] }})",
+        graph.group_count,
+        graph.port_groups,
+        joins.join(", "),
+        ops.join(", ")
+    )
 }
 
 fn generated_terminal_descriptor_literal(port: &HirPort) -> String {

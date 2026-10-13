@@ -268,6 +268,12 @@ pub(super) fn try_build_mixed_signal_instance(
         boundary.len(),
         host.boundary_buses().len()
     );
+    super::ground_reference::note_module(
+        circuit,
+        &element.name,
+        prepared.canonical_ir.as_deref(),
+        host.analog_device(),
+    );
     circuit.add_mixed_signal_host(host)?;
     Ok(true)
 }

@@ -5602,7 +5602,7 @@ impl Engine {
             }
             None => ground_reference::automatic(&flat_elements).map(str::to_owned),
         };
-        #[cfg(feature = "veriloga")]
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         if candidate_reference.is_some() {
             circuit.ground_census = crate::circuit::GroundCensus::Open;
         }
@@ -8562,11 +8562,6 @@ impl Engine {
                                 design_connect_rules
                                     .validate_hierarchical_context(artifact, &element.name)?;
                             }
-                            ground_reference::note_module(
-                                &mut circuit,
-                                &element.name,
-                                prepared.canonical_ir.as_deref(),
-                            );
                             if mixed_modules::try_build_mixed_signal_instance(
                                 &mut circuit,
                                 element,
@@ -8692,6 +8687,12 @@ impl Engine {
                                         format!("temperature update failed: {err}"),
                                     )
                                 })?;
+                            ground_reference::note_module(
+                                &mut circuit,
+                                &element.name,
+                                prepared.canonical_ir.as_deref(),
+                                &device,
+                            );
                             circuit.add_veriloga_device(device);
                             continue;
                         }
@@ -8710,6 +8711,7 @@ impl Engine {
                             )?
                         {
                             device.set_temperature(self.config.temperature);
+                            ground_reference::note_generated(&mut circuit, &device);
                             circuit.add_generated_veriloga_device(device);
                             continue;
                         }
@@ -9599,7 +9601,7 @@ impl Engine {
         // reference. The converters the build inserts from here on drive and
         // sense against node 0, which is whichever net this settles.
         let reference = ground_reference::to_take(candidate_reference, &circuit);
-        #[cfg(feature = "veriloga")]
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         {
             circuit.ground_census = crate::circuit::GroundCensus::Settled;
         }

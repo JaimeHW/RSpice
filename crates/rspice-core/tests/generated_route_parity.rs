@@ -582,6 +582,44 @@ fn a_deck_without_node_zero_matches_it_with_an_omitted_thermal_node() {
     assert_reference_choice_is_invisible("R2_ET_CMC R card", deck, true);
 }
 
+/// ANGELOV_GAN declares its thermal node `t` electrical and contributes to it
+/// against ground (`I(t) <+ V(t) / Rth_T` with self-heating, `I(t) <+ V(t) *
+/// SPICE_GMIN` without), so an instance with `t` connected ties it to node 0,
+/// and a deck that names no node 0 keeps node 0.
+/// The `.va` route reads that from the module's canonical IR as it builds;
+/// the generated route reads what the generator recorded from the same IR.
+/// They must decide alike.
+#[cfg(feature = "veriloga-model-angelov-gan")]
+#[test]
+fn both_routes_keep_node_zero_for_a_module_that_reaches_a_port_single_ended() {
+    let reference = |deck: &str| {
+        let netlist = Netlist::parse_validated(deck).unwrap_or_else(|err| panic!("{err}\n{deck}"));
+        Engine::default()
+            .build_circuit(&netlist)
+            .unwrap_or_else(|err| panic!("{err}\n{deck}"))
+            .get_node_by_name("ref")
+    };
+    let body = "V1 d ref 5\nV2 g ref -1\nX1 d g ref t rf angelov_gan\nRt t ref 1k\n\
+                Rrf rf ref 50\n.end\n";
+    let generated = format!("* angelov_gan generated without node 0\n{body}");
+    let runtime = format!(
+        "* angelov_gan .va without node 0\n.va \"{}\" angelov_gan\n{body}",
+        model_source("models/veriloga/angelov_2.0/vacode/angelov_gan.va")
+    );
+    assert!(uses_generated_devices(&generated));
+    assert!(!uses_generated_devices(&runtime));
+    let (generated, runtime) = (reference(&generated), reference(&runtime));
+    assert_eq!(
+        generated, runtime,
+        "both routes must decide the reference alike"
+    );
+    assert_ne!(
+        generated,
+        Some(0),
+        "`I(t) <+` ties the connected thermal node to node 0, so the deck keeps it"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // JUNCAP200 — junction charge storage, a second two-terminal generated family.
 //

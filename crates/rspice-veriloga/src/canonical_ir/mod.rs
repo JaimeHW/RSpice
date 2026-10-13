@@ -34,6 +34,7 @@ pub mod digital_lower;
 mod digital_validate;
 pub mod digital_value;
 pub(crate) mod frequency;
+pub mod ground_reference;
 pub mod hir;
 pub mod ids;
 pub mod metadata;
@@ -80,6 +81,7 @@ pub use digital_eval::{
     resume as resume_digital_process, start as start_digital_process,
 };
 pub use digital_value::FourStateValue;
+pub use ground_reference::{GroundReferenceSummary, ground_reference};
 pub use hir::{
     CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
     HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirFormalPort, HirInternalNode,

@@ -7723,6 +7723,12 @@ pub mod runtime {
     include_str!("../../rspice-veriloga-runtime/src/array_index.rs"),
     r#"
     }
+    pub mod ground_reference {
+"#,
+    include_str!("../../rspice-veriloga-runtime/src/ground_reference.rs"),
+    r#"
+    }
+    pub use ground_reference::{GroundGuardOp, GroundJoin, GroundReference, GroundReferenceGraph, GroundReferenceInputs};
     pub type Value = f64;
     pub use crate::simparam::{GeneratedSimulationParameters,SimulationParameter};
     pub use crate::analog_effects::*;

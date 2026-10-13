@@ -38,10 +38,17 @@
 //! an unconnected Verilog-A port), does not count: it joins the chosen
 //! reference, as it would had the deck named that net 0. Nor does a node a
 //! module keeps as private state, such as a potential that carries a charge,
-//! or a thermal port's tie to ambient. A native or precompiled device is
-//! judged by its card alone: the build reads the contributions of the
-//! Verilog-A and Verilog-AMS modules it compiles, from their canonical IR,
-//! and has none for the others.
+//! or a thermal port's tie to ambient.
+//!
+//! A native device is judged by its card alone. A Verilog-A or Verilog-AMS
+//! module is judged by its equations, read from its canonical IR by
+//! `rspice_veriloga::canonical_ir::ground_reference`: the build reads them
+//! for a module it compiles, and a generated model carries the generator's
+//! reading of the same IR as metadata. An equation inside an `if` counts when
+//! the instance's own parameter values and connections select it, or when
+//! they cannot decide it before the solve; see
+//! [`rspice_veriloga_runtime::GroundReference`]. A `.va` file and the
+//! generated model built from it therefore answer one card alike.
 
 use super::*;
 
@@ -118,7 +125,7 @@ pub(super) fn to_take(candidate: Option<String>, circuit: &CircuitData) -> Optio
 /// load an authored card expands into that stamps node 0. A device's own
 /// internal resistors and capacitors are its card's, and follow its terminals.
 fn referent(circuit: &CircuitData) -> Option<String> {
-    #[cfg(feature = "veriloga")]
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     if let crate::circuit::GroundCensus::Referenced(instance) = &circuit.ground_census {
         return Some(format!("'{instance}'"));
     }
@@ -287,118 +294,76 @@ fn port_connects_ground(
     }
 }
 
-/// Record a Verilog-A or Verilog-AMS instance whose module's contributions
-/// connect node 0, while the build still has a deck's reference to decide.
-#[cfg(feature = "veriloga")]
-pub(super) fn note_module(
-    circuit: &mut CircuitData,
-    instance: &str,
-    artifact: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
-) {
-    if circuit.ground_census == crate::circuit::GroundCensus::Open
-        && module_references_ground(artifact)
-    {
+/// Record an instance whose module's contributions connect node 0, while the
+/// build still has a deck's reference to decide.
+#[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+fn note_instance(circuit: &mut CircuitData, instance: &str, references: impl FnOnce() -> bool) {
+    if circuit.ground_census == crate::circuit::GroundCensus::Open && references() {
         circuit.ground_census = crate::circuit::GroundCensus::Referenced(instance.to_owned());
     }
 }
 
-/// Whether a module's contributions connect one of its electrical ports to
-/// node 0: a branch it stamps (`I(a) <+`, `V(a) <+`) reaches the port
-/// single-ended, or through a net it declares `ground`.
-///
-/// Every contribution joins the nets of its branch into one group, and a
-/// single-ended one joins its net's group to ground. A flow the module probes
-/// on a branch nothing drives is an ideal short, which the compiler lowers
-/// onto a contribution of its own, so it joins too. A read joins nothing: a
-/// potential or flow read in an expression, a condition or a Verilog-AMS
-/// process stamps nothing in node 0's row or column. A group that holds no
-/// port is the module's private state, such as a node whose potential carries
-/// a charge, so ground inside it connects nothing outside the module. A port
-/// is electrical when its discipline's potential is a voltage or its flow a
-/// current; a thermal port's ground is ambient, not node 0.
+/// Note a Verilog-A or Verilog-AMS instance compiled at run time, once its
+/// device is built: its module's contributions, read from the canonical IR by
+/// [`rspice_veriloga::canonical_ir::ground_reference`], decided with the
+/// device's own parameter values and connections.
 ///
 /// A module whose canonical IR is absent cannot be read, and counts as
 /// connecting node 0, so the build never chooses a reference it cannot
 /// justify.
 #[cfg(feature = "veriloga")]
+pub(super) fn note_module(
+    circuit: &mut CircuitData,
+    instance: &str,
+    artifact: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    device: &crate::device::veriloga::VerilogADevice,
+) {
+    note_instance(circuit, instance, || {
+        module_references_ground(artifact, &RuntimeInstance(device))
+    });
+}
+
+#[cfg(feature = "veriloga")]
 fn module_references_ground(
     artifact: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
+    instance: &dyn rspice_veriloga_runtime::GroundReferenceInputs,
 ) -> bool {
-    let Some(artifact) = artifact else {
-        return true;
-    };
-    let hir = &artifact.hir;
-    let mut nets = NetGroups::new(hir.ground_nodes.iter().map(|net| net.as_str()).collect());
-    for contribution in &hir.contributions {
-        let mut ends = contribution.branch.splitn(2, ',');
-        let pos = ends.next().unwrap_or_default();
-        nets.join(pos, ends.next());
-    }
-    hir.ports
-        .iter()
-        .filter(|port| {
-            port.nature_potential.as_deref() == Some("Voltage")
-                || port.nature_flow.as_deref() == Some("Current")
-        })
-        .any(|port| nets.grounded(&port.name))
+    artifact.is_none_or(|artifact| {
+        rspice_veriloga::canonical_ir::ground_reference(artifact)
+            .view()
+            .references_ground(instance)
+    })
 }
 
-/// The groups a module's contributions join its nets into, with ground as the
-/// group of index 0.
-#[cfg(feature = "veriloga")]
-struct NetGroups<'a> {
-    grounds: Vec<&'a str>,
-    index: HashMap<&'a str, usize>,
-    parent: Vec<usize>,
+/// Note a generated model's instance: the generator recorded its module's
+/// answer from the same canonical IR, and the instance decides it with its
+/// own parameter values. Every port of a generated device is connected, as
+/// its `$port_connected` answers.
+#[cfg(feature = "veriloga-builtins-base")]
+pub(super) fn note_generated(
+    circuit: &mut CircuitData,
+    device: &crate::device::veriloga_builtins::BuiltinVerilogAInstance,
+) {
+    note_instance(circuit, device.instance_name(), || {
+        device.references_ground()
+    });
 }
 
 #[cfg(feature = "veriloga")]
-impl<'a> NetGroups<'a> {
-    fn new(grounds: Vec<&'a str>) -> Self {
-        Self {
-            grounds,
-            index: HashMap::new(),
-            parent: vec![0],
-        }
+struct RuntimeInstance<'a>(&'a crate::device::veriloga::VerilogADevice);
+
+#[cfg(feature = "veriloga")]
+impl rspice_veriloga_runtime::GroundReferenceInputs for RuntimeInstance<'_> {
+    fn parameter(&self, name: &str) -> Option<f64> {
+        self.0.parameter_state(name).map(|(value, _)| value)
     }
 
-    /// Ground for an absent or empty end, `0`, or a declared `ground` net.
-    fn net(&mut self, name: Option<&'a str>) -> usize {
-        let Some(name) =
-            name.filter(|name| !name.is_empty() && *name != "0" && !self.grounds.contains(name))
-        else {
-            return 0;
-        };
-        let next = self.parent.len();
-        let index = *self.index.entry(name).or_insert(next);
-        if index == next {
-            self.parent.push(next);
-        }
-        index
+    fn parameter_given(&self, name: &str) -> Option<bool> {
+        self.0.parameter_state(name).map(|(_, given)| given)
     }
 
-    fn root(&mut self, mut net: usize) -> usize {
-        while self.parent[net] != net {
-            self.parent[net] = self.parent[self.parent[net]];
-            net = self.parent[net];
-        }
-        net
-    }
-
-    fn join(&mut self, pos: &'a str, neg: Option<&'a str>) {
-        let pos = self.net(Some(pos));
-        let neg = self.net(neg);
-        let (pos, neg) = (self.root(pos), self.root(neg));
-        // Ground stays the root of its group.
-        let (low, high) = (pos.min(neg), pos.max(neg));
-        self.parent[high] = low;
-    }
-
-    fn grounded(&mut self, name: &str) -> bool {
-        match self.index.get(name).copied() {
-            Some(net) => self.root(net) == 0,
-            None => false,
-        }
+    fn port_connected(&self, port: u32) -> Option<bool> {
+        self.0.port_connected(usize::try_from(port).ok()?)
     }
 }
 
@@ -438,107 +403,20 @@ mod tests {
     }
 
     #[cfg(feature = "veriloga")]
-    fn references_ground(body: &str) -> bool {
-        let source = format!("module m(p, n, t);\n{body}\nendmodule\n");
-        let report = rspice_veriloga::VerilogACompiler::default()
-            .compile_runtime(&source, None)
-            .unwrap_or_else(|error| panic!("{source}: {error:?}"));
-        module_references_ground(Some(&report.canonical_ir))
-    }
-
-    /// A contribution that reaches a port single-ended, or through a `ground`
-    /// net, connects node 0; a differential one does not, and a read of a
-    /// port single-ended, which stamps nothing at node 0, does not either.
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn a_module_connects_node_zero_through_the_branches_it_stamps_only() {
-        let ports = "inout p, n, t; electrical p, n; thermal t;";
-        for (body, expected) in [
-            ("analog I(p, n) <+ V(p, n) / 1e3;", false),
-            ("analog V(p) <+ 1.0;", true),
-            ("analog I(n) <+ 1e-3;", true),
-            // Reads: in a contribution, an assignment, a condition and a
-            // derivative's axis.
-            ("analog I(p, n) <+ V(p) / 1e3;", false),
-            (
-                "real v; analog begin I(p, n) <+ V(p, n) / 1e3; v = V(p); end",
-                false,
-            ),
-            (
-                "analog begin I(p, n) <+ V(p, n) / 1e3; if (V(n) > 0.5) I(p, n) <+ 1m; end",
-                false,
-            ),
-            (
-                "real g; analog begin I(p, n) <+ V(p, n) / 1e3; g = ddx(V(p, n) * V(p, n), V(p)); end",
-                false,
-            ),
-            // A probe of a branch with no source is an ideal short.
-            (
-                "real i; analog begin I(p, n) <+ V(p, n) / 1e3; i = I(n); end",
-                true,
-            ),
-            (
-                "electrical g; ground g; analog I(p, g) <+ V(p, g) / 1e3;",
-                true,
-            ),
-            // A chain of differential branches through an internal node
-            // still ties the port to ground.
-            (
-                "electrical x; analog begin I(p, x) <+ V(p, x) / 1e3; V(x) <+ 0; end",
-                true,
-            ),
-            // A private state node: its own single-ended equation, read
-            // differentially from the ports.
-            (
-                "electrical q; analog begin I(q) <+ V(q) - V(p, n); I(p, n) <+ V(q) / 1e3; end",
-                false,
-            ),
-            // Thermal ground is ambient, not node 0.
-            ("analog Pwr(t) <+ V(p, n) * V(p, n) / 1e3;", false),
-            // A port's own flow is the current through it, not to ground.
-            (
-                "real i; analog begin I(p, n) <+ V(p, n) / 1e3; i = I(<p>); end",
-                false,
-            ),
-        ] {
-            assert_eq!(
-                references_ground(&format!("{ports}\n{body}")),
-                expected,
-                "{body}"
-            );
-        }
-    }
-
-    /// A Verilog-AMS process that samples a port, single-ended or against
-    /// another port, observes it and stamps nothing: it does not connect node
-    /// 0. A contribution beside it does.
-    #[cfg(feature = "veriloga")]
-    #[test]
-    fn a_process_sampling_a_port_does_not_connect_node_zero() {
-        for (sample, analog, expected) in [
-            ("V(p)", "", false),
-            ("V(p, n)", "", false),
-            ("V(p)", "analog V(p) <+ 0.5;", true),
-        ] {
-            let source = format!(
-                "`timescale 1ns/1ps\nmodule m(p, n, q);\n inout p, n; electrical p, n;\n \
-                 output q; reg q; real v;\n initial q = 1'b0;\n \
-                 always #5 begin v = {sample}; q = v > 0.5; end\n {analog}\nendmodule\n"
-            );
-            let artifact = rspice_veriloga::VerilogACompiler::default()
-                .compile_canonical_ir(&source)
-                .unwrap_or_else(|error| panic!("{source}: {error:?}"));
-            assert_eq!(
-                module_references_ground(Some(&artifact)),
-                expected,
-                "{source}"
-            );
-        }
-    }
-
-    #[cfg(feature = "veriloga")]
     #[test]
     fn a_module_without_its_canonical_ir_counts_as_referencing_node_zero() {
-        assert!(module_references_ground(None));
+        struct Nothing;
+        impl rspice_veriloga_runtime::GroundReferenceInputs for Nothing {
+            fn parameter(&self, _: &str) -> Option<f64> {
+                None
+            }
+            fn parameter_given(&self, _: &str) -> Option<bool> {
+                None
+            }
+            fn port_connected(&self, _: u32) -> Option<bool> {
+                None
+            }
+        }
+        assert!(module_references_ground(None, &Nothing));
     }
 }

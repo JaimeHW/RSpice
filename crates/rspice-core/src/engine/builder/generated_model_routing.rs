@@ -787,6 +787,7 @@ fn add_generated_instance(
     }
     device.set_temperature(keywords.temperature);
     device.set_initially_off(keywords.initial_off);
+    super::ground_reference::note_generated(circuit, &device);
     circuit.add_generated_veriloga_device(device);
     Ok(())
 }

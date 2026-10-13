@@ -904,6 +904,32 @@ impl BuiltinVerilogADevices {
 
 #[cfg(feature = "veriloga-builtins-base")]
 impl BuiltinVerilogAInstance {
+    pub(crate) fn instance_name(&self) -> &str {
+        &self.instance_name
+    }
+
+    /// Whether this instance's contributions connect an electrical port to
+    /// node 0: the generator's reading of its module, decided with this
+    /// instance's parameter values. Every port of a generated device is
+    /// connected.
+    pub(crate) fn references_ground(&self) -> bool {
+        struct Inputs<'a>(&'a builtins::GeneratedBuiltinKind);
+        impl rspice_veriloga_runtime::GroundReferenceInputs for Inputs<'_> {
+            fn parameter(&self, name: &str) -> Option<f64> {
+                self.0.parameter_state(name).map(|(value, _)| value)
+            }
+            fn parameter_given(&self, name: &str) -> Option<bool> {
+                self.0.parameter_state(name).map(|(_, given)| given)
+            }
+            fn port_connected(&self, _: u32) -> Option<bool> {
+                Some(true)
+            }
+        }
+        self.kind
+            .ground_reference()
+            .references_ground(&Inputs(&self.kind))
+    }
+
     pub(crate) fn visit_equation_abstols(
         &self,
         num_nodes: usize,

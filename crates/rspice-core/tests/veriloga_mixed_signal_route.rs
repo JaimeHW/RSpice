@@ -2511,6 +2511,36 @@ fn reference_node(deck: &str) -> Option<usize> {
         .get_node_by_name("ref")
 }
 
+/// Whether a module connects node 0 can hang on its parameters: a
+/// contribution inside an `if` the instance's own values decide counts only
+/// when they select it.
+#[test]
+fn a_parameter_that_selects_a_single_ended_equation_decides_the_reference() {
+    let model = ModelFile::new(
+        "selectable_reference_load",
+        "module selectable_reference_load(p, n);\n inout p, n; electrical p, n;\n \
+         parameter integer tie = 0;\n \
+         analog begin I(p, n) <+ V(p, n) / 1k; if (tie == 1) V(n) <+ 0; end\nendmodule\n",
+    );
+    let reference = |tie: u8| {
+        reference_node(&format!(
+            "* a load tied to node 0 only when asked\n.va \"{}\" selectable_reference_load\n\
+             V1 in ref 1\nR1 in mid 1k\nX1 mid ref selectable_reference_load tie={tie}\n.end\n",
+            model.deck_path()
+        ))
+    };
+    assert_eq!(
+        reference(0),
+        Some(0),
+        "nothing connects node 0, so `ref` is the reference"
+    );
+    assert_ne!(
+        reference(1),
+        Some(0),
+        "`V(n) <+ 0` connects node 0, so the deck keeps it"
+    );
+}
+
 /// The observations that differ between a deck naming its reference `0` and
 /// the same deck naming it `ref`, which the build must then choose. The
 /// reference net is the one name the two decks spell apart.
