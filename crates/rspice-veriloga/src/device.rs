@@ -2918,13 +2918,19 @@ impl VerilogADevice {
             .collect()
     }
 
-    fn finite_result(value: f64, context: impl Into<String>) -> Result<f64, VmError> {
+    /// Pass a finite value through; name the failing quantity otherwise.
+    ///
+    /// `context` runs only on the failure path: the stamp loops call this for
+    /// every contribution and derivative of every evaluation, so the label is
+    /// never formatted for a value that is finite.
+    #[inline]
+    fn finite_result(value: f64, context: impl FnOnce() -> String) -> Result<f64, VmError> {
         if value.is_finite() {
             Ok(value)
         } else {
             Err(VmError::InvalidNumericResult(format!(
                 "{} evaluated to {value}",
-                context.into()
+                context()
             )))
         }
     }
@@ -2951,7 +2957,7 @@ impl VerilogADevice {
     }
 
     fn noise_power(value: f64, source_index: usize) -> Result<f64, VmError> {
-        let value = Self::finite_result(value, format!("noise source {source_index} power"))?;
+        let value = Self::finite_result(value, || format!("noise source {source_index} power"))?;
         if value < 0.0 {
             Err(VmError::InvalidNumericResult(format!(
                 "noise source {source_index} power evaluated to negative value {value}"
@@ -5520,7 +5526,7 @@ impl VerilogADevice {
                         native,
                         NativeValueEntry::StaticCondition(idx),
                     )?;
-                    Self::finite_result(condition, format!("static condition {idx}"))? != 0.0
+                    Self::finite_result(condition, || format!("static condition {idx}"))? != 0.0
                 } else {
                     true
                 };
@@ -5591,7 +5597,7 @@ impl VerilogADevice {
                         wasm,
                         WasmJitExecutableEntry::StaticCondition(idx),
                     )?;
-                    Self::finite_result(condition, format!("static condition {idx}"))? != 0.0
+                    Self::finite_result(condition, || format!("static condition {idx}"))? != 0.0
                 } else {
                     true
                 };
@@ -5767,7 +5773,7 @@ impl VerilogADevice {
                 let active = match &program.static_condition {
                     Some(condition) => {
                         let condition = bytecode_vm.execute(condition)?;
-                        Self::finite_result(condition, format!("static condition {idx}"))? != 0.0
+                        Self::finite_result(condition, || format!("static condition {idx}"))? != 0.0
                     }
                     None => true,
                 };
@@ -6213,10 +6219,9 @@ impl VerilogADevice {
                         entry: entry.jacobian_idx,
                     },
                 )?;
-                let deriv = Self::finite_result(
-                    deriv * scale,
-                    format!("reactive Jacobian {}:{}", program_idx, entry.jacobian_idx),
-                )?;
+                let deriv = Self::finite_result(deriv * scale, || {
+                    format!("reactive Jacobian {}:{}", program_idx, entry.jacobian_idx)
+                })?;
                 if let (Some(row), Some(col)) = (entry.row, entry.col) {
                     matrix_add(row, col, entry.sign * deriv);
                 }
@@ -6679,10 +6684,9 @@ impl VerilogADevice {
                 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
                 WasmJitExecutableEntry::StampValue(program_idx),
             )?;
-            let value = Self::finite_result(
-                value,
-                format!("contribution {program_idx} during device evaluation"),
-            )?;
+            let value = Self::finite_result(value, || {
+                format!("contribution {program_idx} during device evaluation")
+            })?;
             currents.push(value);
             vm.context.currents.push(value);
             if program.branch_ordinal.is_none()
@@ -7714,10 +7718,9 @@ impl VerilogADevice {
                     native,
                     NativeValueEntry::StampValue(program_idx),
                 )?;
-                Self::finite_result(
-                    value,
-                    format!("contribution {program_idx} during noise evaluation"),
-                )?
+                Self::finite_result(value, || {
+                    format!("contribution {program_idx} during noise evaluation")
+                })?
             } else {
                 0.0
             };
@@ -7742,10 +7745,9 @@ impl VerilogADevice {
                     wasm,
                     WasmJitExecutableEntry::StampValue(program_idx),
                 )?;
-                Self::finite_result(
-                    value,
-                    format!("contribution {program_idx} during noise evaluation"),
-                )?
+                Self::finite_result(value, || {
+                    format!("contribution {program_idx} during noise evaluation")
+                })?
             } else {
                 0.0
             };
@@ -7767,10 +7769,9 @@ impl VerilogADevice {
             let active = program_active.get(program_idx).copied().unwrap_or(true);
             let value = if active {
                 let value = vm.execute(&program.value_program)?;
-                Self::finite_result(
-                    value,
-                    format!("contribution {program_idx} during noise evaluation"),
-                )?
+                Self::finite_result(value, || {
+                    format!("contribution {program_idx} during noise evaluation")
+                })?
             } else {
                 0.0
             };
@@ -7950,10 +7951,9 @@ impl VerilogADevice {
                 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
                 WasmJitExecutableEntry::StampValue(prog_idx),
             )?;
-            let value = Self::finite_result(
-                value,
-                format!("contribution {prog_idx} during Jacobian evaluation"),
-            )?;
+            let value = Self::finite_result(value, || {
+                format!("contribution {prog_idx} during Jacobian evaluation")
+            })?;
             vm.context.currents.push(value);
             if program.branch_ordinal.is_none()
                 && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
@@ -7988,7 +7988,8 @@ impl VerilogADevice {
                         entry: jac_idx,
                     },
                 )?;
-                let value = Self::finite_result(value, format!("Jacobian {prog_idx}:{jac_idx}"))?;
+                let value =
+                    Self::finite_result(value, || format!("Jacobian {prog_idx}:{jac_idx}"))?;
                 entries.push(JacobianEntry {
                     value: jac_entry.sign * value,
                     row: jac_entry.row.clone(),
@@ -8481,7 +8482,7 @@ impl VerilogADevice {
                 #[cfg(all(not(feature = "native"), feature = "wasm-jit", target_arch = "wasm32"))]
                 WasmJitExecutableEntry::StampValue(program_idx),
             )?;
-            let value = Self::finite_result(value, format!("contribution {program_idx}"))?;
+            let value = Self::finite_result(value, || format!("contribution {program_idx}"))?;
 
             let correction = if vm.context.evaluation_mode.limiting_enabled()
                 && let Some(correction) = &program.limiter_correction
@@ -8510,7 +8511,7 @@ impl VerilogADevice {
                 0.0
             };
             let correction =
-                Self::finite_result(correction, format!("limiter correction {program_idx}"))?;
+                Self::finite_result(correction, || format!("limiter correction {program_idx}"))?;
 
             // Probed currents stay per-copy; only the stamps scale
             vm.context.currents.push(value);
@@ -8539,10 +8540,9 @@ impl VerilogADevice {
             // V(p) - V(n) - E(x) = 0; the entries hold -dE/dx (sign -1)
             // and the RHS receives Eeq = E - sum dE/dx * x_old, which is
             // exactly value + sum(sign * deriv * x_old).
-            let mut eq_value = Self::finite_result(
-                (value - correction) * scale,
-                format!("scaled contribution {program_idx}"),
-            )?;
+            let mut eq_value = Self::finite_result((value - correction) * scale, || {
+                format!("scaled contribution {program_idx}")
+            })?;
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
@@ -8572,10 +8572,9 @@ impl VerilogADevice {
                         entry: jacobian_entry.jacobian_idx,
                     },
                 )?;
-                let deriv = Self::finite_result(
-                    deriv * scale,
-                    format!("Jacobian {}:{}", program_idx, jacobian_entry.jacobian_idx),
-                )?;
+                let deriv = Self::finite_result(deriv * scale, || {
+                    format!("Jacobian {}:{}", program_idx, jacobian_entry.jacobian_idx)
+                })?;
 
                 // Accumulate the companion RHS term once per derivative
                 // column. Current contributions (and indirect constraint
@@ -8603,10 +8602,9 @@ impl VerilogADevice {
                 }
             }
 
-            eq_value = Self::finite_result(
-                eq_value,
-                format!("equivalent source for contribution {program_idx}"),
-            )?;
+            eq_value = Self::finite_result(eq_value, || {
+                format!("equivalent source for contribution {program_idx}")
+            })?;
 
             // RHS: current contributions stamp -/+ Ieq at the KCL rows;
             // potential contributions stamp +Eeq at the branch row
@@ -8913,7 +8911,7 @@ impl VerilogADevice {
                 source.program_idx,
             );
             let psd = if scales_as_current { psd * m } else { psd / m };
-            let psd = Self::finite_result(psd, format!("scaled noise source {idx} power"))?;
+            let psd = Self::finite_result(psd, || format!("scaled noise source {idx} power"))?;
             let exponent = source
                 .exponent_program
                 .as_ref()
@@ -8940,7 +8938,7 @@ impl VerilogADevice {
                     )
                 })
                 .transpose()?
-                .map(|value| Self::finite_result(value, format!("noise source {idx} exponent")))
+                .map(|value| Self::finite_result(value, || format!("noise source {idx} exponent")))
                 .transpose()?;
 
             let (node_pos, node_neg) = match (scales_as_current, source.branch_ordinal) {
@@ -9421,7 +9419,7 @@ impl VerilogADevice {
             let exponent = metadata
                 .exponent
                 .map(|value| {
-                    Self::finite_result(value, format!("noise process {expected} exponent"))
+                    Self::finite_result(value, || format!("noise process {expected} exponent"))
                 })
                 .transpose()?;
             processes.push(EvaluatedNoiseProcess {
@@ -9526,10 +9524,9 @@ impl VerilogADevice {
             } else {
                 multiplicity.recip()
             };
-            let psd = Self::finite_result(
-                scalar.psd / legacy_scale,
-                format!("noise process {} raw power", source.process_id),
-            )?;
+            let psd = Self::finite_result(scalar.psd / legacy_scale, || {
+                format!("noise process {} raw power", source.process_id)
+            })?;
             let mut injections = Vec::with_capacity(source.injections.len());
             if source.injections.is_empty() {
                 // Backward-compatible cache migration: artifacts serialized
@@ -9814,7 +9811,7 @@ impl VerilogADevice {
                 continue;
             }
             if let Some(exponent) = metadata.exponent {
-                Self::finite_result(exponent, format!("noise process {expected} exponent"))?;
+                Self::finite_result(exponent, || format!("noise process {expected} exponent"))?;
             }
             processes.push(PlannedNoiseProcess {
                 process_id: expected,
@@ -9860,10 +9857,9 @@ impl VerilogADevice {
             } else {
                 multiplicity.recip()
             };
-            Self::finite_result(
-                scalar.psd / legacy_scale,
-                format!("noise process {} raw power", source.process_id),
-            )?;
+            Self::finite_result(scalar.psd / legacy_scale, || {
+                format!("noise process {} raw power", source.process_id)
+            })?;
             let mut injections = Vec::with_capacity(source.injections.len().max(1));
             if source.injections.is_empty() {
                 // An artifact serialized before grouped injections carries one
@@ -10040,13 +10036,13 @@ impl VerilogADevice {
                 source.program_idx,
             );
             let psd = if scales_as_current { psd * m } else { psd / m };
-            let psd = Self::finite_result(psd, format!("scaled noise source {idx} power"))?;
+            let psd = Self::finite_result(psd, || format!("scaled noise source {idx} power"))?;
             let exponent = source
                 .exponent_program
                 .as_ref()
                 .map(|p| vm.execute(p))
                 .transpose()?
-                .map(|value| Self::finite_result(value, format!("noise source {idx} exponent")))
+                .map(|value| Self::finite_result(value, || format!("noise source {idx} exponent")))
                 .transpose()?;
 
             // Potential-contribution noise is a series EMF on the branch
