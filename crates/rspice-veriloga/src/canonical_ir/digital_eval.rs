@@ -67,11 +67,13 @@
 
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use super::cfg::{CfgFunction, CfgTerminator, CfgValueKind, DigitalWait, is_leaf_kind};
+use super::cfg::{
+    CfgFunction, CfgTerminator, CfgValueKind, CfgValueType, DigitalWait, is_leaf_kind,
+};
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalEventExpression,
-    DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalSignal, DigitalSystemCallId,
-    DigitalWriteSelect, DigitalWriteTarget,
+    DigitalRoutineId, DigitalSchedulingRegion, DigitalSensitivityTerm, DigitalSignal,
+    DigitalSystemCallId, DigitalWriteSelect, DigitalWriteTarget,
 };
 use super::digital_value::{self, FourStateValue, truth};
 use super::ids::{BlockId, DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId, ValueId};
@@ -481,6 +483,8 @@ struct DigitalExpressionState {
 pub struct DigitalExpressionWait {
     plan_identity: [u8; 32],
     process: DigitalProcessId,
+    /// The routine whose function holds the expressions, if not the process.
+    routine: Option<DigitalRoutineId>,
     states: Vec<DigitalExpressionState>,
     dependencies: Vec<DigitalSignalId>,
 }
@@ -510,6 +514,18 @@ impl DigitalExpressionWait {
         let process = plan
             .process(self.process)
             .ok_or(DigitalEvalError::ProcessNotInPlan(self.process))?;
+        let function = match self.routine {
+            Some(routine) => {
+                &plan
+                    .routine(routine)
+                    .ok_or(DigitalEvalError::InvalidRoutineCall {
+                        routine,
+                        detail: "the plan does not declare it",
+                    })?
+                    .function
+            }
+            None => &process.function,
+        };
         let mut occurred = false;
         for state in &mut self.states {
             let assignment_change = state.assignment.is_some_and(|selection| {
@@ -521,7 +537,9 @@ impl DigitalExpressionWait {
             if !assignment_change && state.program.dependencies.binary_search(&changed).is_err() {
                 continue;
             }
-            let mut interpreter = Interpreter::new(plan, process, environment, scratch);
+            let mut interpreter =
+                Interpreter::with_function(plan, process, function, environment, scratch);
+            interpreter.routine = self.routine;
             for id in &state.program.instructions {
                 let value = interpreter.compute(*id)?;
                 interpreter.scratch.table.define(*id, value);
@@ -571,9 +589,63 @@ pub struct DigitalResumeState {
     /// controls enter the block and bind its parameters instead.
     analog_instruction: Option<usize>,
     arguments: Vec<DigitalScalar>,
+    /// The routine the suspended frame runs; `None` for the process's own
+    /// function.
+    routine: Option<DigitalRoutineId>,
+    /// That frame's automatic slots; empty outside an automatic routine.
+    slots: Vec<DigitalScalar>,
+    /// The task-enable frames below it, outermost first.
+    callers: Vec<DigitalCallerFrame>,
+}
+
+/// A frame suspended at a task enable, waiting for the task to end
+/// (IEEE 1364-2005 section 10.2.2).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DigitalCallerFrame {
+    /// The routine the frame runs; `None` for the process's own function.
+    pub(crate) routine: Option<DigitalRoutineId>,
+    /// The block the enable resumes into when the task ends.
+    pub(crate) ret: BlockId,
+    /// The frame's live values, bound to `ret`'s parameters.
+    pub(crate) arguments: Vec<DigitalScalar>,
+    /// The frame's automatic slots.
+    pub(crate) slots: Vec<DigitalScalar>,
+}
+
+impl DigitalCallerFrame {
+    pub fn routine(&self) -> Option<DigitalRoutineId> {
+        self.routine
+    }
+
+    pub fn ret(&self) -> BlockId {
+        self.ret
+    }
+
+    pub fn arguments(&self) -> &[DigitalScalar] {
+        &self.arguments
+    }
+
+    pub fn slots(&self) -> &[DigitalScalar] {
+        &self.slots
+    }
 }
 
 impl DigitalResumeState {
+    /// The routine the suspended frame runs, if it is not the process's own.
+    pub fn routine(&self) -> Option<DigitalRoutineId> {
+        self.routine
+    }
+
+    /// The suspended frame's automatic slots.
+    pub fn slots(&self) -> &[DigitalScalar] {
+        &self.slots
+    }
+
+    /// The task-enable frames below the suspended one, outermost first.
+    pub fn callers(&self) -> &[DigitalCallerFrame] {
+        &self.callers
+    }
+
     /// The process this state belongs to.
     pub fn process(&self) -> DigitalProcessId {
         self.process
@@ -720,11 +792,28 @@ pub enum DigitalEvalError {
         site: DigitalSystemCallId,
         detail: String,
     },
+    /// Routine calls nested deeper than [`MAX_CALL_DEPTH`] (design P2 §4.1):
+    /// an automatic routine recursing without end.
+    CallDepth,
+    /// A call names a routine the plan does not declare, or the call and the
+    /// routine disagree.
+    InvalidRoutineCall {
+        routine: DigitalRoutineId,
+        detail: &'static str,
+    },
 }
 
 impl std::fmt::Display for DigitalEvalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::CallDepth => write!(
+                f,
+                "task and function calls nested deeper than {MAX_CALL_DEPTH}: an automatic \
+                 routine recursed without end"
+            ),
+            Self::InvalidRoutineCall { routine, detail } => {
+                write!(f, "call of {routine} is invalid: {detail}")
+            }
             Self::InvalidAnalogResume { block, instruction } => write!(
                 f,
                 "analog sample continuation names invalid instruction {instruction} in block {block}"
@@ -872,6 +961,9 @@ impl std::error::Error for DigitalEvalError {}
 /// hanging the simulator. IEEE 1364-2005 section 9.9.2 calls the latter a hang;
 /// a refusal naming the process is more use than one.
 pub const DEFAULT_PROCESS_STEP_LIMIT: usize = 100_000;
+
+/// The deepest a thread's task and function calls may nest (design P2 §4.1).
+pub const MAX_CALL_DEPTH: usize = 100_000;
 
 // ============================================================================
 // Edge classification
@@ -1336,7 +1428,8 @@ pub struct DigitalEvalScratch {
     /// Separate reusable values for a pure expression, never process state.
     expression: Option<Box<DigitalEvalScratch>>,
     event_identity: Option<[u8; 32]>,
-    event_programs: HashMap<(DigitalProcessId, ValueId), Arc<DigitalEventProgram>>,
+    event_programs:
+        HashMap<(DigitalProcessId, Option<DigitalRoutineId>, ValueId), Arc<DigitalEventProgram>>,
     /// Validated immutable layouts, shared by all accesses of the same shape.
     array_layouts: HashMap<Vec<(i64, i64)>, crate::array_index::UnpackedArrayLayout>,
     /// Immutable live-value lists, computed once per process that needs a sample.
@@ -1352,6 +1445,13 @@ pub struct DigitalEvalScratch {
     /// Outputs of the system calls this activation made, by call node, read
     /// back by `DigitalCallOutput` in the same block.
     call_outputs: Vec<(ValueId, Vec<DigitalScalar>)>,
+    /// The outputs of the task whose call last resumed, read back by
+    /// `DigitalRoutineOutput`, and whether it completed.
+    routine_outputs: Vec<DigitalScalar>,
+    routine_completed: bool,
+    /// Value tables of the callers of the running function, innermost last,
+    /// and spares for the next function call to take.
+    spare_tables: Vec<ValueTable>,
 }
 
 impl DigitalEvalScratch {
@@ -1502,7 +1602,18 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
     if state.plan_identity != plan.content_identity {
         return Err(DigitalEvalError::ResumePlanMismatch);
     }
-    let blocks = process.function.blocks.len();
+    let blocks = match state.routine {
+        Some(routine) => plan
+            .routine(routine)
+            .ok_or(DigitalEvalError::InvalidRoutineCall {
+                routine,
+                detail: "the plan does not declare it",
+            })?
+            .function
+            .blocks
+            .len(),
+        None => process.function.blocks.len(),
+    };
     if usize::from(state.block) >= blocks {
         return Err(DigitalEvalError::ResumeBlockOutOfRange {
             block: state.block,
@@ -1515,6 +1626,9 @@ pub fn resume_in<E: DigitalEnvironment + ?Sized>(
     let displaced = std::mem::replace(&mut scratch.arguments, state.arguments);
     scratch.recycle_resume(displaced);
     let mut interpreter = Interpreter::new(plan, process, environment, scratch);
+    if state.routine.is_some() || !state.callers.is_empty() {
+        interpreter.restore_frames(state.routine, state.slots, state.callers)?;
+    }
     match state.analog_instruction {
         Some(instruction) => {
             interpreter.restore_analog_read(block, instruction)?;
@@ -1661,9 +1775,415 @@ struct Interpreter<'a, 's, E: ?Sized> {
     /// Set by a system task that ends the thread; checked after each
     /// instruction so nothing after the call runs.
     halted: Option<DigitalSystemCallId>,
+    /// The routine the running frame belongs to; `None` for the process's
+    /// (or an observer's) own function.
+    routine: Option<DigitalRoutineId>,
+    /// The running frame's automatic slots.
+    slots: Vec<DigitalScalar>,
+    /// The module time unit `$time` and `%t` use in the running frame.
+    time_scale: crate::time_scale::ModuleTimeScale,
+    /// The frames below the running one, innermost last.
+    frames: Vec<Frame<'a>>,
+}
+
+/// A frame below the running one.
+enum Frame<'a> {
+    /// A task enable, waiting for the task to end.
+    Task {
+        routine: Option<DigitalRoutineId>,
+        function: &'a CfgFunction,
+        time_scale: crate::time_scale::ModuleTimeScale,
+        ret: BlockId,
+        arguments: Vec<DigitalScalar>,
+        slots: Vec<DigitalScalar>,
+    },
+    /// A function call in the middle of a block, with the caller's values.
+    Function {
+        routine: Option<DigitalRoutineId>,
+        function: &'a CfgFunction,
+        time_scale: crate::time_scale::ModuleTimeScale,
+        block: BlockId,
+        instruction: usize,
+        call: ValueId,
+        table: ValueTable,
+        slots: Vec<DigitalScalar>,
+        call_outputs: usize,
+    },
+}
+
+/// The value a frame slot or a variable of this type holds before anything
+/// writes it: all `x` bits (IEEE 1364-2005 section 4.2.2), or a real zero.
+fn default_scalar(value_type: CfgValueType) -> DigitalScalar {
+    match value_type {
+        CfgValueType::Real => DigitalScalar::Real(0.0),
+        CfgValueType::FourState { width } => {
+            DigitalScalar::FourState(FourStateValue::splat(width, FourStateBit::Unknown))
+        }
+        CfgValueType::Integer => DigitalScalar::Integer(0),
+        _ => DigitalScalar::Effect,
+    }
 }
 
 impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
+    fn routine_of(
+        &self,
+        routine: DigitalRoutineId,
+    ) -> Result<&'a super::digital::DigitalRoutine, DigitalEvalError> {
+        self.plan
+            .routine(routine)
+            .ok_or(DigitalEvalError::InvalidRoutineCall {
+                routine,
+                detail: "the plan does not declare it",
+            })
+    }
+
+    /// The function and time unit of a frame running `routine`.
+    fn frame_function(
+        &self,
+        routine: Option<DigitalRoutineId>,
+    ) -> Result<(&'a CfgFunction, crate::time_scale::ModuleTimeScale), DigitalEvalError> {
+        Ok(match routine {
+            Some(routine) => {
+                let routine = self.routine_of(routine)?;
+                (&routine.function, routine.time_scale)
+            }
+            None => (&self.process.function, self.process.time_scale),
+        })
+    }
+
+    /// Make `routine` the running frame and copy the inputs into its storage
+    /// (IEEE 1364-2005 section 10.2.2). The caller has saved its own frame.
+    fn enter_routine(
+        &mut self,
+        id: DigitalRoutineId,
+        inputs: Vec<DigitalScalar>,
+    ) -> Result<BlockId, DigitalEvalError> {
+        let routine = self.routine_of(id)?;
+        self.function = &routine.function;
+        self.routine = Some(id);
+        self.time_scale = routine.time_scale;
+        self.slots = routine
+            .frame_slots
+            .iter()
+            .map(|slot| default_scalar(*slot))
+            .collect();
+        self.scratch.table.enter(routine.function.values.len());
+        let mut inputs = inputs.into_iter();
+        for param in routine.inputs() {
+            let value = inputs.next().ok_or(DigitalEvalError::InvalidRoutineCall {
+                routine: id,
+                detail: "too few arguments",
+            })?;
+            self.store(id, param, value)?;
+        }
+        if inputs.next().is_some() {
+            return Err(DigitalEvalError::InvalidRoutineCall {
+                routine: id,
+                detail: "too many arguments",
+            });
+        }
+        Ok(routine.function.entry)
+    }
+
+    /// Write a routine variable's storage.
+    fn store(
+        &mut self,
+        id: DigitalRoutineId,
+        param: &super::digital::DigitalRoutineParam,
+        value: DigitalScalar,
+    ) -> Result<(), DigitalEvalError> {
+        use super::digital::DigitalRoutineStorage;
+        match (param.storage, value) {
+            (DigitalRoutineStorage::Slot(slot), value) => match self.slots.get_mut(slot as usize) {
+                Some(stored) => *stored = value,
+                None => {
+                    return Err(DigitalEvalError::InvalidRoutineCall {
+                        routine: id,
+                        detail: "an argument names a slot outside its frame",
+                    });
+                }
+            },
+            (DigitalRoutineStorage::Signal(signal), DigitalScalar::Real(value)) => {
+                self.environment.write_real_signal(signal, value);
+            }
+            (DigitalRoutineStorage::Signal(signal), DigitalScalar::FourState(value)) => {
+                let width = self.signal(signal)?.width;
+                let value = if value.width() == width {
+                    value
+                } else {
+                    value.resized(width)
+                };
+                self.environment.write_signal(signal, value);
+            }
+            _ => {
+                return Err(DigitalEvalError::InvalidRoutineCall {
+                    routine: id,
+                    detail: "an argument value has the wrong domain",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Read a routine variable's storage.
+    fn load(
+        &self,
+        id: DigitalRoutineId,
+        param: &super::digital::DigitalRoutineParam,
+    ) -> Result<DigitalScalar, DigitalEvalError> {
+        use super::digital::DigitalRoutineStorage;
+        match param.storage {
+            DigitalRoutineStorage::Slot(slot) => {
+                self.slots
+                    .get(slot as usize)
+                    .cloned()
+                    .ok_or(DigitalEvalError::InvalidRoutineCall {
+                        routine: id,
+                        detail: "an argument names a slot outside its frame",
+                    })
+            }
+            DigitalRoutineStorage::Signal(signal) => {
+                let declared = self.signal(signal)?;
+                if declared.kind.is_real() {
+                    self.environment
+                        .read_real_signal(signal)
+                        .map(DigitalScalar::Real)
+                        .ok_or(DigitalEvalError::SignalUnavailable(signal))
+                } else {
+                    read_signal(self.environment, declared).map(DigitalScalar::FourState)
+                }
+            }
+        }
+    }
+
+    /// Call a function from the middle of `block`: save the caller's values
+    /// and enter the callee, which runs to its `Return` without suspending.
+    fn call_function(
+        &mut self,
+        id: DigitalRoutineId,
+        args: &[ValueId],
+        block: BlockId,
+        instruction: usize,
+        call: ValueId,
+    ) -> Result<BlockId, DigitalEvalError> {
+        if self.frames.len() >= MAX_CALL_DEPTH {
+            return Err(DigitalEvalError::CallDepth);
+        }
+        let inputs = self.call_arguments(args)?;
+        let spare = self.scratch.spare_tables.pop().unwrap_or_default();
+        let table = std::mem::replace(&mut self.scratch.table, spare);
+        self.frames.push(Frame::Function {
+            routine: self.routine,
+            function: self.function,
+            time_scale: self.time_scale,
+            block,
+            instruction,
+            call,
+            table,
+            slots: std::mem::take(&mut self.slots),
+            call_outputs: self.scratch.call_outputs.len(),
+        });
+        self.enter_routine(id, inputs)
+    }
+
+    /// Enable a task: save the caller's live values for `ret` and enter it.
+    fn call_task(
+        &mut self,
+        id: DigitalRoutineId,
+        args: &[ValueId],
+        ret: BlockId,
+        ret_args: &[ValueId],
+    ) -> Result<BlockId, DigitalEvalError> {
+        if self.frames.len() >= MAX_CALL_DEPTH {
+            return Err(DigitalEvalError::CallDepth);
+        }
+        let inputs = self.call_arguments(args)?;
+        let arguments = self.call_arguments(ret_args)?;
+        let params = self.function.block(ret).params.len();
+        if arguments.len() != params {
+            return Err(DigitalEvalError::ArgumentArityMismatch {
+                target: ret,
+                expected: params,
+                found: arguments.len(),
+            });
+        }
+        self.frames.push(Frame::Task {
+            routine: self.routine,
+            function: self.function,
+            time_scale: self.time_scale,
+            ret,
+            arguments,
+            slots: std::mem::take(&mut self.slots),
+        });
+        self.enter_routine(id, inputs)
+    }
+
+    /// End the running routine's activation and return to its caller; `None`
+    /// when the running frame is the bottom one.
+    fn return_from_routine(&mut self) -> Result<Option<(BlockId, usize)>, DigitalEvalError> {
+        let Some(frame) = self.frames.pop() else {
+            return Ok(None);
+        };
+        let Some(id) = self.routine else {
+            return Err(DigitalEvalError::InvalidRoutineCall {
+                routine: DigitalRoutineId(u32::MAX),
+                detail: "a frame returned to a caller without a routine",
+            });
+        };
+        let routine = self.routine_of(id)?;
+        match frame {
+            Frame::Function {
+                routine: caller,
+                function,
+                time_scale,
+                block,
+                instruction,
+                call,
+                table,
+                slots,
+                call_outputs,
+            } => {
+                let result =
+                    routine
+                        .result
+                        .as_ref()
+                        .ok_or(DigitalEvalError::InvalidRoutineCall {
+                            routine: id,
+                            detail: "a task was called as a function",
+                        })?;
+                let value = self.load(id, result)?;
+                let callee = std::mem::replace(&mut self.scratch.table, table);
+                self.scratch.spare_tables.push(callee);
+                self.scratch.call_outputs.truncate(call_outputs);
+                self.routine = caller;
+                self.function = function;
+                self.time_scale = time_scale;
+                self.slots = slots;
+                self.scratch.table.define(call, value);
+                Ok(Some((block, instruction + 1)))
+            }
+            Frame::Task {
+                routine: caller,
+                function,
+                time_scale,
+                ret,
+                arguments,
+                slots,
+            } => {
+                let mut outputs = std::mem::take(&mut self.scratch.routine_outputs);
+                outputs.clear();
+                for param in routine.outputs() {
+                    outputs.push(self.load(id, param)?);
+                }
+                self.scratch.routine_outputs = outputs;
+                self.scratch.routine_completed = true;
+                self.routine = caller;
+                self.function = function;
+                self.time_scale = time_scale;
+                self.slots = slots;
+                self.scratch.table.enter(function.values.len());
+                self.scratch.call_outputs.clear();
+                self.scratch.arguments = arguments;
+                self.bind(ret)?;
+                Ok(Some((ret, 0)))
+            }
+        }
+    }
+
+    /// The task-enable frames below a suspension, outermost first. A function
+    /// never suspends, so a function frame here is a malformed plan.
+    fn suspended_callers(&mut self) -> Result<Vec<DigitalCallerFrame>, DigitalEvalError> {
+        std::mem::take(&mut self.frames)
+            .into_iter()
+            .map(|frame| match frame {
+                Frame::Task {
+                    routine,
+                    ret,
+                    arguments,
+                    slots,
+                    ..
+                } => Ok(DigitalCallerFrame {
+                    routine,
+                    ret,
+                    arguments,
+                    slots,
+                }),
+                Frame::Function { routine, .. } => Err(DigitalEvalError::InvalidRoutineCall {
+                    routine: routine.unwrap_or(DigitalRoutineId(u32::MAX)),
+                    detail: "a function suspended",
+                }),
+            })
+            .collect()
+    }
+
+    /// Restore a suspended thread's frames: the running one and its callers.
+    fn restore_frames(
+        &mut self,
+        routine: Option<DigitalRoutineId>,
+        slots: Vec<DigitalScalar>,
+        callers: Vec<DigitalCallerFrame>,
+    ) -> Result<(), DigitalEvalError> {
+        let (function, time_scale) = self.frame_function(routine)?;
+        self.function = function;
+        self.time_scale = time_scale;
+        self.routine = routine;
+        self.slots = slots;
+        self.scratch.table.enter(function.values.len());
+        self.frames.clear();
+        for caller in callers {
+            let (function, time_scale) = self.frame_function(caller.routine)?;
+            if usize::from(caller.ret) >= function.blocks.len() {
+                return Err(DigitalEvalError::ResumeBlockOutOfRange {
+                    block: caller.ret,
+                    blocks: function.blocks.len(),
+                });
+            }
+            self.frames.push(Frame::Task {
+                routine: caller.routine,
+                function,
+                time_scale,
+                ret: caller.ret,
+                arguments: caller.arguments,
+                slots: caller.slots,
+            });
+        }
+        Ok(())
+    }
+
+    /// Call a function outside the block loop (an event expression observed
+    /// after its process suspended): run it to completion on its own table.
+    fn call_nested(
+        &mut self,
+        id: DigitalRoutineId,
+        args: &[ValueId],
+    ) -> Result<DigitalScalar, DigitalEvalError> {
+        let inputs = self.call_arguments(args)?;
+        let routine = self.routine_of(id)?;
+        let result = routine
+            .result
+            .as_ref()
+            .ok_or(DigitalEvalError::InvalidRoutineCall {
+                routine: id,
+                detail: "a task was called as a function",
+            })?;
+        let mut scratch = DigitalEvalScratch::new();
+        let mut nested = Interpreter::with_function(
+            self.plan,
+            self.process,
+            &routine.function,
+            &mut *self.environment,
+            &mut scratch,
+        );
+        let entry = nested.enter_routine(id, inputs)?;
+        match nested.run(entry, DEFAULT_PROCESS_STEP_LIMIT)? {
+            DigitalProcessOutcome::Finished => nested.load(id, result),
+            _ => Err(DigitalEvalError::InvalidRoutineCall {
+                routine: id,
+                detail: "a function must return without suspending or halting",
+            }),
+        }
+    }
+
     fn new(
         plan: &'a CanonicalDigitalPlan,
         process: &'a CfgDigitalProcess,
@@ -1699,6 +2219,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             environment,
             scratch,
             halted: None,
+            routine: None,
+            slots: Vec::new(),
+            time_scale: process.time_scale,
+            frames: Vec::new(),
         }
     }
 
@@ -1707,7 +2231,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     }
 
     fn run(
-        mut self,
+        &mut self,
         entry: BlockId,
         step_limit: usize,
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
@@ -1718,14 +2242,18 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
     }
 
     fn run_from(
-        mut self,
+        &mut self,
         entry: BlockId,
         mut first_instruction: usize,
         step_limit: usize,
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
-        let function = self.function();
         let mut block = entry;
-        for _ in 0..step_limit {
+        let mut steps = 0;
+        'blocks: while steps < step_limit {
+            steps += 1;
+            // Re-read per block: a call or a return switches the running
+            // function.
+            let function = self.function();
             for (index, instruction) in function
                 .block(block)
                 .instructions
@@ -1733,6 +2261,13 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 .enumerate()
                 .skip(first_instruction)
             {
+                if let CfgValueKind::DigitalCall { routine, args } =
+                    &function.value(instruction.result).kind
+                {
+                    block = self.call_function(*routine, args, block, index, instruction.result)?;
+                    first_instruction = 0;
+                    continue 'blocks;
+                }
                 let value = match self.compute(instruction.result) {
                     Err(DigitalEvalError::AnalogProbeUnavailable(probe))
                         if matches!(
@@ -1752,8 +2287,21 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             first_instruction = 0;
 
             match &function.block(block).terminator {
-                CfgTerminator::Return => return Ok(DigitalProcessOutcome::Finished),
+                CfgTerminator::Return => match self.return_from_routine()? {
+                    Some((next, instruction)) => {
+                        block = next;
+                        first_instruction = instruction;
+                    }
+                    None => return Ok(DigitalProcessOutcome::Finished),
+                },
                 CfgTerminator::Unset => return Err(DigitalEvalError::UnterminatedBlock(block)),
+                CfgTerminator::Wait {
+                    wait: DigitalWait::Call { routine, args },
+                    resume,
+                    resume_args,
+                } => {
+                    block = self.call_task(*routine, args, *resume, resume_args)?;
+                }
                 CfgTerminator::Jump { target, args } => {
                     self.cross(*target, args)?;
                     block = *target;
@@ -1813,6 +2361,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                             found,
                         });
                     }
+                    let callers = self.suspended_callers()?;
                     return Ok(DigitalProcessOutcome::Suspended(DigitalSuspension {
                         wait,
                         resume: DigitalResumeState {
@@ -1821,6 +2370,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                             block: *resume,
                             analog_instruction: None,
                             arguments,
+                            routine: self.routine,
+                            slots: std::mem::take(&mut self.slots),
+                            callers,
                         },
                     }));
                 }
@@ -2119,6 +2671,12 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             DigitalWait::Expressions(terms) => {
                 DigitalWaitRequest::Expressions(self.capture_event_expressions(terms)?)
             }
+            DigitalWait::Call { routine, .. } => {
+                return Err(DigitalEvalError::InvalidRoutineCall {
+                    routine: *routine,
+                    detail: "a task enable is not an event control",
+                });
+            }
             DigitalWait::Delay(delay) => {
                 let ticks = self.integer(*delay)?;
                 if ticks < 0 {
@@ -2139,7 +2697,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         let mut states = Vec::with_capacity(terms.len());
         let mut dependencies = std::collections::BTreeSet::new();
         for term in terms {
-            let key = (self.process.id, term.value);
+            let key = (self.process.id, self.routine, term.value);
             let program = match self.scratch.event_programs.get(&key) {
                 Some(program) => Arc::clone(program),
                 None => {
@@ -2185,6 +2743,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
         Ok(DigitalExpressionWait {
             plan_identity: self.plan.content_identity,
             process: self.process.id,
+            routine: self.routine,
             states,
             dependencies: dependencies.into_iter().collect(),
         })
@@ -2205,7 +2764,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             CfgValueKind::DigitalExpression { function, result } => {
                 let mut storage = self.scratch.expression.take().unwrap_or_default();
                 storage.arguments.clear();
-                let interpreter = Interpreter::with_function(
+                let mut interpreter = Interpreter::with_function(
                     self.plan,
                     self.process,
                     function,
@@ -2251,7 +2810,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 Ok(DigitalScalar::FourState(value))
             }
             CfgValueKind::DigitalDelayTicks { input, signed } => {
-                let scale = self.process.time_scale;
+                let scale = self.time_scale;
                 let precision = self.plan.timing.precision_exponent;
                 let ticks = match self.scalar(*input)? {
                     ScalarRef::Real(value) => scale.delay_ticks(value, precision),
@@ -2622,6 +3181,29 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 .and_then(|(_, outputs)| outputs.get(*index as usize))
                 .cloned()
                 .ok_or(DigitalEvalError::InvalidSystemCall(id)),
+            CfgValueKind::DigitalCall { routine, args } => self.call_nested(*routine, args),
+            CfgValueKind::DigitalRoutineOutput { index } => self
+                .scratch
+                .routine_outputs
+                .get(*index as usize)
+                .cloned()
+                .ok_or(DigitalEvalError::UndefinedValue(id)),
+            CfgValueKind::DigitalRoutineCompleted => Ok(DigitalScalar::FourState(
+                FourStateValue::from_u64(1, u64::from(self.scratch.routine_completed)),
+            )),
+            CfgValueKind::FrameSlotRead { slot } => self
+                .slots
+                .get(*slot as usize)
+                .cloned()
+                .ok_or(DigitalEvalError::UndefinedValue(id)),
+            CfgValueKind::FrameSlotWrite { slot, value } => {
+                let value = self.scalar(*value)?.into_owned();
+                match self.slots.get_mut(*slot as usize) {
+                    Some(stored) => *stored = value,
+                    None => return Err(DigitalEvalError::UndefinedValue(id)),
+                }
+                Ok(DigitalScalar::Effect)
+            }
             CfgValueKind::DigitalPure { function, args } => match function {
                 digital_value::DigitalPureFunction::Math(math) => {
                     if args.len() != math.arity() {

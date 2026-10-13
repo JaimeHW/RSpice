@@ -1109,6 +1109,9 @@ pub(super) fn lower_prepared(
                     Mode::Bits(Context::SELF_DETERMINED),
                 );
             }
+            Expression::Call(call) if lowerer.user_function(call).is_some() => {
+                values.push(lowerer.function_call_value(block, call));
+            }
             _ => values.push(if real {
                 lowerer.real_expression_leaf(block, expression)
             } else {

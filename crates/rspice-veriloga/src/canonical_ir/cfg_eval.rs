@@ -1487,7 +1487,12 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalSystemTask { .. }
             | CfgValueKind::DigitalSystemFunction { .. }
             | CfgValueKind::DigitalCallOutput { .. }
-            | CfgValueKind::DigitalPure { .. } => {
+            | CfgValueKind::DigitalPure { .. }
+            | CfgValueKind::DigitalCall { .. }
+            | CfgValueKind::DigitalRoutineOutput { .. }
+            | CfgValueKind::DigitalRoutineCompleted
+            | CfgValueKind::FrameSlotRead { .. }
+            | CfgValueKind::FrameSlotWrite { .. } => {
                 return Err(CfgEvalError::DigitalConstructInAnalogEvaluation {
                     what: "a four-state or integer value",
                 });

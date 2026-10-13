@@ -96,6 +96,13 @@ impl ProcessLowerer<'_> {
             return;
         }
         let span = dimensions[0].span;
+        if self.process.is_none() {
+            self.error(
+                "an array declared inside a task or function has no executable form yet",
+                span,
+            );
+            return;
+        }
         let mut axes = Vec::with_capacity(dimensions.len());
         for dimension in dimensions {
             let mut reads = BTreeSet::new();

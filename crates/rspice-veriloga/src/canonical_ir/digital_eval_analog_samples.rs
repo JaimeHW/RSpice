@@ -153,6 +153,15 @@ impl<E: DigitalEnvironment + ?Sized> Interpreter<'_, '_, E> {
         instruction: usize,
         probe: DigitalAnalogProbeId,
     ) -> Result<DigitalProcessOutcome, DigitalEvalError> {
+        if let Some(routine) = self.routine {
+            // A continuous-domain read inside a routine would have to resume
+            // in the middle of the routine's frame; refused rather than
+            // resumed in the wrong function.
+            return Err(DigitalEvalError::InvalidRoutineCall {
+                routine,
+                detail: "an analog-owned variable read cannot suspend inside a task or function",
+            });
+        }
         let captures = self.analog_captures(block, instruction)?;
         let mut arguments = std::mem::take(&mut self.scratch.resume);
         arguments.clear();
@@ -173,6 +182,9 @@ impl<E: DigitalEnvironment + ?Sized> Interpreter<'_, '_, E> {
                 block,
                 analog_instruction: Some(instruction),
                 arguments,
+                routine: None,
+                slots: Vec::new(),
+                callers: Vec::new(),
             },
         }))
     }

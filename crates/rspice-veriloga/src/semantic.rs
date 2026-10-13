@@ -386,7 +386,7 @@ mod bounded_loop;
 mod constant_dependencies;
 mod digital;
 mod digital_elaborate;
-mod digital_routines;
+pub(crate) mod digital_routines;
 mod digital_walk;
 mod discrete_left_limit;
 mod discrete_projection;

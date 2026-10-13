@@ -2479,7 +2479,12 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalSystemTask { .. }
             | CfgValueKind::DigitalSystemFunction { .. }
             | CfgValueKind::DigitalCallOutput { .. }
-            | CfgValueKind::DigitalPure { .. } => {
+            | CfgValueKind::DigitalPure { .. }
+            | CfgValueKind::DigitalCall { .. }
+            | CfgValueKind::DigitalRoutineOutput { .. }
+            | CfgValueKind::DigitalRoutineCompleted
+            | CfgValueKind::FrameSlotRead { .. }
+            | CfgValueKind::FrameSlotWrite { .. } => {
                 return Err(EmitError::DigitalValueInAnalogEmitter(value));
             }
         })

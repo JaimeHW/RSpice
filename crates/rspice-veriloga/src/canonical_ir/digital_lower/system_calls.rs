@@ -141,9 +141,16 @@ impl ProcessLowerer<'_> {
     /// Enter a named block's scope (IEEE 1364-2005 section 9.8.3), which `%m`
     /// inside it names.
     pub(super) fn enter_named_scope(&mut self, name: &SmolStr) -> bool {
-        let Some(parent) = self.calls.stack.last().cloned() else {
-            return false;
-        };
+        self.enter_scope(name, DigitalScopeKind::Block).is_some()
+    }
+
+    /// Enter a named block's, task's or function's scope.
+    pub(super) fn enter_scope(
+        &mut self,
+        name: &SmolStr,
+        kind: DigitalScopeKind,
+    ) -> Option<DigitalScopeId> {
+        let parent = self.calls.stack.last().cloned()?;
         let id = DigitalScopeId(self.calls.scope_base + self.calls.scopes.len() as u32);
         let path: SmolStr = format!("{}.{name}", parent.path).into();
         self.calls.scopes.push(DigitalScope {
@@ -151,7 +158,7 @@ impl ProcessLowerer<'_> {
             parent: Some(parent.id),
             path: path.clone(),
             module: parent.module.clone(),
-            kind: DigitalScopeKind::Block,
+            kind,
             time_scale: parent.time_scale,
         });
         self.calls.stack.push(ScopeFrame {
@@ -160,7 +167,7 @@ impl ProcessLowerer<'_> {
             module: parent.module,
             time_scale: parent.time_scale,
         });
-        true
+        Some(id)
     }
 
     pub(super) fn leave_named_scope(&mut self) {
@@ -569,7 +576,13 @@ impl ProcessLowerer<'_> {
             return;
         };
         let Some(process) = self.process else {
-            self.invariant("an observer call has no owning process", task.span);
+            self.error(
+                format!(
+                    "`{}` inside a task or function has no executable form yet",
+                    task.name
+                ),
+                task.span,
+            );
             return;
         };
         let (site, local) = self.allocate_site(kind, &scope, task.span);

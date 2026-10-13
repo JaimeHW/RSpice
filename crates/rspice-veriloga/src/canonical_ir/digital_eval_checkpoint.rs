@@ -14,7 +14,10 @@ use super::super::cfg::CfgValueType;
 use super::analog_samples::AnalogReadPlan;
 use super::*;
 
-const VERSION: u32 = 1;
+/// Version 2 adds routine frames to a continuation: the routine the suspended
+/// frame runs, its automatic slots, and the task-enable frames below it. A
+/// version 1 image is a process frame with none of them, and reads as one.
+const VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct Header {
@@ -80,6 +83,28 @@ pub struct DigitalResumeCheckpoint {
     block: BlockId,
     analog_instruction: Option<u64>,
     arguments: Vec<DigitalScalarCheckpoint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    routine: Option<DigitalRoutineId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    slots: Vec<DigitalScalarCheckpoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    callers: Vec<CallerImage>,
+}
+
+/// A frame suspended at a task enable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CallerImage {
+    routine: Option<DigitalRoutineId>,
+    ret: BlockId,
+    arguments: Vec<DigitalScalarCheckpoint>,
+    slots: Vec<DigitalScalarCheckpoint>,
+}
+
+fn capture_all(values: &[DigitalScalar]) -> Vec<DigitalScalarCheckpoint> {
+    values
+        .iter()
+        .map(DigitalScalarCheckpoint::capture)
+        .collect()
 }
 
 impl DigitalResumeCheckpoint {
@@ -92,10 +117,18 @@ impl DigitalResumeCheckpoint {
             process: state.process,
             block: state.block,
             analog_instruction: state.analog_instruction.map(|index| index as u64),
-            arguments: state
-                .arguments
+            arguments: capture_all(&state.arguments),
+            routine: state.routine,
+            slots: capture_all(&state.slots),
+            callers: state
+                .callers
                 .iter()
-                .map(DigitalScalarCheckpoint::capture)
+                .map(|caller| CallerImage {
+                    routine: caller.routine,
+                    ret: caller.ret,
+                    arguments: capture_all(&caller.arguments),
+                    slots: capture_all(&caller.slots),
+                })
                 .collect(),
         }
     }
@@ -113,6 +146,8 @@ pub struct DigitalExpressionCheckpoint {
     header: Header,
     process: DigitalProcessId,
     states: Vec<ExpressionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    routine: Option<DigitalRoutineId>,
 }
 
 impl DigitalExpressionCheckpoint {
@@ -123,6 +158,7 @@ impl DigitalExpressionCheckpoint {
                 plan: wait.plan_identity,
             },
             process: wait.process,
+            routine: wait.routine,
             states: wait
                 .states
                 .iter()
@@ -255,9 +291,12 @@ pub struct DigitalCheckpointReader<'a> {
     items: usize,
     packed_bits: u64,
     analog: HashMap<DigitalProcessId, AnalogReadPlan>,
-    programs: HashMap<(DigitalProcessId, ValueId), Arc<DigitalEventProgram>>,
-    sites: HashMap<DigitalProcessId, HashSet<Vec<DigitalEventExpression>>>,
+    programs: HashMap<FrameKey, Arc<DigitalEventProgram>>,
+    sites:
+        HashMap<(DigitalProcessId, Option<DigitalRoutineId>), HashSet<Vec<DigitalEventExpression>>>,
 }
+
+type FrameKey = (DigitalProcessId, Option<DigitalRoutineId>, ValueId);
 
 impl<'a> DigitalCheckpointReader<'a> {
     pub fn new(plan: &'a CanonicalDigitalPlan, limits: DigitalCheckpointLimits) -> Result<Self> {
@@ -275,8 +314,44 @@ impl<'a> DigitalCheckpointReader<'a> {
         })
     }
 
+    /// The function a frame of `process` running `routine` executes.
+    fn frame_function(
+        &self,
+        process: DigitalProcessId,
+        routine: Option<DigitalRoutineId>,
+    ) -> Result<&'a CfgFunction> {
+        let process = self
+            .plan
+            .process(process)
+            .ok_or_else(|| invalid("unknown process"))?;
+        match routine {
+            Some(routine) => self
+                .plan
+                .routine(routine)
+                .map(|routine| &routine.function)
+                .ok_or_else(|| invalid("unknown routine")),
+            None => Ok(&process.function),
+        }
+    }
+
+    /// Restore values typed by `types`, one per type.
+    fn typed_all(
+        &mut self,
+        values: &[DigitalScalarCheckpoint],
+        types: impl ExactSizeIterator<Item = CfgValueType>,
+    ) -> Result<Vec<DigitalScalar>> {
+        if values.len() != types.len() {
+            return Err(invalid("captured frame value count differs"));
+        }
+        values
+            .iter()
+            .zip(types)
+            .map(|(value, expected)| self.typed(value, expected))
+            .collect()
+    }
+
     fn header(&self, header: &Header) -> Result<()> {
-        if header.version != VERSION {
+        if !(1..=VERSION).contains(&header.version) {
             return Err(invalid("unsupported schema version"));
         }
         if header.plan != self.plan.content_identity {
@@ -358,11 +433,48 @@ impl<'a> DigitalCheckpointReader<'a> {
     ) -> Result<DigitalResumeState> {
         self.header(&image.header)?;
         self.charge(image.arguments.len().saturating_add(1))?;
-        let process = self
-            .plan
-            .process(image.process)
-            .ok_or_else(|| invalid("unknown process"))?;
-        let function = &process.function;
+        if image.analog_instruction.is_some() && image.routine.is_some() {
+            return Err(invalid("an analog sample barrier inside a routine"));
+        }
+        if image.routine.is_none() && !(image.slots.is_empty() && image.callers.is_empty()) {
+            return Err(invalid("a process frame with routine frames"));
+        }
+        let function = self.frame_function(image.process, image.routine)?;
+        let slots = self.routine_slots(image.routine, &image.slots)?;
+        let mut callers = Vec::with_capacity(image.callers.len());
+        for (depth, caller) in image.callers.iter().enumerate() {
+            // The outermost frame is the process's own; every frame above it
+            // runs a routine.
+            if (depth == 0) != caller.routine.is_none() {
+                return Err(invalid("task-enable frames are out of order"));
+            }
+            let caller_function = self.frame_function(image.process, caller.routine)?;
+            let ret = caller_function
+                .blocks
+                .get(usize::from(caller.ret))
+                .ok_or_else(|| invalid("unknown task return block"))?;
+            if !caller_function.blocks.iter().any(|block| {
+                matches!(&block.terminator, CfgTerminator::Wait { wait: DigitalWait::Call { .. }, resume, .. } if *resume == caller.ret)
+            }) {
+                return Err(invalid("block is not a compiled task return"));
+            }
+            let types: Vec<_> = ret
+                .params
+                .iter()
+                .map(|param| caller_function.value(*param).value_type)
+                .collect();
+            let arguments = self.typed_all(&caller.arguments, types.into_iter())?;
+            let slots = self.routine_slots(caller.routine, &caller.slots)?;
+            callers.push(DigitalCallerFrame {
+                routine: caller.routine,
+                ret: caller.ret,
+                arguments,
+                slots,
+            });
+        }
+        if image.routine.is_some() && callers.is_empty() {
+            return Err(invalid("a routine frame without its callers"));
+        }
         let block = function
             .blocks
             .get(usize::from(image.block))
@@ -411,7 +523,28 @@ impl<'a> DigitalCheckpointReader<'a> {
             block: image.block,
             analog_instruction: instruction,
             arguments,
+            routine: image.routine,
+            slots,
+            callers,
         })
+    }
+
+    /// An automatic routine frame's slots, typed by the routine's frame.
+    fn routine_slots(
+        &mut self,
+        routine: Option<DigitalRoutineId>,
+        slots: &[DigitalScalarCheckpoint],
+    ) -> Result<Vec<DigitalScalar>> {
+        let types = match routine {
+            Some(routine) => self
+                .plan
+                .routine(routine)
+                .ok_or_else(|| invalid("unknown routine"))?
+                .frame_slots
+                .clone(),
+            None => Vec::new(),
+        };
+        self.typed_all(slots, types.into_iter())
     }
 
     /// Check the source wait site for a registered base event. The host owns
@@ -426,11 +559,8 @@ impl<'a> DigitalCheckpointReader<'a> {
                 "event subscription has an incompatible continuation",
             ));
         }
-        let process = self
-            .plan
-            .process(state.process)
-            .ok_or_else(|| invalid("unknown event process"))?;
-        for block in &process.function.blocks {
+        let function = self.frame_function(state.process, state.routine)?;
+        for block in &function.blocks {
             let CfgTerminator::Wait { wait, resume, .. } = &block.terminator else {
                 continue;
             };
@@ -448,6 +578,7 @@ impl<'a> DigitalCheckpointReader<'a> {
                 (DigitalWait::Expressions(expected), DigitalWaitRequest::Expressions(actual)) => {
                     actual.plan_identity == self.plan.content_identity
                         && actual.process == state.process
+                        && actual.routine == state.routine
                         && expected.len() == actual.states.len()
                         && expected.iter().zip(&actual.states).all(|(term, value)| {
                             term.value == value.program.root
@@ -472,11 +603,8 @@ impl<'a> DigitalCheckpointReader<'a> {
         if state.plan_identity != self.plan.content_identity || state.analog_instruction.is_some() {
             return Err(invalid("timer has an incompatible continuation"));
         }
-        let process = self
-            .plan
-            .process(state.process)
-            .ok_or_else(|| invalid("unknown timed process"))?;
-        if !process.function.blocks.iter().any(|block| matches!(&block.terminator,
+        let function = self.frame_function(state.process, state.routine)?;
+        if !function.blocks.iter().any(|block| matches!(&block.terminator,
             CfgTerminator::Wait { wait: DigitalWait::Delay(_), resume, .. } if *resume == state.block)) {
             return Err(invalid("queued continuation is not a compiled delay"));
         }
@@ -489,14 +617,10 @@ impl<'a> DigitalCheckpointReader<'a> {
     ) -> Result<DigitalExpressionWait> {
         self.header(&image.header)?;
         self.charge(image.states.len().saturating_add(1))?;
-        let process = self
-            .plan
-            .process(image.process)
-            .ok_or_else(|| invalid("unknown event process"))?;
-        let function = &process.function;
+        let function = self.frame_function(image.process, image.routine)?;
         let sites = self
             .sites
-            .entry(image.process)
+            .entry((image.process, image.routine))
             .or_insert_with(|| expression_sites(function));
         let terms: Vec<_> = image.states.iter().map(|state| state.term).collect();
         if !sites.contains(&terms) {
@@ -507,7 +631,7 @@ impl<'a> DigitalCheckpointReader<'a> {
         let mut states = Vec::with_capacity(image.states.len());
         let mut dependencies = BTreeSet::new();
         for state in &image.states {
-            let key = (image.process, state.term.value);
+            let key = (image.process, image.routine, state.term.value);
             let program = if let Some(program) = self.programs.get(&key) {
                 Arc::clone(program)
             } else {
@@ -549,6 +673,7 @@ impl<'a> DigitalCheckpointReader<'a> {
         Ok(DigitalExpressionWait {
             plan_identity: image.header.plan,
             process: image.process,
+            routine: image.routine,
             states,
             dependencies: dependencies.into_iter().collect(),
         })

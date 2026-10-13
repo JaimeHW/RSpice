@@ -12,8 +12,8 @@ use smol_str::SmolStr;
 use super::digital::*;
 use super::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
 use super::{
-    CfgTerminator, CfgValueKind, CfgValueType, CompilerPhase, DigitalWait, IrDiagnostic,
-    SourceSpanRef, SsaBuilder,
+    CfgFunction, CfgTerminator, CfgValueKind, CfgValueType, CompilerPhase, DigitalWait,
+    IrDiagnostic, SourceSpanRef, SsaBuilder,
 };
 use crate::PipelineControl;
 
@@ -124,6 +124,7 @@ struct TableOffsets {
     sites: u32,
     scopes: u32,
     observers: u32,
+    routines: u32,
 }
 
 /// An instance scope's path with its root renamed to the instance: each
@@ -260,6 +261,10 @@ pub fn link_digital_plans(
             .observers
             .checked_add(index(instance.plan.observers.len(), "observer")?)
             .ok_or_else(|| error("linked observer count exceeds u32"))?;
+        tables.routines = tables
+            .routines
+            .checked_add(index(instance.plan.routines.len(), "routine")?)
+            .ok_or_else(|| error("linked routine count exceeds u32"))?;
         layouts.push(Layout {
             tables: instance_tables,
             instance,
@@ -497,24 +502,36 @@ pub fn link_digital_plans(
             if let Some(sensitivity) = &mut process.static_sensitivity {
                 relocate_terms(&mut sensitivity.terms, &layout.map);
             }
-            for block in &mut process.function.blocks {
-                if let CfgTerminator::Wait { wait, .. } = &mut block.terminator {
-                    relocate_wait(wait, &layout.map);
-                }
-            }
-            for (offset, value) in process.function.values.iter_mut().enumerate() {
-                if offset & 1023 == 0 {
-                    check_cancel(control)?;
-                }
-                relocate_value(
-                    &mut value.kind,
-                    source,
-                    &layout.map,
-                    &drivers,
-                    layout.tables,
-                )?;
-            }
+            relocate_function(
+                &mut process.function,
+                source,
+                &layout.map,
+                &drivers,
+                layout.tables,
+                control,
+            )?;
             plan.processes.push(process);
+        }
+        for routine in &source.routines {
+            check_cancel(control)?;
+            let mut routine = routine.clone();
+            routine.id = DigitalRoutineId(routine.id.0 + layout.tables.routines);
+            routine.scope = DigitalScopeId(routine.scope.0 + layout.tables.scopes);
+            relocate_span(&mut routine.span, &layout.map);
+            for param in routine.params.iter_mut().chain(routine.result.as_mut()) {
+                if let DigitalRoutineStorage::Signal(signal) = &mut param.storage {
+                    *signal = layout.map.signals[usize::from(*signal)];
+                }
+            }
+            relocate_function(
+                &mut routine.function,
+                source,
+                &layout.map,
+                &drivers,
+                layout.tables,
+                control,
+            )?;
+            plan.routines.push(routine);
         }
         // Scopes, call sites and observers keep their order, shifted to where
         // this instance's tables start; every identity they hold moves with
@@ -639,6 +656,31 @@ fn relocate_terms(terms: &mut [DigitalSensitivityTerm], map: &DigitalLinkedInsta
     }
 }
 
+fn relocate_function(
+    function: &mut CfgFunction,
+    source: &CanonicalDigitalPlan,
+    map: &DigitalLinkedInstance,
+    drivers: &BTreeMap<DigitalDriverId, DigitalDriverId>,
+    tables: TableOffsets,
+    control: &dyn PipelineControl,
+) -> LinkResult<()> {
+    for block in &mut function.blocks {
+        if let CfgTerminator::Wait { wait, .. } = &mut block.terminator {
+            relocate_wait(wait, map);
+            if let DigitalWait::Call { routine, .. } = wait {
+                *routine = DigitalRoutineId(routine.0 + tables.routines);
+            }
+        }
+    }
+    for (offset, value) in function.values.iter_mut().enumerate() {
+        if offset & 1023 == 0 {
+            check_cancel(control)?;
+        }
+        relocate_value(&mut value.kind, source, map, drivers, tables)?;
+    }
+    Ok(())
+}
+
 fn relocate_wait(wait: &mut DigitalWait, map: &DigitalLinkedInstance) {
     match wait {
         DigitalWait::Event(terms) => relocate_terms(terms, map),
@@ -649,7 +691,7 @@ fn relocate_wait(wait: &mut DigitalWait, map: &DigitalLinkedInstance) {
                 }
             }
         }
-        DigitalWait::Delay(_) => {}
+        DigitalWait::Delay(_) | DigitalWait::Call { .. } => {}
         DigitalWait::Repeat { event, .. } => relocate_wait(event, map),
     }
 }
@@ -717,7 +759,15 @@ fn relocate_value(
         | CfgValueKind::DigitalSystemFunction { site, .. } => {
             *site = DigitalSystemCallId(site.0 + tables.sites);
         }
-        CfgValueKind::DigitalCallOutput { .. } | CfgValueKind::DigitalPure { .. } => {}
+        CfgValueKind::DigitalCallOutput { .. }
+        | CfgValueKind::DigitalPure { .. }
+        | CfgValueKind::DigitalRoutineOutput { .. }
+        | CfgValueKind::DigitalRoutineCompleted
+        | CfgValueKind::FrameSlotRead { .. }
+        | CfgValueKind::FrameSlotWrite { .. } => {}
+        CfgValueKind::DigitalCall { routine, .. } => {
+            *routine = DigitalRoutineId(routine.0 + tables.routines);
+        }
         CfgValueKind::DigitalArrayRead { array, .. }
         | CfgValueKind::DigitalArrayBlockingWrite { array, .. } => {
             // Declaration relocation already checked member contiguity once.

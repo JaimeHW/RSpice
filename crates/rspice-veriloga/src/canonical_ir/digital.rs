@@ -883,6 +883,10 @@ pub struct CanonicalDigitalPlan {
     /// host evaluates in the monitor region rather than at the call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observers: Vec<DigitalObserver>,
+    /// Every task and function of the design, per instance, in elaboration
+    /// order. A call names its entry here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routines: Vec<DigitalRoutine>,
 }
 
 /// Dense identity of one system task or function call site.
@@ -920,6 +924,10 @@ pub enum DigitalScopeKind {
     Module,
     /// A named `begin : name` block (IEEE 1364-2005 section 9.8.3).
     Block,
+    /// A task's body (section 10.2).
+    Task,
+    /// A function's body (section 10.4).
+    Function,
 }
 
 /// One hierarchical scope, named the way `%m` prints it (IEEE 1364-2005
@@ -1504,6 +1512,7 @@ impl CanonicalDigitalPlan {
             || !self.bit_aliases.is_empty()
             || !self.real_aliases.is_empty()
             || !self.processes.is_empty()
+            || !self.routines.is_empty()
             || !self.drivers.is_empty()
             || !self.analog_probes.is_empty()
             || !self.absdelta.is_empty()
@@ -1567,5 +1576,114 @@ impl CanonicalDigitalPlan {
         self.processes
             .get(usize::from(id))
             .filter(|process| process.id == id)
+    }
+
+    pub fn routine(&self, id: DigitalRoutineId) -> Option<&DigitalRoutine> {
+        self.routines
+            .get(id.index())
+            .filter(|routine| routine.id == id)
+    }
+}
+
+/// Dense identity of one task or function of the elaborated design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DigitalRoutineId(pub u32);
+
+impl DigitalRoutineId {
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl std::fmt::Display for DigitalRoutineId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "routine#{}", self.0)
+    }
+}
+
+/// Whether a routine is a task or a function (IEEE 1364-2005 section 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalRoutineKind {
+    /// May suspend; enabled as a statement; returns nothing but its outputs.
+    Task,
+    /// Runs without suspending inside an expression and yields its result.
+    Function,
+}
+
+/// Where one routine variable lives (IEEE 1364-2005 section 10.2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalRoutineStorage {
+    /// A static routine's one shared copy: an ordinary signal, which every
+    /// concurrent activation of the routine reads and writes.
+    Signal(DigitalSignalId),
+    /// An automatic routine's per-activation frame slot.
+    Slot(u32),
+}
+
+/// One argument of a routine, in declaration order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalRoutineParam {
+    pub name: SmolStr,
+    pub direction: crate::ast::PortDirection,
+    pub storage: DigitalRoutineStorage,
+    /// The value type the argument holds: four-state of its width, or real.
+    pub value_type: super::cfg::CfgValueType,
+    pub signed: bool,
+}
+
+impl DigitalRoutineParam {
+    /// Copied in at the call (section 10.2.2).
+    pub const fn is_input(&self) -> bool {
+        matches!(
+            self.direction,
+            crate::ast::PortDirection::Input | crate::ast::PortDirection::Inout
+        )
+    }
+
+    /// Copied back when the task completes (section 10.2.2).
+    pub const fn is_output(&self) -> bool {
+        matches!(
+            self.direction,
+            crate::ast::PortDirection::Output | crate::ast::PortDirection::Inout
+        )
+    }
+}
+
+/// A task or function, lowered (IEEE 1364-2005 section 10, design P2 §4.1).
+///
+/// A call enters [`Self::function`] at its entry block with the inputs copied
+/// into their storage, and a `Return` ends the activation: a task's outputs
+/// and a function's result are read back out of storage then. Static routines
+/// keep every variable in signals, so concurrent activations share them;
+/// automatic routines keep theirs in the activation's frame.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalRoutine {
+    pub id: DigitalRoutineId,
+    pub name: SmolStr,
+    pub kind: DigitalRoutineKind,
+    pub automatic: bool,
+    pub function: CfgFunction,
+    pub params: Vec<DigitalRoutineParam>,
+    /// A function's result variable, named by the function (section 10.4.2).
+    pub result: Option<DigitalRoutineParam>,
+    /// The value types of an automatic activation's frame slots; each starts
+    /// at its type's default (`x` bits, or 0.0).
+    pub frame_slots: Vec<super::cfg::CfgValueType>,
+    /// The scope `%m` names inside the routine and `disable` targets.
+    pub scope: DigitalScopeId,
+    pub time_scale: crate::time_scale::ModuleTimeScale,
+    pub span: SourceSpanRef,
+}
+
+impl DigitalRoutine {
+    /// The arguments copied back when a task completes, in declaration order.
+    pub fn outputs(&self) -> impl Iterator<Item = &DigitalRoutineParam> {
+        self.params.iter().filter(|param| param.is_output())
+    }
+
+    /// The arguments a call supplies, in declaration order.
+    pub fn inputs(&self) -> impl Iterator<Item = &DigitalRoutineParam> {
+        self.params.iter().filter(|param| param.is_input())
     }
 }

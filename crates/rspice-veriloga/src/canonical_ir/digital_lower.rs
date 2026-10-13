@@ -93,6 +93,7 @@ mod constants;
 mod expressions;
 mod local_arrays;
 mod local_storage;
+mod routines;
 mod system_calls;
 pub(crate) use connection_shapes::ConnectionShapes;
 use constants::ResolvedConstants;
@@ -668,6 +669,39 @@ fn lower_with_analog_variables(
             calls.add_module_scope(parent, path, instance.module.clone(), instance.time_scale)
         })
         .collect();
+    // Tasks and functions, numbered per scope before any body is lowered so
+    // that a body may call any routine of its scope, itself included.
+    let mut routine_count = 0;
+    let mut plan_routines = Vec::new();
+    let root_routines = routines::signatures(
+        &digital.routines,
+        &mut routine_count,
+        &module_constants,
+        digital.time_scale,
+        &mut diagnostics,
+    );
+    for routine in &digital.routines {
+        match routines::lower_routine(
+            routine,
+            routines::RoutineScope {
+                signals: &mut signals,
+                arrays: &array_storage,
+                index: &module_scope,
+                array_names: &module_array_names,
+                constants: &module_constants,
+                analog_variables,
+                probes: &mut probes,
+                time_scale: digital.time_scale,
+                calls: &mut calls,
+                scope: &root_scope,
+                routines: &root_routines,
+                prefix: "",
+            },
+        ) {
+            Ok(lowered) => plan_routines.push(lowered),
+            Err(mut errors) => diagnostics.append(&mut errors),
+        }
+    }
     for process in &digital.processes {
         match lower_process(
             process,
@@ -683,6 +717,7 @@ fn lower_with_analog_variables(
             digital.time_scale,
             &mut calls,
             &root_scope,
+            &root_routines,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -701,6 +736,7 @@ fn lower_with_analog_variables(
             &mut drivers,
             &mut probes,
             digital.time_scale,
+            &root_routines,
         ) {
             Ok(lowered) => processes.push(lowered),
             Err(mut errors) => diagnostics.append(&mut errors),
@@ -734,6 +770,36 @@ fn lower_with_analog_variables(
             &instance.event_assigned_variables,
             &instance.immutable_analog_variables,
         );
+        let frame_routines = routines::signatures(
+            &instance.routines,
+            &mut routine_count,
+            constants,
+            instance.time_scale,
+            &mut diagnostics,
+        );
+        let prefix = format!("{}.", instance.path);
+        for routine in &instance.routines {
+            match routines::lower_routine(
+                routine,
+                routines::RoutineScope {
+                    signals: &mut signals,
+                    arrays: &array_storage,
+                    index: scope,
+                    array_names: &frame_array_names,
+                    constants,
+                    analog_variables: &frame_variables,
+                    probes: &mut probes,
+                    time_scale: instance.time_scale,
+                    calls: &mut calls,
+                    scope: frame_scope,
+                    routines: &frame_routines,
+                    prefix: &prefix,
+                },
+            ) {
+                Ok(lowered) => plan_routines.push(lowered),
+                Err(mut errors) => diagnostics.append(&mut errors),
+            }
+        }
         for process in &instance.processes {
             match lower_process(
                 process,
@@ -749,6 +815,7 @@ fn lower_with_analog_variables(
                 instance.time_scale,
                 &mut calls,
                 frame_scope,
+                &frame_routines,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -767,6 +834,7 @@ fn lower_with_analog_variables(
                 &mut drivers,
                 &mut probes,
                 instance.time_scale,
+                &frame_routines,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -785,6 +853,7 @@ fn lower_with_analog_variables(
                 &mut drivers,
                 &mut probes,
                 instance.time_scale,
+                &routines::NO_ROUTINES,
             ) {
                 Ok(lowered) => processes.push(lowered),
                 Err(mut errors) => diagnostics.append(&mut errors),
@@ -1004,6 +1073,7 @@ fn lower_with_analog_variables(
         scopes: calls.scopes,
         system_calls: calls.sites,
         observers: calls.observers,
+        routines: plan_routines,
     }
     .seal()
     // Structural validation of the plan this pass just built, reached only
@@ -1103,11 +1173,13 @@ fn lower_continuous_assign(
     drivers: &mut Vec<DigitalDriver>,
     probes: &mut Vec<DigitalAnalogProbe>,
     time_scale: crate::time_scale::ModuleTimeScale,
+    routines: &routines::RoutineTable,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         calls: Default::default(),
         analog_local_inputs: HashMap::new(),
         process: None,
+        routines,
         local_arrays: Vec::new(),
         constant_expression: false,
         time_scale,
@@ -1392,11 +1464,13 @@ fn lower_process(
     time_scale: crate::time_scale::ModuleTimeScale,
     calls: &mut PlanCalls,
     scope: &ScopeFrame,
+    routines: &routines::RoutineTable,
 ) -> Result<CfgDigitalProcess, Vec<DigitalLoweringDiagnostic>> {
     let mut lowerer = ProcessLowerer {
         calls: calls.tables_for(Some(scope)),
         analog_local_inputs: process.analog_local_inputs.clone(),
         process: None,
+        routines,
         local_arrays: Vec::new(),
         constant_expression: false,
         time_scale,
@@ -1535,6 +1609,8 @@ struct ProcessLocal {
     name: Option<SmolStr>,
     /// Stored scalar, or first cell of an array; None for an SSA local.
     shared: Option<DigitalSignalId>,
+    /// An automatic routine's frame slot; None outside one.
+    slot: Option<u32>,
     array: Option<(VectorBounds, super::digital::DigitalArrayRef)>,
     integer: bool,
     packed: bool,
@@ -1707,6 +1783,8 @@ struct ProcessLowerer<'a> {
     calls: CallTables,
     analog_local_inputs: HashMap<Span, SmolStr>,
     process: Option<DigitalProcessId>,
+    /// The tasks and functions a body in this scope can call.
+    routines: &'a routines::RoutineTable,
     local_arrays: Vec<super::digital::DigitalArray>,
     /// Closed parameter expressions may use pure analog math intrinsics.
     constant_expression: bool,
@@ -1760,7 +1838,6 @@ impl ProcessLowerer<'_> {
     /// Refuse a procedural thread statement that has no executable form yet.
     fn unsupported_thread_statement(&mut self, statement: &DigitalStatement) {
         let what = match statement {
-            DigitalStatement::TaskEnable(_) => "task enable",
             DigitalStatement::Fork(_) => "`fork`",
             DigitalStatement::Disable(_) => "`disable`",
             DigitalStatement::Wait(_) => "`wait`",
@@ -1894,6 +1971,7 @@ impl ProcessLowerer<'_> {
         self.locals.push(ProcessLocal {
             name,
             shared: None,
+            slot: None,
             array: None,
             integer: false,
             packed: true,
@@ -1945,6 +2023,7 @@ impl ProcessLowerer<'_> {
         self.locals.push(ProcessLocal {
             name,
             shared: None,
+            slot: None,
             array: None,
             integer: false,
             packed: false,
@@ -1970,6 +2049,18 @@ impl ProcessLowerer<'_> {
     /// miss is a lowering bug rather than a program error, and it reports as
     /// one instead of producing a value nothing defined.
     fn read_local(&mut self, block: BlockId, id: DigitalLocalId) -> ValueId {
+        if let Some(slot) = self.locals[usize::from(id)].slot {
+            let ty = if self.local_is_real(id) {
+                CfgValueType::Real
+            } else {
+                CfgValueType::FourState {
+                    width: self.local_width(id),
+                }
+            };
+            return self
+                .builder
+                .push(block, ty, CfgValueKind::FrameSlotRead { slot });
+        }
         if let Some(signal) = self.locals[usize::from(id)].shared {
             let (ty, kind) = if self.local_is_real(id) {
                 (
@@ -2016,6 +2107,19 @@ impl ProcessLowerer<'_> {
     /// to the target's width by [`Self::assigned_value`] before it gets here,
     /// so a narrower value arriving at this point is an unsigned one.
     fn write_local(&mut self, block: BlockId, id: DigitalLocalId, value: ValueId) {
+        if let Some(slot) = self.locals[usize::from(id)].slot {
+            let value = if self.local_is_real(id) {
+                value
+            } else {
+                self.resize(block, value, self.local_width(id), false)
+            };
+            self.builder.push(
+                block,
+                CfgValueType::Effect,
+                CfgValueKind::FrameSlotWrite { slot, value },
+            );
+            return;
+        }
         if let Some(signal) = self.locals[usize::from(id)].shared {
             let value = if self.local_is_real(id) {
                 value
@@ -2303,8 +2407,8 @@ impl ProcessLowerer<'_> {
                 current
             }
             DigitalStatement::SystemTask(task) => self.system_task_statement(block, task),
-            DigitalStatement::TaskEnable(_)
-            | DigitalStatement::Fork(_)
+            DigitalStatement::TaskEnable(enable) => self.task_enable(block, enable),
+            DigitalStatement::Fork(_)
             | DigitalStatement::Disable(_)
             | DigitalStatement::Wait(_)
             | DigitalStatement::EventTrigger(_) => {
@@ -3415,7 +3519,8 @@ impl ProcessLowerer<'_> {
             )
             .collect();
         for local in carried_locals {
-            if self.locals[usize::from(local)].shared.is_some() {
+            let declared = &self.locals[usize::from(local)];
+            if declared.shared.is_some() || declared.slot.is_some() {
                 continue;
             }
             self.builder
@@ -3644,6 +3749,10 @@ impl ProcessLowerer<'_> {
 
     fn is_real_expression_leaf(&self, expression: &Expression) -> bool {
         match expression {
+            Expression::Call(call) if self.user_function(call).is_some() => self
+                .user_function(call)
+                .and_then(|function| function.result)
+                .is_some_and(|result| result.real),
             Expression::Identifier(identifier)
                 if self.constant_expression && identifier.name == "inf" =>
             {
@@ -4783,6 +4892,11 @@ impl ProcessLowerer<'_> {
 
     fn self_signed_leaf(&self, expression: &Expression) -> bool {
         match expression {
+            // Section 10.4.1: a call is as signed as the function's result.
+            Expression::Call(call) if self.user_function(call).is_some() => self
+                .user_function(call)
+                .and_then(|function| function.result)
+                .is_some_and(|result| result.signed),
             // Rule (c), from the source spelling: the marker survives decoding
             // into `FourStateLiteral::signed`.
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {
@@ -4854,6 +4968,11 @@ impl ProcessLowerer<'_> {
 
     fn self_width_leaf(&self, expression: &Expression) -> u32 {
         match expression {
+            // Section 10.4.1: a call is as wide as the function's result.
+            Expression::Call(call) if self.user_function(call).is_some() => self
+                .user_function(call)
+                .and_then(|function| function.result)
+                .map_or(1, |result| result.width()),
             // Unsized literals have a 32-bit floor and must also retain all
             // their significant bits before any enclosing context is applied.
             Expression::Digital(crate::ast::DigitalExpr::FourState(literal)) => {

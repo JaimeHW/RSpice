@@ -64,6 +64,7 @@ impl<'a> ConnectionShapes<'a> {
             calls: Default::default(),
             analog_local_inputs: HashMap::new(),
             process: None,
+            routines: &super::routines::NO_ROUTINES,
             local_arrays: Vec::new(),
             constant_expression: false,
             time_scale: self.time_scale,

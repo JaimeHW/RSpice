@@ -222,6 +222,7 @@ impl CanonicalDigitalPlan {
                 &self.scopes,
                 &self.system_calls,
                 &self.observers,
+                &self.routines,
             ),
         )
         .map_err(|detail| error(format!("cannot hash digital plan: {detail}")))?;
@@ -232,6 +233,7 @@ impl CanonicalDigitalPlan {
             .iter()
             .map(|process| &process.function)
             .chain(self.observers.iter().map(|observer| &observer.function))
+            .chain(self.routines.iter().map(|routine| &routine.function))
         {
             for function in process_functions(function) {
                 for value in &function.values {
@@ -589,18 +591,41 @@ impl CanonicalDigitalPlan {
             }
         };
         let mut written_drivers = HashSet::new();
-        for (index, process) in self.processes.iter().enumerate() {
-            if usize::from(process.id) != index {
+        for (index, routine) in self.routines.iter().enumerate() {
+            if routine.id.index() != index {
+                return Err(error("digital routines must have dense IDs"));
+            }
+            self.check_routine(routine)?;
+        }
+        let owners = self
+            .processes
+            .iter()
+            .map(|process| (Some(process), &process.function))
+            .chain(
+                self.routines
+                    .iter()
+                    .map(|routine| (None, &routine.function)),
+            );
+        for (index, (process, root)) in owners.enumerate() {
+            if let Some(process) = process
+                && usize::from(process.id) != index
+            {
                 return Err(error("digital processes must have dense IDs"));
             }
-            for function in process_functions(&process.function) {
+            let frame_slots = match process {
+                Some(_) => &[][..],
+                None => &self.routines[index - self.processes.len()].frame_slots[..],
+            };
+            for function in process_functions(root) {
                 function
                     .validate()
                     .map_err(|detail| error(format!("digital process {}: {detail}", index)))?;
                 if !function.block(function.entry).params.is_empty() {
                     return Err(error("digital process entry must not take arguments"));
                 }
-                if let Some(sensitivity) = &process.static_sensitivity {
+                if let Some(sensitivity) =
+                    process.and_then(|process| process.static_sensitivity.as_ref())
+                {
                     check_terms(&sensitivity.terms)?;
                 }
                 let check_wait = |wait: &DigitalWait| -> IrValidationResult {
@@ -643,6 +668,9 @@ impl CanonicalDigitalPlan {
                                 ));
                             }
                             Ok(())
+                        }
+                        DigitalWait::Call { routine, args } => {
+                            self.check_routine_call(function, *routine, args, true)
                         }
                         DigitalWait::Repeat { .. } => unreachable!("nested repeat rejected"),
                     }
@@ -1170,7 +1198,8 @@ impl CanonicalDigitalPlan {
                             value: rhs,
                         } => {
                             if drivers.get(driver).is_none_or(|declared| {
-                                declared.process != process.id || declared.target != *target
+                                process.is_none_or(|process| declared.process != process.id)
+                                    || declared.target != *target
                             }) {
                                 return Err(error(
                                     "digital driver write does not match its declaration",
@@ -1193,6 +1222,39 @@ impl CanonicalDigitalPlan {
                         | CfgValueKind::DigitalPure { .. } => {
                             self.check_call_value(function, value, false)?;
                         }
+                        CfgValueKind::DigitalCall { routine, args } => {
+                            self.check_routine_call(function, *routine, args, false)?;
+                            let callee = &self.routines[routine.index()];
+                            if callee.result.as_ref().map(|result| result.value_type)
+                                != Some(value.value_type)
+                            {
+                                return Err(error(
+                                    "digital function call has the wrong result type",
+                                ));
+                            }
+                        }
+                        CfgValueKind::FrameSlotRead { slot } => {
+                            if frame_slots.get(*slot as usize) != Some(&value.value_type) {
+                                return Err(error(
+                                    "digital frame slot read names no slot of its type",
+                                ));
+                            }
+                        }
+                        CfgValueKind::FrameSlotWrite { slot, value: rhs } => {
+                            if frame_slots.get(*slot as usize)
+                                != Some(&function.value(*rhs).value_type)
+                                || value.value_type != CfgValueType::Effect
+                            {
+                                return Err(error(
+                                    "digital frame slot write names no slot of its type",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalRoutineCompleted => {
+                            if value.value_type != (CfgValueType::FourState { width: 1 }) {
+                                return Err(error("task completion must be one bit"));
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1202,6 +1264,85 @@ impl CanonicalDigitalPlan {
             return Err(error("digital driver has no corresponding write"));
         }
         self.validate_system_calls()
+    }
+
+    /// A routine's storage names declared signals of its type or slots of its
+    /// frame, and a function has a result where a task has none.
+    fn check_routine(&self, routine: &super::digital::DigitalRoutine) -> IrValidationResult {
+        use super::digital::{DigitalRoutineKind, DigitalRoutineStorage};
+        if self.scopes.get(routine.scope.index()).is_none() {
+            return Err(error("digital routine names an undeclared scope"));
+        }
+        if (routine.kind == DigitalRoutineKind::Function) != routine.result.is_some() {
+            return Err(error("digital function needs a result and a task has none"));
+        }
+        for param in routine.params.iter().chain(&routine.result) {
+            let valid = match param.storage {
+                DigitalRoutineStorage::Signal(signal) => {
+                    !routine.automatic
+                        && self.signal(signal).is_some_and(|signal| {
+                            signal.procedurally_assignable
+                                && match param.value_type {
+                                    CfgValueType::Real => signal.kind.is_real(),
+                                    CfgValueType::FourState { width } => {
+                                        !signal.kind.is_real() && signal.width == width
+                                    }
+                                    _ => false,
+                                }
+                        })
+                }
+                DigitalRoutineStorage::Slot(slot) => {
+                    routine.automatic
+                        && routine.frame_slots.get(slot as usize) == Some(&param.value_type)
+                }
+            };
+            if !valid {
+                return Err(error(format!(
+                    "digital routine `{}` argument `{}` has invalid storage",
+                    routine.name, param.name
+                )));
+            }
+        }
+        if routine
+            .frame_slots
+            .iter()
+            .any(|slot| !matches!(slot, CfgValueType::Real | CfgValueType::FourState { .. }))
+        {
+            return Err(error("digital frame slots hold four-state or real values"));
+        }
+        Ok(())
+    }
+
+    /// A call names a routine of the right kind with one operand per input,
+    /// each of the input's type.
+    fn check_routine_call(
+        &self,
+        function: &super::CfgFunction,
+        routine: super::digital::DigitalRoutineId,
+        args: &[super::ids::ValueId],
+        task: bool,
+    ) -> IrValidationResult {
+        let Some(callee) = self.routine(routine) else {
+            return Err(error("digital call names an undeclared routine"));
+        };
+        if (callee.kind == super::digital::DigitalRoutineKind::Task) != task {
+            return Err(error(
+                "a task is enabled as a statement and a function is called in an expression",
+            ));
+        }
+        let inputs: Vec<_> = callee.inputs().collect();
+        if inputs.len() != args.len()
+            || inputs
+                .iter()
+                .zip(args)
+                .any(|(param, arg)| function.value(*arg).value_type != param.value_type)
+        {
+            return Err(error(format!(
+                "digital call of `{}` does not match its arguments",
+                callee.name
+            )));
+        }
+        Ok(())
     }
 
     /// The call node and its site agree: the site exists, the operand count

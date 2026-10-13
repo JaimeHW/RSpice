@@ -686,6 +686,15 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalPure { function, args } => {
                 write!(out, "digital-pure:{function:?}:{}", args.len())
             }
+            CfgValueKind::DigitalCall { routine, args } => {
+                write!(out, "digital-call:{}:{}", routine.0, args.len())
+            }
+            CfgValueKind::DigitalRoutineOutput { index } => {
+                write!(out, "digital-routine-output:{index}")
+            }
+            CfgValueKind::DigitalRoutineCompleted => write!(out, "digital-routine-completed"),
+            CfgValueKind::FrameSlotRead { slot } => write!(out, "frame-slot-read:{slot}"),
+            CfgValueKind::FrameSlotWrite { slot, .. } => write!(out, "frame-slot-write:{slot}"),
         }
         .expect("write value signature");
         out

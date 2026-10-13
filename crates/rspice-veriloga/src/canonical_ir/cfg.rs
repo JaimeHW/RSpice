@@ -1307,6 +1307,31 @@ pub enum CfgValueKind {
         function: digital_value::DigitalPureFunction,
         args: Vec<ValueId>,
     },
+    /// A user function call (IEEE 1364-2005 section 10.4.3), typed by the
+    /// function's result. `args` are the input values in declaration order;
+    /// the callee runs to its `Return` without suspending.
+    DigitalCall {
+        routine: super::digital::DigitalRoutineId,
+        args: Vec<ValueId>,
+    },
+    /// Output `index` of the task whose call resumed this block, in the
+    /// task's output order. Read before the block suspends or calls again.
+    DigitalRoutineOutput {
+        index: u32,
+    },
+    /// Whether the task whose call resumed this block completed, rather than
+    /// being disabled (section 10.3: a disabled task copies nothing back).
+    DigitalRoutineCompleted,
+    /// Read slot `slot` of the running automatic activation's frame.
+    FrameSlotRead {
+        slot: u32,
+    },
+    /// Write slot `slot` of the running automatic activation's frame, ordered
+    /// like a blocking write.
+    FrameSlotWrite {
+        slot: u32,
+        value: ValueId,
+    },
     /// Ordered analog system-task invocation. It has no numerical result and
     /// is never a common subexpression, derivative, or reusable cached value.
     AnalogTask(crate::analog_tasks::AnalogTaskCall<ValueId, super::SourceSpanRef>),
@@ -1445,7 +1470,12 @@ impl CfgValueKind {
             | Self::DigitalSystemTask { .. }
             | Self::DigitalSystemFunction { .. }
             | Self::DigitalCallOutput { .. }
-            | Self::DigitalPure { .. } => true,
+            | Self::DigitalPure { .. }
+            | Self::DigitalCall { .. }
+            | Self::DigitalRoutineOutput { .. }
+            | Self::DigitalRoutineCompleted
+            | Self::FrameSlotRead { .. }
+            | Self::FrameSlotWrite { .. } => true,
         }
     }
 
@@ -1797,8 +1827,10 @@ impl CfgValueKind {
             }
             Self::DigitalSystemTask { args, .. }
             | Self::DigitalSystemFunction { args, .. }
-            | Self::DigitalPure { args, .. } => args.clone(),
+            | Self::DigitalPure { args, .. }
+            | Self::DigitalCall { args, .. } => args.clone(),
             Self::DigitalCallOutput { call, .. } => vec![*call],
+            Self::FrameSlotWrite { value, .. } => vec![*value],
 
             _ => Vec::new(),
         }
@@ -2189,12 +2221,14 @@ impl CfgValueKind {
             }
             Self::DigitalSystemTask { args, .. }
             | Self::DigitalSystemFunction { args, .. }
-            | Self::DigitalPure { args, .. } => {
+            | Self::DigitalPure { args, .. }
+            | Self::DigitalCall { args, .. } => {
                 for value in args {
                     *value = map(*value);
                 }
             }
             Self::DigitalCallOutput { call, .. } => *call = map(*call),
+            Self::FrameSlotWrite { value, .. } => *value = map(*value),
 
             _ => {}
         }
@@ -2348,6 +2382,14 @@ pub enum DigitalWait {
     /// wait is reached rather than when the process starts — `#(n)` where `n`
     /// is a variable waits for its value at that moment.
     Delay(ValueId),
+    /// A task enable (IEEE 1364-2005 section 10.2.2): run the task with these
+    /// input values, and resume when its activation ends. The resume block
+    /// reads the task's outputs through
+    /// [`CfgValueKind::DigitalRoutineOutput`].
+    Call {
+        routine: super::digital::DigitalRoutineId,
+        args: Vec<ValueId>,
+    },
 }
 
 impl DigitalWait {
@@ -2355,6 +2397,7 @@ impl DigitalWait {
     pub fn operands(&self) -> Vec<ValueId> {
         match self {
             Self::Event(_) => Vec::new(),
+            Self::Call { args, .. } => args.clone(),
             Self::Expressions(terms) => terms.iter().map(|term| term.value).collect(),
             Self::Repeat { count, event } => {
                 std::iter::once(*count).chain(event.operands()).collect()
@@ -2371,6 +2414,11 @@ impl DigitalWait {
     pub fn map_operands(&mut self, mut map: impl FnMut(ValueId) -> ValueId) {
         match self {
             Self::Event(_) => {}
+            Self::Call { args, .. } => {
+                for arg in args {
+                    *arg = map(*arg);
+                }
+            }
             Self::Repeat { count, event } => {
                 *count = map(*count);
                 event.map_operands(map);
@@ -2389,7 +2437,7 @@ impl DigitalWait {
         match self {
             Self::Event(terms) => Some(terms),
             Self::Delay(_) => Some(&[]),
-            Self::Expressions(_) => None,
+            Self::Expressions(_) | Self::Call { .. } => None,
             Self::Repeat { event, .. } => event.sensitivity(),
         }
     }

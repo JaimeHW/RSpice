@@ -1921,6 +1921,11 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalSystemFunction { .. }
         | CfgValueKind::DigitalCallOutput { .. }
         | CfgValueKind::DigitalPure { .. }
+        | CfgValueKind::DigitalCall { .. }
+        | CfgValueKind::DigitalRoutineOutput { .. }
+        | CfgValueKind::DigitalRoutineCompleted
+        | CfgValueKind::FrameSlotRead { .. }
+        | CfgValueKind::FrameSlotWrite { .. }
         | CfgValueKind::AnalogCounter { .. }
         | CfgValueKind::AnalogTask(_) => InvalidationClass::Newton,
 
