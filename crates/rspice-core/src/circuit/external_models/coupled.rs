@@ -583,6 +583,12 @@ impl DigitalActiveParticipant for XspiceDigitalParticipant<'_> {
                     },
                 )
                 .map_err(|error| external_error(error.to_string()))?;
+            // A journal means a caller holds the rollback image of every
+            // instance -- the trial's own capture, or the acceptance barrier
+            // around it -- and restores all of them before anything reads a
+            // failed one, exactly as on the standalone path. The per-model
+            // context backup would restore the same state a second time.
+            wave.restored_by_caller = self.resources.is_some();
             if self.interpolating && physical < self.time {
                 wave.interpolated = true;
                 wave.skip_opening_dispatch();
