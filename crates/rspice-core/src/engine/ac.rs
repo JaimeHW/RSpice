@@ -3128,14 +3128,28 @@ impl Engine {
         let mut branch_names = circuit.branch_names_sorted();
         // `I(x1)` of a metered Verilog-A instance is its first terminal's
         // meter current, published as a branch of the instance's own name
-        // beside the meter's.
+        // beside the meter's; a card's alias for a metered terminal, `d1:id`,
+        // is published the same way.
         let instance_currents = circuit
             .veriloga_terminal_meters()
             .iter()
-            .filter(|meter| meter.instance_current)
-            .map(|meter| {
-                branch_names.push(meter.instance.clone());
-                (num_nodes + meter.branch).saturating_sub(1)
+            .flat_map(|meter| {
+                let index = (num_nodes + meter.branch).saturating_sub(1);
+                meter
+                    .instance_current
+                    .then(|| meter.instance.clone())
+                    .into_iter()
+                    .chain(
+                        meter
+                            .aliases
+                            .iter()
+                            .map(|alias| format!("{}:{alias}", meter.instance)),
+                    )
+                    .map(move |name| (name, index))
+            })
+            .map(|(name, index)| {
+                branch_names.push(name);
+                index
             })
             .collect::<Vec<_>>();
         // Closure to solve at a single frequency. Takes the circuit as a

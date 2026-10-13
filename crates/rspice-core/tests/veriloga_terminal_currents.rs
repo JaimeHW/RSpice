@@ -1167,3 +1167,245 @@ mod generated_multi_letter {
         }
     }
 }
+
+/// A generated model an ordinary SPICE card routes to is metered as an X-card
+/// instance is: `I(r1)` of a resistor card whose model is `r2_cmc` and `I(d1)`
+/// of a diode card whose model selects `diode_cmc` are currents of the solved
+/// system, as they are on the native devices.
+///
+/// Each device sits behind a zero-volt source `vm`, so KCL at the node between
+/// them is the reference: `vm`'s current and the node's GMIN floor at an
+/// operating point, a DC sweep point and every transient sample, and `vm`'s
+/// current alone in AC, which has no nodal GMIN. All agree to 1e-12.
+#[cfg(all(
+    feature = "veriloga-model-diode-cmc",
+    feature = "veriloga-model-r2-cmc"
+))]
+mod card_routed {
+    use super::*;
+
+    fn gmin() -> f64 {
+        rspice_core::SimulationConfig::default()
+            .convergence_config
+            .gmin_target
+    }
+
+    /// Hold every transient sample to its KCL reference at the static
+    /// tolerance, against the waveform's peak.
+    fn assert_kcl_waveform(label: &str, actual: &[f64], expected: &[f64]) {
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "{label}: one value per sample"
+        );
+        let scale = expected
+            .iter()
+            .fold(0.0_f64, |scale, value| scale.max(value.abs()));
+        for (index, (a, e)) in actual.iter().zip(expected).enumerate() {
+            assert!(
+                (a - e).abs() <= STATIC_RELATIVE * scale + ABSOLUTE_FLOOR,
+                "{label}: sample {index} is {a:e} against KCL's {e:e}"
+            );
+        }
+    }
+
+    fn voltage(result: &TransientResult, node: &str) -> Vec<f64> {
+        result
+            .try_voltage_waveform_named(node)
+            .unwrap_or_else(|| panic!("V({node}) is retained"))
+            .to_vec()
+    }
+
+    fn resistor(source: &str, saves: &str, analysis: &str) -> String {
+        format!(
+            "* card-routed R2_CMC terminal currents\n\
+             v1 in 0 {source}\n\
+             r1 in a rmod\n\
+             .model rmod r2_cmc\n\
+             vm a b 0\n\
+             rl b 0 2k\n\
+             .save {saves}\n\
+             {analysis}\n\
+             .end\n"
+        )
+    }
+
+    #[test]
+    fn a_card_routed_resistor_reports_the_current_of_the_solved_system() {
+        let saves = "v(a) i(r1) @r1[in1] @r1[in2] i(vm)";
+        // What leaves `n2` into `a` leaves `a` through `vm` and GMIN.
+        let kcl = |point: &SimulationResult| {
+            point.branch_current_named("vm").expect("I(vm)")
+                + gmin() * point.try_voltage_named("a").expect("V(a)")
+        };
+
+        let op = operating_point(&resistor("dc 1.5", saves, ".op"));
+        let native = kcl(&op);
+        assert!(
+            (native - 1.5 / 2100.0).abs() < 1e-9,
+            "the card is R2_CMC at its default 100 ohm: {native}"
+        );
+        assert_static("op I(r1)", observable(&op, "I(r1)"), native);
+        assert_static("op @r1[in1]", observable(&op, "r1:in1"), native);
+        assert_static("op @r1[in2]", observable(&op, "r1:in2"), -native);
+
+        let sweep = Engine::default()
+            .run_dc_sweep(
+                &netlist(&resistor("dc 0", saves, ".dc v1 -1 1 1")),
+                "v1",
+                -1.0,
+                1.0,
+                1.0,
+            )
+            .expect("DC sweep solves");
+        for (value, point) in &sweep {
+            let native = kcl(point);
+            assert_static(
+                &format!("dc {value} I(r1)"),
+                observable(point, "I(r1)"),
+                native,
+            );
+            assert_static(
+                &format!("dc {value} @r1[in2]"),
+                observable(point, "r1:in2"),
+                -native,
+            );
+        }
+
+        let tran = transient(
+            &resistor("sin(0 1 10meg)", saves, ".tran 1n 100n"),
+            100e-9,
+            1e-9,
+        );
+        let native = derived(&tran, "vm")
+            .iter()
+            .zip(voltage(&tran, "a"))
+            .map(|(current, anode)| current + gmin() * anode)
+            .collect::<Vec<_>>();
+        assert_kcl_waveform("tran I(r1)", &derived(&tran, "r1"), &native);
+        assert_kcl_waveform("tran @r1[in1]", &lead(&tran, "r1", "in1"), &native);
+
+        for point in ac(
+            &resistor("dc 0 ac 1", saves, ".ac dec 2 1k 1meg"),
+            &[1e3, 1e6],
+        ) {
+            let native = ac_branch(&point, "vm");
+            assert!(native.norm() > 0.0);
+            assert_complex("ac I(r1)", ac_branch(&point, "r1"), native);
+            assert_complex("ac @r1[in1]", ac_branch(&point, "r1:in1"), native);
+            assert_complex("ac @r1[in2]", ac_branch(&point, "r1:in2"), -native);
+        }
+    }
+
+    fn diode(source: &str, saves: &str, analysis: &str) -> String {
+        format!(
+            "* card-routed diode_cmc terminal currents\n\
+             v1 in 0 {source}\n\
+             rs in a 1k\n\
+             vm a b 0\n\
+             d1 b 0 dcmc\n\
+             .model dcmc d level=2002\n\
+             .save {saves}\n\
+             {analysis}\n\
+             .end\n"
+        )
+    }
+
+    /// The card's own `@d1[id]` reads the anode's meter, as the catalog's
+    /// `@d1[ia]` does.
+    #[test]
+    fn a_card_routed_diode_reports_the_current_of_the_solved_system() {
+        let saves = "v(b) i(d1) @d1[ia] @d1[ik] @d1[id] i(vm)";
+        // What `vm` brings into `b` leaves through the anode and GMIN.
+        let kcl = |point: &SimulationResult| {
+            point.branch_current_named("vm").expect("I(vm)")
+                - gmin() * point.try_voltage_named("b").expect("V(b)")
+        };
+
+        let op = operating_point(&diode("dc 1", saves, ".op"));
+        let native = kcl(&op);
+        assert!(native > 1e-7, "the diode conducts: {native}");
+        assert_static("op I(d1)", observable(&op, "I(d1)"), native);
+        assert_static("op @d1[ia]", observable(&op, "d1:ia"), native);
+        assert_static("op @d1[id]", observable(&op, "d1:id"), native);
+        assert_static("op @d1[ik]", observable(&op, "d1:ik"), -native);
+
+        let sweep = Engine::default()
+            .run_dc_sweep(
+                &netlist(&diode("dc 0", saves, ".dc v1 0.5 1 0.25")),
+                "v1",
+                0.5,
+                1.0,
+                0.25,
+            )
+            .expect("DC sweep solves");
+        for (value, point) in &sweep {
+            let native = kcl(point);
+            assert_static(
+                &format!("dc {value} I(d1)"),
+                observable(point, "I(d1)"),
+                native,
+            );
+            assert_static(
+                &format!("dc {value} @d1[id]"),
+                observable(point, "d1:id"),
+                native,
+            );
+        }
+
+        let tran = transient(
+            &diode("sin(0.5 0.5 20meg)", saves, ".tran 1n 100n"),
+            100e-9,
+            1e-9,
+        );
+        let native = derived(&tran, "vm")
+            .iter()
+            .zip(voltage(&tran, "b"))
+            .map(|(current, anode)| current - gmin() * anode)
+            .collect::<Vec<_>>();
+        assert_kcl_waveform("tran I(d1)", &derived(&tran, "d1"), &native);
+        assert_kcl_waveform("tran @d1[ia]", &lead(&tran, "d1", "ia"), &native);
+        assert_kcl_waveform("tran @d1[id]", &lead(&tran, "d1", "id"), &native);
+
+        for point in ac(
+            &diode("dc 0.7 ac 1", saves, ".ac dec 1 1meg 1g"),
+            &[1e6, 1e8],
+        ) {
+            let native = ac_branch(&point, "vm");
+            assert!(native.norm() > 0.0);
+            assert_complex("ac I(d1)", ac_branch(&point, "d1"), native);
+            assert_complex("ac @d1[id]", ac_branch(&point, "d1:id"), native);
+            assert_complex("ac @d1[ik]", ac_branch(&point, "d1:ik"), -native);
+        }
+    }
+
+    /// A card whose current nobody names gets no meter: its circuit is the
+    /// one an ordinary run builds.
+    #[test]
+    fn an_unnamed_card_routed_current_adds_nothing_to_the_circuit() {
+        let plain = operating_point(&resistor("dc 1.5", "v(a)", ".op"));
+        let metered = operating_point(&resistor("dc 1.5", "v(a) i(r1)", ".op"));
+        assert!(
+            plain.node_names.iter().all(|node| !node.contains("#meter")),
+            "{:?}",
+            plain.node_names
+        );
+        assert!(
+            plain
+                .branch_names
+                .iter()
+                .all(|branch| !branch.eq_ignore_ascii_case("r1:in1")),
+            "{:?}",
+            plain.branch_names
+        );
+        assert_eq!(plain.node_names.len() + 1, metered.node_names.len());
+        assert_eq!(plain.branch_names.len() + 1, metered.branch_names.len());
+        for node in ["in", "a", "b"] {
+            assert_static(
+                &format!("V({node})"),
+                metered.try_voltage_named(node).expect("metered V"),
+                plain.try_voltage_named(node).expect("plain V"),
+            );
+        }
+    }
+}

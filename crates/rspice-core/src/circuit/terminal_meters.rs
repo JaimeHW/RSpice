@@ -20,6 +20,9 @@ pub(crate) struct VerilogATerminalMeter {
     pub(crate) instance: String,
     /// Current label, `i` and the port name in lower case: `@x1[ia]`.
     pub(crate) label: String,
+    /// The card's other labels for this terminal's current, lower case: a
+    /// diode card routed to a generated model reads its anode as `@d1[id]`.
+    pub(crate) aliases: Vec<String>,
     /// Whether this is the first terminal of an instance with at most two and
     /// the deck asks for `I(instance)`, which therefore names it.
     pub(crate) instance_current: bool,
@@ -37,9 +40,17 @@ pub(crate) struct VerilogATerminalMeter {
 }
 
 impl VerilogATerminalMeter {
-    /// `x1:ia`, the spelling an `@x1[ia]` probe resolves through.
-    pub(crate) fn parameter_name(&self) -> String {
-        format!("{}:{}", self.instance, self.label)
+    /// Every label the meter's current is published under: its own, then the
+    /// card's aliases.
+    pub(crate) fn labels(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.label.as_str()).chain(self.aliases.iter().map(String::as_str))
+    }
+
+    /// `x1:ia`, the spelling an `@x1[ia]` probe resolves through, for each of
+    /// [`Self::labels`].
+    pub(crate) fn parameter_names(&self) -> impl Iterator<Item = String> + '_ {
+        self.labels()
+            .map(|label| format!("{}:{label}", self.instance))
     }
 }
 
@@ -121,7 +132,10 @@ impl CircuitData {
             };
             let current = self.veriloga_terminal_meter_current(solution, meter)?;
             for (parameter, value) in &mut entry.params {
-                if parameter.eq_ignore_ascii_case(&meter.label) {
+                if meter
+                    .labels()
+                    .any(|label| parameter.eq_ignore_ascii_case(label))
+                {
                     *value = current;
                 }
             }

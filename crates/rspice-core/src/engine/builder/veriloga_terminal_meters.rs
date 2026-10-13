@@ -24,6 +24,13 @@
 //! every two-terminal SPICE device; with more it names no single current and
 //! is refused, naming the labels that do.
 //!
+//! A generated model an ordinary SPICE card routes to — `R1 in a r2_cmc`, or a
+//! diode card whose model selects `diode_cmc` — is the same device and is
+//! metered the same way, under the card's name: `I(r1)` means on it what it
+//! means on the native resistor. Its terminals are the ones the routing will
+//! instantiate it on, and a card's own spelling of a terminal current, a
+//! diode's `@d1[id]`, reads the same meter as the catalog's label.
+//!
 //! The meters are inserted once the Verilog-A sources are resolved, because a
 //! port's position and name come from its module, and before any device or
 //! boundary is built, because both must see the private node as the
@@ -39,21 +46,31 @@ use crate::netlist::{
 /// Capability token of every refusal this module makes.
 const CAPABILITY: &str = "output.veriloga.terminal_current";
 
-/// One Verilog-A instance's ports, as the deck's X-card connects them.
+/// One Verilog-A instance's ports, as the deck's card connects them.
 pub(super) struct InstancePorts {
     /// Module (or generated model) name, for diagnostics.
     pub(super) module: String,
+    /// What a diagnostic calls the instance: an X-card's "Verilog-A
+    /// instance", or the "generated Verilog-A device" an ordinary SPICE card
+    /// routes to.
+    pub(super) subject: &'static str,
     /// Whether the instance runs on the runtime route, whose instances report
     /// no device parameter other than these terminal currents.
     pub(super) runtime: bool,
     pub(super) ports: Vec<InstancePort>,
 }
 
+/// What an X-card instance is called in a diagnostic.
+const INSTANCE: &str = "Verilog-A instance";
+
 pub(super) struct InstancePort {
     /// Port name as the module declares it.
     pub(super) name: String,
     /// Current label: `i` followed by the port name in lower case.
     pub(super) label: String,
+    /// Other labels the card gives this terminal's current, lower case: a
+    /// diode card's `id` for its anode.
+    pub(super) aliases: Vec<String>,
     /// The X-card node this port is connected to; `None` when the card leaves
     /// it unconnected.
     pub(super) node: Option<usize>,
@@ -149,6 +166,23 @@ impl CurrentRequests {
             && self.accessors.is_empty()
     }
 
+    /// Whether any request could name a current of `instance`. Every test
+    /// below implies this one, so an element it rejects is passed over without
+    /// resolving its ports.
+    fn mentions(&self, instance: &str) -> bool {
+        let canonical = canonical_symbol(instance);
+        self.selects_instance_current(instance)
+            || self
+                .parameters
+                .iter()
+                .chain(&self.bare_parameters)
+                .any(|(device, _)| *device == canonical)
+            || self
+                .accessors
+                .iter()
+                .any(|(_, symbol)| hierarchy_pattern_matches(symbol, &canonical))
+    }
+
     /// Whether `I(instance)` — or a projection of it such as `IM(instance)` —
     /// is asked for, by name or by pattern.
     fn selects_instance_current(&self, instance: &str) -> bool {
@@ -236,6 +270,7 @@ pub(super) fn runtime_instance_ports(
             InstancePort {
                 name: name.to_string(),
                 label: current_label(name),
+                aliases: Vec::new(),
                 node,
                 width,
                 discrete: mixed.is_some_and(|artifact| {
@@ -250,15 +285,24 @@ pub(super) fn runtime_instance_ports(
         .collect();
     InstancePorts {
         module: entry.model.name.to_string(),
+        subject: INSTANCE,
         runtime: true,
         ports,
     }
 }
 
-/// Ports of an X-card instance of a generated model, labelled as the
-/// model's catalog labels them.
+/// Ports of a generated model, labelled as the model's catalog labels them.
+///
+/// The first `authored` terminals connect to the card's nodes in order; the
+/// rest are ground the card left out. `aliases` are the card's other
+/// spellings of a terminal's current.
 #[cfg(feature = "veriloga-builtins-base")]
-pub(super) fn generated_instance_ports(element: &Element, model: &str) -> Option<InstancePorts> {
+fn catalog_ports(
+    model: &str,
+    authored: usize,
+    aliases: &[crate::device::veriloga_builtins::GeneratedTerminalCurrentAlias],
+    subject: &'static str,
+) -> Option<InstancePorts> {
     let descriptor = crate::device::veriloga_builtins::generated_veriloga_model_descriptors()
         .iter()
         .find(|descriptor| descriptor.model_name.eq_ignore_ascii_case(model))?;
@@ -269,21 +313,60 @@ pub(super) fn generated_instance_ports(element: &Element, model: &str) -> Option
         .map(|(index, terminal)| InstancePort {
             name: terminal.name.to_owned(),
             label: terminal.current_parameter.to_ascii_lowercase(),
-            node: (index < element.nodes.len()).then_some(index),
+            aliases: aliases
+                .iter()
+                .filter(|alias| alias.terminal.eq_ignore_ascii_case(terminal.name))
+                .map(|alias| alias.parameter.to_ascii_lowercase())
+                .collect(),
+            node: (index < authored).then_some(index),
             width: 1,
             discrete: false,
         })
         .collect();
     Some(InstancePorts {
         module: descriptor.model_name.to_owned(),
+        subject,
         runtime: false,
         ports,
     })
 }
 
+/// Ports of an X-card instance of a generated model.
+#[cfg(feature = "veriloga-builtins-base")]
+pub(super) fn generated_instance_ports(element: &Element, model: &str) -> Option<InstancePorts> {
+    catalog_ports(model, element.nodes.len(), &[], INSTANCE)
+}
+
 /// Without a generated catalog no X-card names a generated model.
 #[cfg(not(feature = "veriloga-builtins-base"))]
 pub(super) fn generated_instance_ports(_element: &Element, _model: &str) -> Option<InstancePorts> {
+    None
+}
+
+/// Ports of the generated device an ordinary SPICE card routes to:
+/// `R1 in a r2_cmc`, or a diode card whose model selects `diode_cmc`.
+#[cfg(feature = "veriloga-builtins-base")]
+pub(super) fn card_routed_ports(
+    netlist: &ModelResolution<'_>,
+    element: &Element,
+    config: &crate::engine::SimulationConfig,
+) -> Option<InstancePorts> {
+    let card = super::generated_model_routing::generated_card_terminals(netlist, element, config)?;
+    catalog_ports(
+        card.model_name,
+        card.authored,
+        card.aliases,
+        "generated Verilog-A device",
+    )
+}
+
+/// Without a generated catalog every SPICE card stays native.
+#[cfg(not(feature = "veriloga-builtins-base"))]
+pub(super) fn card_routed_ports(
+    _netlist: &ModelResolution<'_>,
+    _element: &Element,
+    _config: &crate::engine::SimulationConfig,
+) -> Option<InstancePorts> {
     None
 }
 
@@ -293,7 +376,8 @@ fn terminal_forms(instance: &str, ports: &InstancePorts) -> String {
     ports
         .ports
         .iter()
-        .map(|port| format!("@{instance}[{}]", port.label))
+        .flat_map(|port| std::iter::once(&port.label).chain(&port.aliases))
+        .map(|label| format!("@{instance}[{label}]"))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -325,6 +409,7 @@ pub(super) fn materialize(
         element: usize,
         node: usize,
         label: String,
+        aliases: Vec<String>,
         instance_current: bool,
         discrete: bool,
     }
@@ -333,17 +418,21 @@ pub(super) fn materialize(
         if index.is_multiple_of(64) && abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
+        if !requests.mentions(&element.name) {
+            continue;
+        }
         let Some(ports) = ports_of(element) else {
             continue;
         };
         let instance = element.name.as_str();
         let module = ports.module.as_str();
+        let subject = ports.subject;
         if requests.names_instance_current(instance) && ports.ports.len() > 2 {
             return Err(refusal(
                 instance,
                 module,
                 format!(
-                    "`I({instance})` names the Verilog-A instance '{instance}' of '{module}', \
+                    "`I({instance})` names the {subject} '{instance}' of '{module}', \
                      which has {} terminals and so no single current; save one terminal's \
                      current instead: {}",
                     ports.ports.len(),
@@ -358,7 +447,7 @@ pub(super) fn materialize(
                         instance,
                         module,
                         format!(
-                            "`@{instance}[{param}]` names no terminal of the Verilog-A instance \
+                            "`@{instance}[{param}]` names no terminal of the {subject} \
                              '{instance}' of '{module}'; its terminal currents are {}",
                             terminal_forms(instance, &ports)
                         ),
@@ -370,7 +459,11 @@ pub(super) fn materialize(
             ports.ports.len() <= 2 && requests.selects_instance_current(instance);
         for (position, port) in ports.ports.iter().enumerate() {
             let primary = instance_current && position == 0;
-            if !primary && !requests.selects_terminal(instance, &port.label) {
+            if !primary
+                && !std::iter::once(&port.label)
+                    .chain(&port.aliases)
+                    .any(|label| requests.selects_terminal(instance, label))
+            {
                 continue;
             }
             if let Some(other) = ports
@@ -382,7 +475,7 @@ pub(super) fn materialize(
                     instance,
                     module,
                     format!(
-                        "`@{instance}[{}]` names two terminals of the Verilog-A instance \
+                        "`@{instance}[{}]` names two terminals of the {subject} \
                          '{instance}' of '{module}', '{}' and '{}', whose names differ only \
                          in case",
                         port.label, port.name, other.name
@@ -395,7 +488,7 @@ pub(super) fn materialize(
                     module,
                     format!(
                         "`@{instance}[{}]` names the {}-bit discrete port '{}' of the \
-                         Verilog-A instance '{instance}' of '{module}'; a terminal current is \
+                         {subject} '{instance}' of '{module}'; a terminal current is \
                          reported for a scalar port only",
                         port.label, port.width, port.name
                     ),
@@ -406,8 +499,8 @@ pub(super) fn materialize(
                     instance,
                     module,
                     format!(
-                        "`@{instance}[{}]` names the port '{}' of the Verilog-A instance \
-                         '{instance}' of '{module}', which the instance leaves unconnected",
+                        "`@{instance}[{}]` names the port '{}' of the {subject} \
+                         '{instance}' of '{module}', which the card leaves unconnected",
                         port.label, port.name
                     ),
                 ));
@@ -416,6 +509,7 @@ pub(super) fn materialize(
                 element: index,
                 node,
                 label: port.label.clone(),
+                aliases: port.aliases.clone(),
                 instance_current: primary,
                 discrete: port.discrete,
             });
@@ -461,6 +555,7 @@ pub(super) fn materialize(
         meters.push(crate::circuit::VerilogATerminalMeter {
             instance,
             label: plan.label,
+            aliases: plan.aliases,
             instance_current: plan.instance_current,
             discrete: plan.discrete,
             source,
@@ -503,55 +598,5 @@ pub(super) fn resolve(
             .insert(meter.source.to_ascii_uppercase());
     }
     circuit.veriloga_terminal_meters = meters;
-    Ok(())
-}
-
-/// Refuse `I(name)` on a generated device a SPICE card built with more than
-/// two terminals, which names no single current.
-///
-/// An X-card instance is refused before it is built; a card-routed device is
-/// known to be one only once its card has been routed.
-#[cfg(feature = "veriloga-builtins-base")]
-pub(super) fn refuse_multi_terminal_generated_currents(
-    netlist: &Netlist,
-    circuit: &CircuitData,
-) -> Result<(), SimulationError> {
-    if circuit.generated_veriloga_devices().is_empty() {
-        return Ok(());
-    }
-    let requests = CurrentRequests::of(netlist);
-    if requests.is_empty() {
-        return Ok(());
-    }
-    for device in circuit.generated_veriloga_devices().iter() {
-        let terminals = device.external_terminals();
-        if terminals.len() <= 2 || !requests.names_instance_current(&device.instance_name) {
-            continue;
-        }
-        let instance = device.instance_name.as_str();
-        let forms = terminals
-            .iter()
-            .map(|terminal| terminal.current_parameter)
-            .chain(
-                device
-                    .terminal_current_aliases()
-                    .iter()
-                    .map(|alias| alias.parameter),
-            )
-            .map(|label| format!("@{instance}[{label}]"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(refusal(
-            instance,
-            device.model_name,
-            format!(
-                "`I({instance})` names the generated Verilog-A device '{instance}' of '{}', \
-                 which has {} terminals and so no single current; save one terminal's current \
-                 instead: {forms}",
-                device.model_name,
-                terminals.len()
-            ),
-        ));
-    }
     Ok(())
 }

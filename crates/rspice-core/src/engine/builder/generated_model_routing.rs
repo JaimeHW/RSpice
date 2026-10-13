@@ -64,6 +64,95 @@ pub(super) struct GeneratedRoutingContext<'a> {
     pub temperature: f64,
 }
 
+/// Where a SPICE card goes on the generated route: the module, the nodes it
+/// is instantiated on — the card's own, then ground for terminals the card
+/// leaves out — and how many of those the card wrote.
+struct GeneratedCardRoute<'a> {
+    target: GeneratedTarget,
+    nodes: Vec<String>,
+    authored: usize,
+    model_def: Option<&'a ModelDef>,
+}
+
+impl GeneratedCardRoute<'_> {
+    fn build(
+        self,
+        circuit: &mut CircuitData,
+        netlist: &Netlist,
+        element: &Element,
+        context: GeneratedRoutingContext<'_>,
+    ) -> Result<bool, SimulationError> {
+        add_generated_instance(
+            circuit,
+            netlist,
+            element,
+            self.target,
+            &self.nodes,
+            self.model_def,
+            context,
+        )?;
+        Ok(true)
+    }
+}
+
+/// What a deck's terminal meters need of a SPICE card the generated route
+/// builds, `R1 in a r2_cmc`.
+pub(super) struct GeneratedCardTerminals {
+    /// The generated module's catalog name.
+    pub(super) model_name: &'static str,
+    /// How many of the module's leading terminals the card's own nodes
+    /// connect, in order; the rest are ground.
+    pub(super) authored: usize,
+    /// The card's other spellings of a terminal's current, a diode's `id`.
+    pub(super) aliases: &'static [GeneratedTerminalCurrentAlias],
+}
+
+/// The generated module a SPICE card will be built as, decided by the routing
+/// the build itself runs, so a meter goes on the terminal the device is
+/// instantiated on.
+///
+/// `None` for a card that stays native, and for one whose route fails: the
+/// build reports that failure where it routes the card.
+pub(super) fn generated_card_terminals(
+    netlist: &ModelResolution<'_>,
+    element: &Element,
+    config: &crate::engine::SimulationConfig,
+) -> Option<GeneratedCardTerminals> {
+    let route = match &element.kind {
+        ElementKind::Resistor {
+            model: Some(model), ..
+        } => generated_resistor_route(netlist, element, model),
+        ElementKind::Diode { model, .. } => generated_diode_route(netlist, element, model),
+        ElementKind::Bjt { model, .. } => generated_bjt_route(
+            element,
+            model,
+            find_model_def(netlist, model),
+            config.spice_dialect,
+            config.device_voltage_limiting,
+        ),
+        ElementKind::Mosfet {
+            model,
+            compact_syntax,
+            instance_params,
+            ..
+        } => find_binned_model_def(
+            netlist,
+            &element.name,
+            model,
+            instance_params,
+            config.temperature,
+        )
+        .and_then(|model_def| generated_mos_route(element, model, model_def, *compact_syntax)),
+        _ => return None,
+    };
+    let route = route.ok().flatten()?;
+    Some(GeneratedCardTerminals {
+        model_name: route.target.model_name,
+        authored: route.authored,
+        aliases: generated_card_current_aliases(route.target, element),
+    })
+}
+
 pub(super) fn try_route_generated_resistor_model(
     circuit: &mut CircuitData,
     netlist: &Netlist,
@@ -71,16 +160,21 @@ pub(super) fn try_route_generated_resistor_model(
     model_name: &str,
     context: GeneratedRoutingContext<'_>,
 ) -> Result<bool, SimulationError> {
-    let GeneratedRoutingContext {
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
-    } = context;
+    match generated_resistor_route(netlist, element, model_name)? {
+        Some(route) => route.build(circuit, netlist, element, context),
+        None => Ok(false),
+    }
+}
+
+fn generated_resistor_route<'a>(
+    netlist: &'a Netlist,
+    element: &Element,
+    model_name: &str,
+) -> Result<Option<GeneratedCardRoute<'a>>, SimulationError> {
     let model_def = find_model_def(netlist, model_name);
     let target = generated_resistor_target(model_name, model_def)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
-        return Ok(false);
+        return Ok(None);
     };
 
     let mut nodes = element.nodes.clone();
@@ -102,22 +196,12 @@ pub(super) fn try_route_generated_resistor_model(
     while nodes.len() < expected {
         nodes.push("0".to_string());
     }
-
-    add_generated_instance(
-        circuit,
-        netlist,
-        element,
+    Ok(Some(GeneratedCardRoute {
         target,
-        &nodes,
+        nodes,
+        authored: element.nodes.len(),
         model_def,
-        GeneratedRoutingContext {
-            instance_params,
-            deferred_params,
-            spice_dialect,
-            temperature,
-        },
-    )?;
-    Ok(true)
+    }))
 }
 
 pub(super) fn try_route_generated_diode_model(
@@ -127,34 +211,28 @@ pub(super) fn try_route_generated_diode_model(
     model_name: &str,
     context: GeneratedRoutingContext<'_>,
 ) -> Result<bool, SimulationError> {
-    let GeneratedRoutingContext {
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
-    } = context;
+    match generated_diode_route(netlist, element, model_name)? {
+        Some(route) => route.build(circuit, netlist, element, context),
+        None => Ok(false),
+    }
+}
+
+fn generated_diode_route<'a>(
+    netlist: &'a Netlist,
+    element: &Element,
+    model_name: &str,
+) -> Result<Option<GeneratedCardRoute<'a>>, SimulationError> {
     let model_def = find_model_def(netlist, model_name);
     let target = generated_diode_target(model_name, model_def)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
-        return Ok(false);
+        return Ok(None);
     };
-
-    let nodes = exact_or_ground_padded_nodes(element, target, 0)?;
-    add_generated_instance(
-        circuit,
-        netlist,
-        element,
+    Ok(Some(GeneratedCardRoute {
         target,
-        &nodes,
+        nodes: exact_or_ground_padded_nodes(element, target, 0)?,
+        authored: element.nodes.len(),
         model_def,
-        GeneratedRoutingContext {
-            instance_params,
-            deferred_params,
-            spice_dialect,
-            temperature,
-        },
-    )?;
-    Ok(true)
+    }))
 }
 
 pub(super) fn try_route_generated_bjt_model(
@@ -166,15 +244,28 @@ pub(super) fn try_route_generated_bjt_model(
     context: GeneratedRoutingContext<'_>,
     voltage_limiting_enabled: bool,
 ) -> Result<bool, SimulationError> {
-    let GeneratedRoutingContext {
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
-    } = context;
+    match generated_bjt_route(
+        element,
+        model_name,
+        model_def,
+        context.spice_dialect,
+        voltage_limiting_enabled,
+    )? {
+        Some(route) => route.build(circuit, netlist, element, context),
+        None => Ok(false),
+    }
+}
+
+fn generated_bjt_route<'a>(
+    element: &Element,
+    model_name: &str,
+    model_def: Option<&'a ModelDef>,
+    spice_dialect: crate::config::SpiceDialect,
+    voltage_limiting_enabled: bool,
+) -> Result<Option<GeneratedCardRoute<'a>>, SimulationError> {
     let target = generated_bjt_target(model_name, model_def, element.nodes.len(), spice_dialect)?;
     let Some(target) = target else {
-        return Ok(false);
+        return Ok(None);
     };
     if !voltage_limiting_enabled {
         return Err(SimulationError::Circuit(format!(
@@ -206,22 +297,12 @@ pub(super) fn try_route_generated_bjt_model(
 
     let expected = expected_terminal_count(element, target)?;
     let max_implicit_ground_nodes = expected.saturating_sub(3);
-    let nodes = exact_or_ground_padded_nodes(element, target, max_implicit_ground_nodes)?;
-    add_generated_instance(
-        circuit,
-        netlist,
-        element,
+    Ok(Some(GeneratedCardRoute {
         target,
-        &nodes,
+        nodes: exact_or_ground_padded_nodes(element, target, max_implicit_ground_nodes)?,
+        authored: element.nodes.len(),
         model_def,
-        GeneratedRoutingContext {
-            instance_params,
-            deferred_params,
-            spice_dialect,
-            temperature,
-        },
-    )?;
-    Ok(true)
+    }))
 }
 
 pub(super) fn try_route_generated_mos_model(
@@ -233,61 +314,60 @@ pub(super) fn try_route_generated_mos_model(
     compact_syntax: bool,
     context: GeneratedRoutingContext<'_>,
 ) -> Result<bool, SimulationError> {
-    let GeneratedRoutingContext {
-        instance_params,
-        deferred_params,
-        spice_dialect,
-        temperature,
-    } = context;
+    match generated_mos_route(element, model_name, model_def, compact_syntax)? {
+        Some(route) => route.build(circuit, netlist, element, context),
+        None => Ok(false),
+    }
+}
+
+fn generated_mos_route<'a>(
+    element: &Element,
+    model_name: &str,
+    model_def: Option<&'a ModelDef>,
+    compact_syntax: bool,
+) -> Result<Option<GeneratedCardRoute<'a>>, SimulationError> {
     let target = generated_mos_target(model_name, model_def)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
-        return Ok(false);
+        return Ok(None);
     };
     let expected = expected_terminal_count(element, target)?;
-    let nodes = if compact_syntax {
+    let (nodes, authored) = if compact_syntax {
         compact_generated_mos_nodes(element, target, expected)?
     } else {
         let max_implicit_ground_nodes = expected.saturating_sub(4);
-        exact_or_ground_padded_nodes(element, target, max_implicit_ground_nodes)?
+        (
+            exact_or_ground_padded_nodes(element, target, max_implicit_ground_nodes)?,
+            element.nodes.len(),
+        )
     };
-    add_generated_instance(
-        circuit,
-        netlist,
-        element,
+    Ok(Some(GeneratedCardRoute {
         target,
-        &nodes,
+        nodes,
+        authored,
         model_def,
-        GeneratedRoutingContext {
-            instance_params,
-            deferred_params,
-            spice_dialect,
-            temperature,
-        },
-    )?;
-    Ok(true)
+    }))
 }
 
+/// A compact MOS card's nodes, and how many of them the card wrote.
 fn compact_generated_mos_nodes(
     element: &Element,
     target: GeneratedTarget,
     expected: usize,
-) -> Result<Vec<String>, SimulationError> {
-    if expected == 3 {
-        return compact_generated_mos_prefix_nodes(element, target, 3, expected);
-    }
-
-    if match_normalized(target.model_name, &["ANGELOV_GAN"]) && expected == 5 {
-        return compact_generated_mos_prefix_nodes(element, target, 3, expected);
-    }
-
-    if match_normalized(target.model_name, &["EPFL_HEMT_10A"]) && expected == 5 {
-        return compact_generated_mos_prefix_nodes(element, target, 4, expected);
-    }
-
-    Err(SimulationError::Circuit(format!(
-        "MOSFET '{}': generated Verilog-A model '{}' requires explicit MOS terminals; compact three-terminal syntax is not accepted for this model",
-        element.name, target.model_name
-    )))
+) -> Result<(Vec<String>, usize), SimulationError> {
+    let prefix_len = if expected == 3
+        || (match_normalized(target.model_name, &["ANGELOV_GAN"]) && expected == 5)
+    {
+        3
+    } else if match_normalized(target.model_name, &["EPFL_HEMT_10A"]) && expected == 5 {
+        4
+    } else {
+        return Err(SimulationError::Circuit(format!(
+            "MOSFET '{}': generated Verilog-A model '{}' requires explicit MOS terminals; compact three-terminal syntax is not accepted for this model",
+            element.name, target.model_name
+        )));
+    };
+    let nodes = compact_generated_mos_prefix_nodes(element, target, prefix_len, expected)?;
+    Ok((nodes, prefix_len))
 }
 
 fn compact_generated_mos_prefix_nodes(

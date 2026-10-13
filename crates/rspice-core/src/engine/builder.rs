@@ -5760,7 +5760,9 @@ impl Engine {
         // A Verilog-A instance's port positions and names are its module's, so
         // its terminal meters go in once the sources are resolved; and before
         // the topology walk, the boundary supplies and the devices are built,
-        // all of which must see the meter's private node as the terminal.
+        // all of which must see the meter's private node as the terminal. A
+        // SPICE card the generated route will build is metered on the
+        // terminals that routing gives it.
         #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         let veriloga_terminal_meters = veriloga_terminal_meters::materialize(
             netlist,
@@ -5769,7 +5771,11 @@ impl Engine {
             self.config.resource_limits.max_flattened_elements,
             |element| {
                 let ElementKind::Subcircuit { subckt_name, .. } = &element.kind else {
-                    return None;
+                    return veriloga_terminal_meters::card_routed_ports(
+                        netlist,
+                        element,
+                        &self.config,
+                    );
                 };
                 #[cfg(feature = "veriloga")]
                 if let Some(binding) = veriloga_models.get(&normalize_model_key(subckt_name)) {
@@ -9530,8 +9536,6 @@ impl Engine {
 
         #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
         veriloga_terminal_meters::resolve(&mut circuit, veriloga_terminal_meters)?;
-        #[cfg(feature = "veriloga-builtins-base")]
-        veriloga_terminal_meters::refuse_multi_terminal_generated_currents(netlist, &circuit)?;
 
         let scoped_auto_bridge_metadata =
             xspice_auto_bridge_scoped_metadata(&circuit, &flattened.xspice_auto_bridge_node_hints);

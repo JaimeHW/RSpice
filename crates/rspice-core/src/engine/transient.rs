@@ -2667,23 +2667,25 @@ impl Engine {
     }
 
     /// The metered Verilog-A terminal currents at `solution`, as the device
-    /// observables an `@x1[ia]` probe reads. Recorded beside every device
-    /// report, so they exist at every sample the report does, the first after a
-    /// checkpoint resume included.
+    /// observables an `@x1[ia]` probe reads, under each label the meter
+    /// carries. Recorded beside every device report, so they exist at every
+    /// sample the report does, the first after a checkpoint resume included.
     fn veriloga_terminal_meter_observables(
         circuit: &crate::circuit::CircuitData,
         solution: &[Value],
     ) -> Result<Vec<(String, String, Value)>, SimulationError> {
-        circuit
-            .veriloga_terminal_meters()
-            .iter()
-            .map(|meter| {
-                circuit
-                    .veriloga_terminal_meter_current(solution, meter)
-                    .map(|current| (meter.instance.clone(), meter.label.clone(), current))
-                    .map_err(SimulationError::Circuit)
-            })
-            .collect()
+        let mut observables = Vec::new();
+        for meter in circuit.veriloga_terminal_meters() {
+            let current = circuit
+                .veriloga_terminal_meter_current(solution, meter)
+                .map_err(SimulationError::Circuit)?;
+            observables.extend(
+                meter
+                    .labels()
+                    .map(|label| (meter.instance.clone(), label.to_owned(), current)),
+            );
+        }
+        Ok(observables)
     }
 
     /// Close an accepted point: record its committed event state, hold the
