@@ -165,6 +165,13 @@ pub(crate) fn create_new_project_with(
     state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
     );
+    // The new plan owns its variables, outputs and specifications, as the
+    // session's first plan does. Without the payload every Run plan in a new
+    // project was refused before it netlisted anything.
+    if let Ok(plan) = state.sim_setup.stable_analysis_plan() {
+        let plan_id = plan.id();
+        state.workspace.content.migrate_active_plan_data(plan_id);
+    }
     state.model_library_manager = model_library_manager;
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);

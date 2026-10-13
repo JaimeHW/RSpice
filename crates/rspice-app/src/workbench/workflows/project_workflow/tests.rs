@@ -596,6 +596,26 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     std::fs::remove_dir_all(root).expect("remove configured PDK root");
 }
 
+/// A new project's plan owns its payload, as the session's first plan does:
+/// run preparation reads the plan's variables, outputs and specifications
+/// from it, and refused every Run plan in a new project without one.
+#[test]
+fn a_new_projects_plan_owns_its_variables_outputs_and_specifications() {
+    let mut state = AppState::default();
+
+    create_new_project(&mut state);
+
+    let plan_id = state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("a new project owns a stable plan")
+        .id();
+    assert!(
+        state.workspace.content.plan_data(plan_id).is_some(),
+        "the new plan has its payload"
+    );
+}
+
 #[test]
 fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
     use crate::simulation::dialog::IntegrationMethod;
@@ -1564,7 +1584,10 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
             .is_some()
     );
 
-    ProjectSnapshot::new(state.workspace.clone(), state.library_manager.clone())
+    // Validated as Save captures it: with its plan, which owns the plan
+    // payload the project seeds.
+    crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
+        .expect("a new project captures")
         .file
         .validate()
         .expect("a named new project satisfies the persisted project contract");
