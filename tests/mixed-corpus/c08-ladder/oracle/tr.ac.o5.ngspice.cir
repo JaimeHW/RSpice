@@ -1,0 +1,10 @@
+* C8 abstraction ladder, variant tr, ac: O5-O1 (ngspice-46) held-digital oracle deck
+* The O5 circuit (oracle/tr.o5.cir): the testbench's output held at its t = 0
+* value (0 V), the encoder removed; the transistor Sallen-Key on C5's BSIM4
+* cards, driven so that v(out) is +H.
+.include ../net/sk_tr.cir
+vstim stim 0 0
+vac fin stim dc 0 ac 1
+.ac dec 20 100 1meg
+.save v(out)
+.end

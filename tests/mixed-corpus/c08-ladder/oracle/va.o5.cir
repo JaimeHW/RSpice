@@ -3,6 +3,6 @@
 * an A/D reader only and is removed. The runner appends the deck's card.
 .hdl "../net/sk_va.va"
 vstim stim 0 0
-vac stim fin dc 0 ac 1
+vac fin stim dc 0 ac 1
 xflt fin out sk_va
 .end

@@ -4,5 +4,5 @@
 * appends the deck's card.
 .include ../net/sk_tr.cir
 vstim stim 0 0
-vac stim fin dc 0 ac 1
+vac fin stim dc 0 ac 1
 .end

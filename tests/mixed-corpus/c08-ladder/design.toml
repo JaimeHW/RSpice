@@ -39,11 +39,11 @@ oracles = ["O6", "O7"]
 timeout_s = 150
 phase = "P3"
 
-# The testbench and quantizer are mixed hosts in the deck, so ac refuses
-# today; the held-digital O5 decks (testbench held at 0 V) run.
+# The held-digital O5 decks (testbench held at 0 V) run in RSpice, and the
+# transistor rung's in ngspice (O5-O1).
 [[analysis]]
 id = "ac"
 variants = ["tr", "va"]
-oracles = ["O6", "O7", "O5"]
+oracles = ["O6", "O7", "O5", "O5-O1"]
 timeout_s = 10
 phase = "P1"

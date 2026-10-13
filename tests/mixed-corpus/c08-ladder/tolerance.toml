@@ -68,6 +68,27 @@ abs_db = 0.001
 abs_deg = 0.01
 why = "the Laplace operator is the transfer exactly"
 
+# The transistor rung against the ideal transfer only in the passband. The
+# design allowed 0.1 dB / 1° to 50 kHz for "the op-amp follower's finite gain
+# and bandwidth", but the two-stage op-amp on these cards has a loop gain of
+# about 140 (−0.062 dB at 100 Hz) and its error grows with frequency: ngspice-46
+# on the same held circuit is 0.10 dB off at 5 kHz, 0.26 dB at 10 kHz, 0.69 dB
+# at 20 kHz and 3.53 dB / 15.4° at 50 kHz. So the ideal biquad is the
+# expectation where the follower's error is inside 0.1 dB (100 Hz, 1 kHz),
+# and the circuit itself is checked over the band against ngspice (O5-O1).
+[[q]]
+id = "acH"
+analysis = "ac"
+variants = ["tr"]
+kind = "ac"
+signal = "v(out)"
+points = [100.0, 1e3]
+oracle = "O6"
+expect = "c08::ach"
+abs_db = 0.1
+abs_deg = 1.0
+why = "the op-amp follower's finite gain (≈140: 0.06 dB) in the passband"
+
 [[q]]
 id = "acH"
 analysis = "ac"
@@ -75,11 +96,11 @@ variants = ["tr"]
 kind = "ac"
 signal = "v(out)"
 points = [100.0, 1e3, 5e3, 1e4, 2e4, 5e4]
-oracle = "O6"
-expect = "c08::ach"
+oracle = "O5-O1"
+ref = "ref/tr.ac.O5-O1.out"
 abs_db = 0.1
 abs_deg = 1.0
-why = "the op-amp follower's finite gain and bandwidth, to 50 kHz"
+why = "the held transistor circuit in ngspice-46: the same BSIM4 cards and small-signal model (C5's O5-O1 ac allowance)"
 
 [[q]]
 id = "acH"
