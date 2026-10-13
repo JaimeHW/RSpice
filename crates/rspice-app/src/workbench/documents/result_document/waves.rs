@@ -24,9 +24,9 @@ use rspice_results_ui::waves::pane::pane_auto_y;
 use rspice_results_ui::waves::pane::{apply_family_trace_style, nearest_drawn_trace};
 use rspice_results_ui::waves::readout::append_copied_cursor;
 pub(super) use rspice_results_ui::waves::{FamilyTraceVisibilityKey, StripModel, UnitPane};
-use rspice_results_ui::waves::{StripTrace, anchor_key, family_color, fmt_in_unit};
+use rspice_results_ui::waves::{StripTrace, anchor_key, family_color};
 #[cfg(test)]
-use rspice_results_ui::waves::{TraceKind, trace_key};
+use rspice_results_ui::waves::{TraceKind, fmt_in_unit, trace_key};
 pub(crate) use rspice_results_ui::waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
@@ -492,6 +492,8 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
 pub(crate) struct ActivePaneFacts {
     /// The unit that names the pane in a unit-scoped stack.
     pub unit: Option<String>,
+    /// The unit the strip's shared X axis is measured in.
+    pub x_unit: Option<String>,
     /// The analysis the pane belongs to. A sheet that is not the waveform
     /// stack still draws exactly one analysis, and it is not necessarily the
     /// one the run's analysis selector points at.
@@ -520,7 +522,11 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
     // The viewport the pane is actually showing, whether the user pinned it
     // or it is fitting the retained data. The mockup states the interval
     // either way: "automatic" alone does not tell a reader what they see.
-    let (x_viewport, y_viewport) = active_pane_viewports(tokens, state);
+    let PaneViewports {
+        x: x_viewport,
+        y: y_viewport,
+        x_unit,
+    } = active_pane_viewports(tokens, state);
     let (x_extent, y_extent) = active_pane_extents(tokens, state);
     let (analysis, traces, runs) = active_pane_identity(tokens, state);
     let pinned = state
@@ -544,6 +550,7 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
     });
     ActivePaneFacts {
         unit: key.map(|key| key.unit.clone()),
+        x_unit,
         analysis,
         traces,
         runs,
@@ -581,7 +588,6 @@ pub(crate) fn active_shared_x_status(
 ) -> Option<SharedXStatus> {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let digits = usize::from(presentation.displayed_significant_digits().get());
     let active = state
         .ui
         .results
@@ -605,13 +611,26 @@ pub(crate) fn active_shared_x_status(
     let (start, end) = shared_axis_viewport_fraction(model.x_scale, full, view);
     let width = end - start;
     Some(SharedXStatus {
-        span: format!(
-            "{} … {}",
-            model.format_x(view.0, digits, quantity_policy),
-            model.format_x(view.1, digits, quantity_policy)
-        ),
+        span: x_range_text(model, view, quantity_policy),
         zoom: if width > 0.0 { 1.0 / width } else { 1.0 },
     })
+}
+
+/// A strip's X interval as its axis states it: the range field's own
+/// spelling, in the frequency unit the reader chose for a hertz axis.
+fn x_range_text(
+    model: &StripModel,
+    (x0, x1): (f64, f64),
+    quantity_policy: crate::quantity::QuantityPresentationPolicy,
+) -> String {
+    if model.x_unit == "Hz" {
+        let (scale, offset, unit) = quantity_policy.frequency_axis_transform();
+        return super::axis_range::format_axis_range(
+            (x0 * scale + offset, x1 * scale + offset),
+            unit,
+        );
+    }
+    super::axis_range::format_axis_range((x0, x1), &model.x_unit)
 }
 
 /// The analysis the active pane belongs to and how many of its traces the
@@ -781,16 +800,21 @@ pub(crate) fn set_active_pane_axis_range(
     true
 }
 
-fn active_pane_viewports(
-    tokens: &Tokens,
-    state: &mut AppState,
-) -> (Option<String>, Option<String>) {
+/// The active pane's two intervals as the inspector states them, and the
+/// unit its shared X axis is measured in.
+#[derive(Default)]
+struct PaneViewports {
+    x: Option<String>,
+    y: Option<String>,
+    x_unit: Option<String>,
+}
+
+fn active_pane_viewports(tokens: &Tokens, state: &mut AppState) -> PaneViewports {
     let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
-        return (None, None);
+        return PaneViewports::default();
     };
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
-    let digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,
@@ -801,7 +825,7 @@ fn active_pane_viewports(
         .iter()
         .find(|model| model.analysis_key == key.analysis)
     else {
-        return (None, None);
+        return PaneViewports::default();
     };
     let panes = model.unit_panes();
     let Some((ordinal, pane)) = panes
@@ -809,16 +833,12 @@ fn active_pane_viewports(
         .enumerate()
         .find(|(_, pane)| pane.unit == key.unit)
     else {
-        return (None, None);
+        return PaneViewports::default();
     };
     let x = model.x_range.map(|full| {
-        let (x0, x1) =
+        let view =
             shared_x_view(&state.ui.results.session, key.analysis, panes.len()).unwrap_or(full);
-        format!(
-            "{} … {}",
-            model.format_x(x0, digits, quantity_policy),
-            model.format_x(x1, digits, quantity_policy)
-        )
+        x_range_text(model, view, quantity_policy)
     });
     let pinned = state
         .ui
@@ -831,14 +851,12 @@ fn active_pane_viewports(
         Some(range) => Some(range),
         None => displayed_pane_auto_y(state, model, pane, ordinal, tokens),
     }
-    .map(|(y0, y1)| {
-        format!(
-            "{} … {}",
-            fmt_in_unit(y0, unit, digits),
-            fmt_in_unit(y1, unit, digits)
-        )
-    });
-    (x, y)
+    .map(|range| super::axis_range::format_axis_range(range, unit));
+    PaneViewports {
+        x,
+        y,
+        x_unit: Some(model.x_unit.clone()),
+    }
 }
 
 /// The Y interval one pane of a strip is showing right now, automatic fit

@@ -37,10 +37,16 @@ pub const NOISE_DENSITY_UNIT: &str = "nV/√Hz";
 /// A unit that already carries an SI prefix takes no second one: 1.79 µV/√Hz
 /// of output noise reads as `1786.13 nV/√Hz`, never as `1.78613 knV/√Hz`.
 pub fn fmt_in_unit(value: f64, unit: &str, significant_digits: usize) -> String {
-    if matches!(unit, NOISE_DENSITY_UNIT | "nA/√Hz" | "ns/√Hz") {
+    if unit_carries_its_decade(unit) {
         return fmt_significant(value, significant_digits, &format!(" {unit}"));
     }
     fmt_si_significant(value, unit, significant_digits)
+}
+
+/// Whether a pane's unit already names its decade, so a value in it is
+/// written as it stands and never takes an SI prefix of its own.
+pub fn unit_carries_its_decade(unit: &str) -> bool {
+    matches!(unit, NOISE_DENSITY_UNIT | "nA/√Hz" | "ns/√Hz")
 }
 
 /// The projections a trace kind performs own their own unit: a decibel

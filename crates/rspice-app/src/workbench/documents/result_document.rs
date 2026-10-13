@@ -5,6 +5,7 @@
 //! (waveform strips, Bode, FFT, eye, histogram, and the
 //! Nyquist/Smith/pole-zero diagnostics), and a content-fit readout strip.
 
+pub(crate) mod axis_range;
 mod bars;
 mod bode;
 mod box_violin;

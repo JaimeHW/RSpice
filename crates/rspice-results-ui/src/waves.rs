@@ -34,7 +34,7 @@ pub use projection::{ProjectionOptions, build_models, family_color};
 use units::signal_unit;
 pub use units::{
     NOISE_DENSITY_UNIT, analysis_default_unit, browser_signal_is_current, browser_signal_unit,
-    fmt_in_unit,
+    fmt_in_unit, unit_carries_its_decade,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

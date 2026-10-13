@@ -1434,6 +1434,7 @@ fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
 
     let facts = ActivePaneFacts {
         unit: None,
+        x_unit: None,
         analysis: None,
         traces: None,
         runs: None,
