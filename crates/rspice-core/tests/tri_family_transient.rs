@@ -110,8 +110,16 @@ const DIODE_CMC: bool = cfg!(feature = "veriloga-model-diode-cmc");
 /// the six `q` edges, where the interval leaving the edge asks its crossing
 /// one hard minimum past it first. 1132 + those 7 single landings is 1139,
 /// and every accepted step below 1e-14 s is one of them.
-const DECK_A_POINTS: usize = 1139;
-const DECK_A_GRID_HASH: u64 = 0x36f3_4a2e_1cf1_7f86;
+///
+/// Re-measured at 1157 when zero-time D/A edges began completing at a
+/// breakpoint one picosecond past their instant. Each of the six `q` edges
+/// trades its hard-minimum landing for that completion, and gains three
+/// points: `a_adc`'s `in_high` crossing on the clock ramp, 1.5 ps after the
+/// edge, now interrupts the 2.42 ps step resumed after the completion, and
+/// the restart after that root is a tenth of it, where the hard-minimum
+/// landing had restored the edge's 24 ps approach. 1139 + 6 × 3 is 1157.
+const DECK_A_POINTS: usize = 1157;
+const DECK_A_GRID_HASH: u64 = 0xf90b_311b_de64_ddd7;
 
 /// Deck A's node waveforms, re-measured after R2.15 took the digital-only nets
 /// out of the analog namespace.
@@ -131,7 +139,10 @@ const DECK_A_GRID_HASH: u64 = 0x36f3_4a2e_1cf1_7f86;
 /// right-limit edges erred 3.2934 V, and the analog solution at every pinned
 /// digital instant is unchanged to 1 uV
 /// (`deck_a_digital_instants_keep_their_pre_fix_analog_solution`).
-const DECK_A_VOLT_HASH: u64 = 0xdd89_3fbe_1613_e538;
+///
+/// Re-measured with the grid for the picosecond edge completion, which moves
+/// no digital trace point and keeps that pinned analog solution.
+const DECK_A_VOLT_HASH: u64 = 0xb7b4_5134_11c8_c8e0;
 
 /// Deck A's fingerprint, from the three constants above.
 const DECK_A_FINGERPRINT: Fingerprint = Fingerprint {
@@ -140,7 +151,7 @@ const DECK_A_FINGERPRINT: Fingerprint = Fingerprint {
     volt_hash: DECK_A_VOLT_HASH,
 };
 
-const DECK_C2_POINTS: usize = 265;
+const DECK_C2_POINTS: usize = 275;
 
 /// Deck C2's accepted grid and analog solution, first measured 2026-09-13.
 ///
@@ -154,10 +165,14 @@ const DECK_C2_POINTS: usize = 265;
 /// the same 265 points on the same grid, every event bit-identical, and `c`
 /// against its 10k-loaded drive, held from before each edge on the edge's own
 /// point, worst 3.2934 V -> 6.6e-14 V.
+///
+/// Re-measured, 265 -> 275, when zero-time D/A edges began completing at a
+/// breakpoint one picosecond past their instant: `c`'s ten edges each add
+/// that completion.
 const DECK_C2_FINGERPRINT: Fingerprint = Fingerprint {
     points: DECK_C2_POINTS,
-    grid_hash: 0x28ff_9ed5_d9c9_59f2,
-    volt_hash: 0x60a2_2915_8352_c32b,
+    grid_hash: 0x7cf9_3421_56ca_b11f,
+    volt_hash: 0x21c4_5bce_11ea_c82e,
 };
 
 /// Deck A's `d_clk` transitions, as the route dated them BEFORE the R2.2
@@ -568,18 +583,19 @@ fn deck_a_tri_family_transient_sequence_golden() {
 ///
 /// The deck does take steps at its floor, and must: they are *landings*, the
 /// one analog timepoint the stepper owes an event it cannot separate from the
-/// point before. Two kinds, both measured on this deck:
+/// point before. `a_adc` reaches `in_low` exactly on the point that lands its
+/// 1.6 V root, and holds `0` there (ngspice `cfunc.mod`), so its move to `x` is
+/// a root at that point itself and is landed one minimum step after it
+/// (48.48 ps). That is the one such landing this deck has.
 ///
-/// - `a_adc` reaches `in_low` exactly on the point that lands its 1.6 V root,
-///   and holds `0` there (ngspice `cfunc.mod`), so its move to `x` is a root at
-///   that point itself and is landed one minimum step after it (48.48 ps).
-/// - `q` is a zero-rise D/A drive: it acts from the first instant after the
-///   point that steps it, so an A/D crossing in the interval leaving that point
-///   is first asked of the point one minimum step past it, where a crossing the
-///   step caused already is (0.05, 10.05 … 50.05 ns, each followed here by
-///   `a_adc`'s own `in_high` crossing on the clock ramp).
+/// `q`'s six edges once added one each. `q` is a zero-rise D/A drive that acts
+/// from the first instant after the point that steps it, and an A/D crossing
+/// in the interval leaving that point used to be asked first of the point one
+/// minimum step past it. The edge now completes at a breakpoint one picosecond
+/// past its instant, so the step leaving it is that picosecond and nothing
+/// lands at the floor (`deck_a_takes_a_controller_sized_step_after_every_digital_edge`).
 ///
-/// What this case pins is that every one of them is a single step: the step
+/// What this case pins is that every landing is a single step: the step
 /// after a landing restarts from the proposal the event interrupted, and is
 /// controller-sized. The ladder P0.10 D10 found — the restart after the 48.48
 /// ps landing capped at twice its own width by the device truncation ceiling,
@@ -649,15 +665,24 @@ fn deck_a_accepts_no_step_near_the_solver_floor_after_a_digital_edge() {
 /// ramp cost sixty-odd more. Both are node- and breakpoint-scoped facts about
 /// the accepted grid, and this case states them as such.
 ///
-/// A picosecond is the separator. The controller's own first proposal after an
-/// edge here is 2.4 ps; the width-gated acceptance floor R2.14 first proposed
-/// would have accepted 0.125 ps at the same instant and called the ladder gone,
-/// so a bound between the two is what tells "ended" from "masked". The second
-/// assertion is what a masked ladder cannot satisfy at all: the edge is taken
-/// whole, in the first accepted point past it — the point on the edge holds
-/// the drive from before it — at the level `q` still holds 2.5 ns later.
+/// The edge's own transition is the separator. `q`'s edges take no time: the
+/// point on an edge holds the drive from before it, and the edge completes one
+/// transition later — the converter's 1 ps minimum — at a breakpoint. The
+/// restart an edge earns here is 2.4 ps, longer than that transition, so the
+/// step leaving an edge crosses the whole transition and lands on its
+/// completion. A ladder at the edge puts its rungs inside the transition, and
+/// so does any width the controller did not propose (the width-gated acceptance
+/// floor R2.14 first proposed would have accepted 0.125 ps there and called the
+/// ladder gone); either makes the step leaving the edge shorter than the edge's
+/// own transition. The step after the completion is not bounded the same way:
+/// it resumes the edge's restart, and `a_adc`'s `in_high` crossing on the clock
+/// ramp, 1.5 ps after every edge, cuts it short. The second assertion is what
+/// a masked ladder cannot satisfy at all: the edge is taken whole, in the
+/// first accepted point past it, at the level `q` still holds 2.5 ns later.
 #[test]
 fn deck_a_takes_a_controller_sized_step_after_every_digital_edge() {
+    /// The converter's minimum transition, which a zero-time edge completes in.
+    const EDGE_TRANSITION: f64 = 1e-12;
     const CONTROLLER_STEP_BOUND: f64 = 1e-12;
     const FLOOR_LADDER_BOUND: f64 = 1e-14;
     let result = run_deck_a();
@@ -680,19 +705,22 @@ fn deck_a_takes_a_controller_sized_step_after_every_digital_edge() {
     );
 
     for index in edges {
-        let edge = result.time[index];
-        let step = result.time[index + 1] - edge;
+        // `index` is the first point past the edge; the one before it is the
+        // edge's own point.
+        let edge = result.time[index - 1];
+        let step = result.time[index] - edge;
         assert!(
-            step >= CONTROLLER_STEP_BOUND,
-            "the step after the D/A edge at {edge:e} is {step:e}, below \
-             {CONTROLLER_STEP_BOUND:e}: the retry ladder at the edge is back, \
-             or something is accepting a width the controller did not propose"
+            (step - EDGE_TRANSITION).abs() <= 1e-9 * EDGE_TRANSITION,
+            "the step leaving the D/A edge at {edge:e} is {step:e}, not the edge's \
+             own {EDGE_TRANSITION:e} transition: the retry ladder at the edge is \
+             back, or something is accepting a width the controller did not propose"
         );
-        let settled = sample_at(&result, "Q", edge + DECK_A_INSTANT_OFFSET);
+        let settled = sample_at(&result, "Q", result.time[index] + DECK_A_INSTANT_OFFSET);
         assert!(
             (q[index] - settled).abs() < 1e-6,
-            "V(q) at {edge:e}, the first point past the edge, is {}, and the \
-             level it settles at is {settled}: the edge was not taken whole",
+            "V(q) at {:e}, the first point past the edge, is {}, and the level it \
+             settles at is {settled}: the edge was not taken whole",
+            result.time[index],
             q[index]
         );
     }

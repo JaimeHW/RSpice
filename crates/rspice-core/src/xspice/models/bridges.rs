@@ -1356,12 +1356,33 @@ fn dac_bridge_transition_duration(start_value: Value, target: Value, ramp: DacBr
     }
 }
 
+/// Where a transition reaches its target, which the stepper lands on as a
+/// breakpoint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DacBridgeCompletion {
+    /// The end of a ramp that takes time.
+    Ramp(Value),
+    /// The end of a zero-duration edge's realization
+    /// ([`CmContext::request_edge_completion`]).
+    Edge(Value),
+}
+
+/// When a transition that started at `start_time` reaches its target.
+///
+/// A transition with no duration — the built-in mixed D/A converter's default
+/// edge — is a step at its own instant, and that instant is a timepoint whose
+/// drive is the left limit ([`dac_bridge_ramp_value`]). The new level is
+/// therefore first solved at whichever point comes next. Left to the stepper,
+/// that is the restart step after the edge's breakpoint, a tenth of the step
+/// before it, which put a buck controller's PWM edges 1 to 2.5 ns late. So a
+/// step completes [`OFFICIAL_BRIDGE_TIMING_MIN`] after its instant, the
+/// shortest edge the bridge law admits, and that point is the breakpoint.
 fn dac_bridge_completion_time(
     start_time: Value,
     start_value: Value,
     target: Value,
     ramp: DacBridgeRamp,
-) -> Option<Value> {
+) -> Option<DacBridgeCompletion> {
     let DacBridgeRamp {
         out_low,
         out_high,
@@ -1384,7 +1405,17 @@ fn dac_bridge_completion_time(
         },
     );
     let slope = span / duration;
-    (slope > 0.0 && slope.is_finite()).then_some(start_time + (target - start_value).abs() / slope)
+    if slope > 0.0 && slope.is_finite() {
+        Some(DacBridgeCompletion::Ramp(
+            start_time + (target - start_value).abs() / slope,
+        ))
+    } else if duration == 0.0 {
+        Some(DacBridgeCompletion::Edge(
+            start_time + OFFICIAL_BRIDGE_TIMING_MIN,
+        ))
+    } else {
+        None
+    }
 }
 
 fn bridge_vector_width(ctx: &CmContext, model_name: &str) -> CmResult<usize> {
@@ -1638,20 +1669,26 @@ fn evaluate_dac_bridge(
             v_out
         };
 
-        if let Some(completion_time) = dac_bridge_completion_time(
-            transition_start_time,
-            transition_start_value,
-            transition_target,
-            DacBridgeRamp {
-                out_low,
-                out_high,
-                t_rise,
-                t_fall,
-            },
-        ) && commit_outputs
-            && completion_time > ctx.time + 1.0e-18
-        {
-            ctx.request_breakpoint(completion_time);
+        if commit_outputs {
+            match dac_bridge_completion_time(
+                transition_start_time,
+                transition_start_value,
+                transition_target,
+                DacBridgeRamp {
+                    out_low,
+                    out_high,
+                    t_rise,
+                    t_fall,
+                },
+            ) {
+                Some(DacBridgeCompletion::Ramp(time)) if time > ctx.time + 1.0e-18 => {
+                    ctx.request_breakpoint(time);
+                }
+                Some(DacBridgeCompletion::Edge(time)) if time > ctx.time + 1.0e-18 => {
+                    ctx.request_edge_completion(time);
+                }
+                _ => {}
+            }
         }
 
         if commit_outputs {

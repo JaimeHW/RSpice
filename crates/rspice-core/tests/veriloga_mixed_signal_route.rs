@@ -1199,6 +1199,70 @@ fn every_digital_net_is_recorded_and_esave_names_each_one() {
     assert!(error.contains("'nosuch' is not an event node"), "{error}");
 }
 
+/// A built-in D/A converter's edge lands at the instant the module drove it.
+///
+/// The converter's edges take no time, and the edge's own timepoint keeps the
+/// level from before it (the left limit). The new level is solved at the next
+/// accepted point, so that point has to come with the edge rather than
+/// wherever the step leaving the edge would have gone: on this deck, with a
+/// 10 ns maximum step, that was the restart step after the edge's breakpoint,
+/// a tenth of the step before it, so the level arrived that much late. The
+/// edge completes 1 ps after its instant, the shortest edge the bridge law
+/// admits, and that completion is a breakpoint, so the new level is solved
+/// within 1 ps of the instant the module drove it.
+///
+/// The reference is ngspice-46 solving the same divider driven by a PWL
+/// source with 1 ps edges at 10, 30 and 50 ns, which crosses half the high
+/// level at 10.0005, 30.0005 and 50.0005 ns. The converter's edge is a step
+/// inside that picosecond, so its crossing lies within half a picosecond of
+/// the twin's. (ngspice's own `dac_bridge` with `t_rise = 1p` is not a
+/// reference here: it requests no completion point for a transition that
+/// starts at the analog point itself, and crosses at 10.32, 30.40 and
+/// 50.50 ns.)
+#[test]
+fn a_built_in_converter_edge_lands_at_the_instant_the_module_drove_it() {
+    let model = ModelFile::new(
+        "edge_instant",
+        "`timescale 1ns/1ps\n\
+         module edge_instant(q); output q; reg q;\n\
+         initial begin q = 1'b0; #10 q = 1'b1; #20 q = 1'b0; #20 q = 1'b1; end\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* built-in D/A edge times\n.param vcc=1.8\nX1 out edge_instant\nR1 out 0 1k\n\
+         .va \"{}\" edge_instant\n.end\n",
+        model.deck_path(),
+    ))
+    .unwrap();
+    let result = Engine::default().run_tran(&netlist, 1e-6, 10e-9).unwrap();
+    let out = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .unwrap();
+    let half = 0.5 * 1.8 * 1000.0 / 1020.0;
+    let crossings: Vec<f64> = result
+        .time
+        .windows(2)
+        .zip(result.voltages[out].windows(2))
+        .filter(|(_, v)| (v[0] - half) * (v[1] - half) < 0.0)
+        .map(|(t, v)| t[0] + (half - v[0]) / (v[1] - v[0]) * (t[1] - t[0]))
+        .collect();
+    assert_eq!(crossings.len(), 3, "three edges: {crossings:?}");
+    for (crossing, (edge, twin)) in crossings.iter().zip([
+        (10e-9, 10.0005e-9),
+        (30e-9, 30.0005e-9),
+        (50e-9, 50.0005e-9),
+    ]) {
+        assert!(
+            *crossing > edge && *crossing <= edge + 1.0e-12 * (1.0 + 1.0e-9),
+            "an edge must cross half the level inside the picosecond after it was driven, \
+             where the 1 ps PWL twin crosses at {twin:.7e} s: {crossing:.7e} s ({crossings:?})"
+        );
+        assert!((crossing - twin).abs() <= 0.5e-12 * (1.0 + 1.0e-9));
+    }
+}
+
 #[test]
 fn a_portless_mixed_initializer_finishes_without_contribution_equations() {
     use rspice_core::{ModelFinishPoint, NoAbort, SimulationOutcome};

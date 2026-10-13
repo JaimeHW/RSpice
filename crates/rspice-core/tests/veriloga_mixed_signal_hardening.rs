@@ -249,10 +249,17 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // points on the same grid, every event bit-identical, and QS against
         // its 10k-loaded drive, held from before each edge on the edge's own
         // point, worst 3.2934 V -> 6.6e-14 V (mean 6.5e-2 -> 3.2e-14 V).
+        //
+        // Re-measured, 508 -> 518, when zero-time D/A edges began completing
+        // at a breakpoint one picosecond past their instant: each of QS's ten
+        // edges adds that completion, and every event is bit-identical. QS
+        // crosses half its level 0.5 ps after each edge, where it crossed
+        // 2.0 ps after (half the restart step that first solved the new
+        // level); a 1 ps PWL edge crosses at 0.5 ps.
         Fingerprint {
-            points: 508,
-            grid_hash: 0x4b39_7d58_993e_1a2a,
-            volt_hash: 0xb968_47e1_1630_c101,
+            points: 518,
+            grid_hash: 0xac5c_1670_ff3a_1bea,
+            volt_hash: 0x7512_13e8_713a_8551,
         },
     ),
     (
@@ -270,19 +277,40 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // adds 0.269 -> 4.1e-3 V (1856 -> 1861 points). All 101 `qdiv`
         // transitions stay bit-identical and all 200 activations are accepted
         // with their own bits.
+        //
+        // Re-measured, 1861 -> 1958, when zero-time D/A edges began
+        // completing at a breakpoint one picosecond past their instant. Every
+        // window after a QDIV edge gains that completion (+99), except the
+        // first, 5 to 15 ns, which loses two: the step after the 5 ns edge's
+        // completion resumes at 100 ps where the restart after the edge was
+        // 13 ps, and the restart after the 10 ns activation is 36 ps rather
+        // than 20 ps. Every event stays bit-identical. QDIV crosses half its
+        // level 0.50 ps after each edge (mean 46.7 ps before); a 1 ps PWL
+        // edge crosses at 0.5 ps. OUT's worst error against the analytic RC
+        // response rose 4.87e-3 -> 5.76e-3 V and its mean 1.32e-3 ->
+        // 1.39e-3 V, and neither moved at an edge. The worst is the step that
+        // lands on the 15 ns activation, which is solved at order one: it grew
+        // 0.870 -> 0.947 ns on the moved grid, and its error, which scales
+        // with the square of the step, grew 4.27e-3 -> 5.04e-3 V.
         Fingerprint {
-            points: 1861,
-            grid_hash: 0x9de2_c05a_18ce_21c1,
-            volt_hash: 0xcef4_36a6_60ff_bfb2,
+            points: 1958,
+            grid_hash: 0xc32e_bd19_6814_2bc5,
+            volt_hash: 0x1448_5c80_84b0_97b5,
         },
     ),
     (
         "an_activation_inside_the_breakpoint_merge_tolerance_is_delivered",
         "hardening_merge_window",
+        // Re-measured, 334 -> 353, when zero-time D/A edges began completing
+        // at a breakpoint one picosecond past their instant: each of QD's 19
+        // edges adds that completion, and every event is bit-identical. The
+        // restart after each edge here was already shorter than the
+        // picosecond, so QD crosses half its level 0.01 ps after each edge
+        // in both runs.
         Fingerprint {
-            points: 334,
-            grid_hash: 0x6b0e_f6fd_36c7_66af,
-            volt_hash: 0x97a0_1311_2bfb_0170,
+            points: 353,
+            grid_hash: 0xfbaa_4f10_e466_f6e5,
+            volt_hash: 0xd37d_277c_dc23_aa1c,
         },
     ),
     // The three feedback decks were re-measured for the left-limit D/A drive
@@ -290,31 +318,37 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
     // bit-identical, and YA/YB against their 10k-loaded drives, held from
     // before each edge on the edge's own point, worst 3.2934 V -> 6.6e-14 V
     // (mean 9.1e-2 -> 2.0e-14 V) in all three.
+    //
+    // And together again, 36 -> 37, when zero-time D/A edges began
+    // completing at a breakpoint one picosecond past their instant: YA and
+    // YB flip at one instant, which adds that completion, every event is
+    // bit-identical, and both cross half their level 0.5 ps after the edge
+    // rather than 40 ps after; a 1 ps PWL edge crosses at 0.5 ps.
     (
         "the_engine_asks_for_no_interior_root_on_a_feedback_carried_crossing",
         "hardening_feedback",
         Fingerprint {
-            points: 36,
-            grid_hash: 0xde34_c01f_9d47_f6dd,
-            volt_hash: 0x3300_2d53_5f8d_efc7,
+            points: 37,
+            grid_hash: 0xda88_27dc_ffe8_7235,
+            volt_hash: 0x885f_95b9_2c3a_3489,
         },
     ),
     (
         "a_crossing_carried_between_two_instances_is_landed_on_once",
         "hardening_feedback_split",
         Fingerprint {
-            points: 36,
-            grid_hash: 0xde34_c01f_9d47_f6dd,
-            volt_hash: 0x59d9_7a0d_d724_2903,
+            points: 37,
+            grid_hash: 0xda88_27dc_ffe8_7235,
+            volt_hash: 0x3317_6bb3_ba0a_ecf8,
         },
     ),
     (
         "a_carried_crossing_wakes_its_process_after_the_write_that_caused_it",
         "hardening_feedback_order",
         Fingerprint {
-            points: 36,
-            grid_hash: 0xde34_c01f_9d47_f6dd,
-            volt_hash: 0x3300_2d53_5f8d_efc7,
+            points: 37,
+            grid_hash: 0xda88_27dc_ffe8_7235,
+            volt_hash: 0x885f_95b9_2c3a_3489,
         },
     ),
     (
@@ -336,10 +370,17 @@ const FINGERPRINTED_FIXTURES: &[(&str, &str, Fingerprint)] = &[
         // to reach 5 ns with at 0.312 ns rather than 0.222 ns (two
         // equalization steps instead of three), and the 10 ns landing adds
         // the same 1.7e-3 V in both runs.
+        //
+        // Re-measured, 191 -> 196, when zero-time D/A edges began completing
+        // at a breakpoint one picosecond past their instant: each of QDIV's
+        // five edges adds that completion, and every event is bit-identical.
+        // The restart after each edge here was already shorter than the
+        // picosecond, so QDIV crosses half its level 0.06 ps after each edge
+        // in both runs.
         Fingerprint {
-            points: 191,
-            grid_hash: 0x222e_573a_9897_3b6f,
-            volt_hash: 0x0084_ce96_a2ed_a11b,
+            points: 196,
+            grid_hash: 0xf73a_2b73_fc1e_312f,
+            volt_hash: 0xe9e3_75a9_5bdf_cddb,
         },
     ),
     (
@@ -471,10 +512,21 @@ fn mixed_fixture_hashes_are_identical_across_processes() {
 /// doubles out of the solver floor (D10). Of the 22 accepted steps below
 /// 1e-14 s around `clk`'s 2/3 ns fall, the 3 landings of the root chase
 /// itself remain and the 19 doubling rungs after them are gone.
+///
+/// Re-measured again when zero-time D/A edges began completing at a
+/// breakpoint one picosecond past their instant (65 -> 58).
+/// `qa` and `qb` flip one picosecond apart, so `qa`'s completion is `qb`'s
+/// edge. The restarts after the two edges used to be a tenth of the steps
+/// between them, 0.1 and 0.07 ps, and the grid doubled back from them over
+/// fourteen points to 431 ps. The stepper now crosses each edge's picosecond
+/// in one step and resumes, at `qb`'s completion, the restart the edges
+/// earned: seven points to 412 ps. Every event but `clk`'s 2/3 ns fall is
+/// bit-identical, and that fall moved by 7.9e-23 s, the A/D root dated on the
+/// moved grid.
 const TWO_CROSSINGS_PIN: (&str, &str, usize) = (
     "two_unfed_crossings_keep_their_own_instants_when_a_trial_lands_on_the_later_one",
     "hardening_two_crossings",
-    65,
+    58,
 );
 
 /// Print `result`'s fingerprint under `key`, and assert its point count
@@ -575,6 +627,11 @@ fn external_toggle_deck(model: &ModelFile) -> String {
 /// Exercise public persisted restart, including its accepted seam and the
 /// exact future analog trajectory and digital transitions.
 fn assert_mixed_persisted_restart(deck: &str, signal: &str) {
+    assert_mixed_persisted_restart_at(deck, signal, 100e-9);
+}
+
+/// [`assert_mixed_persisted_restart`] with the checkpoint at `at`.
+fn assert_mixed_persisted_restart_at(deck: &str, signal: &str, at: f64) {
     let netlist = Netlist::parse(deck).unwrap();
     let engine = Engine::new(SimulationConfig::default());
     assert!(
@@ -589,7 +646,7 @@ fn assert_mixed_persisted_restart(deck: &str, signal: &str) {
             200e-9,
             1e-9,
             TransientStartupMode::OperatingPoint,
-            &[100e-9],
+            &[at],
         )
         .unwrap();
     let saved = &scheduled[0].checkpoint;
@@ -702,6 +759,34 @@ fn a_mixed_checkpoint_restores_external_clock_state_without_initial_replay() {
 fn a_mixed_checkpoint_restores_self_scheduled_events_without_initial_replay() {
     let model = ModelFile::new("checkpoint_divider", CLOCK_DIVIDER);
     assert_mixed_persisted_restart(&divider_deck(&model, 200), "qdiv");
+}
+
+/// A checkpoint on a D/A edge resumes onto the edge's completion.
+///
+/// `qdiv` flips at 105 ns, so the checkpoint is the edge's own accepted point,
+/// where the converter asked for the breakpoint that completes the edge a
+/// picosecond later. The resumed run evaluates no model at its first point,
+/// so only the checkpoint can hand it that completion; without it the resumed
+/// run steps over the completion the uninterrupted run lands on, and the two
+/// part at the edge.
+#[test]
+fn a_mixed_checkpoint_on_a_d_a_edge_resumes_onto_the_edge_completion() {
+    let model = ModelFile::new("checkpoint_edge", CLOCK_DIVIDER);
+    let deck = divider_deck(&model, 200);
+    let baseline = run(&deck, 200e-9, 1e-9);
+    let edge = digital_points(&baseline, "qdiv")
+        .iter()
+        .map(|(at, _)| *at)
+        .find(|at| (at - 105e-9).abs() < 1e-18)
+        .expect("qdiv flips at 105 ns");
+    assert!(
+        baseline
+            .time
+            .iter()
+            .any(|t| (t - (edge + 1e-12)).abs() < 1e-21),
+        "the uninterrupted run lands on the edge's completion"
+    );
+    assert_mixed_persisted_restart_at(&deck, "qdiv", edge);
 }
 
 #[test]

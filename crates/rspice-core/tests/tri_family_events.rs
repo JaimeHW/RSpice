@@ -39,9 +39,9 @@ use rspice_core::{Engine, Netlist};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// `out` of deck E, four nanoseconds after the divider's first rise.
-const DECK_E_OUT_EARLY: f64 = 1.107262;
+const DECK_E_OUT_EARLY: f64 = 1.151593;
 /// `out` of deck E, eight nanoseconds after the divider's first rise.
-const DECK_E_OUT_LATE: f64 = 1.859483;
+const DECK_E_OUT_LATE: f64 = 1.827762;
 
 /// Deck E's accepted grid and analog solution, first measured 2026-09-13.
 ///
@@ -66,10 +66,30 @@ const DECK_E_OUT_LATE: f64 = 1.859483;
 /// they are read at the first accepted point at or after their instants, so
 /// what moved is the edge's head start rather than the sampling, and each is
 /// now within that 1.08e-3 V of the analytic response at its own point.
+///
+/// Re-measured a fourth time when zero-time D/A edges began completing at a
+/// breakpoint one picosecond past their instant: 271 -> 278 points, every
+/// `qdiv` transition bit-identical. Each window between `qdiv` edges gains
+/// that completion. The first loses three points besides, one each in three
+/// places: the step after the 5 ns edge's completion resumes at 50 ps where
+/// the restart after the edge was 6.7 ps; the grid that moves reaches `clk`'s
+/// 10 ns activation from 0.62 ns out rather than 0.83 ns, in two steps rather
+/// than three; and the restart after that activation is 50 ps rather than
+/// 31 ps. The two sampled voltages beside this moved with the grid
+/// (1.107262 -> 1.151593 and 1.859483 -> 1.827762), because each is read at
+/// the first accepted point at or after its instant. Against the analytic
+/// response at their own points, the early one erred +1.57e-4 V and now
+/// +1.34e-4 V. The late one erred -3.99e-4 V and now -5.15e-4 V. That error
+/// is not the edge's. It is set by the order-one step that lands on `clk`'s
+/// 10 ns activation, which changes no analog drive: one step of 0.311 ns,
+/// local error -9.2e-4 V, where there were two of 0.208 ns before (-4.2e-4 V
+/// each). The step leaving the edge's completion adds -3.9e-5 V. With
+/// RELTOL tightened tenfold both runs land within 1.2e-5 V of the analytic
+/// value, and within 3e-7 V of each other.
 const DECK_E_FINGERPRINT: Fingerprint = Fingerprint {
-    points: 271,
-    grid_hash: 0x0298_ba21_539a_bfab,
-    volt_hash: 0xa9e7_9f15_0bd8_fec9,
+    points: 278,
+    grid_hash: 0x9165_451f_8d31_c4ae,
+    volt_hash: 0x104f_75b4_2e20_6b47,
 };
 
 /// First transition of the flop output in deck E3, and the delay every one of

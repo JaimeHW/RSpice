@@ -620,7 +620,12 @@ fn mixed_multiplicity_run(model: &ModelFile, instances: &str) -> (f64, Vec<f64>)
     })
     .run_tran(&deck, 2e-9, 1e-10)
     .unwrap_or_else(|error| panic!("{instances}: {error}"));
-    assert_eq!(result.time, *grid);
+    // Every grid point, and the one breakpoint the converter adds between
+    // two of them: `q`'s 1 ns edge takes no time and completes a picosecond
+    // later, as an XSPICE breakpoint may split a locked interval.
+    let mut expected = grid.to_vec();
+    expected.insert(11, 1e-9 + 1e-12);
+    assert_eq!(result.time, expected);
     let trace = |name: &str| {
         result.voltages[result
             .node_names
