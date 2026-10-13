@@ -1172,26 +1172,50 @@ impl CmContext {
     }
 
     /// Set logical transition metadata for an analog input vector.
+    #[cfg(test)]
     pub(crate) fn set_input_analog_vector_transitions(
         &mut self,
         name: &str,
         transitions: Vec<Option<AnalogTransition>>,
     ) {
-        if self
-            .input_analog_vector_transitions
-            .get(name)
-            .is_some_and(|existing| {
-                existing.len() == transitions.len()
-                    && existing
-                        .iter()
-                        .zip(&transitions)
-                        .all(|(existing, new)| existing.same_bits(new))
-            })
+        self.set_input_analog_vector_transitions_from_fn(name, transitions.len(), |index| {
+            transitions[index]
+        })
+        .expect("a test transition vector fits in memory");
+    }
+
+    /// Set logical transition metadata for an analog input vector while
+    /// reusing the existing vector buffer, as the input setters below do.
+    pub(crate) fn set_input_analog_vector_transitions_from_fn<F>(
+        &mut self,
+        name: &str,
+        value_count: usize,
+        mut value_at: F,
+    ) -> CmResult<()>
+    where
+        F: FnMut(usize) -> Option<AnalogTransition>,
+    {
+        if let Some(values) = self.input_analog_vector_transitions.get(name)
+            && values.len() == value_count
         {
-            return;
+            if let Some(first) = first_changed_element(values, value_count, &mut value_at)
+                && let Some(values) = self.input_analog_vector_transitions.get_mut(name)
+            {
+                finish_refill_from(values, first, value_at);
+            }
+            return Ok(());
         }
-        self.input_analog_vector_transitions
-            .insert(name.to_string(), transitions);
+        match self.input_analog_vector_transitions.get_mut(name) {
+            Some(values) => {
+                refill_vec_from_fn("analog vector transitions", values, value_count, value_at)?;
+            }
+            None => {
+                let values = vec_from_fn("analog vector transitions", value_count, value_at)?;
+                self.input_analog_vector_transitions
+                    .insert(name.to_string(), values);
+            }
+        }
+        Ok(())
     }
 
     /// Set digital vector input values while reusing an existing vector buffer.

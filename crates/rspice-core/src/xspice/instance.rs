@@ -2019,13 +2019,11 @@ impl XspiceInstance {
                         nodes.len(),
                         |index| AnalogValue::new(node_voltage(solution, nodes[index])),
                     )?;
-                    self.context.set_input_analog_vector_transitions(
+                    self.context.set_input_analog_vector_transitions_from_fn(
                         &port.name,
-                        nodes
-                            .iter()
-                            .map(|node| analog_transitions.get(&(*node, 0)).copied())
-                            .collect(),
-                    );
+                        nodes.len(),
+                        |index| analog_transitions.get(&(nodes[index], 0)).copied(),
+                    )?;
                 }
                 PortConnection::TypedAnalogVector(elements) => {
                     self.context.set_input_analog_vector_from_fn(
@@ -2039,17 +2037,15 @@ impl XspiceInstance {
                             ))
                         },
                     )?;
-                    self.context.set_input_analog_vector_transitions(
+                    self.context.set_input_analog_vector_transitions_from_fn(
                         &port.name,
-                        elements
-                            .iter()
-                            .map(|element| {
-                                element
-                                    .primary_node()
-                                    .and_then(|node| analog_transitions.get(&(node, 0)).copied())
-                            })
-                            .collect(),
-                    );
+                        elements.len(),
+                        |index| {
+                            elements[index]
+                                .primary_node()
+                                .and_then(|node| analog_transitions.get(&(node, 0)).copied())
+                        },
+                    )?;
                 }
                 PortConnection::DigitalVector(nodes) => {
                     self.context.set_input_digital_vector_from_fn(
