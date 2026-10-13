@@ -1135,6 +1135,115 @@ fn xyce_level10_soimod1_capmod2_dd_ac_bounds_xyce710_delta() {
     }
 }
 
+/// Charge through each terminal of a Xyce LEVEL=10 SOIMOD=1 device over a
+/// bias ramp, `[vd, vg, vs, ve, vp]`: the integral of each source current
+/// over a 1 ps-step transient, which is how Xyce 7.10's `.measure tran
+/// INTEG` reports it (0.1 ps steps, trapezoidal).
+fn xyce_soimod1_terminal_charges(
+    capmod: u8,
+    drain: &str,
+    gate: &str,
+    source: Value,
+    body: Value,
+) -> [Value; 5] {
+    let deck = format!(
+        "* Xyce LEVEL=10 SOIMOD=1 terminal charge ramp\n\
+         vd d 0 pwl({drain})\n\
+         vg g 0 pwl({gate})\n\
+         vs s 0 {source}\n\
+         ve e 0 0\n\
+         vp p 0 {body}\n\
+         m1 d g s e p nmos w=4u l=1u\n\
+         .model nmos nmos level=10 soimod=1 capmod={capmod} shmod=0 rsh=0\n\
+         .end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("charge-ramp deck parses");
+    let result = engine()
+        .run_tran(&netlist, 2.0e-9, 1.0e-12)
+        .expect("charge-ramp transient runs");
+    ["vd", "vg", "vs", "ve", "vp"].map(|name| {
+        let branch = result
+            .branch_names
+            .iter()
+            .position(|branch| branch.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("missing branch {name} in {:?}", result.branch_names));
+        let current = &result.branch_currents[branch];
+        (1..result.time.len())
+            .map(|k| 0.5 * (current[k] + current[k - 1]) * (result.time[k] - result.time[k - 1]))
+            .sum()
+    })
+}
+
+/// `(drain pwl, gate pwl, vs, vp)`: inverse mode (vs = 1.5 V above a
+/// 0.2 -> 0.5 V drain, gate 1.4 -> 1.8 V) and forward mode (drain
+/// 1.5 -> 1.0 V over a grounded source, gate 0.6 -> 1.2 V), body tied.
+const XYCE_INVERSE_RAMP: (&str, &str, Value, Value) = (
+    "0 0.2 0.2n 0.2 1.2n 0.5",
+    "0 1.4 0.2n 1.4 1.2n 1.8",
+    1.5,
+    0.6,
+);
+const XYCE_FORWARD_RAMP: (&str, &str, Value, Value) = (
+    "0 1.5 0.2n 1.5 1.2n 1.0",
+    "0 0.6 0.2n 0.6 1.2n 1.2",
+    0.0,
+    0.4,
+);
+
+fn assert_terminal_charges_match_xyce(
+    label: &str,
+    capmod: u8,
+    ramp: (&str, &str, Value, Value),
+    xyce: [Value; 5],
+) {
+    let (drain, gate, source, body) = ramp;
+    let charges = xyce_soimod1_terminal_charges(capmod, drain, gate, source, body);
+    for ((name, charge), reference) in ["QD", "QG", "QS", "QE", "QP"].iter().zip(charges).zip(xyce)
+    {
+        if reference == 0.0 {
+            // No DC path and no capacitance reaches the back gate's source.
+            assert!(
+                charge.abs() <= 1.0e-21,
+                "{label} {name}={charge:.6e} C, Xyce 0"
+            );
+        } else {
+            assert_rel(&format!("{label} {name}"), charge, reference, 5.0e-6);
+        }
+    }
+}
+
+/// CAPMOD 2's back-gate charge Qe1 = CboxWL (Ves - Vfbb - Vbs) takes the
+/// mode-frame Ves (N_DEV_MOSFET_B3SOI.C:9382, 12335): in inverse mode the
+/// back gate is referenced to the drain. Against the unswapped Ves the back gate
+/// moved -1.4e-16 C over the inverse ramp and the body 4% too much charge.
+#[test]
+fn xyce_level10_capmod2_terminal_charges_match_xyce710_in_both_modes() {
+    assert_terminal_charges_match_xyce(
+        "inverse CAPMOD 2",
+        2,
+        XYCE_INVERSE_RAMP,
+        [
+            2.919651e-14,
+            -3.208308e-15,
+            -2.920155e-14,
+            0.0,
+            3.213344e-15,
+        ],
+    );
+    assert_terminal_charges_match_xyce(
+        "forward CAPMOD 2",
+        2,
+        XYCE_FORWARD_RAMP,
+        [
+            -1.761704e-14,
+            -6.979503e-15,
+            2.158814e-14,
+            0.0,
+            3.008401e-15,
+        ],
+    );
+}
+
 #[test]
 fn xyce_level10_soimod1_self_heating_ac_bounds_xyce710_delta() {
     let deck = format!(

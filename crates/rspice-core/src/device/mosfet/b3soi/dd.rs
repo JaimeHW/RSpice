@@ -267,8 +267,6 @@ impl B3SoiDd {
             adice: model.adice,
             tox: model.tox,
             tsi: model.tsi,
-            xbjt: model.xbjt,
-            xdif: model.xdif,
             xj: model.xj,
             charge_q: super::common::CHARGE_Q,
             mob_mod: model.mob_mod,
@@ -702,17 +700,10 @@ impl B3SoiDd {
         // (ngspice reuses the CKTstate charges verbatim under ByPass).
         let bias = self.charge_bias(voltages);
         let sized = self.sized_for_bias(bias);
-        let mut charge = eval::eval_with_self_heat(
-            &sized,
-            &self.consts,
-            bias,
-            self.mtype,
-            true,
-            self.self_heating_active(),
-        )
-        .charge
-        .expect("compute_charges=true yields a charge state");
-        if self.self_heating_active() && self.model.cap_mod != 2 {
+        let mut charge = eval::eval(&sized, &self.consts, bias, self.mtype, true)
+            .charge
+            .expect("compute_charges=true yields a charge state");
+        if self.self_heating_active() {
             self.fill_charge_thermal_derivatives(&mut charge, bias);
         }
         charge.qth = self.thermal_capacitance() * bias.del_temp;
@@ -1868,8 +1859,6 @@ mod tests {
             adice: m.adice,
             tox: m.tox,
             tsi: m.tsi,
-            xbjt: m.xbjt,
-            xdif: m.xdif,
             xj: m.xj,
             charge_q: super::super::common::CHARGE_Q,
             mob_mod: m.mob_mod,
