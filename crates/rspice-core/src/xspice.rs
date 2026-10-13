@@ -120,8 +120,8 @@ pub use external::{
 pub(crate) use instance::checkpoint as instance_checkpoint;
 pub use instance::{AnalogInputConnection, DigitalPortConnection, PortConnection, XspiceInstance};
 pub(crate) use instance::{
-    CodeModelVectorParams, EventInputKind, SharedXspiceInstance, XspiceEventInputs,
-    XspiceInstanceCheckpoint,
+    CodeModelVectorParams, EvaluationRecovery, EventInputKind, SharedXspiceInstance,
+    XspiceEventInputs, XspiceInstanceCheckpoint,
 };
 pub use registry::CodeModelRegistry;
 pub(crate) use resource_transaction::{

@@ -949,6 +949,19 @@ pub struct XspiceInstance {
     mixed_input_thresholds_bound: bool,
 }
 
+/// Who puts a failed evaluation's context back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EvaluationRecovery {
+    /// The evaluation backs up the context before the model call and restores
+    /// it if the model fails, so the instance is left as the failure found it.
+    Instance,
+    /// The caller holds an image of this instance, replaces the instance with
+    /// it when the evaluation fails, and reads nothing from the instance in
+    /// between that the failed call could have touched. A backup taken here
+    /// would be overwritten unread.
+    Caller,
+}
+
 /// A circuit's handle on one instance, shared with rollback snapshots until
 /// something writes through it.
 ///
@@ -2077,6 +2090,7 @@ impl XspiceInstance {
     }
 
     /// Attach the circuit journal only for this call, including error recovery.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn evaluate_with_resource_transaction(
         &mut self,
         time: Value,
@@ -2085,6 +2099,7 @@ impl XspiceInstance {
         phase: EvaluationPhase,
         transaction: Option<&super::ResourceTransaction>,
         owner: usize,
+        recovery: EvaluationRecovery,
     ) -> CmResult<()> {
         if phase == EvaluationPhase::CircuitTrial && transaction.is_none() {
             return Err(CmError::EvaluationError(
@@ -2098,7 +2113,7 @@ impl XspiceInstance {
                     owner,
                 }
             }));
-        let result = self.evaluate(time, timestep, analysis, phase);
+        let result = self.evaluate_with_recovery(time, timestep, analysis, phase, recovery);
         self.context.set_resource_transaction(None);
         result
     }
@@ -2116,6 +2131,23 @@ impl XspiceInstance {
         timestep: Value,
         analysis: AnalysisType,
         phase: EvaluationPhase,
+    ) -> CmResult<()> {
+        self.evaluate_with_recovery(
+            time,
+            timestep,
+            analysis,
+            phase,
+            EvaluationRecovery::Instance,
+        )
+    }
+
+    fn evaluate_with_recovery(
+        &mut self,
+        time: Value,
+        timestep: Value,
+        analysis: AnalysisType,
+        phase: EvaluationPhase,
+        recovery: EvaluationRecovery,
     ) -> CmResult<()> {
         if phase == EvaluationPhase::CircuitTrial && !self.context.has_resource_transaction() {
             return Err(CmError::EvaluationError(
@@ -2153,7 +2185,8 @@ impl XspiceInstance {
             return self.evaluate_output_only_probe();
         }
 
-        let context_before_evaluate = self.context.clone();
+        let context_before_evaluate =
+            (recovery == EvaluationRecovery::Instance).then(|| self.context.clone());
         match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
             Ok(Ok(())) => {
                 if track_event_input_signature && phase != EvaluationPhase::RollbackableProbe {
@@ -2170,12 +2203,16 @@ impl XspiceInstance {
                 Ok(())
             }
             Ok(Err(err)) => {
-                self.context = context_before_evaluate;
+                if let Some(context) = context_before_evaluate {
+                    self.context = context;
+                }
                 self.port_context_solution_num_nodes = None;
                 Err(err)
             }
             Err(payload) => {
-                self.context = context_before_evaluate;
+                if let Some(context) = context_before_evaluate {
+                    self.context = context;
+                }
                 Err(self.model_panic_error("evaluation", payload))
             }
         }

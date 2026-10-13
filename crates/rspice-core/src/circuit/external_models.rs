@@ -142,6 +142,11 @@ pub(crate) struct XspiceActiveWave {
     /// is returned to the circuit solver before any analog model evaluates.
     interpolated: bool,
     analog_feedback: bool,
+    /// The caller holds an image of every instance this wave evaluates and
+    /// restores it if the wave fails, reading nothing from the instances in
+    /// between. Set only by the standalone XSPICE acceptance, whose rollback
+    /// image restores every instance on any failure.
+    restored_by_caller: bool,
 }
 
 impl XspiceActiveWave {
@@ -1264,7 +1269,7 @@ impl CircuitData {
         companion: XspiceCompanionPolicy<'_>,
     ) -> crate::xspice::CmResult<()> {
         self.try_evaluate_xspice_with_resources(
-            time, timestep, solution, analysis, phase, companion, None,
+            time, timestep, solution, analysis, phase, companion, None, false,
         )
     }
 
@@ -1278,6 +1283,7 @@ impl CircuitData {
         phase: crate::xspice::EvaluationPhase,
         companion: XspiceCompanionPolicy<'_>,
         resources: Option<&ResourceTransaction>,
+        restored_by_caller: bool,
     ) -> crate::xspice::CmResult<()> {
         if self.has_coupled_event_nets() {
             return Err(crate::xspice::CmError::EvaluationError(
@@ -1285,6 +1291,7 @@ impl CircuitData {
             ));
         }
         let mut wave = self.begin_xspice_active_wave(time, timestep, analysis, phase, companion)?;
+        wave.restored_by_caller = restored_by_caller;
         while self.step_xspice_active_wave(&mut wave, solution, resources)? {}
         self.record_xspice_output_iterate(time, phase);
         Ok(())
@@ -1369,6 +1376,7 @@ impl CircuitData {
             defer_mixed_adc: false,
             interpolated: false,
             analog_feedback: false,
+            restored_by_caller: false,
         })
     }
 
@@ -1692,8 +1700,22 @@ impl CircuitData {
             if wave.defer_mixed_adc && instance.has_mixed_input_thresholds() {
                 continue;
             }
+            // Who puts a failed evaluation back. A standalone acceptance's
+            // caller restores every instance. A probe's caller restores every
+            // instance its image holds -- all but the live-probed ones, which
+            // never reach here -- and reads only instances with an analog
+            // stamp surface before it does; an instance without one cannot be
+            // observed between the failure and the restore.
+            let recovery = if wave.restored_by_caller
+                || (phase == crate::xspice::EvaluationPhase::RollbackableProbe
+                    && !instance.has_analog_stamp_surface())
+            {
+                crate::xspice::EvaluationRecovery::Caller
+            } else {
+                crate::xspice::EvaluationRecovery::Instance
+            };
             if let Err(e) = instance.evaluate_with_resource_transaction(
-                time, timestep, analysis, phase, resources, index,
+                time, timestep, analysis, phase, resources, index, recovery,
             ) {
                 let message = format!("{}: {}", instance.name, e);
                 if self.xspice_evaluation_error.is_none() {
@@ -2052,6 +2074,9 @@ impl CircuitData {
         companion: XspiceCompanionPolicy<'_>,
         resources: Option<&ResourceTransaction>,
     ) -> crate::xspice::CmResult<()> {
+        // `resources` is the journal of the caller's acceptance rollback
+        // (`capture_xspice_acceptance`), which puts every instance back if
+        // this fails; an instance need not also back itself up.
         self.try_evaluate_xspice_with_resources(
             time,
             timestep,
@@ -2060,6 +2085,7 @@ impl CircuitData {
             crate::xspice::EvaluationPhase::AcceptedStep,
             companion,
             resources,
+            resources.is_some(),
         )
     }
 
