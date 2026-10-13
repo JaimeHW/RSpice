@@ -9,8 +9,13 @@ use rspice_results::histogram::display::{HistogramDisplay, hist_axis};
 use rspice_results::histogram::{Histogram, HistogramDisplayMode, SampleMoments};
 use rspice_results::monte_carlo::{MonteCarloMeanConfidence, MonteCarloMeanInterval};
 use rspice_results::yield_analysis::YieldResult;
+use rspice_ui_kit::panels::inspector::inspector_inset;
+use rspice_ui_kit::panels::{
+    PROPERTY_ROW_TRAILING_PAD, property_row_control_columns, property_row_height,
+};
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si};
-use rspice_ui_kit::tokens::Tokens;
+use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::section_header;
 
 /// Why the host cannot supply a qualified selected distribution.
@@ -421,9 +426,10 @@ pub fn range_controls(
     current_range: Option<(f64, f64)>,
 ) -> bool {
     section_header(ui, "Display range", None);
-    let mut range_changed = ui
-        .checkbox(&mut settings.custom_range, "Custom range")
-        .changed();
+    let mut range_changed = inspector_inset(ui, |ui| {
+        ui.checkbox(&mut settings.custom_range, "Custom range")
+            .changed()
+    });
     if range_changed
         && settings.custom_range
         && let Some((min, max)) = current_range
@@ -433,20 +439,44 @@ pub fn range_controls(
         settings.custom_max = max;
     }
     if settings.custom_range {
-        range_changed |= ui
-            .horizontal_wrapped(|ui| {
-                ui.label("Min");
-                let min_changed = ui
-                    .add(egui::DragValue::new(&mut settings.custom_min))
-                    .changed();
-                ui.label("Max");
-                ui.add(egui::DragValue::new(&mut settings.custom_max))
-                    .changed()
-                    || min_changed
-            })
-            .inner;
+        range_changed |= bound_row(ui, "Minimum", &mut settings.custom_min);
+        range_changed |= bound_row(ui, "Maximum", &mut settings.custom_max);
     }
     range_changed
+}
+
+/// One bound of the custom range as a property row: its name in the label
+/// column and the drag field that sets it in the value column.
+fn bound_row(ui: &mut Ui, label: &str, value: &mut f64) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (label_left, value_left) = property_row_control_columns(width);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(width, property_row_height(ui)),
+        egui::Sense::hover(),
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + label_left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let value_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + value_left, rect.top()),
+        egui::pos2(rect.right() - PROPERTY_ROW_TRAILING_PAD, rect.bottom()),
+    );
+    let field = ui
+        .scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(value_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| ui.add(egui::DragValue::new(value)),
+        )
+        .inner;
+    ui.ctx()
+        .accesskit_node_builder(field.id, |node| node.set_label(label));
+    field.changed()
 }
 
 /// Render descriptive and specification evidence already qualified by the host.

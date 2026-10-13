@@ -201,25 +201,28 @@ pub fn right_panel(
         ),
     ];
     crate::presentation::stat_table(ui, &rows);
-    ui.collapsing("Device noise shares", |ui| {
-        let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
-        if shares.is_empty() {
-            crate::presentation::panel_note(ui, "No per-device noise shares were retained.");
-        } else {
-            egui::ScrollArea::vertical().max_height(240.0).show_rows(
-                ui,
-                30.0,
-                shares.len(),
-                |ui, range| {
-                    for index in range {
-                        crate::presentation::stat_table(
-                            ui,
-                            &[(shares[index].0, format!("{:.6} %", shares[index].1), false)],
-                        );
-                    }
-                },
-            );
-        }
+    // The fold sits on the rows' inset rather than on the panel edge.
+    rspice_ui_kit::panels::inspector::inspector_inset(ui, |ui| {
+        ui.collapsing("Device noise shares", |ui| {
+            let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
+            if shares.is_empty() {
+                crate::presentation::panel_note(ui, "No per-device noise shares were retained.");
+            } else {
+                egui::ScrollArea::vertical().max_height(240.0).show_rows(
+                    ui,
+                    30.0,
+                    shares.len(),
+                    |ui, range| {
+                        for index in range {
+                            crate::presentation::stat_table(
+                                ui,
+                                &[(shares[index].0, format!("{:.6} %", shares[index].1), false)],
+                            );
+                        }
+                    },
+                );
+            }
+        })
     });
     crate::presentation::panel_note(
         ui,

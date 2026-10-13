@@ -7,6 +7,7 @@ use super::{
 use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
+use rspice_ui_kit::panels::inspector::section_header_explained;
 use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
     sample_branches_into,
@@ -16,7 +17,6 @@ use rspice_ui_kit::plot::{
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::section_header;
 
 pub const READOUT_ROW_H: f32 = 20.0;
 pub const READOUT_PAD_X: f32 = 10.0;
@@ -195,6 +195,13 @@ fn readout_accessibility_text(
     text
 }
 
+/// How the measurement section's values are computed, as its header states it.
+pub const MEASUREMENT_METHOD: &str = "linear interpolation";
+
+/// The header's hover text: what [`MEASUREMENT_METHOD`] means for the values.
+const MEASUREMENT_METHOD_EXPLAINED: &str = "Measurements use linear segments between retained \
+     samples. Plot smoothing and display decimation do not change these values.";
+
 /// Paint retained-sample measurements for the selected strip and cursor span.
 pub fn measurement_panel(
     ui: &mut Ui,
@@ -204,21 +211,14 @@ pub fn measurement_panel(
     significant_digits: usize,
     quantity_policy: QuantityPresentationPolicy,
 ) {
-    let t = Tokens::get(ui.ctx());
     let title = if window.is_some() {
         "Measurements · A–B"
     } else {
         "Measurements"
     };
-    section_header(ui, title, None);
-    ui.label(
-    egui::RichText::new("Linear interpolation")
-        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-        .color(t.color.text_dim),
-)
-.on_hover_text(
-    "Measurements use linear segments between retained samples. Plot smoothing and display decimation do not change these values.",
-);
+    // How every value below was computed qualifies the section, so it is the
+    // section's own metadata rather than a line of its own under the header.
+    section_header_explained(ui, title, MEASUREMENT_METHOD, MEASUREMENT_METHOD_EXPLAINED);
     measurement_rows(
         ui,
         derived,

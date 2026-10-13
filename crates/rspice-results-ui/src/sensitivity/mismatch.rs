@@ -9,6 +9,7 @@ use crate::{
 use egui::{Sense, Ui};
 use rspice_results::dc_mismatch::DcMismatchEvidence;
 use rspice_ui_kit::{
+    panels::inspector::inspector_inset,
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -570,69 +571,73 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
     }
 
     let header_color = Tokens::get(ui.ctx()).color.text_faint;
-    egui::ScrollArea::both()
-        .id_salt("rspice.results.dc-mismatch-ranked-table")
-        .auto_shrink([false, true])
-        .show_rows(
-            ui,
-            PANEL_ROW_HEIGHT,
-            evidence.contributors.len() + 1,
-            |ui, visible| {
-                ui.set_min_width(560.0);
-                egui::Grid::new("rspice.results.dc-mismatch-ranked-grid")
-                    .num_columns(8)
-                    .striped(true)
-                    .min_col_width(48.0)
-                    .spacing(egui::vec2(12.0, 6.0))
-                    .show(ui, |ui| {
-                        let cell = |text: String| {
-                            egui::RichText::new(text)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        };
-                        if visible.start == 0 {
-                            for heading in [
-                                "RANK",
-                                "INSTANCE",
-                                "PARAMETER",
-                                "SCOPE",
-                                "SIGMA PARAM",
-                                "SENSITIVITY",
-                                "CONTRIBUTION",
-                                "SHARE",
-                            ] {
-                                ui.label(
-                                    egui::RichText::new(heading)
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                        .color(header_color),
-                                );
+    // The table scrolls inside the rows' inset, so its first column starts
+    // where every label above it does rather than on the panel edge.
+    inspector_inset(ui, |ui| {
+        egui::ScrollArea::both()
+            .id_salt("rspice.results.dc-mismatch-ranked-table")
+            .auto_shrink([false, true])
+            .show_rows(
+                ui,
+                PANEL_ROW_HEIGHT,
+                evidence.contributors.len() + 1,
+                |ui, visible| {
+                    ui.set_min_width(560.0);
+                    egui::Grid::new("rspice.results.dc-mismatch-ranked-grid")
+                        .num_columns(8)
+                        .striped(true)
+                        .min_col_width(48.0)
+                        .spacing(egui::vec2(12.0, 6.0))
+                        .show(ui, |ui| {
+                            let cell = |text: String| {
+                                egui::RichText::new(text)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            };
+                            if visible.start == 0 {
+                                for heading in [
+                                    "RANK",
+                                    "INSTANCE",
+                                    "PARAMETER",
+                                    "SCOPE",
+                                    "SIGMA PARAM",
+                                    "SENSITIVITY",
+                                    "CONTRIBUTION",
+                                    "SHARE",
+                                ] {
+                                    ui.label(
+                                        egui::RichText::new(heading)
+                                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                            .color(header_color),
+                                    );
+                                }
+                                ui.end_row();
                             }
-                            ui.end_row();
-                        }
-                        // Row 0 of the virtual list is the heading, so the
-                        // data rows start one behind it.
-                        let first = visible.start.saturating_sub(1);
-                        let last = visible
-                            .end
-                            .saturating_sub(1)
-                            .min(evidence.contributors.len());
-                        for (rank, row) in evidence.contributors[first..last]
-                            .iter()
-                            .enumerate()
-                            .map(|(offset, row)| (first + offset, row))
-                        {
-                            ui.label(cell((rank + 1).to_string()));
-                            ui.label(cell(row.instance.clone()));
-                            ui.label(cell(row.parameter.clone()));
-                            ui.label(cell(row.scope.tag().to_owned()));
-                            ui.label(cell(exact_value(row.sigma_parameter)));
-                            ui.label(cell(exact_value(row.sensitivity)));
-                            ui.label(cell(exact_value(row.contribution)));
-                            ui.label(cell(exact_value(row.share)));
-                            ui.end_row();
-                        }
-                    });
-            },
-        );
+                            // Row 0 of the virtual list is the heading, so the
+                            // data rows start one behind it.
+                            let first = visible.start.saturating_sub(1);
+                            let last = visible
+                                .end
+                                .saturating_sub(1)
+                                .min(evidence.contributors.len());
+                            for (rank, row) in evidence.contributors[first..last]
+                                .iter()
+                                .enumerate()
+                                .map(|(offset, row)| (first + offset, row))
+                            {
+                                ui.label(cell((rank + 1).to_string()));
+                                ui.label(cell(row.instance.clone()));
+                                ui.label(cell(row.parameter.clone()));
+                                ui.label(cell(row.scope.tag().to_owned()));
+                                ui.label(cell(exact_value(row.sigma_parameter)));
+                                ui.label(cell(exact_value(row.sensitivity)));
+                                ui.label(cell(exact_value(row.contribution)));
+                                ui.label(cell(exact_value(row.share)));
+                                ui.end_row();
+                            }
+                        });
+                },
+            );
+    });
 }
 
 #[cfg(any(test, feature = "test-support"))]

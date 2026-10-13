@@ -15,6 +15,7 @@ use rspice_results::sensitivity::{
     SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow, SensitivityValue,
 };
 use rspice_ui_kit::{
+    panels::inspector::inspector_inset,
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -701,62 +702,66 @@ pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan
     let has_phase = matches!(view.evidence.basis, SensitivityBasisEvidence::Ac { .. });
     let columns = if has_phase { 5 } else { 4 };
     let header_color = Tokens::get(ui.ctx()).color.text_faint;
-    egui::ScrollArea::both()
-        .id_salt("rspice.results.sensitivity-study-ranked-table")
-        .auto_shrink([false, true])
-        .show_rows(ui, PANEL_ROW_HEIGHT, ranked.len() + 1, |ui, visible| {
-            ui.set_min_width(470.0);
-            egui::Grid::new("rspice.results.sensitivity-study-ranked-grid")
-                .num_columns(columns)
-                .striped(true)
-                .min_col_width(48.0)
-                .spacing(egui::vec2(12.0, 6.0))
-                .show(ui, |ui| {
-                    let heading = |text: &str| {
-                        egui::RichText::new(text)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(header_color)
-                    };
-                    if visible.start == 0 {
-                        ui.label(heading("RANK"));
-                        ui.label(heading("VARIABLE"));
-                        ui.label(heading("NORMALIZED"));
-                        ui.label(heading("RAW"));
-                        if has_phase {
-                            ui.label(heading("PHASE"));
-                        }
-                        ui.end_row();
-                    }
-                    // Row 0 of the virtual list is the heading, so the data
-                    // rows start one behind it.
-                    let first = visible.start.saturating_sub(1);
-                    let last = visible.end.saturating_sub(1).min(ranked.len());
-                    for (rank, row) in ranked[first..last]
-                        .iter()
-                        .map(|row| &view.evidence.rows[*row])
-                        .enumerate()
-                        .map(|(offset, row)| (first + offset, row))
-                    {
-                        let normalized = column_at(&row.normalized, index);
-                        let cell = |text: String| {
+    // The table scrolls inside the rows' inset, so its first column starts
+    // where every label above it does rather than on the panel edge.
+    inspector_inset(ui, |ui| {
+        egui::ScrollArea::both()
+            .id_salt("rspice.results.sensitivity-study-ranked-table")
+            .auto_shrink([false, true])
+            .show_rows(ui, PANEL_ROW_HEIGHT, ranked.len() + 1, |ui, visible| {
+                ui.set_min_width(470.0);
+                egui::Grid::new("rspice.results.sensitivity-study-ranked-grid")
+                    .num_columns(columns)
+                    .striped(true)
+                    .min_col_width(48.0)
+                    .spacing(egui::vec2(12.0, 6.0))
+                    .show(ui, |ui| {
+                        let heading = |text: &str| {
                             egui::RichText::new(text)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                .color(header_color)
                         };
-                        ui.label(cell(if normalized.value().is_some() {
-                            (rank + 1).to_string()
-                        } else {
-                            "—".to_owned()
-                        }));
-                        ui.label(cell(row.parameter.clone()));
-                        ui.label(cell(exact_sensitivity(normalized)));
-                        ui.label(cell(exact_sensitivity(column_at(&row.raw, index))));
-                        if has_phase {
-                            ui.label(cell(exact_sensitivity(column_at(&row.phase, index))));
+                        if visible.start == 0 {
+                            ui.label(heading("RANK"));
+                            ui.label(heading("VARIABLE"));
+                            ui.label(heading("NORMALIZED"));
+                            ui.label(heading("RAW"));
+                            if has_phase {
+                                ui.label(heading("PHASE"));
+                            }
+                            ui.end_row();
                         }
-                        ui.end_row();
-                    }
-                });
-        });
+                        // Row 0 of the virtual list is the heading, so the data
+                        // rows start one behind it.
+                        let first = visible.start.saturating_sub(1);
+                        let last = visible.end.saturating_sub(1).min(ranked.len());
+                        for (rank, row) in ranked[first..last]
+                            .iter()
+                            .map(|row| &view.evidence.rows[*row])
+                            .enumerate()
+                            .map(|(offset, row)| (first + offset, row))
+                        {
+                            let normalized = column_at(&row.normalized, index);
+                            let cell = |text: String| {
+                                egui::RichText::new(text)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            };
+                            ui.label(cell(if normalized.value().is_some() {
+                                (rank + 1).to_string()
+                            } else {
+                                "—".to_owned()
+                            }));
+                            ui.label(cell(row.parameter.clone()));
+                            ui.label(cell(exact_sensitivity(normalized)));
+                            ui.label(cell(exact_sensitivity(column_at(&row.raw, index))));
+                            if has_phase {
+                                ui.label(cell(exact_sensitivity(column_at(&row.phase, index))));
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+    });
 }
 
 #[cfg(any(test, feature = "test-support"))]

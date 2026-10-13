@@ -10,6 +10,7 @@ use rspice_results::sensitivity::{
     SensitivityResultMode, SensitivityResultRow, SensitivityUnavailability, SensitivityValue,
 };
 use rspice_ui_kit::{
+    panels::inspector::inspector_inset,
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -525,63 +526,67 @@ pub fn right_panel(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sen
     // The panel ranks the same thousands of parameters the chart does, so it
     // lays out only the rows its own viewport can show.
     let header_color = Tokens::get(ui.ctx()).color.text_faint;
-    egui::ScrollArea::both()
-        .id_salt("rspice.results.sensitivity-ranked-table")
-        .auto_shrink([false, true])
-        .show_rows(ui, PANEL_ROW_HEIGHT, ranked.len() + 1, |ui, visible| {
-            ui.set_min_width(470.0);
-            egui::Grid::new("rspice.results.sensitivity-ranked-grid")
-                .num_columns(4)
-                .striped(true)
-                .min_col_width(48.0)
-                .spacing(egui::vec2(12.0, 6.0))
-                .show(ui, |ui| {
-                    let heading = |text: &str| {
-                        egui::RichText::new(text)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(header_color)
-                    };
-                    if visible.start == 0 {
-                        ui.label(heading("RANK"));
-                        ui.label(heading("PARAMETER"));
-                        ui.label(heading("NORMALIZED"));
-                        ui.label(heading("RAW"));
-                        ui.end_row();
-                    }
-                    // Row 0 of the virtual list is the heading, so the data
-                    // rows start one behind it.
-                    let first = visible.start.saturating_sub(1);
-                    let last = visible.end.saturating_sub(1).min(ranked.len());
-                    for (rank, row) in ranked[first..last]
-                        .iter()
-                        .map(|index| &view.rows[*index])
-                        .enumerate()
-                        .map(|(offset, row)| (first + offset, row))
-                    {
-                        ui.label(
-                            egui::RichText::new(if row.normalized.value().is_some() {
-                                (rank + 1).to_string()
-                            } else {
-                                "—".to_owned()
-                            })
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                        );
-                        ui.label(
-                            egui::RichText::new(row.parameter.as_str())
+    // The table scrolls inside the rows' inset, so its first column starts
+    // where every label above it does rather than on the panel edge.
+    inspector_inset(ui, |ui| {
+        egui::ScrollArea::both()
+            .id_salt("rspice.results.sensitivity-ranked-table")
+            .auto_shrink([false, true])
+            .show_rows(ui, PANEL_ROW_HEIGHT, ranked.len() + 1, |ui, visible| {
+                ui.set_min_width(470.0);
+                egui::Grid::new("rspice.results.sensitivity-ranked-grid")
+                    .num_columns(4)
+                    .striped(true)
+                    .min_col_width(48.0)
+                    .spacing(egui::vec2(12.0, 6.0))
+                    .show(ui, |ui| {
+                        let heading = |text: &str| {
+                            egui::RichText::new(text)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                .color(header_color)
+                        };
+                        if visible.start == 0 {
+                            ui.label(heading("RANK"));
+                            ui.label(heading("PARAMETER"));
+                            ui.label(heading("NORMALIZED"));
+                            ui.label(heading("RAW"));
+                            ui.end_row();
+                        }
+                        // Row 0 of the virtual list is the heading, so the data
+                        // rows start one behind it.
+                        let first = visible.start.saturating_sub(1);
+                        let last = visible.end.saturating_sub(1).min(ranked.len());
+                        for (rank, row) in ranked[first..last]
+                            .iter()
+                            .map(|index| &view.rows[*index])
+                            .enumerate()
+                            .map(|(offset, row)| (first + offset, row))
+                        {
+                            ui.label(
+                                egui::RichText::new(if row.normalized.value().is_some() {
+                                    (rank + 1).to_string()
+                                } else {
+                                    "—".to_owned()
+                                })
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                        );
-                        ui.label(
-                            egui::RichText::new(exact_sensitivity(row.normalized))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                        );
-                        ui.label(
-                            egui::RichText::new(exact_sensitivity(row.raw))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                        );
-                        ui.end_row();
-                    }
-                });
-        });
+                            );
+                            ui.label(
+                                egui::RichText::new(row.parameter.as_str())
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                            );
+                            ui.label(
+                                egui::RichText::new(exact_sensitivity(row.normalized))
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                            );
+                            ui.label(
+                                egui::RichText::new(exact_sensitivity(row.raw))
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                            );
+                            ui.end_row();
+                        }
+                    });
+            });
+    });
 }
 
 #[cfg(test)]

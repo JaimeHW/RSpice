@@ -1,6 +1,7 @@
 //! Shared result plot navigation, readout cards and status presentation.
 
 use egui::{Ui, WidgetInfo, WidgetType};
+use rspice_ui_kit::panels::inspector::{INSPECTOR_TEXT_INSET, toned_inspector_copy};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 
@@ -189,7 +190,7 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
         }
         let painter = ui.painter();
         let name_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 12.0, rect.top() + 4.0),
+            egui::pos2(rect.left() + INSPECTOR_TEXT_INSET, rect.top() + 4.0),
             egui::vec2(name_width, row_height - 8.0),
         );
         let value_rect = egui::Rect::from_min_size(
@@ -214,31 +215,21 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     }
 }
 
+/// The table's two columns inside the inspector's text inset on both sides.
 fn stat_column_widths(width: f32) -> (f32, f32) {
-    const OUTER_INSET: f32 = 24.0;
     const GAP: f32 = 8.0;
-    let content = (width - OUTER_INSET - GAP).max(0.0);
+    let content = (width - 2.0 * INSPECTOR_TEXT_INSET - GAP).max(0.0);
     let name = content * 0.42;
     (name, content - name)
 }
 
 /// A faint explanatory note under a right-panel section.
+///
+/// The inspector's own note, in this panel's quieter tone: a viewer's notes
+/// sit in the same inspector as its rows and wrap inside the same inset.
 pub fn panel_note(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::NONE
-        .inner_margin(egui::Margin {
-            left: 12,
-            right: 12,
-            top: 4,
-            bottom: 10,
-        })
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(text)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
-        });
+    let faint = Tokens::get(ui.ctx()).color.text_faint;
+    toned_inspector_copy(ui, text, faint);
 }
 
 /// Parse a `#rrggbb` trace color, falling back to the palette cycle.

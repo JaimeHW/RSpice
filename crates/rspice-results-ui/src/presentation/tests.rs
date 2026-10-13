@@ -6,7 +6,9 @@ fn stat_columns_are_disjoint_at_phone_panel_width() {
     let (name, value) = stat_column_widths(width);
     assert!(name > 0.0);
     assert!(value > name);
-    assert!((name + value + 24.0 + 8.0 - width).abs() < f32::EPSILON * width);
+    // The two columns fill the panel inside the inspector's text inset on
+    // both sides, less the gap between them.
+    assert!((name + value + 2.0 * INSPECTOR_TEXT_INSET + 8.0 - width).abs() < f32::EPSILON * width);
 }
 
 #[test]
