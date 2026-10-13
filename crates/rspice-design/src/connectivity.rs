@@ -826,10 +826,12 @@ where
         }
     }
 
-    /// Bind every ground symbol's net to node 0.
+    /// Bind every ground symbol's net, and every net labelled `0`, to node 0.
     ///
     /// Standard schematic semantics: separate ground symbols are the same
-    /// electrical node even with no drawn wire between them.
+    /// electrical node even with no drawn wire between them, as the deck's
+    /// one `0` makes them. They are merged into one net, the way same-named
+    /// labels are, so the design has the node count the deck has.
     fn identify_ground(&mut self) {
         let schematic = self.schematic;
         let resolve_symbol = self.resolve_symbol;
@@ -841,13 +843,25 @@ where
             if let Some((_, terminal_pos)) = terminals.first()
                 && let Some(&net_id) = self.point_to_net.get(terminal_pos)
             {
-                if self.ground_net.is_none() {
-                    self.ground_net = Some(net_id);
-                }
-                if let Some(net) = self.nets.iter_mut().find(|net| net.id == net_id) {
-                    net.label = Some("0".to_string());
-                }
+                self.join_ground(net_id);
             }
+        }
+        let labelled_zero: Vec<usize> = self
+            .nets
+            .iter()
+            .filter(|net| net.label.as_deref().is_some_and(|label| label.trim() == "0"))
+            .map(|net| net.id)
+            .collect();
+        for net_id in labelled_zero {
+            self.join_ground(net_id);
+        }
+    }
+
+    fn join_ground(&mut self, net_id: usize) {
+        let ground = *self.ground_net.get_or_insert(net_id);
+        self.merge_nets(ground, net_id);
+        if let Some(net) = self.nets.iter_mut().find(|net| net.id == ground) {
+            net.label = Some("0".to_string());
         }
     }
 

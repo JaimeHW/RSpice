@@ -277,3 +277,6 @@ pub fn terminal_nets(component: &Component, nets: &HashMap<(u64, String), String
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests;
