@@ -80,6 +80,7 @@
 //! `@*` process from re-triggering itself forever.
 
 pub(crate) mod checkpoint;
+mod image;
 mod traces;
 pub(crate) use traces::TraceSource;
 mod bindings;
@@ -329,7 +330,8 @@ struct ExpressionSubscription {
 }
 
 /// The signal store and driver resolution for one compiled digital plan.
-#[derive(Clone)]
+///
+/// `Clone` is written out in `image.rs`, so a trial image can be refilled.
 pub(crate) struct DigitalSignalStore {
     plan: Arc<CanonicalDigitalPlan>,
     connected: Option<ConnectedBits>,

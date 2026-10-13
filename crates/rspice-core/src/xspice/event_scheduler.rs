@@ -822,7 +822,7 @@ struct TargetTable {
     ids: HashMap<EventTarget, TargetId>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 struct EventQueues {
     /// Events at ticks after the current one, as a min-heap on the total
     /// order.
@@ -893,6 +893,71 @@ struct EventQueues {
     /// by unique sequence and neither outcome depends on the order the
     /// cancellations happen in.
     driver_events: Vec<Vec<PendingRef>>,
+}
+
+/// Written out so that `clone_from` refills every queue in place: a mixed
+/// circuit's digital host images this kernel before each Newton probe and
+/// refills a spent image rather than allocating one (`DigitalHost`'s
+/// `host/image.rs`). Both methods destructure, so a new field must be placed.
+impl Clone for EventQueues {
+    fn clone(&self) -> Self {
+        let Self {
+            future,
+            slot,
+            cancelled,
+            next_sequence,
+            sequence_exhausted,
+            interned,
+            activations,
+            activated,
+            driver_events,
+        } = self;
+        Self {
+            future: future.clone(),
+            slot: slot.clone(),
+            cancelled: cancelled.clone(),
+            next_sequence: *next_sequence,
+            sequence_exhausted: *sequence_exhausted,
+            interned: Arc::clone(interned),
+            activations: activations.clone(),
+            activated: activated.clone(),
+            driver_events: driver_events.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            future,
+            slot,
+            cancelled,
+            next_sequence,
+            sequence_exhausted,
+            interned,
+            activations,
+            activated,
+            driver_events,
+        } = self;
+        let Self {
+            future: source_future,
+            slot: source_slot,
+            cancelled: source_cancelled,
+            next_sequence: source_next_sequence,
+            sequence_exhausted: source_sequence_exhausted,
+            interned: source_interned,
+            activations: source_activations,
+            activated: source_activated,
+            driver_events: source_driver_events,
+        } = source;
+        future.clone_from(source_future);
+        slot.clone_from(source_slot);
+        cancelled.clone_from(source_cancelled);
+        *next_sequence = *source_next_sequence;
+        *sequence_exhausted = *source_sequence_exhausted;
+        interned.clone_from(source_interned);
+        activations.clone_from(source_activations);
+        activated.clone_from(source_activated);
+        driver_events.clone_from(source_driver_events);
+    }
 }
 
 /// One of a driver's unexecuted events: the instant that decides whether a
@@ -1254,7 +1319,7 @@ impl EventQueues {
 /// that thinks in HDL ticks converts at its own seam — which is what lets one
 /// kernel order a module's `#5` and a code model's 100.4 ps output against
 /// each other without either one being rounded onto the other's grid.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct EventScheduler {
     queues: EventQueues,
     limits: SchedulerLimits,
@@ -1274,6 +1339,63 @@ pub struct EventScheduler {
     slot_events_executed: u64,
     /// A failed slot is not an accepted checkpoint boundary.
     failed_slot: bool,
+}
+
+/// Written out so that `clone_from` reaches [`EventQueues`]' own; see there.
+impl Clone for EventScheduler {
+    fn clone(&self) -> Self {
+        let Self {
+            queues,
+            limits,
+            current,
+            started,
+            slot_delta_cycles,
+            slot_delta_chain,
+            slot_events_executed,
+            failed_slot,
+        } = self;
+        Self {
+            queues: queues.clone(),
+            limits: *limits,
+            current: *current,
+            started: *started,
+            slot_delta_cycles: *slot_delta_cycles,
+            slot_delta_chain: *slot_delta_chain,
+            slot_events_executed: *slot_events_executed,
+            failed_slot: *failed_slot,
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            queues,
+            limits,
+            current,
+            started,
+            slot_delta_cycles,
+            slot_delta_chain,
+            slot_events_executed,
+            failed_slot,
+        } = self;
+        let Self {
+            queues: source_queues,
+            limits: source_limits,
+            current: source_current,
+            started: source_started,
+            slot_delta_cycles: source_slot_delta_cycles,
+            slot_delta_chain: source_slot_delta_chain,
+            slot_events_executed: source_slot_events_executed,
+            failed_slot: source_failed_slot,
+        } = source;
+        queues.clone_from(source_queues);
+        *limits = *source_limits;
+        *current = *source_current;
+        *started = *source_started;
+        *slot_delta_cycles = *source_slot_delta_cycles;
+        *slot_delta_chain = *source_slot_delta_chain;
+        *slot_events_executed = *source_slot_events_executed;
+        *failed_slot = *source_failed_slot;
+    }
 }
 
 impl EventScheduler {

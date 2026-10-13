@@ -235,6 +235,15 @@ impl MixedDigital {
 #[derive(Clone)]
 pub(crate) struct MixedDigitalCoordinator {
     digital: MixedCell<DigitalHost>,
+    /// The image the last trial left behind, refilled by the next trial's
+    /// first write instead of a fresh copy of the host.
+    ///
+    /// Every candidate images `digital` and its first write copies it — once
+    /// per Newton probe on a circuit whose code models settle through the
+    /// wheel. The two images alternate: a rollback hands the written copy
+    /// here and restores the image, a commit hands the image here and keeps
+    /// the copy.
+    spare: MixedSpare<DigitalHost>,
     maps: Vec<DigitalLinkedInstance>,
     /// Linked process index to its position in `maps`, or `usize::MAX` for a
     /// process no instance claimed.
@@ -628,6 +637,7 @@ impl MixedDigitalCoordinator {
                 probes.clone()
             },
             digital: MixedCell::new(digital),
+            spare: MixedSpare::default(),
             maps,
             instance_of_process,
             port_signals,
@@ -693,6 +703,7 @@ impl MixedDigitalCoordinator {
             accepted_observation_probes: vec![None; self.accepted_observation_probes.len()],
             max_interval_events: self.max_interval_events,
             digital: MixedCell::new(self.digital.fresh()),
+            spare: MixedSpare::default(),
             maps: self.maps.clone(),
             instance_of_process: self.instance_of_process.clone(),
             port_signals: self.port_signals.clone(),
@@ -1204,7 +1215,9 @@ impl MixedDigitalCoordinator {
             .next_tick()
             .is_some_and(|next| next <= cursor.tick)
         {
-            let digital = coordinator.digital.make_mut();
+            let digital = coordinator
+                .digital
+                .make_mut_recycling(&mut coordinator.spare);
             digital.sample_analog_probes(&coordinator.probes);
             let advanced = digital.advance_to_with(cursor.tick, &mut participant);
             advanced.map_err(|error| coordinator.execution_error(error))?;
@@ -1222,7 +1235,9 @@ impl MixedDigitalCoordinator {
             // "three time bases", which also says why nearest-tick is the
             // rejected alternative here rather than a forbidden one.
             let tick = hdl_tick(cursor.time, |at| at.ceil_tick(coordinator.resolution))?;
-            let digital = coordinator.digital.make_mut();
+            let digital = coordinator
+                .digital
+                .make_mut_recycling(&mut coordinator.spare);
             digital.sample_analog_probes(&coordinator.probes);
             let advanced =
                 digital.force_many_from_analog_with(&[], tick, cursor.time, &mut participant);
@@ -1257,7 +1272,7 @@ impl MixedDigitalCoordinator {
             solution,
             external: Some(external),
         };
-        let digital = self.digital.make_mut();
+        let digital = self.digital.make_mut_recycling(&mut self.spare);
         digital.sample_analog_probes(&self.probes);
         let result = digital.force_many_from_analog_with(
             &[],
@@ -1413,7 +1428,9 @@ impl MixedDigitalCoordinator {
             if coordinator.drives.is_empty() {
                 continue;
             }
-            let digital = coordinator.digital.make_mut();
+            let digital = coordinator
+                .digital
+                .make_mut_recycling(&mut coordinator.spare);
             digital.sample_analog_probes(&coordinator.probes);
             // Reborrowed through a `match` rather than `Option::map`, which
             // would hand the closure's return the outer lifetime and so lend
@@ -1498,7 +1515,7 @@ impl MixedDigitalCoordinator {
                     solution,
                     external,
                 };
-                let digital = self.digital.make_mut();
+                let digital = self.digital.make_mut_recycling(&mut self.spare);
                 digital.sample_analog_probes(&self.probes);
                 let result = digital.force_many_from_analog_at(
                     &drives,
@@ -1606,7 +1623,9 @@ impl MixedDigitalCoordinator {
         self.accepted_observers = std::mem::take(&mut cursor.observers);
         self.accepted_observation_probes = std::mem::take(&mut cursor.observation_probes);
         self.trial_open = false;
-        cursor.rollback = None;
+        if let Some(image) = cursor.rollback.take() {
+            image.retire(&mut self.spare);
+        }
     }
 
     /// The held equilibrium this coordinator keeps, as an image a rebuilt
@@ -1692,7 +1711,7 @@ impl MixedDigitalCoordinator {
     /// resumptions and queued events disappear together.
     pub(crate) fn rollback_trial(&mut self, mut cursor: SharedTrialCursor) {
         if let Some(rollback) = cursor.rollback.take() {
-            self.digital = rollback;
+            std::mem::replace(&mut self.digital, rollback).retire(&mut self.spare);
         }
         self.trial_open = false;
     }

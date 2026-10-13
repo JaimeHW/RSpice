@@ -99,10 +99,30 @@ pub(super) struct RealTopology {
     pub(super) observed: BTreeSet<DigitalSignalId>,
     by_signal: Vec<Vec<usize>>,
 }
-#[derive(Clone)]
 pub(super) struct ExternalReals {
     pub(super) topology: Arc<RealTopology>,
     values: Vec<f64>,
+}
+/// Written out so a trial image refills the bank in place; see
+/// `host/image.rs`. Both methods destructure, so a new field must be placed.
+impl Clone for ExternalReals {
+    fn clone(&self) -> Self {
+        let Self { topology, values } = self;
+        Self {
+            topology: Arc::clone(topology),
+            values: values.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self { topology, values } = self;
+        let Self {
+            topology: source_topology,
+            values: source_values,
+        } = source;
+        topology.clone_from(source_topology);
+        values.clone_from(source_values);
+    }
 }
 impl ExternalReals {
     pub(super) fn checkpoint(&self) -> Result<RealCheckpoint, String> {

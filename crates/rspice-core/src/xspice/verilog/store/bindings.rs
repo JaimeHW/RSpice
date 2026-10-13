@@ -46,7 +46,6 @@ struct BitTopology {
     external_attached: bool,
 }
 
-#[derive(Clone)]
 pub(super) struct ConnectedBits {
     topology: Arc<BitTopology>,
     resolved: Vec<DigitalValue>,
@@ -54,6 +53,54 @@ pub(super) struct ConnectedBits {
     other_driver_values: Vec<DigitalValue>,
     pending: Vec<Option<FourStateValue>>,
     touched: Vec<DigitalSignalId>,
+}
+
+/// Written out so a trial image refills these tables in place; see
+/// `host/image.rs`. Both methods destructure, so a new field must be placed.
+impl Clone for ConnectedBits {
+    fn clone(&self) -> Self {
+        let Self {
+            topology,
+            resolved,
+            external_values,
+            other_driver_values,
+            pending,
+            touched,
+        } = self;
+        Self {
+            topology: Arc::clone(topology),
+            resolved: resolved.clone(),
+            external_values: external_values.clone(),
+            other_driver_values: other_driver_values.clone(),
+            pending: pending.clone(),
+            touched: touched.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            topology,
+            resolved,
+            external_values,
+            other_driver_values,
+            pending,
+            touched,
+        } = self;
+        let Self {
+            topology: source_topology,
+            resolved: source_resolved,
+            external_values: source_external_values,
+            other_driver_values: source_other_driver_values,
+            pending: source_pending,
+            touched: source_touched,
+        } = source;
+        topology.clone_from(source_topology);
+        resolved.clone_from(source_resolved);
+        external_values.clone_from(source_external_values);
+        other_driver_values.clone_from(source_other_driver_values);
+        pending.clone_from(source_pending);
+        touched.clone_from(source_touched);
+    }
 }
 
 impl ConnectedBits {

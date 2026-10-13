@@ -60,6 +60,7 @@
 mod analog_sample_tests;
 pub(crate) mod checkpoint;
 mod coupled;
+mod image;
 mod threads;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
@@ -466,7 +467,8 @@ fn name_oscillating_tick(resolution: TimeResolution, error: SchedulerError) -> S
 }
 
 /// A compiled digital plan, running.
-#[derive(Clone)]
+///
+/// `Clone` is written out in `image.rs`, so a trial image can be refilled.
 pub(crate) struct DigitalHost {
     /// Failed settlement cannot become an accepted restart boundary.
     checkpoint_failed: bool,

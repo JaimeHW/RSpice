@@ -685,6 +685,55 @@ impl<T: Clone> MixedCell<T> {
         }
         value
     }
+
+    /// [`Self::make_mut`], refilling `spare` instead of allocating when the
+    /// payload is shared.
+    ///
+    /// The copy is still a whole copy: `clone_from` overwrites every field
+    /// with the shared payload's, so the image this produces is the one
+    /// [`Self::make_mut`] produces and is counted the same way. What it saves
+    /// is the allocator — the queues and tables of the image a trial left
+    /// behind a moment ago are refilled rather than freed and asked for again.
+    #[inline]
+    fn make_mut_recycling(&mut self, spare: &mut MixedSpare<T>) -> &mut T {
+        if Arc::get_mut(&mut self.0).is_none()
+            && let Some(mut image) = spare.0.take()
+            && let Some(target) = Arc::get_mut(&mut image)
+        {
+            target.clone_from(&self.0);
+            self.0 = image;
+            settle_cost::note_mixed_trial_deep_copy();
+        }
+        self.make_mut()
+    }
+
+    /// Let go of this handle, keeping the payload as `spare` when this was
+    /// the last handle to it, so nothing else can still observe it.
+    fn retire(self, spare: &mut MixedSpare<T>) {
+        let mut image = self.0;
+        if Arc::get_mut(&mut image).is_some() {
+            spare.0 = Some(image);
+        }
+    }
+}
+
+/// A spent [`MixedCell`] payload kept for [`MixedCell::make_mut_recycling`].
+///
+/// Only ever a payload no handle shares, and never cloned along with its
+/// owner: a copy of the owner starts without one, so each spare is reachable
+/// from exactly one place.
+struct MixedSpare<T>(Option<Arc<T>>);
+
+impl<T> Default for MixedSpare<T> {
+    fn default() -> Self {
+        Self(None)
+    }
+}
+
+impl<T> Clone for MixedSpare<T> {
+    fn clone(&self) -> Self {
+        Self(None)
+    }
 }
 
 impl<T> std::ops::Deref for MixedCell<T> {
