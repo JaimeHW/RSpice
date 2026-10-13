@@ -4505,6 +4505,112 @@ fn canonicalize_complex_homogeneous_singletons(
     changed
 }
 
+/// A copy of `solution` with its LU rounding remnants set to zero, or `None`
+/// when it has none.
+///
+/// A block of the circuit that no excitation reaches solves to exactly zero,
+/// and LU can leave rounding remnants there (1e-33 beside unit-scale
+/// unknowns). Each equation of the block has a zero right-hand side and only
+/// remnants in it, so its componentwise error is one however small they are;
+/// refinement cannot remove them (the correction is a remnant too), and the
+/// singleton projection reaches only an equation with one unknown.
+///
+/// A remnant is a coordinate negligible beside the solution's scale
+/// (`256·eps·max|x|`) that no equation needs. An equation needs a coordinate
+/// when it is open — it has a right-hand side, or a coordinate that is not
+/// negligible or is needed itself — and the coordinate's term in it is above
+/// one rounding of the equation's own magnitude `|b| + |A||x|`. So a small
+/// coordinate an equation is made of is kept however small it is, with every
+/// small coordinate it is made of in turn, while the equations of an
+/// unexcited block, whose every coordinate is a remnant, need none of them.
+/// Zeroing the remnants makes those equations hold exactly, and the caller
+/// certifies the whole system again, so a projection that removed anything an
+/// equation needed still fails.
+fn zero_complex_lu_remnants(
+    csc: &SymbolicSparseColMat<usize>,
+    values: &[Complex64],
+    rhs: &[Complex64],
+    solution: &[Complex64],
+    operation: ComplexSolveOp,
+) -> Option<Vec<Complex64>> {
+    let n = rhs.len();
+    if csc.nrows() != n
+        || csc.ncols() != n
+        || solution.len() != n
+        || values.len() != csc.row_idx().len()
+    {
+        return None;
+    }
+    let zero = Complex64::new(0.0, 0.0);
+    let bound = solution
+        .iter()
+        .fold(0.0_f64, |scale, &value| scale.max(complex_abs1(value)))
+        * 256.0
+        * Value::EPSILON;
+    let mut candidate: Vec<bool> = solution
+        .iter()
+        .map(|&value| value != zero && complex_abs1(value) <= bound)
+        .collect();
+    if !candidate.contains(&true) {
+        return None;
+    }
+
+    // Each equation's terms `(unknown, |a|·|x|)`, the equations each unknown
+    // appears in, and each equation's magnitude.
+    let mut terms: Vec<Vec<(usize, Value)>> = vec![Vec::new(); n];
+    let mut appears_in: Vec<Vec<usize>> = vec![Vec::new(); n];
+    let mut magnitude: Vec<Value> = rhs.iter().map(|&value| complex_abs1(value)).collect();
+    for col in 0..n {
+        let span = csc.col_ptr()[col]..csc.col_ptr()[col + 1];
+        for (&row, &value) in csc.row_idx()[span.clone()].iter().zip(&values[span]) {
+            if value == zero {
+                continue;
+            }
+            let (equation, unknown) = match operation {
+                ComplexSolveOp::Normal => (row, col),
+                ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => (col, row),
+            };
+            let term = complex_abs1(value) * complex_abs1(solution[unknown]);
+            terms[equation].push((unknown, term));
+            appears_in[unknown].push(equation);
+            magnitude[equation] += term;
+        }
+    }
+
+    let mut open: Vec<bool> = (0..n)
+        .map(|equation| {
+            rhs[equation] != zero
+                || terms[equation]
+                    .iter()
+                    .any(|&(unknown, _)| solution[unknown] != zero && !candidate[unknown])
+        })
+        .collect();
+    let mut pending: Vec<usize> = (0..n).filter(|&equation| open[equation]).collect();
+    while let Some(equation) = pending.pop() {
+        for &(unknown, term) in &terms[equation] {
+            if candidate[unknown] && term > Value::EPSILON * magnitude[equation] {
+                candidate[unknown] = false;
+                for &other in &appears_in[unknown] {
+                    if !open[other] {
+                        open[other] = true;
+                        pending.push(other);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut projected = solution.to_vec();
+    let mut changed = false;
+    for (value, &remnant) in projected.iter_mut().zip(&candidate) {
+        if remnant {
+            *value = zero;
+            changed = true;
+        }
+    }
+    changed.then_some(projected)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn fast_complex_componentwise_backward_error(
     csc: &SymbolicSparseColMat<usize>,
@@ -5905,6 +6011,38 @@ impl ComplexMatrix {
                 return Ok(());
             }
             backward_error = canonical_error;
+        }
+
+        if let Some(projected) =
+            zero_complex_lu_remnants(csc, &ws.scaled_values, &ws.scaled_rhs, solution, operation)
+        {
+            let projected_error = complex_componentwise_backward_error(
+                csc,
+                &ws.scaled_values,
+                &projected,
+                &ws.scaled_rhs,
+                scaled_denominator_floor,
+                &mut ws.residual,
+                &mut ws.denominator,
+                &mut ws.compensation,
+                &mut ws.row_nnz,
+                operation,
+            )?;
+            if projected_error.accepted() {
+                let solution_scale = match operation {
+                    ComplexSolveOp::Normal => &ws.col_scale,
+                    ComplexSolveOp::Transpose | ComplexSolveOp::Adjoint => &ws.row_scale,
+                };
+                solution.clear();
+                for (&value, &scale) in projected.iter().zip(solution_scale) {
+                    let value = value * scale;
+                    if !complex_is_finite(value) {
+                        return Err(SolverError::Overflow);
+                    }
+                    solution.push(value);
+                }
+                return Ok(());
+            }
         }
 
         Err(SolverError::InaccurateSolution(
@@ -8423,6 +8561,203 @@ mod tests {
             ComplexSolveOp::Normal,
         ));
         assert_eq!(erased_rhs_candidate, [zero]);
+    }
+
+    /// Certify a hand-made complex solution of `matrix x = rhs`.
+    fn complex_certificate_accepts(
+        matrix: &ComplexMatrix,
+        solution: &[Complex64],
+        rhs: &[Complex64],
+    ) -> bool {
+        complex_componentwise_backward_error(
+            &matrix.csc,
+            &matrix.values,
+            solution,
+            rhs,
+            None,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            ComplexSolveOp::Normal,
+        )
+        .unwrap()
+        .accepted()
+    }
+
+    /// The complex system `x0 = 1`, `x1 - k*x0 = 0`, `x4 - k*x1 = 0` and the
+    /// unexcited block `x2 + x3 = 0`, `x2 - x3 = 0`, whose exact solution is
+    /// `[1, k, 0, 0, k²]`.
+    ///
+    /// The block is a cycle: neither of its equations has one unknown, so the
+    /// singleton projection cannot reach it.
+    fn complex_matrix_with_unexcited_block(k: Value) -> ComplexMatrix {
+        let structure: [(usize, usize); 9] = [
+            (0, 0),
+            (1, 0),
+            (1, 1),
+            (2, 1),
+            (2, 4),
+            (3, 2),
+            (3, 3),
+            (4, 2),
+            (4, 3),
+        ];
+        let real = StaticMatrix::from_triplets(5, 5, &structure.map(|(row, col)| (row, col, 0.0)))
+            .unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+        for (row, col, value) in [
+            (0, 0, 1.0),
+            (1, 0, -k),
+            (1, 1, 1.0),
+            (2, 1, -k),
+            (2, 4, 1.0),
+            (3, 2, 1.0),
+            (3, 3, 1.0),
+            (4, 2, 1.0),
+            (4, 3, -1.0),
+        ] {
+            matrix.add_real(row, col, value);
+        }
+        matrix
+    }
+
+    /// Project `solution` of `matrix x = rhs`.
+    fn complex_remnant_projection(
+        matrix: &ComplexMatrix,
+        solution: &[Complex64],
+        rhs: &[Complex64],
+    ) -> Option<Vec<Complex64>> {
+        zero_complex_lu_remnants(
+            &matrix.csc,
+            &matrix.values,
+            rhs,
+            solution,
+            ComplexSolveOp::Normal,
+        )
+    }
+
+    /// LU rounding remnants in a block no excitation reaches fail the
+    /// componentwise certificate, however small they are: each equation of
+    /// the block has a zero right-hand side and only remnants in it. Zeroing
+    /// them makes the block hold exactly, and the whole system then certifies.
+    #[test]
+    fn complex_remnant_block_is_projected_to_zero_and_then_certified() {
+        let matrix = complex_matrix_with_unexcited_block(0.5);
+        let one = Complex64::new(1.0, 0.0);
+        let zero = Complex64::new(0.0, 0.0);
+        let rhs = [one, zero, zero, zero, zero];
+        let half = Complex64::new(0.5, 0.0);
+        let quarter = Complex64::new(0.25, 0.0);
+        let remnants = [
+            one,
+            half,
+            Complex64::new(1.0e-33, 2.0e-34),
+            Complex64::new(-2.0e-33, 0.0),
+            quarter,
+        ];
+        let mut singletons = remnants;
+        assert!(
+            !canonicalize_complex_homogeneous_singletons(
+                &matrix.csc,
+                &matrix.values,
+                &rhs,
+                &mut singletons,
+                ComplexSolveOp::Normal,
+            ),
+            "the block has no singleton equation"
+        );
+        assert!(
+            !complex_certificate_accepts(&matrix, &remnants, &rhs),
+            "the remnants fail the certificate before the projection"
+        );
+
+        let projected = complex_remnant_projection(&matrix, &remnants, &rhs)
+            .expect("the block's coordinates are remnants");
+        assert_eq!(projected, [one, half, zero, zero, quarter]);
+        assert!(
+            complex_certificate_accepts(&matrix, &projected, &rhs),
+            "the projected solution is exact and certifies"
+        );
+        assert_eq!(
+            complex_remnant_projection(&matrix, &projected, &rhs),
+            None,
+            "an exact solution has nothing to project"
+        );
+    }
+
+    /// A coordinate below the threshold that an equation is made of is not a
+    /// remnant, however small: `x1 = 1e-20*x0` is kept, and so is
+    /// `x4 = 1e-20*x1`, whose own equation has nothing but small coordinates
+    /// in it, while the unexcited block beside them is zeroed.
+    #[test]
+    fn complex_projection_keeps_a_small_coordinate_an_equation_needs() {
+        let one = Complex64::new(1.0, 0.0);
+        let zero = Complex64::new(0.0, 0.0);
+        let rhs = [one, zero, zero, zero, zero];
+        let small = 1.0e-20;
+        let matrix = complex_matrix_with_unexcited_block(small);
+        let x1 = Complex64::new(small, 0.0);
+        let x4 = Complex64::new(small * small, 0.0);
+
+        let solved = complex_matrix_with_unexcited_block(small)
+            .solve(&rhs)
+            .expect("the system is well posed");
+        assert!(
+            (solved[1] - x1).norm() <= 1.0e-12 * small,
+            "the solve returns the small coordinate: {:?}",
+            solved[1]
+        );
+        assert!((solved[4] - x4).norm() <= 1.0e-12 * x4.norm(), "{solved:?}");
+
+        let exact = [one, x1, zero, zero, x4];
+        assert!(complex_certificate_accepts(&matrix, &exact, &rhs));
+        assert_eq!(
+            complex_remnant_projection(&matrix, &exact, &rhs),
+            None,
+            "every small coordinate of the exact solution is needed"
+        );
+
+        let mut with_remnants = exact;
+        with_remnants[2] = Complex64::new(1.0e-33, 0.0);
+        with_remnants[3] = Complex64::new(-2.0e-33, 0.0);
+        assert!(!complex_certificate_accepts(&matrix, &with_remnants, &rhs));
+        let projected = complex_remnant_projection(&matrix, &with_remnants, &rhs)
+            .expect("the block's coordinates are remnants");
+        assert_eq!(projected, exact, "only the block is zeroed");
+        assert!(complex_certificate_accepts(&matrix, &projected, &rhs));
+
+        // Zeroing the small coordinates as well would not have certified: the
+        // whole-system certificate is what refuses a wrong projection.
+        let mut overzeroed = exact;
+        overzeroed[1] = zero;
+        overzeroed[4] = zero;
+        assert!(!complex_certificate_accepts(&matrix, &overzeroed, &rhs));
+    }
+
+    /// The projection repairs rounding remnants only: a solve that is wrong
+    /// in a coordinate that matters still fails after it.
+    #[test]
+    fn complex_projection_does_not_rescue_an_inaccurate_solve() {
+        let matrix = complex_matrix_with_unexcited_block(0.5);
+        let one = Complex64::new(1.0, 0.0);
+        let zero = Complex64::new(0.0, 0.0);
+        let rhs = [one, zero, zero, zero, zero];
+        let inaccurate = [
+            Complex64::new(1.0 + 1.0e-9, 0.0),
+            Complex64::new(0.5, 0.0),
+            Complex64::new(1.0e-33, 0.0),
+            Complex64::new(-2.0e-33, 0.0),
+            Complex64::new(0.25, 0.0),
+        ];
+        assert!(!complex_certificate_accepts(&matrix, &inaccurate, &rhs));
+        let projected = complex_remnant_projection(&matrix, &inaccurate, &rhs)
+            .expect("the block's coordinates are remnants");
+        assert_eq!(&projected[2..4], [zero, zero]);
+        assert!(
+            !complex_certificate_accepts(&matrix, &projected, &rhs),
+            "x0 is wrong by 1e-9 and stays wrong"
+        );
     }
 
     #[test]
