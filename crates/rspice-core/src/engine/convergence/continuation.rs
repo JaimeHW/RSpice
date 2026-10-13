@@ -1,6 +1,15 @@
 //! GMIN stepping, source stepping, pseudo-transient, and arc-length continuation.
+//!
+//! Every aid here solves a deformed circuit on its way to the circuit itself:
+//! nodes shunted to ground, sources at a fraction of their value, a
+//! pseudo-capacitance anchoring each unknown. A deformed stage is never an
+//! answer. An aid returns only the unmodified circuit's solution at the
+//! direct solve's GMIN floor and full source strength, converged and
+//! certified by the residual test a direct solve faces; otherwise it fails
+//! with a [`ContinuationFailure`] naming the aid and the stage it stopped at.
 
 use super::*;
+use crate::analysis::error::{ContinuationAid, ContinuationFailure, ContinuationStage};
 
 /// Controls the predictor step used by monotonic source continuation.
 ///
@@ -109,12 +118,14 @@ impl Engine {
         values
     }
 
-    #[inline]
-    pub(in crate::engine::convergence) fn gmin_linear_schedule(&self) -> Vec<Value> {
-        let conv = &self.config.convergence_config;
-        let start = conv.gmin_initial.max(1e-2);
-        let end = conv.gmin_target.max(0.0);
-        Self::build_descending_schedule(start, end)
+    /// The deformed stages of linear GMIN stepping, largest first. Every one
+    /// lies above `floor`, the nodal GMIN the direct solve uses, which is the
+    /// stage that ends the walk.
+    pub(in crate::engine::convergence) fn gmin_linear_schedule(&self, floor: Value) -> Vec<Value> {
+        let start = self.config.convergence_config.gmin_initial.max(1e-2);
+        let mut stages = Self::build_descending_schedule(start, floor);
+        stages.retain(|&gmin| gmin > floor);
+        stages
     }
 
     #[inline]
@@ -136,104 +147,108 @@ impl Engine {
         Self::build_descending_schedule(start, end)
     }
 
-    /// GMIN stepping: try progressively smaller GMIN values
+    /// GMIN stepping for a linear circuit.
+    ///
+    /// Each stage solves the circuit with `gmin` from every node to ground,
+    /// down a descending schedule that ends at the floor the direct solve
+    /// used. Only that last stage, the circuit's own system, answers; a stage
+    /// above it is a different circuit with every node shunted to ground.
     pub(crate) fn gmin_stepping(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-    ) -> Result<Vec<Value>, SolverError> {
-        let gmin_values = self.gmin_linear_schedule();
-        let size = circuit.matrix_size();
-        let mut solution = Vec::with_capacity(size);
-        let mut proposal = Vec::with_capacity(size);
-        let mut rhs = vec![0.0; size];
-        let mut solved = false;
-        let stamp_independent_behavioral = !circuit.behavioral_sources.is_empty()
-            && !circuit.behavioral_sources.has_solution_dependent_sources();
-        let zero_solution = stamp_independent_behavioral.then(|| vec![0.0; size]);
-
-        for (idx, &gmin) in gmin_values.iter().enumerate() {
-            matrix.clear_values();
-            rhs.fill(0.0);
-            self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin);
-            if let Some(zero_solution) = zero_solution.as_deref() {
-                circuit
-                    .stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0)
-                    .map_err(|error| SolverError::InvalidCircuit(error.to_string()))?;
-            }
-
-            match matrix.solve_into(&rhs, &mut proposal) {
-                Ok(()) => {
-                    std::mem::swap(&mut solution, &mut proposal);
-                    solved = true;
-                    // Continue to try smaller GMIN for better accuracy
-                }
-                Err(_) if solved => {
-                    // Can't solve with smaller GMIN, use the last successful one
-                    break;
-                }
-                Err(e) if idx == gmin_values.len() - 1 => {
-                    // Last GMIN value failed and we have no solution
-                    return Err(e);
-                }
-                Err(_) => {
-                    // Try next GMIN value
-                    continue;
-                }
-            }
-        }
-
-        if solved {
-            Ok(solution)
-        } else {
-            Err(SolverError::SingularMatrix)
-        }
+    ) -> Result<Vec<Value>, SimulationError> {
+        let floor = self.dc_nodal_gmin_floor(circuit);
+        let deformed = self.gmin_linear_schedule(floor);
+        self.walk_linear_stages(
+            circuit,
+            matrix,
+            ContinuationAid::GminStepping,
+            (&deformed, floor),
+            |circuit, matrix, rhs, gmin| self.stamp_dc_direct(circuit, matrix, rhs, gmin),
+        )
     }
 
-    /// Source stepping: ramp sources from 0 to 100%
+    /// Source stepping for a linear circuit: the sources at a rising fraction
+    /// of their value, every stage at the direct solve's GMIN floor. Only the
+    /// full-strength stage, the circuit's own system, answers.
     pub(crate) fn source_stepping(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-    ) -> Result<Vec<Value>, SolverError> {
-        // Source stepping sequence
-        const SOURCE_SCALES: &[Value] = &[0.0, 0.1, 0.25, 0.5, 0.75, 1.0];
+    ) -> Result<Vec<Value>, SimulationError> {
+        const DEFORMED_SCALES: &[Value] = &[0.0, 0.1, 0.25, 0.5, 0.75];
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        self.walk_linear_stages(
+            circuit,
+            matrix,
+            ContinuationAid::SourceStepping,
+            (DEFORMED_SCALES, 1.0),
+            |circuit, matrix, rhs, scale| {
+                self.stamp_dc_scaled(circuit, matrix, rhs, gmin_floor, scale);
+            },
+        )
+    }
 
+    /// Walk a linear aid's `(deformed, own)` stages and answer with `own`,
+    /// the stage that is the circuit's own system.
+    ///
+    /// A linear stage hands nothing on to the next one, so a deformed stage
+    /// that fails does not end the walk and one that solves is not an
+    /// answer: the circuit's own stage alone decides. The deformed stages
+    /// still run because a solve's outcome can depend on the factorization
+    /// history the solver carries between them.
+    fn walk_linear_stages(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        aid: ContinuationAid,
+        (deformed, own): (&[Value], Value),
+        stamp: impl Fn(&CircuitData, &mut StaticMatrix, &mut [Value], Value),
+    ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let mut solution = vec![0.0; size]; // Start from zero
-        let mut proposal = Vec::with_capacity(size);
+        let mut solution = Vec::with_capacity(size);
         let mut rhs = vec![0.0; size];
         let stamp_independent_behavioral = !circuit.behavioral_sources.is_empty()
             && !circuit.behavioral_sources.has_solution_dependent_sources();
         let zero_solution = stamp_independent_behavioral.then(|| vec![0.0; size]);
-
-        for &scale in SOURCE_SCALES {
+        let mut solve_stage = |stage: Value,
+                               circuit: &mut CircuitData,
+                               matrix: &mut StaticMatrix,
+                               solution: &mut Vec<Value>|
+         -> Result<Result<(), SolverError>, SimulationError> {
             matrix.clear_values();
             rhs.fill(0.0);
-
-            self.stamp_dc_scaled(circuit, matrix, &mut rhs, gmin_floor, scale);
+            stamp(&*circuit, matrix, &mut rhs, stage);
             if let Some(zero_solution) = zero_solution.as_deref() {
                 circuit
                     .stamp_behavioral_sources(matrix, &mut rhs, zero_solution, 0.0)
-                    .map_err(|error| SolverError::InvalidCircuit(error.to_string()))?;
+                    .map_err(SimulationError::from)?;
             }
+            Ok(matrix.solve_into(&rhs, solution))
+        };
 
-            match matrix.solve_into(&rhs, &mut proposal) {
-                Ok(()) => {
-                    std::mem::swap(&mut solution, &mut proposal);
-                }
-                Err(e) if scale == 1.0 => {
-                    return Err(e);
-                }
-                Err(_) => {
-                    // Try to continue with the current solution
-                    continue;
-                }
+        let mut reached = None;
+        for &stage in deformed {
+            if solve_stage(stage, circuit, matrix, &mut solution)?.is_ok() {
+                reached = Some(stage);
             }
         }
-
-        Ok(solution)
+        match solve_stage(own, circuit, matrix, &mut solution)? {
+            Ok(()) => Ok(solution),
+            Err(error) => Err(self.linear_continuation_failure(
+                circuit,
+                matrix,
+                ContinuationFailure {
+                    aid,
+                    reached,
+                    unsolved: ContinuationStage::Step(own),
+                    iterations: deformed.len() + 1,
+                    cause: None,
+                },
+                error,
+            )),
+        }
     }
 
     /// Source stepping for nonlinear circuits.
@@ -273,6 +288,15 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         const SOURCE_SCALE_EPS: Value = 1.0e-12;
+        let stopped = |reached: Option<Value>, unsolved: ContinuationStage, iterations: usize| {
+            SimulationError::from(ContinuationFailure {
+                aid: ContinuationAid::SourceStepping,
+                reached,
+                unsolved,
+                iterations: iterations.max(1),
+                cause: None,
+            })
+        };
 
         let size = circuit.matrix_size();
         let entry_state = circuit.nonlinear_state_snapshot();
@@ -309,7 +333,9 @@ impl Engine {
         }
         if !bootstrap_converged {
             circuit.restore_nonlinear_state(entry_state);
-            return Err(SimulationError::ConvergenceFailed(
+            return Err(stopped(
+                None,
+                ContinuationStage::Step(0.0),
                 total_iterations.max(source_iterations),
             ));
         }
@@ -320,19 +346,27 @@ impl Engine {
         let mut attempts = 0usize;
 
         while accepted_scale < 1.0 - SOURCE_SCALE_EPS {
+            let target_scale = (accepted_scale + source_step).min(1.0);
             if attempts >= policy.maximum_steps {
                 circuit.restore_nonlinear_state(entry_state);
-                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                return Err(stopped(
+                    Some(accepted_scale),
+                    ContinuationStage::Step(target_scale),
+                    total_iterations,
+                ));
             }
             if Self::should_abort_iteration(abort, attempts) {
                 circuit.restore_nonlinear_state(entry_state);
                 return Err(SimulationError::Aborted);
             }
 
-            let target_scale = (accepted_scale + source_step).min(1.0);
             if target_scale <= accepted_scale + SOURCE_SCALE_EPS {
                 circuit.restore_nonlinear_state(entry_state);
-                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                return Err(stopped(
+                    Some(accepted_scale),
+                    ContinuationStage::Step(target_scale),
+                    total_iterations,
+                ));
             }
 
             let accepted_state = circuit.nonlinear_state_snapshot();
@@ -364,7 +398,11 @@ impl Engine {
                 circuit.restore_nonlinear_state(accepted_state);
                 let Some(reduced_step) = policy.step_after_failure(source_step) else {
                     circuit.restore_nonlinear_state(entry_state);
-                    return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                    return Err(stopped(
+                        Some(accepted_scale),
+                        ContinuationStage::Step(target_scale),
+                        total_iterations,
+                    ));
                 };
                 source_step = reduced_step;
             }
@@ -391,7 +429,11 @@ impl Engine {
         }
         if !converged {
             circuit.restore_nonlinear_state(entry_state);
-            return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            return Err(stopped(
+                Some(accepted_scale),
+                ContinuationStage::UnmodifiedCircuit,
+                total_iterations,
+            ));
         }
 
         Ok(polished_solution)
@@ -402,6 +444,11 @@ impl Engine {
     /// Uses pseudo-capacitor anchoring (`Gpseudo * (x - x_prev)`) and grows the
     /// pseudo timestep as the solution stabilizes. This is a robust fallback for
     /// hard DC operating points where direct Newton/source/GMIN struggle.
+    ///
+    /// Every stage, the last included, solves the circuit with that anchor
+    /// on each unknown, so no stage is an operating point of the circuit
+    /// itself. The walk ends with one Newton solve of the unmodified circuit
+    /// from its last stage, and fails if that does not converge.
     pub(crate) fn pseudo_transient_nonlinear_with_guess_and_abort(
         &self,
         circuit: &mut CircuitData,
@@ -427,10 +474,13 @@ impl Engine {
         let solve_denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
 
         let mut stage = 0usize;
+        let mut accepted_dt = None;
+        let mut total_iterations = 0usize;
         while !pseudo.is_complete() {
             if Self::should_abort_iteration(abort, stage) {
                 return Err(SimulationError::Aborted);
             }
+            let stage_dt = pseudo.dt();
             let pseudo_conductance = pseudo.conductance(0);
             let mut stage_converged = false;
 
@@ -438,6 +488,7 @@ impl Engine {
                 if Self::should_abort_iteration(abort, iteration) {
                     return Err(SimulationError::Aborted);
                 }
+                total_iterations += 1;
                 rhs.fill(0.0);
                 matrix.clear_values();
 
@@ -547,14 +598,32 @@ impl Engine {
 
             if stage_converged {
                 anchor_solution = solution.clone();
+                accepted_dt = Some(stage_dt);
                 pseudo.advance_on_success();
             } else if !pseudo.reduce_on_failure() {
-                return Err(SimulationError::ConvergenceFailed(pseudo_iterations));
+                return Err(ContinuationFailure {
+                    aid: ContinuationAid::PseudoTransient,
+                    reached: accepted_dt,
+                    unsolved: ContinuationStage::Step(stage_dt),
+                    iterations: total_iterations.max(1),
+                    cause: None,
+                }
+                .into());
             }
             stage += 1;
         }
 
-        Ok(solution)
+        match self.warm_restart_after_fallback(circuit, matrix, &solution, abort)? {
+            Some(closed) => Ok(closed),
+            None => Err(ContinuationFailure {
+                aid: ContinuationAid::PseudoTransient,
+                reached: accepted_dt,
+                unsolved: ContinuationStage::UnmodifiedCircuit,
+                iterations: total_iterations.max(1),
+                cause: None,
+            }
+            .into()),
+        }
     }
 
     /// Arc-length continuation fallback for strongly nonlinear or multi-solution circuits.
@@ -600,6 +669,7 @@ impl Engine {
         arc.initialize(&current_solution);
 
         let mut arc_step = 0usize;
+        let mut accepted_lambda = 0.0;
         while !arc.is_complete() && !arc.is_failed() {
             if Self::should_abort_iteration(abort, arc_step) {
                 return Err(SimulationError::Aborted);
@@ -621,6 +691,7 @@ impl Engine {
             if converged {
                 arc.accept_step(&corrected_solution, target_lambda, newton_iters);
                 current_solution = corrected_solution;
+                accepted_lambda = target_lambda;
             } else if !arc.reject_step() {
                 break;
             }
@@ -628,18 +699,36 @@ impl Engine {
         }
 
         if arc.is_complete() {
-            Ok(current_solution)
-        } else {
-            log::warn!(
-                "Arc-length continuation did not reach lambda=1. Falling back to monotonic source continuation."
-            );
-            self.source_stepping_nonlinear_with_guess_and_abort(
+            // The walk counts a point within its tolerance of lambda = 1 as
+            // complete, and that point still has the sources short of full
+            // strength. Close it at full strength.
+            if accepted_lambda == 1.0 {
+                return Ok(current_solution);
+            }
+            let (closed, converged, _) = self.solve_scaled_nonlinear_corrector(
                 circuit,
                 matrix,
-                &current_solution,
+                1.0,
+                CorrectorRun {
+                    initial_solution: &current_solution,
+                    damping_state: &mut damping_state,
+                    max_iterations: arc_cfg.max_newton_iters,
+                },
                 abort,
-            )
+            )?;
+            if converged {
+                return Ok(closed);
+            }
         }
+        log::warn!(
+            "Arc-length continuation did not reach the full-strength circuit. Falling back to monotonic source continuation."
+        );
+        self.source_stepping_nonlinear_with_guess_and_abort(
+            circuit,
+            matrix,
+            &current_solution,
+            abort,
+        )
     }
 
     /// Homotopy for stiff JFET-family gate generation-recombination branches.
@@ -665,6 +754,15 @@ impl Engine {
         const STEP_SHRINK: Value = 0.5;
         const SCALE_EPS: Value = 1.0e-12;
         const MAX_ATTEMPTS: usize = 512;
+        let stopped = |reached: Option<Value>, unsolved: ContinuationStage, iterations: usize| {
+            SimulationError::from(ContinuationFailure {
+                aid: ContinuationAid::GateGenerationStepping,
+                reached,
+                unsolved,
+                iterations: iterations.max(1),
+                cause: None,
+            })
+        };
 
         let size = circuit.matrix_size();
         let mut solution = Self::sanitize_initial_guess(initial_guess, size);
@@ -693,7 +791,11 @@ impl Engine {
         }
         if !relaxed_converged {
             circuit.set_jfet_gate_generation_scale(1.0);
-            return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            return Err(stopped(
+                None,
+                ContinuationStage::Step(0.0),
+                total_iterations,
+            ));
         }
         solution = relaxed_solution;
 
@@ -702,19 +804,27 @@ impl Engine {
         let mut attempts = 0usize;
 
         while accepted_scale < 1.0 - SCALE_EPS {
+            let target_scale = (accepted_scale + scale_step).min(1.0);
             if attempts >= MAX_ATTEMPTS {
                 circuit.set_jfet_gate_generation_scale(1.0);
-                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                return Err(stopped(
+                    Some(accepted_scale),
+                    ContinuationStage::Step(target_scale),
+                    total_iterations,
+                ));
             }
             if Self::should_abort_iteration(abort, attempts) {
                 circuit.set_jfet_gate_generation_scale(1.0);
                 return Err(SimulationError::Aborted);
             }
 
-            let target_scale = (accepted_scale + scale_step).min(1.0);
             if target_scale <= accepted_scale + SCALE_EPS {
                 circuit.set_jfet_gate_generation_scale(1.0);
-                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                return Err(stopped(
+                    Some(accepted_scale),
+                    ContinuationStage::Step(target_scale),
+                    total_iterations,
+                ));
             }
 
             let accepted_state = circuit.nonlinear_state_snapshot();
@@ -750,7 +860,11 @@ impl Engine {
                 scale_step *= STEP_SHRINK;
                 if scale_step < MIN_STEP {
                     circuit.set_jfet_gate_generation_scale(1.0);
-                    return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                    return Err(stopped(
+                        Some(accepted_scale),
+                        ContinuationStage::Step(target_scale),
+                        total_iterations,
+                    ));
                 }
             }
 
@@ -776,7 +890,11 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         if !converged {
-            return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            return Err(stopped(
+                Some(accepted_scale),
+                ContinuationStage::UnmodifiedCircuit,
+                total_iterations,
+            ));
         }
 
         Ok(polished)
@@ -789,6 +907,11 @@ impl Engine {
     /// This helps BJT and other semiconductor devices find their operating
     /// point by initially providing a strong DC path that's gradually removed.
     /// This is a technique used in commercial SPICE simulators like Spectre/HSPICE.
+    ///
+    /// The walk ends at exactly the floor the direct solve uses, so its last
+    /// stage is the circuit's own system, converged by the direct solve's
+    /// tests. A walk that cannot get there fails; it never answers with a
+    /// stage above the floor.
     pub(crate) fn gmin_stepping_nonlinear_with_abort(
         &self,
         circuit: &mut CircuitData,
@@ -800,12 +923,20 @@ impl Engine {
         const MIN_GMIN_STEP_DECADES: Value = 1.0e-3;
         const GMIN_STEP_GROWTH: Value = 1.35;
         const GMIN_STEP_SHRINK: Value = 0.5;
-        const GMIN_SCALE_EPS: Value = 1.0e-15;
         const MAX_GMIN_ATTEMPTS: usize = 2048;
+        let stopped = |reached: Option<Value>, unsolved: Value, iterations: usize| {
+            SimulationError::from(ContinuationFailure {
+                aid: ContinuationAid::GminStepping,
+                reached,
+                unsolved: ContinuationStage::Step(unsolved),
+                iterations: iterations.max(1),
+                cause: None,
+            })
+        };
 
         let gmin_scales = self.gmin_nonlinear_schedule_for_circuit(circuit);
         let start_gmin = gmin_scales.first().copied().unwrap_or(1.0e-3).max(0.0);
-        let final_gmin = gmin_scales.last().copied().unwrap_or(0.0).max(0.0);
+        let final_gmin = self.dc_nodal_gmin_floor(circuit);
 
         let size = circuit.matrix_size();
 
@@ -842,7 +973,9 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         if !initial_converged {
-            return Err(SimulationError::ConvergenceFailed(
+            return Err(stopped(
+                None,
+                start_gmin,
                 total_iterations.max(gmin_iterations),
             ));
         }
@@ -852,17 +985,17 @@ impl Engine {
         let mut step_decades = MAX_GMIN_STEP_DECADES;
         let mut attempts = 0usize;
 
-        while accepted_gmin > final_gmin.max(accepted_gmin * GMIN_SCALE_EPS) {
-            if attempts >= MAX_GMIN_ATTEMPTS {
-                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+        while accepted_gmin > final_gmin {
+            let target_gmin = Self::next_descending_gmin(accepted_gmin, final_gmin, step_decades);
+            if attempts >= MAX_GMIN_ATTEMPTS || target_gmin >= accepted_gmin {
+                return Err(stopped(
+                    Some(accepted_gmin),
+                    target_gmin.min(accepted_gmin),
+                    total_iterations,
+                ));
             }
             if Self::should_abort_iteration(abort, attempts) {
                 return Err(SimulationError::Aborted);
-            }
-
-            let target_gmin = Self::next_descending_gmin(accepted_gmin, final_gmin, step_decades);
-            if target_gmin >= accepted_gmin {
-                break;
             }
 
             let accepted_state = circuit.nonlinear_state_snapshot();
@@ -899,7 +1032,7 @@ impl Engine {
                 circuit.restore_nonlinear_state(accepted_state);
                 step_decades *= GMIN_STEP_SHRINK;
                 if step_decades < MIN_GMIN_STEP_DECADES {
-                    return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                    return Err(stopped(Some(accepted_gmin), target_gmin, total_iterations));
                 }
             }
 
@@ -931,15 +1064,28 @@ impl Engine {
         Ok(solution)
     }
 
+    /// The next GMIN stage below `accepted_gmin`, `step_decades` further
+    /// down. A step that reaches the floor lands on it exactly, never on a
+    /// rounding of it, so the walk ends at the circuit's own system.
     fn next_descending_gmin(accepted_gmin: Value, final_gmin: Value, step_decades: Value) -> Value {
         if final_gmin <= 0.0 {
             let floor = 1.0e-30;
             let next = 10.0_f64.powf(accepted_gmin.max(floor).log10() - step_decades);
             if next <= floor { 0.0 } else { next }
         } else {
-            let target_log = (accepted_gmin.log10() - step_decades).max(final_gmin.log10());
-            10.0_f64.powf(target_log).max(final_gmin)
+            let next = 10.0_f64.powf(accepted_gmin.log10() - step_decades);
+            if next <= final_gmin { final_gmin } else { next }
         }
+    }
+
+    /// Device junction GMIN for a GMIN-stepping stage at nodal `gmin`.
+    ///
+    /// Above the floor the junctions carry the stage's gmin, as ngspice's
+    /// stepping moves `CKTgmin` itself. They never go below the value the
+    /// direct solve uses, so the last stage is the circuit's own system even
+    /// where the nodal floor is zero.
+    pub(in crate::engine::convergence) fn gmin_stage_junction_gmin(&self, gmin: Value) -> Value {
+        self.effective_device_junction_gmin(gmin.max(self.config.convergence_config.gmin_target))
     }
 
     fn solve_gmin_nonlinear_corrector(
@@ -956,7 +1102,7 @@ impl Engine {
             max_iterations,
         } = run;
         let mut solution = initial_solution.to_vec();
-        let junction_gmin = self.effective_device_junction_gmin(gmin);
+        let junction_gmin = self.gmin_stage_junction_gmin(gmin);
         self.update_device_states_for_dc_with_junction_gmin(circuit, &solution, junction_gmin);
         let mut used_iterations = 0usize;
         let mut rhs = vec![0.0; solution.len()];
@@ -1108,5 +1254,183 @@ mod source_continuation_policy_tests {
             None
         );
         assert_eq!(explicit_source_continuation_policy(None), None);
+    }
+}
+
+/// An aid answers with the unmodified circuit's operating point or fails
+/// with the stage it stopped at; a deformed stage is never the answer.
+#[cfg(test)]
+mod operating_point_rule_tests {
+    use super::*;
+    use crate::abort_signal::NoAbort;
+    use crate::config::SimulationConfig;
+
+    fn linked(engine: &Engine, mut circuit: CircuitData) -> (CircuitData, StaticMatrix) {
+        let matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        (circuit, matrix)
+    }
+
+    /// One node with `current` injected into it and a conductance to ground
+    /// of exactly `conductance`, which a negative value makes cancel a GMIN
+    /// stage of the same size exactly.
+    fn injected_node(engine: &Engine, conductance: Value) -> (CircuitData, StaticMatrix) {
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n");
+        circuit.resistors.add("r1".to_string(), node, 0, 1.0);
+        circuit.resistors.conductances[0] = conductance;
+        circuit.current_sources.add("i1".to_string(), 0, node, 1e-6);
+        linked(engine, circuit)
+    }
+
+    fn continuation_failure(error: SimulationError) -> ContinuationFailure {
+        match error {
+            SimulationError::ContinuationFailed(failure) => *failure,
+            other => panic!("expected a convergence-aid failure, got {other}"),
+        }
+    }
+
+    /// The old walk stopped at the first stage that failed after one had
+    /// solved and returned that earlier stage, a circuit with every node
+    /// shunted to ground. A deformed stage that fails says nothing about the
+    /// circuit's own system, so the walk goes on to the floor and answers
+    /// with it.
+    #[test]
+    fn linear_gmin_stepping_answers_from_the_floor_after_a_stage_fails() {
+        let engine = Engine::default();
+        let floor = engine.config.convergence_config.gmin_target;
+        let stage = engine.gmin_linear_schedule(floor)[3];
+        let (mut circuit, mut matrix) = injected_node(&engine, -stage);
+
+        let solution = engine
+            .gmin_stepping(&mut circuit, &mut matrix)
+            .expect("the floor stage solves");
+
+        let expected = 1e-6 / (floor - stage);
+        assert!(
+            (solution[0] - expected).abs() <= 1e-12 * expected.abs(),
+            "v(n) = {:e}, expected {expected:e}",
+            solution[0]
+        );
+    }
+
+    /// The floor stage is singular: the conductance cancels the GMIN floor
+    /// exactly, while every stage above it solves. The old walk answered
+    /// with the stage just above the floor, about 1.1e8 V; there is no
+    /// operating point to give.
+    #[test]
+    fn linear_gmin_stepping_refuses_a_singular_floor_stage() {
+        let engine = Engine::default();
+        let floor = engine.config.convergence_config.gmin_target;
+        let (mut circuit, mut matrix) = injected_node(&engine, -floor);
+
+        let failure = continuation_failure(
+            engine
+                .gmin_stepping(&mut circuit, &mut matrix)
+                .expect_err("a singular floor has no operating point"),
+        );
+
+        assert_eq!(failure.aid, ContinuationAid::GminStepping);
+        assert_eq!(failure.unsolved, ContinuationStage::Step(floor));
+        assert!(
+            failure.reached.is_some_and(|gmin| gmin > floor),
+            "a shunted stage solved: {failure}"
+        );
+        assert!(failure.cause.is_some(), "{failure}");
+    }
+
+    /// A step that reaches the floor lands on it exactly, so the last stage
+    /// is the circuit's own system and not a rounding of its GMIN.
+    #[test]
+    fn nonlinear_gmin_stage_lands_exactly_on_the_floor() {
+        let floor = 1e-15;
+        assert_eq!(Engine::next_descending_gmin(1e-14, floor, 1.0), floor);
+        assert_eq!(
+            Engine::next_descending_gmin(floor * (1.0 + 4.0 * Value::EPSILON), floor, 1e-3),
+            floor
+        );
+        assert_eq!(Engine::next_descending_gmin(1e-30, 0.0, 1.0), 0.0);
+    }
+
+    /// Where the nodal floor is zero (an RSHUNT deck), the old walk's last
+    /// stage also dropped the device junction GMIN below the direct solve's,
+    /// so it solved a different circuit. Here that moves a reverse-biased
+    /// diode node from about -1 V to about -500 V.
+    #[test]
+    fn nonlinear_gmin_stepping_ends_on_the_direct_solves_circuit() {
+        let mut config = SimulationConfig::default();
+        config.convergence_config.gmin_initial = 1e-3;
+        config.convergence_config.gmin_target = 1e-9;
+        config.convergence_config.junction_gmin_target = 1e-12;
+        let engine = Engine::new(config);
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n");
+        circuit.diodes.add(crate::device::Diode::spice_defaults(
+            "d1".to_string(),
+            node,
+            0,
+        ));
+        circuit.current_sources.add("i1".to_string(), node, 0, 1e-9);
+        circuit.global_shunt_conductance = 1e-12;
+        let (mut circuit, mut matrix) = linked(&engine, circuit);
+        assert_eq!(engine.dc_nodal_gmin_floor(&circuit), 0.0);
+        let zero = vec![0.0; circuit.matrix_size()];
+
+        let direct = engine
+            .solve_nonlinear_with_guess_and_abort(&mut circuit, &mut matrix, Some(&zero), &NoAbort)
+            .expect("the direct solve converges");
+        let stepped = engine
+            .gmin_stepping_nonlinear_with_abort(&mut circuit, &mut matrix, &zero, &NoAbort)
+            .expect("GMIN stepping reaches the floor");
+
+        assert!(
+            (-1.1..-0.9).contains(&direct[0]),
+            "direct v(n) = {:e}",
+            direct[0]
+        );
+        assert!(
+            (stepped[0] - direct[0]).abs() <= 1e-6 * direct[0].abs(),
+            "GMIN stepping v(n) = {:e}, direct {:e}",
+            stepped[0],
+            direct[0]
+        );
+    }
+
+    /// A current source draws more from a diode node than the diode's
+    /// saturation current can supply, and no GMIN conditions the node: the
+    /// circuit has no operating point. Every pseudo-transient stage still
+    /// solves, because its pseudo-capacitance anchors the node, and the old
+    /// walk returned the last of them, near -2 kV, as the operating point.
+    #[test]
+    fn pseudo_transient_refuses_when_the_unmodified_circuit_does_not_converge() {
+        let mut config = SimulationConfig::default();
+        config.convergence_config.gmin_target = 0.0;
+        config.convergence_config.junction_gmin_target = 0.0;
+        let engine = Engine::new(config);
+        let mut circuit = CircuitData::new();
+        let node = circuit.get_or_create_node("n");
+        circuit.diodes.add(crate::device::Diode::spice_defaults(
+            "d1".to_string(),
+            node,
+            0,
+        ));
+        circuit.current_sources.add("i1".to_string(), node, 0, 1e-6);
+        let (mut circuit, mut matrix) = linked(&engine, circuit);
+        let zero = vec![0.0; circuit.matrix_size()];
+
+        let failure = continuation_failure(
+            engine
+                .pseudo_transient_nonlinear_with_guess_and_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    &zero,
+                    &NoAbort,
+                )
+                .expect_err("the circuit has no operating point"),
+        );
+
+        assert_eq!(failure.aid, ContinuationAid::PseudoTransient);
+        assert_eq!(failure.unsolved, ContinuationStage::UnmodifiedCircuit);
+        assert!(failure.reached.is_some(), "{failure}");
     }
 }

@@ -1,6 +1,9 @@
 //! End-to-end policy for floating components at the shared DC-bias boundary.
 
-use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
+use rspice_core::engine::{
+    ContinuationAid, ContinuationStage, Engine, SimulationConfig, SimulationError,
+    SimulationErrorCategory, SpiceDialect,
+};
 use rspice_core::netlist::Netlist;
 
 fn engine() -> Engine {
@@ -237,6 +240,38 @@ fn a_sensed_loop_that_nothing_drives_solves_to_zero_on_the_faer_backend() {
             engine.convergence_quality().gmin_stepping_count,
             0,
             "{title}: the bias needs no continuation"
+        );
+    }
+}
+
+/// The deck's only conductance cancels the 1e-15 S GMIN floor exactly, so
+/// the circuit's own system is singular while every GMIN stage above the
+/// floor solves. GMIN stepping used to answer with the stage just above the
+/// floor, about 1.1e8 V at `n`, which is the solution of a different circuit.
+/// The operating point does not exist, and the refusal names the aid and the
+/// stage it could not solve, whether or not source stepping runs after it.
+#[test]
+fn a_singular_floor_is_refused_rather_than_answered_by_a_shunted_gmin_stage() {
+    let netlist = parse(
+        "Negative conductance cancelling the GMIN floor\nI1 0 n 1u\nR1 n 0 -1e15\n.op\n.end\n",
+    );
+    for source_stepping in [true, false] {
+        let mut config = SimulationConfig::default();
+        config.convergence_config.source_stepping = source_stepping;
+        let engine = Engine::new(config);
+        let error = engine
+            .run_dc_op(&netlist)
+            .expect_err("no operating point exists");
+        let SimulationError::ContinuationFailed(failure) = &error else {
+            panic!("source stepping {source_stepping}: expected an aid failure, got {error}");
+        };
+        assert_eq!(failure.aid, ContinuationAid::GminStepping, "{error}");
+        assert_eq!(failure.unsolved, ContinuationStage::Step(1e-15), "{error}");
+        assert!(failure.reached.is_some_and(|gmin| gmin > 1e-15), "{error}");
+        assert!(failure.cause.is_some(), "{error}");
+        assert_eq!(
+            error.descriptor().category,
+            SimulationErrorCategory::Convergence
         );
     }
 }

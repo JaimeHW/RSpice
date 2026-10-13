@@ -371,8 +371,14 @@ fn discontinuity_newton_hint_prevents_false_dc_convergence() {
                 let error = result.expect_err(
                     "the active hint must prevent convergence even with zero KCL residual",
                 );
+                // Every operating-point aid fails too, and the last one to
+                // run reports which aid stopped and where.
                 assert!(
-                    matches!(error, rspice_core::SimulationError::ConvergenceFailed(_)),
+                    matches!(
+                        error,
+                        rspice_core::SimulationError::ConvergenceFailed(_)
+                            | rspice_core::SimulationError::ContinuationFailed(_)
+                    ),
                     "{spice_dialect:?}: {error}"
                 );
             } else {

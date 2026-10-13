@@ -952,7 +952,7 @@ impl Engine {
         solution: &[Value],
         gmin: Value,
     ) -> Result<bool, SimulationError> {
-        let junction_gmin = self.effective_device_junction_gmin(gmin);
+        let junction_gmin = self.gmin_stage_junction_gmin(gmin);
         self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
@@ -1164,7 +1164,7 @@ impl Engine {
         solution: &[Value],
         gmin: Value,
     ) -> Option<Value> {
-        let junction_gmin = self.effective_device_junction_gmin(gmin);
+        let junction_gmin = self.gmin_stage_junction_gmin(gmin);
         self.nonlinear_merit_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,

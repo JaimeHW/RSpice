@@ -34,9 +34,10 @@ fn prefer_nonfinite_trial_failure(
         // retry from the variant, and a rescue that turned a rejectable trial
         // into an ordinary circuit error would end the run the dt cut was
         // about to save.
-        (SimulationError::ConvergenceFailed(_), Some(trial)) => {
-            SimulationError::NonFiniteTrial(Box::new(trial.clone()))
-        }
+        (
+            SimulationError::ConvergenceFailed(_) | SimulationError::ContinuationFailed(_),
+            Some(trial),
+        ) => SimulationError::NonFiniteTrial(Box::new(trial.clone())),
         _ => fallback,
     }
 }
@@ -190,6 +191,41 @@ impl Engine {
         }
     }
 
+    /// The failure of a linear aid whose last stage, the circuit's own
+    /// system, did not solve.
+    ///
+    /// An aid that solved no stage at all made no progress to report: the
+    /// circuit's own system failed as it did for the direct solve, and is
+    /// reported the same way. One that solved a deformed stage reports the
+    /// stage, since that solution is exactly what it refuses to return. A
+    /// singular system names the rows no equation constrains either way, and
+    /// the attribution keys on that sentence, which the failure quotes.
+    pub(in crate::engine::convergence) fn linear_continuation_failure(
+        &self,
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        mut failure: crate::analysis::error::ContinuationFailure,
+        error: SolverError,
+    ) -> SimulationError {
+        if failure.reached.is_none() {
+            return if matches!(error, SolverError::SingularMatrix) {
+                self.singular_system_error(circuit, matrix)
+            } else {
+                SimulationError::Solver(error)
+            };
+        }
+        failure.cause = Some(if matches!(error, SolverError::SingularMatrix) {
+            let (message, diagnostic) = singular_system_failure(circuit, matrix);
+            if let Some(diagnostic) = diagnostic {
+                self.record_convergence(|quality| quality.record_failure_diagnostic(diagnostic));
+            }
+            message
+        } else {
+            error.to_string()
+        });
+        failure.into()
+    }
+
     /// Refuse a singular system, recording which rows carry no equation.
     fn singular_system_error(
         &self,
@@ -237,7 +273,7 @@ impl Engine {
             return Ok(sol);
         }
 
-        let mut last_err = direct_result.expect_err("checked Err branch");
+        let last_err = direct_result.expect_err("checked Err branch");
         if matches!(last_err, SolverError::SingularMatrix) && rhs.iter().all(|&value| value == 0.0)
         {
             // Floating LU may round a small Schur pivot to zero in a regular
@@ -257,20 +293,25 @@ impl Engine {
         }
         let conv_cfg = &self.config.convergence_config;
 
+        // An aid answers only with the circuit's own solution. When none
+        // can, a failure naming a deformed stage an aid did solve says more
+        // than the circuit's own system failing at every stage alike.
+        let mut aid_failure: Option<SimulationError> = None;
+        let mut keep_failure = |error: SimulationError| {
+            if !matches!(aid_failure, Some(SimulationError::ContinuationFailed(_))) {
+                aid_failure = Some(error);
+            }
+        };
         if conv_cfg.gmin_stepping {
             self.record_convergence(|quality| {
                 if quality.gmin_stepping_count == 0 {
-                    log::warn!(
-                        "direct DC solve failed; falling back to gmin stepping.                          The operating point is reached by relaxing device                          conductances, so check it against expectations."
-                    );
+                    log::warn!("direct DC solve failed; falling back to gmin stepping.");
                 }
                 quality.record_gmin_stepping();
             });
             match self.gmin_stepping(circuit, matrix) {
                 Ok(sol) => return Ok(sol),
-                Err(e) => {
-                    last_err = e;
-                }
+                Err(error) => keep_failure(error),
             }
         }
 
@@ -281,13 +322,13 @@ impl Engine {
                 }
                 quality.record_source_stepping();
             });
-            return self.source_stepping(circuit, matrix).map_err(|err| {
-                if matches!(err, crate::solver::SolverError::SingularMatrix) {
-                    self.singular_system_error(circuit, matrix)
-                } else {
-                    SimulationError::Solver(err)
-                }
-            });
+            match self.source_stepping(circuit, matrix) {
+                Ok(sol) => return Ok(sol),
+                Err(error) => keep_failure(error),
+            }
+        }
+        if let Some(error) = aid_failure {
+            return Err(error);
         }
 
         if matches!(last_err, crate::solver::SolverError::SingularMatrix) {
@@ -362,7 +403,7 @@ impl Engine {
 
     pub(in crate::engine) fn is_recoverable_startup_error(error: &SimulationError) -> bool {
         match error {
-            SimulationError::ConvergenceFailed(_) => true,
+            SimulationError::ConvergenceFailed(_) | SimulationError::ContinuationFailed(_) => true,
             SimulationError::Solver(crate::solver::SolverError::InvalidCircuit(_)) => false,
             SimulationError::Solver(_) => true,
             // `NonFiniteTrial` is deliberately NOT recoverable here. It is how

@@ -144,10 +144,11 @@ pub use dc::{
     canonical_device_parameter_sweep_source,
 };
 pub use error::{
-    ElaborationError, ElaborationErrorKind, MaterializationMismatchError, OutputCommitError,
-    OutputCommitPhase, PersistenceIncompatibleError, RequestedSignalUnavailableError,
-    ResultSchemaMismatchError, SimulationError, SimulationErrorCategory, SimulationErrorCode,
-    SimulationErrorDescriptor, UnsupportedCapabilityError,
+    ContinuationAid, ContinuationFailure, ContinuationStage, ElaborationError,
+    ElaborationErrorKind, MaterializationMismatchError, OutputCommitError, OutputCommitPhase,
+    PersistenceIncompatibleError, RequestedSignalUnavailableError, ResultSchemaMismatchError,
+    SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
+    UnsupportedCapabilityError,
 };
 pub use hb::{
     EnvelopeCarrierBasis, EnvelopeEventTolerances, EnvelopeResult, EnvelopeSourceEvent,

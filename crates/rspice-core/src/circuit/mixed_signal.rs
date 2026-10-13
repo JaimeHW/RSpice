@@ -157,7 +157,10 @@ impl CircuitData {
         error: SimulationError,
         time: Value,
     ) -> SimulationError {
-        if !matches!(error, SimulationError::ConvergenceFailed(_)) {
+        if !matches!(
+            error,
+            SimulationError::ConvergenceFailed(_) | SimulationError::ContinuationFailed(_)
+        ) {
             return error;
         }
         // Read from the parked ledgers rather than from the instances: the

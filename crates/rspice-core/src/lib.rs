@@ -136,13 +136,13 @@ pub use analysis::{DcAnalysis, MeasureEngine, MeasureResult};
 pub use circuit::CircuitData;
 pub use device::{Device, DeviceModel, engine_capabilities, engine_supports_capability};
 pub use engine::{
-    ConvergenceConfig, ConvergencePreset, DampingStrategy, ElaborationError, ElaborationErrorKind,
-    Engine, EngineHealthReport, GpTransientPhaseModel, JfetLevel2Model,
-    MaterializationMismatchError, OutputCommitError, OutputCommitPhase,
-    PersistenceIncompatibleError, RequestedSignalUnavailableError, ResultSchemaMismatchError,
-    SimulationConfig, SimulationConfigError, SimulationConfigOverrides, SimulationError,
-    SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor, SpiceDialect,
-    UnsupportedCapabilityError, XyceTraInterpolation, resolve_simulation_config,
+    ContinuationAid, ContinuationFailure, ContinuationStage, ConvergenceConfig, ConvergencePreset,
+    DampingStrategy, ElaborationError, ElaborationErrorKind, Engine, EngineHealthReport,
+    GpTransientPhaseModel, JfetLevel2Model, MaterializationMismatchError, OutputCommitError,
+    OutputCommitPhase, PersistenceIncompatibleError, RequestedSignalUnavailableError,
+    ResultSchemaMismatchError, SimulationConfig, SimulationConfigError, SimulationConfigOverrides,
+    SimulationError, SimulationErrorCategory, SimulationErrorCode, SimulationErrorDescriptor,
+    SpiceDialect, UnsupportedCapabilityError, XyceTraInterpolation, resolve_simulation_config,
 };
 #[cfg(feature = "veriloga")]
 pub use engine::{

@@ -14,11 +14,11 @@ use rspice_core::execution::{
 use rspice_core::netlist::NetlistSourceLocation;
 use rspice_core::solver::SolverError;
 use rspice_core::{
-    ElaborationError, ElaborationErrorKind, MaterializationMismatchError, Netlist,
-    OutputCommitError, OutputCommitPhase, PersistenceIncompatibleError,
-    RequestedSignalUnavailableError, ResourceKind, ResultSchemaMismatchError,
-    SimulationConfigError, SimulationError, SimulationErrorCategory, SimulationErrorCode,
-    UnsupportedCapabilityError,
+    ContinuationAid, ContinuationFailure, ContinuationStage, ElaborationError,
+    ElaborationErrorKind, MaterializationMismatchError, Netlist, OutputCommitError,
+    OutputCommitPhase, PersistenceIncompatibleError, RequestedSignalUnavailableError, ResourceKind,
+    ResultSchemaMismatchError, SimulationConfigError, SimulationError, SimulationErrorCategory,
+    SimulationErrorCode, UnsupportedCapabilityError,
 };
 
 /// An analysis identity minted by the planner, which is the only way one is
@@ -76,6 +76,26 @@ fn convergence_metadata_covers_engine_and_nested_solver_failures() {
     assert_eq!(nested.code, SimulationErrorCode::SolverError);
     assert_eq!(nested.category, SimulationErrorCategory::Solver);
     assert_eq!(nested.iterations, Some(23));
+
+    // A convergence aid that stopped short of the circuit's own operating
+    // point is a convergence failure that names the aid and the stage.
+    let stopped = SimulationError::from(ContinuationFailure {
+        aid: ContinuationAid::PseudoTransient,
+        reached: Some(1e-3),
+        unsolved: ContinuationStage::UnmodifiedCircuit,
+        iterations: 31,
+        cause: None,
+    });
+    let descriptor = stopped.descriptor();
+    assert_eq!(descriptor.code, SimulationErrorCode::ConvergenceError);
+    assert_eq!(descriptor.category, SimulationErrorCategory::Convergence);
+    assert_eq!(descriptor.iterations, Some(31));
+    assert!(!descriptor.retryable);
+    assert_eq!(
+        stopped.to_string(),
+        "Convergence failed: pseudo-transient continuation stopped at pseudo-timestep = \
+         1.000e-3 s; the closing Newton solve of the unmodified circuit did not converge"
+    );
 }
 
 #[test]
@@ -379,7 +399,7 @@ fn expected_descriptor(
         SimulationError::OutputCommitFailed(_) => {
             (Code::OutputCommitFailed, Category::OutputCommit, false)
         }
-        SimulationError::ConvergenceFailed(_) => {
+        SimulationError::ConvergenceFailed(_) | SimulationError::ContinuationFailed(_) => {
             (Code::ConvergenceError, Category::Convergence, false)
         }
         SimulationError::Aborted => (Code::Aborted, Category::Cancellation, true),
@@ -475,6 +495,13 @@ fn one_of_every_variant() -> Vec<SimulationError> {
             "no such directory",
         )),
         SimulationError::ConvergenceFailed(5),
+        SimulationError::from(ContinuationFailure {
+            aid: ContinuationAid::GminStepping,
+            reached: Some(1e-14),
+            unsolved: ContinuationStage::Step(1e-15),
+            iterations: 14,
+            cause: None,
+        }),
         SimulationError::Aborted,
         SimulationError::TimeLimitExceeded,
     ]

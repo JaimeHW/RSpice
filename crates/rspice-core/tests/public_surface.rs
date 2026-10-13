@@ -128,8 +128,15 @@ use rspice_core::analysis::harmonic_balance::{
 //   self-checking testbench entry point (P2 section 2.3) for the ivtest
 //   conformance harness; today the core's testbench suite calls it, and
 //   restricted visibility would leave it dead code in a non-test build.
-// The census is 5,695, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5695;
+// The census was 5,695, with no slack.
+// Three statements for the typed failure of an operating-point convergence
+// aid that stops short of the circuit's own operating point:
+// `ContinuationFailure`, carried by `SimulationError::ContinuationFailed`,
+// and the `ContinuationAid` and `ContinuationStage` it names. Enum variant
+// payloads must be public; the simulation bridge (`rspice-simulation`
+// error.rs) and the Python exception mapping (`rspice-python`
+// errors/simulation.rs) read the variant. The census is 5,698, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5698;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

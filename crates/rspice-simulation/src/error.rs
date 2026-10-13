@@ -359,6 +359,12 @@ impl From<rspice_core::SimulationError> for SimulationError {
                     message: "Newton-Raphson iteration limit exceeded".to_string(),
                 }
             }
+            rspice_core::SimulationError::ContinuationFailed(failure) => {
+                SimulationError::ConvergenceFailed {
+                    iterations: failure.iterations,
+                    message: failure.to_string(),
+                }
+            }
             rspice_core::SimulationError::Aborted => SimulationError::Aborted,
             // An expired time budget is a stop, not a failed circuit; the UI
             // treats it exactly as it treats a user cancellation until it

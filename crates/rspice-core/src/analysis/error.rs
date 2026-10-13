@@ -969,6 +969,112 @@ impl std::fmt::Display for ResultSchemaMismatchError {
 
 impl std::error::Error for ResultSchemaMismatchError {}
 
+/// An operating-point convergence aid: a homotopy that solves a deformed
+/// circuit and walks the deformation back to the circuit itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ContinuationAid {
+    /// A conductance from every node to ground, stepped down to the GMIN
+    /// floor the direct solve uses.
+    GminStepping,
+    /// The independent sources, ramped up to full strength.
+    SourceStepping,
+    /// A pseudo-capacitance on every unknown, its timestep grown until the
+    /// circuit sits at DC.
+    PseudoTransient,
+    /// The gate generation-recombination branches of JFET-family devices,
+    /// ramped up to full strength.
+    GateGenerationStepping,
+}
+
+impl ContinuationAid {
+    /// The aid's continuation parameter at `value`, in the aid's own units.
+    fn stage(self, value: crate::Value) -> String {
+        match self {
+            Self::GminStepping => format!("gmin = {value:.3e} S"),
+            Self::SourceStepping => format!("source scale = {value:.4}"),
+            Self::PseudoTransient => format!("pseudo-timestep = {value:.3e} s"),
+            Self::GateGenerationStepping => format!("gate-generation scale = {value:.4}"),
+        }
+    }
+}
+
+impl std::fmt::Display for ContinuationAid {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::GminStepping => "GMIN stepping",
+            Self::SourceStepping => "source stepping",
+            Self::PseudoTransient => "pseudo-transient continuation",
+            Self::GateGenerationStepping => "gate-generation continuation",
+        })
+    }
+}
+
+/// The stage a convergence aid could not solve.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ContinuationStage {
+    /// A stage of the aid's own schedule, at this value of its parameter:
+    /// siemens for GMIN stepping, a fraction of full strength for source and
+    /// gate-generation stepping, seconds for a pseudo-transient timestep.
+    /// The last stage of GMIN, source and gate-generation stepping is the
+    /// circuit itself.
+    Step(crate::Value),
+    /// The closing Newton solve of the unmodified circuit, started from the
+    /// last stage the aid solved.
+    UnmodifiedCircuit,
+}
+
+/// An operating-point convergence aid that did not reach the circuit's own
+/// operating point.
+///
+/// Every stage an aid solves before its last belongs to a deformed circuit:
+/// nodes shunted to ground, sources at a fraction of their value, a
+/// pseudo-capacitance anchoring each unknown. Such a stage is never an
+/// answer. An aid answers only with the unmodified circuit's solution at the
+/// final GMIN floor and full source strength, converged and certified by the
+/// residual test a direct solve faces, and reports this failure otherwise.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContinuationFailure {
+    /// The aid that stopped.
+    pub aid: ContinuationAid,
+    /// The last stage it solved, in its parameter; `None` when it solved
+    /// none.
+    pub reached: Option<crate::Value>,
+    /// The stage it could not solve.
+    pub unsolved: ContinuationStage,
+    /// Newton iterations the aid spent; linear solves for a linear circuit.
+    pub iterations: usize,
+    /// What the solver reported at the unsolved stage, when it said more
+    /// than that the stage did not converge.
+    pub cause: Option<String>,
+}
+
+impl std::fmt::Display for ContinuationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.aid)?;
+        match self.reached {
+            Some(value) => write!(formatter, " stopped at {}", self.aid.stage(value))?,
+            None => formatter.write_str(" stopped before its first stage")?,
+        }
+        match self.unsolved {
+            ContinuationStage::Step(value) => write!(
+                formatter,
+                "; the stage at {} did not solve",
+                self.aid.stage(value)
+            )?,
+            ContinuationStage::UnmodifiedCircuit => formatter.write_str(
+                "; the closing Newton solve of the unmodified circuit did not converge",
+            )?,
+        }
+        if let Some(cause) = &self.cause {
+            write!(formatter, " ({cause})")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ContinuationFailure {}
+
 /// Simulation errors
 #[derive(Debug, Error)]
 pub enum SimulationError {
@@ -1075,6 +1181,12 @@ pub enum SimulationError {
     #[error("Convergence failed after {0} iterations")]
     ConvergenceFailed(usize),
 
+    /// An operating-point convergence aid stopped short of the circuit's own
+    /// operating point. It names the aid and the stage it could not solve;
+    /// it is a convergence failure to every frontend.
+    #[error("Convergence failed: {0}")]
+    ContinuationFailed(Box<ContinuationFailure>),
+
     #[error("Simulation aborted by user")]
     Aborted,
 
@@ -1118,6 +1230,12 @@ impl From<ResultSchemaMismatchError> for SimulationError {
 impl From<UnsupportedCapabilityError> for SimulationError {
     fn from(error: UnsupportedCapabilityError) -> Self {
         Self::UnsupportedCapability(Box::new(error))
+    }
+}
+
+impl From<ContinuationFailure> for SimulationError {
+    fn from(error: ContinuationFailure) -> Self {
+        Self::ContinuationFailed(Box::new(error))
     }
 }
 
@@ -1335,7 +1453,7 @@ impl SimulationError {
                 SimulationErrorCategory::OutputCommit,
                 false,
             ),
-            Self::ConvergenceFailed(_) => (
+            Self::ConvergenceFailed(_) | Self::ContinuationFailed(_) => (
                 SimulationErrorCode::ConvergenceError,
                 SimulationErrorCategory::Convergence,
                 false,
@@ -1359,6 +1477,7 @@ impl SimulationError {
             iterations: match self {
                 Self::ConvergenceFailed(iterations)
                 | Self::Solver(SolverError::ConvergenceFailed(iterations)) => Some(*iterations),
+                Self::ContinuationFailed(failure) => Some(failure.iterations),
                 _ => None,
             },
             resource_limit: match self {

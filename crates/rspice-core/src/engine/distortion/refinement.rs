@@ -61,7 +61,8 @@ pub(super) fn refine(
                 | SimulationError::NonFiniteTrial(_)
                 | SimulationError::ParameterDomain(_)
                 | SimulationError::Solver(_)
-                | SimulationError::ConvergenceFailed(_),
+                | SimulationError::ConvergenceFailed(_)
+                | SimulationError::ContinuationFailed(_),
             ) if errors.iter().all(|error| error.is_finite()) => break,
             Err(failure) => return Err(failure),
         };
