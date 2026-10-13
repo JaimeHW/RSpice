@@ -1533,9 +1533,19 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             let view_type = view.view_type;
             if matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
                 if let Some(schematic) = self.find_schematic(&reference) {
+                    let master = (
+                        library.expect("view implies library"),
+                        cell.expect("view implies cell"),
+                        view,
+                    );
                     let materialized_binding = binding
                         .map(|placed| {
-                            materialize_schematic_binding(placed, &reference, schematic.document)
+                            materialize_schematic_binding(
+                                placed,
+                                master,
+                                &reference,
+                                schematic.document,
+                            )
                         })
                         .transpose()?;
                     return Ok(Some((

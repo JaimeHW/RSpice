@@ -10,6 +10,7 @@ pub(super) fn is_project_virtual_source_path(path: &Path) -> bool {
 
 pub(super) fn materialize_schematic_binding(
     placed: &LibraryCellInstance,
+    (library, cell, view): (&Library, &Cell, &View),
     reference: &CellViewRef,
     schematic: &SchematicDocument,
 ) -> Result<LibraryCellInstance, String> {
@@ -28,6 +29,10 @@ pub(super) fn materialize_schematic_binding(
     }
     let mut materialized =
         LibraryCellInstance::new(&reference.library, &reference.cell, &reference.view);
+    // The master's parameter contract, by the rule a source view binds:
+    // without it every override passed through unchecked, under a warning
+    // that the master declared none.
+    materialized.declare_parameters(current_parameter_order(library, cell, view)?);
     materialized.bind_interface(&ports);
     Ok(materialized)
 }

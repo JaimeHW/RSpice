@@ -112,6 +112,57 @@ fn borrowed_documents_resolve_shared_masters_without_editor_or_host_files() {
     assert_eq!(documents.0[&child.key()].0.components.len(), 0);
 }
 
+/// A schematic master that declares a parameter contract binds it as the
+/// instance's allowlist, as a source view's does. Materialization used to
+/// give the instance a fresh binding with none, so every override passed
+/// through unchecked with a warning that the master declared no contract.
+#[test]
+fn a_schematic_masters_parameter_contract_is_its_instances_allowlist() {
+    let root = CellViewRef::new("work", "top", "schematic");
+    let child = CellViewRef::new("work", "amp", "schematic");
+    let mut library = Library::new("work");
+    for name in ["top", "amp"] {
+        let mut cell = Cell::new(name);
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        if name == "amp" {
+            cell.metadata.insert(
+                "cdf.parameter_contract".to_owned(),
+                r#"[{"name":"gain","default":"2"},{"name":"bw"}]"#.to_owned(),
+            );
+        }
+        library.add_cell(cell);
+    }
+    let mut libraries = LibraryCatalog::default();
+    libraries.add_library(library);
+    let mut top = SchematicDocument::default();
+    top.components.push(
+        Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
+            .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
+            .with_name_value("X1", "amp"),
+    );
+    let documents = Documents(HashMap::from([
+        (root.key(), (top, false)),
+        (child.key(), (SchematicDocument::default(), false)),
+    ]));
+    let sources = ProjectSourceRegistry::default();
+    let context = HierarchyContext {
+        documents: &documents,
+        libraries: &libraries,
+        project_id: ProjectId::new(),
+        project_sources: &sources,
+        source_files: &NoSourceFiles,
+    };
+
+    let (_, plan) = resolve_hierarchy(context, root, None);
+
+    let materialized = plan
+        .binding(&InstancePath::root().child("X1").unwrap())
+        .and_then(ConfigurationExecutionBinding::materialized_binding)
+        .expect("the instance binds its master");
+    assert!(materialized.parameters_declared());
+    assert_eq!(materialized.parameter_order, ["gain", "bw"]);
+}
+
 /// With no configuration, an instance of a project-owned Verilog-A cell runs
 /// the bundle its view owns, exactly as a configuration would bind it: Spectre
 /// reaches `veriloga` with no configuration at all. The unconfigured path used
