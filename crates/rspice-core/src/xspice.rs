@@ -109,8 +109,8 @@ pub use event::EventValue;
 #[cfg(any(feature = "veriloga", test))]
 pub(crate) use event::checkpoint as event_checkpoint;
 pub(crate) use event::{
-    EventNodeMap, SharedXspiceEventQueue, SharedXspiceEventValues, XspiceEventScheduler,
-    XspiceEventValues,
+    EventLoads, EventNodeMap, SharedXspiceEventQueue, SharedXspiceEventValues,
+    XspiceEventScheduler, XspiceEventValues,
 };
 pub use external::{
     DigitalCosimInputEvent, DigitalCosimRuntime, DigitalCosimRuntimeFactory, DigitalCosimSpec,

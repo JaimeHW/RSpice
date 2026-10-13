@@ -357,6 +357,67 @@ pub(crate) type XspiceDriverId = (String, String, usize);
 /// (the one walk that does, the checkpoint image, sorts what it collects), so
 /// the cheap hash changes no result.
 pub(crate) type EventNodeMap<V> = rustc_hash::FxHashMap<NodeId, V>;
+
+/// The total load each event node presents -- ngspice's summed `LOAD()`
+/// contributions -- under a revision number.
+///
+/// The loads are fixed once the circuit's instances are registered, yet every
+/// evaluation used to copy them into the instance's context port by port, one
+/// keyed lookup per node, only to find them unchanged. A context records the
+/// revision it last copied (`CmContext::event_loads_revision`), and an
+/// instance whose connections have not moved since skips the copy while the
+/// revision still matches. Every change draws a fresh revision from one
+/// process-wide counter, so two maps that share a revision are copies of one
+/// another and a context can never match a map it was not filled from.
+#[derive(Debug, Clone)]
+pub(crate) struct EventLoads {
+    values: EventNodeMap<Value>,
+    revision: u64,
+}
+
+impl Default for EventLoads {
+    fn default() -> Self {
+        Self {
+            values: EventNodeMap::default(),
+            revision: next_event_loads_revision(),
+        }
+    }
+}
+
+/// A revision no map has carried yet. Zero is never drawn: it is what a
+/// context that has copied no loads records.
+fn next_event_loads_revision() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+impl EventLoads {
+    /// The total load on `node`, if any instance loads it.
+    #[inline]
+    pub(crate) fn get(&self, node: NodeId) -> Option<Value> {
+        self.values.get(&node).copied()
+    }
+
+    /// The revision a context copying these loads records.
+    #[inline]
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Add one instance's contribution to `node`.
+    pub(crate) fn add(&mut self, node: NodeId, load: Value) {
+        *self.values.entry(node).or_insert(0.0) += load;
+        self.revision = next_event_loads_revision();
+    }
+
+    /// Forget every contribution, ahead of summing them again.
+    #[cfg(feature = "veriloga")]
+    pub(crate) fn clear(&mut self) {
+        self.values.clear();
+        self.revision = next_event_loads_revision();
+    }
+}
+
 // Node lookup order is immaterial; the driver fold is not. In particular,
 // summing real drivers in randomized HashMap order changes cancellation after
 // rebuilding a circuit. Keep every fold, including inout other-driver views,

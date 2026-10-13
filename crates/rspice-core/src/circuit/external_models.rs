@@ -821,7 +821,7 @@ impl CircuitData {
             .iter()
             .any(|port| port.default_type.is_event_driven());
         instance.for_each_event_load_contribution(|node, load| {
-            *self.xspice_event_loads.entry(node).or_insert(0.0) += load;
+            self.xspice_event_loads.add(node, load);
         });
         for connection in instance.connections() {
             mark_xspice_event_connection_nets(&mut self.net_kinds, connection);
@@ -839,7 +839,7 @@ impl CircuitData {
         for instance in &mut self.xspice_instances {
             instance.make_mut().rebind_event_node(from, to);
             instance.for_each_event_load_contribution(|node, load| {
-                *self.xspice_event_loads.entry(node).or_insert(0.0) += load;
+                self.xspice_event_loads.add(node, load);
             });
         }
         self.rebuild_net_kinds();

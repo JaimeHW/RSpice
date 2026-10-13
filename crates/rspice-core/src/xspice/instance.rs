@@ -35,7 +35,7 @@ pub(crate) struct CodeModelVectorParams<'a> {
 pub(crate) struct XspiceEventInputs<'a> {
     pub digital_values: &'a super::EventNodeMap<DigitalValue>,
     pub digital_event_times: &'a super::EventNodeMap<Value>,
-    pub event_total_loads: &'a super::EventNodeMap<Value>,
+    pub event_total_loads: &'a super::EventLoads,
     pub real_values: &'a super::EventNodeMap<Value>,
     pub real_event_times: &'a super::EventNodeMap<Value>,
 }
@@ -384,28 +384,22 @@ fn set_context_event_total_load(
     context: &mut CmContext,
     port_name: &str,
     connection: &PortConnection,
-    event_total_loads: &super::EventNodeMap<Value>,
+    event_total_loads: &super::EventLoads,
 ) -> CmResult<()> {
     match connection {
         PortConnection::Digital(node)
         | PortConnection::DigitalInverted(node)
         | PortConnection::Real(node) => {
-            context.set_port_total_load(
-                port_name,
-                event_total_loads.get(node).copied().unwrap_or(0.0),
-            );
+            context.set_port_total_load(port_name, event_total_loads.get(*node).unwrap_or(0.0));
         }
         PortConnection::DigitalVector(nodes) | PortConnection::RealVector(nodes) => {
             context.set_port_vector_total_loads_from_fn(port_name, nodes.len(), |index| {
-                event_total_loads.get(&nodes[index]).copied().unwrap_or(0.0)
+                event_total_loads.get(nodes[index]).unwrap_or(0.0)
             })?;
         }
         PortConnection::DigitalVectorMapped(nodes) => {
             context.set_port_vector_total_loads_from_fn(port_name, nodes.len(), |index| {
-                event_total_loads
-                    .get(&nodes[index].node)
-                    .copied()
-                    .unwrap_or(0.0)
+                event_total_loads.get(nodes[index].node).unwrap_or(0.0)
             })?;
         }
         _ => {}
@@ -1924,14 +1918,19 @@ impl XspiceInstance {
         }
 
         let ports = &self.ports;
+        // The loads change only when the circuit's instances or this
+        // instance's connections do; see `super::EventLoads`.
+        let copy_loads = self.context.event_loads_revision() != event_total_loads.revision();
 
         for (i, port) in ports.iter().enumerate() {
-            set_context_event_total_load(
-                &mut self.context,
-                &port.name,
-                &self.connections[i],
-                event_total_loads,
-            )?;
+            if copy_loads {
+                set_context_event_total_load(
+                    &mut self.context,
+                    &port.name,
+                    &self.connections[i],
+                    event_total_loads,
+                )?;
+            }
 
             if port.direction != super::PortDirection::In
                 && port.direction != super::PortDirection::InOut
@@ -2090,6 +2089,10 @@ impl XspiceInstance {
                 }
                 PortConnection::Null => {}
             }
+        }
+        if copy_loads {
+            self.context
+                .set_event_loads_revision(event_total_loads.revision());
         }
         Ok(())
     }
@@ -3448,6 +3451,8 @@ impl XspiceInstance {
                 *node = to;
             }
         };
+        // The context's port loads were looked up through the old nodes.
+        self.context.set_event_loads_revision(0);
         for connection in self.connections.iter_mut() {
             match connection {
                 PortConnection::Digital(node)
@@ -3468,6 +3473,8 @@ impl XspiceInstance {
 
     /// Remap circuit node IDs after a topology-level reference-node rewrite.
     pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
+        // The context's port loads were looked up through the old nodes.
+        self.context.set_event_loads_revision(0);
         for connection in self.connections.iter_mut() {
             match connection {
                 PortConnection::Analog(node)
@@ -4244,14 +4251,14 @@ mod tests {
         )
         .expect("event-load instance constructs");
 
-        let mut event_total_loads = HashMap::default();
+        let mut event_total_loads = crate::xspice::EventLoads::default();
         instance.for_each_event_load_contribution(|node, load| {
-            *event_total_loads.entry(node).or_insert(0.0) += load;
+            event_total_loads.add(node, load);
         });
 
-        assert_eq!(event_total_loads.get(&1).copied(), Some(6.0e-12));
-        assert_eq!(event_total_loads.get(&2).copied(), Some(2.0e-12));
-        assert_eq!(event_total_loads.get(&3).copied(), Some(8.0e-12));
+        assert_eq!(event_total_loads.get(1), Some(6.0e-12));
+        assert_eq!(event_total_loads.get(2), Some(2.0e-12));
+        assert_eq!(event_total_loads.get(3), Some(8.0e-12));
 
         instance
             .update_inputs(

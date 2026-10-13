@@ -137,7 +137,8 @@ fn instance_runtime_checkpoint_checks_inverted_inputs_inout_ownership_and_real_p
         (4, 5.0),
     ]);
     let real_times = HashMap::from_iter([(2, 1e-9)]);
-    let loads = HashMap::from_iter([(1, 1e-12)]);
+    let mut loads = crate::xspice::EventLoads::default();
+    loads.add(1, 1e-12);
     let inputs = || XspiceEventInputs {
         digital_values: &bits,
         digital_event_times: &times,

@@ -608,6 +608,9 @@ pub struct CmContext {
     port_total_loads: CopyOnWrite<HashMap<String, Value>>,
     /// ngspice-style total event-node load per vector event port element.
     port_vector_total_loads: CopyOnWrite<HashMap<String, Vec<Value>>>,
+    /// Revision of the circuit's event loads the two maps above were last
+    /// filled from, or 0 if never. See `crate::xspice::EventLoads`.
+    event_loads_revision: u64,
     /// Output port values by name
     outputs: CopyOnWrite<HashMap<String, OutputValue>>,
     /// Connected analog node index per scalar analog port (0 = ground).
@@ -756,6 +759,7 @@ impl CmContext {
             input_vector_event_times: CopyOnWrite::default(),
             port_total_loads: CopyOnWrite::default(),
             port_vector_total_loads: CopyOnWrite::default(),
+            event_loads_revision: 0,
             outputs: CopyOnWrite::default(),
             port_nodes: CopyOnWrite::default(),
             port_terminals: CopyOnWrite::default(),
@@ -930,6 +934,20 @@ impl CmContext {
     /// Borrow all per-element total loads for an event vector port.
     pub fn port_vector_total_loads(&self, name: &str) -> Option<&[Value]> {
         self.port_vector_total_loads.get(name).map(Vec::as_slice)
+    }
+
+    /// Revision of the circuit's event loads the port loads were last filled
+    /// from, or 0 if never.
+    #[inline]
+    pub(crate) fn event_loads_revision(&self) -> u64 {
+        self.event_loads_revision
+    }
+
+    /// Record which revision of the circuit's event loads the port loads now
+    /// hold; 0 records that they hold none in particular.
+    #[inline]
+    pub(crate) fn set_event_loads_revision(&mut self, revision: u64) {
+        self.event_loads_revision = revision;
     }
 
     /// Get analog input vector

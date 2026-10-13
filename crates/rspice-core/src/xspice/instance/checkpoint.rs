@@ -103,12 +103,13 @@ impl XspiceInstance {
     #[cfg(feature = "veriloga")]
     pub(crate) fn prepare_checkpoint_loads(
         &mut self,
-        loads: &crate::xspice::EventNodeMap<Value>,
+        loads: &crate::xspice::EventLoads,
     ) -> Result<(), String> {
         for (port, connection) in self.ports.iter().zip(&self.connections) {
             set_context_event_total_load(&mut self.context, &port.name, connection, loads)
                 .map_err(|error| error.to_string())?;
         }
+        self.context.set_event_loads_revision(loads.revision());
         Ok(())
     }
 
@@ -333,13 +334,7 @@ impl XspiceInstance {
                     } else {
                         self.context.port_total_load(&port.name)
                     };
-                    if load.to_bits()
-                        != events
-                            .event_total_loads
-                            .get(&node)
-                            .copied()
-                            .unwrap_or(0.0)
-                            .to_bits()
+                    if load.to_bits() != events.event_total_loads.get(node).unwrap_or(0.0).to_bits()
                     {
                         return Err("XSPICE checkpoint event-node load differs from circuit".into());
                     }

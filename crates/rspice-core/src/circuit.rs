@@ -665,7 +665,7 @@ pub struct CircuitData {
     /// Cached presence of event-driven XSPICE ports.
     pub(crate) xspice_has_event_driven_devices: bool,
     /// ngspice-style total LOAD() contribution per event node.
-    pub(crate) xspice_event_loads: crate::xspice::EventNodeMap<Value>,
+    pub(crate) xspice_event_loads: crate::xspice::EventLoads,
     /// Scratch nodes touched while applying a batch of XSPICE digital events.
     pub(crate) xspice_touched_digital_nodes: Vec<NodeId>,
     /// Scratch nodes touched while applying a batch of XSPICE real-valued events.
