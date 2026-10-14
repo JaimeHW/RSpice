@@ -718,8 +718,7 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
     let mut route = AnalysesRoute::open(crowded_plan(), 900.0);
     let first = route.settle(Vec::new());
     let top = top_of(&first, FIRST_GROUP);
-    // The lowest group the catalogue can add to: it refuses a kind that
-    // cannot run yet.
+    // The lowest group the plan holds a kind in.
     let last_kind = {
         let plan = route
             .app
@@ -731,7 +730,6 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
             .instances()
             .iter()
             .map(|instance| instance.kind())
-            .filter(|kind| kind.execution_blocker().is_none())
             .collect::<Vec<_>>();
         super::ANALYSIS_CATEGORY_ORDER
             .into_iter()
@@ -742,7 +740,7 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
                     .copied()
                     .find(|kind| super::analysis_catalog_group(*kind) == group)
             })
-            .expect("the plan holds a runnable analysis")
+            .expect("the plan holds an analysis")
     };
     let inserted = super::insert_analysis_instance(&mut route.app, last_kind)
         .expect("a second instance of the kind inserts");
