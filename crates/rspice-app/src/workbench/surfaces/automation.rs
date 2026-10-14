@@ -11,8 +11,8 @@ use crate::ui::widgets::Button;
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp, ScalarPreference};
 
 use super::super::design_system::{
-    WorkbenchIcon, code_inspector_property_list, code_inspector_section, code_workspace_heading,
-    property_row, workspace_title_row,
+    WorkbenchIcon, code_inspector_property_list, code_inspector_section, heading, property_row,
+    workspace_title_row,
 };
 use crate::workbench::documents::code_workspace::{
     AutomationExecutionState, CodeDiagnosticCollection, CodeEditorLanguage, CodeWorkspacePage,
@@ -284,7 +284,6 @@ fn handle_automation_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
 
 fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.ui.messages();
-    let eyebrow = messages.text(MessageId::AutomationHeadingEyebrow);
     let title = messages.text(MessageId::AutomationHeadingTitle);
     let description = messages.text(MessageId::AutomationHeadingDescription);
     let generated_netlist = messages.text(MessageId::CodeGeneratedNetlist);
@@ -293,7 +292,7 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
     let stack_actions = title_actions_stack(visible_workspace_rect(ui).width());
     workspace_title_row(ui, |ui| {
         if stack_actions {
-            code_workspace_heading(ui, &eyebrow, &title, &description);
+            heading(ui, &title, Some(&description));
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -320,7 +319,7 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(heading_width);
-                        code_workspace_heading(ui, &eyebrow, &title, &description);
+                        heading(ui, &title, Some(&description));
                     },
                 );
                 ui.add_space(6.0);

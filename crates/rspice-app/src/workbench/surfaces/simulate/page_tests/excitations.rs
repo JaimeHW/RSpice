@@ -114,10 +114,6 @@ fn the_excitations_page_states_every_occurrence_the_run_drives_a_source_at() {
         );
     }
     assert!(
-        rendered.contains("DESIGN \u{00b7} 3 SOURCES \u{00b7} 2 RF PORTS \u{00b7} 0 UNREAD"),
-        "the eyebrow counts what the run drives:\n{rendered}"
-    );
-    assert!(
         rendered.contains("Port number 1 is claimed by more than one placed port"),
         "one port drawn once and reached twice claims one index of one matrix:\n{rendered}"
     );

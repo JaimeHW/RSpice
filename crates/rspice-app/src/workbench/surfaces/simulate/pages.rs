@@ -25,18 +25,14 @@ const CHIP_HEIGHT: f32 = 22.0;
 /// Render the selected setup page. The analyses route is handled by the
 /// surface itself and never reaches here.
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
-    // The Excitations page and its own heading state the same two lists, so
-    // each is resolved once here and lent to both. Each resolved it separately,
-    // and resolving one walks the design's nets — so a frame showing that page
-    // paid for the walk twice to print one count above the table it counts.
+    // Resolving either list walks the design's nets, so only the page that
+    // shows them pays for it.
     let (excitations, rf_ports) = if page == SimulationPage::Excitations {
         design_excitations(app)
     } else {
         (Vec::new(), Vec::new())
     };
-    workspace_title_row(ui, |ui| {
-        page_heading(ui, app, page, &excitations, &rf_ports)
-    });
+    workspace_title_row(ui, |ui| page_heading(ui, app, page));
     setup_page(ui, |ui| match page {
         SimulationPage::Analyses => {}
         SimulationPage::Excitations => {
@@ -137,18 +133,8 @@ pub(super) fn plan_configuration_receipts(ui: &mut Ui, app: &RSpiceApp) {
     );
 }
 
-/// Eyebrow, title, description, and the page's own primary action.
-///
-/// The eyebrow states the page's authority in the plan, derived from the same
-/// state the page edits — never a static caption.
-fn page_heading(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    page: SimulationPage,
-    excitations: &[crate::simulation::placed_sources::PlacedSource],
-    rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
-) {
-    let eyebrow = eyebrow(app, page, excitations, rf_ports);
+/// Title, description, and the page's own primary action.
+fn page_heading(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
     let chip = PreflightChip::resolve(app);
     ui.horizontal(|ui| {
         let available = ui.available_width();
@@ -159,7 +145,7 @@ fn page_heading(
             egui::vec2((available - action_width - chip_reserve).max(1.0), 0.0),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                heading(ui, &eyebrow, page.title(), page.description());
+                heading(ui, page.title(), Some(page.description()));
             },
         );
         if action.is_none() && chip.is_none() {
@@ -335,193 +321,6 @@ fn preflight_chip(ui: &mut Ui, currency: PreflightCurrency, text: &str) -> bool 
     } else {
         response.on_hover_text("This preflight report is current for the design in front of you.");
         false
-    }
-}
-
-/// The plan payload the three registry pages edit, borrowed rather than cloned.
-///
-/// Each of those pages resolves this same payload and clones it, which is right
-/// for a page body that then edits it and wrong for a heading that runs every
-/// frame on every route.
-fn plan_payload(app: &RSpiceApp) -> Option<&crate::state::SimulationPlanPayload> {
-    app.state
-        .sim_setup
-        .stable_analysis_plan()
-        .ok()
-        .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id))
-}
-
-/// A count and the thing it counts, pluralized: `3 VARIABLES`, `1 VARIABLE`.
-fn counted(count: usize, singular: &str, plural: &str) -> String {
-    if count == 1 {
-        format!("1 {}", singular.to_uppercase())
-    } else {
-        format!("{count} {}", plural.to_uppercase())
-    }
-}
-
-/// What this page has authority over, and what it currently holds.
-///
-/// Every arm reads the state its page edits. Six of these were static captions
-/// naming the *topic* of the page -- "SAVED SIGNALS · EXPRESSIONS" read the
-/// same above an empty registry and a full one, which is the one moment a
-/// heading could have been useful. A caption that cannot change is decoration
-/// occupying the position a reader has learned carries state.
-///
-/// Cheap, with one exception that is named rather than glossed. Every arm but
-/// the first is a `len`, a `count` over a small vector, or a `Copy` scalar. The
-/// expensive answers each page can give -- the resolved run space, the
-/// saved-output preflight, the model qualification gate -- are page-body work
-/// and stay there.
-///
-/// The exception is Excitations, whose eyebrow counts the placed-source and
-/// placed-port lists over the whole design. Resolving either walks the nets of
-/// every master that places one, so each is resolved once by [`show`] and lent
-/// to the heading and the page body together rather than resolved by each. The
-/// Design navigator's rail asks for the same two lists on the same frame and
-/// costs nothing for it: the walk is retained against the design projection it
-/// was derived from, so the second caller of a frame pays a pointer comparison.
-/// The walk itself skips every master that places none of what it lists, so a
-/// sheet being drawn pays nothing at all.
-fn eyebrow(
-    app: &RSpiceApp,
-    page: SimulationPage,
-    excitations: &[crate::simulation::placed_sources::PlacedSource],
-    rf_ports: &[crate::simulation::placed_sources::PlacedRfPort],
-) -> String {
-    match page {
-        // `unread` counts sources, as it always has. A port's readership is not
-        // the same fact — a port no `.sp` run indexes is still terminating the
-        // design — and the card's own chip is where that is stated.
-        SimulationPage::Excitations => {
-            let unread = excitations
-                .iter()
-                .filter(|source| !source.is_read())
-                .count();
-            let sources = counted(excitations.len(), "source", "sources");
-            if rf_ports.is_empty() {
-                format!("DESIGN · {sources} · {unread} unread")
-            } else {
-                format!(
-                    "DESIGN · {sources} · {} · {unread} unread",
-                    counted(rf_ports.len(), "RF port", "RF ports")
-                )
-            }
-        }
-        SimulationPage::Analyses => {
-            let plan = app
-                .state
-                .sim_setup
-                .stable_analysis_plan()
-                .ok()
-                .map(|plan| plan.instances().len())
-                .unwrap_or_default();
-            format!("PLAN · {}", counted(plan, "analysis", "analyses"))
-        }
-        SimulationPage::Variables => {
-            let variables =
-                plan_payload(app).map_or(&[][..], |payload| payload.design_variables.as_slice());
-            let sweepable = variables
-                .iter()
-                .filter(|variable| {
-                    !matches!(
-                        variable.sweep_eligibility,
-                        crate::state::DesignVariableSweepEligibility::FixedParameter
-                    )
-                })
-                .count();
-            format!(
-                "PARAMETERIZATION · {} · {sweepable} SWEEPABLE",
-                counted(variables.len(), "variable", "variables")
-            )
-        }
-        SimulationPage::Outputs => {
-            let outputs =
-                plan_payload(app).map_or(&[][..], |payload| payload.saved_outputs.as_slice());
-            let derived = outputs
-                .iter()
-                .filter(|output| {
-                    matches!(
-                        output.kind,
-                        crate::state::SavedOutputKind::DerivedExpression
-                    )
-                })
-                .count();
-            format!(
-                "SAVED SIGNALS · {} · {derived} DERIVED",
-                counted(outputs.len(), "signal", "signals")
-            )
-        }
-        SimulationPage::Specifications => {
-            let payload = plan_payload(app);
-            let limits = payload.map_or(0, |payload| payload.specs.len());
-            // A legacy plan can hold projected entries with no governed records
-            // behind them, because the migration that mints those needs a
-            // mutable workspace this heading does not have. Reporting "0
-            // governed" there would name a real zero; "ungoverned" names the
-            // state the page will actually show.
-            let governed = payload.map_or(0, |payload| payload.specification_definitions.len());
-            format!(
-                "REQUIREMENTS · {} · {}",
-                counted(limits, "limit", "limits"),
-                if limits > 0 && governed == 0 {
-                    "UNGOVERNED".to_owned()
-                } else {
-                    format!("{governed} GOVERNED")
-                }
-            )
-        }
-        SimulationPage::RunSet => {
-            let axes = app.state.sim_setup.run_set.enabled_dimensions().count();
-            let variation = if app
-                .state
-                .sim_setup
-                .has_enabled_analysis_kind(crate::simulation::plan::AnalysisKind::MonteCarlo)
-            {
-                "MONTE CARLO"
-            } else {
-                "DETERMINISTIC"
-            };
-            format!(
-                "RUN SPACE · {} · {variation}",
-                counted(axes, "axis", "axes")
-            )
-        }
-        SimulationPage::Models => {
-            let bindings = &app.state.sim_setup.model_bindings;
-            let pinned = bindings
-                .iter()
-                .filter(|binding| binding.selected_corner.is_some())
-                .count();
-            format!(
-                "MODEL CLOSURE · {} · {pinned} SECTION-PINNED",
-                counted(bindings.len(), "library", "libraries")
-            )
-        }
-        // One term, not two: "DESIGN CONTRACT" was a fixed caption naming the
-        // topic, which is the shape the rule above rejects. The preset is the
-        // state this page holds.
-        SimulationPage::Solver => format!(
-            "NUMERICS · {}",
-            app.state.sim_setup.options.preset_label().to_uppercase()
-        ),
-        SimulationPage::Save => {
-            let policy = app.state.sim_setup.save_policy;
-            format!(
-                // `retained_dataset_limit` is the ceiling this plan keeps to,
-                // not a count of what it has kept: "20 RETAINED" read as twenty
-                // datasets on disk above a project holding none.
-                "RESULT STORAGE · {} · KEEP {} · {}",
-                policy.output_selection_mode.label().to_uppercase(),
-                policy.retained_dataset_limit,
-                if policy.live_streaming_enabled {
-                    "STREAMING"
-                } else {
-                    "ON COMPLETION"
-                }
-            )
-        }
     }
 }
 

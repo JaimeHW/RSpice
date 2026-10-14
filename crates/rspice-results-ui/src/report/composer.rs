@@ -11,10 +11,7 @@ use rspice_results::report_document::{
     ReportPageId, ReportPageInclusion,
 };
 use rspice_ui_kit::{
-    panels::{
-        WorkbenchIcon, code_inspector_section, code_workspace_heading, icon_button,
-        workspace_title_row,
-    },
+    panels::{WorkbenchIcon, code_inspector_section, heading, icon_button, workspace_title_row},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Button, select},
@@ -179,11 +176,10 @@ pub fn show(ui: &mut Ui, host: &mut impl ComposerHost) {
 
         if !host.project_open() {
             workspace_title_row(ui, |ui| {
-                code_workspace_heading(
+                heading(
                     ui,
-                    "REPORT AUTHORING · NO OPEN PROJECT",
                     "Engineering report composer",
-                    "Open a project before creating a project-owned report document.",
+                    Some("Open a project before creating a project-owned report document."),
                 );
             });
             return;
@@ -333,11 +329,12 @@ fn report_title_row(ui: &mut Ui, host: &mut impl ComposerHost) {
 }
 
 fn report_title_heading(ui: &mut Ui) {
-    code_workspace_heading(
+    heading(
         ui,
-        "REPORT AUTHORING · ENGINEERING DRAFT",
         "Engineering report composer",
-        "Author traceable pages, locked run references, publication plots and machine-readable appendices. Release closure alone owns package assembly and promotion.",
+        Some(
+            "Author traceable pages, locked run references, publication plots and machine-readable appendices. Release closure alone owns package assembly and promotion.",
+        ),
     );
 }
 

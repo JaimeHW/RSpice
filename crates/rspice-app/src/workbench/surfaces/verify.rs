@@ -81,62 +81,32 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
-    let run = verification_run(app);
-    let (eyebrow, title, description) = match app.state.workbench.verification_page {
+    let (title, description) = match app.state.workbench.verification_page {
         VerificationPage::Yield => (
-            run.map_or_else(
-                || "PVT & MONTE CARLO · NO RETAINED DATASET".to_owned(),
-                |run| {
-                    format!(
-                        "PVT & MONTE CARLO · RUN {} · DATASET {}",
-                        run.id, run.dataset_id
-                    )
-                },
-            ),
             "PVT & Monte Carlo verification",
             "Yield, retained-run specification margins, and traceable measurement evidence from the active project.",
         ),
         VerificationPage::Corners => (
-            run.map_or_else(
-                || "PROCESS CORNERS · NO RETAINED DATASET".to_owned(),
-                |run| {
-                    format!(
-                        "PROCESS CORNERS · RUN {} · DATASET {}",
-                        run.id, run.dataset_id
-                    )
-                },
-            ),
             "Process-corner verification",
             "Retained corner sweep values and source-attributed execution state from the active immutable dataset.",
         ),
         VerificationPage::Tuning => (
-            "PARAMETER TUNER · NOMINAL SANDBOX · NON-DESTRUCTIVE".to_owned(),
             "Live design-space exploration",
             "Explore bounded active-plan variables without changing authoritative design data; review commits one plan revision and dispatches a retained production run.",
         ),
         VerificationPage::Optimization => (
-            run.map_or_else(
-                || "OPTIMIZATION · NO RETAINED DATASET".to_owned(),
-                |run| format!("OPTIMIZATION · RUN {} · DATASET {}", run.id, run.dataset_id),
-            ),
             "Optimization candidate",
             "Bounded design variables and convergence evidence produced by the production optimization engine.",
         ),
         VerificationPage::DeviceSafety => (
-            run.map_or_else(
-                || "SOA · NO RETAINED DATASET".to_owned(),
-                |run| format!("SOA · RUN {} · DATASET {}", run.id, run.dataset_id),
-            ),
             "Safe-operating-area verification",
             "Electrical SOA evidence from executed analyses; geometry remains owned by Physical DRC.",
         ),
         VerificationPage::Regression => (
-            "REGRESSION · GOVERNED RETAINED BASELINE".to_owned(),
             "Golden regression comparison",
             "Candidate and immutable baseline measurements are aligned without inventing tolerance or pass criteria.",
         ),
         VerificationPage::Drc => (
-            "PHYSICAL VERIFICATION · NO RETAINED LAYOUT EVIDENCE".to_owned(),
             "Design-rule checking",
             "Physical sign-off remains fail-closed until a layout source, rule deck, and immutable marker database are retained.",
         ),
@@ -154,7 +124,7 @@ fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.allocate_ui_with_layout(
                 egui::vec2((available - action_width - 8.0).max(1.0), 0.0),
                 egui::Layout::top_down(egui::Align::Min),
-                |ui| heading(ui, &eyebrow, title, description),
+                |ui| heading(ui, title, Some(description)),
             );
             ui.allocate_ui_with_layout(
                 egui::vec2(action_width, 0.0),
@@ -163,7 +133,7 @@ fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         });
     } else {
-        heading(ui, &eyebrow, title, description);
+        heading(ui, title, Some(description));
         if action_width > 0.0 {
             ui.add_space(7.0);
             ui.horizontal_wrapped(|ui| verification_header_actions(ui, app, page));

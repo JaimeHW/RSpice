@@ -1173,7 +1173,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     // so the sentence, the hop's label and the hop's own availability are
     // three views of a single answer rather than three answers.
     let prior = prior_plan_run(app);
-    let (eyebrow, description, plan_available) = match app.state.sim_setup.stable_analysis_plan() {
+    let (description, plan_available) = match app.state.sim_setup.stable_analysis_plan() {
         Ok(plan) => {
             let enabled = plan
                 .instances()
@@ -1185,7 +1185,6 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 PriorPlanRun::heading_claim,
             );
             (
-                format!("Simulation plan · revision {}", plan.revision().get()),
                 format!(
                     "{enabled} enabled instances · {} active · {} catalog types · {} executable · {} PVT points · {prior}",
                     plan.instances().len(),
@@ -1199,11 +1198,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 true,
             )
         }
-        Err(error) => (
-            "Simulation plan · unavailable".to_owned(),
-            format!("Stable plan unavailable · {error}"),
-            false,
-        ),
+        Err(error) => (format!("Stable plan unavailable · {error}"), false),
     };
 
     // The split toggle sits beside the hop because both answer "and now show
@@ -1259,7 +1254,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                     // than the reserve wraps inside the heading's own column
                     // instead of running under the group.
                     ui.set_width(heading_width);
-                    heading(ui, &eyebrow, &plan_name, &description);
+                    heading(ui, &plan_name, Some(&description));
                 },
             );
             if let Some(chip) = &chip {
@@ -1284,7 +1279,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 .clicked();
         });
     } else {
-        heading(ui, &eyebrow, &plan_name, &description);
+        heading(ui, &plan_name, Some(&description));
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;

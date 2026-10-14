@@ -834,7 +834,6 @@ define_messages! {
     AutomationFileMissing => "Automation file missing",
     AutomationFileMissingDescription => "The selected file is not present in the authenticated Automation workspace.",
     AutomationDropOneSource => "Drop one Automation project file at a time so each source-graph revision remains independently reviewable.",
-    AutomationHeadingEyebrow => "AUTOMATION · LOCAL SCRIPT · REPRODUCIBLE BATCH",
     AutomationHeadingTitle => "Automation and CI console",
     AutomationHeadingDescription => "Compose project-aware run plans, exports, comparisons and machine-readable release gates.",
     AutomationValidate => "Validate",

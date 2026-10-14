@@ -2072,54 +2072,28 @@ pub fn status_dot(ui: &mut Ui, color: Color32, text: &str) {
     });
 }
 
-pub fn heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(eyebrow.to_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_faint),
-    );
-    ui.add_space(2.0);
-    ui.label(
-        egui::RichText::new(title)
-            .font(theme::sans(15.0, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    ui.label(
-        egui::RichText::new(description)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
-}
-
-/// Exact compact heading used by the mockup's Code & Automation title rows.
+/// A workspace page's heading: its title, and the sentence under it when the
+/// page needs one.
 ///
-/// This is deliberately separate from [`heading`]: code workspaces use the
-/// mockup's three-point vertical rhythm and tracked mono eyebrow while other
-/// workbench headings retain their existing composition.
-pub fn code_workspace_heading(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
+/// There is no eyebrow above the title. A page is named once, by its title.
+pub fn heading(ui: &mut Ui, title: &str, description: Option<&str>) {
     let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(eyebrow.to_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .extra_letter_spacing(0.09 * tokens::FS_0)
-            .color(t.color.text_faint),
-    );
-    ui.add_space(3.0);
     ui.label(
         egui::RichText::new(title)
             .font(theme::sans(15.0, FontWeight::SemiBold))
             .color(t.color.text),
     );
-    ui.add_space(3.0);
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(description)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        )
-        .wrap(),
-    );
+    if let Some(description) = description {
+        ui.add_space(3.0);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(description)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            )
+            .wrap(),
+        );
+    }
 }
 
 /// One canonical section of the embedded Code-workspace inspector.
