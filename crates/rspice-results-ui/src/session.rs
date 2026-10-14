@@ -414,9 +414,15 @@ pub struct ResultViewerState {
     pub cache: DecimationCache,
     /// Derived dB/phase series cache.
     pub derived: DerivedSeries,
-    /// Presentation-only exact family rows selected by Visualization Studio.
-    /// Source datasets are never modified by this projection.
+    /// Presentation-only exact family rows the drawn sheet shows. Source
+    /// datasets are never modified by this projection.
     pub sample_selection: Option<SourceSampleSelection>,
+    /// Family slicing applied over a quick view, per analysis. A project
+    /// result document keeps its own with each pane instead.
+    pub family_policies: HashMap<
+        AnalysisPresentationKey,
+        rspice_results::visualization_document::FamilyPresentationPolicy,
+    >,
     /// Session-only visibility overrides for exact family group traces. These
     /// are presentation state and never alter source WaveformData visibility.
     pub hidden_family_traces: HashSet<crate::waves::FamilyTraceVisibilityKey>,

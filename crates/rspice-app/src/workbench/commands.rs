@@ -1037,10 +1037,13 @@ impl Command {
                 state.workbench.current_route().surface_id() == super::SurfaceId::Results
                     && state.simulation.retained.has_results()
             }
+            Self::FamilySlicing => {
+                state.workbench.current_route().surface_id() == super::SurfaceId::Results
+                    && crate::workbench::documents::result_document::family_available(state)
+            }
             Self::VisualizationTraceManager
             | Self::VisualizationCursorManager
-            | Self::ReviewNotes
-            | Self::FamilySlicing => {
+            | Self::ReviewNotes => {
                 matches!(
                     state.workbench.current_route().surface_id(),
                     super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
@@ -2283,8 +2286,7 @@ impl Command {
                 crate::workbench::documents::result_document::open_measurement(&mut app.state);
             }
             Self::FamilySlicing => {
-                open_studio_tool(app, "Family slicing and pivot");
-                crate::workbench::documents::visualization_studio::open_family_slicing(app);
+                crate::workbench::documents::result_document::open_family(&mut app.state);
             }
             // The run is already the selected one: every affordance that hops
             // here selects it first, so this command carries the workspace

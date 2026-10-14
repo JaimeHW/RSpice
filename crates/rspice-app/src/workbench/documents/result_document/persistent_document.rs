@@ -197,7 +197,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
                 // Manifest is a dataset-native document, so it replaces the
                 // page projection instead of masquerading as one retained
                 // visualization pane.
-                super::show_persistent_pane_viewer(ui, app, ResultViewer::Manifest);
+                super::show_persistent_pane_viewer(ui, app, ResultViewer::Manifest, None);
                 None
             } else {
                 render_page(ui, app, page, active_pane_id, active_viewer)
@@ -866,11 +866,18 @@ fn render_pane_viewer(
     } else {
         pane.viewer_id.clone()
     };
+    let family = match super::document_edit::family::pane_selection(&app.state, pane, viewer) {
+        Ok(family) => family,
+        Err(reason) => {
+            unavailable_surface(ui, &pane.title, &reason);
+            return;
+        }
+    };
     if let Err(reason) = project_pane_presentation(&mut app.state, pane, viewer) {
         unavailable_surface(ui, &pane.title, &reason);
         return;
     }
-    super::show_persistent_pane_viewer(ui, app, viewer);
+    super::show_persistent_pane_viewer(ui, app, viewer, family);
     capture_pane_presentation(&mut app.state, pane, viewer);
 }
 

@@ -1026,7 +1026,7 @@ fn draw_sheet_and_tessellate(app: &mut RSpiceApp, viewer: ResultViewer) {
         let output = ctx.run_ui(input.clone(), |ctx| {
             egui::Panel::right("inspector").show(ctx, |ui| right_panel(ui, &mut app.state));
             egui::CentralPanel::default()
-                .show(ctx, |ui| show_persistent_pane_viewer(ui, app, viewer));
+                .show(ctx, |ui| show_persistent_pane_viewer(ui, app, viewer, None));
         });
         for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
             let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {
@@ -1193,7 +1193,7 @@ fn drawn_shape_count(app: &mut RSpiceApp, viewer: ResultViewer) -> usize {
     for _ in 0..2 {
         let output = ctx.run_ui(input.clone(), |ctx| {
             egui::CentralPanel::default()
-                .show(ctx, |ui| show_persistent_pane_viewer(ui, app, viewer));
+                .show(ctx, |ui| show_persistent_pane_viewer(ui, app, viewer, None));
         });
         shapes = output.shapes.len();
     }
@@ -1481,8 +1481,9 @@ fn every_sheet_draws_at_a_touch_composition() {
         };
         for _ in 0..2 {
             let output = ctx.run_ui(input.clone(), |ctx| {
-                egui::CentralPanel::default()
-                    .show(ctx, |ui| show_persistent_pane_viewer(ui, &mut app, viewer));
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show_persistent_pane_viewer(ui, &mut app, viewer, None);
+                });
             });
             for primitive in ctx.tessellate(output.shapes, output.pixels_per_point) {
                 let egui::epaint::Primitive::Mesh(mesh) = primitive.primitive else {

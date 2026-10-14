@@ -596,3 +596,261 @@ fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
             .is_empty()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Family slicing
+// ---------------------------------------------------------------------------
+
+const SOA_TIMES: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+/// A retained SOA run: a time-domain analysis whose every sample is one
+/// point of a family over time, a family the waveform view draws.
+fn soa_run(id: u64) -> SimulationRun {
+    let mut run = SimulationRun::new(id);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_waveforms(vec![WaveformData::new(
+                "V(out)",
+                SOA_TIMES.to_vec(),
+                vec![0.0, 1.0, 2.0, 1.0, 0.0],
+                "#fff",
+            )])
+            .with_family_metadata(crate::state::AnalysisResultFamilyMetadata::Soa {
+                time: SOA_TIMES.to_vec(),
+            }),
+    );
+    run
+}
+
+/// Open Family slicing, narrow it to `filter`, and apply it.
+fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
+    app.state.workbench.workspace = Workspace::Results;
+    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    assert!(family_available(&app.state));
+    open_family(&mut app.state);
+    let Some(ResultDocumentDialog::Family(mut draft)) =
+        app.state.workbench.result_document_dialog.clone()
+    else {
+        panic!("Family slicing opens its form");
+    };
+    draft.filter = filter.to_owned();
+    let choices = family::choices(&app.state, &draft);
+    assert_eq!(choices.refusal, None);
+    assert_eq!(choices.points, Ok("3 of 5 points".to_owned()));
+    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
+    commit_open_dialog(&mut app.state);
+    assert!(
+        app.state.workbench.result_document_dialog.is_none(),
+        "an applied slice closes its form"
+    );
+}
+
+/// The family rows the drawn sheet shows, when it shows a slice.
+fn drawn_rows(app: &RSpiceApp) -> Option<Vec<usize>> {
+    app.state
+        .ui
+        .results
+        .session
+        .sample_selection
+        .as_ref()
+        .map(|selection| selection.source_indices.clone())
+}
+
+/// Over a quick view a family slice is kept for the session, per analysis,
+/// and the waveform view draws only the rows it keeps.
+#[test]
+fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+
+    apply_family_slice(&mut app, "time <= 0.5");
+    assert_eq!(app.state.ui.results.session.family_policies.len(), 1);
+    drive_frame(|ui| super::super::show(ui, &mut app));
+    assert_eq!(drawn_rows(&app), Some(vec![0, 1, 2]));
+}
+
+/// A project result document over `run` whose copy of the result keeps each
+/// row's time and sample, the dimensions a family slice is kept over.
+fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
+    use crate::results::visualization_document::{
+        ColumnRole, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
+    };
+    let run = &app.state.simulation.retained.runs[0];
+    let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
+    let analysis_id =
+        super::super::create_document::source_analysis_identity(run, &run.analyses[0]);
+    let column = |key: &str, label: &str, value_type, role, unit: Option<&str>| {
+        SourceColumn::new(key, label, value_type, role, unit.map(str::to_owned))
+            .expect("the column is valid")
+    };
+    let columns = vec![
+        column(
+            "time",
+            "Time",
+            ValueType::Real,
+            ColumnRole::Coordinate,
+            Some("s"),
+        ),
+        column(
+            "sample",
+            "Sample",
+            ValueType::Integer,
+            ColumnRole::Coordinate,
+            None,
+        ),
+        column(
+            "v(out)",
+            "V(out)",
+            ValueType::Real,
+            ColumnRole::Signal,
+            Some("V"),
+        ),
+    ];
+    let rows = SOA_TIMES
+        .iter()
+        .zip([0.0, 1.0, 2.0, 1.0, 0.0])
+        .zip(1_i64..)
+        .map(|((time, value), sample)| {
+            SourceRow::new(vec![
+                TypedValue::Real(*time),
+                TypedValue::Integer(sample),
+                TypedValue::Real(value),
+            ])
+        })
+        .collect();
+    let source = SourceDataset::new(binding, columns, rows).expect("the source is valid");
+    let mut document =
+        VisualizationDocument::new("SOA review", vec![source]).expect("the document is valid");
+    let pane_id = document.panes()[0].id;
+    document
+        .transact(
+            document.revision(),
+            vec![DocumentEdit::SetPaneSource {
+                pane_id,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(PaneDataBinding {
+                    analysis_id,
+                    dataset: binding,
+                }),
+            }],
+        )
+        .expect("the pane binds the run");
+    let document_id = app
+        .state
+        .workspace
+        .content
+        .insert_visualization_document(document)
+        .expect("the project keeps the document");
+    app.state.workbench.activate(Workspace::Results);
+    assert!(
+        crate::workbench::chrome::document_bar::activate_document_by_id(
+            &mut app.state,
+            &WorkspaceDocumentId::VisualizationDocument(document_id),
+        )
+    );
+    document_id
+}
+
+/// A family slice kept with a pane survives a save, and the pane draws only
+/// the rows it keeps. The result viewer ignored a saved pane's family policy
+/// and drew every row.
+#[test]
+fn a_saved_pane_family_slice_is_drawn_as_saved() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+    let document_id = family_document(&mut app);
+    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    show_document(&mut app, document_id);
+    assert_eq!(drawn_rows(&app), None);
+
+    apply_family_slice(&mut app, "time <= 0.5");
+    reload(&mut app, document_id);
+    assert!(
+        retained(&app, document_id).panes()[0]
+            .family_policy
+            .is_some(),
+        "the slice is kept with the pane"
+    );
+    assert!(app.state.ui.results.session.family_policies.is_empty());
+    show_document(&mut app, document_id);
+    assert_eq!(drawn_rows(&app), Some(vec![0, 1, 2]));
+}
+
+/// Drawing a pane's slice changes the session's selection, which clears its
+/// cursors. The pane's cursors were projected from the document and have to
+/// survive that, or capturing the pane deletes them from the document.
+#[test]
+fn drawing_a_pane_family_slice_keeps_the_pane_cursors() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+    let document_id = family_document(&mut app);
+    let pane_id = retained(&app, document_id).panes()[0].id;
+    let edits = links::cursor_pair_edits(
+        retained(&app, document_id),
+        pane_id,
+        (Some(0.25), Some(0.5)),
+    )
+    .expect("the pane keeps cursors on its X axis");
+    transact(&mut app.state, document_id, edits).expect("the cursors are kept");
+    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    show_document(&mut app, document_id);
+
+    apply_family_slice(&mut app, "time <= 0.5");
+    for _ in 0..2 {
+        show_document(&mut app, document_id);
+    }
+    assert_eq!(drawn_rows(&app), Some(vec![0, 1, 2]));
+    let mut kept = retained(&app, document_id)
+        .cursors()
+        .iter()
+        .map(|cursor| (cursor.label.clone(), cursor.position.clone()))
+        .collect::<Vec<_>>();
+    kept.sort_by(|left, right| left.0.cmp(&right.0));
+    assert_eq!(
+        kept,
+        vec![
+            (
+                "A".to_owned(),
+                crate::results::visualization_document::TypedValue::Real(0.25)
+            ),
+            (
+                "B".to_owned(),
+                crate::results::visualization_document::TypedValue::Real(0.5)
+            ),
+        ]
+    );
+}
+
+/// A document keeps a slice only over dimensions its copy of the result
+/// declares. The documents the result viewer creates declare none, so the
+/// form refuses before Apply instead of failing on it.
+#[test]
+fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+    let document_id = family_document(&mut app);
+    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    show_document(&mut app, document_id);
+    open_family(&mut app.state);
+    let Some(ResultDocumentDialog::Family(mut draft)) =
+        app.state.workbench.result_document_dialog.clone()
+    else {
+        panic!("Family slicing opens its form");
+    };
+    // Status is not a column of this document's copy of the result.
+    draft.filter = "status != not-run".to_owned();
+    let choices = family::choices(&app.state, &draft);
+    assert_eq!(
+        choices.refusal.as_deref(),
+        Some("The document keeps no Status values for this pane to slice by.")
+    );
+}

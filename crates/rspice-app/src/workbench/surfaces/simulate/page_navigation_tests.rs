@@ -341,8 +341,13 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         crate::workbench::state::Workspace::Results,
         "the hop lands where the family view is drawn"
     );
+    let Some(rspice_results_ui::document_dialogs::ResultDocumentDialog::Family(draft)) =
+        &app.state.workbench.result_document_dialog
+    else {
+        panic!("the hop opens Family slicing");
+    };
     assert_eq!(
-        app.state.workbench.visualization_studio.family_query, "temperature = 125",
+        draft.filter, "temperature = 125",
         "and it arrives narrowed to the member the point names"
     );
 

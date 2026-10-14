@@ -223,8 +223,8 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
 }
 
 pub(crate) use document_edit::{
-    add_pane_available, compare_available, open_add_pane, open_compare, open_measurement,
-    toggle_linked_cursors,
+    add_pane_available, compare_available, family_available, open_add_pane, open_compare,
+    open_family, open_measurement, set_family_filter, toggle_linked_cursors,
 };
 
 pub(crate) fn visualization_source_dataset(
@@ -1706,7 +1706,8 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     // same strips, and a pane context left over from a project-owned document
     // would scope its plot views, cursors and marker edits onto them.
     app.state.ui.results.session.leave_persistent_document();
-    app.state.ui.results.set_sample_selection(None);
+    let family = document_edit::family::quick_view_selection(&app.state);
+    app.state.ui.results.set_sample_selection(family);
     prepare_viewer_state(app);
     let plan_before_docbar = app
         .state
@@ -1852,8 +1853,33 @@ pub(crate) fn show_embedded_with_sample_selection(
 /// viewer. The caller owns binding and compatibility checks; this helper only
 /// refreshes renderer caches and deliberately restores the requested viewer
 /// after quick-view reconciliation so no fallback viewer can be substituted.
-pub(super) fn show_persistent_pane_viewer(ui: &mut Ui, app: &mut RSpiceApp, viewer: ResultViewer) {
-    app.state.ui.results.set_sample_selection(None);
+///
+/// `family` is the slice the pane's kept family policy shows. Panes of one
+/// page draw in turn, so the selection changes between them every frame; a
+/// change of selection clears the session's cursors and hidden family
+/// members, which here were projected from this pane's own document state
+/// and have to survive it, or capturing the pane would delete them.
+pub(super) fn show_persistent_pane_viewer(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    viewer: ResultViewer,
+    family: Option<SourceSampleSelection>,
+) {
+    let session = &app.state.ui.results.session;
+    let cursors = (
+        session.cursors,
+        session.cursor_strip,
+        session.cursor_a_anchor.clone(),
+    );
+    let hidden = session.hidden_family_traces.clone();
+    let results = &mut app.state.ui.results;
+    results.set_sample_selection(family);
+    (
+        results.session.cursors,
+        results.session.cursor_strip,
+        results.session.cursor_a_anchor,
+    ) = cursors;
+    results.session.hidden_family_traces = hidden;
     prepare_viewer_state(app);
     app.state.ui.results.session.viewer = viewer;
     show_viewer_well(ui, app, ResultChrome::Full);

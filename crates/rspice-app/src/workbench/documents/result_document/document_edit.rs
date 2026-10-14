@@ -126,6 +126,12 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 rspice_results_ui::document_dialogs::measurement::show(ctx, &mut draft, &preview);
             (ResultDocumentDialog::Measurement(draft), choice)
         }
+        ResultDocumentDialog::Family(mut draft) => {
+            let choices = family::choices(&app.state, &draft);
+            let choice =
+                rspice_results_ui::document_dialogs::family::show(ctx, &mut draft, &choices);
+            (ResultDocumentDialog::Family(draft), choice)
+        }
     };
     app.state.workbench.result_document_dialog = Some(dialog);
     match choice {
@@ -144,6 +150,7 @@ fn commit_open_dialog(state: &mut AppState) {
         Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft).map(|()| None),
         Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
         Some(ResultDocumentDialog::Measurement(draft)) => measurement::commit(state, &draft),
+        Some(ResultDocumentDialog::Family(draft)) => family::commit(state, &draft),
         None => return,
     };
     match result {
@@ -517,10 +524,12 @@ fn remove_pane_edits(
 }
 
 mod compare;
+pub(super) mod family;
 pub(super) mod links;
 mod measurement;
 
 pub(crate) use compare::{compare_available, open_compare};
+pub(crate) use family::{family_available, open_family, set_family_filter};
 pub(crate) use measurement::open_measurement;
 
 #[cfg(test)]

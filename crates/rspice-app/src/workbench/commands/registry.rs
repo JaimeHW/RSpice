@@ -1315,6 +1315,13 @@ impl Command {
             Self::RevealProducerLog => super::result_navigation::producer_log_hop(app)
                 .err()
                 .unwrap_or("no check-marked quantity names a producer"),
+            Self::FamilySlicing
+                if app.state.workbench.current_route().surface_id()
+                    == crate::workbench::SurfaceId::Results
+                    && app.state.simulation.retained.has_results() =>
+            {
+                "the result holds no sweep, corner or Monte Carlo family"
+            }
             Self::ReviewNotes
             | Self::MeasurementLibrary
             | Self::FamilySlicing

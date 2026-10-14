@@ -8,6 +8,7 @@
 
 pub mod add_pane;
 pub mod compare;
+pub mod family;
 pub mod measurement;
 
 /// The one result-document form open at a time.
@@ -20,6 +21,9 @@ pub enum ResultDocumentDialog {
     /// Add measurement also opens over a quick view, where it evaluates the
     /// expression and refuses to keep it.
     Measurement(measurement::MeasurementDraft),
+    /// Family slicing keeps its policy with the selected pane over a
+    /// document, and with the analysis for the session over a quick view.
+    Family(family::FamilyDraft),
 }
 
 /// Option labels for a select row, and the label of the selected entry.

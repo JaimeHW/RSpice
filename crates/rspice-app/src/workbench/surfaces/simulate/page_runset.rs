@@ -1693,16 +1693,15 @@ pub(super) fn open_point_in_family(
         ));
         return;
     }
-    // Results first, so the studio tool opens somewhere the reader can see it
-    // rather than arming a dock behind this page. The filter is written last
-    // because opening the slicing dock initializes it from the pane's own
-    // policy — a carried point has to survive that initialization, not race
-    // it.
+    // Results first, so the form opens somewhere the reader can see it rather
+    // than behind this page. The filter is written last because opening the
+    // form seeds it from the policy in force — a carried point has to survive
+    // that seeding, not race it.
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
     Command::FamilySlicing.execute(app);
-    app.state.workbench.visualization_studio.family_query = query;
+    crate::workbench::documents::result_document::set_family_filter(&mut app.state, query);
 }
 
 /// Compile one point into the family view's filter, or say why it cannot be.

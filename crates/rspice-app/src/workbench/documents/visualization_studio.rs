@@ -549,10 +549,6 @@ pub(crate) fn open_annotation_editor(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::Annotation);
 }
 
-pub(crate) fn open_family_slicing(app: &mut RSpiceApp) {
-    open_dock(app, VisualizationDock::FamilySlice);
-}
-
 fn retained_document_analysis(
     run: &SimulationRun,
     source_id: AnalysisInstanceId,
