@@ -538,3 +538,61 @@ fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
         "Go to definition jumps rather than opening the tools dialog"
     );
 }
+
+/// Renders for review, dark and light at desktop size: the Verilog-A page
+/// with its file row and no menu of its own, the editor's right-click menu,
+/// and the application's Edit menu over the same page.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_source_editor_menus_for_review() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let settle: usize = std::env::var("RSPICE_RASTER_PASSES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(3);
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    for (theme, mode) in [
+        ("dark", crate::ui::Mode::Dark),
+        ("light", crate::ui::Mode::Light),
+    ] {
+        let mut write =
+            |view: &str, ctx: &egui::Context, app: &mut RSpiceApp, mut output: egui::FullOutput| {
+                for _ in 0..settle {
+                    output = frame(ctx, app, DESKTOP);
+                }
+                let canvas = crate::ui::raster::rasterize(ctx, DESKTOP, &output);
+                let path = directory.join(format!("source-editor-{view}-{theme}-1440x900.png"));
+                std::fs::write(&path, canvas.png(DESKTOP.y as usize)).expect("write the render");
+                writeln!(report, "{}", path.display()).ok();
+            };
+        let page = || {
+            let (ctx, mut app, _) = veriloga_with_focused_editor();
+            app.state.ui.theme.mode = mode;
+            let output = frame(&ctx, &mut app, DESKTOP);
+            (ctx, app, output)
+        };
+
+        let (ctx, mut app, output) = page();
+        write("file-row", &ctx, &mut app, output);
+
+        let (ctx, mut app, _) = page();
+        let output = right_click_line(&ctx, &mut app, 2);
+        write("context-menu", &ctx, &mut app, output);
+
+        let (ctx, mut app, output) = page();
+        let (trigger, _) = menu_item(&output, "Edit").expect("the Edit menu");
+        let output = press(
+            &ctx,
+            &mut app,
+            trigger.center(),
+            egui::PointerButton::Primary,
+        );
+        write("edit-menu", &ctx, &mut app, output);
+    }
+}
