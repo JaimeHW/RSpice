@@ -18,13 +18,13 @@ const TABLE_HEAD_HEIGHT: f32 = 27.0;
 const TABLE_ROW_HEIGHT: f32 = 44.0;
 const COLUMN_WEIGHTS: [f32; 7] = [0.12, 0.14, 0.07, 0.17, 0.20, 0.12, 0.18];
 const COLUMN_TITLES: [&str; 7] = [
-    "ANALYSIS",
-    "EXPANSION",
-    "TASKS",
-    "DOMAIN AXIS",
-    "STORED VALUES",
-    "PRECISION",
-    "ELIGIBILITY",
+    "Analysis",
+    "Expansion",
+    "Tasks",
+    "Domain axis",
+    "Stored values",
+    "Precision",
+    "Eligibility",
 ];
 
 pub struct SavedOutputs<'a> {
@@ -51,7 +51,7 @@ pub struct ManifestResponse {
     pub open_plan: bool,
     pub open_task_deck: bool,
 }
-pub fn show(ui: &mut Ui, manifest: Option<&ManifestViewModel>, lifecycle_is_terminal: bool) {
+pub fn show(ui: &mut Ui, manifest: Option<&ManifestViewModel>) {
     let Some(manifest) = manifest else {
         well_hint(ui, "No retained dataset is selected");
         return;
@@ -85,11 +85,7 @@ pub fn show(ui: &mut Ui, manifest: Option<&ManifestViewModel>, lifecycle_is_term
                         manifest.lifecycle, manifest.inventory_status
                     ))
                     .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                    .color(if lifecycle_is_terminal {
-                        t.color.ok
-                    } else {
-                        t.color.warn
-                    }),
+                    .color(t.color.text_dim),
                 );
             });
         })

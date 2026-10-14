@@ -23,7 +23,7 @@ fn centered_card(state: ResultOperationalState, well_size: egui::Vec2) -> (Rect,
             well = ui.available_rect_before_wrap();
             card = OperationalCard {
                 status: &status,
-                accent: Tokens::get(ui.ctx()).color.info,
+                icon_tone: Tokens::get(ui.ctx()).color.text_dim,
                 offer: None,
                 floating: true,
             }
@@ -205,5 +205,30 @@ fn canonical_operational_registry_matches_the_result_contract() {
         assert!(!state.label().is_empty());
         assert!(!state.message().is_empty());
         assert!(!state.recovery().is_empty());
+    }
+}
+
+/// Only a state the reader has to notice colours its glyph, and only in the
+/// warning or error tone; a complete, recovered, empty or loading state is
+/// neutral. The title and border are never tinted, so the glyph is the one
+/// statement of severity on the card.
+#[test]
+fn only_a_warning_or_error_state_colours_its_glyph() {
+    let palette = Tokens::default().color;
+    for state in ResultOperationalState::ALL {
+        let category = state.category();
+        let expected = match category {
+            ResultOperationalCategory::Partial | ResultOperationalCategory::Warning => palette.warn,
+            ResultOperationalCategory::Error => palette.err,
+            _ => palette.text_dim,
+        };
+        assert_eq!(icon_tone(category, &palette), expected, "{}", state.id());
+        assert_ne!(icon_tone(category, &palette), palette.ok, "{}", state.id());
+        assert_ne!(
+            icon_tone(category, &palette),
+            palette.info,
+            "{}",
+            state.id()
+        );
     }
 }

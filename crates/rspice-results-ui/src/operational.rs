@@ -265,16 +265,10 @@ pub fn show<'a>(
         };
     }
     let t = Tokens::get(ui.ctx());
-    let accent = match status.state.category() {
-        ResultOperationalCategory::Normal | ResultOperationalCategory::Recovery => t.color.ok,
-        ResultOperationalCategory::Empty | ResultOperationalCategory::Loading => t.color.info,
-        ResultOperationalCategory::Partial | ResultOperationalCategory::Warning => t.color.warn,
-        ResultOperationalCategory::Error => t.color.err,
-    };
     let offer = failure_site();
     let card = OperationalCard {
         status,
-        accent,
+        icon_tone: icon_tone(status.state.category(), &t.color),
         offer: offer.as_ref(),
         floating: status.blocks_visuals,
     };
@@ -415,11 +409,28 @@ const fn operational_icon(category: ResultOperationalCategory) -> WorkbenchIcon 
     }
 }
 
+/// The colour of a card's category glyph: the warning or error tone for a
+/// state the reader has to notice, neutral otherwise. The glyph is the only
+/// coloured thing on the card; its title and border never are.
+fn icon_tone(
+    category: ResultOperationalCategory,
+    palette: &rspice_ui_kit::palette::Palette,
+) -> egui::Color32 {
+    match category {
+        ResultOperationalCategory::Partial | ResultOperationalCategory::Warning => palette.warn,
+        ResultOperationalCategory::Error => palette.err,
+        ResultOperationalCategory::Normal
+        | ResultOperationalCategory::Recovery
+        | ResultOperationalCategory::Empty
+        | ResultOperationalCategory::Loading => palette.text_dim,
+    }
+}
+
 /// One operational card: the category glyph, then the state's label, detail,
 /// message and recovery, then whatever this state lets the reader act on.
 struct OperationalCard<'a> {
     status: &'a ResultOperationalStatus,
-    accent: egui::Color32,
+    icon_tone: egui::Color32,
     offer: Option<&'a FailureSiteControl<'a>>,
     /// The card that owns the well — elevated and shadowed over the canvas —
     /// rather than the banner attached above a still-usable viewer.
@@ -430,17 +441,9 @@ impl OperationalCard<'_> {
     /// Draw the card across the width its caller already fixed.
     fn show(&self, ui: &mut Ui, actions: &mut OperationalResponse) -> egui::Response {
         let t = Tokens::get(ui.ctx());
-        // Severity outlines the card; an empty or loading state is not an
-        // alarm and keeps the ordinary strong border under its heading.
-        let border = match self.status.state.category() {
-            ResultOperationalCategory::Normal
-            | ResultOperationalCategory::Empty
-            | ResultOperationalCategory::Loading => t.color.border_strong,
-            ResultOperationalCategory::Partial
-            | ResultOperationalCategory::Warning
-            | ResultOperationalCategory::Error
-            | ResultOperationalCategory::Recovery => self.accent,
-        };
+        // Every card keeps the same strong border; the glyph alone carries
+        // severity.
+        let border = t.color.border_strong;
         let mut frame = egui::Frame::NONE
             .fill(if self.floating {
                 t.color.bg_elevated
@@ -473,7 +476,7 @@ impl OperationalCard<'_> {
                     operational_icon(self.status.state.category()).paint(
                         ui.painter(),
                         glyph,
-                        self.accent,
+                        self.icon_tone,
                     );
                     let copy = (width - OPERATIONAL_CARD_ICON - OPERATIONAL_CARD_ICON_GAP).max(1.0);
                     ui.allocate_ui_with_layout(
@@ -485,7 +488,7 @@ impl OperationalCard<'_> {
                             ui.label(
                                 egui::RichText::new(self.status.state.label())
                                     .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                                    .color(self.accent),
+                                    .color(t.color.text),
                             );
                             if let Some(detail) = self.status.detail.as_deref() {
                                 ui.label(

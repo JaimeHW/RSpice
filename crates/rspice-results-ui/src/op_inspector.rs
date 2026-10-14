@@ -13,14 +13,17 @@ use rspice_ui_kit::{
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{measurement_table, section_header},
+    widgets::{Problem, measurement_table, paint_problem_mark, section_header},
 };
 use std::{borrow::Cow, collections::BTreeMap};
 const NAME_W: f32 = 146.0;
 const KIND_W: f32 = 82.0;
 const REGION_W: f32 = 92.0;
 const VALUE_MIN_W: f32 = 78.0;
-const ACTION_W: f32 = 82.0;
+/// Wide enough that the "Schematic" button keeps its label on one line.
+const ACTION_W: f32 = 100.0;
+/// The button's inset inside its column.
+const ACTION_INSET: egui::Vec2 = egui::vec2(5.0, 3.0);
 const ROW_H: f32 = 25.0;
 const HEADER_H: f32 = 23.0;
 const GROUP_H: f32 = 24.0;
@@ -510,9 +513,9 @@ fn device_column_header(
     sort: Option<&(String, bool)>,
 ) -> Option<String> {
     let mut headers = vec![
-        (NAME_W, "INSTANCE", false),
-        (KIND_W, "FAMILY", false),
-        (REGION_W, "REGION", false),
+        (NAME_W, "Instance", false),
+        (KIND_W, "Family", false),
+        (REGION_W, "Region", false),
     ];
     headers.extend(columns.iter().map(|(name, _)| (VALUE_MIN_W, *name, true)));
     headers.push((ACTION_W, "", false));
@@ -629,12 +632,7 @@ fn show_solve_strip(ui: &mut Ui, evidence: &OpEvidence) {
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    egui::RichText::new("OP")
-                        .font(theme::mono(tokens::FS_1, FontWeight::SemiBold))
-                        .color(t.color.accent),
-                );
-                ui.label(
-                    egui::RichText::new("Operating point · retained DC solution")
+                    egui::RichText::new("Operating point")
                         .font(theme::sans(tokens::FS_1, FontWeight::Medium))
                         .color(t.color.text),
                 );
@@ -668,10 +666,13 @@ fn show_solve_strip(ui: &mut Ui, evidence: &OpEvidence) {
                 );
                 if !evidence.success {
                     ui.separator();
+                    let (mark, _) = ui
+                        .allocate_exact_size(egui::Vec2::splat(PROBLEM_MARK), egui::Sense::hover());
+                    paint_problem_mark(ui.painter(), mark, Problem::Failure);
                     ui.label(
-                        egui::RichText::new("retained partial evidence")
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.err),
+                        egui::RichText::new("Partial solution")
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
                     );
                 }
             });
@@ -714,15 +715,33 @@ fn node_value_text(row: &OperatingPointValue) -> (String, bool) {
     if row.value.is_finite() {
         (fmt_si(row.value, &row.unit, 6), true)
     } else {
-        ("invalid · non-finite".to_owned(), false)
+        ("non-finite".to_owned(), false)
     }
 }
-fn region_color(region: &str, colors: &rspice_ui_kit::palette::Palette) -> egui::Color32 {
-    match region.to_ascii_lowercase().as_str() {
-        "saturation" | "forward active" => colors.ok,
-        "cutoff" | "breakdown" => colors.err,
-        _ => colors.traces[1],
-    }
+/// Side of the problem mark set before a refused value.
+const PROBLEM_MARK: f32 = 11.0;
+/// A value the solve did not produce: neutral words, right-aligned like every
+/// value in the column, behind a failure mark at the cell's leading edge.
+fn paint_refused_cell(ui: &Ui, cell: egui::Rect, text: &str, font: egui::FontId) {
+    paint_problem_mark(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(
+                cell.left() + CELL_INSET + PROBLEM_MARK * 0.5,
+                cell.center().y,
+            ),
+            egui::Vec2::splat(PROBLEM_MARK),
+        ),
+        Problem::Failure,
+    );
+    paint_cell(
+        ui,
+        cell,
+        text,
+        egui::Align2::RIGHT_CENTER,
+        font,
+        Tokens::get(ui.ctx()).color.text_dim,
+    );
 }
 fn show_node_card(
     ui: &mut Ui,
@@ -778,12 +797,12 @@ fn show_node_card(
                 ui,
                 table_width,
                 &[
-                    (NAME_W, "NODE", false),
-                    (VALUE_MIN_W + 36.0, "VOLTAGE", true),
-                    (64.0, "UNIT", false),
+                    (NAME_W, "Node", false),
+                    (VALUE_MIN_W + 36.0, "Voltage", true),
+                    (64.0, "Unit", false),
                     (
                         table_width - NAME_W - VALUE_MIN_W - 100.0 - ACTION_W,
-                        "IDENTITY",
+                        "Identity",
                         false,
                     ),
                     (ACTION_W, "", false),
@@ -855,18 +874,20 @@ fn show_node_card(
                         Tokens::get(ui.ctx()).color.text,
                     );
                     let (value_text, value_valid) = node_value_text(row);
-                    paint_cell(
-                        ui,
-                        op_column_rect(rect, NAME_W, VALUE_MIN_W + 36.0),
-                        value_text,
-                        egui::Align2::RIGHT_CENTER,
-                        theme::mono(tokens::FS_1, FontWeight::Regular),
-                        if value_valid {
-                            Tokens::get(ui.ctx()).color.text
-                        } else {
-                            Tokens::get(ui.ctx()).color.err
-                        },
-                    );
+                    let value_cell = op_column_rect(rect, NAME_W, VALUE_MIN_W + 36.0);
+                    let value_font = theme::mono(tokens::FS_1, FontWeight::Regular);
+                    if value_valid {
+                        paint_cell(
+                            ui,
+                            value_cell,
+                            value_text,
+                            egui::Align2::RIGHT_CENTER,
+                            value_font,
+                            Tokens::get(ui.ctx()).color.text,
+                        );
+                    } else {
+                        paint_refused_cell(ui, value_cell, &value_text, value_font);
+                    }
                     paint_cell(
                         ui,
                         op_column_rect(rect, NAME_W + VALUE_MIN_W + 36.0, 64.0),
@@ -886,7 +907,7 @@ fn show_node_card(
                     );
                     let available = source.mapping.node_available(&row.name);
                     let button_rect = op_column_rect(rect, table_width - ACTION_W, ACTION_W)
-                        .shrink2(egui::vec2(7.0, 3.0));
+                        .shrink2(ACTION_INSET);
                     let response = ui
                         .add_enabled_ui(available, |ui| {
                             ui.put(button_rect, egui::Button::new("Schematic"))
@@ -1082,7 +1103,7 @@ fn show_device_card(
                             region,
                             egui::Align2::LEFT_CENTER,
                             theme::mono(tokens::FS_0, FontWeight::Regular),
-                            region_color(region, colors),
+                            colors.text_dim,
                         );
                     }
                     for (index, (name, unit)) in columns.iter().enumerate() {
@@ -1113,7 +1134,7 @@ fn show_device_card(
                     }
                     let target = source.mapping.device_target(&entry.name);
                     let button_rect = op_column_rect(rect, table_width - ACTION_W, ACTION_W)
-                        .shrink2(egui::vec2(7.0, 3.0));
+                        .shrink2(ACTION_INSET);
                     let response = ui
                         .add_enabled_ui(target.is_some(), |ui| {
                             ui.put(button_rect, egui::Button::new("Schematic"))
@@ -1360,7 +1381,7 @@ mod tests {
         let groups = grouped_nodes(&dc, "", "amplifier");
         assert_eq!(groups["amplifier"].len(), 1);
         let (display, valid) = node_value_text(&dc.node_voltages[groups["amplifier"][0].1]);
-        assert_eq!(display, "invalid · non-finite");
+        assert_eq!(display, "non-finite");
         assert!(!valid);
     }
     #[test]

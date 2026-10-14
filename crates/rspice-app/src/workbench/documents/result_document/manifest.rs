@@ -43,15 +43,7 @@ pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>>
 }
 pub(crate) fn show(ui: &mut Ui, state: &mut AppState) {
     let plan = active_manifest(state);
-    let lifecycle_is_terminal = state
-        .simulation
-        .active_run()
-        .is_some_and(|run| run.lifecycle.is_terminal());
-    viewer::show(
-        ui,
-        plan.as_ref().map(|plan| &plan.model),
-        lifecycle_is_terminal,
-    );
+    viewer::show(ui, plan.as_ref().map(|plan| &plan.model));
 }
 pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(plan) = active_manifest(state) else {
