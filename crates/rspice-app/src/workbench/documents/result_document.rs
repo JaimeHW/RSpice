@@ -2130,23 +2130,36 @@ fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn show_docbar(ui: &mut Ui, app: &mut RSpiceApp) {
-    show_docbar_for_family(ui, app, None);
+    show_docbar_for_family(ui, app, None, chrome::bars::DocumentBarSource::QuickView);
 }
 
-pub(super) fn show_persistent_docbar(ui: &mut Ui, app: &mut RSpiceApp, family_label: &str) {
-    show_docbar_for_family(ui, app, Some(family_label));
+/// The docbar over a project result document. Returns the index of the page
+/// the reader picked, when they picked one.
+pub(super) fn show_persistent_docbar(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    family_label: &str,
+    pages: &[String],
+    page: usize,
+) -> Option<usize> {
+    show_docbar_for_family(
+        ui,
+        app,
+        Some(family_label),
+        chrome::bars::DocumentBarSource::Document { pages, page },
+    )
 }
 
-fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option<&str>) {
+fn show_docbar_for_family(
+    ui: &mut Ui,
+    app: &mut RSpiceApp,
+    family_label: Option<&str>,
+    source: chrome::bars::DocumentBarSource<'_>,
+) -> Option<usize> {
     let available = ResultViewer::all().filter(|&viewer| {
         family_label.is_none_or(|family| family_allows_viewer(family, viewer))
             && viewer_availability(&app.state, viewer).available
     });
-    let source = if family_label.is_some() {
-        chrome::bars::DocumentBarSource::Document
-    } else {
-        chrome::bars::DocumentBarSource::QuickView
-    };
     let actions =
         chrome::bars::document_bar(ui, app.state.ui.results.session.viewer, available, source);
     if let Some(viewer) = actions.viewer {
@@ -2160,6 +2173,7 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
         crate::workbench::documents::visualization_studio::open(app);
         crate::workbench::documents::visualization_studio::open_document_properties(app);
     }
+    actions.page
 }
 
 /// The domain controls a custom-canvas sheet owns, drawn left-aligned in its

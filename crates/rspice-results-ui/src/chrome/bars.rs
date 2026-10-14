@@ -10,7 +10,7 @@ use rspice_ui_kit::{
     panels::WorkbenchIcon,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{chip, docbar_at_height},
+    widgets::{chip, docbar_at_height, select},
 };
 
 /// Document selection and application navigation requested by the bar.
@@ -20,15 +20,27 @@ pub struct DocumentBarActions {
     pub create_document: bool,
     pub add_pane: bool,
     pub open_properties: bool,
+    /// The index of the page the reader picked.
+    pub page: Option<usize>,
 }
 
 /// What the bar is in front of: a dataset's quick view, or a project result
-/// document, which can take more panes.
+/// document, which can take more panes and may hold several pages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DocumentBarSource {
+pub enum DocumentBarSource<'a> {
     QuickView,
-    Document,
+    Document {
+        /// Page titles in document order, and the page being shown.
+        pages: &'a [String],
+        page: usize,
+    },
 }
+
+/// Width of the page picker: room for a page title without crowding the
+/// viewer tabs beside it.
+const PAGE_PICKER_WIDTH: f32 = 150.0;
+/// Air on either side of the page picker, the inset a viewer tab keeps.
+const PAGE_PICKER_GUTTER: f32 = 8.0;
 
 pub enum SpecificationAction {
     Discard,
@@ -82,7 +94,7 @@ pub fn document_bar(
     ui: &mut Ui,
     current: ResultViewer,
     available: impl IntoIterator<Item = ResultViewer>,
-    source: DocumentBarSource,
+    source: DocumentBarSource<'_>,
 ) -> DocumentBarActions {
     let mut actions = DocumentBarActions::default();
     docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
@@ -99,7 +111,7 @@ pub fn document_bar(
                         "Create a dataset-bound result document",
                     );
                 }
-                DocumentBarSource::Document => {
+                DocumentBarSource::Document { .. } => {
                     actions.add_pane = viewer_picker(
                         ui,
                         WorkbenchIcon::Add,
@@ -115,6 +127,24 @@ pub fn document_bar(
                 tabs_size,
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
+                    // A document of several pages shows one at a time; the
+                    // picker leads the row because the tabs below it belong
+                    // to the page it names.
+                    if let DocumentBarSource::Document { pages, page } = source
+                        && pages.len() > 1
+                    {
+                        ui.add_space(PAGE_PICKER_GUTTER);
+                        actions.page = select(
+                            ui,
+                            "rspice.results.document-page",
+                            "Page",
+                            pages.get(page).map_or("", String::as_str),
+                            pages,
+                            PAGE_PICKER_WIDTH,
+                        );
+                        ui.add_space(PAGE_PICKER_GUTTER);
+                        viewer_picker_separator(ui);
+                    }
                     viewer_tab_scroller(ui, "rspice.results.viewer-tabs", |ui| {
                         actions.viewer = viewer_tabs(ui, current, available);
                     });

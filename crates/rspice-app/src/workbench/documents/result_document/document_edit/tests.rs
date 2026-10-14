@@ -205,6 +205,85 @@ fn removing_a_linked_pane_takes_it_out_of_its_link_group() {
     show_document(&mut app, document_id);
 }
 
+/// Save the document and load it back, as a project round trip does.
+fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
+    let documents = &mut app.state.workspace.content.visualization_documents;
+    let index = documents
+        .iter()
+        .position(|document| document.id() == document_id)
+        .expect("the project retains the document");
+    let saved = serde_json::to_string(&documents[index]).expect("the document saves");
+    documents[index] = serde_json::from_str(&saved).expect("the document loads");
+}
+
+/// The fixture run's one analysis, as a pane binding.
+fn fixture_binding(app: &RSpiceApp) -> PaneDataBinding {
+    let run = &app.state.simulation.retained.runs[0];
+    PaneDataBinding {
+        analysis_id: super::super::create_document::source_analysis_identity(run, &run.analyses[0]),
+        dataset: DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
+    }
+}
+
+/// A saved document can hold pages after the first; the Studio authored
+/// them. The result viewer showed only the first page and offered no way to
+/// another, so such a page was unreachable.
+#[test]
+fn a_saved_document_shows_the_second_page_once_it_is_picked() {
+    use crate::results::visualization_document::{
+        NewPage, NewPagePane, PageUpdatePolicy, PaneKind,
+    };
+    let (mut app, document_id) = document_fixture("single-pane");
+    let binding = fixture_binding(&app);
+    transact(
+        &mut app.state,
+        document_id,
+        vec![DocumentEdit::AddPaneOnNewPage {
+            page: NewPage {
+                title: "Corners".to_owned(),
+                layout: PageLayout::Rows,
+                template_id: "engineering-dark".to_owned(),
+                update_policy: PageUpdatePolicy::RefreshLinkedFigures,
+            },
+            pane: NewPagePane {
+                title: "Corner waveform".to_owned(),
+                kind: PaneKind::Cartesian,
+                viewer_id: "viewer-waveform".to_owned(),
+                binding: Some(binding),
+            },
+        }],
+    )
+    .expect("a second page commits");
+    reload(&mut app, document_id);
+    show_document(&mut app, document_id);
+    let document = retained(&app, document_id);
+    let second_page = document.pages()[1].id;
+    let second_pane = document
+        .panes()
+        .iter()
+        .find(|pane| pane.page_id == second_page)
+        .expect("the second page holds a pane")
+        .id;
+    let session = &app.state.ui.results.session;
+    assert_ne!(
+        session.persistent_document_page(document_id),
+        Some(second_page)
+    );
+
+    super::super::persistent_document::select_page(&mut app.state, document_id, 1);
+    show_document(&mut app, document_id);
+
+    let session = &app.state.ui.results.session;
+    assert_eq!(
+        session.persistent_document_page(document_id),
+        Some(second_page)
+    );
+    assert_eq!(
+        session.persistent_document_pane(document_id),
+        Some(second_pane)
+    );
+}
+
 #[test]
 fn the_last_pane_on_a_page_is_not_removable() {
     let (mut app, document_id) = document_fixture("single-pane");

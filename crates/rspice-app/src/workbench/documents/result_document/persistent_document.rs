@@ -152,7 +152,23 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     if let Some(viewer) = compatible_active_viewer(&app.state, &page.page.title, active_pane) {
         select_global_viewer(&mut app.state, viewer);
     }
-    super::show_persistent_docbar(ui, app, &page.page.title);
+    let page_titles = document
+        .pages
+        .iter()
+        .map(|page| page.page.title.clone())
+        .collect::<Vec<_>>();
+    let page_index = document
+        .pages
+        .iter()
+        .position(|candidate| candidate.page.id == selected_page_id)
+        .unwrap_or_default();
+    if let Some(picked) =
+        super::show_persistent_docbar(ui, app, &page.page.title, &page_titles, page_index)
+        && picked != page_index
+    {
+        select_page(&mut app.state, document_id, picked);
+        ui.ctx().request_repaint();
+    }
     let active_viewer = compatible_active_viewer(&app.state, &page.page.title, active_pane);
     if let Some(viewer) = active_viewer {
         select_global_viewer(&mut app.state, viewer);
@@ -238,6 +254,24 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     if strip_height > 0.0 {
         super::waves::readout_strip(ui, &mut app.state, strip_height);
     }
+}
+
+/// Show the document's page at `index`, in document order, from the next
+/// frame. The pane the reader works in moves to that page's first pane.
+pub(super) fn select_page(state: &mut AppState, document_id: ResultDocumentId, index: usize) {
+    let Some(page_id) = state
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .and_then(|document| document.pages().get(index).map(|page| page.id))
+    else {
+        return;
+    };
+    state
+        .ui
+        .results
+        .session
+        .select_persistent_document_page(document_id, page_id);
 }
 
 /// The page and pane the reader is working in, resolved exactly as [`show`]
