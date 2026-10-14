@@ -18,6 +18,9 @@ use crate::raster::{Canvas, render, render_themed};
 use crate::tokens::Mode;
 use crate::widgets::{Button, CommandForm, NotificationCategory, ToastKind, Toasts};
 
+/// One toast as the review seeds it: severity, title, detail.
+type ReviewToast = (ToastKind, &'static str, &'static str);
+
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_the_status_grammar_for_review() {
@@ -33,7 +36,7 @@ fn render_the_status_grammar_for_review() {
 
     // Three toasts is the stack's ceiling, so the error gets a canvas of its
     // own.
-    let toast_sets: [(&str, &[(ToastKind, &str, &str)]); 2] = [
+    let toast_sets: [(&str, &[ReviewToast]); 2] = [
         (
             "k1-toasts-success-info-warn",
             &[
