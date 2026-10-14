@@ -24,7 +24,7 @@ pub(super) fn component_panel(
         .find(|component| component.id == id)
         .cloned()
     else {
-        sheet_panel(ui, app, &sheet.nets);
+        sheet_panel(ui, app);
         return;
     };
     let evidence = component_model_evidence(&app.state, &component);

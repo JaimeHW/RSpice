@@ -1028,7 +1028,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
     let Some(net) = nets.iter().find(|net| net.name.eq_ignore_ascii_case(name)) else {
         // The conductor resolved to a net connectivity no longer reports.
         // Fall back to the sheet rather than narrate a phantom object.
-        sheet_panel(ui, app, nets);
+        sheet_panel(ui, app);
         return;
     };
     let class = net.class;

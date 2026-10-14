@@ -1467,36 +1467,42 @@ fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
     assert!((net.right() - (312.0 - PANEL_INSET)).abs() < 0.5, "{net:?}");
 }
 
+/// With nothing selected the panel holds what the sheet needs from the
+/// reader: the route to Page Setup and the schematic checks. What the tab,
+/// the status bar and the navigator already say about the sheet, and the print
+/// format Page Setup owns, are not restated.
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn drawing_sheet_inspector_uses_resolved_geometry_and_canonical_labels() {
-    let state = AppState::default();
-    let sheet = resolve_active_drawing_sheet(&state);
+fn the_sheet_panel_holds_only_page_setup_and_checks() {
+    let mut app = RSpiceApp::test_instance();
+    let painted = painted_panel(|ui| sheet_panel(ui, &mut app));
+    assert_eq!(
+        painted,
+        "Drawing sheet\nPage setup…\nChecks\nstale\nRun schematic checks\n"
+    );
+}
 
-    assert_eq!(
-        drawing_sheet_source_label(sheet.format.inheritance),
-        "inherited · project default"
+/// A probe states the signal it saves, and an unbound one is the problem to
+/// act on. Its stable ID, raw anchor and the toolbar's own actions are gone.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_unbound_probe_states_its_missing_signal_as_a_problem() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.schematic.document_mut_for_test().probes.push(
+        SchematicProbe::new(5, Point::new(10, 20), "P1", None)
+            .expect("an unbound probe is well formed"),
     );
-    assert_eq!(sheet.format_label(), "ISO A4 · landscape");
-    assert_eq!(
-        sheet.format.display_unit.format_size_um(
-            sheet.geometry.physical.paper.width_um,
-            sheet.geometry.physical.paper.height_um
-        ),
-        "297 × 210 mm"
+    let nodes = accesskit_nodes(|ui| probe_panel(ui, &mut app, 5));
+    assert!(
+        nodes.iter().any(|(_, node)| {
+            node.label() == Some("Signal") && node.description() == Some("Warning")
+        }),
+        "the unbound signal carries a warning"
     );
-    assert_eq!(
-        drawing_sheet_margins_label(&sheet.format),
-        "10 · 10 · 10 · 20 mm"
-    );
-    assert_eq!(
-        drawing_sheet_border_label(&sheet),
-        "standard border with zones · 4 × 4 zones"
-    );
-    assert_eq!(
-        drawing_sheet_title_block_label(&sheet),
-        "RSpice compact · bottom right"
-    );
-    assert_eq!(sheet.page_label, "1 of 1");
+    let painted = painted_panel(|ui| probe_panel(ui, &mut app, 5));
+    for gone in ["PROBE-5", "Anchor", "Center marker", "Delete probe", "Show in results"] {
+        assert!(!painted.contains(gone), "{gone}: {painted}");
+    }
 }
 
 /// The canvas can draw that a name crosses sheets but not where it lands, so

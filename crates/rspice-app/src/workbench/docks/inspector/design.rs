@@ -14,19 +14,17 @@ use component::*;
 
 use std::collections::{HashMap, HashSet};
 
-use egui::{Color32, RichText, Ui};
+use egui::Ui;
 
 use crate::schematic::view::{
     drawing_sheet::{
-        ActiveDrawingSheet, DrawingSheetOverflowSummary, drawing_sheet_overflow_summary,
-        resolve_active_drawing_sheet,
+        DrawingSheetOverflowSummary, drawing_sheet_overflow_summary, resolve_active_drawing_sheet,
     },
     schematic_symbol_context,
     sheet_visibility::{self, SheetScope},
 };
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode,
-    DrawingSheetBorderTemplate, DrawingSheetInheritance, DrawingSheetTitleBlockAnchor,
     DrawingSheetTitleBlockTemplate, NetNamingPolicy, PropertyDefinition, PropertyType,
     PropertyValue, SoaRuleVerdictEvidence,
 };
@@ -39,7 +37,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
     Problem, PropertyRowCaption, WorkbenchIcon, property_row_captioned, property_row_combo,
     property_row_flagged, property_row_input_action, property_row_input_captioned,
-    property_row_input_with_hint, schematic_property_row as property_row,
+    property_row_input_with_hint, problem_line, schematic_property_row as property_row,
     schematic_property_row_problem as property_row_problem,
 };
 use crate::workbench::state::{InlineEditField, ModelsPage, VerificationPage, Workspace};
@@ -50,7 +48,6 @@ use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
 
 use super::{ComponentModelEvidence, component_model_evidence, muted_inspector_copy};
-use rspice_ui_kit::panels::inspector::toned_inspector_copy;
 use rspice_ui_kit::panels::{
     panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,
     section_header_explained,
@@ -315,8 +312,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         } else {
             muted_inspector_copy(
                 ui,
-                "The document changed while this inspector edit was open. The draft has not \
-                 been applied.",
+                "The design changed under your edit. Your text was not applied.",
             );
             // Wrapped rather than elided: the draft is the reader's own unsaved
             // text, and all of it has to stay readable until it is discarded.
@@ -372,7 +368,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         DesignSubject::Shape(id) => shape_panel(ui, app, id),
         DesignSubject::Probe(id) => probe_panel(ui, app, id),
         DesignSubject::Multi => multi_panel(ui, app),
-        DesignSubject::Sheet => sheet_panel(ui, app, &sheet.nets),
+        DesignSubject::Sheet => sheet_panel(ui, app),
     }
 }
 
@@ -473,8 +469,7 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
 /// connectivity rows would have been. An inspector that silently showed the
 /// editor buffer's nets instead would name conductors the run will not have.
 fn unresolved_projection_note(ui: &mut Ui, reason: &str) {
-    let warn = Tokens::get(ui.ctx()).color.warn;
-    toned_inspector_copy(ui, reason, warn);
+    problem_line(ui, Problem::Warning, reason);
 }
 
 // =============================================================================
@@ -704,117 +699,12 @@ use inline_instance::*;
 // Sheet inspector
 // =============================================================================
 
-fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
-    let reference = app.state.workspace.content.active_view.clone();
-    let depth = app
-        .state
-        .workspace
-        .content
-        .hierarchy_stack
-        .len()
-        .saturating_sub(1);
-    let child_view_count = app
-        .state
-        .schematic
-        .document()
-        .components
-        .iter()
-        .filter(|component| {
-            app.state
-                .hierarchy_master_for_component(component.id)
-                .is_some()
-        })
-        .count();
-
-    section_header(ui, "Sheet", None);
-    property_row(
-        ui,
-        "Library / cell",
-        &format!("{}/{}", reference.library, reference.cell),
-    );
-    property_row(ui, "View", &reference.view);
-    property_row(
-        ui,
-        "Grid / snap",
-        &format!(
-            "{} · snap {}",
-            schematic_grid_label(app.state.schematic.document().document_policy.grid_pitch),
-            if app.state.schematic.session.editor.snap_engine.enabled {
-                "on"
-            } else {
-                "off"
-            }
-        ),
-    );
-    property_row(
-        ui,
-        "Hierarchy",
-        &if depth == 0 {
-            format!(
-                "root · {child_view_count} child view{}",
-                if child_view_count == 1 { "" } else { "s" }
-            )
-        } else {
-            format!(
-                "{} · depth {depth}",
-                app.state.workspace.content.active_display_path()
-            )
-        },
-    );
-    let occurrences = app.state.master_occurrence_paths();
-    property_row(
-        ui,
-        "Edit scope",
-        &match occurrences.len() {
-            0 => "not instantiated by the open design".to_owned(),
-            1 => "one occurrence".to_owned(),
-            count => format!("{count} occurrences"),
-        },
-    )
-    .on_hover_text(if occurrences.is_empty() {
-        "The configured hierarchy does not reach this document.".to_owned()
-    } else {
-        occurrences.join("\n")
-    });
-    property_row(
-        ui,
-        "Working revision",
-        &app.state
-            .workspace
-            .content
-            .project
-            .revision()
-            .get()
-            .to_string(),
-    );
-
+/// Nothing selected: what the sheet itself needs from the reader — its print
+/// problems with the route to Page Setup, and its schematic checks. What the
+/// document tab, the status bar and the navigator already say about the sheet
+/// is not said again here.
+fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     drawing_sheet_inspector(ui, app);
-
-    section_header(ui, "Contents", None);
-    property_row(
-        ui,
-        "Instances",
-        &app.state.schematic.document().components.len().to_string(),
-    );
-    property_row(ui, "Nets", &nets.len().to_string());
-    property_row(
-        ui,
-        "Interface ports",
-        &match app.state.schematic.interface_ports().len() {
-            0 => "— testbench root".to_owned(),
-            count => count.to_string(),
-        },
-    );
-    let probes = app.state.schematic.document().probes.len();
-    property_row(
-        ui,
-        "Probes",
-        &if probes == 0 {
-            "none placed".to_owned()
-        } else {
-            probes.to_string()
-        },
-    );
 
     // The header says whether the check is current and how many errors it
     // found; a row appears only for a finding to act on.
@@ -851,140 +741,67 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
             false,
         );
     });
-
-    section_header(ui, "Selection", Some("none"));
-    muted_inspector_copy(
-        ui,
-        "Click an instance or conductor to inspect it. Drag for a marquee; Shift-click adds to the selection.",
-    );
 }
 
+/// The sheet's print problems — a title block that does not fit, objects
+/// outside the drawing area — and the route to Page Setup, where the format
+/// itself is set and read. A read-only sheet with nothing wrong has no
+/// section.
 fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     let sheet = resolve_active_drawing_sheet(&app.state);
     let symbol_context = schematic_symbol_context(&app.state);
     let overflow = drawing_sheet_overflow_summary(&app.state, &symbol_context, &sheet);
-    let source = drawing_sheet_source_label(sheet.format.inheritance);
-    let physical = sheet.geometry.physical;
-    let unit = sheet.format.display_unit;
-
-    section_header(ui, "Drawing sheet", Some(source));
-    property_row(ui, "Format", &sheet.format_label());
-    property_row(
-        ui,
-        "Dimensions",
-        &unit.format_size_um(physical.paper.width_um, physical.paper.height_um),
-    );
-    property_row(
-        ui,
-        "Printable area",
-        &unit.format_size_um(physical.printable.width_um, physical.printable.height_um),
-    );
-    property_row(ui, "Margins", &drawing_sheet_margins_label(&sheet.format));
-    property_row(ui, "Border", &drawing_sheet_border_label(&sheet));
-    property_row(ui, "Title block", &drawing_sheet_title_block_label(&sheet));
-    if sheet.format.title_block_substituted() {
-        drawing_sheet_title_block_substitution(ui, &sheet);
-    }
-    property_row(
-        ui,
-        "Page",
-        &format!("{} · {}", sheet.page_label, sheet.sheet_name),
-    );
-
-    // Content inside the sheet is the normal state; content outside it is the
-    // box below, which counts it.
-    if !overflow.is_clear() {
-        drawing_sheet_overflow_advisory(ui, app, &overflow);
+    let substituted = sheet.format.title_block_substituted();
+    let writable = !app.state.schematic_edit_read_only();
+    if !writable && !substituted && overflow.is_clear() {
+        return;
     }
 
-    if app.state.schematic_edit_read_only() {
-        drawing_sheet_lock_note(
-            ui,
-            "The active schematic is read-only. The sheet format is shown in full and prints exactly as stated.",
+    section_header(ui, "Drawing sheet", None);
+    if substituted {
+        let requested = drawing_sheet_title_template_name(sheet.format.title_block.template);
+        let effective = drawing_sheet_title_template_name(
+            sheet.geometry.physical.effective_title_block_template,
         );
-    } else {
+        problem_line(
+            ui,
+            Problem::Warning,
+            &format!(
+                "{requested} doesn't fit; {effective} is printed. Enlarge the sheet in Page Setup."
+            ),
+        );
+    }
+    if !overflow.is_clear() {
+        problem_line(ui, Problem::Warning, &drawing_sheet_overflow_text(&overflow));
+    }
+    if writable || !overflow.is_clear() {
         action_stack(ui, |ui| {
-            let width = ui.available_width();
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.spacing_mut().item_spacing.y = ACTION_ROW_GAP;
-
-                    let availability = Command::PageSetup.availability(app);
-                    let response = Button::new("Page setup…")
-                        .icon(Icon::File)
-                        .min_width(width)
-                        .enabled(availability.is_available())
-                        .show(ui);
-                    if let CommandAvailability::Disabled(reason) = availability {
-                        response.on_disabled_hover_text(reason);
-                    } else if response.clicked() {
-                        Command::PageSetup.execute(app);
-                    }
-
-                    let availability = Command::SheetFormatManager.availability(app);
-                    let response = Button::new("All sheet formats…")
-                        .icon(Icon::Copy)
-                        .min_width(width)
-                        .enabled(availability.is_available())
-                        .show(ui);
-                    if let CommandAvailability::Disabled(reason) = availability {
-                        response.on_disabled_hover_text(reason);
-                    } else if response.clicked() {
-                        Command::SheetFormatManager.execute(app);
-                    }
-                },
-            );
+            if !overflow.is_clear() {
+                if Button::new("Show first")
+                    .icon(Icon::ZoomFit)
+                    .show(ui)
+                    .clicked()
+                {
+                    crate::schematic::view::drawing_sheet::show_first_drawing_sheet_overflow(
+                        &mut app.state,
+                    );
+                }
+                if Button::new("Review all…").show(ui).clicked() {
+                    crate::workbench::app::open_drawing_sheet_overflow_review(&mut app.state);
+                }
+            }
+            if writable {
+                command_action(
+                    ui,
+                    app,
+                    Command::PageSetup,
+                    Icon::File,
+                    "Page setup…",
+                    false,
+                );
+            }
         });
     }
-}
-
-fn drawing_sheet_title_block_substitution(ui: &mut Ui, sheet: &ActiveDrawingSheet) {
-    let t = Tokens::get(ui.ctx());
-    let requested = drawing_sheet_title_template_name(sheet.format.title_block.template);
-    let effective =
-        drawing_sheet_title_template_name(sheet.geometry.physical.effective_title_block_template);
-    let shown = egui::Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(
-            t.color.warn.r(),
-            t.color.warn.g(),
-            t.color.warn.b(),
-            18,
-        ))
-        .stroke(egui::Stroke::new(
-            1.0,
-            Color32::from_rgba_unmultiplied(
-                t.color.warn.r(),
-                t.color.warn.g(),
-                t.color.warn.b(),
-                102,
-            ),
-        ))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(9, 8))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new("Title block substituted")
-                    .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                    .color(t.color.warn),
-            );
-            ui.add(
-                egui::Label::new(
-                    RichText::new(format!(
-                        "{requested} does not fit the current drawing area, so {effective} is rendered. The requested template remains saved; enlarge the sheet or drawing area in Page Setup to restore it."
-                    ))
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
-    ui.painter().vline(
-        shown.response.rect.left() + 1.0,
-        shown.response.rect.y_range(),
-        egui::Stroke::new(2.0, t.color.warn),
-    );
 }
 
 const fn drawing_sheet_title_template_name(
@@ -999,77 +816,8 @@ const fn drawing_sheet_title_template_name(
     }
 }
 
-const fn drawing_sheet_source_label(inheritance: DrawingSheetInheritance) -> &'static str {
-    match inheritance {
-        DrawingSheetInheritance::Explicit => "sheet override",
-        DrawingSheetInheritance::ProjectDefault => "inherited · project default",
-        DrawingSheetInheritance::UserDefault => "inherited · personal",
-    }
-}
-
-fn drawing_sheet_margins_label(format: &crate::state::SchematicSheetFormat) -> String {
-    let margins = format.margins;
-    let unit = format.display_unit;
-    if margins.top_um == margins.right_um
-        && margins.top_um == margins.bottom_um
-        && margins.top_um == margins.left_um
-    {
-        format!(
-            "{} {} all edges",
-            unit.format_um(margins.top_um),
-            unit.suffix()
-        )
-    } else {
-        format!(
-            "{} · {} · {} · {} {}",
-            unit.format_um(margins.top_um),
-            unit.format_um(margins.right_um),
-            unit.format_um(margins.bottom_um),
-            unit.format_um(margins.left_um),
-            unit.suffix()
-        )
-    }
-}
-
-fn drawing_sheet_border_label(sheet: &ActiveDrawingSheet) -> String {
-    let template = match sheet.format.border {
-        DrawingSheetBorderTemplate::Standard => "standard border with zones",
-        DrawingSheetBorderTemplate::Plain => "plain border",
-        DrawingSheetBorderTemplate::None => "no border",
-        DrawingSheetBorderTemplate::OrganizationManaged => "organization border",
-    };
-    sheet.geometry.physical.zones.map_or_else(
-        || template.to_owned(),
-        |zones| format!("{template} · {} × {} zones", zones.columns, zones.rows),
-    )
-}
-
-fn drawing_sheet_title_block_label(sheet: &ActiveDrawingSheet) -> String {
-    let template = match sheet.format.title_block.template {
-        DrawingSheetTitleBlockTemplate::Compact => "RSpice compact",
-        DrawingSheetTitleBlockTemplate::Standard => "RSpice standard",
-        DrawingSheetTitleBlockTemplate::Wide => "RSpice wide",
-        DrawingSheetTitleBlockTemplate::OrganizationManaged => "Organization block",
-        DrawingSheetTitleBlockTemplate::None => {
-            return "none · identity printed in the page header".to_owned();
-        }
-    };
-    let anchor = match sheet.format.title_block.anchor {
-        DrawingSheetTitleBlockAnchor::BottomRight => "bottom right",
-        DrawingSheetTitleBlockAnchor::BottomLeft => "bottom left",
-        DrawingSheetTitleBlockAnchor::BottomStrip => "bottom strip",
-        DrawingSheetTitleBlockAnchor::TopRight => "top right",
-    };
-    format!("{template} · {anchor}")
-}
-
-fn drawing_sheet_overflow_advisory(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    summary: &DrawingSheetOverflowSummary,
-) {
-    let t = Tokens::get(ui.ctx());
-    let count = summary.finding_count();
+/// How many objects stand outside the drawing area, and where.
+fn drawing_sheet_overflow_text(summary: &DrawingSheetOverflowSummary) -> String {
     let mut details = Vec::with_capacity(2);
     if summary.outside_border > 0 {
         let mut outside = format!("{} outside the border", summary.outside_border);
@@ -1084,70 +832,14 @@ fn drawing_sheet_overflow_advisory(
             summary.title_block_collisions
         ));
     }
-    let fill =
-        Color32::from_rgba_unmultiplied(t.color.warn.r(), t.color.warn.g(), t.color.warn.b(), 18);
-    let border =
-        Color32::from_rgba_unmultiplied(t.color.warn.r(), t.color.warn.g(), t.color.warn.b(), 102);
-    section_block_gap(ui);
-    let shown = egui::Frame::new()
-        .fill(fill)
-        .stroke(egui::Stroke::new(1.0, border))
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::symmetric(9, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            ui.spacing_mut().item_spacing.y = 7.0;
-            ui.label(
-                egui::RichText::new(format!(
-                    "△ {count} object{} outside the drawing area",
-                    if count == 1 { "" } else { "s" }
-                ))
-                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                .color(t.color.warn),
-            );
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(format!(
-                        "{}. This is advisory: the sheet saves, netlists, checks and simulates unchanged. Print and export ask what to do with it.",
-                        details.join(" · ")
-                    ))
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-            ui.horizontal(|ui| {
-                if Button::new("Show first")
-                    .icon(Icon::ZoomFit)
-                    .show(ui)
-                    .clicked()
-                {
-                    crate::schematic::view::drawing_sheet::show_first_drawing_sheet_overflow(
-                        &mut app.state,
-                    );
-                }
-                if Button::new("Review all…").show(ui).clicked() {
-                    crate::workbench::app::open_drawing_sheet_overflow_review(&mut app.state);
-                }
-            });
-        });
-    ui.painter().vline(
-        shown.response.rect.left() + 1.0,
-        shown.response.rect.y_range(),
-        egui::Stroke::new(2.0, t.color.warn),
+    let headline = format!(
+        "{} outside the drawing area",
+        count_label(summary.finding_count(), "object")
     );
-}
-
-fn drawing_sheet_lock_note(ui: &mut Ui, message: &str) {
-    let faint = Tokens::get(ui.ctx()).color.text_faint;
-    toned_inspector_copy(ui, message, faint);
-}
-
-fn schematic_grid_label(pitch: crate::state::SchematicGridPitch) -> &'static str {
-    match pitch {
-        crate::state::SchematicGridPitch::Mil50 => "50 mil",
-        crate::state::SchematicGridPitch::Mil25 => "25 mil",
-        crate::state::SchematicGridPitch::Metric => "metric",
+    if details.is_empty() {
+        headline
+    } else {
+        format!("{headline}: {}", details.join(" · "))
     }
 }
 
@@ -1207,64 +899,30 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
     );
 
-    section_header(ui, "Selected objects", Some(&selected.len().to_string()));
+    // The set's instances, one row each: a click picks that one out of the
+    // set. The toolbar, the context menu and the keys act on the set itself.
+    section_block_gap(ui);
     if selected.is_empty() {
-        muted_inspector_copy(
-            ui,
-            "The selection holds conductors and annotations only. Add an instance to edit properties.",
-        );
-    } else {
-        let mut reduce: Option<u64> = None;
-        for (id, name, value) in &selected {
-            let row = TreeRow::new(name)
-                .mono()
-                .indent(1)
-                .meta(value)
-                .selected(true)
-                .show(ui);
-            if row.response.clicked() {
-                reduce = Some(*id);
-            }
-            row.response
-                .on_hover_text(format!("Reduce the selection to {name}"));
-        }
-        if let Some(id) = reduce {
-            select_component(app, id);
-        }
-        muted_inspector_copy(
-            ui,
-            "Selecting a row reduces the selection to that object for property editing.",
-        );
+        muted_inspector_copy(ui, "No instances selected.");
+        return;
     }
-
-    section_header(ui, "Selection actions", None);
-    action_stack(ui, |ui| {
-        command_action(
-            ui,
-            app,
-            Command::RotateSelection,
-            Icon::Rotate,
-            "Rotate 90° clockwise",
-            false,
-        );
-        command_action(
-            ui,
-            app,
-            Command::MirrorSelectionHorizontal,
-            Icon::Mirror,
-            "Mirror about vertical axis",
-            false,
-        );
-        command_action(ui, app, Command::Duplicate, Icon::Copy, "Duplicate", false);
-        command_action(
-            ui,
-            app,
-            Command::Delete,
-            Icon::Trash,
-            "Delete selection",
-            true,
-        );
-    });
+    let mut reduce: Option<u64> = None;
+    for (id, name, value) in &selected {
+        let row = TreeRow::new(name)
+            .mono()
+            .indent(1)
+            .meta(value)
+            .selected(true)
+            .show(ui);
+        if row.response.clicked() {
+            reduce = Some(*id);
+        }
+        row.response
+            .on_hover_text(format!("Reduce the selection to {name}"));
+    }
+    if let Some(id) = reduce {
+        select_component(app, id);
+    }
 }
 
 // =============================================================================
@@ -1284,15 +942,11 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         return;
     };
     object_title(ui, "Note", Some(note.kind.label()), None);
-    section_header(ui, "Documentation object", Some("editable"));
-    property_row(ui, "Stable ID", &format!("NOTE-{id}"));
-    property_row(ui, "Type", note.kind.label());
+    section_block_gap(ui);
     property_row(ui, "Text", &note.text);
     property_row(ui, "Layer", note.layer.label());
-    property_row(ui, "Anchor", &format!("{}, {}", note.pos.x, note.pos.y));
     sheet_row(ui, &app.state, id);
     if let Some(review) = note.review.as_ref() {
-        property_row(ui, "Review record", &review.record_id);
         property_row(ui, "Review state", review.state.keyword());
     }
 }
@@ -1309,23 +963,9 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     else {
         return;
     };
-    let (min, max) = shape.bounds();
     object_title(ui, "Shape", Some(shape.kind().label()), None);
-    section_header(ui, "Documentation shape", Some("editable"));
-    property_row(ui, "Stable ID", &format!("SHAPE-{id}"));
-    property_row(ui, "Type", shape.kind().label());
+    section_block_gap(ui);
     property_row(ui, "Layer", shape.layer.label());
-    property_row(ui, "Electrical connectivity", "none");
-    property_row(
-        ui,
-        "Bounds",
-        &format!("{}, {} to {}, {}", min.x, min.y, max.x, max.y),
-    );
-    property_row(
-        ui,
-        "Control points",
-        &shape.geometry.points().len().to_string(),
-    );
     sheet_row(ui, &app.state, id);
 }
 
@@ -1343,24 +983,23 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     };
     let bound = probe.source_expression.as_deref();
     object_title(ui, &probe.reference, Some("Probe"), None);
-    section_header(ui, "Probe marker", Some("authored output intent"));
-    property_row(ui, "Stable ID", &format!("PROBE-{id}"));
-    property_row(ui, "Reference", &probe.reference);
-    property_row(ui, "Source", bound.unwrap_or("not bound"));
-    property_row(
+    section_block_gap(ui);
+    // A probe that names no signal saves nothing; that is the one thing about
+    // it to act on.
+    property_row_problem(
         ui,
-        "Anchor",
-        &format!("{}, {}", probe.position.x, probe.position.y),
+        "Signal",
+        bound.unwrap_or("not bound"),
+        bound.is_none().then_some(Problem::Warning),
     );
     sheet_row(ui, &app.state, id);
-    property_row(ui, "Electrical connectivity", "none");
 
     let writable = !app.state.schematic_edit_read_only();
     let mut enabled = probe.enabled;
     section_block_gap(ui);
     let enabled_response = ui.add_enabled(
         writable,
-        egui::Checkbox::new(&mut enabled, "Include this probe in future runs"),
+        egui::Checkbox::new(&mut enabled, "Save this signal"),
     );
     if !writable {
         enabled_response.on_disabled_hover_text("The active schematic is read-only.");
@@ -1368,16 +1007,12 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let mut plot_on_materialization = probe.plot_on_materialization;
     let plot_response = ui.add_enabled(
         writable && enabled,
-        egui::Checkbox::new(
-            &mut plot_on_materialization,
-            "Show automatically when the next run materializes it",
-        ),
+        egui::Checkbox::new(&mut plot_on_materialization, "Plot after the next run"),
     );
     if !writable {
         plot_response.on_disabled_hover_text("The active schematic is read-only.");
     } else if !enabled {
-        plot_response
-            .on_disabled_hover_text("Enable the probe before changing its display intent.");
+        plot_response.on_disabled_hover_text("Save the signal before choosing to plot it.");
     }
     if enabled != probe.enabled || plot_on_materialization != probe.plot_on_materialization {
         let changed = app
@@ -1390,12 +1025,14 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         }
     }
 
+    let Some(expression) = bound else {
+        return;
+    };
     action_stack(ui, |ui| {
-        if let Some(expression) = bound
-            && Button::new("Show in results")
-                .icon(Icon::Results)
-                .show(ui)
-                .clicked()
+        if Button::new("Show in results")
+            .icon(Icon::Results)
+            .show(ui)
+            .clicked()
         {
             if writable {
                 let changed = crate::schematic::view::ensure_probe_visible_with_feedback(
@@ -1416,10 +1053,6 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
                 );
             }
         }
-        if Button::new("Center marker").ghost().show(ui).clicked() {
-            app.state.schematic.session.editor.center_request = Some(probe.position);
-        }
-        command_action(ui, app, Command::Delete, Icon::Trash, "Delete probe", true);
     });
 }
 
@@ -1427,10 +1060,9 @@ impl AppState {
     /// Every occurrence the open document's master is instantiated at, in path
     /// order.
     ///
-    /// This is the one derivation of how far an edit here reaches. Two surfaces
-    /// read it — the sheet inspector's edit-scope row above, and the canvas
-    /// strip in `workbench::surfaces::design` — and they must never be able to
-    /// disagree, so neither counts instances for itself.
+    /// This is the one derivation of how far an edit here reaches. The canvas
+    /// strip in `workbench::surfaces::design` states it, and no surface counts
+    /// instances for itself.
     ///
     /// The design projection is the authority. It is the same value a run is
     /// prepared from, memoized on the content it derives from, so the number a
