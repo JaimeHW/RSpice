@@ -359,8 +359,15 @@ fn a_refused_entry_is_stated_under_its_field_and_holds_save() {
     let ctx = themed_context();
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     let output = frame_with(&ctx, &mut app, DESKTOP, Vec::new());
+    // The form's own check and radio marks: the inspector behind the dialog
+    // names its build targets with the same words.
     let mark = |output: &egui::FullOutput, id| {
-        node_rect(node(output, &messages().text(id)).unwrap_or_else(|| panic!("{id:?} mark")))
+        use egui::accesskit::Role;
+        node_rect(
+            named_nodes(output, &messages().text(id))
+                .find(|node| matches!(node.role(), Role::CheckBox | Role::RadioButton))
+                .unwrap_or_else(|| panic!("{id:?} mark")),
+        )
     };
     let ordinary = mark(&output, MessageId::VerilogABuildSettingsUseInterpreter).top()
         - mark(&output, MessageId::VerilogABuildSettingsGeneratedRust).bottom();
