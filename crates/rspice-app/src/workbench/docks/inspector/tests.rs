@@ -664,9 +664,9 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
 #[test]
 fn failure_row_reserves_a_non_overlapping_margin_column_at_drawer_width() {
     let row_width = 228.0;
-    let columns = failure_row_columns(row_width, 48.0);
-    let target_right = FAILURE_ROW_PADDING_X + columns.target_width;
-    let margin_left = row_width - FAILURE_ROW_PADDING_X - columns.margin_width;
+    let columns = failure_row_columns(row_width, 48.0, PANEL_INSET);
+    let target_right = PANEL_INSET + columns.target_width;
+    let margin_left = row_width - PANEL_INSET - columns.margin_width;
 
     assert!(target_right + FAILURE_ROW_COLUMN_GAP <= margin_left + f32::EPSILON);
     assert_eq!(columns.margin_width, 48.0);

@@ -2038,50 +2038,30 @@ fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<Stri
     Ok(net)
 }
 
+/// The Verify inspector states only what its page does not: the Monte Carlo
+/// run's definition and worst samples, a corner run that failed, and the
+/// tuning session's uncommitted or invalid values. The other pages already
+/// show everything there is to say about them.
 fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.workbench.verification_page {
         VerificationPage::Yield => yield_details(ui, app),
         VerificationPage::Corners => {
-            let result = app
-                .state
-                .simulation
-                .active_run()
-                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Corner));
-            let points = result
-                .and_then(|analysis| analysis.waveforms.first())
-                .map_or(0, |waveform| waveform.x.len());
-            section_header(
-                ui,
-                "Corner details",
-                Some(if result.is_some() {
-                    "retained"
-                } else {
-                    "not run"
-                }),
-            );
-            property_row(ui, "Points", &points.to_string());
-            property_row(
-                ui,
-                "Signals",
-                &result
-                    .map_or(0, |analysis| analysis.waveforms.len())
-                    .to_string(),
-            );
-            property_row(
-                ui,
-                "Execution",
-                if result.is_some_and(|analysis| analysis.success) {
-                    "complete"
-                } else if result.is_some() {
-                    "failed / incomplete"
-                } else {
-                    "no evidence"
-                },
-            );
+            let failed = app.state.simulation.active_run().and_then(|run| {
+                run.analyses.iter().find(|analysis| {
+                    analysis.analysis_type == crate::state::AnalysisType::Corner
+                        && !analysis.success
+                })
+            });
+            if let Some(analysis) = failed {
+                let message = analysis.error_message.as_deref().map_or_else(
+                    || "The corner run failed.".to_owned(),
+                    |error| format!("The corner run failed: {error}"),
+                );
+                crate::ui::widgets::problem_line(ui, Problem::Failure, &message);
+            }
         }
         VerificationPage::Tuning => {
             let session = &app.state.workbench.verification;
-            let variable_count = session.tuning_variables.len();
             let dirty_count = session
                 .tuning_variables
                 .iter()
@@ -2092,97 +2072,25 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
                 .iter()
                 .filter(|draft| draft.validation_error.is_some())
                 .count();
+            let uncommitted = format!("{dirty_count} uncommitted");
             section_header(
                 ui,
-                "Parameter tuning",
-                Some(if dirty_count == 0 {
-                    "committed baseline"
-                } else {
-                    "provisional"
-                }),
+                "Tuning",
+                (dirty_count > 0).then_some(uncommitted.as_str()),
             );
-            property_row(ui, "Design variables", &variable_count.to_string());
-            property_row(ui, "Provisional changes", &dirty_count.to_string());
-            property_row(
-                ui,
-                "Validation",
-                if invalid_count == 0 {
-                    "ready"
-                } else {
-                    "blocked"
-                },
-            );
-            property_row(
-                ui,
-                "Commit contract",
-                "one plan revision + retained production run",
-            );
-        }
-        VerificationPage::Optimization => {
-            section_header(ui, "Optimization details", None);
-            let retained =
-                app.state.simulation.active_run().and_then(|run| {
-                    verified_analysis(run, crate::state::AnalysisType::Optimization)
-                });
-            if retained.is_some() {
-                property_row(ui, "State", "retained optimization result");
-            } else {
-                property_row(ui, "State", "no retained optimization evidence");
+            if invalid_count > 0 {
+                super::super::design_system::property_row_problem(
+                    ui,
+                    "Validation",
+                    &format!("{invalid_count} invalid"),
+                    Some(Problem::Failure),
+                );
             }
         }
-        VerificationPage::DeviceSafety => {
-            let active_run = app.state.simulation.active_run();
-            let has_soa = active_run
-                .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Soa))
-                .is_some();
-            section_header(
-                ui,
-                "SOA details",
-                Some(if has_soa {
-                    "execution receipt retained"
-                } else {
-                    "not run"
-                }),
-            );
-            property_row(
-                ui,
-                "SOA evidence",
-                if has_soa {
-                    "inspect retained rule results"
-                } else {
-                    "unavailable"
-                },
-            );
-            property_row(ui, "Geometry", "owned by Physical DRC");
-        }
-        VerificationPage::Regression => {
-            section_header(ui, "Regression details", Some("main"));
-            property_row(
-                ui,
-                "Retained runs",
-                &app.state.simulation.retained.runs.len().to_string(),
-            );
-            property_row(
-                ui,
-                "Baseline",
-                if app.state.simulation.retained.runs.len() >= 2 {
-                    "selectable immutable run"
-                } else {
-                    "unavailable"
-                },
-            );
-            property_row(ui, "Verdict", "requires configured tolerance contract");
-        }
+        VerificationPage::Optimization
+        | VerificationPage::DeviceSafety
+        | VerificationPage::Regression => {}
     }
-}
-
-fn verified_analysis(
-    run: &crate::state::SimulationRun,
-    analysis_type: crate::state::AnalysisType,
-) -> Option<&crate::state::AnalysisResult> {
-    run.analyses.iter().find(|analysis| {
-        analysis.analysis_type == analysis_type && analysis.success && analysis.provenance.is_some()
-    })
 }
 
 fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
@@ -2191,12 +2099,7 @@ fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
     let provenance = evidence.and(app.state.simulation.retained.yield_provenance());
     let results = evidence.unwrap_or_default();
 
-    let status = if provenance.is_some() {
-        "complete"
-    } else {
-        "no active evidence"
-    };
-    section_header(ui, "Run definition", Some(status));
+    section_header(ui, "Monte Carlo", None);
     if let Some(provenance) = provenance {
         property_row(
             ui,
@@ -2209,50 +2112,36 @@ fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
         property_row(ui, "Seed", &format!("0x{:X}", provenance.seed));
         property_row(ui, "Sampling", provenance.sampling_mode.display_name());
         let (passing, total) = joint_yield(results).unwrap_or((0, 0));
-        let interval = wilson_interval_95(passing, total);
-        property_row(
-            ui,
-            "Confidence",
-            &interval.map_or_else(
-                || "Unavailable".to_owned(),
-                |(low, high)| format!("95% Wilson · {:.2}–{:.2}%", low * 100.0, high * 100.0),
-            ),
-        );
+        if let Some((low, high)) = wilson_interval_95(passing, total) {
+            property_row(
+                ui,
+                "Confidence",
+                &format!("95% CI {:.2}–{:.2}%", low * 100.0, high * 100.0),
+            );
+        }
         if let Some(run) = run {
-            property_row(ui, "Duration", &format!("{:.3} s", run.elapsed_time));
-            property_row(ui, "Dataset", &run.dataset_id.to_string());
+            property_row(
+                ui,
+                "Duration",
+                &crate::ui::plot::fmt_si_significant(run.elapsed_time, "s", 3),
+            );
         }
     } else {
-        property_row(ui, "Samples", "No retained Monte Carlo dataset");
-        property_row(ui, "Seed", "Unavailable");
-        property_row(ui, "Sampling", "Unavailable");
-        property_row(ui, "Confidence", "Unavailable");
+        muted_inspector_copy(ui, "No Monte Carlo run");
     }
 
     let failures = worst_samples(results);
-    let failed_count = joint_yield(results).map_or(0, |(passing, total)| total - passing);
-    let failed_label = format!("{failed_count} fail");
-    section_header(ui, "Worst samples", Some(&failed_label));
-    if failures.is_empty() {
-        property_row(
-            ui,
-            "Evidence",
-            if results.is_empty() {
-                "No active sample trail"
-            } else {
-                "No failing samples"
-            },
-        );
-    } else {
+    if !failures.is_empty() {
+        let failed_count = joint_yield(results).map_or(0, |(passing, total)| total - passing);
+        let failed_label = format!("{failed_count} fail");
+        section_header(ui, "Worst samples", Some(&failed_label));
         for failure in failures.iter().take(3) {
             failure_row(ui, failure);
         }
     }
 
-    section_header(ui, "Specification yields", None);
-    if results.is_empty() {
-        property_row(ui, "Evidence", "No active-dataset yield results");
-    } else {
+    if !results.is_empty() {
+        section_header(ui, "Specification yields", None);
         for result in results {
             property_row(
                 ui,
@@ -2325,7 +2214,6 @@ fn normalized_yield_margin(
     }
 }
 
-const FAILURE_ROW_PADDING_X: f32 = 9.0;
 const FAILURE_ROW_PADDING_Y: f32 = 8.0;
 const FAILURE_ROW_COLUMN_GAP: f32 = 8.0;
 const FAILURE_ROW_DETAIL_GAP: f32 = 4.0;
@@ -2336,8 +2224,15 @@ struct FailureRowColumns {
     margin_width: f32,
 }
 
-fn failure_row_columns(row_width: f32, measured_margin_width: f32) -> FailureRowColumns {
-    let content_width = (row_width - FAILURE_ROW_PADDING_X * 2.0).max(1.0);
+/// The target and margin columns of a failure row `row_width` wide whose text
+/// is inset `padding_x` from both edges: the panel's own inset, so the row's
+/// text lines up with the property rows around it.
+fn failure_row_columns(
+    row_width: f32,
+    measured_margin_width: f32,
+    padding_x: f32,
+) -> FailureRowColumns {
+    let content_width = (row_width - padding_x * 2.0).max(1.0);
     let margin_width = measured_margin_width.max(1.0).min(content_width);
     let target_width = (content_width - margin_width - FAILURE_ROW_COLUMN_GAP).max(1.0);
     FailureRowColumns {
@@ -2351,18 +2246,22 @@ fn failure_row(ui: &mut Ui, failure: &FailedSample) -> egui::Response {
     let width = ui.available_width().max(1.0);
     let title = format!("#{:04} · {}", failure.sample_index + 1, failure.target);
     let margin = format!("{:+.2}%", failure.normalized_margin * 100.0);
-    let detail = format!("observed {:.6} {}", failure.value, failure.unit);
+    let detail = format!(
+        "observed {}",
+        crate::ui::plot::fmt_si_significant(failure.value, &failure.unit, 4)
+    );
     let title_font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let margin_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let detail_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let measured_margin = ui
         .painter()
         .layout_no_wrap(margin, margin_font, t.color.err);
-    let columns = failure_row_columns(width, measured_margin.size().x);
+    let padding_x = panel_inset(ui);
+    let columns = failure_row_columns(width, measured_margin.size().x, padding_x);
     let title_galley = ui
         .painter()
         .layout(title, title_font, t.color.text, columns.target_width);
-    let content_width = (width - FAILURE_ROW_PADDING_X * 2.0).max(1.0);
+    let content_width = (width - padding_x * 2.0).max(1.0);
     let detail_galley = ui
         .painter()
         .layout(detail, detail_font, t.color.text_faint, content_width);
@@ -2395,7 +2294,7 @@ fn failure_row(ui: &mut Ui, failure: &FailedSample) -> egui::Response {
     );
     let title_top = rect.top() + FAILURE_ROW_PADDING_Y;
     let target_rect = Rect::from_min_size(
-        Pos2::new(rect.left() + FAILURE_ROW_PADDING_X, title_top),
+        Pos2::new(rect.left() + padding_x, title_top),
         Vec2::new(columns.target_width, title_height),
     );
     ui.painter().with_clip_rect(target_rect).galley(
@@ -2404,10 +2303,7 @@ fn failure_row(ui: &mut Ui, failure: &FailedSample) -> egui::Response {
         t.color.text,
     );
     let margin_rect = Rect::from_min_size(
-        Pos2::new(
-            rect.right() - FAILURE_ROW_PADDING_X - columns.margin_width,
-            title_top,
-        ),
+        Pos2::new(rect.right() - padding_x - columns.margin_width, title_top),
         Vec2::new(columns.margin_width, title_height),
     );
     ui.painter().with_clip_rect(margin_rect).galley(
@@ -2420,8 +2316,8 @@ fn failure_row(ui: &mut Ui, failure: &FailedSample) -> egui::Response {
     );
     let detail_top = title_top + title_height + FAILURE_ROW_DETAIL_GAP;
     let detail_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + FAILURE_ROW_PADDING_X, detail_top),
-        Pos2::new(rect.right() - FAILURE_ROW_PADDING_X, rect.bottom()),
+        Pos2::new(rect.left() + padding_x, detail_top),
+        Pos2::new(rect.right() - padding_x, rect.bottom()),
     );
     ui.painter().with_clip_rect(detail_rect).galley(
         detail_rect.left_top(),

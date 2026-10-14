@@ -358,6 +358,102 @@ fn open_results_selects_the_last_run_in_the_results_workspace() {
     );
 }
 
+fn assert_states(painted: &[String], present: &[&str], absent: &[&str]) {
+    for expected in present {
+        assert!(
+            painted.iter().any(|text| text == expected),
+            "{expected:?} is missing: {painted:?}"
+        );
+    }
+    for gone in absent {
+        assert!(
+            !painted.iter().any(|text| text.contains(gone)),
+            "{gone:?} is still stated: {painted:?}"
+        );
+    }
+}
+
+#[test]
+fn the_verify_inspector_states_the_monte_carlo_run_without_its_dataset_identity() {
+    let painted = simulate_text(&mut verify_monte_carlo());
+
+    assert_states(
+        &painted,
+        &[
+            "Monte Carlo",
+            "40 / 40",
+            "95% CI 80.14–97.42%",
+            "12.4 s",
+            "Worst samples",
+            "observed 38.90 dB",
+            "Specification yields",
+        ],
+        &["Run definition", "Wilson", "Dataset", "complete"],
+    );
+}
+
+#[test]
+fn the_verify_inspector_says_once_that_no_monte_carlo_ran() {
+    let painted = simulate_text(&mut verify_yield_empty());
+
+    assert_states(
+        &painted,
+        &["Monte Carlo", "No Monte Carlo run"],
+        &[
+            "Unavailable",
+            "Seed",
+            "Worst samples",
+            "Specification yields",
+            "No active",
+        ],
+    );
+}
+
+#[test]
+fn the_verify_inspector_restates_nothing_the_other_pages_show() {
+    for page in [
+        VerificationPage::Corners,
+        VerificationPage::Optimization,
+        VerificationPage::DeviceSafety,
+        VerificationPage::Regression,
+    ] {
+        let painted = simulate_text(&mut verify_app(page));
+        assert_states(
+            &painted,
+            &[],
+            &[
+                "details",
+                "Points",
+                "Signals",
+                "Execution",
+                "State",
+                "Geometry",
+                "Retained runs",
+                "Baseline",
+                "Verdict",
+            ],
+        );
+    }
+}
+
+#[test]
+fn the_tuning_inspector_states_only_uncommitted_and_invalid_values() {
+    let painted = simulate_text(&mut verify_tuning());
+
+    assert_states(
+        &painted,
+        &["Tuning"],
+        &[
+            "Parameter tuning",
+            "committed baseline",
+            "Design variables",
+            "Provisional changes",
+            "Validation",
+            "Commit contract",
+        ],
+    );
+}
+
 /// One review panel: its file name and the app state it renders.
 type ReviewPanel = (&'static str, fn() -> RSpiceApp);
 
