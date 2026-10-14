@@ -99,7 +99,6 @@ pub(crate) struct VirtualEditorStyle<'a> {
     pub accent: Color32,
     pub error: Color32,
     pub warning: Color32,
-    pub information: Color32,
     pub edited_lines: &'a std::collections::HashSet<usize>,
     pub breakpoints: &'a [usize],
     pub breakpoints_enabled: bool,
@@ -387,18 +386,12 @@ pub(crate) fn show_virtual_text_editor(
                     let is_active = session.model.selections().iter().any(|selection| {
                         session.model.line_column_for_char(selection.cursor).0 == line.logical_line
                     });
+                    // The debugger's current line and the cross-probed line are
+                    // where the reader is, so they take the active-item accent.
                     if style.current_line == Some(one_based_line) {
-                        code_painter.rect_filled(
-                            row_rect,
-                            0.0,
-                            style.information.linear_multiply(0.12),
-                        );
+                        code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.12));
                     } else if style.cross_probe_line == Some(line.logical_line) {
-                        code_painter.rect_filled(
-                            row_rect,
-                            0.0,
-                            style.information.linear_multiply(0.08),
-                        );
+                        code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.08));
                     } else if is_active {
                         code_painter.rect_filled(row_rect, 0.0, style.active_background);
                     } else if pointer_hover.is_some_and(|pointer| row_rect.contains(pointer)) {
@@ -1569,7 +1562,6 @@ mod tests {
             accent: Color32::LIGHT_BLUE,
             error: Color32::RED,
             warning: Color32::YELLOW,
-            information: Color32::LIGHT_BLUE,
             edited_lines: edited,
             breakpoints: &[],
             breakpoints_enabled: false,

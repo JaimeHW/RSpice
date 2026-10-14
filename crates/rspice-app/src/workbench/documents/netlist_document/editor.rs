@@ -190,7 +190,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             accent: c.accent,
             error: c.err,
             warning: c.warn,
-            information: c.info,
             edited_lines: &edited_lines,
             breakpoints: &[],
             breakpoints_enabled: false,

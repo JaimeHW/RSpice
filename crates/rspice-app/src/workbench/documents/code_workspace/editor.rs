@@ -384,7 +384,6 @@ fn show_code_document_impl(
             accent: colors.accent,
             error: colors.err,
             warning: colors.warn,
-            information: colors.info,
             edited_lines: &edited_lines,
             breakpoints,
             breakpoints_enabled,
@@ -660,7 +659,7 @@ fn highlight_line(
         let underline = severity.map_or(Stroke::NONE, |severity| {
             Stroke::new(
                 1.0,
-                diagnostic_color(severity, colors.err, colors.warn, colors.info),
+                diagnostic_color(severity, colors.err, colors.warn, colors.text_faint),
             )
         });
         append(job, &line[cursor..end], font.clone(), color, underline);
@@ -802,15 +801,16 @@ const fn diagnostic_problem(severity: CodeEditorSeverity) -> Option<Problem> {
     }
 }
 
+/// The squiggle under the offending text: an error or a warning in its own
+/// colour, a note or a hint in the faint neutral, since neither is a problem.
 const fn diagnostic_color(
     severity: CodeEditorSeverity,
     error: Color32,
     warning: Color32,
-    info: Color32,
+    neutral: Color32,
 ) -> Color32 {
     match severity {
-        CodeEditorSeverity::Hint => info,
-        CodeEditorSeverity::Info => info,
+        CodeEditorSeverity::Hint | CodeEditorSeverity::Info => neutral,
         CodeEditorSeverity::Warning => warning,
         CodeEditorSeverity::Error => error,
     }
