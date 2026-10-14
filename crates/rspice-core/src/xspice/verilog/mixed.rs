@@ -2909,9 +2909,13 @@ impl MixedSignalHost {
     /// probe is what lets a Newton iteration see this module's continuous
     /// equations and its D/A levels without the boundary having been decided,
     /// and what lets a residual be assembled at a timepoint that is not a
-    /// candidate endpoint at all — an LTE probe, or the static residual capture
-    /// a Xyce OneStep step takes *after* committing the timepoint it is
-    /// capturing.
+    /// candidate endpoint at all, such as an LTE probe.
+    ///
+    /// The static residual a Xyce OneStep step keeps is not a probe. It is
+    /// read by [`Self::stamp_static_dae`] from the settled acceptance trial
+    /// before that trial prepares and commits, so its D/A levels are the
+    /// trial's left limit, the levels the step into the timepoint was solved
+    /// with.
     ///
     /// The one difference from [`Self::begin_trial`] is the monotonicity check.
     /// That check exists because acceptance advances the analog integrator, so
