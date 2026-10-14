@@ -73,7 +73,11 @@
 //! asks the controller for no interior root on such a step. A crossing with no
 //! such feedback before it in the same trial is the circuit's own: it keeps
 //! the interpolated instant and the nearest-tick rule above, because dating it
-//! at the endpoint would be a setup/hold-class error on a sampling edge.
+//! at the endpoint would be a setup/hold-class error on a sampling edge. So
+//! does one beside a drive the activity due at the trial's own timepoint
+//! moved: that drive acts from the first instant after the timepoint, and the
+//! step onto it is solved with the drive from before
+//! ([`MixedSignalHost::digital_feedback_into_interval`]).
 //!
 //! "Before it" spans the Newton probes of one candidate rather than one trial.
 //! The solver rolls a probe back before the solution that probe's write moved
@@ -959,6 +963,21 @@ impl EventPort {
         let node = self.trace_node.filter(|node| *node != self.node)?;
         Some((self.bit?, node))
     }
+
+    /// Whether this is an output a shared converter drives the deck from:
+    /// the ports [`MixedSignalHost::converted_output_changed`] watches.
+    fn is_converted_output(&self) -> bool {
+        self.converted_bit().is_some()
+            && self.direction
+                == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
+    }
+
+    /// This port's bit as `digital` holds it; `None` for a port that names no
+    /// bit or a signal `digital` does not hold.
+    fn bit_in(&self, digital: &MixedDigital) -> Option<FourStateBit> {
+        let bit = self.bit?;
+        digital.read(self.signal).map(|value| value.bit(bit))
+    }
 }
 
 /// One vector boundary port, as a bus over the deck nodes its bits landed on.
@@ -1125,6 +1144,17 @@ struct TrialVectors {
     /// [`MixedSignalHost::sample_discrete_inputs`] at the end of a settle
     /// pass, which is again too late to date that pass's crossings with.
     discrete_at_trial_start: Vec<Option<f64>>,
+    /// The drives that act from the first instant after the timepoint that
+    /// moves them, as they stood once the activity due at the trial's own
+    /// timepoint had run and before any crossing of the trial was published:
+    /// every D/A bridge's bit, every event port's bit (a converted output's is
+    /// the one compared) and every discrete read that takes its left limit.
+    /// Parallel to `bridges.dac`, `MixedSignalHost::event_ports` and
+    /// `MixedSignalHost::discrete_inputs`. See
+    /// [`MixedSignalHost::digital_feedback_into_interval`].
+    dac_after_endpoint: Vec<FourStateBit>,
+    ports_after_endpoint: Vec<Option<FourStateBit>>,
+    discrete_after_endpoint: Vec<Option<f64>>,
 }
 
 /// Everything a rejected trial has to put back.
@@ -1194,11 +1224,25 @@ struct ActiveTrial {
     /// crossing and its refinement, because dating it at the endpoint would be
     /// a setup/hold-class error on a sampling edge.
     ///
+    /// Nor is a movement the activity due at the trial's own timepoint makes
+    /// to a drive that acts from the first instant after it — a D/A bridge,
+    /// a converted output, a discrete read that takes its left limit. The
+    /// solution at that timepoint holds the drive from before it, so nothing
+    /// the movement does reaches this interval: a clock edge landing on the
+    /// step's end leaves an unrelated crossing inside the step its own
+    /// instant. [`MixedSignalHost::digital_feedback_into_interval`] asks the
+    /// question that way.
+    ///
     /// What remains approximate: an A/D crossing the circuit causes in the
-    /// same interval as such a movement is still dated at that movement's
-    /// tick. Both events are inside one step and no second solve can separate
-    /// them, because re-solving lands on the movement again.
+    /// same interval as a movement a crossing caused is still dated at that
+    /// movement's tick. Both events are inside one step and no second solve
+    /// can separate them, because re-solving lands on the movement again.
     digital_feedback: bool,
+    /// Whether the drives the activity due at the trial's own timepoint left
+    /// have been imaged into `TrialVectors::dac_after_endpoint` and its
+    /// siblings: taken once, by the first settle pass, after that activity
+    /// and before the trial publishes a crossing.
+    endpoint_imaged: bool,
     /// Whether the analog solution itself stepped over this trial's interval:
     /// an ideal switch of the circuit changed state between the accepted
     /// point and this candidate. Its conductance changes at the candidate,
@@ -2120,22 +2164,105 @@ impl MixedSignalHost {
             return false;
         };
         self.event_ports.iter().any(|port| {
-            if port.trace_node.is_none_or(|node| node == port.node)
-                || port.direction
-                    != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
-            {
-                return false;
-            }
-            port.bit.is_some_and(|bit| {
-                let before = trial.rollback.read(port.signal).map(|value| value.bit(bit));
-                let after = self
-                    .state
-                    .digital
-                    .read(port.signal)
-                    .map(|value| value.bit(bit));
-                before != after
-            })
+            port.is_converted_output()
+                && port.bit_in(&trial.rollback) != port.bit_in(&self.state.digital)
         })
+    }
+
+    /// Image the drives the activity due at this trial's own timepoint left,
+    /// once per trial: see `TrialVectors::dac_after_endpoint`. Taken after
+    /// that activity has run and before the trial publishes a crossing: by
+    /// the circuit for every enrolled instance before any of them settles,
+    /// and otherwise by the first settle pass.
+    pub(crate) fn image_endpoint_activity(&mut self) -> Result<(), MixedSignalError> {
+        let Some(trial) = self.trial.as_mut() else {
+            return Ok(());
+        };
+        if trial.endpoint_imaged {
+            return Ok(());
+        }
+        read_dac_bits(&self.state, &mut trial.vectors.dac_after_endpoint)?;
+        trial.vectors.ports_after_endpoint.clear();
+        trial.vectors.ports_after_endpoint.extend(
+            self.event_ports
+                .iter()
+                .map(|port| port.bit_in(&self.state.digital)),
+        );
+        read_discrete_inputs(
+            &self.state,
+            &self.discrete_inputs,
+            &mut trial.vectors.discrete_after_endpoint,
+        );
+        trial.endpoint_imaged = true;
+        Ok(())
+    }
+
+    /// Whether the discrete half moved, inside this trial, something the
+    /// analog equations read *over this trial's interval* — the question
+    /// that decides whether an A/D crossing found on it is the circuit's own
+    /// (`ActiveTrial::digital_feedback`).
+    ///
+    /// [`Self::digital_feedback_since_trial_start`] counts every movement since
+    /// the trial opened. That over-counts one kind: a drive that acts from the
+    /// first instant after the timepoint that moves it — a D/A bridge's bit, a
+    /// converted output, a discrete read that takes its left limit — moved by
+    /// the activity due at the trial's own timepoint. The solution there holds
+    /// the drive from before it (`stamp_dac_bridges`, `left_limit_image`, the
+    /// shared converter's `dac_bridge_ramp_value`), so the step onto a clock
+    /// edge solves exactly what it would have solved without the edge, and a
+    /// threshold an unrelated input crosses inside it keeps its own instant.
+    /// Those drives count only from the image taken after that activity:
+    /// what moves them later in the trial is a process a crossing of this
+    /// trial woke, which is the feedback the dating rule is for. A read that
+    /// sees the settled value — an analog event body's, a digital edge flag,
+    /// a sampled real — counts from the trial's start, as before.
+    ///
+    /// An operating point has no interval and no left limit; it answers as
+    /// [`Self::digital_feedback_since_trial_start`] does.
+    pub(crate) fn digital_feedback_into_interval(&self) -> Result<bool, MixedSignalError> {
+        let Some(trial) = self.trial.as_ref() else {
+            return Ok(false);
+        };
+        if trial.timestep_seconds <= 0.0 {
+            return self.digital_feedback_since_trial_start();
+        }
+        let settled_read_moved = self
+            .discrete_inputs
+            .iter()
+            .zip(&trial.vectors.discrete_at_trial_start)
+            .any(|(input, was)| {
+                !input.reads_left_limit()
+                    && read_discrete_input(&self.state, input).map(f64::to_bits)
+                        != was.map(f64::to_bits)
+            });
+        if settled_read_moved {
+            return Ok(true);
+        }
+        if !trial.endpoint_imaged {
+            return Ok(false);
+        }
+        if dac_bits_differ(&self.state, &trial.vectors.dac_after_endpoint)? {
+            return Ok(true);
+        }
+        let converted_moved = self
+            .event_ports
+            .iter()
+            .zip(&trial.vectors.ports_after_endpoint)
+            .any(|(port, was)| {
+                port.is_converted_output() && port.bit_in(&self.state.digital) != *was
+            });
+        if converted_moved {
+            return Ok(true);
+        }
+        Ok(self
+            .discrete_inputs
+            .iter()
+            .zip(&trial.vectors.discrete_after_endpoint)
+            .any(|(input, was)| {
+                input.reads_left_limit()
+                    && read_discrete_input(&self.state, input).map(f64::to_bits)
+                        != was.map(f64::to_bits)
+            }))
     }
 
     pub(crate) fn analysis_step(&self) -> (bool, bool) {
@@ -3051,6 +3178,7 @@ impl MixedSignalHost {
             observation_refinement: None,
             start_digital,
             digital_feedback: false,
+            endpoint_imaged: false,
             analog_step: false,
             scheduled_activation,
             rollback,
@@ -3667,12 +3795,17 @@ impl MixedSignalHost {
         {
             self.advance_digital_at_candidate(circuit_voltages, &scratch.probes, tick, start)?;
         }
+        // The first pass has now run the activity due at this timepoint and
+        // has published nothing yet: what that activity left is the image a
+        // left-limited drive is measured from.
+        self.image_endpoint_activity()?;
         // Established after the discrete half has run and before the first
         // crossing of this pass is dated: whether the digital world moved
-        // something the analog equations read is what decides how to date one,
-        // and the trial's own `dac_moved` and the device's own copy of the
-        // discrete reads are not written until the end of the pass.
-        if self.digital_feedback_since_trial_start()?
+        // something the analog equations read over this interval is what
+        // decides how to date one, and the trial's own `dac_moved` and the
+        // device's own copy of the discrete reads are not written until the
+        // end of the pass.
+        if self.digital_feedback_into_interval()?
             && let Some(trial) = self.trial.as_mut()
         {
             trial.digital_feedback = true;

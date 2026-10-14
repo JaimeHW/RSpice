@@ -872,6 +872,16 @@ fn settle_lanes(
     }
     .map_err(shared_error)?;
     coordinator.synchronize(hosts).map_err(shared_error)?;
+    // The wheel has run what was due at this timepoint and no crossing of
+    // the trial is published yet, so every instance images its left-limited
+    // drives now, before the first of them settles: a crossing one instance
+    // publishes can wake a process that moves another's drive, and that move
+    // must be measured as the feedback it is. See
+    // `MixedSignalHost::digital_feedback_into_interval`.
+    for host in hosts.iter_mut() {
+        let imaged = host.image_endpoint_activity();
+        named(host, imaged)?;
+    }
     for _ in 0..MAX_BOUNDARY_SETTLE_PASSES {
         // The coordinator ran the wheel for every enrolled instance at
         // once, so whether that run moved something the analog equations
@@ -901,7 +911,7 @@ fn settle_lanes(
         // every later pass by the loop's own.
         let mut fed_back = false;
         for host in hosts.iter() {
-            fed_back |= named(host, host.digital_feedback_since_trial_start())?;
+            fed_back |= named(host, host.digital_feedback_into_interval())?;
         }
         if fed_back {
             for host in hosts.iter_mut() {

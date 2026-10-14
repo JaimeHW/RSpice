@@ -5522,6 +5522,73 @@ endmodule
     }
 }
 
+/// **A D/A edge does not date a crossing it could not have caused.**
+///
+/// The converter on `q` steps at 50 ns, and the step landing there is solved
+/// with the drive from before the edge, so nothing the edge does reaches the
+/// interval ending on it. The ramp on `d` crosses 1 V inside that interval,
+/// at 49.9 ns, on its own account: the statement it fires must read that
+/// instant, not the edge's.
+#[test]
+fn an_unrelated_crossing_in_the_step_onto_a_da_edge_keeps_its_own_instant() {
+    let model = ModelFile::new(
+        "edge_beside_crossing",
+        r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module edge_beside_crossing(d, q, at);
+    input d;
+    wire d;
+    output q;
+    reg q;
+    inout at;
+    electrical at;
+    real seen;
+    initial begin
+        q = 1'b0;
+        #50 q = 1'b1;
+    end
+    analog begin
+        @(posedge d) seen = $abstime;
+        V(at) <+ seen * 1e9;
+    end
+endmodule
+"#,
+    );
+    // A 0 to 2 V ramp over 99.8 ns; with a 2 V supply the A/D threshold is
+    // 1 V, crossed at 49.9 ns.
+    let deck = format!(
+        "* an A/D crossing in the step that ends on a D/A edge\n\
+         .param vcc=2\n\
+         vin in 0 pwl(0 0 99.8n 2)\n\
+         x1 in q at edge_beside_crossing\n\
+         rq q 0 1k\n\
+         rat at 0 1k\n\
+         .va \"{}\" edge_beside_crossing\n\
+         .end\n",
+        model.deck_path()
+    );
+    let result = run(&deck, 100.0e-9, 2.0e-9);
+    let q = waveform(&result, "q");
+    let rose = result
+        .time
+        .iter()
+        .zip(&q)
+        .find(|(_, volts)| **volts > 1.0)
+        .map(|(time, _)| *time)
+        .expect("the D/A output rises");
+    assert!(
+        rose > 50.0e-9 && rose < 50.1e-9,
+        "the D/A edge is at 50 ns and drives from the first point after it, rose at {rose:e}"
+    );
+    let at = waveform(&result, "at");
+    let last = *at.last().unwrap();
+    assert!(
+        (last - 49.9).abs() < 1e-3,
+        "the statement ran at {last} ns; the threshold is crossed at 49.9 ns"
+    );
+}
+
 /// **A packed grouping of 32 bits or more reads as a real.**
 ///
 /// Verilog-AMS 2023 Table 7-1 stops at 31 bits; beyond it RSpice reads the
