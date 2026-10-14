@@ -244,7 +244,7 @@ fn keyboard_focus_label(
     }
 }
 
-/// Publish accessible canvas/selection state and paint the final focus ring.
+/// Publish accessible canvas and selection state.
 pub fn finish(
     ui: &Ui,
     response: &Response,
@@ -274,8 +274,7 @@ pub fn finish(
             node.set_label(selection_status);
             node.set_live(egui::accesskit::Live::Polite);
         });
-    // The canvas takes keyboard focus for tool, nudge, and routing shortcuts,
-    // so it owes a visible focus ring like every other custom click target.
-    // Painted last so the schematic artwork does not cover it.
-    rspice_ui_kit::theme::paint_focus_ring(ui, response, available);
+    // No focus ring around the canvas. It takes keyboard focus on every press
+    // so its shortcuts work, so a ring framed the drawing for as long as anyone
+    // worked in it. Keyboard focus on an object inside it draws its own outline.
 }
