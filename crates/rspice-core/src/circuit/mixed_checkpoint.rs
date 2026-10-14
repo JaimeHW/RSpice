@@ -122,6 +122,17 @@ impl CircuitData {
             .collect()
     }
 
+    /// The refusal of the first mixed instance whose analog block holds a
+    /// discrete input the restored digital state does not give
+    /// ([`MixedSignalHost::restored_discrete_input_refusal`]).
+    pub(crate) fn restored_discrete_input_refusal(
+        &self,
+    ) -> Option<crate::UnsupportedCapabilityError> {
+        self.mixed_signal_hosts
+            .iter()
+            .find_map(MixedSignalHost::restored_discrete_input_refusal)
+    }
+
     fn validate_mixed_checkpoint_idle(&self) -> Result<(), String> {
         if self.xspice_evaluation_error.is_some()
             || self

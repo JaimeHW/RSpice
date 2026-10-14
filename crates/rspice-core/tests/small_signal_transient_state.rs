@@ -964,3 +964,86 @@ mod abstime {
         linearizes_at_the_state_time(true);
     }
 }
+
+/// A checkpoint taken at the tick of a digital edge an analog block reads
+/// holds that edge's left limits beside the digital state the edge settled,
+/// and is still one accepted state: the card linearizes around it as around
+/// the live state at that time.
+#[cfg(feature = "veriloga")]
+mod edge_tick {
+    use super::trim::SourceFile;
+    use super::*;
+
+    /// A conductance a clocked counter steps. The contribution reads `code`
+    /// at its left limit, and an event body on the clock's rising edge reads
+    /// it settled, so at an edge the two differ by the edge's step.
+    const STEPPER: &str = "`include \"disciplines.vams\"\n\
+        `timescale 1ns/1ps\n\
+        module stepper(p, n);\n\
+          inout p, n; electrical p, n;\n\
+          reg clk; integer code; real g;\n\
+          initial begin clk = 0; code = 1; end\n\
+          always #500 clk = ~clk;\n\
+          always @(posedge clk) code = code + 1;\n\
+          analog begin\n\
+            @(posedge clk) g = code;\n\
+            I(p, n) <+ V(p, n) * 1.0e-3 * (code + g);\n\
+          end\n\
+        endmodule\n";
+
+    /// The clocked conductance behind 1k, run to 1.5 us: the clock's second
+    /// rising edge.
+    fn deck(module: &SourceFile, cards: &str) -> String {
+        format!(
+            "* a clocked conductance\n\
+             vin in 0 dc 1 ac 1\n\
+             r1 in out 1k\n\
+             xg out 0 stepper\n\
+             .va \"{}\" stepper\n\
+             .tran 10n 1.5u\n\
+             {cards}\
+             .end\n",
+            module.path()
+        )
+    }
+
+    #[test]
+    fn a_checkpoint_at_an_edge_linearizes_like_the_live_state() {
+        let module = SourceFile::new("va", STEPPER);
+        let live = parse(&deck(&module, ".ac lin 2 1k 2k actimes=1.5u\n"));
+        let index = card_index(&live, |card| matches!(card, AnalysisCommand::Ac { .. }));
+        let engine = Engine::default();
+        let expected = run_at_state_times(&engine, &live, index);
+
+        let writer = parse(&deck(&module, ""));
+        let (stop, max_step) = transient_window(&writer);
+        let (_, checkpoint) = engine
+            .run_tran_checkpointed(&writer, stop, max_step)
+            .expect("the clocked deck checkpoints on the clock's edge");
+        let checkpoint = through_a_file(&checkpoint, "edge");
+        let reader = parse(&deck(
+            &module,
+            ".ac lin 2 1k 2k checkpoint=\"edge.rspice-tran\"\n",
+        ));
+        let result = engine
+            .run_small_signal_at_checkpoint(&reader, index, &checkpoint, &NoAbort)
+            .unwrap_or_else(|error| panic!("a checkpoint at an edge is one state: {error}"));
+        assert_eq!(result.state_time, expected[0].state_time);
+        assert_sweeps_agree(
+            "checkpoint at an edge against live state",
+            ac_points(&result),
+            ac_points(&expected[0]),
+            1.0e-9,
+        );
+        // At the edge the contribution reads `code` before it, 2, and the
+        // event body after it, 3: g = 5 mS, and v(out) = 1 / (1 + 1k g).
+        for point in ac_points(&result) {
+            assert_phasor_close(
+                &format!("v(out) at the edge at {} Hz", point.frequency),
+                ac_voltage(point, "out"),
+                Complex64::new(1.0 / 6.0, 0.0),
+                1.0e-9,
+            );
+        }
+    }
+}

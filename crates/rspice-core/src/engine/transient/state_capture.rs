@@ -228,12 +228,21 @@ impl Engine {
                 state_capture: Some(&capture),
             },
         )?;
-        capture.into_captured().pop().ok_or_else(|| {
+        let captured = capture.into_captured().pop().ok_or_else(|| {
             SimulationError::Circuit(format!(
                 "the resumed transient captured no state at the checkpoint time {:e} s",
                 checkpoint.time
             ))
-        })
+        })?;
+        // The analysis reads each mixed instance's discrete inputs from its
+        // analog slots as the image restored them; they must be the values
+        // the digital state restored beside them gives, wherever that state
+        // determines them.
+        #[cfg(feature = "veriloga")]
+        if let Some(refusal) = captured.circuit.restored_discrete_input_refusal() {
+            return Err(refusal.into());
+        }
+        Ok(captured)
     }
 }
 

@@ -583,6 +583,110 @@ impl MixedSignalHost {
         restored.scratch = TrialScratch::default();
         Ok(restored)
     }
+
+    /// Refuse a restored participant whose analog block holds a discrete
+    /// input the digital state restored beside it does not give.
+    ///
+    /// A small-signal analysis around a checkpoint's state reads the analog
+    /// block's own input slots, which hold exactly the values the accepted
+    /// solution used, and the view is the digital half the same image
+    /// restored. So this cross-checks the image against itself, where the
+    /// view determines a slot:
+    /// - an analog event body's read, and a real a code model samples off the
+    ///   analog solution, see the value the accepted point settled to, which
+    ///   is the view's;
+    /// - every other read takes its left limit, the value before the accepted
+    ///   point's digital activity ([`DiscreteAnalogInput::reads_left_limit`]),
+    ///   so it is checked only where the boundary histories show that every
+    ///   bit it reads held still across the accepted point;
+    /// - an edge flag is that activity itself, which the view does not hold.
+    pub(crate) fn restored_discrete_input_refusal(
+        &self,
+    ) -> Option<crate::UnsupportedCapabilityError> {
+        let input = self.discrete_inputs.iter().find(|input| {
+            if input.edge.is_some() || (input.reads_left_limit() && !self.read_held_still(input)) {
+                return false;
+            }
+            let expected = DiscreteAnalogInput::lanes(read_discrete_input(&self.state, input));
+            [input.variable, input.validity]
+                .into_iter()
+                .zip(expected)
+                .any(|(slot, expected)| {
+                    self.analog.discrete_state_value(slot).map(f64::to_bits)
+                        != Some(expected.to_bits())
+                })
+        })?;
+        let held = [input.variable, input.validity]
+            .map(|slot| self.analog.discrete_state_value(slot).unwrap_or(f64::NAN));
+        let restored = DiscreteAnalogInput::lanes(read_discrete_input(&self.state, input));
+        Some(
+            crate::UnsupportedCapabilityError::new(
+                "analysis.small_signal.checkpoint_inconsistent",
+                format!(
+                    "the checkpoint's analog state for instance `{}` reads `{}` as {} (valid \
+                     {}), and the digital state it restores gives {} (valid {}): the image is \
+                     not one accepted state, so no analysis linearizes around it",
+                    self.instance, input.name, held[0], held[1], restored[0], restored[1]
+                ),
+            )
+            .for_instance(self.instance.clone()),
+        )
+    }
+
+    /// Whether every bit `input` reads is a boundary bit whose accepted
+    /// history shows it held still across the accepted point, so that its
+    /// left limit there is the value the restored view holds.
+    fn read_held_still(&self, input: &DiscreteAnalogInput) -> bool {
+        if self.state.digital.is_real(input.signal) {
+            return false;
+        }
+        let (lsb, width) = match input.selection {
+            Some((lsb, width, _)) => (lsb, width),
+            None => match self.state.digital.read(input.signal) {
+                Some(value) => (0, value.width()),
+                None => return false,
+            },
+        };
+        (0..width).all(|offset| {
+            lsb.checked_add(i64::from(offset))
+                .and_then(|bit| u32::try_from(bit).ok())
+                .is_some_and(|bit| self.boundary_bit_held_still(input.signal, bit))
+        })
+    }
+
+    /// Whether `bit` of `signal` is a D/A, A/D or converted-port bit whose two
+    /// newest accepted values, before and after the accepted point, agree.
+    fn boundary_bit_held_still(&self, signal: DigitalSignalId, bit: u32) -> bool {
+        let still = |history: &BoundaryNetHistory| {
+            history.filled >= 2 && (history.recent ^ (history.recent >> 2)) & 0b11 == 0
+        };
+        let state = &self.state;
+        state
+            .bridges
+            .dac
+            .iter()
+            .zip(&state.dac_history)
+            .any(|(bridge, history)| bridge.signal == signal && bridge.bit == bit && still(history))
+            || state
+                .bridges
+                .adc
+                .iter()
+                .zip(&state.adc_history)
+                .any(|(bridge, history)| {
+                    bridge.signal == Some(signal) && bridge.bit == bit && still(history)
+                })
+            || self
+                .event_ports
+                .iter()
+                .zip(&state.port_history)
+                .any(|(port, history)| {
+                    port.signal == signal
+                        && port
+                            .converted_bit()
+                            .is_some_and(|(converted, _)| converted == bit)
+                        && still(history)
+                })
+    }
 }
 
 #[cfg(test)]

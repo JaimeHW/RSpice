@@ -252,3 +252,168 @@ fn participant_checkpoint_rejects_corrupt_boundaries_and_incompatible_configurat
         host.participant_checkpoint(Default::default()).unwrap()
     );
 }
+
+/// An analog block reading the digital half four ways: `adc`'s rising edge
+/// as an event control, `code` inside that event body, and `dac` and `held`
+/// in its contribution, at their left limits. `dac` drives node 3 through a
+/// D/A bridge, so its history shows whether it moved at an accepted point;
+/// `held` has no history.
+const READER: &str = "module reader(p,n,adc,dac); inout p,n; electrical p,n;
+    input adc; wire adc; output dac; reg dac;
+    integer code, held; real g;
+    initial begin code=1; held=3; dac=0; end
+    always @(posedge adc) begin code=code+1; dac=~dac; end
+    analog begin
+      @(posedge adc) g=code;
+      I(p,n)<+V(p,n)*(g+dac+held)/1000.0;
+    end endmodule";
+
+fn reader_fixture() -> (MixedDigitalCoordinator, MixedSignalHost) {
+    let compiled = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    })
+    .compile_runtime(READER, None)
+    .unwrap();
+    let mut host = MixedSignalHost::from_compiled(
+        "dut",
+        Arc::new(compiled.model),
+        &compiled.canonical_ir,
+        &[1, 0],
+        SchedulerLimits::default(),
+        &rspice_veriloga::NoPipelineControl,
+    )
+    .unwrap();
+    host.add_adc_bridge("adc", 0, (2, 0), 0.4, 0.6).unwrap();
+    host.add_dac_bridge("dac", 0, (3, 0), 0.0, 5.0, 100.0)
+        .unwrap();
+    let mut coordinator = MixedDigitalCoordinator::enroll(
+        std::slice::from_mut(&mut host),
+        &Default::default(),
+        &rspice_veriloga::NoPipelineControl,
+    )
+    .unwrap();
+    host.begin_analog_analysis(2).unwrap();
+    host.start_digital_execution().unwrap();
+    coordinator.start().unwrap();
+    (coordinator, host)
+}
+
+/// `host`'s accepted state written to a checkpoint and restored into a
+/// freshly built reader, as a resumed run restores it.
+fn restored_reader(
+    coordinator: &MixedDigitalCoordinator,
+    host: &MixedSignalHost,
+) -> MixedSignalHost {
+    let saved = host.participant_checkpoint(Default::default()).unwrap();
+    let digital = coordinator.checkpoint(Default::default()).unwrap();
+    let (template, receiving) = reader_fixture();
+    let coordinator = template
+        .restored_checkpoint(&digital, Default::default())
+        .unwrap();
+    receiving
+        .restored_participant_checkpoint(&saved, &coordinator, Default::default())
+        .unwrap()
+}
+
+/// The analog read of `name` that `read` picks out, as the compiled module
+/// declared it.
+fn reader_input(
+    host: &MixedSignalHost,
+    name: &str,
+    read: impl Fn(&DiscreteAnalogInput) -> bool,
+) -> DiscreteAnalogInput {
+    host.discrete_inputs
+        .iter()
+        .find(|input| input.name == name && read(input))
+        .cloned()
+        .unwrap_or_else(|| {
+            panic!(
+                "a read of `{name}` among {:?}",
+                host.discrete_inputs
+                    .iter()
+                    .map(|input| (&input.name, input.event_read, input.edge.is_some()))
+                    .collect::<Vec<_>>()
+            )
+        })
+}
+
+/// `host` with `input`'s value slot overwritten, as a corrupted image would
+/// restore it.
+fn with_slot(host: &MixedSignalHost, input: &DiscreteAnalogInput, value: f64) -> MixedSignalHost {
+    let mut corrupt = host.clone();
+    corrupt
+        .analog
+        .make_mut()
+        .sample_discrete_state(input.variable, value)
+        .unwrap();
+    corrupt
+}
+
+fn assert_refused(host: &MixedSignalHost, what: &str) {
+    let refusal = host
+        .restored_discrete_input_refusal()
+        .unwrap_or_else(|| panic!("{what} is refused"));
+    assert_eq!(
+        refusal.capability,
+        "analysis.small_signal.checkpoint_inconsistent"
+    );
+    assert_eq!(refusal.instance.as_deref(), Some("dut"));
+}
+
+/// A checkpoint taken at the tick of an edge restores slots the view does
+/// not give — the edge flag, and the left limits of the values the edge
+/// moved — and is accepted; a slot the view does give, corrupted, is
+/// refused.
+#[test]
+fn restored_discrete_inputs_are_checked_where_the_restored_view_determines_them() {
+    let (mut coordinator, mut host) = reader_fixture();
+    step(&mut coordinator, &mut host, 0.0, &[0.0; 3]);
+    // `adc` rises at 1 ns: the edge fires, `code` steps to 2 and the event
+    // body reads it, `dac` toggles, and the contribution reads `dac` at its
+    // left limit, 0.
+    step(&mut coordinator, &mut host, 1e-9, &[1.0, 1.0, 0.0]);
+    let at_edge = restored_reader(&coordinator, &host);
+    let dac = reader_input(&at_edge, "dac", DiscreteAnalogInput::reads_left_limit);
+    assert_eq!(
+        (
+            at_edge.analog.discrete_state_value(dac.variable),
+            read_discrete_input(&at_edge.state, &dac)
+        ),
+        (Some(0.0), Some(1.0)),
+        "the checkpoint holds `dac` at its left limit and the view after the edge"
+    );
+    assert!(
+        at_edge.restored_discrete_input_refusal().is_none(),
+        "a checkpoint at an edge is one accepted state"
+    );
+    let code = reader_input(&at_edge, "code", |input| input.event_read);
+    assert_refused(
+        &with_slot(&at_edge, &code, 7.0),
+        "an event body's read the view does not give",
+    );
+    // `dac` moved at the edge, so its left limit is no value of the view.
+    assert!(
+        with_slot(&at_edge, &dac, 0.5)
+            .restored_discrete_input_refusal()
+            .is_none()
+    );
+
+    // At 2 ns `dac` holds still, and its D/A history says so: its left limit
+    // there is the view's value, and a corrupted one is refused.
+    step(&mut coordinator, &mut host, 2e-9, &[1.0, 1.0, 5.0]);
+    let still = restored_reader(&coordinator, &host);
+    assert!(still.restored_discrete_input_refusal().is_none());
+    assert_refused(
+        &with_slot(&still, &dac, 0.5),
+        "a left limit the history shows held still",
+    );
+    // `held` has no history to show it held still, so its left limit is
+    // never checked.
+    let held = reader_input(&still, "held", DiscreteAnalogInput::reads_left_limit);
+    assert!(
+        with_slot(&still, &held, 9.0)
+            .restored_discrete_input_refusal()
+            .is_none()
+    );
+}
