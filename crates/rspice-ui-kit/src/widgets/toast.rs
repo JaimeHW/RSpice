@@ -16,14 +16,14 @@ use super::notice;
 /// Visual severity of a toast.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ToastKind {
-    /// Green success confirmation used by the mockup's normal action feedback.
+    /// A completed action, confirmed by a neutral check glyph.
     Success,
-    /// Accent-edged informational toast.
+    /// An informational notice, under a neutral info glyph.
     #[default]
     Info,
-    /// Warning-edged toast.
+    /// A warning, marked by a triangle in the warning colour.
     Warn,
-    /// Error-edged toast.
+    /// An error, marked by an octagon in the error colour.
     Error,
 }
 
