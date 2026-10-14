@@ -234,6 +234,8 @@ impl HdlFileStore {
     /// Apply a committed journal; the failures it met, for warnings.
     pub(crate) fn apply(&self, ops: Vec<FileOp>) -> Vec<String> {
         let mut state = self.state();
+        // A browser build keeps every file in memory, so nothing can fail.
+        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let mut failures = Vec::new();
         for op in ops {
             match self.target {
