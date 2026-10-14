@@ -15,18 +15,96 @@ fn console_empty_hints_match_mockup_spacing_and_type_scale() {
     assert_eq!(CONSOLE_FONT_SIZE, tokens::FS_1);
 }
 
+/// Only a warning or an error earns a mark, and the mark is the line's only
+/// colour: notes, debug and trace lines are told apart by neutral ink alone.
 #[test]
-fn severity_tones_preserve_warning_info_and_diagnostic_meaning() {
-    assert_eq!(log_tone(LogSeverity::Error), SemanticTone::Error);
-    assert_eq!(log_tone(LogSeverity::Warning), SemanticTone::Warning);
-    assert_eq!(log_tone(LogSeverity::Info), SemanticTone::Info);
-    assert_eq!(log_tone(LogSeverity::Debug), SemanticTone::Debug);
-    assert_eq!(log_tone(LogSeverity::Trace), SemanticTone::Trace);
+fn only_warnings_and_errors_earn_a_problem_mark() {
+    assert_eq!(log_problem(LogSeverity::Error), Some(Problem::Failure));
+    assert_eq!(log_problem(LogSeverity::Warning), Some(Problem::Warning));
+    for quiet in [LogSeverity::Info, LogSeverity::Debug, LogSeverity::Trace] {
+        assert_eq!(log_problem(quiet), None);
+    }
 
-    assert_eq!(drc_tone(DrcSeverity::Critical), SemanticTone::Error);
-    assert_eq!(drc_tone(DrcSeverity::Error), SemanticTone::Error);
-    assert_eq!(drc_tone(DrcSeverity::Warning), SemanticTone::Warning);
-    assert_eq!(drc_tone(DrcSeverity::Info), SemanticTone::Info);
+    assert_eq!(drc_problem(DrcSeverity::Critical), Some(Problem::Failure));
+    assert_eq!(drc_problem(DrcSeverity::Error), Some(Problem::Failure));
+    assert_eq!(drc_problem(DrcSeverity::Warning), Some(Problem::Warning));
+    assert_eq!(drc_problem(DrcSeverity::Info), None);
+
+    let palette = Tokens::default().color;
+    let neutral = [palette.text, palette.text_dim, palette.text_faint];
+    for severity in [
+        LogSeverity::Error,
+        LogSeverity::Warning,
+        LogSeverity::Info,
+        LogSeverity::Debug,
+        LogSeverity::Trace,
+    ] {
+        assert!(
+            neutral.contains(&log_message_color(&Tokens::default(), severity)),
+            "{severity:?} messages must be painted in neutral ink"
+        );
+    }
+}
+
+/// Every console row is painted in neutral ink. The one colour a log, problem
+/// or task row may carry is its leading mark, and a pass, a note or a
+/// lifecycle word carries none.
+#[test]
+fn console_rows_paint_no_coloured_text() {
+    fn text_colors(shape: &egui::epaint::Shape, colors: &mut Vec<egui::Color32>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                colors.push(text.fallback_color);
+                colors.extend(text.galley.job.sections.iter().map(|s| s.format.color));
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    text_colors(shape, colors);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut state = AppState::default();
+    state.log_buffer.clear();
+    state.log_buffer.log(
+        LogSeverity::Error,
+        LogSource::Simulation,
+        "solve failed",
+        None,
+    );
+    state.log_buffer.log(
+        LogSeverity::Warning,
+        LogSource::Simulation,
+        "gmin stepping",
+        None,
+    );
+    state.log_buffer.log(
+        LogSeverity::Info,
+        LogSource::Simulation,
+        "run complete",
+        None,
+    );
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| console(ui, &mut state));
+    });
+    let mut colors = Vec::new();
+    for clipped in &output.shapes {
+        text_colors(&clipped.shape, &mut colors);
+    }
+    let palette = Tokens::default().color;
+    assert!(!colors.is_empty(), "the console painted no text");
+    for color in colors {
+        assert!(
+            [palette.text, palette.text_dim, palette.text_faint].contains(&color)
+                || color == egui::Color32::PLACEHOLDER,
+            "console text painted in {color:?}, not a neutral ink"
+        );
+    }
 }
 
 #[test]
@@ -293,7 +371,7 @@ fn measurement_table_uses_project_specification_for_verdict_and_margin() {
     };
     let row = measurement_table_row(&measurement, "AC", Some(&spec));
     assert_eq!(row.status, "PASS");
-    assert_eq!(row.tone, SemanticTone::Success);
+    assert!(!row.failed, "a pass is neutral");
     assert_eq!(row.specification, "9.000000 … 10.000000");
     assert_eq!(row.margin, "+500.000000 m");
     assert_eq!(row.worst_point, "AC");
@@ -301,7 +379,7 @@ fn measurement_table_uses_project_specification_for_verdict_and_margin() {
     let failed = rspice_core::MeasureResult::success("gain", 10.25);
     let row = measurement_table_row(&failed, "AC", Some(&spec));
     assert_eq!(row.status, "FAIL");
-    assert_eq!(row.tone, SemanticTone::Error);
+    assert!(row.failed);
     assert_eq!(row.margin, "-250.000000 m");
 }
 
@@ -341,7 +419,7 @@ fn measurement_table_presents_failvalue_against_the_raw_value() {
     };
     let row = measurement_table_row(&failing_at_limit, "TRAN", None);
     assert_eq!(row.status, "FAIL");
-    assert_eq!(row.tone, SemanticTone::Error);
+    assert!(row.failed);
     assert_eq!(
         row.margin, "-0.000000",
         "inclusive FAILVALUE equality must retain a failing sign"
@@ -406,19 +484,24 @@ fn measurement_table_combines_every_contract_and_reports_the_limiting_margin() {
     assert_eq!(row.margin, "-1.000000");
 }
 
+/// Lifecycle words are states, not severities: only a failed run is marked.
 #[test]
 fn task_lifecycle_copy_distinguishes_cancelled_failed_and_interrupted() {
     assert_eq!(
         run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Aborted),
-        ("CANCELLED", SemanticTone::Warning)
+        ("CANCELLED", None)
     );
     assert_eq!(
         run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Failed),
-        ("FAIL", SemanticTone::Error)
+        ("FAIL", Some(Problem::Failure))
     );
     assert_eq!(
         run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Interrupted),
-        ("INTERRUPTED", SemanticTone::Warning)
+        ("INTERRUPTED", None)
+    );
+    assert_eq!(
+        run_lifecycle_presentation(crate::state::SimulationRunLifecycle::Completed),
+        ("DONE", None)
     );
 }
 

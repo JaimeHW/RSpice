@@ -14,6 +14,7 @@ use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::app_state::session::script_console::ConsoleHistoryItem;
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -35,6 +36,11 @@ const CONSOLE_ROW_MIN_HEIGHT: f32 = 16.0;
 const CONSOLE_TIME_WIDTH: f32 = 58.0;
 const CONSOLE_SOURCE_WIDTH: f32 = 62.0;
 const CONSOLE_COLUMN_GAP: f32 = 9.0;
+/// Side of a row's leading problem mark.
+const CONSOLE_MARK_SIDE: f32 = 11.0;
+/// The gutter every row reserves for that mark, so a marked row's columns line
+/// up with an unmarked row's.
+const CONSOLE_MARK_GUTTER: f32 = CONSOLE_MARK_SIDE + 6.0;
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 const EMPTY_HINT_PADDING_X: i8 = 12;
 const EMPTY_HINT_PADDING_Y: i8 = 20;
@@ -230,19 +236,11 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) 
                 ConsolePage::TaskLog => app.state.simulation.retained.runs.len(),
                 ConsolePage::Console => 0,
             };
-            let count_tone = match page {
-                ConsolePage::Problems => ConsoleCountTone::Warning,
-                ConsolePage::TaskLog => ConsoleCountTone::Success,
-                ConsolePage::Console | ConsolePage::Interactive | ConsolePage::Measurements => {
-                    ConsoleCountTone::Neutral
-                }
-            };
             let response = console_tab(
                 ui,
                 page,
                 app.state.workbench.console_page == page,
                 count,
-                count_tone,
                 height,
             );
             ids.push(response.id);
@@ -290,19 +288,11 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) 
     }
 }
 
-#[derive(Clone, Copy)]
-enum ConsoleCountTone {
-    Neutral,
-    Warning,
-    Success,
-}
-
 fn console_tab(
     ui: &mut Ui,
     page: ConsolePage,
     selected: bool,
     count: usize,
-    count_tone: ConsoleCountTone,
     height: f32,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -357,23 +347,14 @@ fn console_tab(
             egui::pos2(rect.right() - 10.0 - badge_width * 0.5, rect.center().y),
             Vec2::new(badge_width, 15.0),
         );
-        let (ink, fill) = match count_tone {
-            ConsoleCountTone::Warning => (
-                t.color.warn,
-                theme::mix(t.color.bg_panel, t.color.warn, 0.11),
-            ),
-            ConsoleCountTone::Success => {
-                (t.color.ok, theme::mix(t.color.bg_panel, t.color.ok, 0.11))
-            }
-            ConsoleCountTone::Neutral => (t.color.text_dim, t.color.bg_active),
-        };
-        ui.painter().rect_filled(badge, 7.0, fill);
+        // A count is a number, not a verdict: every tab's pill is neutral.
+        ui.painter().rect_filled(badge, 7.0, t.color.bg_active);
         ui.painter().text(
             badge.center(),
             egui::Align2::CENTER_CENTER,
             digits,
             theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
-            ink,
+            t.color.text_dim,
         );
     }
     if selected {
@@ -1017,11 +998,10 @@ fn problems(ui: &mut Ui, state: &mut AppState) {
                     any = true;
                     issue_row(
                         ui,
+                        drc_problem(violation.severity),
                         violation.severity.display_name(),
                         &violation.location.display(),
                         &violation.message,
-                        drc_tone(violation.severity),
-                        false,
                     );
                 }
             }
@@ -1033,11 +1013,10 @@ fn problems(ui: &mut Ui, state: &mut AppState) {
                 any = true;
                 issue_row(
                     ui,
+                    log_problem(entry.severity),
                     entry.severity.name(),
                     entry.context.as_deref().unwrap_or(entry.source.name()),
                     &entry.message,
-                    log_tone(entry.severity),
-                    false,
                 );
             }
             if !any {
@@ -1070,13 +1049,19 @@ fn netlist_problems(ui: &mut Ui, state: &mut AppState) {
                     )
                 };
                 let source = netlist_diagnostic_location(diagnostic);
-                let tone = if current {
-                    netlist_diagnostic_tone(diagnostic.severity)
-                } else {
-                    SemanticTone::Trace
-                };
-                let response =
-                    netlist_problem_row(ui, &status, &source, &diagnostic.message, tone, current);
+                // A stale diagnostic describes text that has since changed:
+                // it keeps its words, faint, and gives up its mark.
+                let problem = current
+                    .then(|| netlist_diagnostic_problem(diagnostic.severity))
+                    .flatten();
+                let response = netlist_problem_row(
+                    ui,
+                    problem,
+                    &status,
+                    &source,
+                    &diagnostic.message,
+                    current,
+                );
                 if response.clicked() {
                     requested = Some(diagnostic.canonical.diagnostic_id);
                 }
@@ -1095,16 +1080,31 @@ fn netlist_problems(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
+/// One canonical netlist diagnostic. Only a current diagnostic is a target,
+/// and only a current warning or error carries a mark; every column is
+/// neutral, and a stale row is faint throughout.
 fn netlist_problem_row(
     ui: &mut Ui,
+    problem: Option<Problem>,
     status: &str,
     source: &str,
     message: &str,
-    tone: SemanticTone,
     interactive: bool,
 ) -> egui::Response {
     let tokens = Tokens::get(ui.ctx());
-    let color = tone_color(&tokens, tone);
+    let (status_color, source_color, message_color) = if interactive {
+        (
+            tokens.color.text_dim,
+            tokens.color.text_dim,
+            tokens.color.text,
+        )
+    } else {
+        (
+            tokens.color.text_faint,
+            tokens.color.text_faint,
+            tokens.color.text_faint,
+        )
+    };
     let sense = if interactive {
         Sense::click()
     } else {
@@ -1117,7 +1117,7 @@ fn netlist_problem_row(
     // The row is painted, not built from widgets, so nothing else declares
     // what it is: an interactive row is a keyboard target that opens the
     // diagnostic, and a stale one is still text a screen reader should read.
-    let label = row_announcement(&[status, source, message]);
+    let label = announced_row(problem, &[status, source, message]);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             if interactive {
@@ -1132,29 +1132,31 @@ fn netlist_problem_row(
     if response.hovered() && interactive {
         ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
     }
-    let source_x = rect.left() + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
+    paint_row_mark(ui, rect.left(), rect.top(), problem);
+    let status_x = rect.left() + CONSOLE_MARK_GUTTER;
+    let source_x = status_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
     let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
     for (text, x, width, font, text_color) in [
         (
             status,
-            rect.left(),
+            status_x,
             CONSOLE_TIME_WIDTH,
             theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
-            color,
+            status_color,
         ),
         (
             source,
             source_x,
             CONSOLE_SOURCE_WIDTH,
             theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
-            color,
+            source_color,
         ),
         (
             message,
             message_x,
             (rect.right() - message_x).max(1.0),
             theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
-            color,
+            message_color,
         ),
     ] {
         let clip = egui::Rect::from_min_max(
@@ -1182,6 +1184,35 @@ fn row_announcement(columns: &[&str]) -> String {
         .copied()
         .collect::<Vec<_>>()
         .join(" · ")
+}
+
+/// [`row_announcement`], with the severity a row's mark shows said first,
+/// because a screen reader cannot see the mark.
+fn announced_row(problem: Option<Problem>, columns: &[&str]) -> String {
+    let label = row_announcement(columns);
+    match problem {
+        Some(problem) => problem.announce(&label),
+        None => label,
+    }
+}
+
+/// Paint a row's leading problem mark into the gutter every row reserves, so
+/// marked and unmarked rows keep their columns aligned. A row with no problem
+/// leaves the gutter empty.
+fn paint_row_mark(ui: &Ui, left: f32, top: f32, problem: Option<Problem>) {
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(
+                    left + CONSOLE_MARK_SIDE * 0.5,
+                    top + CONSOLE_ROW_MIN_HEIGHT * 0.5,
+                ),
+                Vec2::splat(CONSOLE_MARK_SIDE),
+            ),
+            problem,
+        );
+    }
 }
 
 fn netlist_diagnostic_location(
@@ -1213,15 +1244,14 @@ fn netlist_diagnostic_severity_name(
     }
 }
 
-fn netlist_diagnostic_tone(
+fn netlist_diagnostic_problem(
     severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
-) -> SemanticTone {
+) -> Option<Problem> {
     use crate::workbench::documents::netlist_document::DiagnosticSeverity;
     match severity {
-        DiagnosticSeverity::Error => SemanticTone::Error,
-        DiagnosticSeverity::Warning => SemanticTone::Warning,
-        DiagnosticSeverity::Info => SemanticTone::Info,
-        DiagnosticSeverity::Hint => SemanticTone::Debug,
+        DiagnosticSeverity::Error => Some(Problem::Failure),
+        DiagnosticSeverity::Warning => Some(Problem::Warning),
+        DiagnosticSeverity::Info | DiagnosticSeverity::Hint => None,
     }
 }
 
@@ -1289,9 +1319,9 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
                         measurement_cell(ui, &row.expression, true);
                         measurement_cell(ui, &row.value, true);
                         measurement_cell(ui, &row.specification, true);
-                        measurement_cell_tone(ui, &row.margin, row.tone);
+                        measurement_cell(ui, &row.margin, true);
                         measurement_cell(ui, &row.worst_point, false);
-                        measurement_cell_tone(ui, row.status, row.tone);
+                        measurement_status_cell(ui, row.status, row.failed);
                         ui.end_row();
                     }
                 });
@@ -1306,13 +1336,16 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.task_log")
         .show(ui, |ui| {
             if app.state.simulation.retained.runs.is_empty() {
-                muted(ui, "Queued, active, cancelled, and completed simulation tasks will appear here.");
+                muted(
+                    ui,
+                    "Queued, active, cancelled, and completed simulation tasks will appear here.",
+                );
             }
             for run in &app.state.simulation.retained.runs {
                 let active = app.state.simulation.execution.active_execution
                     == run.execution_identity()
                     && !run.lifecycle.is_terminal();
-                let (status, tone) = run_lifecycle_presentation(run.lifecycle);
+                let (status, problem) = run_lifecycle_presentation(run.lifecycle);
                 let progress = if active {
                     format!(
                         " · {}%",
@@ -1327,6 +1360,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
                 issue_row(
                     ui,
+                    problem,
                     status,
                     &run.label,
                     &format!(
@@ -1334,18 +1368,6 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                         run.analyses.len(),
                         run.elapsed_time
                     ),
-                    tone,
-                    false,
-                );
-            }
-            if !app.state.simulation.execution.has_active_execution() {
-                issue_row(
-                    ui,
-                    "IDLE",
-                    "queue",
-                    "No queued execution. The next run will snapshot the active plan and project revision.",
-                    SemanticTone::Info,
-                    false,
                 );
             }
         });
@@ -1360,7 +1382,9 @@ struct MeasurementTableRow {
     margin: String,
     worst_point: String,
     status: &'static str,
-    tone: SemanticTone,
+    /// The measurement failed its contract or could not be evaluated. Only
+    /// the status cell of a failed row is coloured; a pass is neutral.
+    failed: bool,
 }
 
 fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
@@ -1471,13 +1495,13 @@ fn measurement_table_row(
             .and_then(|units| units.value.symbol())
     };
     let specification_text = measurement_contract_text(measurement, specification);
-    let (status, tone, margin) = if let Some(error) = measurement
+    let (status, failed, margin) = if let Some(error) = measurement
         .error
         .as_deref()
         .filter(|_| measurement.value.is_none())
         .filter(|error| !error.trim().is_empty())
     {
-        ("ERROR", SemanticTone::Error, error.to_owned())
+        ("ERROR", true, error.to_owned())
     } else if measurement_has_contract(measurement, specification) {
         measurement_contract_verdict(measurement, specification)
     } else if let Some(error) = measurement
@@ -1485,9 +1509,9 @@ fn measurement_table_row(
         .as_deref()
         .filter(|error| !error.trim().is_empty())
     {
-        ("ERROR", SemanticTone::Error, error.to_owned())
+        ("ERROR", true, error.to_owned())
     } else {
-        ("NO SPEC", SemanticTone::Info, "—".to_owned())
+        ("NO SPEC", false, "—".to_owned())
     };
     MeasurementTableRow {
         name: measurement.name.clone(),
@@ -1507,7 +1531,7 @@ fn measurement_table_row(
         margin,
         worst_point: analysis_label.to_owned(),
         status,
-        tone,
+        failed,
     }
 }
 
@@ -1575,27 +1599,24 @@ fn measurement_contract_text(
     }
 }
 
+/// The status word, whether it is a failure, and the margin text.
 fn measurement_contract_verdict(
     measurement: &rspice_core::MeasureResult,
     specification: Option<&crate::state::SpecEntry>,
-) -> (&'static str, SemanticTone, String) {
+) -> (&'static str, bool, String) {
     let Some(value) = measurement.value else {
-        return ("NO DATA", SemanticTone::Warning, "—".to_owned());
+        return ("NO DATA", false, "—".to_owned());
     };
     if measurement.failure_limit.is_some() && measurement.raw_value.is_none() {
-        return (
-            "NO DATA",
-            SemanticTone::Warning,
-            "raw value unavailable".to_owned(),
-        );
+        return ("NO DATA", false, "raw value unavailable".to_owned());
     }
 
     if let Some(units) = &measurement.units {
         let project_value =
             match measurement.value_in_unit(specification.map_or("", |spec| spec.unit.as_str())) {
                 Ok(Some(value)) => value,
-                Ok(None) => return ("NO DATA", SemanticTone::Warning, "value unavailable".into()),
-                Err(error) => return ("ERROR", SemanticTone::Error, error),
+                Ok(None) => return ("NO DATA", false, "value unavailable".into()),
+                Err(error) => return ("ERROR", true, error),
             };
         let passed =
             measurement.passed && specification.is_none_or(|spec| spec.passes(project_value));
@@ -1647,11 +1668,7 @@ fn measurement_contract_verdict(
         }
         return (
             if passed { "PASS" } else { "FAIL" },
-            if passed {
-                SemanticTone::Success
-            } else {
-                SemanticTone::Error
-            },
+            !passed,
             if margins.is_empty() {
                 "unbounded".into()
             } else {
@@ -1720,15 +1737,7 @@ fn measurement_contract_verdict(
             .unwrap_or("contract failed")
             .to_owned()
     };
-    (
-        if passed { "PASS" } else { "FAIL" },
-        if passed {
-            SemanticTone::Success
-        } else {
-            SemanticTone::Error
-        },
-        margin,
-    )
+    (if passed { "PASS" } else { "FAIL" }, !passed, margin)
 }
 
 fn specification_text(specification: &crate::state::SpecEntry) -> String {
@@ -1765,12 +1774,19 @@ fn measurement_cell(ui: &mut Ui, text: &str, mono: bool) {
     );
 }
 
-fn measurement_cell_tone(ui: &mut Ui, text: &str, tone: SemanticTone) {
+/// The status cell: the one verdict cell of a results table. A failure reads
+/// in the error colour, as ADE Assembler marks it; a pass and every other
+/// status are plain text.
+fn measurement_status_cell(ui: &mut Ui, text: &str, failed: bool) {
     let tokens = Tokens::get(ui.ctx());
     ui.label(
         egui::RichText::new(text)
             .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
-            .color(tone_color(&tokens, tone)),
+            .color(if failed {
+                tokens.color.err
+            } else {
+                tokens.color.text
+            }),
     );
 }
 
@@ -1788,19 +1804,21 @@ fn run_lifecycle_label(lifecycle: crate::state::SimulationRunLifecycle) -> &'sta
     }
 }
 
+/// A run's lifecycle word, and the mark it earns. Lifecycle words are states,
+/// not severities: only a failed run is a problem.
 fn run_lifecycle_presentation(
     lifecycle: crate::state::SimulationRunLifecycle,
-) -> (&'static str, SemanticTone) {
+) -> (&'static str, Option<Problem>) {
     use crate::state::SimulationRunLifecycle as Lifecycle;
     match lifecycle {
-        Lifecycle::LegacyUnknown => ("UNKNOWN", SemanticTone::Warning),
-        Lifecycle::Preparing => ("QUEUED", SemanticTone::Info),
-        Lifecycle::Running => ("RUNNING", SemanticTone::Info),
-        Lifecycle::Cancelling => ("CANCELLING", SemanticTone::Warning),
-        Lifecycle::Completed => ("DONE", SemanticTone::Success),
-        Lifecycle::Failed => ("FAIL", SemanticTone::Error),
-        Lifecycle::Aborted => ("CANCELLED", SemanticTone::Warning),
-        Lifecycle::Interrupted => ("INTERRUPTED", SemanticTone::Warning),
+        Lifecycle::LegacyUnknown => ("UNKNOWN", None),
+        Lifecycle::Preparing => ("QUEUED", None),
+        Lifecycle::Running => ("RUNNING", None),
+        Lifecycle::Cancelling => ("CANCELLING", None),
+        Lifecycle::Completed => ("DONE", None),
+        Lifecycle::Failed => ("FAIL", Some(Problem::Failure)),
+        Lifecycle::Aborted => ("CANCELLED", None),
+        Lifecycle::Interrupted => ("INTERRUPTED", None),
     }
 }
 
@@ -1808,102 +1826,87 @@ fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
     let t = Tokens::get(ui.ctx());
     row(
         ui,
+        None,
         ">",
         "AUTO",
         &item.command,
-        t.color.info,
+        t.color.text_dim,
         t.color.text_dim,
     );
-    for line in item.output.message.lines() {
+    // A failed command marks its first output line; the words stay neutral.
+    let failure = (!item.output.success).then_some(Problem::Failure);
+    for (index, line) in item.output.message.lines().enumerate() {
         row(
             ui,
+            failure.filter(|_| index == 0),
             "",
             "",
             line,
-            if item.output.success {
-                t.color.ok
-            } else {
-                t.color.err
-            },
-            if item.output.success {
-                t.color.ok
-            } else {
-                t.color.err
-            },
+            t.color.text_dim,
+            t.color.text,
         );
     }
     if let Some(data) = item.output.data.as_deref() {
         for line in data.lines() {
-            row(ui, "", "DATA", line, t.color.info, t.color.text_dim);
+            row(
+                ui,
+                None,
+                "",
+                "DATA",
+                line,
+                t.color.text_dim,
+                t.color.text_dim,
+            );
         }
     }
 }
 
+/// A problem, log or task row: a leading mark for a warning or a failure,
+/// then neutral columns.
 fn issue_row(
     ui: &mut Ui,
+    problem: Option<Problem>,
     status: &str,
     source: &str,
     message: &str,
-    tone: SemanticTone,
-    interactive: bool,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let color = tone_color(&t, tone);
-    row_with_sense(
+    row(
         ui,
+        problem,
         status,
         source,
         message,
-        color,
-        color,
-        if interactive {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
+        t.color.text_dim,
+        t.color.text,
     )
 }
 
-/// Semantic row tones are kept independent of the active palette so severity
-/// cannot accidentally collapse into a success/error boolean.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SemanticTone {
-    Error,
-    Warning,
-    Success,
-    Info,
-    Debug,
-    Trace,
-}
-
-fn tone_color(tokens: &Tokens, tone: SemanticTone) -> egui::Color32 {
-    match tone {
-        SemanticTone::Error => tokens.color.err,
-        SemanticTone::Warning => tokens.color.warn,
-        SemanticTone::Success => tokens.color.ok,
-        SemanticTone::Info => tokens.color.info,
-        SemanticTone::Debug => tokens.color.text_dim,
-        SemanticTone::Trace => tokens.color.text_faint,
-    }
-}
-
-fn log_tone(severity: LogSeverity) -> SemanticTone {
+fn log_problem(severity: LogSeverity) -> Option<Problem> {
     match severity {
-        LogSeverity::Error => SemanticTone::Error,
-        LogSeverity::Warning => SemanticTone::Warning,
-        LogSeverity::Info => SemanticTone::Info,
-        LogSeverity::Debug => SemanticTone::Debug,
-        LogSeverity::Trace => SemanticTone::Trace,
+        LogSeverity::Error => Some(Problem::Failure),
+        LogSeverity::Warning => Some(Problem::Warning),
+        LogSeverity::Info | LogSeverity::Debug | LogSeverity::Trace => None,
     }
 }
 
-fn drc_tone(severity: rspice_design::drc::DrcSeverity) -> SemanticTone {
+/// The neutral ink a log line's message is painted in: primary for the lines
+/// a reader acts on, quieter for notes, faintest for tracing.
+fn log_message_color(tokens: &Tokens, severity: LogSeverity) -> egui::Color32 {
+    match severity {
+        LogSeverity::Error | LogSeverity::Warning => tokens.color.text,
+        LogSeverity::Info | LogSeverity::Debug => tokens.color.text_dim,
+        LogSeverity::Trace => tokens.color.text_faint,
+    }
+}
+
+fn drc_problem(severity: rspice_design::drc::DrcSeverity) -> Option<Problem> {
     match severity {
         rspice_design::drc::DrcSeverity::Critical | rspice_design::drc::DrcSeverity::Error => {
-            SemanticTone::Error
+            Some(Problem::Failure)
         }
-        rspice_design::drc::DrcSeverity::Warning => SemanticTone::Warning,
-        rspice_design::drc::DrcSeverity::Info => SemanticTone::Info,
+        rspice_design::drc::DrcSeverity::Warning => Some(Problem::Warning),
+        rspice_design::drc::DrcSeverity::Info => None,
     }
 }
 
@@ -1961,6 +1964,7 @@ fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleC
 
 fn row(
     ui: &mut Ui,
+    problem: Option<Problem>,
     time: &str,
     source: &str,
     message: &str,
@@ -1969,6 +1973,7 @@ fn row(
 ) -> egui::Response {
     row_with_sense(
         ui,
+        problem,
         time,
         source,
         message,
@@ -1978,8 +1983,11 @@ fn row(
     )
 }
 
+/// One console line: the problem-mark gutter, then the time, source and
+/// message columns. Severity is the mark's alone; the columns are neutral.
 fn row_with_sense(
     ui: &mut Ui,
+    problem: Option<Problem>,
     time: &str,
     source: &str,
     message: &str,
@@ -1988,8 +1996,11 @@ fn row_with_sense(
     sense: egui::Sense,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let message_x_offset =
-        CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
+    let message_x_offset = CONSOLE_MARK_GUTTER
+        + CONSOLE_TIME_WIDTH
+        + CONSOLE_COLUMN_GAP
+        + CONSOLE_SOURCE_WIDTH
+        + CONSOLE_COLUMN_GAP;
     let message_width = (ui.available_width() - message_x_offset).max(1.0);
     let message_galley = ui.painter().layout(
         message.to_owned(),
@@ -2004,7 +2015,7 @@ fn row_with_sense(
     // painted galleys. Without this the log is invisible to a screen reader,
     // and an issue row — which a clickable sense turns into a tab stop —
     // would take focus with nothing announced and nothing drawn.
-    let label = row_announcement(&[time, source, message]);
+    let label = announced_row(problem, &[time, source, message]);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             if sense.senses_click() {
@@ -2021,7 +2032,8 @@ fn row_with_sense(
     if sense.senses_click() && response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    let time_x = rect.left();
+    paint_row_mark(ui, rect.left(), rect.top(), problem);
+    let time_x = rect.left() + CONSOLE_MARK_GUTTER;
     let source_x = time_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
     let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
     let time_clip = egui::Rect::from_min_max(

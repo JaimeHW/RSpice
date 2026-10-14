@@ -7,7 +7,7 @@
 
 use egui::{Sense, Ui};
 
-use super::{AppState, SemanticTone, log_tone, row, row_with_sense, tone_color};
+use super::{AppState, log_message_color, log_problem, row, row_with_sense};
 
 use crate::ui::tokens::Tokens;
 
@@ -25,13 +25,11 @@ pub(super) fn log_row(
     entry: &crate::diagnostics::LogEntry,
 ) -> Option<crate::diagnostics::LogAnchor> {
     let t = Tokens::get(ui.ctx());
-    let tone = log_tone(entry.severity);
-    let source_color = tone_color(&t, tone);
-    let message_color = match tone {
-        SemanticTone::Error | SemanticTone::Warning | SemanticTone::Success => source_color,
-        SemanticTone::Info | SemanticTone::Debug => t.color.text_dim,
-        SemanticTone::Trace => t.color.text_faint,
-    };
+    // A warning or an error is a mark in front of the line; the source and
+    // the message stay neutral.
+    let problem = log_problem(entry.severity);
+    let source_color = t.color.text_dim;
+    let message_color = log_message_color(&t, entry.severity);
     let message = entry.context.as_ref().map_or_else(
         || entry.message.clone(),
         |context| format!("{} · {context}", entry.message),
@@ -39,6 +37,7 @@ pub(super) fn log_row(
     let Some(anchor) = entry.anchor.as_ref() else {
         row(
             ui,
+            problem,
             &entry.format_timestamp(),
             entry.source.name(),
             &message,
@@ -52,6 +51,7 @@ pub(super) fn log_row(
     let refusal = state.log_anchor_refusal(anchor);
     let response = row_with_sense(
         ui,
+        problem,
         &entry.format_timestamp(),
         entry.source.name(),
         &message,
