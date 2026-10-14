@@ -686,10 +686,21 @@ impl MixedDigitalCoordinator {
         let plan = self.digital.plan();
         let site = plan.system_calls.get(finish.site as usize)?;
         let scope = plan.scopes.get(site.scope.index());
-        // The scope's root is the instance it was linked as.
-        let instance = scope
-            .map(|scope| scope.path.split('.').next().unwrap_or(""))
-            .unwrap_or("");
+        // The scope's root is the instance it was linked as, named by its
+        // SPICE path, which has dots of its own inside a subcircuit (`x1.xtb`).
+        let instance = scope.map_or("", |scope| {
+            self.maps
+                .iter()
+                .map(|map| map.name.as_str())
+                .filter(|name| {
+                    scope
+                        .path
+                        .strip_prefix(name)
+                        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+                })
+                .max_by_key(|name| name.len())
+                .unwrap_or("")
+        });
         Some(CoordinatorFinish {
             instance,
             module: scope.map_or("", |scope| scope.module.as_str()),

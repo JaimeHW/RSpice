@@ -470,22 +470,31 @@ impl CompiledDigitalDesign {
         // against that answer rather than trusted for it: a `.stim` that has
         // drifted away from its design would otherwise drive a real net with bits
         // and produce a trace that looks like a run.
+        let names = DesignNames {
+            aliases: &self.signal_aliases,
+            // A linked design's roots are its instances, which the aliases
+            // already name; a compiled module is its own root.
+            root: self
+                .signal_aliases
+                .is_empty()
+                .then_some(self.module.as_str()),
+        };
         let inputs = stimulus
             .inputs
             .iter()
-            .map(|port| resolve_port(&host, port, &self.signal_aliases))
+            .map(|port| resolve_port(&host, port, &names))
             .collect::<Result<Vec<_>, DigitalRunError>>()?;
         let outputs = stimulus
             .outputs
             .iter()
-            .map(|port| resolve_port(&host, port, &self.signal_aliases))
+            .map(|port| resolve_port(&host, port, &names))
             .collect::<Result<Vec<_>, DigitalRunError>>()?;
         let clock = stimulus
             .clock
             .as_ref()
             .map(|clock| {
                 Ok::<_, DigitalRunError>((
-                    resolve_signal(&host, &clock.port, &self.signal_aliases)?,
+                    resolve_signal(&host, &clock.port, &names)?,
                     clock.half_period,
                 ))
             })
@@ -612,25 +621,63 @@ struct ResolvedPort {
     name: String,
 }
 
-/// Resolve one stimulus port and check that the two agree about its domain.
+/// The names a stimulus may use for a design's signals.
+struct DesignNames<'a> {
+    aliases: &'a std::collections::BTreeMap<String, DigitalSignalId>,
+    /// The root of an unlinked design: the module compiled.
+    root: Option<&'a str>,
+}
+
+/// Resolve one name over the design's one store.
+///
+/// A name is a signal of the compiled module (`q`, `u1.q`) or, in a linked
+/// design, a path from one of its roots (`a.u1.q`): each instance a design was
+/// linked from is a root named by its instance path. A compiled module is its
+/// own root, so `top.q` also names its `q`. Any of these may be spelled from
+/// `$root` (IEEE 1364-2005 section 12.5): `$root.top.q`, `$root.a.u1.q`.
 fn resolve_signal(
     host: &DigitalHost,
     name: &str,
-    aliases: &std::collections::BTreeMap<String, DigitalSignalId>,
+    names: &DesignNames<'_>,
 ) -> Result<DigitalSignalId, DigitalRunError> {
-    aliases
-        .get(name)
-        .copied()
-        .map(Ok)
-        .unwrap_or_else(|| host.signal(name))
+    let lookup = |path: &str| {
+        names
+            .aliases
+            .get(path)
+            .copied()
+            .map(Ok)
+            .unwrap_or_else(|| host.signal(path))
+    };
+    fn below<'p>(root: Option<&str>, path: &'p str) -> Option<&'p str> {
+        path.strip_prefix(root?)?.strip_prefix('.')
+    }
+    let found = match name.strip_prefix("$root.") {
+        Some(path) if names.root.is_some() => below(names.root, path).map_or_else(
+            || {
+                Err(DigitalRunError::UnknownSignal {
+                    name: name.to_owned(),
+                })
+            },
+            lookup,
+        ),
+        Some(path) => lookup(path),
+        None => lookup(name).or_else(|error| below(names.root, name).map_or(Err(error), lookup)),
+    };
+    found.map_err(|error| match error {
+        DigitalRunError::UnknownSignal { .. } => DigitalRunError::UnknownSignal {
+            name: name.to_owned(),
+        },
+        error => error,
+    })
 }
 
+/// Resolve one stimulus port and check that the two agree about its domain.
 fn resolve_port(
     host: &DigitalHost,
     port: &DigitalPort,
-    aliases: &std::collections::BTreeMap<String, DigitalSignalId>,
+    names: &DesignNames<'_>,
 ) -> Result<ResolvedPort, DigitalRunError> {
-    let signal = resolve_signal(host, &port.name, aliases)?;
+    let signal = resolve_signal(host, &port.name, names)?;
     let real = host.is_real(signal);
     if real != (port.width == 0) {
         return Err(DigitalRunError::StimulusValueDomain {

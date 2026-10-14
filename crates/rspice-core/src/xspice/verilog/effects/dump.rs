@@ -150,7 +150,8 @@ impl Dump {
 
 /// A signal's place in the hierarchy: its enclosing scope path and its own
 /// name. A flattened plan names a child's signal `u1.x` under the root it was
-/// compiled for; a linked plan prefixes every name with its root.
+/// compiled for; a linked plan prefixes every name with its root, which is an
+/// instance path that may have dots of its own (`x1.xtb`).
 fn hierarchy(plan: &CanonicalDigitalPlan, name: &str) -> (String, String) {
     let roots: Vec<&str> = plan
         .scopes
@@ -158,8 +159,12 @@ fn hierarchy(plan: &CanonicalDigitalPlan, name: &str) -> (String, String) {
         .filter(|scope| scope.parent.is_none())
         .map(|scope| scope.path.as_str())
         .collect();
-    let first = name.split('.').next().unwrap_or(name);
-    let full = if roots.len() > 1 && roots.contains(&first) || roots.is_empty() {
+    let rooted = roots.len() > 1
+        && roots.iter().any(|root| {
+            name.strip_prefix(root)
+                .is_some_and(|rest| rest.starts_with('.'))
+        });
+    let full = if rooted || roots.is_empty() {
         name.to_owned()
     } else {
         format!("{}.{name}", roots[0])

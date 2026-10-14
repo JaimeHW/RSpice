@@ -5145,6 +5145,60 @@ fn a_digital_finish_ends_the_transient_at_its_tick() {
     );
 }
 
+/// Design P2 section 4.9: an X-card with no nodes instantiates a portless
+/// testbench, and each X-card instance is a root of the digital design named
+/// by its SPICE path, which is what `%m` prints, at the deck's top level and
+/// inside a subcircuit.
+#[test]
+fn a_zero_node_x_card_instantiates_a_portless_testbench_named_by_its_spice_path() {
+    use rspice_core::config::{HdlOutputCollector, HdlStream};
+    use rspice_core::{ModelFinishPoint, SimulationOutcome};
+    let model = ModelFile::new(
+        "portless_bench",
+        "`timescale 1ns/1ns\n\
+         module portless_bench;\n\
+         initial begin #5 $display(\"%m at %0t\", $time); #5 $finish; end\n\
+         endmodule\n",
+    );
+    for (instances, path) in [
+        ("Xtb portless_bench", "xtb"),
+        (
+            ".subckt bench\nXtb portless_bench\n.ends\nX1 bench",
+            "x1.xtb",
+        ),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "* a portless testbench beside a resistor\nV1 a 0 1\nR1 a 0 1k\n{instances}\n\
+             .va \"{}\" portless_bench\n.end\n",
+            model.deck_path()
+        ))
+        .expect("the deck parses");
+        let collector = std::sync::Arc::new(HdlOutputCollector::new());
+        let mut config = SimulationConfig::default();
+        config.hdl.output = Some(collector.clone());
+        let outcome = Engine::new(config)
+            .run_with_outcome(&rspice_core::NoAbort, |engine, signal| {
+                engine.run_tran_with_abort(&netlist, 100e-9, 1e-9, signal)
+            })
+            .expect("the run completes");
+        let SimulationOutcome::Finished { finish, .. } = outcome else {
+            panic!("the testbench's $finish ends the run, got {outcome:?}");
+        };
+        let ModelFinishPoint::Transient { time } = finish.point else {
+            panic!("a transient finish, got {:?}", finish.point);
+        };
+        assert!((time - 10e-9).abs() < 1e-18, "finished at {time:e}");
+        let printed: Vec<String> = collector
+            .take()
+            .into_iter()
+            .filter(|record| record.stream == HdlStream::Stdout)
+            .map(|record| record.text.to_ascii_lowercase())
+            .collect();
+        assert_eq!(printed, [format!("{path} at 5\n")], "{finish:?}");
+        assert!(finish.instance.eq_ignore_ascii_case(path), "{finish:?}");
+    }
+}
+
 /// Design P2 section 4.3: an operating point prints the time-zero output once,
 /// at its committed equilibrium, stamped as the operating point.
 #[test]

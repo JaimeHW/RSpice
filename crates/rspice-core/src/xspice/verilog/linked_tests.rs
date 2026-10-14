@@ -388,3 +388,66 @@ fn linked_digital_analog_probes_and_refusals_preserve_instance_identity() {
             .to_string();
     assert!(error.contains("cancelled"), "{error}");
 }
+
+/// Design P2 section 4.9: each linked instance is a root named by its
+/// instance path, and a name over the one linked store may start at any root
+/// (`b.u1.q`) or at `$root` (IEEE 1364-2005 section 12.5). A compiled module
+/// is its own root.
+#[test]
+fn names_start_at_any_root_or_at_root_over_the_linked_store() {
+    let design = CompiledDigitalDesign::compile(
+        r#"
+        module leaf(d, q); input d; output q; reg q, seen;
+          always @(d) begin seen = d; q = ~d; end
+        endmodule
+        module cell(d, q); input d; output q; wire q; leaf u1(.d(d), .q(q)); endmodule
+    "#,
+        Some("cell"),
+    )
+    .unwrap();
+    let rows: &[&[&str]] = &[&["0"], &["1"]];
+    let alone = stimulus(
+        &[("$root.cell.d", 1)],
+        &[
+            ("q", 1),
+            ("u1.seen", 1),
+            ("cell.u1.seen", 1),
+            ("$root.cell.u1.seen", 1),
+        ],
+        1,
+        rows,
+    );
+    assert_eq!(
+        values(design.run(&alone).unwrap()),
+        vec![vec!["1", "0", "0", "0"], vec!["0", "1", "1", "1"]]
+    );
+    let linked = CompiledDigitalDesign::link(
+        "pair",
+        &[("a", &design), ("b", &design)],
+        &[net("x", &[("a", "d")]), net("y", &[("a", "q"), ("b", "d")])],
+    )
+    .unwrap();
+    let pair = stimulus(
+        &[("$root.a.d", 1)],
+        &[
+            ("a.u1.seen", 1),
+            ("b.u1.seen", 1),
+            ("$root.b.u1.seen", 1),
+            ("y", 1),
+        ],
+        1,
+        rows,
+    );
+    assert_eq!(
+        values(linked.run(&pair).unwrap()),
+        vec![vec!["0", "1", "1", "1"], vec!["1", "0", "0", "0"]]
+    );
+    // `$root` is followed by a root: the compiled module, or an instance.
+    for (design, name) in [(&design, "$root.u1.seen"), (&linked, "$root.c.u1.seen")] {
+        let error = design
+            .run(&stimulus(&[], &[(name, 1)], 1, &[&[]]))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(name), "{error}");
+    }
+}
