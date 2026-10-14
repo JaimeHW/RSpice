@@ -1497,6 +1497,13 @@ struct DiscreteAnalogInput {
     /// equations. Set by [`MixedSignalHost::declare_analog_sampled_reals`]
     /// once the circuit's code models are known.
     analog_sample: bool,
+    /// Whether the analog equations read this value or its validity, directly
+    /// or through the analog assignments that feed them
+    /// (`VerilogADevice::equations_read_variable`). A value only a task or a
+    /// dead assignment reads is still sampled into the device for that read,
+    /// but its moves are no steps of the equations: they restart no
+    /// integration and ask for no edge completion.
+    feeds_equations: bool,
 }
 
 impl DiscreteAnalogInput {
@@ -1819,6 +1826,8 @@ impl MixedSignalHost {
                     real: signal.kind.is_real(),
                     name: signal.name.to_string(),
                     analog_sample: false,
+                    feeds_equations: analog.equations_read_variable(usize::from(*value))
+                        || analog.equations_read_variable(usize::from(*validity)),
                 })
             })
             .collect::<Result<Vec<_>, MixedSignalError>>()?;
@@ -2062,11 +2071,12 @@ impl MixedSignalHost {
         &self.analog
     }
 
-    /// Instantaneous D/A level or impedance changes, and a discrete value an
-    /// analog block reads changing under it, cannot be compared with smooth
-    /// analog history. Report the final candidate's actual electrical change,
-    /// including Z release, to the integration restart contract. A purely
-    /// event-connected bit or an intermediate delta glitch adds none.
+    /// Instantaneous D/A level or impedance changes, and a discrete value the
+    /// analog equations read changing under them, cannot be compared with
+    /// smooth analog history. Report the final candidate's actual electrical
+    /// change, including Z release, to the integration restart contract. A
+    /// purely event-connected bit, an intermediate delta glitch, and a value
+    /// only a task or a dead assignment reads add none.
     pub(crate) fn candidate_discontinuity(&self) -> bool {
         if self.analog.discontinuity_rising() || self.converted_output_changed() {
             return true;
@@ -2084,12 +2094,15 @@ impl MixedSignalHost {
         // analog solution — a V-to-real converter republishes a sample at
         // every point, continuous at the timepoints, and naming each one a
         // discontinuity would restart integration at every one of them.
+        // And a value the equations never read steps nothing: one only a
+        // `$strobe` reads would otherwise restart integration at every write.
         let read_moved = self
             .discrete_inputs
             .iter()
             .zip(&trial.vectors.discrete_at_trial_start)
             .any(|(input, was)| {
                 !input.analog_sample
+                    && input.feeds_equations
                     && read_discrete_input(&self.state, input).map(f64::to_bits)
                         != was.map(f64::to_bits)
             });
@@ -2142,12 +2155,9 @@ impl MixedSignalHost {
     /// code model samples off the analog solution is continuous at the
     /// timepoints and is not one.
     pub(crate) fn analog_reads_discrete_after_activity(&self) -> bool {
-        self.discrete_inputs.iter().any(|input| {
-            !input.reads_left_limit()
-                && !input.analog_sample
-                && (self.analog.equations_read_variable(input.variable)
-                    || self.analog.equations_read_variable(input.validity))
-        })
+        self.discrete_inputs
+            .iter()
+            .any(|input| !input.reads_left_limit() && !input.analog_sample && input.feeds_equations)
     }
 
     /// Whether the analog block's `@(final_step)` body can change its
@@ -4920,6 +4930,7 @@ impl MixedSignalHost {
     fn accepted_point_stepped_a_read(&self) -> bool {
         let stepped = |input: &DiscreteAnalogInput, held: [f64; 2], settled: &MixedDigital| {
             input.reads_left_limit()
+                && input.feeds_equations
                 && DiscreteAnalogInput::lanes(read_discrete_value(settled, input)).map(f64::to_bits)
                     != held.map(f64::to_bits)
         };
@@ -5811,6 +5822,51 @@ endmodule
             "@(posedge d) $strobe(\"d=%d\", d);\n    I(p, n) <+ V(p, n);"
         ));
         assert!(!steps("@(posedge d) v = d;\n    I(p, n) <+ V(p, n);"));
+    }
+
+    /// Which writes of a process-owned real restart the analog integration:
+    /// one that changes the value, when the equations read it, through a
+    /// contribution or an assignment that feeds one. A value only a task
+    /// reads, or that only a dead assignment copies, moves nothing the
+    /// integrator holds, and a write of the value already held moves nothing
+    /// at all.
+    #[test]
+    fn only_a_changed_value_the_equations_read_restarts_integration() {
+        let restarts = |write: &str, analog: &str| {
+            let source = format!(
+                "module m(p, n);\n  inout p, n;\n  electrical p, n;\n  real x, v;\n  \
+                 initial x = 0.0;\n  always #5 x = {write};\n  analog begin\n    {analog}\n  \
+                 end\nendmodule\n"
+            );
+            let mut host =
+                MixedSignalHost::compile(&source, None, "xm", &[1, 0], SchedulerLimits::default())
+                    .expect("mixed source compiles and starts");
+            let mut reported = Vec::new();
+            for tick in 0..=5 {
+                begin(&mut host, tick);
+                while host
+                    .settle_analog_bridges(&[0.0; 2])
+                    .expect("bridges settle")
+                {}
+                reported.push(host.candidate_discontinuity());
+                host.accept_trial().expect("accept a quiet trial");
+            }
+            assert!(
+                !reported[1..5].contains(&true),
+                "no point between the writes is a discontinuity: {reported:?}"
+            );
+            reported[5]
+        };
+        let step = "x + 1.0";
+        assert!(restarts(step, "I(p, n) <+ x * V(p, n);"));
+        assert!(restarts(step, "v = x;\n    I(p, n) <+ v * V(p, n);"));
+        assert!(!restarts(
+            step,
+            "if (x > 1.0e9) $strobe(\"x=%g\", x);\n    I(p, n) <+ V(p, n);"
+        ));
+        assert!(!restarts(step, "v = x;\n    I(p, n) <+ V(p, n);"));
+        assert!(!restarts(step, "I(p, n) <+ V(p, n);"));
+        assert!(!restarts("0.0", "I(p, n) <+ x * V(p, n);"));
     }
 
     /// The missed-breakpoint refusal is kept for an activation the stepper had

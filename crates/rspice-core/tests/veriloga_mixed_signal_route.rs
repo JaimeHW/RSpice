@@ -4249,6 +4249,94 @@ endmodule
     }
 }
 
+/// A real a process copies off a V-to-real sample restarts integration only
+/// where the analog equations read it.
+///
+/// `always @(r) x = r` follows `Aobs`'s sample of `V(input)`, so `x` changes at
+/// every accepted point. Where only a task reads `x`, the equations never see
+/// it, so the run must be the run of the same deck whose analog block does not
+/// read `x` at all: the same accepted grid, the same solution and the same
+/// Newton work, bit for bit. Each sample used to restart integration and ask
+/// for an edge completion a picosecond after it, and the run crept along at
+/// sub-picosecond steps until it stopped at 4.991 ns on the delta-cycle limit.
+#[test]
+fn a_sampled_real_only_a_task_reads_does_not_restart_integration() {
+    let run_with = |analog: &str| {
+        let model = ModelFile::new(
+            "sampled_real_copy",
+            &format!(
+                r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module zoh(r, p);
+ input r; wreal r;
+ inout p; electrical p;
+ real x;
+ initial x = 0.0;
+ always @(r) x = r;
+ analog begin
+  {analog}
+ end
+endmodule
+"#
+            ),
+        );
+        let deck = format!(
+            "* a sampled real a process copies\n\
+             Vin input 0 sin(0 1 50meg)\n\
+             Aobs input r obs\n\
+             R1 input p 1k\n\
+             C1 p 0 1p\n\
+             X1 r p zoh\n\
+             .model obs v_to_real\n\
+             .va \"{}\" zoh\n\
+             .end\n",
+            model.deck_path()
+        );
+        let netlist = Netlist::parse(&deck).expect("the deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let result = engine
+            .run_tran(&netlist, 100.0e-9, 1.0e-9)
+            .expect("the deck runs");
+        let iterations = engine.convergence_quality().total_iterations;
+        (result, iterations)
+    };
+    let (task, task_iterations) =
+        run_with("I(p) <+ V(p) / 1000.0;\n  if (x > 1.0e9) $strobe(\"x=%g\", x);");
+    let (unread, unread_iterations) = run_with("I(p) <+ V(p) / 1000.0;");
+    println!(
+        "read by a task: {} points, {task_iterations} Newton iterations; \
+         not read: {} points, {unread_iterations} Newton iterations",
+        task.time.len(),
+        unread.time.len()
+    );
+    let bits = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        bits(&task.time),
+        bits(&unread.time),
+        "a real only a task reads must not move the accepted grid: {} points against {}",
+        task.time.len(),
+        unread.time.len()
+    );
+    assert_eq!(task.node_names, unread.node_names);
+    for node in &task.node_names {
+        assert_eq!(
+            bits(&waveform(&task, node)),
+            bits(&waveform(&unread, node)),
+            "V({node}) must not depend on a task's read"
+        );
+    }
+    assert_eq!(
+        task_iterations, unread_iterations,
+        "the Newton work must be the same"
+    );
+}
+
 #[test]
 fn typed_event_boundaries_convert_loaded_real_ports_through_physical_voltage() {
     let model = ModelFile::new(
