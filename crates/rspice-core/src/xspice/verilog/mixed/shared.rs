@@ -648,12 +648,19 @@ impl MixedDigitalCoordinator {
     /// Install the run's HDL options and output receiver before execution
     /// starts.
     pub(crate) fn configure_hdl(&mut self, config: &crate::config::HdlRunConfig) {
+        use super::super::effects::files::{HdlFileOptions, HdlFileStore, HdlFileTarget};
         self.hdl_output = config.output.clone();
+        // Design P2 section 4.3: relative HDL paths resolve against the
+        // deck's directory.
         self.digital
             .make_mut()
             .configure_effects(super::super::effects::HdlEffectsConfig {
                 plusargs: config.plusargs.clone(),
                 seed: config.seed,
+                files: HdlFileOptions::new(
+                    config.deck_directory.as_deref(),
+                    Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
+                ),
             });
     }
 

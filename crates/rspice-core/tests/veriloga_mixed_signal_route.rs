@@ -5204,20 +5204,20 @@ fn a_rolled_back_trial_prints_nothing() {
 #[test]
 fn an_unsupported_system_call_is_a_typed_capability_refusal() {
     let model = ModelFile::new(
-        "fopen_user",
+        "dump_user",
         "`timescale 1ns/1ns\n\
-         module fopen_user(p, n); inout p, n; electrical p, n; integer fd;\n\
-         initial #2 fd = $fopen(\"x.txt\");\n\
+         module dump_user(p, n); inout p, n; electrical p, n;\n\
+         initial #2 $dumpvars;\n\
          analog I(p, n) <+ V(p, n) / 1000.0; endmodule\n",
     );
     let netlist = Netlist::parse(&format!(
-        "* an unsupported system call\nV1 a 0 1\nR1 a p 1k\nX1 p 0 fopen_user\n.va \"{}\" fopen_user\n.end\n",
+        "* an unsupported system call\nV1 a 0 1\nR1 a p 1k\nX1 p 0 dump_user\n.va \"{}\" dump_user\n.end\n",
         model.deck_path()
     ))
     .expect("the deck parses");
     let error = Engine::new(SimulationConfig::default())
         .run_tran(&netlist, 10e-9, 1e-9)
-        .expect_err("`$fopen` is not supported yet");
+        .expect_err("`$dumpvars` is not supported yet");
     let rspice_core::SimulationError::UnsupportedCapability(refusal) = &error else {
         panic!("expected a typed capability refusal, got {error:?}");
     };
@@ -5225,7 +5225,7 @@ fn an_unsupported_system_call_is_a_typed_capability_refusal() {
     assert!(
         refusal
             .detail
-            .contains("HDL file and waveform I/O (`$fopen`) is not supported yet"),
+            .contains("HDL file and waveform I/O (`$dumpvars`) is not supported yet"),
         "{error}"
     );
     assert!(!error.to_string().contains("lane"), "{error}");

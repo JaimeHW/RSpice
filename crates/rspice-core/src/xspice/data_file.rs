@@ -336,6 +336,16 @@ fn registered(path: &str) -> Result<Option<VirtualDataFile>, String> {
     Ok(files.files.get(path).cloned())
 }
 
+/// A registered virtual file's contents, with no native fallback: what an
+/// HDL design reads in the browser worker.
+#[cfg(feature = "veriloga")]
+pub(crate) fn registered_contents(path: &str) -> Option<Arc<str>> {
+    lock_virtual_files()
+        .files
+        .get(path)
+        .map(|file| Arc::clone(&file.contents))
+}
+
 /// Register or replace a virtual XSPICE data file.
 ///
 /// This is the browser/mobile-compatible path for file-backed XSPICE models.

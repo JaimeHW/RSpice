@@ -19,8 +19,16 @@
 //! a `$strobe` when it runs, the active `$monitor` when it is set up, turned
 //! back on, or when the first change of one of its operands happens. That is
 //! the order Icarus Verilog prints them in, and a deterministic one.
+//! `$fstrobe` and `$fmonitor` join the same queue; any number of
+//! `$fmonitor`s may be active at once (section 17.2.2).
+//!
+//! # Files
+//!
+//! File and string I/O is [`files`]: it writes through the same journal,
+//! released at the same commit.
 
 pub(crate) mod checkpoint;
+pub(crate) mod files;
 pub(crate) mod format;
 pub(crate) mod plusargs;
 pub(crate) mod random;
@@ -37,9 +45,11 @@ use rspice_veriloga::canonical_ir::digital_eval::{
 };
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalProcessId;
+use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
 use rspice_veriloga::four_state::FourStateBit;
 
 pub(crate) use crate::config::{HdlOrigin, HdlOutputRecord, HdlPoint, HdlSeverity, HdlStream};
+use crate::xspice::verilog::store::DigitalSignalStore;
 use format::{FormatArgument, FormatContext, TimeFormat};
 
 /// The run options the effects read, fixed for the host's life.
@@ -47,6 +57,8 @@ use format::{FormatArgument, FormatContext, TimeFormat};
 pub(crate) struct HdlEffectsConfig {
     pub plusargs: Vec<String>,
     pub seed: u32,
+    /// The run directory, its confinement, and where writes land.
+    pub files: files::HdlFileOptions,
 }
 
 /// What ended a run.
@@ -70,10 +82,27 @@ pub(crate) struct HdlFinishRequest {
 /// One entry of the monitor region's queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum MonitorTask {
-    /// A `$strobe`'s argument function.
+    /// A `$strobe`'s or `$fstrobe`'s argument function.
     Strobe(u32),
     /// The active `$monitor`.
     Monitor,
+    /// An active `$fmonitor`, by its serial number.
+    FileMonitor(u32),
+}
+
+/// An active `$fmonitor` (section 17.2.2).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FileMonitor {
+    pub serial: u32,
+    pub observer: u32,
+    /// The descriptor it writes to, read when it first prints: a later
+    /// `$fclose` of that descriptor ends it, even if the descriptor's number
+    /// is reused.
+    pub descriptor: Option<u32>,
+    /// Whether it is in this step's queue.
+    #[serde(skip)]
+    pub queued: bool,
 }
 
 /// The active `$monitor` (section 17.1.3: only one at a time).
@@ -117,6 +146,12 @@ pub(crate) struct HdlEffects {
     finish: Option<HdlFinishRequest>,
     severities: SeverityCounts,
     design_precision: i8,
+    /// Open files and the writes not yet released.
+    files: files::HdlFiles,
+    file_monitors: Vec<FileMonitor>,
+    next_monitor_serial: u32,
+    /// The monitor-region task whose argument function is running.
+    evaluating: Option<MonitorTask>,
 }
 
 impl HdlEffects {
@@ -138,6 +173,10 @@ impl HdlEffects {
             finish: None,
             severities: SeverityCounts::default(),
             design_precision,
+            files: files::HdlFiles::default(),
+            file_monitors: Vec::new(),
+            next_monitor_serial: 0,
+            evaluating: None,
         }
     }
 
@@ -160,13 +199,39 @@ impl HdlEffects {
         self.severities
     }
 
-    /// Take every journaled record; called when a trial commits.
+    /// Take every journaled record, and write every journaled file change to
+    /// the run's files; called when a trial commits. A file the host cannot
+    /// write is reported as a warning record at the end.
     pub(crate) fn drain_journal(&mut self) -> Vec<HdlOutputRecord> {
-        std::mem::take(&mut self.journal)
+        let failures = self.files.release(&self.config.files.store);
+        let mut records = std::mem::take(&mut self.journal);
+        if !failures.is_empty() {
+            let (tick, seconds) = records
+                .last()
+                .map_or((0, 0.0), |record| (record.tick, record.seconds));
+            for failure in failures {
+                self.severities.warnings += 1;
+                records.push(HdlOutputRecord {
+                    point: HdlPoint::Transient { time: seconds },
+                    tick,
+                    seconds,
+                    stream: HdlStream::Diagnostic {
+                        severity: HdlSeverity::Warning,
+                    },
+                    text: format!("HDL file write failed: {failure}"),
+                    origin: HdlOrigin {
+                        scope: String::new(),
+                        file: String::new(),
+                        line: 0,
+                    },
+                });
+            }
+        }
+        records
     }
 
     pub(crate) fn has_journal(&self) -> bool {
-        !self.journal.is_empty()
+        !self.journal.is_empty() || self.files.has_pending()
     }
 
     pub(crate) fn monitor_region_pending(&self) -> bool {
@@ -176,7 +241,72 @@ impl HdlEffects {
     /// Take the monitor region's queue in scheduling order.
     pub(crate) fn take_monitor_region(&mut self) -> Vec<MonitorTask> {
         self.monitor_queued = false;
+        for monitor in &mut self.file_monitors {
+            monitor.queued = false;
+        }
         std::mem::take(&mut self.queue)
+    }
+
+    /// The argument function a monitor-region task runs, if it still runs
+    /// one; the task is what [`Self::system_task`] sees as being evaluated
+    /// until the next call.
+    pub(crate) fn observer_for(&mut self, task: MonitorTask) -> Option<u32> {
+        let observer = match task {
+            MonitorTask::Strobe(observer) => Some(observer),
+            MonitorTask::Monitor => self.enabled_monitor(),
+            MonitorTask::FileMonitor(serial) => self
+                .file_monitors
+                .iter()
+                .find(|monitor| monitor.serial == serial)
+                .map(|monitor| monitor.observer),
+        };
+        self.evaluating = observer.map(|_| task);
+        observer
+    }
+
+    fn evaluating_monitor(&self) -> Option<&FileMonitor> {
+        let Some(MonitorTask::FileMonitor(serial)) = self.evaluating else {
+            return None;
+        };
+        self.file_monitors
+            .iter()
+            .find(|monitor| monitor.serial == serial)
+    }
+
+    fn evaluating_monitor_mut(&mut self) -> Option<&mut FileMonitor> {
+        let Some(MonitorTask::FileMonitor(serial)) = self.evaluating else {
+            return None;
+        };
+        self.file_monitors
+            .iter_mut()
+            .find(|monitor| monitor.serial == serial)
+    }
+
+    /// Whether a change of a signal can matter to anything here.
+    pub(crate) fn observes_changes(&self) -> bool {
+        self.monitor.as_ref().is_some_and(|monitor| monitor.enabled)
+            || !self.file_monitors.is_empty()
+    }
+
+    /// A signal changed: a `$monitor` or `$fmonitor` reading it prints at the
+    /// end of the step (sections 17.1.3 and 17.2.2).
+    pub(crate) fn note_change(&mut self, plan: &CanonicalDigitalPlan, signal: DigitalSignalId) {
+        let reads = |observer: u32| {
+            plan.observers
+                .get(observer as usize)
+                .is_some_and(|observer| observer.dependencies.binary_search(&signal).is_ok())
+        };
+        if let Some(observer) = self.enabled_monitor()
+            && reads(observer)
+        {
+            self.monitor_operand_changed();
+        }
+        for monitor in &mut self.file_monitors {
+            if !monitor.queued && reads(monitor.observer) {
+                monitor.queued = true;
+                self.queue.push(MonitorTask::FileMonitor(monitor.serial));
+            }
+        }
     }
 
     /// The active `$monitor`'s argument function, if it is enabled.
@@ -247,7 +377,24 @@ impl HdlEffects {
         first: usize,
         radix: DigitalRadix,
     ) -> Result<String, DigitalEvalError> {
-        let mut arguments = Vec::with_capacity(site.arguments.len());
+        self.format_with(plan, site, args, first, radix, None)
+    }
+
+    /// Format arguments from `first`, led by `leading`, a format string
+    /// `$sformat` read from a variable rather than a literal.
+    fn format_with(
+        &self,
+        plan: &CanonicalDigitalPlan,
+        site: &DigitalSystemCall,
+        args: &[DigitalScalar],
+        first: usize,
+        radix: DigitalRadix,
+        leading: Option<&str>,
+    ) -> Result<String, DigitalEvalError> {
+        let mut arguments = Vec::with_capacity(site.arguments.len() + 1);
+        if let Some(leading) = leading {
+            arguments.push(FormatArgument::Literal(leading));
+        }
         for argument in &site.arguments[first.min(site.arguments.len())..] {
             arguments.push(match argument {
                 DigitalSystemArgument::Empty => FormatArgument::Empty,
@@ -294,10 +441,22 @@ impl HdlEffects {
         ))
     }
 
-    /// Refuse a kind whose host behaviour has not landed (file and waveform
-    /// I/O is P2 lane L5's). The text names the feature, never the lane.
+    /// Refuse a kind whose host behaviour has not landed (`$readmem*` and the
+    /// value change dump). The text names the feature, never the lane.
     fn refuse_unlanded(site: &DigitalSystemCall) -> Result<(), DigitalEvalError> {
-        if site.kind.lane() == DigitalSystemLane::Files {
+        use DigitalSystemCallKind as Kind;
+        if matches!(
+            site.kind,
+            Kind::Readmemb
+                | Kind::Readmemh
+                | Kind::Dumpfile
+                | Kind::Dumpvars
+                | Kind::Dumpon
+                | Kind::Dumpoff
+                | Kind::Dumpall
+                | Kind::Dumplimit
+                | Kind::Dumpflush
+        ) {
             return Err(DigitalEvalError::SystemCallUnavailable {
                 site: site.id,
                 detail: format!(
@@ -309,7 +468,8 @@ impl HdlEffects {
         Ok(())
     }
 
-    /// Perform a system task enable.
+    /// Perform a system task enable. `store` is the design's signals, which
+    /// `$fread` loads.
     pub(crate) fn system_task(
         &mut self,
         plan: &CanonicalDigitalPlan,
@@ -317,6 +477,7 @@ impl HdlEffects {
         args: &[DigitalScalar],
         clock: Option<DigitalClock>,
         origin: CallOrigin,
+        store: &mut DigitalSignalStore,
     ) -> Result<DigitalTaskOutcome, DigitalEvalError> {
         let site =
             plan.system_calls
@@ -326,6 +487,9 @@ impl HdlEffects {
                     detail: "the plan declares no such site".into(),
                 })?;
         Self::refuse_unlanded(site)?;
+        if site.kind.lane() == DigitalSystemLane::Files && !site.kind.is_function() {
+            return self.file_task(plan, site, args, clock, origin);
+        }
         let mut outcome = DigitalTaskOutcome::CONTINUE;
         match site.kind {
             DigitalSystemCallKind::Display(radix) | DigitalSystemCallKind::Write(radix) => {
@@ -456,7 +620,7 @@ impl HdlEffects {
                     CallOrigin::Process(process) => Some(process),
                     CallOrigin::Observer => None,
                 };
-                let result = self.function(plan, site, args, process, clock)?;
+                let result = self.function(plan, site, args, process, clock, store)?;
                 outcome.outputs = result.outputs;
             }
             other => {
@@ -540,6 +704,7 @@ impl HdlEffects {
         args: &[DigitalScalar],
         process: Option<DigitalProcessId>,
         clock: Option<DigitalClock>,
+        store: &mut DigitalSignalStore,
     ) -> Result<DigitalFunctionOutcome, DigitalEvalError> {
         let site =
             plan.system_calls
@@ -549,7 +714,7 @@ impl HdlEffects {
                     detail: "the plan declares no such site".into(),
                 })?;
         Self::refuse_unlanded(site)?;
-        self.function(plan, site, args, process, clock)
+        self.function(plan, site, args, process, clock, store)
     }
 
     fn function(
@@ -559,8 +724,12 @@ impl HdlEffects {
         args: &[DigitalScalar],
         process: Option<DigitalProcessId>,
         clock: Option<DigitalClock>,
+        store: &mut DigitalSignalStore,
     ) -> Result<DigitalFunctionOutcome, DigitalEvalError> {
         use DigitalSystemCallKind as Kind;
+        if site.kind.lane() == DigitalSystemLane::Files {
+            return self.file_function(plan, site, args, clock, store);
+        }
         let operand = |index: usize| -> Option<(&DigitalScalar, bool)> {
             let (operand, class) = match site.arguments.get(index)? {
                 DigitalSystemArgument::Value { operand, class } => (*operand, *class),

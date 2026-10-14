@@ -88,7 +88,7 @@ use rspice_veriloga::canonical_ir::digital_eval::{
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::{DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId};
 
-use super::effects::{CallOrigin, HdlEffects, HdlEffectsConfig, MonitorTask};
+use super::effects::{CallOrigin, HdlEffects, HdlEffectsConfig};
 
 use super::store::{
     DigitalSignalStore, EventCapture, ExternalBitDriverId, SignalTransition, StoreError,
@@ -631,7 +631,7 @@ impl DigitalEnvironment for HostEnvironment<'_> {
     ) -> Result<DigitalTaskOutcome, DigitalEvalError> {
         let clock = self.store.read_clock();
         self.effects
-            .system_task(self.plan, site, args, clock, self.origin)
+            .system_task(self.plan, site, args, clock, self.origin, self.store)
     }
     fn system_function(
         &mut self,
@@ -644,7 +644,7 @@ impl DigitalEnvironment for HostEnvironment<'_> {
             CallOrigin::Observer => None,
         };
         self.effects
-            .system_function(self.plan, site, args, process, clock)
+            .system_function(self.plan, site, args, process, clock, self.store)
     }
 }
 
@@ -1358,12 +1358,8 @@ impl DigitalHost {
     /// Run the monitor region's queue in the order it was scheduled.
     fn run_monitor_region(&mut self) -> Result<(), DigitalRunError> {
         for task in self.effects.take_monitor_region() {
-            let observer = match task {
-                MonitorTask::Strobe(observer) => observer,
-                MonitorTask::Monitor => match self.effects.enabled_monitor() {
-                    Some(observer) => observer,
-                    None => continue,
-                },
+            let Some(observer) = self.effects.observer_for(task) else {
+                continue;
             };
             let mut environment = HostEnvironment {
                 store: &mut self.store,
@@ -1682,23 +1678,13 @@ impl DigitalHost {
             if drained.is_empty() {
                 return Ok(());
             }
+            let observed = self.effects.observes_changes();
             for transition in drained.iter() {
-                // IEEE 1364-2005 section 17.1.3: a change of any of the active
-                // `$monitor`'s operands prints its arguments at the end of
-                // the step.
-                if let Some(observer) = self.effects.enabled_monitor()
-                    && self
-                        .plan
-                        .observers
-                        .get(observer as usize)
-                        .is_some_and(|observer| {
-                            observer
-                                .dependencies
-                                .binary_search(&transition.signal)
-                                .is_ok()
-                        })
-                {
-                    self.effects.monitor_operand_changed();
+                // IEEE 1364-2005 sections 17.1.3 and 17.2.2: a change of a
+                // `$monitor`'s or `$fmonitor`'s operand prints it at the end
+                // of the step.
+                if observed {
+                    self.effects.note_change(&self.plan, transition.signal);
                 }
                 for token in &transition.expressions {
                     if let Some(update) = self.expression_updates.remove(token) {

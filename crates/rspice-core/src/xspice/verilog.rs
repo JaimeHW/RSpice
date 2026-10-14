@@ -678,8 +678,13 @@ pub enum HdlSchedule {
 /// How a self-checking testbench run is configured (design P2 section 2.3).
 #[derive(Debug, Clone, Default)]
 pub struct HdlTestbenchOptions {
-    /// Where relative HDL file paths resolve (HDL file I/O, P2 lane L5).
+    /// Where relative HDL file paths resolve; the working directory when
+    /// absent.
     pub run_directory: Option<std::path::PathBuf>,
+    /// Write the design's files to disk. Otherwise they stay in memory: the
+    /// report's `File` records carry them, and the design reads back what it
+    /// wrote, but nothing on disk changes.
+    pub write_files: bool,
     /// `$test$plusargs`/`$value$plusargs` sources, first match wins.
     pub plusargs: Vec<String>,
     /// `hdlseed`.
@@ -758,7 +763,7 @@ pub fn run_digital_testbench(
     sources: &[(std::path::PathBuf, String)],
     options: &HdlTestbenchOptions,
 ) -> Result<HdlTestbenchReport, DigitalRunError> {
-    // The run directory is P2 lane L5's; delay selection and `specify` L6's.
+    // Delay selection and `specify` are refused until they are implemented.
     // The token says which; the text names the feature.
     let unavailable = |capability: &'static str, option: &str, reason: &str| {
         Err(DigitalRunError::Unsupported(Box::new(
@@ -768,13 +773,6 @@ pub fn run_digital_testbench(
             ),
         )))
     };
-    if options.run_directory.is_some() {
-        return unavailable(
-            "hdl.option.rundir",
-            "a testbench run directory",
-            "HDL file I/O is not implemented",
-        );
-    }
     if options.delay_select != crate::config::HdlDelaySelect::Typ {
         return unavailable(
             "hdl.option.delay_select",
@@ -866,9 +864,18 @@ pub fn run_digital_testbench(
     };
     let resolution = TimeResolution::new(plan.timing.precision_exponent)?;
     let mut host = DigitalHost::from_plan(Arc::new(plan), resolution, SchedulerLimits::HDL);
+    let target = if options.write_files {
+        effects::files::HdlFileTarget::Disk
+    } else {
+        effects::files::HdlFileTarget::Memory
+    };
     host.configure_effects(effects::HdlEffectsConfig {
         plusargs: options.plusargs.clone(),
         seed: options.seed,
+        files: effects::files::HdlFileOptions::new(
+            options.run_directory.as_deref(),
+            Arc::new(effects::files::HdlFileStore::new(target)),
+        ),
     });
     host.set_reverse_active(options.schedule == HdlSchedule::ReverseActive);
     host.start()?;
@@ -877,6 +884,9 @@ pub fn run_digital_testbench(
         .unwrap_or(TimeResolution::MAX_EXACT_TICKS);
     let mut end_tick = 0;
     let mut end = HdlTestbenchEnd::Quiescent;
+    // Every step is accepted: its output is released, and its file writes
+    // land, as it ends.
+    let mut records = host.drain_hdl_output();
     while host.hdl_finish().is_none() {
         let Some(next) = host.next_tick() else {
             break;
@@ -886,6 +896,7 @@ pub fn run_digital_testbench(
             break;
         }
         host.advance_to(next)?;
+        records.append(&mut host.drain_hdl_output());
         end_tick = next;
     }
     let finish = host.hdl_finish().cloned();
@@ -898,7 +909,7 @@ pub fn run_digital_testbench(
         };
     }
     let end_seconds = resolution.ticks_to_seconds(end_tick)?;
-    let mut records = host.drain_hdl_output();
+    records.append(&mut host.drain_hdl_output());
     for record in &mut records {
         record.point = crate::config::HdlPoint::Transient {
             time: record.seconds,

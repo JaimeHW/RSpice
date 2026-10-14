@@ -211,7 +211,10 @@ fn execute_end(spec: &CaseSpec) -> RunEnd {
         Some("max") => HdlDelaySelect::Max,
         _ => HdlDelaySelect::Typ,
     };
+    // Icarus runs every test from the checkout's root; the design's files
+    // stay in memory, so parallel runs never share one on disk.
     let options = HdlTestbenchOptions {
+        run_directory: Some(spec.root.clone()),
         plusargs: spec.plusargs.clone(),
         delay_select,
         specify: spec.specify,
