@@ -146,12 +146,15 @@ pub fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize)
     changed
 }
 
-/// A stacked uppercase label above its field.
+/// A stacked label above its field, painted as written (sentence case).
+///
+/// Sans, like a property row's label: a mono label over a mono value reads
+/// as one run of code once case no longer sets the label apart.
 pub fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
     ui.label(
-        egui::RichText::new(label.to_ascii_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+        egui::RichText::new(label)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(t.color.text_dim),
     );
     ui.add_space(4.0);
