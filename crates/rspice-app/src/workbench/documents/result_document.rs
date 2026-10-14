@@ -223,7 +223,8 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
 }
 
 pub(crate) use document_edit::{
-    add_pane_available, compare_available, open_add_pane, open_compare, toggle_linked_cursors,
+    add_pane_available, compare_available, open_add_pane, open_compare, open_measurement,
+    toggle_linked_cursors,
 };
 
 pub(crate) fn visualization_source_dataset(

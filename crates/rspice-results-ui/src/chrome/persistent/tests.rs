@@ -48,3 +48,22 @@ fn pane_slot_geometry_sanitizes_nonfinite_available_extents() {
     let slots = bounded_pane_slots(stage, PageLayout::Grid { columns: 2 }, 4);
     assert_slots_are_finite_and_bounded(stage, &slots, 4);
 }
+
+/// A kept measurement reads by the expression that was measured, in
+/// engineering notation at the document's digits, never as a fixed six
+/// decimals that print a microvolt as 0.000001.
+#[test]
+fn a_measurement_reads_in_engineering_notation_at_the_document_digits() {
+    assert_eq!(
+        measurement_text("rms(V(out))", Some(12.345_678), 7),
+        "rms(V(out)) = 12.34568"
+    );
+    assert_eq!(
+        measurement_text("max(V(out))", Some(1.234_567_8e-6), 4),
+        "max(V(out)) = 1.235 µ"
+    );
+    assert_eq!(
+        measurement_text("Measurement 3", None, 7),
+        "Measurement 3 = unevaluated"
+    );
+}

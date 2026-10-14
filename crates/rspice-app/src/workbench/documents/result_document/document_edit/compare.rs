@@ -16,42 +16,6 @@ use rspice_results_ui::document_dialogs::compare::{
 
 use super::*;
 use crate::results::visualization_document::ComparisonReceipt;
-use crate::state::SimulationRun;
-
-/// The run and analysis being compared: the selected pane's over a document,
-/// the active one over a quick view.
-fn candidate(state: &AppState) -> Result<(&SimulationRun, &AnalysisResult), String> {
-    if state.workbench.workspace != Workspace::Results {
-        return Err("Open a result in Results to compare it.".to_owned());
-    }
-    let runs = &state.simulation.retained.runs;
-    if let Some(document_id) = active_document_id(state) {
-        let (_, pane_id) = super::super::persistent_document::reading_position(state, document_id)
-            .ok_or_else(|| "The result document has no pane to compare.".to_owned())?;
-        let binding = project_document(state, document_id)?
-            .panes()
-            .iter()
-            .find(|pane| pane.id == pane_id)
-            .and_then(|pane| pane.binding)
-            .ok_or_else(|| "The selected pane shows no dataset to compare.".to_owned())?;
-        let (run, analysis) = super::super::persistent_document::resolve_binding(state, binding)?;
-        return Ok((&runs[run], &runs[run].analyses[analysis]));
-    }
-    let run = state
-        .simulation
-        .view
-        .active_run_idx
-        .and_then(|index| runs.get(index))
-        .ok_or_else(|| "Select a result to compare.".to_owned())?;
-    let analysis = state
-        .simulation
-        .view
-        .active_analysis_idx
-        .and_then(|index| run.analyses.get(index))
-        .or_else(|| run.analyses.first())
-        .ok_or_else(|| "The selected result holds no analysis.".to_owned())?;
-    Ok((run, analysis))
-}
 
 /// The retained runs that hold the candidate's analysis on the same X axis,
 /// each with its matching analysis and the signals the two share.
@@ -80,13 +44,13 @@ fn run_label(run: &SimulationRun) -> String {
 
 /// Whether Compare datasets has a candidate and a baseline to compare it with.
 pub(crate) fn compare_available(state: &AppState) -> bool {
-    candidate(state).is_ok_and(|(run, analysis)| !baselines(state, run, analysis).is_empty())
+    reading_analysis(state).is_ok_and(|(run, analysis)| !baselines(state, run, analysis).is_empty())
 }
 
 /// Open Compare datasets on the result the reader is looking at, against the
 /// first compatible baseline.
 pub(crate) fn open_compare(state: &mut AppState) {
-    let baseline = match candidate(state) {
+    let baseline = match reading_analysis(state) {
         Ok((run, analysis)) => baselines(state, run, analysis)
             .first()
             .map(|(baseline, _)| baseline.dataset_id),
@@ -152,7 +116,7 @@ fn numbers(draft: &CompareDraft) -> Result<CompareNumbers, String> {
 /// Resolve the form's choices against the retained datasets, moving a
 /// baseline or signal that no longer exists onto the first one that does.
 pub(super) fn choices(state: &AppState, draft: &mut CompareDraft) -> CompareChoices {
-    let (run, analysis) = match candidate(state) {
+    let (run, analysis) = match reading_analysis(state) {
         Ok(found) => found,
         Err(refusal) => {
             return CompareChoices {
@@ -204,7 +168,7 @@ pub(super) fn commit(
     }
     let numbers = numbers(&draft)?;
     let (outcome, edits) = {
-        let (run, analysis) = candidate(state)?;
+        let (run, analysis) = reading_analysis(state)?;
         let baseline = draft
             .baseline
             .and_then(|id| {

@@ -1272,8 +1272,8 @@ impl EditorHandoff {
         match self {
             Self::Calculator => "Compose and evaluate an expression without saving it to the plan.",
             Self::ScalarMeasurement => {
-                "Author a retained scalar measurement over the active analysis. It opens in \
-                 Visualization Studio, which owns measurement authoring."
+                "Evaluate a scalar expression over the active result and keep its value in the \
+                 result document. It opens in Results."
             }
             Self::UnitDiagnostics => {
                 "Report the inferred unit and dimensional check for the expressions the active \
@@ -1303,11 +1303,10 @@ impl EditorHandoff {
     }
 
     pub(super) fn dispatch(self, app: &mut RSpiceApp) {
-        // The measurement author lives in Visualization Studio, and the
-        // command only navigates there from a result surface. Activating
-        // Results first is what makes the hand-off land somewhere the reader
-        // can see, rather than arming a dock behind this page. The calculator
-        // and the diagnostics window are modeless tools the frame paints over
+        // Add measurement draws over the result viewer. Activating Results
+        // first is what makes the hand-off land somewhere the reader can see,
+        // rather than opening a form behind this page. The calculator and the
+        // diagnostics window are modeless tools the frame paints over
         // whatever workspace is open, so they need no route change.
         if matches!(self, Self::ScalarMeasurement) {
             app.state

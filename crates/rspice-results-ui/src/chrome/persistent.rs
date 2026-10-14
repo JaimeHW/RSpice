@@ -1,6 +1,7 @@
 //! Persistent Results page geometry and pane chrome over retained display data.
 
 use egui::{Align, Layout, Rect, RichText, Sense, Ui, UiBuilder, pos2, vec2};
+use rspice_results::number_format::fmt_si_significant;
 use rspice_results::visualization_document::{Annotation, Measurement, PageLayout, PaneId};
 use rspice_ui_kit::{
     panels::painted_label,
@@ -137,11 +138,14 @@ pub fn pane_frame<R>(
     .inner
 }
 
+/// The pane's kept measurements and notes, in one line above its viewer.
+/// Values carry the document's significant digits.
 pub fn evidence_bar(
     ui: &mut Ui,
     pane_id: PaneId,
     measurements: &[Measurement],
     annotations: &[Annotation],
+    significant_digits: usize,
 ) {
     if measurements.is_empty() && annotations.is_empty() {
         return;
@@ -156,20 +160,18 @@ pub fn evidence_bar(
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         for measurement in measurements {
-                            let value = measurement.value.map_or_else(
-                                || "unevaluated".to_owned(),
-                                |value| format!("{value:.6}"),
-                            );
+                            let name = measurement
+                                .expression
+                                .as_deref()
+                                .unwrap_or(&measurement.label);
                             ui.label(
-                                RichText::new(format!("{} = {value}", measurement.label))
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text),
-                            )
-                            .on_hover_text(
-                                measurement
-                                    .expression
-                                    .as_deref()
-                                    .unwrap_or("Retained document measurement"),
+                                RichText::new(measurement_text(
+                                    name,
+                                    measurement.value,
+                                    significant_digits,
+                                ))
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text),
                             );
                         }
                         for annotation in annotations {
@@ -177,12 +179,21 @@ pub fn evidence_bar(
                                 RichText::new(format!("Note: {}", annotation.text))
                                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                                     .color(t.color.text_dim),
-                            )
-                            .on_hover_text("Retained visualization annotation");
+                            );
                         }
                     });
                 });
         });
+}
+
+/// One measurement as the evidence bar states it: what was measured, by the
+/// expression the reader wrote, and its value in engineering notation.
+fn measurement_text(name: &str, value: Option<f64>, significant_digits: usize) -> String {
+    let value = value.map_or_else(
+        || "unevaluated".to_owned(),
+        |value| fmt_si_significant(value, "", significant_digits),
+    );
+    format!("{name} = {value}")
 }
 
 /// Retained entity counts shown in the pane header's detail.

@@ -1031,10 +1031,15 @@ impl Command {
                     && state.project_lifecycle.is_open()
                     && state.simulation.retained.has_results()
             }
+            // Add measurement draws over the result viewer, and over a quick
+            // view it evaluates without keeping, so it needs only a result.
+            Self::MeasurementLibrary => {
+                state.workbench.current_route().surface_id() == super::SurfaceId::Results
+                    && state.simulation.retained.has_results()
+            }
             Self::VisualizationTraceManager
             | Self::VisualizationCursorManager
             | Self::ReviewNotes
-            | Self::MeasurementLibrary
             | Self::FamilySlicing => {
                 matches!(
                     state.workbench.current_route().surface_id(),
@@ -2275,8 +2280,7 @@ impl Command {
                 crate::workbench::documents::visualization_studio::open_annotation_editor(app);
             }
             Self::MeasurementLibrary => {
-                open_studio_tool(app, "Measurement library");
-                crate::workbench::documents::visualization_studio::open_measurement_editor(app);
+                crate::workbench::documents::result_document::open_measurement(&mut app.state);
             }
             Self::FamilySlicing => {
                 open_studio_tool(app, "Family slicing and pivot");

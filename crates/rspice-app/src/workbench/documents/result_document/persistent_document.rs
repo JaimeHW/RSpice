@@ -17,6 +17,7 @@ use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
     Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, Marker, Measurement, Page,
     PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace, TypedValue,
+    VisualizationDocument,
 };
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::workbench::{AppState, RSpiceApp};
@@ -709,7 +710,21 @@ fn render_pane(
     let viewer = pane_viewer(is_active, active_viewer, &pane.viewer_id);
     persistent::pane_frame(ui, pane.id, is_active, |ui| {
         let activated_pane_id = pane_header(ui, app, pane, viewer, is_active);
-        persistent::evidence_bar(ui, pane.id, &pane.measurements, &pane.annotations);
+        let digits = app
+            .state
+            .workspace
+            .content
+            .visualization_document(pane.document_id)
+            .map(VisualizationDocument::presentation)
+            .unwrap_or_default()
+            .significant_digits;
+        persistent::evidence_bar(
+            ui,
+            pane.id,
+            &pane.measurements,
+            &pane.annotations,
+            usize::from(digits),
+        );
         let viewer_height = ui.available_height().max(1.0);
         ui.allocate_ui_with_layout(
             vec2(ui.available_width(), viewer_height),

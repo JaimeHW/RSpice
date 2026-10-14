@@ -2174,9 +2174,16 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
     EditorHandoff::ScalarMeasurement.dispatch(&mut app);
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::VisualizationStudio,
-        "the measurement author lives in Visualization Studio, so the hand-off has to arrive \
-         there rather than leave the reader on this page"
+        crate::workbench::SurfaceId::Results,
+        "Add measurement draws over the result viewer, so the hand-off has to arrive there \
+         rather than leave the reader on this page"
+    );
+    assert!(
+        matches!(
+            app.state.workbench.result_document_dialog,
+            Some(rspice_results_ui::document_dialogs::ResultDocumentDialog::Measurement(_))
+        ),
+        "the hand-off opens Add measurement"
     );
 }
 

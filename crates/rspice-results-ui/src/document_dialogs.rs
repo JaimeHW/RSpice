@@ -8,6 +8,7 @@
 
 pub mod add_pane;
 pub mod compare;
+pub mod measurement;
 
 /// The one result-document form open at a time.
 #[derive(Debug, Clone, PartialEq)]
@@ -16,6 +17,9 @@ pub enum ResultDocumentDialog {
     /// Compare datasets also opens over a quick view, where its outcome is
     /// shown and not kept.
     Compare(compare::CompareDraft),
+    /// Add measurement also opens over a quick view, where it evaluates the
+    /// expression and refuses to keep it.
+    Measurement(measurement::MeasurementDraft),
 }
 
 /// Option labels for a select row, and the label of the selected entry.

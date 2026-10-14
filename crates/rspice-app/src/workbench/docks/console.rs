@@ -1326,8 +1326,12 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 });
         });
+    // Add measurement draws over the result viewer, so it opens there.
     if add_measurement {
-        crate::workbench::documents::visualization_studio::open_measurement_editor(app);
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Results);
+        Command::MeasurementLibrary.execute(app);
     }
 }
 

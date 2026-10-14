@@ -478,3 +478,121 @@ fn compare_is_refused_without_a_compatible_baseline() {
     open_compare(&mut app.state);
     assert!(app.state.workbench.result_document_dialog.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Add measurement
+// ---------------------------------------------------------------------------
+
+/// Open Add measurement, type `expression`, and return what the form shows.
+fn measurement_preview(
+    app: &mut RSpiceApp,
+    expression: &str,
+) -> rspice_results_ui::document_dialogs::measurement::MeasurementPreview {
+    app.state.workbench.workspace = Workspace::Results;
+    open_measurement(&mut app.state);
+    let Some(ResultDocumentDialog::Measurement(mut draft)) =
+        app.state.workbench.result_document_dialog.clone()
+    else {
+        panic!("Add measurement opens its form");
+    };
+    draft.expression = expression.to_owned();
+    let preview = measurement::preview(&app.state, &draft);
+    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Measurement(draft));
+    preview
+}
+
+/// A measurement added in the result viewer is kept on the selected pane,
+/// with the trace it reads, and survives a save. Only the Studio could add
+/// one; the result viewer showed them and could not make them.
+#[test]
+fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
+    let (mut app, document_id) = document_fixture("two-linked-panes");
+    show_document(&mut app, document_id);
+    let panes = ordered_panes(&app, document_id);
+    app.state
+        .ui
+        .results
+        .session
+        .select_persistent_document_pane(document_id, panes[1].id);
+
+    let preview = measurement_preview(&mut app, "rms(V(out))");
+    assert_eq!(preview.refusal, None);
+    assert!(matches!(preview.value, Ok(Some(_))), "{:?}", preview.value);
+    commit_open_dialog(&mut app.state);
+    assert!(
+        app.state.workbench.result_document_dialog.is_none(),
+        "a kept measurement closes its form"
+    );
+
+    reload(&mut app, document_id);
+    let document = retained(&app, document_id);
+    let [measurement] = document.measurements() else {
+        panic!("one measurement is kept");
+    };
+    assert_eq!(measurement.pane_id, panes[1].id);
+    assert_eq!(measurement.expression.as_deref(), Some("rms(V(out))"));
+    // ∫y² over the two linear segments 0 → 1 → 0 on [0, 1] is 1/3.
+    let value = measurement.value.expect("the value is kept");
+    assert!((value - (1.0_f64 / 3.0).sqrt()).abs() < 1e-14, "{value}");
+    let trace = document
+        .traces()
+        .iter()
+        .find(|trace| trace.id == measurement.trace_ids[0])
+        .expect("the measurement references a kept trace");
+    assert_eq!(
+        (trace.pane_id, trace.label.as_str()),
+        (panes[1].id, "V(out)")
+    );
+    show_document(&mut app, document_id);
+}
+
+/// An expression that is still a trace, or names a signal the pane does not
+/// show, is refused under the field and keeps nothing.
+#[test]
+fn a_measurement_must_reduce_to_a_number() {
+    let (mut app, document_id) = document_fixture("single-pane");
+    show_document(&mut app, document_id);
+    let preview = measurement_preview(&mut app, "V(out)");
+    assert!(
+        preview
+            .value
+            .as_ref()
+            .is_err_and(|reason| reason.contains("reduce it")),
+        "{:?}",
+        preview.value
+    );
+    commit_open_dialog(&mut app.state);
+    assert!(retained(&app, document_id).measurements().is_empty());
+}
+
+/// Over a quick view the form still evaluates, so the value can be read,
+/// but Add is refused: a quick view has no document to keep it.
+#[test]
+fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![transient_run(1)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+
+    let preview = measurement_preview(&mut app, "max(V(out))");
+    assert_eq!(
+        preview.refusal.as_deref(),
+        Some("Create a result document to keep measurements.")
+    );
+    assert!(matches!(preview.value, Ok(Some(_))), "{:?}", preview.value);
+    commit_open_dialog(&mut app.state);
+    assert!(
+        matches!(
+            app.state.workbench.result_document_dialog,
+            Some(ResultDocumentDialog::Measurement(_))
+        ),
+        "a refused Add leaves the form open"
+    );
+    assert!(
+        app.state
+            .workspace
+            .content
+            .visualization_documents
+            .is_empty()
+    );
+}

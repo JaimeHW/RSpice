@@ -545,10 +545,6 @@ pub(crate) fn open_document_properties(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::DocumentProperties);
 }
 
-pub(crate) fn open_measurement_editor(app: &mut RSpiceApp) {
-    open_dock(app, VisualizationDock::Measurement);
-}
-
 pub(crate) fn open_annotation_editor(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::Annotation);
 }

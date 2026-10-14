@@ -22,7 +22,7 @@ use crate::results::visualization_document::{
     DocumentEdit, EntityRef, NewPane, PageLayout, PaneDataBinding, PaneId, PanePlacement,
     VisualizationDocument, VisualizationTransactionReceipt,
 };
-use crate::state::AnalysisResult;
+use crate::state::{AnalysisResult, SimulationRun};
 use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
 use super::{AppState, RSpiceApp, ResultViewer};
@@ -60,6 +60,43 @@ fn transact(
         .map_err(|error| error.to_string())
 }
 
+/// The run and analysis the reader is looking at: the selected pane's
+/// binding over a project result document, the active one over a quick view.
+/// Drawing a page re-selects the active run once per pane, so a document's
+/// pane is resolved from its binding, never from the active selection.
+fn reading_analysis(state: &AppState) -> Result<(&SimulationRun, &AnalysisResult), String> {
+    if state.workbench.workspace != Workspace::Results {
+        return Err("Open a result in Results.".to_owned());
+    }
+    let runs = &state.simulation.retained.runs;
+    if let Some(document_id) = active_document_id(state) {
+        let (_, pane_id) = super::persistent_document::reading_position(state, document_id)
+            .ok_or_else(|| "The result document has no pane.".to_owned())?;
+        let binding = project_document(state, document_id)?
+            .panes()
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .and_then(|pane| pane.binding)
+            .ok_or_else(|| "The selected pane shows no dataset.".to_owned())?;
+        let (run, analysis) = super::persistent_document::resolve_binding(state, binding)?;
+        return Ok((&runs[run], &runs[run].analyses[analysis]));
+    }
+    let run = state
+        .simulation
+        .view
+        .active_run_idx
+        .and_then(|index| runs.get(index))
+        .ok_or_else(|| "Select a result.".to_owned())?;
+    let analysis = state
+        .simulation
+        .view
+        .active_analysis_idx
+        .and_then(|index| run.analyses.get(index))
+        .or_else(|| run.analyses.first())
+        .ok_or_else(|| "The selected result holds no analysis.".to_owned())?;
+    Ok((run, analysis))
+}
+
 fn report(state: &mut AppState, result: Result<(), String>) {
     if let Err(error) = result {
         state.push_user_message(ConsoleMessage::error(error));
@@ -83,6 +120,12 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 rspice_results_ui::document_dialogs::compare::show(ctx, &mut draft, &choices);
             (ResultDocumentDialog::Compare(draft), choice)
         }
+        ResultDocumentDialog::Measurement(mut draft) => {
+            let preview = measurement::preview(&app.state, &draft);
+            let choice =
+                rspice_results_ui::document_dialogs::measurement::show(ctx, &mut draft, &preview);
+            (ResultDocumentDialog::Measurement(draft), choice)
+        }
     };
     app.state.workbench.result_document_dialog = Some(dialog);
     match choice {
@@ -100,6 +143,7 @@ fn commit_open_dialog(state: &mut AppState) {
     let result = match state.workbench.result_document_dialog.clone() {
         Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft).map(|()| None),
         Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
+        Some(ResultDocumentDialog::Measurement(draft)) => measurement::commit(state, &draft),
         None => return,
     };
     match result {
@@ -474,8 +518,10 @@ fn remove_pane_edits(
 
 mod compare;
 pub(super) mod links;
+mod measurement;
 
 pub(crate) use compare::{compare_available, open_compare};
+pub(crate) use measurement::open_measurement;
 
 #[cfg(test)]
 mod tests;
