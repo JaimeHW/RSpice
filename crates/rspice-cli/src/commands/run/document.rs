@@ -21,9 +21,10 @@
 
 use std::path::Path;
 
+use rspice_core::execution::result_document::ScalarValue;
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisResultDocument, AnalysisResultDocumentBuilder, ResultCoordinate,
-    ResultDocumentError, ResultNamespaces, SignalSchema,
+    ResultDocumentError, ResultNamespaces, ResultScalar, SignalSchema, SignalUnit,
 };
 
 use super::RunContext;
@@ -169,13 +170,21 @@ fn finalize(
     analysis_id: AnalysisInstanceId,
     mut builder: AnalysisResultDocumentBuilder,
 ) -> Result<AnalysisResultDocument, CliError> {
-    // A result around a transient state names the transient and the state's
-    // time, and is written in its own dataset.
+    // A result around a transient state names the `.TRAN` analysis whose
+    // trajectory holds the state as its parent, and the state's time as the
+    // `state_time` scalar in seconds, and is written in its own dataset.
     let mut output = analysis_id.tag();
     if let Some(state) = ctx.transient_state() {
-        builder = builder
-            .at_transient_state(state.transient, state.time)
-            .map_err(|error| document_error(ctx, analysis_id, error))?;
+        let state_time = ResultScalar::new(
+            "state_time",
+            "State time",
+            Some(SignalUnit::Second),
+            ScalarValue::Real {
+                value: Some(state.time),
+            },
+        )
+        .map_err(|error| document_error(ctx, analysis_id, error.into()))?;
+        builder = builder.parent_analysis(state.transient).scalar(state_time);
         output = state.dataset();
     }
     builder

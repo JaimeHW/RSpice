@@ -2736,10 +2736,19 @@ fn a_small_signal_result_at_a_transient_state_names_the_transient() {
     assert_eq!(at_op.parent_analysis(), None);
     assert!(at_op.scalars().is_empty());
 
+    let state_time = ResultScalar::new(
+        "state_time",
+        "State time",
+        Some(SignalUnit::Second),
+        ScalarValue::Real {
+            value: Some(5.5e-4),
+        },
+    )
+    .expect("a state time is a scalar");
     let at_state = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
         .expect("AC projection")
-        .at_transient_state(instance(AnalysisKind::Tran), 5.5e-4)
-        .expect("a transient names a state")
+        .parent_analysis(instance(AnalysisKind::Tran))
+        .scalar(state_time)
         .build()
         .expect("an AC result around a transient state");
     assert_eq!(
@@ -2761,14 +2770,6 @@ fn a_small_signal_result_at_a_transient_state_names_the_transient() {
         .expect("the document reads back");
     assert_eq!(decoded, at_state);
 
-    let not_a_transient = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
-        .expect("AC projection")
-        .at_transient_state(instance(AnalysisKind::Ac), 5.5e-4)
-        .expect_err("only a transient has states");
-    assert!(matches!(
-        not_a_transient,
-        ResultDocumentError::Malformed { .. }
-    ));
     let wrong = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
         .expect("AC projection")
         .parent_analysis(instance(AnalysisKind::Op))

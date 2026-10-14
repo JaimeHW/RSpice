@@ -477,38 +477,6 @@ fn device_states_from_reports(
 // Constructors
 //=============================================================================
 
-impl AnalysisResultDocumentBuilder {
-    /// Name the transient state a small-signal result linearized around
-    /// (`ACTIMES=`/`CHECKPOINT=`): the `.TRAN` analysis whose trajectory holds
-    /// it, as the parent, and the state's time as the `state_time` scalar in
-    /// seconds. One card publishes one document per state time, each so
-    /// named.
-    pub fn at_transient_state(
-        self,
-        transient: AnalysisInstanceId,
-        state_time: Value,
-    ) -> Result<Self, ResultDocumentError> {
-        if transient.kind() != crate::identity::AnalysisKind::Tran {
-            return Err(ResultDocumentError::Malformed {
-                location: "transient state",
-                detail: format!(
-                    "a transient state belongs to a .TRAN analysis, not to {}",
-                    transient.tag()
-                ),
-            });
-        }
-        let scalar = ResultScalar::new(
-            "state_time",
-            "State time",
-            Some(SignalUnit::Second),
-            ScalarValue::Real {
-                value: Some(state_time),
-            },
-        )?;
-        Ok(self.parent_analysis(transient).scalar(scalar))
-    }
-}
-
 impl AnalysisResultDocument {
     /// Project one converged operating point.
     pub fn from_operating_point(

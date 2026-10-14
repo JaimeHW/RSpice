@@ -1201,7 +1201,10 @@ impl Netlist {
     /// the card, and keep every small-signal state request with its card: a
     /// request whose card is dropped goes with it, and the rest follow their
     /// cards to their new positions.
-    pub fn retain_analyses(&mut self, mut keep: impl FnMut(usize, &AnalysisCommand) -> bool) {
+    pub(crate) fn retain_analyses(
+        &mut self,
+        mut keep: impl FnMut(usize, &AnalysisCommand) -> bool,
+    ) {
         let mut positions = Vec::with_capacity(self.analyses.len());
         let mut kept_count = 0usize;
         for (index, analysis) in self.analyses.iter().enumerate() {
@@ -16014,5 +16017,36 @@ mod tests {
                 ("XZERO.N1".to_string(), 0.0),
             ]
         );
+    }
+
+    /// Dropping cards moves each small-signal state request to its card's new
+    /// position, and a dropped card takes its request with it.
+    #[test]
+    fn retained_cards_keep_their_state_requests() {
+        let mut netlist = Netlist::parse(
+            "* states\nv1 in 0 dc 1 ac 1\nr1 in out 1k\nc1 out 0 1n\n.tran 10n 5u\n\
+             .op\n.ac dec 10 1 1meg actimes=2u\n.noise v(out) v1 dec 10 1 1meg actimes=3u\n.end\n",
+        )
+        .expect("the stated deck parses");
+        let stated = |netlist: &Netlist| {
+            netlist
+                .small_signal_states
+                .iter()
+                .map(|request| (request.analysis_index, request.source.clone()))
+                .collect::<Vec<_>>()
+        };
+        let times = |time| SmallSignalStateSource::TransientTimes(vec![time]);
+        assert_eq!(stated(&netlist), [(2, times(2.0e-6)), (3, times(3.0e-6))]);
+
+        netlist.retain_analyses(|_, analysis| !matches!(analysis, AnalysisCommand::Op));
+        assert_eq!(stated(&netlist), [(1, times(2.0e-6)), (2, times(3.0e-6))]);
+        assert_eq!(netlist.small_signal_state(1), Some(&times(2.0e-6)));
+
+        netlist.retain_analyses(|index, _| index != 1);
+        assert_eq!(stated(&netlist), [(1, times(3.0e-6))]);
+        assert!(matches!(
+            netlist.analyses.as_slice(),
+            [AnalysisCommand::Tran { .. }, AnalysisCommand::Noise { .. }]
+        ));
     }
 }

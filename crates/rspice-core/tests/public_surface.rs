@@ -135,25 +135,23 @@ use rspice_core::analysis::harmonic_balance::{
 // and the `ContinuationAid` and `ContinuationStage` it names. Enum variant
 // payloads must be public; the simulation bridge (`rspice-simulation`
 // error.rs) and the Python exception mapping (`rspice-python`
-// errors/simulation.rs) read the variant. The census was 5,698, with no slack.
-// Small-signal analyses around a transient state (`ACTIMES=`/`CHECKPOINT=`):
-// - `netlist`: the sidecar's `SmallSignalStateRequest` and
-//   `SmallSignalStateSource`, the types of the public
-//   `Netlist::small_signal_states` field; `Netlist::small_signal_state`, which
-//   the CLI run command reads to route a card to its state and the simulation
-//   service's manual-deck reader reads to refuse one; and
-//   `Netlist::retain_analyses`, which keeps the sidecar with its cards
-//   wherever a caller drops cards (the core's materialized runs and restart
-//   identity, and the parse tests).
+// errors/simulation.rs) read the variant. The census was 5,695 under a
+// ceiling of 5,698.
+// Small-signal analyses around a transient state (`ACTIMES=`/`CHECKPOINT=`)
+// add eight statements for the CLI run command and the simulation service:
 // - `engine`: `run_small_signal_at_transient_times` and
-//   `run_small_signal_at_checkpoint` with `StateLinearizedResult`,
-//   `SmallSignalCardResult` and their re-export, which the CLI run command
-//   calls and publishes.
-// - `execution`: `AnalysisResultDocumentBuilder::at_transient_state`, which
-//   names a result's parent transient and state time for the CLI run
-//   command's documents.
-// The census is 5,705, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5705;
+//   `run_small_signal_at_checkpoint`, which both call; their
+//   `StateLinearizedResult` and its `SmallSignalCardResult`, whose variants
+//   both match; and the one re-export that names the two types outside the
+//   private module.
+// - `netlist`: `SmallSignalStateRequest` and `SmallSignalStateSource`, the
+//   types of the public `Netlist::small_signal_states` field, which the
+//   simulation service's headless tasks match and both callers' state
+//   routing matches; and `Netlist::small_signal_state`, the request of one
+//   card, which the CLI reads to route the card and the simulation service to
+//   run or refuse it.
+// The census is 5,703, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5703;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

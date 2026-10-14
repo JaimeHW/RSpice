@@ -7,6 +7,7 @@
 //! the transient state, solved as an ordinary operating point.
 
 use rspice_core::engine::{SmallSignalCardResult, StateLinearizedResult};
+use rspice_core::execution::DeckPlan;
 use rspice_core::netlist::{AnalysisCommand, SmallSignalStateSource};
 use rspice_core::{Complex64, Engine, Netlist, NoAbort};
 
@@ -109,37 +110,45 @@ fn every_small_signal_card_round_trips_its_state_keyword() {
 }
 
 /// The sidecar names its card by index, so a card after a `.STEP` axis keeps
-/// its state when a run axis is stripped from a materialized coordinate.
+/// its state when the run axis is stripped from every materialized
+/// coordinate.
 #[test]
-fn a_state_request_follows_its_card_when_cards_are_dropped() {
-    let mut netlist = parse(&rc_deck(
+fn a_state_request_follows_its_card_into_each_materialized_run() {
+    let netlist = parse(&rc_deck(
         ".step param tcap list 3u 4u\n.op\n.ac dec 10 1 1meg actimes=2u\n.tf v(out) v1",
     ));
     let index = |netlist: &Netlist| {
-        netlist
-            .analyses
-            .iter()
-            .position(|analysis| matches!(analysis, AnalysisCommand::Ac { .. }))
-            .expect("the .ac card")
+        card_index(netlist, |analysis| {
+            matches!(analysis, AnalysisCommand::Ac { .. })
+        })
     };
     let before = index(&netlist);
-    assert_eq!(
-        netlist.small_signal_state(before),
-        Some(&SmallSignalStateSource::TransientTimes(vec![2.0e-6]))
-    );
-    netlist.retain_analyses(|_, analysis| !matches!(analysis, AnalysisCommand::Step(_)));
-    let after = index(&netlist);
-    assert_eq!(after, before - 1);
-    assert_eq!(netlist.small_signal_states.len(), 1);
-    assert_eq!(
-        netlist.small_signal_state(after),
-        Some(&SmallSignalStateSource::TransientTimes(vec![2.0e-6]))
-    );
-    netlist.retain_analyses(|_, analysis| !matches!(analysis, AnalysisCommand::Ac { .. }));
-    assert!(
-        netlist.small_signal_states.is_empty(),
-        "a dropped card takes its state with it"
-    );
+    let stated = Some(SmallSignalStateSource::TransientTimes(vec![2.0e-6]));
+    assert_eq!(netlist.small_signal_state(before).cloned(), stated);
+
+    let engine = Engine::default();
+    let plan = DeckPlan::from_netlist(&netlist, &engine.config().resource_limits)
+        .expect("the stepped deck plans");
+    let materializer = engine
+        .prepare_deck_plan_materializer(&netlist, &plan)
+        .expect("the stepped deck materializes");
+    assert_eq!(materializer.len(), 2, "one run per stepped value");
+    for run_index in 0..materializer.len() {
+        let run = materializer
+            .materialize_run(run_index)
+            .unwrap_or_else(|error| panic!("run {run_index} materializes: {error}"));
+        let run = run.netlist();
+        assert!(
+            !run.analyses
+                .iter()
+                .any(|analysis| matches!(analysis, AnalysisCommand::Step(_))),
+            "a materialized run carries no run axis"
+        );
+        let after = index(run);
+        assert_eq!(after, before - 1, "the .ac card moves up past the axis");
+        assert_eq!(run.small_signal_states.len(), 1);
+        assert_eq!(run.small_signal_state(after).cloned(), stated);
+    }
 }
 
 #[test]
