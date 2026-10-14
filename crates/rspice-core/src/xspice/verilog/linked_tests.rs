@@ -391,8 +391,8 @@ fn linked_digital_analog_probes_and_refusals_preserve_instance_identity() {
 
 /// Design P2 section 4.9: each linked instance is a root named by its
 /// instance path, and a name over the one linked store may start at any root
-/// (`b.u1.q`) or at `$root` (IEEE 1364-2005 section 12.5). A compiled module
-/// is its own root.
+/// (`b.u1.q`) or at `$root` (IEEE 1800-2017 section 23.3.1). A compiled
+/// module is its own root.
 #[test]
 fn names_start_at_any_root_or_at_root_over_the_linked_store() {
     let design = CompiledDigitalDesign::compile(

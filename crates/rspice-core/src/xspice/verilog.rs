@@ -634,7 +634,7 @@ struct DesignNames<'a> {
 /// design, a path from one of its roots (`a.u1.q`): each instance a design was
 /// linked from is a root named by its instance path. A compiled module is its
 /// own root, so `top.q` also names its `q`. Any of these may be spelled from
-/// `$root` (IEEE 1364-2005 section 12.5): `$root.top.q`, `$root.a.u1.q`.
+/// `$root` (IEEE 1800-2017 section 23.3.1): `$root.top.q`, `$root.a.u1.q`.
 fn resolve_signal(
     host: &DigitalHost,
     name: &str,
