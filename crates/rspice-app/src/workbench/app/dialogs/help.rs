@@ -274,18 +274,13 @@ impl RSpiceApp {
                     any_shown = true;
 
                     ui.add_space(8.0);
-                    let mut header = egui::text::LayoutJob::default();
-                    header.append(
-                        &category.display_name().to_uppercase(),
-                        0.0,
-                        egui::TextFormat {
-                            font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
-                            color: c.text_faint,
-                            extra_letter_spacing: 0.08 * tokens::FS_0,
-                            ..Default::default()
-                        },
+                    // Category heads are painted as written, in sentence
+                    // case, like every kit header.
+                    ui.label(
+                        RichText::new(category.display_name())
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_faint),
                     );
-                    ui.label(header);
                     ui.add_space(2.0);
 
                     for command in commands {
@@ -395,21 +390,13 @@ fn render_help_page(ui: &mut egui::Ui, query: &mut String, action: &mut Option<H
         });
     }
     ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        if ui.button("Command reference").clicked() {
-            *action = Some(HelpAction::Command(Command::KeyboardShortcuts));
-        }
-        if ui.button("Platform capability matrix").clicked() {
-            *action = Some(HelpAction::Command(Command::FeatureAvailability));
-        }
-        if ui.button("Interoperability matrix").clicked() {
-            *action = Some(HelpAction::Command(Command::InteroperabilityMatrix));
-        }
-    });
+    if ui.button("Command reference").clicked() {
+        *action = Some(HelpAction::Command(Command::KeyboardShortcuts));
+    }
 }
 
 fn render_release_notes(ui: &mut egui::Ui) {
-    section_heading(ui, "CURRENT BUILD");
+    section_heading(ui, "Current build");
     Grid::new("help.release-build")
         .num_columns(2)
         .spacing([24.0, 7.0])
@@ -428,24 +415,10 @@ fn render_release_notes(ui: &mut egui::Ui) {
             ));
             ui.end_row();
         });
-    ui.add_space(12.0);
-    section_heading(ui, "COMPATIBILITY CHANGES");
-    ui.label(
-        "\u{2022} Project execution contexts are migrated through schema 9 before they can authorize simulation.",
-    );
-    ui.label(
-        "\u{2022} Project descriptors, technology bindings, model-bound symbols, and source registries retain explicit schema identities.",
-    );
-    ui.label(
-        "\u{2022} Unsupported future schemas fail closed; they are never silently rewritten by this build.",
-    );
-    ui.label(
-        "\u{2022} Browser and native persistence bindings remain separate authorities and cannot be inferred from a pathname alone.",
-    );
 }
 
 fn render_migration_guide(ui: &mut egui::Ui) {
-    section_heading(ui, "SUPPORTED PROJECT CONTRACTS");
+    section_heading(ui, "Supported file versions");
     Grid::new("help.migration-contracts")
         .num_columns(2)
         .spacing([24.0, 7.0])
@@ -467,7 +440,7 @@ fn render_migration_guide(ui: &mut egui::Ui) {
             ui.end_row();
         });
     ui.add_space(12.0);
-    section_heading(ui, "SAFE MIGRATION WORKFLOW");
+    section_heading(ui, "Migrating a project");
     ui.label("1. Preserve the original project and all externally referenced model/source files.");
     ui.label("2. Open a project copy; RSpice validates every supported schema before mutation.");
     ui.label("3. Review migration diagnostics, source bindings, model revisions, and analysis dependencies.");
@@ -479,7 +452,7 @@ fn render_diagnostics(ui: &mut egui::Ui, app: &RSpiceApp) {
     let config = dirs::config_dir()
         .map(|path| path.join("rspice").display().to_string())
         .unwrap_or_else(|| "Host configuration directory unavailable".to_owned());
-    section_heading(ui, "SYSTEM DIAGNOSTICS");
+    section_heading(ui, "System diagnostics");
     Grid::new("help.system-diagnostics")
         .num_columns(2)
         .spacing([24.0, 7.0])
@@ -536,12 +509,10 @@ fn render_support_bundle(
     include_session_log: &mut bool,
     disclosure_reviewed: &mut bool,
 ) {
-    section_heading(ui, "DISCLOSURE PREVIEW");
+    section_heading(ui, "Disclosure preview");
     ui.label("Always included:");
-    ui.label(
-        "\u{2022} product version, build identity, operating system, architecture, and host class",
-    );
-    ui.label("\u{2022} active workspace, project-open state, document counts, and schema versions");
+    ui.label("Product version, build identity, operating system, architecture, and host class");
+    ui.label("Active workspace, project-open state, document counts, and schema versions");
     ui.checkbox(
         include_session_log,
         format!(
@@ -566,7 +537,7 @@ fn render_support_bundle(
 }
 
 fn render_legal_privacy(ui: &mut egui::Ui) {
-    section_heading(ui, "PRIVACY AND SUPPORT DATA");
+    section_heading(ui, "Privacy and support data");
     ui.label(
         "RSpice support export is explicit and local. The disclosure preview controls whether the redacted in-memory session log is included.",
     );
@@ -574,7 +545,7 @@ fn render_legal_privacy(ui: &mut egui::Ui) {
         "Project content, models, results, credentials, license keys, and recovery checkpoints are excluded from the support artifact.",
     );
     ui.add_space(10.0);
-    section_heading(ui, "PRODUCT LICENSE");
+    section_heading(ui, "Product license");
     ScrollArea::vertical()
         .id_salt("help.legal-license")
         .max_height(300.0)
