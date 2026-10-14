@@ -13,8 +13,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use std::cell::RefCell;
 
 use super::state::{
-    ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, VerificationPage,
-    WorkbenchState, Workspace,
+    ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, WorkbenchState, Workspace,
 };
 
 pub(crate) mod code_context;
