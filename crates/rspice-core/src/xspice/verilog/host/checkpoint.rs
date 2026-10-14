@@ -442,7 +442,7 @@ impl DigitalHost {
             {
                 return Err("host effects name an undeclared `$monitor`".into());
             }
-            restored.effects.restore_state(&section.image)?;
+            restored.effects.restore_state(&self.plan, &section.image)?;
         }
         for (index, image) in slots.iter().enumerate() {
             let (process, parent) = lineage[index];

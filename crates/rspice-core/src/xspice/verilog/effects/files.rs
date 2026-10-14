@@ -95,6 +95,9 @@ pub(crate) enum FileOp {
     },
     /// Write at the end (`"a"` handles).
     Append { path: PathBuf, bytes: Vec<u8> },
+    /// Shorten to `length`: a resumed checkpoint discards what was written
+    /// after it.
+    Truncate { path: PathBuf, length: u64 },
     /// The design closed a handle on the file.
     Close { path: PathBuf },
 }
@@ -105,6 +108,7 @@ impl FileOp {
             Self::Create { path, .. }
             | Self::Write { path, .. }
             | Self::Append { path, .. }
+            | Self::Truncate { path, .. }
             | Self::Close { path } => path,
         }
     }
@@ -126,6 +130,9 @@ impl FileOp {
                 content[start..end].copy_from_slice(bytes);
             }
             Self::Append { bytes, .. } => content.extend_from_slice(bytes),
+            Self::Truncate { length, .. } => {
+                content.truncate(usize::try_from(*length).unwrap_or(usize::MAX));
+            }
             Self::Close { .. } => {}
         }
     }
@@ -286,6 +293,12 @@ fn apply_on_disk(open: &mut BTreeMap<PathBuf, std::fs::File>, op: &FileOp) -> st
             let file = open.get_mut(path.as_path()).expect("opened above");
             file.seek(SeekFrom::End(0))?;
             file.write_all(bytes)
+        }
+        FileOp::Truncate { path, length } => {
+            handle(open, path, false)?;
+            open.get_mut(path.as_path())
+                .expect("opened above")
+                .set_len(*length)
         }
         FileOp::Close { path } => {
             if let Some(mut file) = open.remove(path.as_path()) {
@@ -610,6 +623,12 @@ impl OpenFile {
             }
         }
     }
+
+    fn content_hash(&self) -> Option<String> {
+        self.content
+            .as_ref()
+            .map(|content| blake3::hash(content).to_hex().to_string())
+    }
 }
 
 /// Where a write goes.
@@ -647,13 +666,6 @@ pub(crate) struct HdlFiles {
 impl HdlFiles {
     pub(crate) fn has_pending(&self) -> bool {
         !self.pending.is_empty()
-    }
-
-    /// Whether no file is open and no write is pending.
-    pub(crate) fn is_idle(&self) -> bool {
-        self.pending.is_empty()
-            && self.descriptors.iter().all(Option::is_none)
-            && self.channels.iter().all(Option::is_none)
     }
 
     /// Hand the journal to the store; the failures, for warnings.
@@ -942,6 +954,145 @@ pub(crate) fn text_bytes(text: &str) -> Vec<u8> {
         }
     }
     bytes
+}
+
+/// A saved open handle (design P2 section 5.4, the effects section's file
+/// table). A write is restored by truncating the file to what the handle
+/// had written, so output after the checkpoint is discarded; a read is
+/// restored by re-reading the file, which must be what the handle read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HandleImage {
+    /// The descriptor `$fopen` returned.
+    pub descriptor: u32,
+    pub name: String,
+    pub path: String,
+    pub mode: OpenMode,
+    pub position: u64,
+    pub length: u64,
+    /// BLAKE3 of what a readable handle reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pushback: Vec<u8>,
+    #[serde(default)]
+    pub eof: bool,
+    #[serde(default)]
+    pub error: i32,
+}
+
+impl HdlFiles {
+    pub(crate) fn capture(&self) -> Result<Vec<HandleImage>, String> {
+        if !self.pending.is_empty() {
+            return Err("HDL file writes are not released".into());
+        }
+        let descriptors = self
+            .descriptors
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, file)| Some((FD_FLAG | slot as u32, file.as_ref()?)));
+        let channels = self
+            .channels
+            .iter()
+            .enumerate()
+            .filter_map(|(bit, file)| Some((1u32 << bit, file.as_ref()?)));
+        Ok(descriptors
+            .chain(channels)
+            .map(|(descriptor, file)| HandleImage {
+                descriptor,
+                name: file.name.to_string(),
+                path: file.path.to_string_lossy().into_owned(),
+                mode: file.mode,
+                position: file.position,
+                length: file.length,
+                content: file.content_hash(),
+                pushback: file.pushback.clone(),
+                eof: file.eof,
+                error: file.error,
+            })
+            .collect())
+    }
+
+    /// Reopen every saved handle. A written file is cut back to what it held
+    /// at the checkpoint; a read file must hold what the handle read.
+    pub(crate) fn restore(
+        &mut self,
+        options: &HdlFileOptions,
+        images: &[HandleImage],
+    ) -> Result<(), String> {
+        *self = Self::default();
+        for image in images {
+            let path = PathBuf::from(&image.path);
+            if image.mode.write && !options.unrestricted && !options.confines(&normalize(&path)) {
+                return Err(format!(
+                    "checkpointed HDL file {} is outside this run's directory {}",
+                    image.path,
+                    options.run_directory.display()
+                ));
+            }
+            let content = if image.mode.read {
+                let bytes = options
+                    .store
+                    .read(&path, &image.name)?
+                    .ok_or_else(|| format!("checkpointed HDL file {} is gone", image.path))?;
+                let length = usize::try_from(image.length).unwrap_or(usize::MAX);
+                let bytes = bytes.get(..length).map(<[u8]>::to_vec).ok_or_else(|| {
+                    format!(
+                        "checkpointed HDL file {} is shorter than when it was saved",
+                        image.path
+                    )
+                })?;
+                let hash = blake3::hash(&bytes).to_hex().to_string();
+                if image.content.as_deref() != Some(hash.as_str()) {
+                    return Err(format!(
+                        "checkpointed HDL file {} changed since it was saved",
+                        image.path
+                    ));
+                }
+                Some(bytes)
+            } else {
+                None
+            };
+            if image.mode.write {
+                self.journal(FileOp::Truncate {
+                    path: path.clone(),
+                    length: image.length,
+                });
+            }
+            let mut file = OpenFile::new(&image.name, path, image.mode, content);
+            file.position = image.position;
+            file.length = image.length;
+            file.pushback.clone_from(&image.pushback);
+            file.eof = image.eof;
+            file.error = image.error;
+            if image.descriptor & FD_FLAG != 0 {
+                let slot = (image.descriptor & !FD_FLAG) as usize;
+                if !(FIRST_SLOT..=1 << 20).contains(&slot) {
+                    return Err(format!(
+                        "checkpointed file descriptor 0x{:08x} is not one $fopen hands out",
+                        image.descriptor
+                    ));
+                }
+                if self.descriptors.len() <= slot {
+                    self.descriptors.resize(slot + 1, None);
+                }
+                self.descriptors[slot] = Some(file);
+            } else {
+                if !image.descriptor.is_power_of_two() || image.descriptor < 2 {
+                    return Err(format!(
+                        "checkpointed multichannel descriptor 0x{:08x} is not one bit of 1 to 30",
+                        image.descriptor
+                    ));
+                }
+                let bit = image.descriptor.trailing_zeros() as usize;
+                if self.channels.len() < CHANNEL_BITS {
+                    self.channels.resize(CHANNEL_BITS, None);
+                }
+                self.channels[bit] = Some(file);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

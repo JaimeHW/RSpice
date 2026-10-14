@@ -1,5 +1,5 @@
-//! Resolution, confinement, snapshot reads and commit-time writes (design P2
-//! section 4.3).
+//! Resolution, confinement, snapshot reads, commit-time writes and checkpoint
+//! offset truncation (design P2 section 4.3).
 
 use super::*;
 
@@ -226,4 +226,56 @@ fn a_memory_store_keeps_writes_off_the_disk() {
     files.write(target, b"more\n");
     assert!(files.reader(again).unwrap().seek(0, 0));
     assert_eq!(read_all(files.reader(again).unwrap()), b"kept\nmore\n");
+}
+
+/// A resumed checkpoint truncates each written file to what it held when the
+/// checkpoint was taken, so output written after it is discarded.
+#[test]
+fn a_restored_checkpoint_truncates_writes_after_it() {
+    let run = scratch("checkpoint");
+    let options = options(&run, HdlFileTarget::Disk);
+    let mut files = HdlFiles::default();
+    let descriptor = files.open(&options, "log.txt", Some("w")).unwrap();
+    let channel = files.open(&options, "mcd.txt", None).unwrap();
+    let target = files.write_targets(descriptor).unwrap()[0];
+    files.write(target, b"one\n");
+    files.write(
+        WriteTarget::Channel(channel.trailing_zeros() as usize),
+        b"m1\n",
+    );
+    files.release(&options.store);
+    let image = files.capture().unwrap();
+    files.write(target, b"after\n");
+    files.release(&options.store);
+    assert_eq!(std::fs::read(run.join("log.txt")).unwrap(), b"one\nafter\n");
+
+    let mut resumed = HdlFiles::default();
+    resumed.restore(&options, &image).unwrap();
+    resumed.write(target, b"two\n");
+    resumed.release(&options.store);
+    assert_eq!(std::fs::read(run.join("log.txt")).unwrap(), b"one\ntwo\n");
+    assert_eq!(std::fs::read(run.join("mcd.txt")).unwrap(), b"m1\n");
+    assert_eq!(resumed.write_targets(channel).unwrap().len(), 1);
+}
+
+#[test]
+fn a_restored_read_handle_must_find_the_file_it_was_reading() {
+    let run = scratch("checkpoint-read");
+    std::fs::write(run.join("in.txt"), "abcdef").unwrap();
+    let options = options(&run, HdlFileTarget::Disk);
+    let mut files = HdlFiles::default();
+    let descriptor = files.open(&options, "in.txt", Some("r")).unwrap();
+    files.reader(descriptor).unwrap().next_byte();
+    let image = files.capture().unwrap();
+    let mut resumed = HdlFiles::default();
+    resumed.restore(&options, &image).unwrap();
+    assert_eq!(read_all(resumed.reader(descriptor).unwrap()), b"bcdef");
+    std::fs::write(run.join("in.txt"), "abcdeX").unwrap();
+    let error = HdlFiles::default().restore(&options, &image).unwrap_err();
+    assert!(error.contains("changed since it was saved"), "{error}");
+    // A checkpoint is taken at a released boundary.
+    let written = files.open(&options, "w.txt", Some("w")).unwrap();
+    let target = files.write_targets(written).unwrap()[0];
+    files.write(target, b"x");
+    assert!(files.capture().is_err());
 }

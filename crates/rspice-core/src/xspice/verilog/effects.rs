@@ -969,9 +969,13 @@ impl HdlEffects {
         );
     }
 
-    /// Restore the state a checkpoint saved.
-    pub(crate) fn restore_state(&mut self, image: &checkpoint::EffectsImage) -> Result<(), String> {
-        image.restore_into(self)
+    /// Restore the state a checkpoint saved for `plan`.
+    pub(crate) fn restore_state(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        image: &checkpoint::EffectsImage,
+    ) -> Result<(), String> {
+        image.restore_into(plan, self)
     }
 }
 
