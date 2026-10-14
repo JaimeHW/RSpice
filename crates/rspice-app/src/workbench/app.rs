@@ -1476,6 +1476,9 @@ fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
 // =============================================================================
 
 #[cfg(test)]
+mod chrome_review_tests;
+
+#[cfg(test)]
 mod gesture_tests;
 
 #[cfg(test)]
