@@ -124,7 +124,9 @@ enum HeldTransientState {
     ///
     /// Behind a lock because an engine is shared across worker threads and a
     /// circuit's device caches are not: the lock is taken once, to clone.
-    Captured(std::sync::Mutex<CapturedTransientState>),
+    /// Boxed: a captured circuit is kilobytes, and the engine holding it is
+    /// moved by value.
+    Captured(Box<std::sync::Mutex<CapturedTransientState>>),
     /// Run the state transient to this time on whichever netlist the analysis
     /// prepares. A sensitivity perturbs the deck, and its state moves with
     /// the perturbation, so every perturbed solve reruns the transient.
@@ -382,7 +384,9 @@ impl Engine {
                     netlist,
                     TransientStateBias {
                         window,
-                        state: HeldTransientState::Captured(std::sync::Mutex::new(captured)),
+                        state: HeldTransientState::Captured(Box::new(std::sync::Mutex::new(
+                            captured,
+                        ))),
                     },
                 );
                 Ok(StateLinearizedResult {
@@ -448,7 +452,7 @@ impl Engine {
             netlist,
             TransientStateBias {
                 window,
-                state: HeldTransientState::Captured(std::sync::Mutex::new(captured)),
+                state: HeldTransientState::Captured(Box::new(std::sync::Mutex::new(captured))),
             },
         );
         Ok(StateLinearizedResult {
