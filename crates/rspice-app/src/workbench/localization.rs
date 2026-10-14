@@ -479,6 +479,7 @@ define_messages! {
     CodeNavigatorOutlineVariables => "Variables",
     CodeNavigatorOutlineNets => "Branches and nets",
     CodeNavigatorOutlineFunctions => "Analog functions",
+    CodeNavigatorUsedIn => "Used in",
     CodeNavigatorRoleBuildProfile => "build profile",
     CodeNavigatorRoleEntry => "entry",
     CodeNavigatorRoleRunPlan => "run plan",

@@ -12,12 +12,14 @@
 //! the Python entry because the bundle says so, not because of its extension.
 //!
 //! Below the files, the Verilog-A rail states what the file in front of the
-//! reader includes and where each include resolved, and what it declares.
+//! reader includes and where each include resolved, what it declares, and
+//! where the cell is placed.
 
 use super::*;
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::design_system::{Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceFileAction, SourceIncludeTarget, SourceNavigation, SourceOutlineGroup,
@@ -28,6 +30,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 /// The rail of a Verilog-A cell view's bundle, with its file operations.
 pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::VerilogA;
+    let reference = app.state.workspace.content.active_view.clone();
     let actions = active_bundle(&app.state, language).map(|bundle| FileActions {
         bundle_id: bundle.id(),
         root: bundle.root().logical_path().to_owned(),
@@ -43,6 +46,10 @@ pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
         active: active_path(&app.state, language),
         language,
         actions,
+        used_in: Some(
+            app.state
+                .cell_instances(&reference.library, &reference.cell, None),
+        ),
     };
     show_rail(ui, app, rail);
 }
@@ -56,6 +63,7 @@ pub(super) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
         active: active_path(&app.state, language),
         language,
         actions: None,
+        used_in: None,
     };
     show_rail(ui, app, rail);
 }
@@ -68,6 +76,8 @@ struct Rail {
     active: Option<String>,
     language: ProjectSourceLanguage,
     actions: Option<FileActions>,
+    /// The cell's placed instances, for a rail whose bundle is a cell view's.
+    used_in: Option<Vec<CellInstanceUse>>,
 }
 
 /// New, rename and delete for a bundle's files, offered by the rail that
@@ -317,6 +327,7 @@ enum RailRequest {
     },
     /// Read a built-in header in the editor well.
     ViewHeader(&'static str),
+    OpenInstance(CellInstanceUse),
 }
 
 fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
@@ -362,6 +373,9 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
                 includes_section(ui, &navigation, header, messages, &mut request);
             }
             outline_section(ui, &navigation, active, messages, &mut request);
+            if let Some(used_in) = &rail.used_in {
+                used_in_section(ui, used_in, messages, &mut request);
+            }
         });
 
     match request {
@@ -393,6 +407,7 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
                 });
             }
         }
+        Some(RailRequest::OpenInstance(usage)) => open_instance(&mut app.state, &usage),
     }
 }
 
@@ -647,6 +662,51 @@ const fn outline_group_icon(group: SourceOutlineGroup) -> WorkbenchIcon {
         SourceOutlineGroup::Nets => WorkbenchIcon::Wire,
         SourceOutlineGroup::Variables | SourceOutlineGroup::Functions => WorkbenchIcon::Code,
     }
+}
+
+/// The cell's instances across the project's schematics. Its header counts
+/// them, which is the whole answer when there are none.
+fn used_in_section(
+    ui: &mut Ui,
+    used_in: &[CellInstanceUse],
+    messages: MessageCatalog,
+    request: &mut Option<RailRequest>,
+) {
+    section_header(
+        ui,
+        &messages.text(MessageId::CodeNavigatorUsedIn),
+        Some(&used_in.len().to_string()),
+    );
+    for usage in used_in {
+        let response = nav_row_response(
+            ui,
+            WorkbenchIcon::Instance,
+            &format!("{} / {}", usage.schematic.cell, usage.instance),
+            false,
+            None,
+        )
+        .on_hover_text(usage.schematic.display_path());
+        if response.clicked() {
+            *request = Some(RailRequest::OpenInstance(usage.clone()));
+        }
+    }
+}
+
+/// Open the schematic `usage` is placed in, with the instance selected and
+/// centred.
+fn open_instance(state: &mut AppState, usage: &CellInstanceUse) {
+    state.open_workspace_view(usage.schematic.clone());
+    let position = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == usage.component_id)
+        .map(|component| component.pos);
+    let editor = &mut state.schematic.session.editor;
+    editor.selection.select_only_component(usage.component_id);
+    editor.net_highlight.clear();
+    editor.center_request = position;
 }
 
 fn source_row_icon(role: Option<ProjectSourceRole>) -> WorkbenchIcon {
