@@ -2267,6 +2267,24 @@ impl SmallSignalStateSource {
     }
 }
 
+impl AnalysisCommand {
+    /// Whether this is a small-signal card that may linearize around a
+    /// transient state (`ACTIMES=`/`CHECKPOINT=`).
+    pub(crate) const fn takes_small_signal_state(&self) -> bool {
+        matches!(
+            self,
+            Self::Ac { .. }
+                | Self::Noise { .. }
+                | Self::Tf { .. }
+                | Self::Sp { .. }
+                | Self::Stb { .. }
+                | Self::PoleZero { .. }
+                | Self::Sensitivity { .. }
+                | Self::Disto { .. }
+        )
+    }
+}
+
 /// Analysis command from netlist
 #[derive(Debug, Clone)]
 pub enum AnalysisCommand {

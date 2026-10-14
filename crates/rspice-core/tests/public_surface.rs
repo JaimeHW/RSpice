@@ -144,11 +144,12 @@ use rspice_core::analysis::harmonic_balance::{
 //   its state; and `Netlist::retain_analyses`, which keeps the sidecar with
 //   its cards wherever a frontend drops cards (the simulation service's
 //   transient preparation).
-// - `engine`: `run_small_signal_at_transient_times` with
-//   `StateLinearizedResult`, `SmallSignalCardResult` and their re-export,
-//   which the CLI run command and the simulation service call and publish.
-// The census is 5,703, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5703;
+// - `engine`: `run_small_signal_at_transient_times` and
+//   `run_small_signal_at_checkpoint` with `StateLinearizedResult`,
+//   `SmallSignalCardResult` and their re-export, which the CLI run command and
+//   the simulation service call and publish.
+// The census is 5,704, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5704;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

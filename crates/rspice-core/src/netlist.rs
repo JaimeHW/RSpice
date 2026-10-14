@@ -1179,7 +1179,18 @@ impl Netlist {
 
     /// The transient state the analysis card at `analysis_index` linearizes
     /// around, when the card names one with `ACTIMES=` or `CHECKPOINT=`.
+    ///
+    /// Only a small-signal card has one: a caller that replaced the cards
+    /// without their requests leaves a request naming some other card, which
+    /// is not that card's state.
     pub fn small_signal_state(&self, analysis_index: usize) -> Option<&SmallSignalStateSource> {
+        if !self
+            .analyses
+            .get(analysis_index)
+            .is_some_and(AnalysisCommand::takes_small_signal_state)
+        {
+            return None;
+        }
         self.small_signal_states
             .iter()
             .find(|request| request.analysis_index == analysis_index)

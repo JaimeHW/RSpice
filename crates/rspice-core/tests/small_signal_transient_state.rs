@@ -428,6 +428,227 @@ fn a_device_no_checkpoint_carries_still_linearizes_around_a_live_state() {
     }
 }
 
+/// The same deck cannot write the state to a checkpoint: the capture is
+/// refused, before any solve, by the transient's own checkpoint blocker.
+#[test]
+fn a_device_no_checkpoint_carries_refuses_the_checkpoint_capture() {
+    let netlist = parse(B3SOI_GAIN_STAGE);
+    let (stop, max_step) = transient_window(&netlist);
+    let error = Engine::default()
+        .run_tran_checkpointed(&netlist, stop, max_step)
+        .expect_err("B3SOI's accepted state has no checkpoint image");
+    let rspice_core::SimulationError::UnsupportedCapability(refusal) = &error else {
+        panic!("a checkpoint blocker is a capability refusal: {error}");
+    };
+    assert_eq!(refusal.capability, "analysis.tran.checkpoint_capability");
+}
+
+/// The deck's first `.TRAN` card's stop time and resolved maximum step.
+fn transient_window(netlist: &Netlist) -> (f64, f64) {
+    let Some(AnalysisCommand::Tran {
+        step,
+        stop,
+        start,
+        max_step,
+        ..
+    }) = netlist
+        .analyses
+        .iter()
+        .find(|card| matches!(card, AnalysisCommand::Tran { .. }))
+        .cloned()
+    else {
+        panic!("the deck has a .TRAN card")
+    };
+    let max_step =
+        rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
+            .expect("the window resolves");
+    (stop, max_step)
+}
+
+/// Write `checkpoint` to a file and read it back as a frontend loads one.
+fn through_a_file(
+    checkpoint: &rspice_core::engine::TransientCheckpoint,
+    name: &str,
+) -> rspice_core::engine::TransientCheckpoint {
+    let path = std::env::temp_dir().join(format!(
+        "rspice_state_{name}_{}.rspice-tran",
+        std::process::id()
+    ));
+    checkpoint.save(&path).expect("the checkpoint saves");
+    let limit = 1 << 30;
+    let loaded = rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
+        &path, limit, limit, &NoAbort,
+    );
+    let _ = std::fs::remove_file(&path);
+    loaded.expect("the checkpoint loads")
+}
+
+/// Every node and branch of two AC sweeps agree point for point.
+fn assert_sweeps_agree(
+    what: &str,
+    actual: &[rspice_core::analysis::AcResult],
+    expected: &[rspice_core::analysis::AcResult],
+    rel: f64,
+) {
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "{what}: one point per frequency"
+    );
+    for (point, reference) in actual.iter().zip(expected) {
+        assert_eq!(point.frequency, reference.frequency);
+        assert_eq!(point.node_names, reference.node_names);
+        for (name, (&value, &expected)) in point
+            .node_names
+            .iter()
+            .zip(point.voltages.iter().zip(&reference.voltages))
+        {
+            assert_phasor_close(
+                &format!("{what}: v({name}) at {} Hz", point.frequency),
+                value,
+                expected,
+                rel,
+            );
+        }
+        for (name, (&value, &expected)) in point
+            .branch_names
+            .iter()
+            .zip(point.currents.iter().zip(&reference.currents))
+        {
+            assert_phasor_close(
+                &format!("{what}: i({name}) at {} Hz", point.frequency),
+                value,
+                expected,
+                rel,
+            );
+        }
+    }
+}
+
+/// The diode-RC state written to a checkpoint file at T and read back
+/// linearizes as the live state at T does. The deck that reads it is the
+/// deck that wrote it plus the card, so the card's `CHECKPOINT=` is all that
+/// tells the two apart, and the restart identity sets it aside.
+#[test]
+fn a_checkpoint_file_linearizes_like_the_live_state_it_holds() {
+    let live = parse(DIODE_RC);
+    let index = card_index(&live, |card| matches!(card, AnalysisCommand::Ac { .. }));
+    let engine = Engine::default();
+    let expected = run_at_state_times(&engine, &live, index);
+
+    let writer = parse(&DIODE_RC.replace(".ac dec 4 1k 100meg actimes=20u\n", ""));
+    let (stop, max_step) = transient_window(&writer);
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&writer, stop, max_step)
+        .expect("the diode-RC transient checkpoints");
+    let checkpoint = through_a_file(&checkpoint, "diode_rc");
+
+    let reader = parse(&DIODE_RC.replace("actimes=20u", "checkpoint=\"diode_rc.rspice-tran\""));
+    let result = engine
+        .run_small_signal_at_checkpoint(&reader, index, &checkpoint, &NoAbort)
+        .unwrap_or_else(|error| panic!("the card runs at the checkpoint's state: {error}"));
+    assert_eq!(result.state_time, expected[0].state_time);
+    assert_sweeps_agree(
+        "checkpoint against live state",
+        ac_points(&result),
+        ac_points(&expected[0]),
+        1.0e-9,
+    );
+
+    // A deck that is not the one that wrote the checkpoint is refused.
+    let other = parse(
+        &DIODE_RC
+            .replace("actimes=20u", "checkpoint=\"diode_rc.rspice-tran\"")
+            .replace("r1 out 0 10k", "r1 out 0 12k"),
+    );
+    let error = engine
+        .run_small_signal_at_checkpoint(&other, index, &checkpoint, &NoAbort)
+        .expect_err("a checkpoint of another deck is not this deck's state");
+    assert!(!error.to_string().is_empty());
+}
+
+/// A `.SENS … AC` card around a state reruns the state transient for every
+/// perturbation: its derivative is the central difference of the card run
+/// around the states of the perturbed decks. A DC `.SENS` card, and any
+/// `.SENS` card at a checkpoint, is refused.
+#[test]
+fn an_ac_sensitivity_at_a_state_follows_the_state_through_the_perturbation() {
+    let deck = |load: f64, card: &str| {
+        DIODE_RC
+            .replace("r1 out 0 10k", &format!("r1 out 0 {load:.17e}"))
+            .replace(".ac dec 4 1k 100meg actimes=20u", card)
+    };
+    let engine = Engine::default();
+    let sens = parse(&deck(
+        1.0e4,
+        ".sens v(out) r1 ac lin 1 100k 100k actimes=20u",
+    ));
+    let index = card_index(&sens, |card| {
+        matches!(card, AnalysisCommand::Sensitivity { .. })
+    });
+    let results = run_at_state_times(&engine, &sens, index);
+    let SmallSignalCardResult::Sensitivity(card) = &results[0].result else {
+        panic!("a .sens card gives a sensitivity result")
+    };
+    let rspice_core::engine::SensitivityCardResult::Ac(ac) = card.as_ref() else {
+        panic!("a .sens … ac card gives an AC sensitivity")
+    };
+    let row = ac
+        .sensitivities
+        .iter()
+        .find(|row| row.element.eq_ignore_ascii_case("r1"))
+        .unwrap_or_else(|| panic!("an r1 row: {:?}", ac.sensitivities));
+
+    let step = 1.0e-3;
+    let at = |load: f64| {
+        let netlist = parse(&deck(load, ".ac lin 1 100k 100k actimes=20u"));
+        let index = card_index(&netlist, |card| matches!(card, AnalysisCommand::Ac { .. }));
+        ac_voltage(
+            &ac_points(&run_at_state_times(&engine, &netlist, index)[0])[0],
+            "out",
+        )
+    };
+    let difference = (at(1.0e4 * (1.0 + step)) - at(1.0e4 * (1.0 - step))) / (2.0e4 * step);
+    assert_phasor_close(
+        "d v(out) / d r1 around the state",
+        row.absolute[0],
+        difference,
+        1.0e-3,
+    );
+
+    let dc = parse(&deck(1.0e4, ".sens v(out) actimes=20u"));
+    let index = card_index(&dc, |card| {
+        matches!(card, AnalysisCommand::Sensitivity { .. })
+    });
+    let error = engine
+        .run_small_signal_at_transient_times(&dc, index, &[20.0e-6], &NoAbort)
+        .expect_err("a DC .sens card has no derivative of a transient state");
+    let rspice_core::SimulationError::UnsupportedCapability(refusal) = &error else {
+        panic!("a capability refusal: {error}");
+    };
+    assert_eq!(refusal.capability, "analysis.sens.transient_state.dc");
+
+    let writer = parse(&deck(1.0e4, ""));
+    let (stop, max_step) = transient_window(&writer);
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&writer, stop, max_step)
+        .expect("the diode-RC transient checkpoints");
+    let at_checkpoint = parse(&deck(
+        1.0e4,
+        ".sens v(out) r1 ac lin 1 100k 100k checkpoint=\"s.rspice-tran\"",
+    ));
+    let error = engine
+        .run_small_signal_at_checkpoint(&at_checkpoint, index, &checkpoint, &NoAbort)
+        .expect_err("a perturbed deck is not the deck that wrote the checkpoint");
+    let rspice_core::SimulationError::UnsupportedCapability(refusal) = &error else {
+        panic!("a capability refusal: {error}");
+    };
+    assert_eq!(
+        refusal.capability,
+        "analysis.sens.transient_state.checkpoint"
+    );
+}
+
 /// A trim code that only the transient reaches: the corpus trim register
 /// starts at code 1010 and an SPI frame shifts in 1111, latched when chip
 /// select rises at 400 µs. Around the state at 550 µs the amplifier is the
@@ -597,6 +818,62 @@ mod trim {
         assert!(
             moved,
             "code 15 linearizes differently from the initial code 10"
+        );
+    }
+
+    /// The same state, written at 550 µs by the restart schedule a
+    /// `.OPTIONS RESTART JOB=` run takes and read back from the file, holds
+    /// the latched code: the held digital state comes back with the analog
+    /// state, and the card linearizes as it does around the live state.
+    #[test]
+    fn the_code_loaded_over_spi_reads_back_from_a_restart_checkpoint() {
+        let register = SourceFile::new("v", TRIM_REGISTER);
+        let load = SourceFile::new("va", NOISY_LOAD);
+        let live = parse(&trim_deck(
+            &register,
+            &load,
+            ".ac dec 2 1k 10meg actimes=550u\n",
+        ));
+        let index = card_index(&live, |card| matches!(card, AnalysisCommand::Ac { .. }));
+        let engine = Engine::default();
+        let expected = run_at_state_times(&engine, &live, index);
+
+        let writer = parse(&trim_deck(
+            &register,
+            &load,
+            ".options restart job=trim_state initial_interval=550u\n",
+        ));
+        // The schedule's one nominal time is INITIAL_INTERVAL, which is the
+        // stop time: both are the deck's own 550u.
+        let (stop, max_step) = transient_window(&writer);
+        let (_, scheduled) = engine
+            .run_tran_checkpoint_schedule_with_startup_mode(
+                &writer,
+                stop,
+                max_step,
+                rspice_core::engine::TransientStartupMode::OperatingPoint,
+                &[stop],
+            )
+            .expect("the trim deck writes its restart checkpoint");
+        let [saved] = scheduled.as_slice() else {
+            panic!("one checkpoint at 550 us, not {}", scheduled.len())
+        };
+        let checkpoint = through_a_file(&saved.checkpoint, "trim");
+
+        let reader = parse(&trim_deck(
+            &register,
+            &load,
+            ".ac dec 2 1k 10meg checkpoint=\"trim_state\"\n",
+        ));
+        let result = engine
+            .run_small_signal_at_checkpoint(&reader, index, &checkpoint, &NoAbort)
+            .unwrap_or_else(|error| panic!("the card runs at the checkpoint's state: {error}"));
+        assert_eq!(result.state_time, expected[0].state_time);
+        assert_sweeps_agree(
+            "checkpoint against live state",
+            ac_points(&result),
+            ac_points(&expected[0]),
+            1.0e-9,
         );
     }
 }

@@ -140,7 +140,7 @@ impl TransientStateBias {
     }
 }
 
-/// The cards that linearize, and the analysis each refuses under.
+/// The small-signal card at `analysis_index`, or the refusal of any other.
 fn small_signal_card(
     netlist: &Netlist,
     analysis_index: usize,
@@ -151,21 +151,14 @@ fn small_signal_card(
             netlist.analyses.len()
         ))
     })?;
-    match card {
-        AnalysisCommand::Ac { .. }
-        | AnalysisCommand::Noise { .. }
-        | AnalysisCommand::Tf { .. }
-        | AnalysisCommand::Sp { .. }
-        | AnalysisCommand::Stb { .. }
-        | AnalysisCommand::PoleZero { .. }
-        | AnalysisCommand::Sensitivity { .. }
-        | AnalysisCommand::Disto { .. } => Ok(card),
-        other => Err(SimulationError::Netlist(format!(
-            "only .AC, .NOISE, .TF, .SP, .STB, .PZ, .SENS and .DISTO linearize around a \
-             transient state; analysis {analysis_index} is {}",
-            card_name(other)
-        ))),
+    if card.takes_small_signal_state() {
+        return Ok(card);
     }
+    Err(SimulationError::Netlist(format!(
+        "only .AC, .NOISE, .TF, .SP, .STB, .PZ, .SENS and .DISTO linearize around a transient \
+         state; analysis {analysis_index} is {}",
+        card_name(card)
+    )))
 }
 
 fn card_name(card: &AnalysisCommand) -> &'static str {
@@ -400,6 +393,70 @@ impl Engine {
             .collect()
     }
 
+    /// Run the small-signal card at `analysis_index` around the state a
+    /// transient checkpoint holds.
+    ///
+    /// The deck is an authored restart of the run that wrote the checkpoint:
+    /// its `.TRAN` card, circuit and trajectory controls must be the
+    /// checkpoint's, while its stop time, its `.OPTIONS RESTART` metadata and
+    /// its `ACTIMES=`/`CHECKPOINT=` cards may differ. The deck's transient is
+    /// resumed from the checkpoint, which validates and restores it — the
+    /// held digital state included — and the restored state is captured at
+    /// the checkpoint's time without a step taken. A `.SENS` card is refused:
+    /// a perturbed deck is not the deck that wrote the checkpoint, so the
+    /// state cannot move with the perturbation.
+    ///
+    /// Called by the command line and the simulation service for cards that
+    /// carry `CHECKPOINT=`, with the file they load.
+    pub fn run_small_signal_at_checkpoint(
+        &self,
+        netlist: &Netlist,
+        analysis_index: usize,
+        checkpoint: &super::TransientCheckpoint,
+        abort: &dyn AbortSignal,
+    ) -> Result<StateLinearizedResult, SimulationError> {
+        let card = small_signal_card(netlist, analysis_index)?;
+        if matches!(card, AnalysisCommand::Sensitivity { .. }) {
+            return Err(checkpoint_sensitivity_refusal());
+        }
+        let window = StateTransientWindow::of_first_transient(netlist)?.ok_or_else(|| {
+            SimulationError::Netlist(
+                "CHECKPOINT= resumes the deck's .TRAN card from the checkpoint, and the deck \
+                 has no .TRAN card"
+                    .to_owned(),
+            )
+        })?;
+        // A resumed run must reach past its checkpoint; one that stops at the
+        // checkpoint time stops at its first accepted point either way.
+        let window = StateTransientWindow {
+            tstop: if window.tstop > checkpoint.time {
+                window.tstop
+            } else {
+                checkpoint.time + window.max_step
+            },
+            ..window
+        };
+        let captured = self.capture_checkpoint_state(
+            netlist,
+            checkpoint,
+            window.tstop,
+            window.max_step,
+            abort,
+        )?;
+        let state_time = captured.time;
+        let engine = self.at_transient_state(
+            netlist,
+            TransientStateBias {
+                window,
+                state: HeldTransientState::Captured(std::sync::Mutex::new(captured)),
+            },
+        );
+        Ok(StateLinearizedResult {
+            state_time,
+            result: engine.run_small_signal_card(netlist, card, abort)?,
+        })
+    }
+
     /// Run one small-signal card through its own entry point, on the per-run
     /// engine [`Self::at_transient_state`] built for it.
     fn run_small_signal_card(
@@ -506,6 +563,18 @@ fn dc_sensitivity_at_state_refusal() -> SimulationError {
         "analysis.sens.transient_state.dc",
         "a DC .SENS card reports operating-point tangents, not derivatives of a transient \
          state; add an AC sweep to the card to linearize it around the state",
+    )
+    .for_analysis_kind(crate::identity::AnalysisKind::Sensitivity)
+    .into()
+}
+
+/// A `.SENS` card perturbs the deck, and a checkpoint holds the state of the
+/// unperturbed deck only.
+fn checkpoint_sensitivity_refusal() -> SimulationError {
+    crate::UnsupportedCapabilityError::new(
+        "analysis.sens.transient_state.checkpoint",
+        "a .SENS card perturbs the deck, and a checkpoint holds the state of the unperturbed \
+         deck only; linearize the card at the state with ACTIMES= instead",
     )
     .for_analysis_kind(crate::identity::AnalysisKind::Sensitivity)
     .into()

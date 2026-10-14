@@ -172,6 +172,69 @@ impl Engine {
         }
         Ok((result, captured))
     }
+
+    /// Resume the transient `checkpoint` holds on `netlist`, as an authored
+    /// restart of it, and capture the state at the checkpoint's own time.
+    ///
+    /// That time is the resumed run's first accepted point, so the run
+    /// validates the checkpoint against the deck, restores it, captures the
+    /// restored state and stops without taking a step. `tstop` must exceed
+    /// the checkpoint's time, as any resumed run's does.
+    pub(in crate::engine) fn capture_checkpoint_state(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &super::TransientCheckpoint,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<CapturedTransientState, SimulationError> {
+        validate_transient_window(tstop, max_step)?;
+        if !tstop.is_finite() || tstop <= checkpoint.time {
+            return Err(SimulationError::Circuit(format!(
+                "resume stop time {tstop:e} must exceed the checkpoint time {:e}",
+                checkpoint.time
+            )));
+        }
+        let startup_mode = checkpoint.startup_mode().ok_or_else(|| {
+            SimulationError::Circuit(
+                "legacy transient checkpoint does not record its startup mode; refusing to \
+                 guess whether the captured trajectory used UIC"
+                    .to_string(),
+            )
+        })?;
+        let times = [checkpoint.time];
+        let capture = TransientStateCapture::new(&times, tstop)?;
+        self.reset_convergence_quality();
+        let mut engine = self.resolved_for_netlist(netlist);
+        engine.small_signal_state = None;
+        engine.ensure_transient_request_floor(tstop - checkpoint.time, max_step)?;
+        engine.run_tran_resolved_with_resume(
+            netlist,
+            netlist,
+            TransientRunWindow {
+                tstop,
+                max_step,
+                startup_mode,
+                dc_seed: None,
+                integral_trace: None,
+            },
+            abort,
+            TransientResumePlan {
+                resume: Some(checkpoint),
+                resume_validation: ResumeValidation::AuthoredRestart,
+                final_checkpoint_retention: FinalCheckpointRetention::Discarded,
+                scheduled_checkpoint_times: &[],
+                checkpoint_observer: None,
+                state_capture: Some(&capture),
+            },
+        )?;
+        capture.into_captured().pop().ok_or_else(|| {
+            SimulationError::Circuit(format!(
+                "the resumed transient captured no state at the checkpoint time {:e} s",
+                checkpoint.time
+            ))
+        })
+    }
 }
 
 #[cfg(test)]

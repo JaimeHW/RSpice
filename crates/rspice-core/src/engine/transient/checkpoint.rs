@@ -1255,6 +1255,21 @@ pub(crate) fn restart_checkpoint_identity(netlist: &Netlist) -> Option<String> {
     // legitimately use different descriptions without changing any equation,
     // state variable, or accepted-step decision.
     normalized.title.clear();
+    // A small-signal card that linearizes around a transient state
+    // (`ACTIMES=`/`CHECKPOINT=`) reads the trajectory and never changes it,
+    // so the deck that captures a state and the deck that linearizes around
+    // it are one restart contract. Decks written before those keywords hold
+    // no such card, so their identities are unchanged. A request is honored
+    // only on a small-signal card, so a caller that replaced the cards
+    // without their requests cannot drop a card that shapes the trajectory.
+    let stated = normalized
+        .small_signal_states
+        .iter()
+        .map(|request| request.analysis_index)
+        .collect::<std::collections::BTreeSet<_>>();
+    normalized.retain_analyses(|index, analysis| {
+        !(stated.contains(&index) && analysis.takes_small_signal_state())
+    });
     for analysis in &mut normalized.analyses {
         if let crate::netlist::AnalysisCommand::Tran { stop, .. } = analysis {
             *stop = 0.0;
