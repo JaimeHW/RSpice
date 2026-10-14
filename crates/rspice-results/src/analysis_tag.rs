@@ -150,11 +150,7 @@ impl CanonicalAnalysisKind {
     ///
     /// Appended, never renumbered: these tags are part of the config digest,
     /// so reusing or reordering one would silently redefine every prepared
-    /// snapshot already on disk. Tags 20, 26 and 30..=34 name kinds whose
-    /// solver or qualified model contract is not present in this engine build;
-    /// the tag still exists because the specification is transportable and its
-    /// identity must stay stable, and [`Self::execution_blocker`] is what keeps
-    /// them from being dispatched.
+    /// snapshot already on disk.
     #[must_use]
     pub const fn tag(self) -> u8 {
         match self {
@@ -243,19 +239,6 @@ impl CanonicalAnalysisKind {
             | Self::DcMismatch => AnalysisAvailability::Preview,
             _ => AnalysisAvailability::Production,
         }
-    }
-
-    /// Why this exact execution kind cannot be dispatched, if it cannot.
-    ///
-    /// Availability and executability answer different questions: a preview
-    /// engine may run but remain ineligible for sign-off, while a transportable
-    /// preview specification may have no solver in this binary at all. Both
-    /// facts live on the canonical tag so plan preflight, worker dispatch and
-    /// retained-result provenance cannot silently classify the same kind
-    /// differently.
-    #[must_use]
-    pub const fn execution_blocker(self) -> Option<&'static str> {
-        None
     }
 
     /// The result family a task of this kind produces.
@@ -365,16 +348,13 @@ mod tests {
     }
 
     #[test]
-    fn preview_metadata_partitions_exactly_into_runnable_and_blocked_kinds() {
-        let runnable = CanonicalAnalysisKind::ALL
+    fn preview_metadata_names_exactly_the_preview_engines() {
+        let preview = CanonicalAnalysisKind::ALL
             .into_iter()
-            .filter(|kind| {
-                kind.availability() == AnalysisAvailability::Preview
-                    && kind.execution_blocker().is_none()
-            })
+            .filter(|kind| kind.availability() == AnalysisAvailability::Preview)
             .collect::<Vec<_>>();
         assert_eq!(
-            runnable,
+            preview,
             vec![
                 CanonicalAnalysisKind::Envelope,
                 CanonicalAnalysisKind::Qpss,
@@ -388,17 +368,5 @@ mod tests {
                 CanonicalAnalysisKind::DcMismatch,
             ]
         );
-
-        let blocked = CanonicalAnalysisKind::ALL
-            .into_iter()
-            .filter(|kind| kind.execution_blocker().is_some())
-            .collect::<Vec<_>>();
-        assert!(blocked.is_empty());
-        assert!(blocked.into_iter().all(|kind| {
-            kind.availability() == AnalysisAvailability::Preview
-                && kind
-                    .execution_blocker()
-                    .is_some_and(|reason| !reason.trim().is_empty())
-        }));
     }
 }

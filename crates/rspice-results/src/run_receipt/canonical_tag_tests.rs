@@ -148,9 +148,6 @@ fn runnable_preview_workflows_authenticate_but_remain_explicitly_non_sign_off() 
             CanonicalAnalysisKind::Psp,
         ]
     );
-    for kind in receipt.preview_engine_kinds() {
-        assert_eq!(kind.execution_blocker(), None, "{kind:?} is runnable");
-    }
     let blocker = receipt
         .sign_off_blocker()
         .expect("preview execution must remain non-sign-off");

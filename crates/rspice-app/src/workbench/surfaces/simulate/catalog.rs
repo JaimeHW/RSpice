@@ -183,10 +183,7 @@ pub(super) fn analysis_catalog_window(
                     }
                 }
                 if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                    chosen = filtered
-                        .get(active)
-                        .copied()
-                        .filter(|kind| kind.execution_blocker().is_none());
+                    chosen = filtered.get(active).copied();
                 }
             }
 
@@ -490,9 +487,6 @@ pub(super) fn analysis_catalog_disposition(
     rows: &[AnalysisStackRow],
     kind: AnalysisKind,
 ) -> String {
-    if kind.execution_blocker().is_some() {
-        return "Unavailable".to_owned();
-    }
     // Naming the one instance already in the plan is worth more than counting
     // it: "Add another · \"Startup transient\" in plan" says what adding a
     // second one would sit beside. A count only says there is something there.
@@ -615,14 +609,14 @@ pub(super) fn analysis_catalog_row_height(
     let (copy_width, readiness_width) = if compact {
         (
             (row_width - 10.0 - copy_left).max(1.0),
-            (row_width - 12.0 - copy_left - readiness_mark_advance(kind)).max(1.0),
+            (row_width - 12.0 - copy_left).max(1.0),
         )
     } else {
         let readiness_left =
             (row_width - 12.0 - ANALYSIS_CATALOG_READINESS_WIDTH).max(copy_left + 96.0);
         (
             (readiness_left - 12.0 - copy_left).max(1.0),
-            (row_width - 24.0 - readiness_left - readiness_mark_advance(kind)).max(1.0),
+            (row_width - 24.0 - readiness_left).max(1.0),
         )
     };
     let title = ui.painter().layout(
@@ -672,8 +666,7 @@ pub(super) fn analysis_catalog_row(
 ) -> bool {
     let t = Tokens::get(ui.ctx());
     let compact = ui.available_width() <= TITLE_ACTION_STACK_BREAKPOINT;
-    let blocker = kind.execution_blocker();
-    let enabled = ui.is_enabled() && blocker.is_none();
+    let enabled = ui.is_enabled();
     let sense = if enabled {
         Sense::click()
     } else {
@@ -692,11 +685,7 @@ pub(super) fn analysis_catalog_row(
             egui::WidgetType::SelectableLabel,
             enabled,
             selected,
-            if let Some(reason) = blocker {
-                format!("{} unavailable: {reason}", kind.label())
-            } else {
-                format!("Add {} analysis instance", kind.label())
-            },
+            format!("Add {} analysis instance", kind.label()),
         )
     });
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
@@ -794,27 +783,11 @@ pub(super) fn analysis_catalog_row(
     } else {
         rect.top() + 8.0
     };
-    let readiness_content_left = if compact {
+    let readiness_text_left = if compact {
         readiness_left
     } else {
         readiness_left + 12.0
     };
-    // A kind this build cannot run leads its readiness with the failure mark;
-    // every other kind states its readiness in words alone.
-    if blocker.is_some() {
-        paint_problem_mark(
-            &painter,
-            Rect::from_center_size(
-                egui::pos2(
-                    readiness_content_left + READINESS_MARK_SIDE * 0.5,
-                    readiness_top + 6.5,
-                ),
-                Vec2::splat(READINESS_MARK_SIDE),
-            ),
-            Problem::Failure,
-        );
-    }
-    let readiness_text_left = readiness_content_left + readiness_mark_advance(kind);
     let readiness_text_width = (rect.right() - 12.0 - readiness_text_left).max(1.0);
     let action_galley = ui.painter().layout(
         disposition.to_owned(),
@@ -837,58 +810,30 @@ pub(super) fn analysis_catalog_row(
         },
     );
     if let Some(readiness) = readiness {
-        let detail_tone = if blocker.is_some() {
-            t.color.text_dim
-        } else {
-            t.color.text_faint
-        };
         let detail_galley = ui.painter().layout(
             readiness.to_owned(),
             theme::sans(tokens::FS_0, FontWeight::Regular),
-            detail_tone,
+            t.color.text_faint,
             readiness_text_width,
         );
         painter.galley(
             egui::pos2(readiness_text_left, readiness_top + action_height + 2.0),
             detail_galley,
-            detail_tone,
+            t.color.text_faint,
         );
     }
     theme::paint_focus_ring_outset(ui, &response, rect);
-    if let Some(reason) = blocker {
-        response.on_hover_text(reason).clicked() && enabled
-    } else {
-        response
-            .on_hover_text(format!("Add {} analysis instance", kind.label()))
-            .clicked()
-            && enabled
-    }
-}
-
-/// Side of the failure mark a blocked kind's readiness leads with, and the
-/// advance from its left edge to the words after it.
-const READINESS_MARK_SIDE: f32 = 11.0;
-const READINESS_MARK_ADVANCE: f32 = 17.0;
-
-/// How far a kind's readiness words start from their column: past the mark
-/// when the kind is blocked, at the column otherwise.
-const fn readiness_mark_advance(kind: AnalysisKind) -> f32 {
-    if kind.execution_blocker().is_some() {
-        READINESS_MARK_ADVANCE
-    } else {
-        0.0
-    }
+    response
+        .on_hover_text(format!("Add {} analysis instance", kind.label()))
+        .clicked()
+        && enabled
 }
 
 pub(super) const fn analysis_catalog_readiness(kind: AnalysisKind) -> Option<&'static str> {
-    if let Some(reason) = kind.execution_blocker() {
-        Some(reason)
-    } else {
-        match kind.availability() {
-            crate::simulation::plan::AnalysisAvailability::Production => None,
-            crate::simulation::plan::AnalysisAvailability::Preview => {
-                Some("Preview engine · non-sign-off")
-            }
+    match kind.availability() {
+        crate::simulation::plan::AnalysisAvailability::Production => None,
+        crate::simulation::plan::AnalysisAvailability::Preview => {
+            Some("Preview engine · non-sign-off")
         }
     }
 }
@@ -900,7 +845,7 @@ pub(super) fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
         .filter(|kind| {
             query.is_empty()
                 || format!(
-                    "{} {} {} {} {} {} {} {} {}",
+                    "{} {} {} {} {} {} {} {}",
                     kind.stable_id(),
                     kind.code(),
                     kind.glyph(),
@@ -909,7 +854,6 @@ pub(super) fn filtered_catalog_kinds(query: &str) -> Vec<AnalysisKind> {
                     analysis_catalog_group(*kind),
                     kind.category().detail,
                     availability_label(*kind),
-                    kind.execution_blocker().unwrap_or_default(),
                 )
                 .to_ascii_lowercase()
                 .contains(&query)

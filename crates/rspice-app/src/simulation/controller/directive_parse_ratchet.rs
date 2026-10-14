@@ -92,11 +92,6 @@ fn every_emitted_analysis_directive_parses_as_the_engine_reads_it() {
     let mut emitted = 0_usize;
 
     for kind in AnalysisKind::ALL {
-        // A kind with no solver in this build is refused by name long before a
-        // deck is written, and makes no claim about the parser.
-        if kind.execution_blocker().is_some() {
-            continue;
-        }
         // A draft that needs an authored output or source never reaches a
         // directive at all. That is the editor's contract, not the parser's —
         // but it is recorded rather than skipped, so the set of kinds this
@@ -1009,9 +1004,4 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
         AnalysisSpec::LegacyDcOp | AnalysisSpec::DcOp { .. }
     ));
     assert_eq!(queue[1].analysis_line, ".op (implicit QPSS seed)");
-    assert!(
-        crate::state::CanonicalAnalysisKind::Qpss
-            .execution_blocker()
-            .is_none()
-    );
 }

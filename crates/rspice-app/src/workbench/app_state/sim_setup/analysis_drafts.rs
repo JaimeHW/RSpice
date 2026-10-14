@@ -16,9 +16,6 @@ impl SimSetupState {
         if let Some(error) = draft.manifest_configuration_error() {
             return Some(error);
         }
-        if let Some(blocker) = draft.kind().execution_blocker() {
-            return Some(format!("Execution unavailable: {blocker}"));
-        }
         let mut projection = self.clone();
         projection.apply_analysis_draft_projection(draft);
         if matches!(draft, AnalysisDraft::OperatingPoint(state) if matches!(state.temperature_mode_idx, 0 | 3))

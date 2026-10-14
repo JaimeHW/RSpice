@@ -675,13 +675,6 @@ impl AnalysisKind {
         )
     }
 
-    /// Current engine limitation. The identity and configuration remain
-    /// persistent, but execution must reject these kinds until a real solver
-    /// is integrated.
-    pub const fn execution_blocker(self) -> Option<&'static str> {
-        self.canonical_kind().execution_blocker()
-    }
-
     /// Exact prerequisite kinds declared by the canonical mockup manifest.
     pub const fn prerequisites(self) -> &'static [Self] {
         const OP: &[AnalysisKind] = &[AnalysisKind::OperatingPoint];
@@ -760,12 +753,6 @@ mod tests {
                 "{}",
                 kind.label()
             );
-            assert_eq!(
-                kind.execution_blocker(),
-                kind.canonical_kind().execution_blocker(),
-                "{}",
-                kind.label()
-            );
         }
         let preview = AnalysisKind::ALL
             .into_iter()
@@ -800,7 +787,6 @@ mod tests {
             AnalysisKind::Disto,
         ] {
             assert_eq!(kind.availability(), AnalysisAvailability::Production);
-            assert_eq!(kind.execution_blocker(), None);
         }
     }
 

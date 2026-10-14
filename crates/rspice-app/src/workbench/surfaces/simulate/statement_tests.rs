@@ -62,9 +62,6 @@ fn a_displayed_statement_is_a_directive_the_engine_accepts() {
 
     let mut checked = 0_usize;
     for kind in AnalysisKind::ALL {
-        if kind.execution_blocker().is_some() {
-            continue;
-        }
         let draft = AnalysisDraft::for_kind(kind);
         // A default draft that needs an authored output or source emits no
         // directive at all, and the page shows the refusal instead. That is

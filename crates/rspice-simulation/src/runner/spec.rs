@@ -147,14 +147,6 @@ pub(super) fn run_spec_request_in_context(
     let validation = spec.validate();
     ensure_not_aborted(abort_flag)?;
     validation.map_err(SimulationError::InvalidConfig)?;
-    if let Some(reason) =
-        crate::execution_identity::canonical_analysis_kind(&spec).execution_blocker()
-    {
-        return Err(SimulationError::InvalidConfig(format!(
-            "{} execution is unavailable; the request was rejected before dispatch: {reason}",
-            spec.run_type().display_name(),
-        )));
-    }
     dependencies
         .validate_for_spec(&spec, &options)
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
@@ -895,10 +887,6 @@ R2 out 0 1k\n\
             adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
             extraction_path: EnvelopeExtractionPath::Projection,
         };
-        assert_eq!(
-            crate::execution_identity::canonical_analysis_kind(&spec).execution_blocker(),
-            None
-        );
 
         let result = run_spec_request(
             &EngineBridge::new(),
@@ -959,10 +947,6 @@ R2 out 0 1k\n\
             noise_parameters: false,
             noise_reference: None,
         };
-        assert_eq!(
-            crate::execution_identity::canonical_analysis_kind(&hbsp).execution_blocker(),
-            None
-        );
         let hbsp_result = run_spec_request(
             &EngineBridge::new(),
             hbsp,
@@ -1006,10 +990,6 @@ R2 out 0 1k\n\
             noise_figure: true,
             contributor_ranking: true,
         };
-        assert_eq!(
-            crate::execution_identity::canonical_analysis_kind(&hbnoise).execution_blocker(),
-            None
-        );
         let hbnoise_result = run_spec_request(
             &EngineBridge::new(),
             hbnoise.clone(),
@@ -1355,10 +1335,6 @@ R2 out 0 1k\n\
             noise_parameters: false,
             noise_reference: None,
         };
-        assert_eq!(
-            crate::execution_identity::canonical_analysis_kind(&psp).execution_blocker(),
-            None
-        );
 
         let result = run_spec_request(
             &EngineBridge::new(),
@@ -1501,11 +1477,6 @@ R2 out 0 1k\n\
             scale: 1.0,
             uic: false,
         };
-        assert_eq!(
-            crate::execution_identity::canonical_analysis_kind(&spec).execution_blocker(),
-            None,
-            "the transient-noise solver is in this build"
-        );
         assert!(
             config::analysis_config_from_spec(&spec).is_some(),
             "transient noise routes with the config-backed group"
@@ -2394,10 +2365,6 @@ R2 out 0 {r2v}\n";
     /// The kind is no longer refused before the engine is asked.
     #[test]
     fn dc_mismatch_is_no_longer_refused_before_dispatch() {
-        assert_eq!(
-            rspice_results::analysis_tag::CanonicalAnalysisKind::DcMismatch.execution_blocker(),
-            None
-        );
         let error = run_dc_mismatch(
             "no statistics\nV1 in 0 1\nR1 in out 1k\nR2 out 0 2k\n.end\n",
             dc_mismatch_spec(1.0, 10),

@@ -1647,9 +1647,6 @@ fn analysis_editor(
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         let rename_requested = analysis_form_header(ui, &selected, validation_error.as_deref());
-        if let Some(blocker) = selected.kind.execution_blocker() {
-            capability_banner(ui, blocker);
-        }
         lifecycle_toolbar(ui, &selected, &mut action);
         analysis_contract(
             ui,
@@ -1929,26 +1926,6 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
         | AnalysisKind::TransientNoise
         | AnalysisKind::Envelope => WorkbenchIcon::Simulate,
     }
-}
-
-/// Why this build cannot run the selected analysis. Its configuration stays
-/// editable; the form under the banner says so by being there.
-fn capability_banner(ui: &mut Ui, blocker: &str) {
-    let t = Tokens::get(ui.ctx());
-    let content_width = (ui.available_width() - 16.0).max(1.0);
-    let response = egui::Frame::new()
-        .fill(t.color.bg_panel_2)
-        .inner_margin(egui::Margin::symmetric(8, 7))
-        .show(ui, |ui| {
-            ui.set_width(content_width);
-            page_kit::note_line(ui, &format!("Can't run: {blocker}."), page_kit::Tone::Error);
-        })
-        .response;
-    ui.painter().hline(
-        response.rect.x_range(),
-        response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
 }
 
 fn lifecycle_toolbar(

@@ -178,11 +178,6 @@ fn validate_request(request: &HeadlessTaskRequest) -> ServiceRunResult<()> {
         return Err(context("display label must not be empty".to_owned()));
     }
     analysis.spec.validate().map_err(&context)?;
-    if let Some(reason) =
-        crate::execution_identity::canonical_analysis_kind(&analysis.spec).execution_blocker()
-    {
-        return Err(context(reason.to_owned()));
-    }
     if let Some(config) = &analysis.config {
         if executes_via_spec(&analysis.spec) {
             return Err(context(

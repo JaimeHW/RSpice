@@ -32,10 +32,6 @@ where
     let mut errors = Vec::new();
 
     for instance in plan.instances() {
-        if let Some(reason) = instance.kind().execution_blocker() {
-            errors.push(format!("{}: {reason}", instance.display_name()));
-            continue;
-        }
         let projected_setup = match inputs.sim_setup.frozen_instance_projection(plan, instance) {
             Ok(projection) => projection,
             Err(error) => {

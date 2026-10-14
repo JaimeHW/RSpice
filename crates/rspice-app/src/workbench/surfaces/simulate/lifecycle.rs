@@ -275,8 +275,8 @@ pub(super) type InsertAnalysisResult = Result<
 /// Both selections are the same one this function already wrote — the return
 /// is what lets the second one act on it without re-reading the plan.
 ///
-/// `None` is every refusal, each of which has already stated itself: a blocked
-/// kind, a plan that does not resolve, an insert the plan rejected.
+/// `None` is every refusal, each of which has already stated itself: a plan
+/// that does not resolve, an insert the plan rejected.
 pub(super) fn insert_analysis_instance(
     app: &mut RSpiceApp,
     kind: AnalysisKind,
@@ -285,10 +285,6 @@ pub(super) fn insert_analysis_instance(
     app.state.sim_setup.session.palette_query.clear();
     app.state.sim_setup.session.palette_active = 0;
     app.state.sim_setup.session.palette_scroll_to_active = false;
-    if let Some(reason) = kind.execution_blocker() {
-        record_failure(&mut app.state, "Insert", reason);
-        return None;
-    }
     let repair_context = build_envelope_source_catalog(&app.state).dependency_repair_context();
     let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
