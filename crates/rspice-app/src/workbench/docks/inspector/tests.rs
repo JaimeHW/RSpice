@@ -1181,6 +1181,171 @@ fn veriloga_inspector_app() -> RSpiceApp {
     app
 }
 
+/// The shipped CMOS inverter example open on the Design sheet, nothing
+/// selected.
+fn cmos_inverter_app() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
+    app.state.schematic.clear_undo_history();
+    app.state.sync_active_schematic_to_workspace();
+    app.state.workbench.activate(Workspace::Design);
+    app
+}
+
+/// The ID of the inverter's component named `name`.
+fn inverter_component(app: &RSpiceApp, name: &str) -> u64 {
+    app.state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.name == name)
+        .unwrap_or_else(|| panic!("the inverter has no {name}"))
+        .id
+}
+
+/// The inverter with its output net selected, the way a click on the
+/// output wire leaves it.
+fn design_net_app() -> RSpiceApp {
+    let mut app = cmos_inverter_app();
+    let out = rspice_design::connectivity::summary::design_nets(&app.state.schematic)
+        .into_iter()
+        .find(|net| net.name.eq_ignore_ascii_case("out"))
+        .expect("the inverter's output is labelled out");
+    for wire in out.wire_ids {
+        app.state.schematic.session.editor.selection.select_wire(wire);
+    }
+    app
+}
+
+/// The inverter with both transistors and the output stub selected.
+fn design_multi_app() -> RSpiceApp {
+    let mut app = cmos_inverter_app();
+    let (mp, mn) = (
+        inverter_component(&app, "MP"),
+        inverter_component(&app, "MN"),
+    );
+    let selection = &mut app.state.schematic.session.editor.selection;
+    selection.select_component(mp);
+    selection.select_component(mn);
+    let stub = app
+        .state
+        .schematic
+        .document()
+        .wires
+        .last()
+        .map(|wire| wire.id)
+        .expect("the inverter is wired");
+    app.state.schematic.session.editor.selection.select_wire(stub);
+    app
+}
+
+/// The inverter's pull-down transistor selected, beside a current run that
+/// solved the inverter's operating point with its input held at mid-rail —
+/// the device report and node voltages are the engine's own.
+fn design_mos_op_app() -> RSpiceApp {
+    let deck = "\
+* CMOS inverter at its switching point
+vdd vdd 0 dc 1.8
+vin in 0 dc 0.9
+MP out in vdd vdd pch W=2u L=0.18u
+MN out in 0 0 nch W=1u L=0.18u
+.model nch NMOS LEVEL=1 VTO=0.45 KP=200u LAMBDA=0.05
+.model pch PMOS LEVEL=1 VTO=-0.45 KP=80u LAMBDA=0.05
+.op
+.end
+";
+    let netlist = rspice_core::netlist::Netlist::parse(deck).expect("the op deck parses");
+    let (solution, report) =
+        rspice_core::engine::Engine::new(rspice_core::engine::SimulationConfig::default())
+            .run_dc_op_with_report(&netlist)
+            .expect("the inverter's operating point solves");
+    let node_voltages = solution
+        .node_names
+        .iter()
+        .zip(&solution.node_voltages)
+        .skip(1)
+        .map(|(name, value)| rspice_results::operating_point::OperatingPointValue {
+            name: format!("V({name})"),
+            value: *value,
+            unit: "V".to_owned(),
+        })
+        .collect();
+
+    let mut app = cmos_inverter_app();
+    let mn = inverter_component(&app, "MN");
+    let project_revision = app.state.workspace.content.project.revision();
+    let analysis_id = crate::product::AnalysisInstanceId::new();
+    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
+        project_revision,
+        prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x11; 32]),
+        source_content_digest: crate::product::ContentDigest::from_bytes([0x22; 32]),
+        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+            crate::product::ContentDigest::from_bytes([0x33; 32]),
+        ),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![
+            crate::state::PreparedRunTaskReceipt::new(
+                analysis_id,
+                project_revision,
+                Vec::new(),
+                1,
+                crate::product::ContentDigest::from_bytes([0x44; 32]),
+            )
+            .expect("valid prepared task"),
+        ],
+    })
+    .expect("valid prepared run receipt");
+    app.state
+        .simulation
+        .start_prepared_run(receipt)
+        .expect("the run starts")
+        .add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::DcOp, "Operating point")
+                .with_provenance(
+                    crate::state::AnalysisResultProvenance::new_with_source_domain(
+                        crate::state::AnalysisResultSourceDomain::SimulationPlan,
+                        analysis_id,
+                        project_revision,
+                        crate::product::ContentDigest::from_bytes([0x44; 32]),
+                        Vec::new(),
+                    )
+                    .expect("valid prepared analysis provenance"),
+                )
+                .with_dc_op(rspice_results::operating_point::DcOpResult {
+                    node_voltages,
+                    branch_currents: Vec::new(),
+                    power_dissipation: Vec::new(),
+                })
+                .with_device_op(report),
+        );
+    let generated = crate::simulation::netlist_gen::generate_netlist(&app.state.schematic);
+    let point_to_net = generated
+        .nets
+        .iter()
+        .flat_map(|(net, points)| points.iter().map(move |point| (*point, net.clone())))
+        .collect();
+    app.state.simulation.source.cross_probe.update(
+        app.state.workspace.content.active_view.clone(),
+        point_to_net,
+        generated.nets,
+        std::collections::HashMap::new(),
+        app.state.schematic.topology_version(),
+    );
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(mn);
+    app
+}
+
 /// One review panel: its file name and the app state it renders.
 type ReviewPanel = (&'static str, fn() -> RSpiceApp);
 
@@ -1192,8 +1357,12 @@ type ReviewPanel = (&'static str, fn() -> RSpiceApp);
 fn render_the_inspector_panels_for_review() {
     let directory = std::env::var("RSPICE_RASTER_DIR")
         .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    let panels: [ReviewPanel; 3] = [
+    let panels: [ReviewPanel; 7] = [
         ("design-component", design_component_app),
+        ("design-net", design_net_app),
+        ("design-sheet", cmos_inverter_app),
+        ("design-multi", design_multi_app),
+        ("design-mos-op", design_mos_op_app),
         ("veriloga-inspector", veriloga_inspector_app),
         ("waves-details", waves_details_app),
     ];
@@ -1216,5 +1385,23 @@ fn render_the_inspector_panels_for_review() {
                 },
             );
         }
+    }
+    // The data browser is the navigator's, beside the Results inspector: the
+    // same finished transient, at the navigator's default and minimum widths.
+    for width in [256.0, 220.0] {
+        let mut app = waves_details_app();
+        crate::ui::raster::write_panel_review(
+            &directory,
+            &format!("data-browser-{width}"),
+            crate::ui::Theme::default(),
+            Vec2::new(width, 900.0),
+            10.0,
+            |ui, _| {
+                let panel = Tokens::get(ui.ctx()).color.bg_panel;
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(panel))
+                    .show(ui, |ui| super::super::navigator::show(ui, &mut app));
+            },
+        );
     }
 }
