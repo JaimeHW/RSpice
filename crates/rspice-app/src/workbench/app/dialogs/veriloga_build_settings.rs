@@ -8,11 +8,12 @@
 //! project. A view still on the compiler's built-in defaults gains the
 //! document on its first save.
 //!
-//! Each list field states why it refuses an entry in the line under it, which
-//! is always there, so nothing moves while the reader types; a refused entry
-//! holds Save until it is fixed or cleared, since saving without it would
-//! drop what the reader typed. The status line is left for what belongs to no
-//! field: a read-only project, or a save the project refused.
+//! Each list field states why it refuses an entry in a line under it, there
+//! only while the entry is refused: an empty line under every list would put
+//! a hole in the form for an error that is rarely there. A refused entry holds
+//! Save until it is fixed or cleared, since saving without it would drop what
+//! the reader typed. The status line is left for what belongs to no field: a
+//! read-only project, or a save the project refused.
 //!
 //! The entry module is offered only when the source declares more than one
 //! top module. Choosing another makes it the module this view compiles: the
@@ -440,8 +441,13 @@ impl FieldRefusals {
     }
 }
 
-fn line(refusal: Option<&String>) -> FieldLine<'_> {
-    refusal.map_or(FieldLine::Blank, |refusal| FieldLine::Error(refusal))
+/// State `refusal` in the line under the list field `field`, when there is
+/// one. Without one the row ends at its field, an ordinary row gap above the
+/// next.
+fn refusal_line(rows: &mut FormRows<'_>, field: Id, refusal: Option<&String>) {
+    if let Some(refusal) = refusal {
+        rows.field_line(Some(field), FieldLine::Error(refusal));
+    }
 }
 
 impl RSpiceApp {
@@ -595,7 +601,7 @@ fn form_body(
     if edit.add {
         let _ = draft.add_include(messages);
     }
-    rows.field_line(Some(include_id()), line(refusals.include.as_ref()));
+    refusal_line(rows, include_id(), refusals.include.as_ref());
 
     let (define_hint, add_define) = (
         text(MessageId::VerilogABuildSettingsDefineHint),
@@ -620,7 +626,7 @@ fn form_body(
     if edit.add {
         let _ = draft.add_define(messages);
     }
-    rows.field_line(Some(define_id()), line(refusals.define.as_ref()));
+    refusal_line(rows, define_id(), refusals.define.as_ref());
 
     if draft.show_undefines {
         let (undefine_hint, add_undefine) = (
@@ -646,7 +652,7 @@ fn form_body(
         if edit.add {
             let _ = draft.add_undefine(messages);
         }
-        rows.field_line(Some(undefine_id()), line(refusals.undefine.as_ref()));
+        refusal_line(rows, undefine_id(), refusals.undefine.as_ref());
     }
 
     let [units, convergence, discontinuities, hidden, portability] = [

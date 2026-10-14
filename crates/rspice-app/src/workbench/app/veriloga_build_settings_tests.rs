@@ -337,14 +337,44 @@ fn build_settings_save_is_refused_on_a_read_only_project() {
     }
 }
 
+/// The top of the field `name` labels, less the bottom of the one `above`
+/// labels: the air between two rows whose first lines are those fields.
+fn gap_between_fields(output: &egui::FullOutput, above: MessageId, name: MessageId) -> f32 {
+    let field = |id| {
+        node_rect(
+            field_node(output, &messages().text(id)).unwrap_or_else(|| panic!("{id:?} field")),
+        )
+    };
+    field(name).top() - field(above).bottom()
+}
+
 /// A refused entry is stated under its own field and holds Save, which would
-/// otherwise drop it; fixing it lets the save through.
+/// otherwise drop it; fixing it lets the save through. Without a refusal
+/// there is no line: the list ends at its field, an ordinary row gap above
+/// the next row.
 #[test]
 fn a_refused_entry_is_stated_under_its_field_and_holds_save() {
     let mut app = veriloga_view_holding(TWO_MODULES);
     Command::VerilogABuildSettings.execute(&mut app);
-    draft(&mut app).include_draft = "../outside".to_owned();
     let ctx = themed_context();
+    frame_with(&ctx, &mut app, DESKTOP, Vec::new());
+    let output = frame_with(&ctx, &mut app, DESKTOP, Vec::new());
+    let mark = |output: &egui::FullOutput, id| {
+        node_rect(node(output, &messages().text(id)).unwrap_or_else(|| panic!("{id:?} mark")))
+    };
+    let ordinary = mark(&output, MessageId::VerilogABuildSettingsUseInterpreter).top()
+        - mark(&output, MessageId::VerilogABuildSettingsGeneratedRust).bottom();
+    assert!(ordinary > 0.0, "rows stand apart: {ordinary}");
+    let (include, defines) = (
+        MessageId::VerilogABuildSettingsIncludePaths,
+        MessageId::VerilogABuildSettingsDefines,
+    );
+    assert!(
+        (gap_between_fields(&output, include, defines) - ordinary).abs() < 0.5,
+        "with nothing refused, a list is followed by the ordinary row gap of {ordinary}"
+    );
+
+    draft(&mut app).include_draft = "../outside".to_owned();
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     let output = frame_with(&ctx, &mut app, DESKTOP, Vec::new());
 
@@ -370,6 +400,13 @@ fn a_refused_entry_is_stated_under_its_field_and_holds_save() {
     assert!(
         line.top() >= field.bottom() && line.top() - field.bottom() < 8.0,
         "under its field: line {line:?}, field {field:?}"
+    );
+    let next =
+        node_rect(field_node(&output, &messages().text(defines)).expect("the defines field"));
+    assert!(
+        (next.top() - line.bottom() - ordinary).abs() < 0.5,
+        "the line grows its row, and the next row keeps the ordinary gap: \
+         line {line:?}, next {next:?}"
     );
     assert!(
         node(
@@ -457,7 +494,8 @@ fn save_and_compile_compiles_with_the_new_settings() {
 
 /// Renders for review: Build settings over a typical profile — one module,
 /// two include paths, two defines — at desktop and phone sizes, dark and
-/// light.
+/// light; and over a source declaring two modules, which adds the entry
+/// module row.
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_build_settings_for_review() {
@@ -468,23 +506,30 @@ fn render_build_settings_for_review() {
     std::fs::create_dir_all(&directory).expect("raster output directory");
     let stderr = std::io::stderr();
     let mut report = stderr.lock();
-    for (name, size, coarse) in [
-        ("1440x900", DESKTOP, false),
-        ("1400x900", egui::vec2(1400.0, 900.0), false),
-        ("390x844", egui::vec2(390.0, 844.0), true),
+    for (name, size, coarse, source) in [
+        ("1440x900", DESKTOP, false, None),
+        ("1400x900", egui::vec2(1400.0, 900.0), false, None),
+        ("390x844", egui::vec2(390.0, 844.0), true, None),
+        ("1440x900-two-modules", DESKTOP, false, Some(TWO_MODULES)),
     ] {
         for (mode, mode_name) in [
             (crate::ui::Mode::Dark, "dark"),
             (crate::ui::Mode::Light, "light"),
         ] {
-            let mut app = open_project_app();
-            let (reference, _) = add_veriloga_cell(
-                &mut app.state,
-                "gain_cell",
-                "models/gain_cell.va",
-                "gain_cell",
+            let mut app = source.map_or_else(
+                || {
+                    let mut app = open_project_app();
+                    let (reference, _) = add_veriloga_cell(
+                        &mut app.state,
+                        "gain_cell",
+                        "models/gain_cell.va",
+                        "gain_cell",
+                    );
+                    open_in_design(&mut app.state, &reference);
+                    app
+                },
+                veriloga_view_holding,
             );
-            open_in_design(&mut app.state, &reference);
             app.state.workbench.coarse_pointer = coarse;
             Command::VerilogABuildSettings.execute(&mut app);
             let form = draft(&mut app);
