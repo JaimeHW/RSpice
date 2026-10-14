@@ -33,10 +33,9 @@ use rspice_results_ui::selection::{
 
 use super::super::commands::result_navigation::reveal_producer_log;
 use super::super::commands::vocabulary::Command;
-use super::super::design_system::{
-    PANEL_HEADER_H, StatusMark, WorkbenchIcon, paint_status_mark, property_row, section_header,
-};
+use super::super::design_system::{PANEL_HEADER_H, WorkbenchIcon, property_row, section_header};
 use super::super::state::{ModelsPage, ProjectPage, SimulationPage, VerificationPage, Workspace};
+use crate::ui::widgets::{Problem, paint_problem_mark};
 
 const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 const SIGNAL_ROW_HEIGHT: f32 = 30.0;
@@ -112,11 +111,6 @@ const FLOW_LABEL_TOP: f32 = 7.0;
 const FLOW_DETAIL_TOP: f32 = 23.0;
 const FLOW_STATUS_TOP: f32 = 43.0;
 const FLOW_DETAIL_LINE_HEIGHT: f32 = 15.0;
-const FLOW_STATUS_DOT_SIZE: f32 = 5.0;
-const FLOW_STATUS_GAP: f32 = 6.0;
-const CAPABILITY_BANNER_MARGIN: i8 = 8;
-const CAPABILITY_BANNER_ICON_SIZE: f32 = 15.0;
-const CAPABILITY_BANNER_GAP: f32 = 7.0;
 const NETLIST_OUTLINE_ROW_HEIGHT: f32 = 27.0;
 const NETLIST_OUTLINE_TOUCH_ROW_HEIGHT: f32 = 44.0;
 const NETLIST_OUTLINE_ICON_SIZE: f32 = 14.0;
@@ -896,12 +890,6 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     nav_property(ui, "Integrity", "payloads verified on load");
 }
 
-/// The section that holds the standing capability notice.
-const CAPABILITY_POLICY_SECTION: &str = "Capability policy";
-/// What that notice says, named once so the filter and the paint agree.
-const CAPABILITY_POLICY_NOTICE: &str = "Every analysis declares release-engine, preview, \
-     compatibility, platform and sign-off contracts before it can be added.";
-
 /// Whether one line of the simulation rail survives the navigator's filter.
 ///
 /// `query` arrives trimmed and lower-cased from the panel's own field. An
@@ -910,16 +898,13 @@ const CAPABILITY_POLICY_NOTICE: &str = "Every analysis declares release-engine, 
 /// pays for the comparison.
 ///
 /// The rail used to spend the query on the nine route rows and nothing else,
-/// so a search for a corner name hid every page and left the Run set axes, the
-/// Variation row and the capability banner sitting under it, unfiltered and
-/// unrelated to what had been typed.
+/// so a search for a corner name hid every page and left the Run set axes
+/// sitting under it, unfiltered and unrelated to what had been typed.
 fn nav_matches(query: &str, text: &str) -> bool {
     query.is_empty() || text.to_lowercase().contains(query)
 }
 
 fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
-    use crate::simulation::plan::AnalysisKind;
-
     let enabled = app.state.sim_setup.enabled_analysis_instance_count();
     let total = app
         .state
@@ -955,8 +940,10 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .into_iter()
         .filter(|page| nav_matches(&query, page.label()))
         .collect::<Vec<_>>();
+    // The Analyses row already counts what is enabled; the header only names
+    // the section.
     if !routes.is_empty() {
-        section_header(ui, "Lab characterization", Some(&format!("{enabled} on")));
+        section_header(ui, "Setup", None);
     }
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
@@ -993,22 +980,19 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             // while the plan was going to run twenty-seven points over four
             // dimensions, and nothing on the rail said so.
             let run_set = &app.state.sim_setup.run_set;
-            let points = run_set_validation.forecast.point_count.max(1);
             // An axis answers for its own name, which is what the row states.
             // Matching the values instead would leave a row on screen for a
-            // query the reader cannot see the reason for.
+            // query the reader cannot see the reason for. Only the axes the
+            // run sweeps are listed: a disabled axis is not part of the run,
+            // and no axes at all is the default, which needs no row. The point
+            // count is the Run set route row's.
             let axes = run_set
                 .dimensions
                 .iter()
-                .filter(|dimension| nav_matches(&query, &dimension.name))
+                .filter(|dimension| dimension.enabled && nav_matches(&query, &dimension.name))
                 .collect::<Vec<_>>();
-            let no_axes = run_set.dimensions.is_empty() && nav_matches(&query, "Axes");
-            let variation = nav_matches(&query, "Variation");
-            if !axes.is_empty() || no_axes || variation {
-                section_header(ui, "Run set", Some(&format!("{points} pts")));
-            }
-            if no_axes {
-                nav_property(ui, "Axes", "none declared");
+            if !axes.is_empty() {
+                section_header(ui, "Run set", None);
             }
             for dimension in axes {
                 let values = dimension
@@ -1016,9 +1000,6 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                     .iter()
                     .map(|value| value.lexical.as_str())
                     .collect::<Vec<_>>();
-                // A disabled axis states its size rather than its values: it is
-                // declared, it is not in the run, and a row that showed the
-                // values would read as one that is.
                 // The unit is the axis's, not the value's: the run set stores
                 // temperature values as bare lexical numbers, so a rail that
                 // printed them as authored said "-40 25 125" and left the
@@ -1026,9 +1007,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                 // carries the unit on every value; one unit for the axis says
                 // the same thing and is what fits the dock's 228 px.
                 let unit = dimension.unit();
-                let value = if !dimension.enabled {
-                    format!("{} values \u{b7} axis off", values.len())
-                } else if values.len() > NAV_AXIS_VALUE_LIMIT {
+                let value = if values.len() > NAV_AXIS_VALUE_LIMIT {
                     format!(
                         "{}{} +{}",
                         values[..NAV_AXIS_VALUE_LIMIT].join(" "),
@@ -1043,30 +1022,6 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                     )
                 };
                 nav_property(ui, &dimension.name, &value);
-            }
-            if variation {
-                nav_property(
-                    ui,
-                    "Variation",
-                    if app
-                        .state
-                        .sim_setup
-                        .has_enabled_analysis_kind(AnalysisKind::MonteCarlo)
-                    {
-                        "Monte Carlo enabled"
-                    } else {
-                        "no Monte Carlo instance"
-                    },
-                );
-            }
-            // The banner is prose rather than a row, so it answers for the
-            // sentence it paints as well as for the section that holds it.
-            if nav_matches(&query, CAPABILITY_POLICY_SECTION)
-                || nav_matches(&query, CAPABILITY_POLICY_NOTICE)
-            {
-                ui.add_space(8.0);
-                section_header(ui, CAPABILITY_POLICY_SECTION, None);
-                capability_policy_banner(ui);
             }
         });
 }
@@ -1139,9 +1094,10 @@ fn simulate_nav_meta(
         // the caller, like the analysis and run-set numbers beside it.
         SimulationPage::Excitations => count(placed_sources),
         SimulationPage::Variables => count(payload.map_or(0, |data| data.design_variables.len())),
-        SimulationPage::Outputs | SimulationPage::Save => {
-            count(payload.map_or(0, |data| data.saved_outputs.len()))
-        }
+        SimulationPage::Outputs => count(payload.map_or(0, |data| data.saved_outputs.len())),
+        // The same saved-output count the Outputs row states; one number is
+        // printed once.
+        SimulationPage::Save => None,
         SimulationPage::Specifications => count(payload.map_or(0, |data| data.specs.len())),
         SimulationPage::RunSet => points.map(|points| format!("{points} pt")),
         SimulationPage::Models => count(app.state.sim_setup.model_bindings.len()),
@@ -1150,48 +1106,6 @@ fn simulate_nav_meta(
         // preset the effective options match.
         SimulationPage::Solver => Some(app.state.sim_setup.options.preset_label()),
     }
-}
-
-fn capability_policy_banner(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    let response = egui::Frame::new()
-        .fill(t.color.bg_inset)
-        .corner_radius(t.radius)
-        .inner_margin(egui::Margin::same(CAPABILITY_BANNER_MARGIN))
-        .outer_margin(egui::Margin::same(CAPABILITY_BANNER_MARGIN))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = CAPABILITY_BANNER_GAP;
-                let (icon_rect, _) = ui.allocate_exact_size(
-                    egui::Vec2::splat(CAPABILITY_BANNER_ICON_SIZE),
-                    egui::Sense::hover(),
-                );
-                WorkbenchIcon::Info.paint(ui.painter(), icon_rect, t.color.text_dim);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(CAPABILITY_POLICY_NOTICE)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    )
-                    .wrap(),
-                );
-            });
-        })
-        .response;
-    let border_rect = response.rect.shrink(f32::from(CAPABILITY_BANNER_MARGIN));
-    let outline = [
-        border_rect.left_top(),
-        border_rect.right_top(),
-        border_rect.right_bottom(),
-        border_rect.left_bottom(),
-        border_rect.left_top(),
-    ];
-    ui.painter().add(egui::Shape::dashed_line(
-        &outline,
-        egui::Stroke::new(1.0, t.color.border_strong),
-        3.0,
-        3.0,
-    ));
 }
 
 /// One `label`/`value` row of a navigator card, laid out as two columns.
@@ -6198,60 +6112,24 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
         {
             continue;
         }
-        if flow_row(
-            ui,
-            &flow,
-            app.state.workbench.verification_page == page,
-            page.is_operational(),
-        ) {
+        if flow_row(ui, &flow, app.state.workbench.verification_page == page) {
             app.state.workbench.verification_page = page;
         }
     }
-    section_header(ui, "Active evidence coverage", None);
+    // The one coverage number a designer acts on, and what is missing from
+    // it. Full coverage is the normal state and says nothing.
+    section_header(ui, "Specifications", None);
     let coverage = verification_coverage(app);
-    let status_width = ui.available_width().max(1.0);
-    egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.set_width((status_width - 20.0).max(1.0));
-            let healthy = coverage.total > 0 && coverage.gaps == 0;
-            let tone = if healthy {
-                Tokens::get(ui.ctx()).color.ok
-            } else {
-                Tokens::get(ui.ctx()).color.warn
-            };
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let (dot, _) = ui.allocate_exact_size(egui::vec2(5.0, 13.0), egui::Sense::hover());
-                ui.painter().circle_filled(dot.center(), 2.5, tone);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&coverage.status)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(tone),
-                    )
-                    .wrap(),
-                );
-            });
-        });
-    property_row(
-        ui,
-        "Mapped specifications",
-        &format!("{} / {}", coverage.mapped, coverage.total),
-    );
-    property_row(
-        ui,
-        "PVT points",
-        &format!("{} retained", coverage.pvt_points),
-    );
-    property_row(
-        ui,
-        "Executable checks",
-        &format!(
-            "{} executed · {} passed",
-            coverage.executed, coverage.passed
-        ),
-    );
+    if coverage.total > 0 {
+        property_row(
+            ui,
+            "Passing",
+            &format!("{} / {}", coverage.passed, coverage.total),
+        );
+    }
+    if !coverage.status.is_empty() {
+        rspice_ui_kit::panels::inspector::muted_inspector_copy(ui, &coverage.status);
+    }
     ui.painter().hline(
         ui.max_rect().x_range(),
         ui.cursor().top(),
@@ -6259,31 +6137,40 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
+/// One verification flow's row: what it is, what it holds, and its state,
+/// stated once. A problem leads the row with its mark; otherwise the row leads
+/// with the flow's neutral page glyph.
 #[derive(Clone)]
 struct VerificationFlowPresentation {
     label: String,
     detail: String,
     status: String,
-    mark: VerificationFlowMark,
-    icon_tone: FlowTone,
-    status_tone: FlowTone,
-}
-
-#[derive(Clone, Copy)]
-enum VerificationFlowMark {
-    Status(StatusMark),
-    Text(&'static str),
+    problem: Option<Problem>,
+    glyph: &'static str,
 }
 
 const fn verification_flow_label(page: VerificationPage) -> &'static str {
     match page {
         VerificationPage::Yield => "PVT & Monte Carlo",
         VerificationPage::Corners => "Process corners",
-        VerificationPage::Tuning => "Parameter tuning sandbox",
+        VerificationPage::Tuning => "Tuning",
         VerificationPage::Optimization => "Optimization",
         VerificationPage::DeviceSafety => "Electrical SOA",
-        VerificationPage::Regression => "Regression · main",
+        VerificationPage::Regression => "Regression",
         VerificationPage::Drc => "Physical DRC",
+    }
+}
+
+/// The neutral glyph a flow row leads with when it reports no problem.
+const fn verification_flow_glyph(page: VerificationPage) -> &'static str {
+    match page {
+        VerificationPage::Yield => "M",
+        VerificationPage::Corners => "C",
+        VerificationPage::Tuning => "T",
+        VerificationPage::Optimization => "O",
+        VerificationPage::DeviceSafety => "S",
+        VerificationPage::Regression => "R",
+        VerificationPage::Drc => "D",
     }
 }
 
@@ -6323,42 +6210,22 @@ fn verification_flow_presentation(
                     || verification_flow_label(page).to_owned(),
                     |(run, _)| format!("PVT & Monte Carlo · Run {}", run.id),
                 ),
-                detail: evidence.map_or_else(
-                    || "No retained Monte Carlo evidence for the active dataset".to_owned(),
-                    |(_, provenance)| {
-                        format!(
-                            "{} / {} samples · seed {:#x}",
-                            provenance.runs_completed, provenance.runs_requested, provenance.seed
-                        )
-                    },
-                ),
+                // The seed and the sampling are the inspector's; the row says
+                // how much of the run completed.
+                detail: evidence.map_or_else(String::new, |(_, provenance)| {
+                    format!(
+                        "{} / {} samples",
+                        provenance.runs_completed, provenance.runs_requested
+                    )
+                }),
                 status: worst.map_or_else(
                     || "not run".to_owned(),
-                    |result| format!("{:.2}% retained yield", result.yield_percent),
+                    |result| format!("{:.1}% yield", result.yield_percent),
                 ),
-                mark: VerificationFlowMark::Status(
-                    if worst.is_some_and(|result| result.fail_count == 0) {
-                        StatusMark::Success
-                    } else if worst.is_some() {
-                        StatusMark::Warning
-                    } else {
-                        StatusMark::Neutral
-                    },
-                ),
-                icon_tone: if worst.is_some_and(|result| result.fail_count == 0) {
-                    FlowTone::Ok
-                } else if worst.is_some() {
-                    FlowTone::Warn
-                } else {
-                    FlowTone::Neutral
-                },
-                status_tone: if worst.is_some_and(|result| result.fail_count == 0) {
-                    FlowTone::Ok
-                } else if worst.is_some() {
-                    FlowTone::Warn
-                } else {
-                    FlowTone::Neutral
-                },
+                problem: worst
+                    .is_some_and(|result| result.fail_count > 0)
+                    .then_some(Problem::Warning),
+                glyph: verification_flow_glyph(page),
             }
         }
         VerificationPage::Corners => {
@@ -6369,41 +6236,18 @@ fn verification_flow_presentation(
                 .map_or(0, |waveform| waveform.x.len());
             VerificationFlowPresentation {
                 label: verification_flow_label(page).to_owned(),
-                detail: if point_count == 0 {
-                    "No retained process-corner evidence".to_owned()
-                } else {
-                    format!("{point_count} retained corner points")
-                },
+                detail: String::new(),
                 status: if point_count == 0 {
                     "not run".to_owned()
                 } else if result.is_some_and(|analysis| analysis.success) {
-                    format!("{point_count} complete")
+                    format!("{point_count} corners")
                 } else {
                     "failed / incomplete".to_owned()
                 },
-                mark: VerificationFlowMark::Status(
-                    if result.is_some_and(|analysis| analysis.success) {
-                        StatusMark::Success
-                    } else if result.is_some() {
-                        StatusMark::Warning
-                    } else {
-                        StatusMark::Neutral
-                    },
-                ),
-                icon_tone: if result.is_some_and(|analysis| analysis.success) {
-                    FlowTone::Ok
-                } else if result.is_some() {
-                    FlowTone::Warn
-                } else {
-                    FlowTone::Neutral
-                },
-                status_tone: if result.is_some_and(|analysis| analysis.success) {
-                    FlowTone::Ok
-                } else if result.is_some() {
-                    FlowTone::Warn
-                } else {
-                    FlowTone::Neutral
-                },
+                problem: result
+                    .is_some_and(|analysis| !analysis.success)
+                    .then_some(Problem::Warning),
+                glyph: verification_flow_glyph(page),
             }
         }
         VerificationPage::Tuning => {
@@ -6424,27 +6268,19 @@ fn verification_flow_presentation(
                 .count();
             VerificationFlowPresentation {
                 label: verification_flow_label(page).to_owned(),
-                detail: if variable_count == 0 {
-                    "No active-plan design variables".to_owned()
-                } else {
-                    format!("{variable_count} typed active-plan variable(s)")
+                detail: match variable_count {
+                    0 => "No variables".to_owned(),
+                    1 => "1 variable".to_owned(),
+                    count => format!("{count} variables"),
                 },
+                // Nothing uncommitted is the normal state, and says nothing.
                 status: if dirty_count == 0 {
-                    "baseline".to_owned()
+                    String::new()
                 } else {
-                    format!("{dirty_count} provisional")
+                    format!("{dirty_count} uncommitted")
                 },
-                mark: VerificationFlowMark::Text("T"),
-                icon_tone: if dirty_count == 0 {
-                    FlowTone::Accent
-                } else {
-                    FlowTone::Warn
-                },
-                status_tone: if dirty_count == 0 {
-                    FlowTone::Accent
-                } else {
-                    FlowTone::Warn
-                },
+                problem: None,
+                glyph: verification_flow_glyph(page),
             }
         }
         VerificationPage::Optimization => {
@@ -6452,27 +6288,14 @@ fn verification_flow_presentation(
                 .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Optimization));
             VerificationFlowPresentation {
                 label: verification_flow_label(page).to_owned(),
-                detail: if result.is_some() {
-                    "Source-attributed optimization result retained".to_owned()
-                } else {
-                    "Bounded production optimization analysis".to_owned()
-                },
+                detail: String::new(),
                 status: if result.is_some() {
-                    "retained result".to_owned()
+                    "done".to_owned()
                 } else {
                     "not run".to_owned()
                 },
-                mark: VerificationFlowMark::Text("O"),
-                icon_tone: if result.is_some() {
-                    FlowTone::Accent
-                } else {
-                    FlowTone::Neutral
-                },
-                status_tone: if result.is_some() {
-                    FlowTone::Accent
-                } else {
-                    FlowTone::Neutral
-                },
+                problem: None,
+                glyph: verification_flow_glyph(page),
             }
         }
         VerificationPage::DeviceSafety => {
@@ -6491,21 +6314,8 @@ fn verification_flow_presentation(
                 } else {
                     "not run".to_owned()
                 },
-                mark: VerificationFlowMark::Status(if has_evidence {
-                    StatusMark::Warning
-                } else {
-                    StatusMark::Neutral
-                }),
-                icon_tone: if has_evidence {
-                    FlowTone::Warn
-                } else {
-                    FlowTone::Neutral
-                },
-                status_tone: if has_evidence {
-                    FlowTone::Warn
-                } else {
-                    FlowTone::Neutral
-                },
+                problem: has_evidence.then_some(Problem::Warning),
+                glyph: verification_flow_glyph(page),
             }
         }
         VerificationPage::Regression => {
@@ -6524,37 +6334,22 @@ fn verification_flow_presentation(
             let ready = retained_runs >= 2;
             VerificationFlowPresentation {
                 label: verification_flow_label(page).to_owned(),
-                detail: "Measurements and waveforms vs governed baseline".to_owned(),
+                detail: String::new(),
                 status: if ready {
-                    format!("{retained_runs} source-attributed runs")
+                    format!("{retained_runs} runs")
                 } else {
-                    "baseline unavailable".to_owned()
+                    "needs 2 runs".to_owned()
                 },
-                mark: VerificationFlowMark::Status(if ready {
-                    StatusMark::Success
-                } else {
-                    StatusMark::Neutral
-                }),
-                icon_tone: if ready {
-                    FlowTone::Accent
-                } else {
-                    FlowTone::Neutral
-                },
-                status_tone: if ready {
-                    FlowTone::Accent
-                } else {
-                    FlowTone::Neutral
-                },
+                problem: None,
+                glyph: verification_flow_glyph(page),
             }
         }
         VerificationPage::Drc => VerificationFlowPresentation {
             label: verification_flow_label(page).to_owned(),
-            detail: "Unavailable until layout, rule-deck, and marker evidence are retained"
-                .to_owned(),
-            status: "not selectable".to_owned(),
-            mark: VerificationFlowMark::Status(StatusMark::Neutral),
-            icon_tone: FlowTone::Neutral,
-            status_tone: FlowTone::Error,
+            detail: String::new(),
+            status: String::new(),
+            problem: None,
+            glyph: verification_flow_glyph(page),
         },
     }
 }
@@ -6570,11 +6365,9 @@ fn verified_analysis(
 
 struct VerificationCoverage {
     total: usize,
-    mapped: usize,
-    executed: usize,
     passed: usize,
-    pvt_points: usize,
-    gaps: usize,
+    /// What is missing from the coverage, or nothing when every specification
+    /// was measured.
     status: String,
 }
 
@@ -6614,14 +6407,6 @@ fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
             })
         })
         .collect::<Vec<_>>();
-    let mapped = app
-        .state
-        .workspace
-        .content
-        .specs
-        .iter()
-        .filter(|spec| !spec.measurement.trim().is_empty())
-        .count();
     let executed = values.iter().filter(|value| value.is_some()).count();
     let passed = app
         .state
@@ -6634,24 +6419,19 @@ fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
             value.is_some_and(|(value, contract_held)| contract_held && spec.passes(value))
         })
         .count();
-    let pvt_points = run
-        .and_then(|run| verified_analysis(run, crate::state::AnalysisType::Corner))
-        .and_then(|analysis| analysis.waveforms.first())
-        .map_or(0, |waveform| waveform.x.len());
     let gaps = total.saturating_sub(executed);
     VerificationCoverage {
         total,
-        mapped,
-        executed,
         passed,
-        pvt_points,
-        gaps,
         status: if total == 0 {
-            "No project specifications configured".to_owned()
+            "No specs".to_owned()
         } else if gaps == 0 {
-            "Coverage current for active dataset".to_owned()
+            String::new()
         } else {
-            format!("{gaps} evidence gaps · review required")
+            format!(
+                "{gaps} spec{} not measured",
+                if gaps == 1 { "" } else { "s" }
+            )
         },
     }
 }

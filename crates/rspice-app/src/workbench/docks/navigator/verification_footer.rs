@@ -13,36 +13,32 @@ pub(super) fn active_mc_sample_trail(simulation: &crate::state::SimulationState)
         .unwrap_or(0)
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum FlowTone {
-    Neutral,
-    Accent,
-    Ok,
-    Warn,
-    Error,
+/// A flow row's height, and where its status line sits, for `detail_lines`
+/// wrapped lines of detail and a status line or none.
+///
+/// The label, then the detail, then the status, each on the row's own pitch; a
+/// line the flow has nothing to say on is not drawn and takes no height.
+pub(super) fn flow_row_geometry(detail_lines: usize, has_status: bool) -> (f32, f32) {
+    let detail_top = |line: usize| FLOW_DETAIL_TOP + line as f32 * FLOW_DETAIL_LINE_HEIGHT;
+    let status_top = match detail_lines {
+        0 => FLOW_DETAIL_TOP,
+        lines => FLOW_STATUS_TOP + (lines - 1) as f32 * FLOW_DETAIL_LINE_HEIGHT,
+    };
+    let last_top = if has_status {
+        status_top
+    } else {
+        detail_top(detail_lines.saturating_sub(1))
+    };
+    (last_top + (FLOW_ROW_HEIGHT - FLOW_STATUS_TOP), status_top)
 }
 
-pub(super) fn flow_row_geometry(detail_lines: usize) -> (f32, f32) {
-    let extra_detail_height = detail_lines.saturating_sub(1) as f32 * FLOW_DETAIL_LINE_HEIGHT;
-    (
-        FLOW_ROW_HEIGHT + extra_detail_height,
-        FLOW_STATUS_TOP + extra_detail_height,
-    )
-}
-
-pub(super) fn flow_row(
-    ui: &mut Ui,
-    flow: &VerificationFlowPresentation,
-    selected: bool,
-    enabled: bool,
-) -> bool {
+pub(super) fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selected: bool) -> bool {
     let VerificationFlowPresentation {
         label,
         detail,
         status,
-        mark,
-        icon_tone,
-        status_tone,
+        problem,
+        glyph,
     } = flow;
     let t = Tokens::get(ui.ctx());
     let text_width = (ui.available_width() - FLOW_TEXT_LEFT - 9.0).max(1.0);
@@ -52,24 +48,30 @@ pub(super) fn flow_row(
         t.color.text_faint,
         text_width,
     );
-    let (row_height, status_top) = flow_row_geometry(detail_galley.rows.len().max(1));
+    let detail_lines = if detail.is_empty() {
+        0
+    } else {
+        detail_galley.rows.len().max(1)
+    };
+    let (row_height, status_top) = flow_row_geometry(detail_lines, !status.is_empty());
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), row_height),
-        if enabled {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
+        egui::Sense::click(),
     );
     response.widget_info(|| {
+        let spoken = [label.as_str(), detail.as_str(), status.as_str()]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(". ");
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
-            enabled,
+            true,
             selected,
-            format!("{label}. {detail}. {status}"),
+            problem.map_or_else(|| spoken.clone(), |problem| problem.announce(&spoken)),
         )
     });
-    if selected || (enabled && response.hovered()) {
+    if selected || response.hovered() {
         ui.painter().rect_filled(
             rect,
             0.0,
@@ -92,58 +94,22 @@ pub(super) fn flow_row(
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let icon_ink = match *icon_tone {
-        FlowTone::Neutral => t.color.text_faint,
-        FlowTone::Accent => t.color.accent,
-        FlowTone::Ok => t.color.ok,
-        FlowTone::Warn => t.color.warn,
-        FlowTone::Error => t.color.err,
-    };
-    let (status_dot, status_ink) = match *status_tone {
-        FlowTone::Neutral => (t.color.text_faint, t.color.text_dim),
-        FlowTone::Accent => (t.color.accent, t.color.text_dim),
-        FlowTone::Ok => (t.color.ok, t.color.text_dim),
-        FlowTone::Warn => (t.color.warn, t.color.warn),
-        FlowTone::Error => (t.color.err, t.color.err),
-    };
-    let status_circle = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 17.5, rect.top() + 16.5),
-        egui::vec2(17.0, 17.0),
-    );
-    let circle_fill = match *icon_tone {
-        FlowTone::Ok => t.color.ok.gamma_multiply(0.14),
-        FlowTone::Warn => t.color.warn.gamma_multiply(0.14),
-        FlowTone::Accent => t.color.accent.gamma_multiply(0.14),
-        FlowTone::Neutral => t.color.bg_panel_2,
-        FlowTone::Error => t.color.err.gamma_multiply(0.14),
-    };
-    let circle_border = match *icon_tone {
-        FlowTone::Ok | FlowTone::Warn | FlowTone::Accent | FlowTone::Error => {
-            icon_ink.gamma_multiply(0.7)
-        }
-        FlowTone::Neutral => icon_ink,
-    };
-    ui.painter()
-        .circle_filled(status_circle.center(), 8.5, circle_fill);
-    ui.painter().circle_stroke(
-        status_circle.center(),
-        8.0,
-        egui::Stroke::new(1.0, circle_border),
-    );
-    match mark {
-        VerificationFlowMark::Status(mark) => paint_status_mark(
+    // The leading slot holds the flow's problem, in its own mark and colour,
+    // or the flow's neutral page glyph. There is no tinted disc behind either.
+    let lead = egui::pos2(rect.left() + 17.5, rect.top() + FLOW_LABEL_TOP + 6.5);
+    match problem {
+        Some(problem) => paint_problem_mark(
             ui.painter(),
-            egui::Rect::from_center_size(status_circle.center(), egui::Vec2::splat(8.0)),
-            *mark,
-            icon_ink,
+            egui::Rect::from_center_size(lead, egui::Vec2::splat(11.0)),
+            *problem,
         ),
-        VerificationFlowMark::Text(text) => {
+        None => {
             ui.painter().text(
-                status_circle.center(),
+                lead,
                 egui::Align2::CENTER_CENTER,
-                text,
-                theme::sans(tokens::FS_0, FontWeight::Medium),
-                icon_ink,
+                glyph,
+                theme::mono(tokens::FS_0, FontWeight::Medium),
+                t.color.text_dim,
             );
         }
     }
@@ -158,38 +124,24 @@ pub(super) fn flow_row(
         theme::sans(tokens::FS_0, FontWeight::Medium),
         t.color.text,
     );
-    painter.galley(
-        egui::pos2(text_left, rect.top() + FLOW_DETAIL_TOP),
-        detail_galley,
-        t.color.text_faint,
-    );
-    let status_dot_rect = egui::Rect::from_min_size(
-        egui::pos2(text_left, rect.top() + status_top + 4.0),
-        egui::Vec2::splat(FLOW_STATUS_DOT_SIZE),
-    );
-    painter.circle_filled(
-        status_dot_rect.center(),
-        FLOW_STATUS_DOT_SIZE * 0.5,
-        status_dot,
-    );
-    painter.text(
-        egui::pos2(
-            text_left + FLOW_STATUS_DOT_SIZE + FLOW_STATUS_GAP,
-            rect.top() + status_top,
-        ),
-        egui::Align2::LEFT_TOP,
-        status,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        status_ink,
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    let clicked = enabled && response.clicked();
-    if !enabled {
-        response.on_hover_text(
-            "Unavailable: this flow has no qualified execution and retained-evidence pipeline.",
+    if detail_lines > 0 {
+        painter.galley(
+            egui::pos2(text_left, rect.top() + FLOW_DETAIL_TOP),
+            detail_galley,
+            t.color.text_faint,
         );
     }
-    clicked
+    if !status.is_empty() {
+        painter.text(
+            egui::pos2(text_left, rect.top() + status_top),
+            egui::Align2::LEFT_TOP,
+            status,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+    }
+    theme::paint_focus_ring(ui, &response, rect);
+    response.clicked()
 }
 
 pub(super) fn models(ui: &mut Ui, app: &mut RSpiceApp) {

@@ -6,7 +6,6 @@
 //! the density switch between desktop and touch.
 
 use super::{
-    CAPABILITY_BANNER_GAP, CAPABILITY_BANNER_ICON_SIZE, CAPABILITY_BANNER_MARGIN,
     EMPTY_HINT_PADDING_X, EMPTY_HINT_PADDING_Y, EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP,
     FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_COLUMN_GAP,
     NAV_PROPERTY_PADDING_X, PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT,
@@ -91,14 +90,26 @@ fn navigator_painted_lines(width: f32, mut app: RSpiceApp) -> Vec<(String, egui:
 /// The card is a two-column form grid in the mockup and the dock is 228 px
 /// wide below 1261 px, which is where the single-row layout failed: the value
 /// was floated right and grew leftwards with nothing to stop it, so
-/// "Supply voltage" ran straight into "3 values · axis off" and "Variation"
-/// into "no Monte Carlo instance" — no gutter, no ellipsis, no way to read
-/// where one ended. Measured columns cannot do that, and this is the width
-/// that proves it.
+/// "Supply voltage" ran straight into its values with no gutter, no ellipsis
+/// and no way to read where one ended. Measured columns cannot do that, and
+/// this is the width that proves it.
 #[test]
 fn run_set_card_rows_keep_their_value_off_their_label() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Simulate);
+    // Only an axis the run sweeps has a row.
+    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        dimension.enabled = true;
+    }
+    let names = app
+        .state
+        .sim_setup
+        .run_set
+        .dimensions
+        .iter()
+        .map(|dimension| dimension.name.clone())
+        .collect::<Vec<_>>();
+    assert!(!names.is_empty(), "the fixture run set declares axes");
     let lines = navigator_painted_lines(228.0, app);
 
     let find = |text: &str| -> egui::Rect {
@@ -113,12 +124,17 @@ fn run_set_card_rows_keep_their_value_off_their_label() {
             })
             .1
     };
-    for (label, value) in [
-        ("Supply voltage", "3 values \u{b7} axis off"),
-        ("Variation", "no Monte Carlo instance"),
-    ] {
+    for label in &names {
+        let label = label.as_str();
         let label_rect = find(label);
-        let value_rect = find(value);
+        let (value, value_rect) = lines
+            .iter()
+            .find(|(_, rect)| {
+                rect.left() > label_rect.right()
+                    && (rect.center().y - label_rect.center().y).abs() < 2.0
+            })
+            .map(|(text, rect)| (text.as_str(), *rect))
+            .unwrap_or_else(|| panic!("the {label:?} row paints no value"));
         assert!(
             value_rect.left() - label_rect.right() >= NAV_PROPERTY_COLUMN_GAP - 0.5,
             "{label:?} ends at {} and {value:?} starts at {}, closer than the \
@@ -510,9 +526,12 @@ fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
     assert!(FLOW_DETAIL_TOP - (FLOW_LABEL_TOP + 11.0) >= 4.0);
     assert!(FLOW_STATUS_TOP - (FLOW_DETAIL_TOP + 11.0) >= 4.0);
     assert!(FLOW_ROW_HEIGHT - (FLOW_STATUS_TOP + 11.0) >= 7.0);
-    assert_eq!(flow_row_geometry(1), (63.0, 43.0));
-    assert_eq!(flow_row_geometry(2), (78.0, 58.0));
-    assert_eq!(flow_row_geometry(3), (93.0, 73.0));
+    assert_eq!(flow_row_geometry(1, true), (63.0, 43.0));
+    assert_eq!(flow_row_geometry(2, true), (78.0, 58.0));
+    assert_eq!(flow_row_geometry(3, true), (93.0, 73.0));
+    // A row that states only its label and one line is one line shorter.
+    assert_eq!(flow_row_geometry(0, true), (43.0, 23.0));
+    assert_eq!(flow_row_geometry(1, false), (43.0, 43.0));
 }
 
 #[test]
@@ -524,10 +543,10 @@ fn verification_navigation_exposes_the_operational_tuning_route() {
         [
             "PVT & Monte Carlo",
             "Process corners",
-            "Parameter tuning sandbox",
+            "Tuning",
             "Optimization",
             "Electrical SOA",
-            "Regression · main",
+            "Regression",
         ]
     );
     assert!(!VerificationPage::NAVIGATION.contains(&VerificationPage::Drc));
@@ -553,11 +572,9 @@ fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
 
     let coverage = verification_coverage(&app);
 
-    assert_eq!(coverage.mapped, 1);
-    assert_eq!(coverage.executed, 0);
+    assert_eq!(coverage.total, 1);
     assert_eq!(coverage.passed, 0);
-    assert_eq!(coverage.gaps, 1);
-    assert_ne!(coverage.status, "Coverage current for active dataset");
+    assert_eq!(coverage.status, "1 spec not measured");
 }
 
 #[test]
@@ -566,9 +583,7 @@ fn empty_specification_set_is_neutral_not_healthy() {
     let coverage = verification_coverage(&app);
 
     assert_eq!(coverage.total, 0);
-    assert_eq!(coverage.gaps, 0);
-    assert_eq!(coverage.status, "No project specifications configured");
-    assert_ne!(coverage.status, "Coverage current for active dataset");
+    assert_eq!(coverage.status, "No specs");
 }
 
 #[test]
@@ -606,9 +621,9 @@ fn finite_goal_miss_counts_as_executed_but_not_passed() {
     app.state.simulation.view.active_run_idx = Some(0);
 
     let coverage = verification_coverage(&app);
-    assert_eq!(coverage.executed, 1);
+    // Measured, so nothing is missing; missed its goal, so it does not pass.
+    assert_eq!(coverage.status, "");
     assert_eq!(coverage.passed, 0);
-    assert_eq!(coverage.gaps, 0);
 }
 
 #[test]
@@ -618,13 +633,6 @@ fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
     assert!(verification_navigator_requires_scroll(390.0));
     assert!(!verification_navigator_requires_scroll(560.0));
     assert!(!verification_navigator_requires_scroll(700.0));
-}
-
-#[test]
-fn capability_policy_banner_matches_mock_spacing() {
-    assert_eq!(CAPABILITY_BANNER_MARGIN, 8);
-    assert_eq!(CAPABILITY_BANNER_ICON_SIZE, 15.0);
-    assert_eq!(CAPABILITY_BANNER_GAP, 7.0);
 }
 
 #[test]
@@ -1287,9 +1295,9 @@ fn a_producer_tagged_entry_matches_without_naming_its_quantity() {
 
 /// The simulation rail derives what it states once per frame.
 ///
-/// The Run set row states the resolved point count and the Run set card below
-/// states it again, and each asked the run set for it — two validations of one
-/// declaration to print one number twice. The Excitations row states how many
+/// The Run set row states the resolved point count, and the Run set card below
+/// it used to state it again, each asking the run set for it — two validations
+/// of one declaration to print one number twice. The Excitations row states how many
 /// sources the whole design places, and resolving that walks the configured
 /// hierarchy, resolves each master's nets, parses every source's parameters and
 /// sorts the result — nine rows each asking would pay for it nine times.
@@ -1308,7 +1316,7 @@ fn the_simulation_rail_derives_what_it_states_once_a_frame() {
     reset();
     let painted = navigator_painted_lines(228.0, app);
     assert!(
-        painted.iter().any(|(text, _)| text == "Run set"),
+        painted.iter().any(|(text, _)| text == "Setup"),
         "the frame drew the simulation rail"
     );
 
@@ -1341,6 +1349,10 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
     fn rail(query: &str) -> Vec<String> {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Simulate);
+        // Only an axis the run sweeps has a row.
+        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+            dimension.enabled = true;
+        }
         app.state.workbench.set_navigator_filter(query);
         navigator_painted_lines(228.0, app)
             .into_iter()
@@ -1349,14 +1361,7 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
     }
 
     let unfiltered = rail("");
-    for line in [
-        "Lab characterization",
-        "Analyses",
-        "Run set",
-        "Supply voltage",
-        "Variation",
-        "Capability policy",
-    ] {
+    for line in ["Setup", "Analyses", "Run set", "Supply voltage"] {
         assert!(
             unfiltered.iter().any(|painted| painted.as_str() == line),
             "an unfiltered rail still paints {line:?}; it painted {unfiltered:?}"
@@ -1375,12 +1380,7 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
         filtered.iter().any(|painted| painted.as_str() == "Run set"),
         "and the section that kept a row keeps its header; it painted {filtered:?}"
     );
-    for dropped in [
-        "Variation",
-        "Analyses",
-        "Lab characterization",
-        "Capability policy",
-    ] {
+    for dropped in ["Analyses", "Setup"] {
         assert!(
             !filtered.iter().any(|painted| painted.as_str() == dropped),
             "{dropped:?} matches nothing the reader typed; the rail painted {filtered:?}"
