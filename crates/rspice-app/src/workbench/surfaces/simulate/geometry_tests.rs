@@ -331,3 +331,372 @@ fn the_analysis_catalogue_takes_its_columns_from_its_body_not_the_viewport() {
         "a body that cannot carry two columns of that minimum draws one: {narrow:?}"
     );
 }
+
+/// The window the split-route scrolling cases are drawn in.
+const ROUTE_WIDTH: f32 = 1_440.0;
+
+/// The stack's first group header, as painted: the stack's topmost line.
+const FIRST_GROUP: &str = "Core analyses";
+
+/// The Analyses route held open in a 1440-point window across many passes, so
+/// a wheel's eased scroll can run its course between two measurements.
+struct AnalysesRoute {
+    ctx: egui::Context,
+    app: RSpiceApp,
+    height: f32,
+}
+
+impl AnalysesRoute {
+    fn open(mut app: RSpiceApp, height: f32) -> Self {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+        let mut route = Self { ctx, app, height };
+        route.settle(Vec::new());
+        route
+    }
+
+    fn pass(&mut self, events: Vec<egui::Event>) -> Vec<PaintedLine> {
+        let app = &mut self.app;
+        let output = self.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(ROUTE_WIDTH, self.height),
+                )),
+                events,
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::show(ui, app));
+            },
+        );
+        painted_lines(&output.shapes)
+    }
+
+    /// `events`, then passes until anything they set moving has stopped.
+    fn settle(&mut self, events: Vec<egui::Event>) -> Vec<PaintedLine> {
+        let mut lines = self.pass(events);
+        for _ in 0..60 {
+            lines = self.pass(Vec::new());
+        }
+        lines
+    }
+
+    /// Turn the wheel over `at`, let the scroll run its course, then take the
+    /// pointer away, so a tooltip the resting pointer raised is not measured
+    /// as a line the scroll moved.
+    fn scroll_at(&mut self, at: egui::Pos2) -> Vec<PaintedLine> {
+        self.settle(wheel_over(at));
+        self.settle(vec![egui::Event::PointerGone])
+    }
+
+    /// Where the stack ends and the editor begins.
+    fn divider(&self) -> f32 {
+        let gutter = self.ctx.global_style().spacing.scroll.allocated_width();
+        let surface = ROUTE_WIDTH - gutter;
+        super::analysis_split_widths(surface, surface).0
+    }
+}
+
+/// A plan holding one instance of every kind it accepts, which is far more
+/// than a 900-point window shows, with its transient analysis selected: the
+/// longest form, and one that runs past the window too.
+fn crowded_plan() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let plan = app
+        .state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("the test plan resolves");
+    for kind in AnalysisKind::MANIFEST_ORDER {
+        if plan
+            .instances()
+            .iter()
+            .all(|instance| instance.kind() != kind)
+        {
+            let _ = plan.insert(kind);
+        }
+    }
+    select_transient(&mut app.state);
+    app
+}
+
+fn select_transient(state: &mut crate::workbench::AppState) {
+    let plan = state
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .expect("the test plan resolves");
+    let transient = match plan
+        .instances()
+        .iter()
+        .find(|instance| instance.kind() == AnalysisKind::Transient)
+    {
+        Some(instance) => instance.id(),
+        None => plan.insert(AnalysisKind::Transient).expect("transient").0,
+    };
+    state.workbench.active_analysis_instance = Some(transient);
+}
+
+/// A wheel turned over `at`, asking to move the content up by 400 points.
+fn wheel_over(at: egui::Pos2) -> Vec<egui::Event> {
+    vec![
+        egui::Event::PointerMoved(at),
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -400.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        },
+    ]
+}
+
+/// One column's lines below the title row, as (text, top in tenths of a point).
+fn column(
+    lines: &[PaintedLine],
+    below: f32,
+    in_column: impl Fn(&PaintedLine) -> bool,
+) -> Vec<(String, i64)> {
+    lines
+        .iter()
+        .filter(|line| line.top >= below && in_column(line))
+        .map(|line| (line.text.clone(), (line.top * 10.0).round() as i64))
+        .collect()
+}
+
+fn top_of(lines: &[PaintedLine], text: &str) -> f32 {
+    lines
+        .iter()
+        .find(|line| line.text == text)
+        .unwrap_or_else(|| panic!("{text:?} is painted"))
+        .top
+}
+
+/// Whether a line both measurements hold rose by more than 40 points.
+fn rose(before: &[(String, i64)], after: &[(String, i64)]) -> bool {
+    before.iter().any(|(text, top)| {
+        after
+            .iter()
+            .find(|(other, _)| other == text)
+            .is_some_and(|(_, moved)| *moved < top - 400)
+    })
+}
+
+/// Fail, naming only the lines that differ, unless `after` repeats `before`.
+#[track_caller]
+fn assert_unmoved(before: &[(String, i64)], after: &[(String, i64)], what: &str) {
+    let gone = before
+        .iter()
+        .filter(|line| !after.contains(line))
+        .collect::<Vec<_>>();
+    let new = after
+        .iter()
+        .filter(|line| !before.contains(line))
+        .collect::<Vec<_>>();
+    assert!(
+        gone.is_empty() && new.is_empty(),
+        "{what}: no longer painted {gone:?}; newly painted {new:?}"
+    );
+}
+
+/// Each column scrolls its own content and nothing else.
+///
+/// The stack and the editor shared the surface's one scroll, title row
+/// included, so turning the wheel over a long form carried the stack and the
+/// title off the screen with it. A plan too long for the window and a form too
+/// long for it are each turned through on their own here, and the column not
+/// under the wheel, and the title over both, have to stay exactly where they
+/// were.
+#[test]
+fn the_stack_and_the_editor_scroll_on_their_own_under_a_title_that_stays() {
+    let mut route = AnalysesRoute::open(crowded_plan(), 900.0);
+    let divider = route.divider();
+    let first = route.settle(Vec::new());
+    // The title row's heading is the plan's name.
+    let title = route
+        .app
+        .state
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
+    let title_top = top_of(&first, &title);
+    let body_top = top_of(&first, FIRST_GROUP);
+    let in_stack = |line: &PaintedLine| line.right <= divider;
+    let in_editor = |line: &PaintedLine| line.left > divider;
+    let stack = column(&first, body_top, in_stack);
+    let editor = column(&first, body_top, in_editor);
+
+    let after_editor = route.scroll_at(egui::pos2(divider + 300.0, 600.0));
+    assert_eq!(
+        top_of(&after_editor, &title),
+        title_top,
+        "the title row stays put"
+    );
+    assert_unmoved(
+        &stack,
+        &column(&after_editor, body_top, in_stack),
+        "turning the wheel over the editor leaves the stack where it was",
+    );
+    let editor_scrolled = column(&after_editor, body_top, in_editor);
+    assert!(rose(&editor, &editor_scrolled), "the editor scrolled");
+
+    let after_stack = route.scroll_at(egui::pos2(divider * 0.5, 600.0));
+    assert_eq!(
+        top_of(&after_stack, &title),
+        title_top,
+        "the title row stays put"
+    );
+    assert_unmoved(
+        &editor_scrolled,
+        &column(&after_stack, body_top, in_editor),
+        "turning the wheel over the stack leaves the editor where it was",
+    );
+    assert!(
+        rose(&stack, &column(&after_stack, body_top, in_stack)),
+        "the stack scrolled"
+    );
+}
+
+/// A column with nothing past the bottom of the window does not scroll.
+///
+/// A short plan beside a form that runs long: the wheel over the stack used to
+/// scroll the whole surface, because the form made it taller than the window,
+/// and the stack went with it. And with the window tall enough for the form
+/// too, the wheel over either column moves nothing at all.
+#[test]
+fn a_column_that_fits_does_not_scroll() {
+    let mut app = RSpiceApp::test_instance();
+    select_transient(&mut app.state);
+    let mut route = AnalysesRoute::open(app, 900.0);
+    let divider = route.divider();
+    let first = route.settle(Vec::new());
+    let body_top = top_of(&first, FIRST_GROUP);
+    let everything = |_: &PaintedLine| true;
+    let before = column(&first, 0.0, everything);
+    let after = route.scroll_at(egui::pos2(divider * 0.5, 600.0));
+    assert_unmoved(
+        &before,
+        &column(&after, 0.0, everything),
+        "a short stack does not scroll, and takes nothing else with it",
+    );
+    assert_eq!(top_of(&after, FIRST_GROUP), body_top);
+
+    let mut app = RSpiceApp::test_instance();
+    select_transient(&mut app.state);
+    let mut tall = AnalysesRoute::open(app, 3_000.0);
+    let first = tall.settle(Vec::new());
+    let before = column(&first, 0.0, everything);
+    for at in [
+        egui::pos2(divider * 0.5, 600.0),
+        egui::pos2(divider + 300.0, 600.0),
+    ] {
+        let after = tall.scroll_at(at);
+        assert_unmoved(
+            &before,
+            &column(&after, 0.0, everything),
+            "nothing moves where everything fits",
+        );
+    }
+}
+
+/// An analysis made active from outside the stack is scrolled into its view.
+///
+/// The stack scrolls on its own now, so the analysis the catalogue inserts and
+/// selects can land below what the stack shows. The catalogue's own two steps
+/// are taken here — insert, then select — with the stack at its top and the
+/// new row at its far end.
+#[test]
+fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
+    let mut route = AnalysesRoute::open(crowded_plan(), 900.0);
+    let first = route.settle(Vec::new());
+    let top = top_of(&first, FIRST_GROUP);
+    // The lowest group the catalogue can add to: it refuses a kind that
+    // cannot run yet.
+    let last_kind = {
+        let plan = route
+            .app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .expect("the test plan resolves");
+        let insertable = plan
+            .instances()
+            .iter()
+            .map(|instance| instance.kind())
+            .filter(|kind| kind.execution_blocker().is_none())
+            .collect::<Vec<_>>();
+        super::ANALYSIS_CATEGORY_ORDER
+            .into_iter()
+            .rev()
+            .find_map(|group| {
+                insertable
+                    .iter()
+                    .copied()
+                    .find(|kind| super::analysis_catalog_group(*kind) == group)
+            })
+            .expect("the plan holds a runnable analysis")
+    };
+    let inserted = super::insert_analysis_instance(&mut route.app, last_kind)
+        .expect("a second instance of the kind inserts");
+    route.app.state.workbench.active_analysis_instance = Some(inserted);
+
+    let after = route.settle(Vec::new());
+    let moved = after
+        .iter()
+        .find(|line| line.text == FIRST_GROUP)
+        .map(|line| line.top);
+    assert!(
+        moved.is_none_or(|moved| moved < top - 40.0),
+        "the stack scrolled down to the new row: its first group stayed at {moved:?}"
+    );
+}
+
+/// Renders the split Analyses route in a 1440 x 900 window for review: the
+/// default plan, whose short stack draws no scroll bar beside a form that
+/// runs long, and a crowded plan whose lowest analysis is active, so the
+/// stack has scrolled to it.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_split_analyses_route_for_review() {
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+
+    let mut short = RSpiceApp::test_instance();
+    select_transient(&mut short.state);
+    let mut crowded = crowded_plan();
+    let lowest = crowded
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .and_then(|plan| {
+            super::ANALYSIS_CATEGORY_ORDER
+                .into_iter()
+                .rev()
+                .find_map(|group| {
+                    plan.instances()
+                        .iter()
+                        .find(|instance| super::analysis_catalog_group(instance.kind()) == group)
+                        .map(|instance| instance.id())
+                })
+        });
+    crowded.state.workbench.active_analysis_instance = lowest;
+
+    for (stem, mut app) in [
+        ("studio-analyses-short", short),
+        ("studio-analyses-crowded", crowded),
+    ] {
+        app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+        let canvas = crate::ui::raster::render(vec2(ROUTE_WIDTH, 900.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| super::show(ui, &mut app));
+        });
+        std::fs::write(directory.join(format!("{stem}.png")), canvas.png(900))
+            .expect("write the render");
+    }
+}

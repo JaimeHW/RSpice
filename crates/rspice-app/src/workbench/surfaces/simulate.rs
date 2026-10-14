@@ -311,6 +311,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         let track = ui.available_width();
         let gutter = ui.spacing().scroll.allocated_width();
         let surface_width = (track - gutter).max(1.0);
+        let page = app.state.workbench.simulation_page;
+        let responsive_width = ui.ctx().content_rect().width().min(surface_width);
+        if page == SimulationPage::Analyses
+            && analysis_workspace_is_split(responsive_width, surface_width)
+        {
+            split_analysis_route(ui, app, surface_width, responsive_width);
+            return;
+        }
         let output = ScrollArea::vertical()
             .id_salt("workbench.simulate.surface")
             .vertical_scroll_offset(app.state.workbench.simulation_surface_scroll_y)
@@ -319,26 +327,39 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 let scroll_content_origin_y = ui.min_rect().top();
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.set_width(surface_width);
-                let page = app.state.workbench.simulation_page;
                 if page == SimulationPage::Analyses {
+                    // A narrow surface: the stack above the editor, both in
+                    // this one scroll, on one resolution of the plan's
+                    // participation as on the split route.
                     workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
-                    analysis_workspace(ui, app, surface_width, scroll_content_origin_y);
+                    let participation = participation::PlanParticipation::resolve(&app.state);
+                    ordered_instance_stack(ui, app, &participation);
+                    ui.add_space(STACKED_WORKSPACE_GAP);
+                    analysis_editor(
+                        ui,
+                        app,
+                        responsive_width,
+                        scroll_content_origin_y,
+                        &participation,
+                    );
                 } else {
                     pages::show(ui, app, page);
                 }
             });
-        let pending_delta = std::mem::take(
-            &mut app
-                .state
-                .workbench
-                .simulation_surface_pending_scroll_delta_y,
-        );
-        app.state.workbench.simulation_surface_scroll_y =
-            adjusted_scroll_for_stack_delta(output.state.offset.y, 0.0, pending_delta);
-        if pending_delta != 0.0 {
-            ui.ctx().request_repaint();
-        }
+        settle_surface_scroll(ui, &mut app.state, output.state.offset.y);
     });
+}
+
+/// Keep the offset the surface's scroll ended on, moved by whatever the
+/// editor's anchor asked for this frame.
+fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
+    let pending_delta =
+        std::mem::take(&mut state.workbench.simulation_surface_pending_scroll_delta_y);
+    state.workbench.simulation_surface_scroll_y =
+        adjusted_scroll_for_stack_delta(offset_y, 0.0, pending_delta);
+    if pending_delta != 0.0 {
+        ui.ctx().request_repaint();
+    }
 }
 
 /// Paint whichever plan-editing overlay is open, over whatever workspace the
@@ -434,14 +455,21 @@ fn drain_lifecycle_refusal(ctx: &egui::Context, state: &mut AppState) {
     }
 }
 
-fn analysis_workspace(
+/// The Analyses route with the stack and the editor side by side.
+///
+/// The title row stays put, and each column scrolls its own content, and
+/// only when that content runs past the bottom of the window. The two used to
+/// share the surface's one scroll: reading down a long form carried the stack
+/// off the screen with it, and both columns were held to the window's height
+/// under a title in that same scroll, so the route scrolled by the title's
+/// height with nothing below to scroll to.
+fn split_analysis_route(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     surface_width: f32,
-    scroll_content_origin_y: f32,
+    responsive_width: f32,
 ) {
-    let viewport_width = ui.ctx().content_rect().width();
-    let responsive_width = viewport_width.min(surface_width);
+    workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
     // Resolved once for the route and lent to both columns. Resolving it
     // expands the declared space, and the two columns each did it: the rail
     // through the workload it prices its rows from, the editor through the
@@ -449,52 +477,54 @@ fn analysis_workspace(
     // and it is the same one, so the two columns cannot report a different
     // space on the same frame.
     let participation = participation::PlanParticipation::resolve(&app.state);
-    if analysis_workspace_is_split(responsive_width, surface_width) {
-        let divider = 1.0;
-        let available = ui.available_width();
-        let (left_width, right_width) = analysis_split_widths(available, responsive_width);
-        let column_min_height =
-            analysis_column_min_height(ui.clip_rect().bottom(), ui.cursor().top());
-        let stack_background = ui.painter().add(egui::Shape::Noop);
-        let row = ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = divider;
-            ui.allocate_ui_with_layout(vec2(left_width, 0.0), Layout::top_down(Align::Min), |ui| {
-                ui.set_min_height(column_min_height);
-                ordered_instance_stack(ui, app, &participation)
-            });
-            ui.allocate_ui_with_layout(
-                vec2(right_width, column_min_height),
-                Layout::top_down(Align::Min),
-                |ui| {
-                    analysis_editor(
-                        ui,
-                        app,
-                        responsive_width,
-                        scroll_content_origin_y,
-                        &participation,
-                    );
-                },
+    let body = ui.available_rect_before_wrap();
+    let (stack_width, _) = analysis_split_widths(surface_width, responsive_width);
+    let stack_rect = Rect::from_min_size(body.min, vec2(stack_width, body.height()));
+    // One point of the page's own tone parts the stack's panel from the editor.
+    let editor_rect =
+        Rect::from_min_max(egui::pos2(stack_rect.right() + 1.0, body.top()), body.max);
+    ui.painter()
+        .rect_filled(stack_rect, 0.0, Tokens::get(ui.ctx()).color.bg_panel);
+
+    let mut stack = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(stack_rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    ScrollArea::vertical()
+        .id_salt("workbench.simulate.analysis-stack")
+        .auto_shrink([false, false])
+        .show(&mut stack, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ordered_instance_stack(ui, app, &participation);
+        });
+
+    // The editor's height follows its width, so it withholds the scrollbar's
+    // gutter whether or not a bar is up, for the reason `show` gives.
+    let mut editor = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(editor_rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    let editor_width = (editor_rect.width() - editor.spacing().scroll.allocated_width()).max(1.0);
+    let output = ScrollArea::vertical()
+        .id_salt("workbench.simulate.analysis-editor")
+        .vertical_scroll_offset(app.state.workbench.simulation_surface_scroll_y)
+        .auto_shrink([false, false])
+        .show(&mut editor, |ui| {
+            let scroll_content_origin_y = ui.min_rect().top();
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_width(editor_width);
+            analysis_editor(
+                ui,
+                app,
+                responsive_width,
+                scroll_content_origin_y,
+                &participation,
             );
         });
-        ui.painter().set(
-            stack_background,
-            egui::Shape::rect_filled(
-                analysis_stack_background_rect(row.response.rect, left_width),
-                0.0,
-                Tokens::get(ui.ctx()).color.bg_panel,
-            ),
-        );
-    } else {
-        ordered_instance_stack(ui, app, &participation);
-        ui.add_space(STACKED_WORKSPACE_GAP);
-        analysis_editor(
-            ui,
-            app,
-            responsive_width,
-            scroll_content_origin_y,
-            &participation,
-        );
-    }
+    settle_surface_scroll(ui, &mut app.state, output.state.offset.y);
+    ui.advance_cursor_after_rect(body);
 }
 
 fn analysis_workspace_is_split(viewport_width: f32, surface_width: f32) -> bool {
@@ -542,20 +572,6 @@ const fn analysis_row_content_min_width() -> f32 {
         + ANALYSIS_ROW_TRAILING_PADDING
 }
 
-fn analysis_column_min_height(clip_bottom: f32, content_top: f32) -> f32 {
-    (clip_bottom - content_top).max(1.0)
-}
-
-fn analysis_stack_background_rect(row_rect: Rect, left_width: f32) -> Rect {
-    Rect::from_min_max(
-        row_rect.min,
-        egui::pos2(
-            (row_rect.left() + left_width).min(row_rect.right()),
-            row_rect.bottom(),
-        ),
-    )
-}
-
 fn ordered_instance_stack(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -594,6 +610,7 @@ fn ordered_instance_stack(
             });
         } else {
             let mut displayed_position = 0usize;
+            let mut active_row = None;
             for group in ANALYSIS_CATEGORY_ORDER {
                 let members = rows
                     .iter()
@@ -605,13 +622,22 @@ fn ordered_instance_stack(
                 analysis_group_header(ui, group, members.len());
                 for row in members {
                     displayed_position += 1;
+                    let top = ui.cursor().top();
+                    let is_active = active == Some(row.id);
                     if let Some(row_action) =
-                        analysis_stack_row(ui, row, displayed_position, active == Some(row.id))
+                        analysis_stack_row(ui, row, displayed_position, is_active)
                     {
                         action = Some(row_action);
                     }
+                    if is_active {
+                        active_row = Some(Rect::from_x_y_ranges(
+                            ui.max_rect().x_range(),
+                            top..=ui.cursor().top(),
+                        ));
+                    }
                 }
             }
+            reveal_newly_active_row(ui, active, active_row);
         }
     });
 
@@ -627,6 +653,23 @@ fn ordered_instance_stack(
             apply_analysis_action(app, id, AnalysisAction::SetEnabled(enabled));
         }
         None => {}
+    }
+}
+
+/// Scroll the stack to the active analysis once each time it changes.
+///
+/// The stack scrolls on its own beside the editor, so an analysis made active
+/// from elsewhere — the catalogue selects what it inserts, a blocker's reveal
+/// selects what it names — can be out of its view. Pressing a row changes it
+/// too, and that row is already in view, so the scroll is a no-op there.
+fn reveal_newly_active_row(ui: &Ui, active: Option<AnalysisInstanceId>, row: Option<Rect>) {
+    let (Some(active), Some(row)) = (active, row) else {
+        return;
+    };
+    let revealed = egui::Id::new("workbench.simulate.analysis-stack.revealed");
+    if ui.data(|data| data.get_temp::<AnalysisInstanceId>(revealed)) != Some(active) {
+        ui.scroll_to_rect(row, None);
+        ui.data_mut(|data| data.insert_temp(revealed, active));
     }
 }
 

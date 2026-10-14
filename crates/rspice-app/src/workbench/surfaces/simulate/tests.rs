@@ -222,13 +222,6 @@ fn responsive_surface_geometry_matches_mockup_contract() {
     assert_eq!(ANALYSIS_STACK_DESKTOP_MIN_WIDTH, 190.0);
     assert!(ANALYSIS_STACK_TABLET_MIN_WIDTH >= analysis_row_content_min_width());
     assert_eq!(STACKED_WORKSPACE_GAP, 9.0);
-    assert_eq!(analysis_column_min_height(720.0, 148.0), 572.0);
-    assert_eq!(analysis_column_min_height(100.0, 120.0), 1.0);
-    let row_rect = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_000.0, 572.0));
-    let background = analysis_stack_background_rect(row_rect, 340.0);
-    assert_eq!(background.min, row_rect.min);
-    assert_eq!(background.width(), 340.0);
-    assert_eq!(background.height(), row_rect.height());
 }
 
 #[test]
