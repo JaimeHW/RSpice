@@ -18,11 +18,19 @@ name = "ports"
 families = ["spice", "va-runtime", "vams-digital"]
 today = "runs"
 
+# split: full with the testbench in a file of its own (net/tb_sar.v, no
+# `timescale) read after net/sar8.v; the deck's HDL sources are one
+# compilation unit, so tb_sar inherits sar8.v's timescale.
+[[variant]]
+name = "split"
+families = ["spice", "va-runtime", "vams-digital"]
+today = "runs"
+
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
 [[analysis]]
 id = "tran"
-variants = ["full", "ports"]
+variants = ["full", "ports", "split"]
 oracles = ["O6", "O2", "O5"]
 timeout_s = 520
 phase = "P2"
@@ -30,7 +38,7 @@ phase = "P2"
 # The coupled t = 0 fixed point (D-A): the sampling state.
 [[analysis]]
 id = "op"
-variants = ["full", "ports"]
+variants = ["full", "ports", "split"]
 oracles = ["O6", "O2", "O5", "O5-O1"]
 timeout_s = 30
 phase = "P1"

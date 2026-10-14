@@ -130,7 +130,9 @@ decks.
 ## C4 — 8-bit SAR ADC (`c04-sar8`)
 
 RSpice-authored throughout: the register (`net/sar8.v`), the testbench and
-register in one file (`net/sar8_full.v`), the Verilog-A comparator
+register in one file (`net/sar8_full.v`), the testbench alone with no
+`timescale` (`net/tb_sar.v`, which variant `split` reads after
+`net/sar8.v`), the Verilog-A comparator
 (`net/cmp_va.va`), the capacitor DAC and switches (`net/sar_analog.cir`), its
 values (`net/caps_nominal.cir`, and `net/caps_mc.cir` with the Monte Carlo
 mismatch draws the mc-tran decks include), the sequencer wiring (`net/sar_ports.cir`, `net/sar_full.cir`), and every oracle

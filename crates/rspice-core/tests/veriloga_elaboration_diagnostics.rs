@@ -174,8 +174,10 @@ fn a_source_declaring_nothing_is_an_unknown_module_at_that_file() {
     assert!(error.module.is_some(), "the source names itself: {error}");
 }
 
+/// The sources of one deck are one library, so a module name two of them
+/// declare is refused before any instance is bound, naming both files.
 #[test]
-fn a_name_two_sources_claim_is_module_not_selected_on_the_instance() {
+fn a_name_two_sources_claim_is_module_not_selected_naming_both_sources() {
     let first = ModelFile::new(
         "ambiguous_first",
         "`include \"disciplines.vams\"\n\
@@ -200,12 +202,21 @@ fn a_name_two_sources_claim_is_module_not_selected_on_the_instance() {
         first.deck_path(),
         second.deck_path()
     ));
-    assert_eq!(error.kind, ElaborationErrorKind::ModuleNotSelected);
-    assert_eq!(error.instance.as_deref(), Some("x1"));
-    assert_eq!(error.module.as_deref(), Some("amb"));
-    // Nothing points at a line here and the error says so rather than
-    // inventing one: a parsed element carries no source location.
-    assert_eq!(span_of(&error), "<none>");
+    assert_eq!(
+        error.kind,
+        ElaborationErrorKind::ModuleNotSelected,
+        "{error}"
+    );
+    assert_eq!(error.instance, None, "no instance was reached: {error}");
+    assert!(
+        error.detail.contains("'amb'")
+            && error.detail.contains(&first.deck_path())
+            && error.detail.contains(&second.deck_path()),
+        "the refusal names the module and both sources: {error}"
+    );
+    // It points at the second declaration's file, which is where the name
+    // stopped being unique.
+    assert!(span_of(&error).contains("ambiguous_second"), "{error}");
 }
 
 #[test]

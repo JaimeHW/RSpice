@@ -222,7 +222,7 @@ pub struct ConnectSpecification {
 
 pub use connection_artifact::ConnectionLibraryArtifact;
 pub use connection_configuration::ConnectionConfiguration;
-pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency};
+pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency, UnitFile};
 pub use prepared_virtual_source::PreparedVirtualSource;
 pub use source_diagnostics::SourceCompileDiagnostic;
 
@@ -2030,10 +2030,48 @@ impl VerilogACompiler {
         limits: preprocessor::SourceProviderLimits,
         control: &dyn PipelineControl,
     ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
-        let input_bytes = std::fs::metadata(path)
-            .ok()
-            .and_then(|metadata| usize::try_from(metadata.len()).ok())
-            .unwrap_or(0);
+        self.prepare_files_runtime_source(&[path], limits, control)
+    }
+
+    /// Prepare several filesystem sources as one compilation unit, the
+    /// library `work` of IEEE 1364-2005 clause 19: the files are read in the
+    /// order given, macros and `timescale` carry from one file into the next
+    /// (sections 19.3 and 19.8), and a module of any file may instantiate a
+    /// module of another. [`PreparedRuntimeSource::unit_files`] says which
+    /// file declared which module. A later file that declares a module
+    /// without a `timescale` of its own inherits the one in force, with a
+    /// warning. Duplicate module names are the caller's to refuse: the files
+    /// that declare each are reported, so the refusal can name them.
+    pub fn prepare_unit_runtime_source_with_diagnostics(
+        &self,
+        paths: &[&std::path::Path],
+        limits: preprocessor::SourceProviderLimits,
+        control: &dyn PipelineControl,
+    ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
+        if paths.is_empty() {
+            return Err(
+                CompileError::io_error("a compilation unit needs at least one file").into(),
+            );
+        }
+        self.prepare_files_runtime_source(paths, limits, control)
+    }
+
+    fn prepare_files_runtime_source(
+        &self,
+        paths: &[&std::path::Path],
+        limits: preprocessor::SourceProviderLimits,
+        control: &dyn PipelineControl,
+    ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
+        let path = paths[0];
+        let input_bytes = paths
+            .iter()
+            .map(|path| {
+                std::fs::metadata(path)
+                    .ok()
+                    .and_then(|metadata| usize::try_from(metadata.len()).ok())
+                    .unwrap_or(0)
+            })
+            .fold(0_usize, usize::saturating_add);
         let mut measurements = metrics::MetricsRecorder::with_control(
             input_bytes,
             self.options.performance_budget.clone(),
@@ -2051,7 +2089,14 @@ impl VerilogACompiler {
             usize::MAX,
             control,
         );
-        let preprocessed = pp.preprocess_provider_root_mapped(&provider, path)?;
+        let (preprocessed, unit_ranges) = if paths.len() == 1 {
+            (
+                pp.preprocess_provider_root_mapped(&provider, path)?,
+                Vec::new(),
+            )
+        } else {
+            pp.preprocess_provider_roots_mapped(&provider, paths)?
+        };
         let dependencies: Vec<_> = pp
             .dependency_documents()
             .iter()
@@ -2079,6 +2124,14 @@ impl VerilogACompiler {
             );
         }
 
+        if let Some((message, diagnostic)) =
+            prepared_source::unit_duplicate_module(paths, &unit_ranges, &preprocessed)
+        {
+            return Err(ProviderCompileError::Compile {
+                source: CompileError::ModuleSelection(message),
+                diagnostics: vec![diagnostic],
+            });
+        }
         let diagnostic_source = source_package_path.display().to_string();
         let source_package = self.logical_file_source_package(&source_package_path);
         let analyzed = self
@@ -2096,8 +2149,13 @@ impl VerilogACompiler {
                 ),
                 source,
             })?;
+        let (unit_files, unit_warnings) =
+            prepared_source::unit_layout(paths, &unit_ranges, &preprocessed.source, &analyzed);
         let diagnostics = source_diagnostics::map_diagnostics(
-            runtime_report::semantic_warning_diagnostics(&preprocessed.source, &analyzed.warnings),
+            runtime_report::semantic_warning_diagnostics(
+                &preprocessed.source,
+                &[unit_warnings.as_slice(), analyzed.warnings.as_slice()].concat(),
+            ),
             &preprocessed,
             pp.dependency_documents(),
         );
@@ -2109,6 +2167,7 @@ impl VerilogACompiler {
                     .map(|document| document.source.as_str())
             }),
             diagnostics,
+            unit_files,
             source_package,
             replay_module: None,
             replay_configuration: None,

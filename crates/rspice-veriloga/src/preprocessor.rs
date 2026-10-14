@@ -712,6 +712,38 @@ impl Preprocessor {
         self.preprocess_document(provider, document, 1)
     }
 
+    /// Preprocess several roots as one compilation unit, in order. Macros,
+    /// `timescale` and the other compiler directives carry from one root into
+    /// the next (IEEE 1364-2005 sections 19.3 and 19.8), and the dependency
+    /// closure covers every root. Returns the expanded unit and the expanded
+    /// byte range each root produced; each root starts on a line of its own.
+    pub(crate) fn preprocess_provider_roots_mapped(
+        &mut self,
+        provider: &dyn SourceProvider,
+        roots: &[&Path],
+    ) -> Result<(PreprocessedSource, Vec<std::ops::Range<usize>>), PreprocessorError> {
+        self.reset_dependency_capture();
+        let mut unit = PreprocessedSource::default();
+        let mut ranges = Vec::with_capacity(roots.len());
+        for root in roots {
+            provider.checkpoint()?;
+            let document = provider.load_root(root)?;
+            let logical_path = document.logical_path.clone();
+            let mut expanded = self.preprocess_document(provider, document, 1)?;
+            if !expanded.source.is_empty() && !expanded.source.ends_with('\n') {
+                let line = expanded
+                    .segments
+                    .last()
+                    .map_or(1, |segment| segment.source_line);
+                expanded.push_source("\n", &logical_path, line);
+            }
+            let start = unit.source.len();
+            unit.append(expanded);
+            ranges.push(start..unit.source.len());
+        }
+        Ok((unit, ranges))
+    }
+
     /// Return canonical source/include dependencies captured during the most
     /// recent top-level `preprocess_file` call.
     pub fn dependencies(&self) -> Vec<PathBuf> {

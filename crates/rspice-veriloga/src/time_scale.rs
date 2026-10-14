@@ -86,6 +86,22 @@ impl ModuleTimeScale {
         Ok(10_u64.pow((self.unit_exponent - design_precision) as u32))
     }
 
+    /// The spelling a `timescale operand of this power of ten takes:
+    /// `1ns`, `10us`, `100ps`.
+    pub(crate) fn exponent_spelling(exponent: i8) -> String {
+        let magnitude = exponent.rem_euclid(3);
+        let unit = match exponent - magnitude {
+            0 => "s",
+            -3 => "ms",
+            -6 => "us",
+            -9 => "ns",
+            -12 => "ps",
+            -15 => "fs",
+            _ => return format!("1e{exponent}s"),
+        };
+        format!("{}{unit}", 10_u32.pow(magnitude as u32))
+    }
+
     /// Parse the two operands of an active `timescale directive.
     pub(crate) fn parse(operands: &str) -> Result<Self, &'static str> {
         fn exponent(operand: &str) -> Option<i8> {

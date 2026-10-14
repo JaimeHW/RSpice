@@ -369,6 +369,7 @@ impl VerilogACompiler {
                     },
                 ),
                 diagnostics,
+                unit_files: Vec::new(),
                 source_package: bundle.root_path().to_owned(),
                 source: preprocessed.source,
                 analyzed,

@@ -35,11 +35,168 @@ pub struct PreparedRuntimeSource {
     pub(crate) metrics: PipelineMetrics,
     pub(crate) diagnostics: Vec<crate::SourceCompileDiagnostic>,
     pub(crate) source_map: crate::prepared_diagnostics::PreparedSourceMap,
+    /// The files of a unit of more than one, in reading order; empty for one.
+    pub(crate) unit_files: Vec<UnitFile>,
+}
+
+/// One file of a compilation unit of several files, and what it declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitFile {
+    /// The path the preparation was given.
+    pub path: PathBuf,
+    /// Ordinary modules declared in this file or in a file it includes, in
+    /// declaration order.
+    pub modules: Vec<smol_str::SmolStr>,
+}
+
+/// A module name two files of a unit both declare, refused before analysis
+/// so the refusal can name both files: the unit is one library, in which a
+/// module name is declared once. Returns the message and a diagnostic at the
+/// second declaration; `None` when every name is unique across files (a
+/// source that does not lex is left to the analysis to report).
+pub(crate) fn unit_duplicate_module(
+    paths: &[&std::path::Path],
+    ranges: &[std::ops::Range<usize>],
+    preprocessed: &crate::preprocessor::PreprocessedSource,
+) -> Option<(String, crate::SourceCompileDiagnostic)> {
+    use crate::lexer::{Lexer, TokenKind};
+    let tokens = Lexer::new(&preprocessed.source, crate::SourceId::new(0))
+        .collect_tokens()
+        .ok()?;
+    let mut declared: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for pair in tokens.windows(2) {
+        if !matches!(pair[0].kind, TokenKind::Module | TokenKind::Macromodule) {
+            continue;
+        }
+        let Some(name) = pair[1].text.as_deref() else {
+            continue;
+        };
+        let offset = pair[1].span.start as usize;
+        let Some(file) = ranges.iter().position(|range| range.contains(&offset)) else {
+            continue;
+        };
+        let first = *declared.entry(name).or_insert(file);
+        if first == file {
+            continue;
+        }
+        let message = format!(
+            "module '{name}' is declared in both '{}' and '{}'; the HDL sources of a run form \
+             one library, in which a module name is declared once",
+            paths[first].display(),
+            paths[file].display()
+        );
+        let location = preprocessed.segment_at(offset);
+        let diagnostic = crate::SourceCompileDiagnostic {
+            severity: crate::CompileDiagnosticSeverity::Error,
+            phase: crate::CompileDiagnosticPhase::ModuleSelection,
+            code: "VA-UNIT-DUPLICATE-MODULE".to_owned(),
+            message: message.clone(),
+            path: Some(location.map_or_else(
+                || paths[file].display().to_string(),
+                |segment| segment.logical_path.display().to_string(),
+            )),
+            byte_start: None,
+            byte_end: None,
+            line: location.map(|segment| segment.source_line),
+            column: None,
+        };
+        return Some((message, diagnostic));
+    }
+    None
+}
+
+/// Which file of a unit declared what, and the warning for each later file
+/// that inherits a `timescale` (IEEE 1364-2005 section 19.8).
+pub(crate) fn unit_layout(
+    paths: &[&std::path::Path],
+    ranges: &[std::ops::Range<usize>],
+    source: &str,
+    analyzed: &crate::semantic::AnalyzedFile,
+) -> (Vec<UnitFile>, Vec<crate::semantic::SemanticWarning>) {
+    const DIRECTIVE: &str = "__rspice_timescale (";
+    let mut files: Vec<UnitFile> = paths
+        .iter()
+        .zip(ranges)
+        .map(|(path, _)| UnitFile {
+            path: path.to_path_buf(),
+            modules: Vec::new(),
+        })
+        .collect();
+    let file_at = |offset: u32| {
+        ranges
+            .iter()
+            .position(|range| range.contains(&(offset as usize)))
+    };
+    // The first module each file declares, for the inheritance warning.
+    let mut first_module: Vec<Option<(&str, crate::Span)>> = vec![None; files.len()];
+    for item in &analyzed.source.items {
+        let crate::ast::Item::Module(module) = item else {
+            continue;
+        };
+        let Some(index) = file_at(module.span.start) else {
+            continue;
+        };
+        files[index].modules.push(module.name.clone());
+        first_module[index].get_or_insert((module.name.as_str(), module.span));
+    }
+    let mut warnings = Vec::new();
+    for (index, range) in ranges.iter().enumerate().skip(1) {
+        let Some((module, span)) = first_module[index] else {
+            continue;
+        };
+        // A directive of the file's own, ahead of its first module, means it
+        // inherits nothing.
+        if source[range.start..span.start as usize].contains(DIRECTIVE) {
+            continue;
+        }
+        let Some(at) = source[..range.start].rfind(DIRECTIVE) else {
+            continue;
+        };
+        let operands = &source[at + DIRECTIVE.len()..];
+        let Some((unit, precision)) = operands
+            .split_once(')')
+            .and_then(|(operands, _)| operands.split_once(','))
+            .and_then(|(unit, precision)| {
+                Some((
+                    unit.trim().parse::<i8>().ok()?,
+                    precision.trim().parse::<i8>().ok()?,
+                ))
+            })
+        else {
+            continue;
+        };
+        let inherited = crate::time_scale::ModuleTimeScale::new(unit, precision);
+        // A `resetall` leaves the default in force, which is not inherited.
+        if inherited.is_err() || inherited == Ok(crate::time_scale::ModuleTimeScale::default()) {
+            continue;
+        }
+        let from = file_at(at as u32).map_or_else(String::new, |from| {
+            format!(" from '{}'", files[from].path.display())
+        });
+        warnings.push(crate::semantic::SemanticWarning {
+            code: "VA-UNIT-TIMESCALE-INHERITED",
+            message: format!(
+                "'{}' declares module '{module}' without a `timescale; it inherits `timescale \
+                 {}/{}{from}, the one in force where the file begins (IEEE 1364-2005 section 19.8)",
+                files[index].path.display(),
+                crate::time_scale::ModuleTimeScale::exponent_spelling(unit),
+                crate::time_scale::ModuleTimeScale::exponent_spelling(precision),
+            ),
+            span,
+        });
+    }
+    (files, warnings)
 }
 
 impl PreparedRuntimeSource {
     pub fn preprocessed_source(&self) -> &str {
         &self.source
+    }
+
+    /// The files of a compilation unit of several files, in reading order,
+    /// with the modules each declares. Empty when one file was prepared.
+    pub fn unit_files(&self) -> &[UnitFile] {
+        &self.unit_files
     }
 
     /// Input identity for a selected runtime, including preserved assignments.
@@ -352,6 +509,7 @@ impl VerilogACompiler {
             metrics: measurements.finish(),
             diagnostics,
             source_map,
+            unit_files: Vec::new(),
         })
     }
 }

@@ -420,7 +420,13 @@ use super::*;
 // argument. No artifact changes shape, so the schema stays, but a cached
 // artifact no longer stands for the same compile, and the fail-closed
 // reading is to rebuild.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 147;
+//
+// Version 149 keys a record by the compilation unit it was compiled in. The
+// HDL sources of a run are one unit (IEEE 1364-2005 clause 19), so a module
+// compiled beside other files saw their macros, `timescale` and modules; the
+// record carries the identity of that ordered set of files, and a record
+// without the field cannot say which unit it came from.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 149;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
@@ -641,6 +647,7 @@ pub(super) struct VerilogADiskCacheRecord {
     pub(super) source_path: PathBuf,
     pub(super) selected_module: Option<String>,
     pub(super) configuration: Option<[u8; 32]>,
+    pub(super) unit: Option<[u8; 32]>,
     pub(super) dependencies: Vec<VerilogADependencyFingerprint>,
     pub(super) model: rspice_veriloga::CompiledModel,
     pub(super) canonical_ir: Option<rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -720,6 +727,9 @@ pub(super) struct VerilogASourceKey {
     source_path: PathBuf,
     selected_module: Option<String>,
     configuration: Option<[u8; 32]>,
+    /// The compilation unit of several files the module was compiled in;
+    /// `None` when its own file was the whole unit.
+    unit: Option<[u8; 32]>,
 }
 
 #[cfg(feature = "veriloga")]
@@ -729,6 +739,7 @@ impl VerilogASourceKey {
             source_path: canonicalize_for_cache(path),
             selected_module: selected_module.map(str::to_owned),
             configuration: None,
+            unit: None,
         }
     }
 
@@ -751,6 +762,7 @@ struct BorrowedVerilogACacheRecord<'a> {
     source_path: &'a Path,
     selected_module: Option<&'a str>,
     configuration: Option<[u8; 32]>,
+    unit: Option<[u8; 32]>,
     dependencies: &'a [VerilogADependencyFingerprint],
     model: &'a rspice_veriloga::CompiledModel,
     canonical_ir: Option<&'a rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
@@ -765,6 +777,7 @@ impl<'a> BorrowedVerilogACacheRecord<'a> {
             source_path: &source.source_path,
             selected_module: source.selected_module.as_deref(),
             configuration: source.configuration,
+            unit: source.unit,
             dependencies: &entry.dependencies,
             model: entry.model.as_ref(),
             canonical_ir: entry.canonical_ir.as_deref(),
@@ -1193,6 +1206,10 @@ pub(super) fn cache_record_path_with_root(
     if let Some(configuration) = source.configuration {
         hasher.update(b"\0configuration\0");
         hasher.update(&configuration);
+    }
+    if let Some(unit) = source.unit {
+        hasher.update(b"\0unit\0");
+        hasher.update(&unit);
     }
     let key = hasher.finalize().to_hex().to_string();
     cache_root.join(format!("{key}.json"))
@@ -1743,6 +1760,7 @@ fn load_model_from_disk_locked_with_limits(
     if *requested_source != record_source
         || source_path.selected_module != record.selected_module
         || source_path.configuration != record.configuration
+        || source_path.unit != record.unit
         || record.configuration.is_some_and(|identity| {
             record.canonical_ir.as_ref().and_then(|artifact| {
                 artifact.connections.configuration().map(|configuration| {
@@ -2167,32 +2185,49 @@ pub(super) fn prepare_veriloga_source(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
+    prepare_veriloga_unit(&[path], limits, abort)
+}
+
+/// Prepare HDL sources as one compilation unit, read in the order given
+/// (IEEE 1364-2005 clause 19). One path prepares that file alone.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+pub(super) fn prepare_veriloga_unit(
+    paths: &[&Path],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
     check_build_abort(abort)?;
-    if is_sealed_veriloga_virtual_path(path) {
-        return Err(cache_refusal(
-            path,
-            crate::ElaborationErrorKind::MissingSource,
-            "this sealed Verilog-A runtime requires its registered canonical source context; filesystem preparation is not permitted",
-        ));
+    let path = paths[0];
+    let mut source_bytes = 0_usize;
+    for &path in paths {
+        if is_sealed_veriloga_virtual_path(path) {
+            return Err(cache_refusal(
+                path,
+                crate::ElaborationErrorKind::MissingSource,
+                "this sealed Verilog-A runtime requires its registered canonical source context; filesystem preparation is not permitted",
+            ));
+        }
+        let source_metadata = std::fs::metadata(path).map_err(|error| {
+            cache_refusal(
+                path,
+                crate::ElaborationErrorKind::MissingSource,
+                format!("this source does not exist or is unreadable: {error}"),
+            )
+        })?;
+        source_bytes = source_bytes
+            .saturating_add(usize::try_from(source_metadata.len()).unwrap_or(usize::MAX));
+        ResourceLimitError::ensure(
+            ResourceKind::DependencySourceBytes,
+            source_bytes,
+            limits.max_dependency_source_bytes,
+        )?;
     }
-    let source_metadata = std::fs::metadata(path).map_err(|error| {
-        cache_refusal(
-            path,
-            crate::ElaborationErrorKind::MissingSource,
-            format!("this source does not exist or is unreadable: {error}"),
-        )
-    })?;
-    ResourceLimitError::ensure(
-        ResourceKind::DependencySourceBytes,
-        usize::try_from(source_metadata.len()).unwrap_or(usize::MAX),
-        limits.max_dependency_source_bytes,
-    )?;
 
     let compiler = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options());
     let control = VerilogACompileControl { abort };
     let preparation_started = crate::time_compat::Instant::now();
-    let prepared = compiler.prepare_file_runtime_source_with_diagnostics(
-        path,
+    let prepared = compiler.prepare_unit_runtime_source_with_diagnostics(
+        paths,
         rspice_veriloga::SourceProviderLimits {
             max_dependencies: usize::MAX,
             max_total_source_bytes: limits.max_dependency_source_bytes,
@@ -2231,6 +2266,27 @@ pub(super) fn prepare_veriloga_source(
                 }
                 source_admission_error(path, "preparation failed", error)
             }
+            // A unit of several files refuses a module name two of them
+            // declare, at the second declaration.
+            rspice_veriloga::ProviderCompileError::Compile {
+                source: rspice_veriloga::CompileError::ModuleSelection(message),
+                diagnostics,
+            } if paths.len() > 1 => {
+                VERILOGA_CACHE_TELEMETRY
+                    .compilations_failed
+                    .fetch_add(1, Relaxed);
+                let second = diagnostics
+                    .first()
+                    .and_then(|diagnostic| diagnostic.path.as_deref())
+                    .map_or_else(|| path.to_path_buf(), PathBuf::from);
+                crate::ElaborationError::new(
+                    crate::ElaborationErrorKind::ModuleNotSelected,
+                    message,
+                )
+                .in_source(second)
+                .with_compiler_diagnostics(diagnostics)
+                .into()
+            }
             rspice_veriloga::ProviderCompileError::Compile {
                 source,
                 diagnostics,
@@ -2268,6 +2324,15 @@ pub(super) fn prepare_veriloga_source(
     ))
 }
 
+#[cfg(all(feature = "veriloga", target_arch = "wasm32"))]
+pub(super) fn prepare_veriloga_unit(
+    paths: &[&Path],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
+    prepare_veriloga_source(paths[0], limits, abort)
+}
+
 #[cfg(feature = "veriloga")]
 fn record_veriloga_compilation_time(elapsed: std::time::Duration) {
     use std::sync::atomic::Ordering::Relaxed;
@@ -2289,6 +2354,7 @@ pub(super) fn compile_and_cache_prepared_veriloga(
         path,
         selected_module,
         prepared,
+        None,
         None,
         &[],
         limits,
@@ -2313,20 +2379,64 @@ pub(super) fn lookup_configured_veriloga(
     path: &Path,
     selected_module: Option<&str>,
     identity: [u8; 32],
+    unit: Option<[u8; 32]>,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Option<CachedVerilogAModel>, SimulationError> {
     let mut key = VerilogASourceKey::new(path, selected_module);
     key.configuration = Some(identity);
+    key.unit = unit;
     lookup_veriloga_key_with_limits_and_abort(&key, limits, abort)
 }
 
+/// The identity of a compilation unit of several files: the files, in the
+/// order they are read. Their contents are the record's dependencies, so the
+/// identity names only which files and in what order.
 #[cfg(feature = "veriloga")]
+pub(super) fn unit_identity<'a>(paths: impl IntoIterator<Item = &'a Path>) -> [u8; 32] {
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"rspice.hdl-unit\0");
+    for path in paths {
+        let path = canonicalize_for_cache(path);
+        let text = path.to_string_lossy();
+        hash.update(&(text.len() as u64).to_le_bytes());
+        hash.update(text.as_bytes());
+    }
+    *hash.finalize().as_bytes()
+}
+
+/// A module of a compilation unit of several files, as one include names it.
+#[cfg(feature = "veriloga")]
+pub(super) fn lookup_unit_veriloga(
+    path: &Path,
+    selected_module: Option<&str>,
+    unit: [u8; 32],
+    limits: ResourceLimits,
+    abort: &dyn AbortSignal,
+) -> Result<Option<CachedVerilogAModel>, SimulationError> {
+    let mut key = VerilogASourceKey::new(path, selected_module);
+    key.unit = Some(unit);
+    lookup_veriloga_key_with_limits_and_abort(&key, limits, abort)
+}
+
+/// A module compiled from a compilation unit of several files: the unit
+/// keys its record, and `module` is what the include selects, its file's
+/// only module when it names none.
+#[cfg(feature = "veriloga")]
+#[derive(Debug, Clone, Copy)]
+pub(super) struct UnitSelection<'a> {
+    pub(super) identity: [u8; 32],
+    pub(super) module: &'a str,
+}
+
+#[cfg(feature = "veriloga")]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compile_and_cache_prepared_with_connections(
     path: &Path,
     selected_module: Option<&str>,
     prepared: &rspice_veriloga::PreparedRuntimeSource,
     configuration: Option<&rspice_veriloga::ConnectionConfiguration>,
+    unit: Option<UnitSelection<'_>>,
     retained_dependencies: &[VerilogADependencyFingerprint],
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
@@ -2334,6 +2444,8 @@ pub(super) fn compile_and_cache_prepared_with_connections(
     use std::sync::atomic::Ordering::Relaxed;
     check_build_abort(abort)?;
     let mut canonical = VerilogASourceKey::new(path, selected_module);
+    canonical.unit = unit.map(|unit| unit.identity);
+    let selected_module = unit.map(|unit| unit.module).or(selected_module);
     if let Some(configuration) = configuration {
         let source = prepared
             .runtime_source_identity(selected_module)

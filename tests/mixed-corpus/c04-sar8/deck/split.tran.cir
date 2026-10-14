@@ -1,0 +1,11 @@
+* C4 8-bit SAR ADC, variant split, tran
+.hdl "../net/sar8.v"
+.hdl "../net/tb_sar.v"
+.hdl "../net/cmp_va.va"
+.include ../net/caps_nominal.cir
+.include ../net/sar_analog.cir
+.include ../net/vin_codes.cir
+.include ../net/sar_full.cir
+.param vcc=1.8 nconv=32
+.tran 1n 32u
+.end

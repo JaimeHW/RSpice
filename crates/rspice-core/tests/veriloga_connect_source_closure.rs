@@ -182,8 +182,11 @@ fn virtual_models_share_active_included_connection_rules_after_transport_and_cac
     }
 }
 
+/// Two roots in two files are one compilation unit, prepared once, so an edit
+/// to the header they share lands in neither or in both: the build reads one
+/// snapshot, and the next build reads the edited one.
 #[test]
-fn different_roots_cannot_mix_versions_of_a_shared_source_snapshot() {
+fn different_roots_of_one_unit_share_one_source_snapshot() {
     let tree = SourceTree::new();
     let header = tree.write("gain.vh", "`define GAIN 1e-3\n");
     let root_source = |name: &str| {
@@ -203,17 +206,30 @@ fn different_roots_cannot_mix_versions_of_a_shared_source_snapshot() {
         phase_threshold: 0.3,
         edited: AtomicBool::new(false),
     };
-    let error = Engine::default()
-        .build_circuit_with_abort(&deck, &edit)
-        .unwrap_err()
-        .to_string();
+    // V1 supplies gain * 1 V to each root.
+    let supplied = |result: &rspice_core::SimulationResult| {
+        result
+            .branch_current_named("V1")
+            .expect("V1's current")
+            .abs()
+    };
+    let before = Engine::default()
+        .run_dc_op_with_abort(&deck, &edit)
+        .expect("one snapshot builds");
     assert!(edit.edited.load(Ordering::SeqCst));
-    for expected in ["gain.vh", "first.va", "second.va", "stable source snapshot"] {
-        assert!(error.contains(expected), "{error}");
-    }
-    // The interrupted build may populate the optimization cache, but all
-    // entries retain their captured identities and the next build can recover.
-    Engine::default().build_circuit(&deck).unwrap();
+    assert!(
+        (supplied(&before) - 2e-3).abs() < 1e-12,
+        "both roots read the snapshot taken before the edit: {}",
+        supplied(&before)
+    );
+    // The entries keep the identities they were compiled from, so the next
+    // build reads the edited header in both roots.
+    let after = Engine::default().run_dc_op(&deck).unwrap();
+    assert!(
+        (supplied(&after) - 4e-3).abs() < 1e-12,
+        "both roots read the edited header: {}",
+        supplied(&after)
+    );
 }
 
 fn connection_alternatives() -> String {

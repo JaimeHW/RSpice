@@ -220,3 +220,159 @@ fn a_missing_verilog_a_source_names_the_path_it_tried_and_the_deck_line() {
         "the refusal must name the deck line the directive sits on: {text}"
     );
 }
+
+// The HDL sources of one deck are one compilation unit, the library `work`,
+// read in deck order (IEEE 1364-2005 clause 19): a module of one file may
+// instantiate a module of another, macros and `timescale` carry from one file
+// into the next (sections 19.3 and 19.8), and a module name is declared once.
+
+/// The deck's `out` voltage over a short transient, one sample per entry.
+fn transient_out(engine: &Engine, deck: &Path, tstop: f64, step: f64) -> (Vec<f64>, Vec<f64>) {
+    let netlist = Netlist::parse_file(deck)
+        .unwrap_or_else(|error| panic!("{} must parse: {error}", deck.display()));
+    let result = engine
+        .run_tran(&netlist, tstop, step)
+        .unwrap_or_else(|error| panic!("{} must run: {error}", deck.display()));
+    let out = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("a node 'out'");
+    (result.time.clone(), result.voltages[out].clone())
+}
+
+/// The level the built-in D/A bridge (20 ohms from `vcc`) holds on a 1 kohm
+/// load when the module drives 1.
+const DRIVEN_HIGH: f64 = 3.3 * 1000.0 / 1020.0;
+
+#[test]
+fn a_module_of_one_file_instantiates_a_module_of_another_in_either_order() {
+    let fixture = Fixture::new("unit_cross_file");
+    fixture.write(
+        "top.v",
+        "module unit_top(q); output q; wire q; unit_leaf u1(.y(q)); endmodule\n",
+    );
+    fixture.write(
+        "leaf.v",
+        "module unit_leaf(y); output y; reg y; initial y = 1'b1; endmodule\n",
+    );
+    for (first, second) in [("top.v", "leaf.v"), ("leaf.v", "top.v")] {
+        let deck = fixture.write(
+            &format!("deck_{first}.cir"),
+            &format!(
+                "* a module instantiating a module of another file\n.param vcc=3.3\n\
+                 X1 out unit_top\nR1 out 0 1k\n.hdl \"{first}\"\n.hdl \"{second}\"\n.end\n"
+            ),
+        );
+        let (_, out) = transient_out(&Engine::default(), &deck, 2e-9, 1e-10);
+        assert!(!out.is_empty());
+        for voltage in out {
+            assert!(
+                (voltage - DRIVEN_HIGH).abs() < 1e-9,
+                "unit_top's child from the other file must drive out high ({first} first): \
+                 {voltage}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_macro_and_a_timescale_carry_into_the_next_file_with_a_warning() {
+    let fixture = Fixture::new("unit_directives");
+    // A file of directives only: it declares no module and has no model.
+    fixture.write("defs.v", "`timescale 10ns/1ns\n`define UNIT_LEVEL 1'b1\n");
+    let edge = fixture.write(
+        "edge.v",
+        "module unit_edge(q); output q; reg q;\n\
+         initial begin q = 1'b0; #10 q = `UNIT_LEVEL; end\n\
+         endmodule\n",
+    );
+    let deck = fixture.write(
+        "deck.cir",
+        "* directives carried from one file into the next\n.param vcc=3.3\n\
+         X1 out unit_edge\nR1 out 0 1k\n.hdl \"defs.v\"\n.hdl \"edge.v\"\n.end\n",
+    );
+    let engine = Engine::default();
+    let (time, out) = transient_out(&engine, &deck, 200e-9, 1e-9);
+    // `#10` is 100 ns in the inherited 10ns unit; the default 1ns would put
+    // the edge at 10 ns.
+    for (t, voltage) in time.iter().zip(&out) {
+        if *t < 99e-9 {
+            assert!(
+                voltage.abs() < 1e-9,
+                "out must be low before 100 ns: {voltage} at {t}"
+            );
+        } else if *t > 101e-9 {
+            assert!(
+                (voltage - DRIVEN_HIGH).abs() < 1e-9,
+                "the macro's level must reach out after 100 ns: {voltage} at {t}"
+            );
+        }
+    }
+    let warnings: Vec<_> = engine
+        .compiler_diagnostics()
+        .into_iter()
+        .filter(|diagnostic| diagnostic.code == "VA-UNIT-TIMESCALE-INHERITED")
+        .collect();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "one inheriting file, one warning: {warnings:?}"
+    );
+    let warning = &warnings[0];
+    assert!(
+        warning.message.contains("unit_edge") && warning.message.contains("10ns/1ns"),
+        "the warning names the module and the inherited timescale: {}",
+        warning.message
+    );
+    assert_eq!(
+        warning
+            .path
+            .as_deref()
+            .map(Path::new)
+            .and_then(Path::file_name),
+        edge.file_name(),
+        "the warning points into the inheriting file: {warning}"
+    );
+}
+
+#[test]
+fn a_module_two_files_declare_is_refused_naming_both() {
+    let fixture = Fixture::new("unit_duplicate");
+    for name in ["first.v", "second.v"] {
+        fixture.write(
+            name,
+            "module unit_twice(q); output q; reg q; initial q = 1'b1; endmodule\n",
+        );
+    }
+    let deck = fixture.write(
+        "deck.cir",
+        "* one module name in two files\n.param vcc=3.3\nX1 out unit_twice\nR1 out 0 1k\n\
+         .hdl \"first.v\"\n.hdl \"second.v\"\n.end\n",
+    );
+    let netlist = Netlist::parse_file(&deck).expect("the deck parses");
+    let error = Engine::default()
+        .run_tran(&netlist, 2e-9, 1e-10)
+        .expect_err("a module declared twice must be refused");
+    let rspice_core::SimulationError::Elaboration(refusal) = &error else {
+        panic!("a duplicate module is a typed elaboration refusal: {error}");
+    };
+    assert_eq!(
+        refusal.kind,
+        rspice_core::ElaborationErrorKind::ModuleNotSelected,
+        "{error}"
+    );
+    assert!(
+        refusal.detail.contains("'unit_twice'")
+            && refusal.detail.contains("first.v")
+            && refusal.detail.contains("second.v"),
+        "the refusal names the module and both files: {error}"
+    );
+    assert!(
+        refusal
+            .span
+            .as_ref()
+            .is_some_and(|span| span.to_string().contains("second.v")),
+        "the refusal points at the second declaration's file: {error}"
+    );
+}

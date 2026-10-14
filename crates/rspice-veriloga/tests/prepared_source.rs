@@ -646,6 +646,101 @@ fn multiple_modules_compile_from_one_frozen_source_and_dependency_identity() {
     );
 }
 
+/// Several files prepared as one compilation unit, read in order (IEEE
+/// 1364-2005 clause 19): a macro and a `timescale` reach the next file, a
+/// module instantiates one of another file, the unit says which file declared
+/// what, and a later file that inherits a `timescale` is warned about.
+#[test]
+fn files_prepared_as_one_unit_share_directives_and_modules() {
+    let files = Sources::new();
+    let defs = files.write("defs.v", "`timescale 10ns/1ns\n`define LEVEL 1'b1\n");
+    let leaf = files.write(
+        "leaf.v",
+        "module leaf(y); output y; reg y; initial #1 y = `LEVEL; endmodule\n",
+    );
+    let top = files.write(
+        "top.v",
+        "`timescale 1ns/1ps\nmodule top(q); output q; wire q; leaf u1(.y(q)); endmodule\n",
+    );
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    });
+    let prepared = compiler
+        .prepare_unit_runtime_source_with_diagnostics(
+            &[&defs, &leaf, &top],
+            SourceProviderLimits::UNBOUNDED,
+            &NoPipelineControl,
+        )
+        .unwrap();
+    let declared: Vec<(&std::path::Path, Vec<&str>)> = prepared
+        .unit_files()
+        .iter()
+        .map(|file| {
+            (
+                file.path.as_path(),
+                file.modules.iter().map(|module| module.as_str()).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        declared,
+        [
+            (defs.as_path(), vec![]),
+            (leaf.as_path(), vec!["leaf"]),
+            (top.as_path(), vec!["top"]),
+        ]
+    );
+    let inherited: Vec<_> = prepared
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "VA-UNIT-TIMESCALE-INHERITED")
+        .collect();
+    assert_eq!(inherited.len(), 1, "only leaf.v inherits: {inherited:?}");
+    assert!(
+        inherited[0].message.contains("'leaf'")
+            && inherited[0].message.contains("10ns/1ns")
+            && inherited[0].message.contains("defs.v"),
+        "{}",
+        inherited[0].message
+    );
+    // top's child comes from another file; leaf's delay is in the inherited
+    // 10 ns unit, top's in its own 1 ns.
+    let built = prepared.compile_runtime(Some("top")).unwrap();
+    assert!(built.canonical_ir.digital.has_executable_content());
+
+    let twice = files.write(
+        "twice.v",
+        "module leaf(y); output y; reg y; initial y = 1'b0; endmodule\n",
+    );
+    let error = compiler
+        .prepare_unit_runtime_source_with_diagnostics(
+            &[&leaf, &twice],
+            SourceProviderLimits::UNBOUNDED,
+            &NoPipelineControl,
+        )
+        .unwrap_err();
+    let rspice_veriloga::ProviderCompileError::Compile {
+        source: rspice_veriloga::CompileError::ModuleSelection(message),
+        diagnostics,
+    } = error
+    else {
+        panic!("a module two files declare is a module-selection refusal: {error}");
+    };
+    assert!(
+        message.contains("'leaf'") && message.contains("leaf.v") && message.contains("twice.v"),
+        "{message}"
+    );
+    assert!(
+        diagnostics[0]
+            .path
+            .as_deref()
+            .is_some_and(|path| path.ends_with("twice.v")),
+        "{diagnostics:?}"
+    );
+    assert_eq!(diagnostics[0].line, Some(1));
+}
+
 #[test]
 fn standalone_connect_library_is_prepared_without_a_device_module() {
     let files = Sources::new();
