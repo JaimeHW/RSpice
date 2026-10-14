@@ -474,7 +474,20 @@ impl ProcessLowerer<'_> {
         let mut operands = Vec::new();
         let mut outputs: Vec<(DigitalLValue, DigitalValueClass)> = Vec::new();
         for (position, argument) in call.args.iter().enumerate().skip(skip) {
-            match kind.argument_use(position) {
+            let usage = match kind.argument_use(position) {
+                // `$fread` loads an array when it names one, and otherwise
+                // writes a variable.
+                DigitalArgumentUse::ArrayOrOutput => match argument {
+                    Expression::Identifier(identifier)
+                        if self.digital_array(&identifier.name).is_some() =>
+                    {
+                        DigitalArgumentUse::ArrayOutput
+                    }
+                    _ => DigitalArgumentUse::Output,
+                },
+                usage => usage,
+            };
+            match usage {
                 DigitalArgumentUse::Input => {
                     let argument =
                         self.input_argument(block, argument, &mut operands, kind.formats());
@@ -514,7 +527,9 @@ impl ProcessLowerer<'_> {
                         }
                     }
                 }
-                DigitalArgumentUse::Output | DigitalArgumentUse::InOut => {
+                DigitalArgumentUse::Output
+                | DigitalArgumentUse::InOut
+                | DigitalArgumentUse::ArrayOrOutput => {
                     let Some(target) = expression_as_target(argument) else {
                         self.error(
                             format!(

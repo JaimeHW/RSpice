@@ -551,3 +551,45 @@ fn writes_to_the_stderr_descriptor_are_stderr_records() {
         .collect();
     assert_eq!(errors, ["err 2\n", "late\n"]);
 }
+
+/// `$fread` into a reg (IEEE 1364-2005 section 17.2.4.4): whole bytes, most
+/// significant first, a narrow reg keeping the low bits, and a short read
+/// keeping the bytes it did not reach. Expected text from Icarus 13.0
+/// (probe `scratchpad/p2l5/probe/p7.v`).
+#[test]
+fn fread_loads_a_reg_as_icarus_does() {
+    let directory = run_directory("fread-reg");
+    let source = r#"module tb;
+  integer fd, r;
+  reg [15:0] h;
+  reg [11:0] t;
+  initial begin
+    fd = $fopen("work/p7.bin", "wb");
+    $fwrite(fd, "%c%c%c%c%c", 8'h12, 8'h34, 8'hab, 8'hcd, 8'hef);
+    $fclose(fd);
+    fd = $fopen("work/p7.bin", "rb");
+    h = 16'hxxxx;
+    r = $fread(h, fd);
+    $display("reg16 %0d %h", r, h);
+    t = 12'h000;
+    r = $fread(t, fd);
+    $display("reg12 %0d %h", r, t);
+    h = 16'h5a5a;
+    r = $fread(h, fd);
+    $display("partial %0d %h", r, h);
+    r = $fread(h, fd);
+    $display("at end %0d %h", r, h);
+    $fclose(fd);
+  end
+endmodule
+"#;
+    let report = bench_in(&directory, source, false);
+    assert_eq!(
+        stdout(&report),
+        "reg16 2 1234\n\
+         reg12 2 bcd\n\
+         partial 1 ef5a\n\
+         at end 0 ef5a\n"
+    );
+    assert!(warnings(&report).is_empty());
+}

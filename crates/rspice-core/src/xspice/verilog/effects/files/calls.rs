@@ -735,6 +735,25 @@ impl HdlEffects {
         clock: Option<DigitalClock>,
         store: &mut DigitalSignalStore,
     ) -> Result<DigitalFunctionOutcome, DigitalEvalError> {
+        // `$fread(reg, fd)`: one word into a variable, which the call
+        // writes back as its output.
+        if let Some(DigitalSystemArgument::Output { class, .. }) = site.arguments.first() {
+            let DigitalValueClass::FourState { width, .. } = *class else {
+                return Err(failed(site, "`$fread` loads an integral variable"));
+            };
+            let mut value = match output_current(site, args, 0) {
+                Some(DigitalScalar::FourState(value)) => value.resized(width),
+                _ => FourStateValue::splat(width, FourStateBit::Unknown),
+            };
+            let read = match self.reader(plan, site, args, clock, 1) {
+                Some(file) => read_word(file, &mut value),
+                None => 0,
+            };
+            return Ok(DigitalFunctionOutcome {
+                value: word(read as i32),
+                outputs: vec![DigitalScalar::FourState(value)],
+            });
+        }
         let Memory {
             array,
             class,

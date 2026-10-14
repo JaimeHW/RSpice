@@ -1042,8 +1042,14 @@ pub enum DigitalArgumentUse {
     Output,
     /// Read and written back (`$random(seed)`).
     InOut,
-    /// A whole unpacked array the host writes (`$readmemh`, `$fread`).
+    /// A whole unpacked array the host writes (`$readmemh`).
     ArrayOutput,
+    /// A whole unpacked array, or else a variable written as an [`Output`]
+    /// (`$fread`, IEEE 1364-2005 section 17.2.4.4, which loads a memory or
+    /// a reg).
+    ///
+    /// [`Output`]: DigitalArgumentUse::Output
+    ArrayOrOutput,
     /// A scope or signal named rather than read (`$dumpvars`, `$printtimescale`).
     Reference,
 }
@@ -1436,7 +1442,7 @@ impl DigitalSystemCallKind {
             (Self::Fgets | Self::Sformat | Self::Swrite(_), 0) => Output,
             (Self::Ferror, 1) => Output,
             (Self::Fscanf | Self::Sscanf, index) if index >= 2 => Output,
-            (Self::Fread, 0) => ArrayOutput,
+            (Self::Fread, 0) => ArrayOrOutput,
             (Self::Readmemb | Self::Readmemh, 1) => ArrayOutput,
             (Self::Dumpvars, index) if index >= 1 => Reference,
             (Self::PrintTimeScale, 0) => Reference,

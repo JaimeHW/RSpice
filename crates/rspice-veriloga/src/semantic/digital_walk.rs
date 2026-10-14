@@ -364,6 +364,7 @@ pub(crate) fn call_output_names(call: &SystemFunction, names: &mut Vec<smol_str:
             DigitalArgumentUse::Output
                 | DigitalArgumentUse::InOut
                 | DigitalArgumentUse::ArrayOutput
+                | DigitalArgumentUse::ArrayOrOutput
         ) && let Some(name) = system_call_output_name(argument)
         {
             names.push(name.clone());

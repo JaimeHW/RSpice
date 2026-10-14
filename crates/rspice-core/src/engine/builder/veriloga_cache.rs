@@ -413,7 +413,14 @@ use super::*;
 // tasks and functions to the plan. A version-144 record refused every module
 // that declared one, so none holds a routine; rebuilding keeps the record
 // and the schema in step.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 145;
+//
+// Version 147 is version 34's situation for `$fread`: the front end now
+// accepts a reg as its first argument (IEEE 1364-2005 section 17.2.4.4),
+// which was a compile error, and lowers it to the plan's existing output
+// argument. No artifact changes shape, so the schema stays, but a cached
+// artifact no longer stands for the same compile, and the fail-closed
+// reading is to rebuild.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 147;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

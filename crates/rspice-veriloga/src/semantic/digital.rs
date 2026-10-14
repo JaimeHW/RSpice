@@ -3263,7 +3263,8 @@ impl SemanticAnalyzer {
                 },
                 DigitalArgumentUse::Output
                 | DigitalArgumentUse::InOut
-                | DigitalArgumentUse::ArrayOutput => {
+                | DigitalArgumentUse::ArrayOutput
+                | DigitalArgumentUse::ArrayOrOutput => {
                     if super::digital_walk::system_call_output_name(argument).is_none() {
                         self.record_error_at(
                             SemanticErrorKind::InvalidExpression(format!(
