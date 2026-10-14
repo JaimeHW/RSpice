@@ -73,10 +73,11 @@ impl<'a> Button<'a> {
     /// Mark the action as destructive.
     ///
     /// With [`Button::accent`] it fills with the error color — the dialog
-    /// grammar's destructive primary. On a bordered button it tones the border
-    /// and the label instead, which is the design's `.button.danger`: the one
-    /// destructive action in a row of ordinary ones, marked without being
-    /// promoted to the surface's primary.
+    /// grammar's destructive primary, kept for the confirmation of an
+    /// irreversible delete. A bordered button is left as it is: its label is
+    /// ordinary text on the ordinary border, because a row of buttons with one
+    /// painted red reads as an alarm rather than as a choice, and the verb on
+    /// it already says what it does.
     pub fn destructive(mut self, destructive: bool) -> Self {
         self.destructive = destructive;
         self
@@ -190,8 +191,6 @@ impl<'a> Button<'a> {
             } else {
                 c.accent_ink
             }
-        } else if self.destructive {
-            c.err
         } else {
             c.text
         };
@@ -256,15 +255,7 @@ impl<'a> Button<'a> {
             } else {
                 mix(c.bg_panel_2, c.bg_hover, hover)
             };
-            // A destructive bordered action carries the error tone on its
-            // border as well as its label, so the mark survives a row of
-            // buttons read at a glance.
-            let border = if self.destructive {
-                c.err
-            } else {
-                mix(c.border, c.border_strong, hover)
-            };
-            (fill, border)
+            (fill, mix(c.border, c.border_strong, hover))
         };
 
         let opacity = if self.enabled { 1.0 } else { 0.4 };
@@ -594,6 +585,39 @@ mod tests {
             Some("Ctrl+Shift+Z")
         );
         assert_eq!(trailing_shortcut("Grid: dots - click for lines"), None);
+    }
+
+    /// A bordered destructive button paints exactly what an ordinary one
+    /// does; only the filled primary keeps the error fill.
+    #[test]
+    fn only_a_filled_destructive_button_is_red() {
+        fn shapes(button: impl Fn() -> Button<'static>) -> Vec<egui::epaint::ClippedShape> {
+            let ctx = egui::Context::default();
+            crate::Theme::default().apply(&ctx);
+            ctx.run_ui(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    button().show(ui);
+                });
+            })
+            .shapes
+        }
+        let ordinary = shapes(|| Button::new("Delete revision"));
+        let destructive = shapes(|| Button::new("Delete revision").destructive(true));
+        assert_eq!(
+            format!("{destructive:?}"),
+            format!("{ordinary:?}"),
+            "a bordered destructive button is drawn differently"
+        );
+
+        let err = Tokens::default().color.err;
+        let filled = shapes(|| Button::new("Delete library").accent().destructive(true));
+        assert!(
+            filled.iter().any(|clipped| matches!(
+                &clipped.shape,
+                egui::Shape::Rect(rect) if rect.fill == err
+            )),
+            "the confirmation's destructive primary lost its error fill"
+        );
     }
 
     #[test]
