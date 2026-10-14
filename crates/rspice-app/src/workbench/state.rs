@@ -1960,7 +1960,9 @@ impl WorkbenchState {
 
     /// Atomically return across up to `count` known routes, reconciling the
     /// foreground surface only once from the original route to the final
-    /// destination.
+    /// destination. Only the browser build's history pop jumps several
+    /// routes at once.
+    #[cfg(any(target_arch = "wasm32", test))]
     pub fn navigate_back_steps(
         &mut self,
         count: usize,
