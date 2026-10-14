@@ -60,7 +60,12 @@ impl AppState {
             {
                 continue;
             }
-            collect(schematic.as_ref(), &reference, (library, cell, view), &mut uses);
+            collect(
+                schematic.as_ref(),
+                &reference,
+                (library, cell, view),
+                &mut uses,
+            );
         }
         uses.sort_by(|left, right| {
             (
@@ -143,9 +148,14 @@ mod tests {
                 .iter()
                 .map(|usage| usage.schematic.clone())
                 .collect::<Vec<_>>(),
-            [active.clone(), CellViewRef::new("work", "bench", "schematic")]
+            [
+                active.clone(),
+                CellViewRef::new("work", "bench", "schematic")
+            ]
         );
-        let symbol_only = app.state.cell_instances("behavioral", "gain", Some("symbol"));
+        let symbol_only = app
+            .state
+            .cell_instances("behavioral", "gain", Some("symbol"));
         assert_eq!(symbol_only.len(), 1);
         assert_eq!(symbol_only[0].schematic, active);
     }
