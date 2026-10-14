@@ -615,14 +615,14 @@ pub(super) fn analysis_catalog_row_height(
     let (copy_width, readiness_width) = if compact {
         (
             (row_width - 10.0 - copy_left).max(1.0),
-            (row_width - 10.0 - copy_left).max(1.0),
+            (row_width - 12.0 - copy_left - readiness_mark_advance(kind)).max(1.0),
         )
     } else {
         let readiness_left =
             (row_width - 12.0 - ANALYSIS_CATALOG_READINESS_WIDTH).max(copy_left + 96.0);
         (
             (readiness_left - 12.0 - copy_left).max(1.0),
-            (row_width - 12.0 - readiness_left - 24.0).max(1.0),
+            (row_width - 24.0 - readiness_left - readiness_mark_advance(kind)).max(1.0),
         )
     };
     let title = ui.painter().layout(
@@ -744,7 +744,7 @@ pub(super) fn analysis_catalog_row(
         Align2::LEFT_CENTER,
         kind.code(),
         theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        t.color.accent,
+        t.color.text_dim,
     );
 
     let copy_left = code_right + if compact { 9.0 } else { 12.0 };
@@ -799,18 +799,22 @@ pub(super) fn analysis_catalog_row(
     } else {
         readiness_left + 12.0
     };
-    painter.circle_filled(
-        egui::pos2(readiness_content_left + 2.5, readiness_top + 5.0),
-        2.5,
-        if blocker.is_some() {
-            t.color.err
-        } else if availability_label(kind) == "Production" {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
-    );
-    let readiness_text_left = readiness_content_left + 12.0;
+    // A kind this build cannot run leads its readiness with the failure mark;
+    // every other kind states its readiness in words alone.
+    if blocker.is_some() {
+        paint_problem_mark(
+            &painter,
+            Rect::from_center_size(
+                egui::pos2(
+                    readiness_content_left + READINESS_MARK_SIDE * 0.5,
+                    readiness_top + 6.5,
+                ),
+                Vec2::splat(READINESS_MARK_SIDE),
+            ),
+            Problem::Failure,
+        );
+    }
+    let readiness_text_left = readiness_content_left + readiness_mark_advance(kind);
     let readiness_text_width = (rect.right() - 12.0 - readiness_text_left).max(1.0);
     let action_galley = ui.painter().layout(
         disposition.to_owned(),
@@ -833,24 +837,21 @@ pub(super) fn analysis_catalog_row(
         },
     );
     if let Some(readiness) = readiness {
+        let detail_tone = if blocker.is_some() {
+            t.color.text_dim
+        } else {
+            t.color.text_faint
+        };
         let detail_galley = ui.painter().layout(
             readiness.to_owned(),
             theme::sans(tokens::FS_0, FontWeight::Regular),
-            if blocker.is_some() {
-                t.color.err
-            } else {
-                t.color.text_faint
-            },
+            detail_tone,
             readiness_text_width,
         );
         painter.galley(
             egui::pos2(readiness_text_left, readiness_top + action_height + 2.0),
             detail_galley,
-            if blocker.is_some() {
-                t.color.err
-            } else {
-                t.color.text_faint
-            },
+            detail_tone,
         );
     }
     theme::paint_focus_ring_outset(ui, &response, rect);
@@ -861,6 +862,21 @@ pub(super) fn analysis_catalog_row(
             .on_hover_text(format!("Add {} analysis instance", kind.label()))
             .clicked()
             && enabled
+    }
+}
+
+/// Side of the failure mark a blocked kind's readiness leads with, and the
+/// advance from its left edge to the words after it.
+const READINESS_MARK_SIDE: f32 = 11.0;
+const READINESS_MARK_ADVANCE: f32 = 17.0;
+
+/// How far a kind's readiness words start from their column: past the mark
+/// when the kind is blocked, at the column otherwise.
+const fn readiness_mark_advance(kind: AnalysisKind) -> f32 {
+    if kind.execution_blocker().is_some() {
+        READINESS_MARK_ADVANCE
+    } else {
+        0.0
     }
 }
 
