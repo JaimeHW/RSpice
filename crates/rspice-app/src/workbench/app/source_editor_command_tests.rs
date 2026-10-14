@@ -3,7 +3,7 @@
 //! than a schematic hidden behind it, and no page carries a menu of its own.
 
 use super::veriloga_design_tests::{
-    DESKTOP, add_veriloga_cell, frame, open_in_design, open_project_app, themed_context,
+    DESKTOP, add_veriloga_cell, frame, frame_with, open_in_design, open_project_app, themed_context,
 };
 use super::*;
 use crate::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
@@ -23,25 +23,6 @@ fn root_text(app: &RSpiceApp, bundle_id: ProjectSourceId) -> String {
         .root()
         .content()
         .to_owned()
-}
-
-fn frame_with(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    events: Vec<egui::Event>,
-) -> egui::FullOutput {
-    ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, DESKTOP)),
-            events,
-            ..Default::default()
-        },
-        |ui| {
-            app.prepare_frame(ui.ctx());
-            app.render_frame_chrome(ui);
-            app.render_frame_dialogs(ui.ctx());
-        },
-    )
 }
 
 fn key(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
@@ -92,6 +73,7 @@ fn veriloga_with_selected_first_line() -> (egui::Context, RSpiceApp, ProjectSour
     frame_with(
         &ctx,
         &mut app,
+        DESKTOP,
         vec![key(egui::Key::End, egui::Modifiers::SHIFT)],
     );
     (ctx, app, bundle_id)
@@ -242,6 +224,7 @@ fn ctrl_d_in_a_focused_source_editor_duplicates_the_caret_line_once() {
     frame_with(
         &ctx,
         &mut app,
+        DESKTOP,
         vec![key(
             egui::Key::D,
             egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
@@ -263,6 +246,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     frame_with(
         &ctx,
         &mut app,
+        DESKTOP,
         vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
     );
 
@@ -295,6 +279,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     frame_with(
         &ctx,
         &mut app,
+        DESKTOP,
         vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
     );
     let editor =
@@ -305,6 +290,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     frame_with(
         &ctx,
         &mut app,
+        DESKTOP,
         vec![key(
             egui::Key::F,
             egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
@@ -442,12 +428,13 @@ fn press(
     at: egui::Pos2,
     button: egui::PointerButton,
 ) -> egui::FullOutput {
-    frame_with(ctx, app, vec![egui::Event::PointerMoved(at)]);
+    frame_with(ctx, app, DESKTOP, vec![egui::Event::PointerMoved(at)]);
     let mut output = None;
     for pressed in [true, false] {
         output = Some(frame_with(
             ctx,
             app,
+            DESKTOP,
             vec![egui::Event::PointerButton {
                 pos: at,
                 button,
@@ -616,29 +603,20 @@ fn render_the_source_editor_menus_for_review() {
         ("dark", crate::ui::Mode::Dark),
         ("light", crate::ui::Mode::Light),
     ] {
-        let mut write =
-            |view: &str, ctx: &egui::Context, app: &mut RSpiceApp, mut output: egui::FullOutput| {
-                for _ in 0..settle {
-                    output = frame(ctx, app, DESKTOP);
-                }
-                let canvas = crate::ui::raster::rasterize(ctx, DESKTOP, &output);
-                let path = directory.join(format!("source-editor-{view}-{theme}-1440x900.png"));
-                std::fs::write(&path, canvas.png(DESKTOP.y as usize)).expect("write the render");
-                writeln!(report, "{}", path.display()).ok();
-            };
         let page = || {
             let (ctx, mut app, _) = veriloga_with_focused_editor();
             app.state.ui.theme.mode = mode;
             let output = frame(&ctx, &mut app, DESKTOP);
             (ctx, app, output)
         };
+        let mut shots = Vec::new();
 
-        let (ctx, mut app, output) = page();
-        write("file-row", &ctx, &mut app, output);
+        let (ctx, app, output) = page();
+        shots.push(("file-row", ctx, app, output));
 
         let (ctx, mut app, _) = page();
         let output = right_click_line(&ctx, &mut app, 2);
-        write("context-menu", &ctx, &mut app, output);
+        shots.push(("context-menu", ctx, app, output));
 
         let (ctx, mut app, output) = page();
         let (trigger, _) = menu_item(&output, "Edit").expect("the Edit menu");
@@ -648,6 +626,16 @@ fn render_the_source_editor_menus_for_review() {
             trigger.center(),
             egui::PointerButton::Primary,
         );
-        write("edit-menu", &ctx, &mut app, output);
+        shots.push(("edit-menu", ctx, app, output));
+
+        for (view, ctx, mut app, mut output) in shots {
+            for _ in 0..settle {
+                output = frame(&ctx, &mut app, DESKTOP);
+            }
+            let canvas = crate::ui::raster::rasterize(&ctx, DESKTOP, &output);
+            let path = directory.join(format!("source-editor-{view}-{theme}-1440x900.png"));
+            std::fs::write(&path, canvas.png(DESKTOP.y as usize)).expect("write the render");
+            writeln!(report, "{}", path.display()).ok();
+        }
     }
 }

@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 
 use super::dialogs::veriloga_build_settings::save_veriloga_build_settings;
 use super::veriloga_design_tests::{
-    DESKTOP, add_veriloga_cell, open_in_design, open_project_app, themed_context, wait_for_compile,
+    DESKTOP, add_veriloga_cell, frame_with, open_in_design, open_project_app, themed_context,
+    wait_for_compile,
 };
 use super::*;
 use crate::state::ProjectSourceRole;
@@ -50,27 +51,6 @@ fn draft(app: &mut RSpiceApp) -> &mut VerilogABuildSettingsDraft {
         .veriloga_build_settings
         .as_mut()
         .expect("Build settings is open")
-}
-
-/// One whole application frame with `events` delivered to it.
-fn frame_with(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    size: egui::Vec2,
-    events: Vec<egui::Event>,
-) -> egui::FullOutput {
-    ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
-            events,
-            ..Default::default()
-        },
-        |ui| {
-            app.prepare_frame(ui.ctx());
-            app.render_frame_chrome(ui);
-            app.render_frame_dialogs(ui.ctx());
-        },
-    )
 }
 
 /// The accessibility node the frame drew and named `name`, if any.

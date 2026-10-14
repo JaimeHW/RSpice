@@ -91,9 +91,20 @@ pub(super) fn frame(
     app: &mut RSpiceApp,
     size: egui::Vec2,
 ) -> egui::FullOutput {
+    frame_with(ctx, app, size, Vec::new())
+}
+
+/// One whole application frame with `events` delivered to it.
+pub(super) fn frame_with(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    size: egui::Vec2,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
     ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+            events,
             ..Default::default()
         },
         |ui| {
