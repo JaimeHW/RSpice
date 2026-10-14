@@ -12,7 +12,7 @@ use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
 
 use super::super::commands::vocabulary::Command;
-use super::super::design_system::{card, heading, property_row, status_dot, workspace_title_row};
+use super::super::design_system::{card, heading, property_row, workspace_title_row};
 use super::super::state::VerificationPage;
 use tuning::{
     revert_tuning_session, sync_tuning_session, tuning, tuning_commit_block_reason,
@@ -40,12 +40,6 @@ const TABLE_MARK_SIDE: f32 = 11.0;
 const TABLE_MARK_ADVANCE: f32 = 17.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    // Persisted legacy pages can outlive their retired prototype surfaces.
-    // Fail closed before rendering so no unavailable workflow is exposed as
-    // an interactive verification page.
-    if !app.state.workbench.verification_page.is_operational() {
-        app.state.workbench.verification_page = VerificationPage::Yield;
-    }
     if app.state.workbench.verification_page == VerificationPage::Tuning {
         sync_tuning_session(app);
     }
@@ -76,7 +70,6 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     VerificationPage::Optimization => optimization(ui, app),
                     VerificationPage::DeviceSafety => device_safety(ui, app),
                     VerificationPage::Regression => regression(ui, app, body_viewport_height),
-                    VerificationPage::Drc => physical_drc(ui, app),
                 }
             });
     });
@@ -109,10 +102,6 @@ fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
         VerificationPage::Regression => (
             "Golden regression comparison",
             "Candidate and immutable baseline measurements are aligned without inventing tolerance or pass criteria.",
-        ),
-        VerificationPage::Drc => (
-            "Design-rule checking",
-            "Physical sign-off remains fail-closed until a layout source, rule deck, and immutable marker database are retained.",
         ),
     };
     let page = app.state.workbench.verification_page;
@@ -236,8 +225,7 @@ fn verification_header_actions(ui: &mut Ui, app: &mut RSpiceApp, page: Verificat
         }
         VerificationPage::Yield
         | VerificationPage::Optimization
-        | VerificationPage::DeviceSafety
-        | VerificationPage::Drc => {}
+        | VerificationPage::DeviceSafety => {}
     }
 }
 
@@ -2129,54 +2117,6 @@ struct RegressionCoverageIssue {
     target: Option<crate::state::RegressionTargetSelector>,
     label: String,
     detail: String,
-}
-
-fn physical_drc(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Physical evidence contract", |ui| {
-        status_dot(
-            ui,
-            Tokens::get(ui.ctx()).color.err,
-            "No retained physical DRC evidence",
-        );
-        property_row(ui, "Layout source", "not attached");
-        property_row(ui, "Qualified rule deck", "not attached");
-        property_row(ui, "Immutable marker database", "unavailable");
-        property_row(ui, "Sign-off eligibility", "blocked");
-        ui.label("Schematic connectivity checks are never reclassified as geometry verification. Physical DRC remains fail-closed until a real layout source and qualified rule-deck execution produce attributable marker evidence.");
-    });
-    card(
-        ui,
-        "Source electrical checks · separate evidence domain",
-        |ui| {
-            let current =
-                app.state.dialogs.drc_checked_version == app.state.schematic.topology_version();
-            property_row(
-                ui,
-                "Schematic topology",
-                if current {
-                    "current"
-                } else {
-                    "stale / not run"
-                },
-            );
-            if let Some(result) = &app.state.dialogs.drc_results {
-                let summary = result.summary();
-                property_row(ui, "Critical", &summary.critical.to_string());
-                property_row(ui, "Errors", &summary.errors.to_string());
-                property_row(ui, "Advisories", &summary.warnings.to_string());
-            }
-            if Button::new("Run source electrical checks")
-                .show(ui)
-                .clicked()
-            {
-                Command::RunChecks.execute(app);
-                app.state.workbench.verification.action_receipt =
-                "Source electrical checks completed. They remain separate from physical DRC evidence."
-                    .to_owned();
-            }
-        },
-    );
-    action_receipt(ui, app);
 }
 
 #[cfg(test)]

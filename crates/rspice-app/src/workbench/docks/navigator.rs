@@ -6157,7 +6157,6 @@ const fn verification_flow_label(page: VerificationPage) -> &'static str {
         VerificationPage::Optimization => "Optimization",
         VerificationPage::DeviceSafety => "Electrical SOA",
         VerificationPage::Regression => "Regression",
-        VerificationPage::Drc => "Physical DRC",
     }
 }
 
@@ -6170,7 +6169,6 @@ const fn verification_flow_glyph(page: VerificationPage) -> &'static str {
         VerificationPage::Optimization => "O",
         VerificationPage::DeviceSafety => "S",
         VerificationPage::Regression => "R",
-        VerificationPage::Drc => "D",
     }
 }
 
@@ -6344,13 +6342,6 @@ fn verification_flow_presentation(
                 glyph: verification_flow_glyph(page),
             }
         }
-        VerificationPage::Drc => VerificationFlowPresentation {
-            label: verification_flow_label(page).to_owned(),
-            detail: String::new(),
-            status: String::new(),
-            problem: None,
-            glyph: verification_flow_glyph(page),
-        },
     }
 }
 

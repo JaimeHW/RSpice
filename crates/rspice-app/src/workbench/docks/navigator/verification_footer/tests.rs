@@ -549,8 +549,6 @@ fn verification_navigation_exposes_the_operational_tuning_route() {
             "Regression",
         ]
     );
-    assert!(!VerificationPage::NAVIGATION.contains(&VerificationPage::Drc));
-    assert!(!VerificationPage::Drc.is_operational());
 }
 
 #[test]

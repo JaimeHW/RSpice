@@ -1745,14 +1745,6 @@ fn verify_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         "Regression plan",
         None,
     );
-    menu_separator(ui);
-    command_item_as(
-        ui,
-        app,
-        Command::VerificationPage(VerificationPage::Drc),
-        "Physical DRC",
-        None,
-    );
 }
 
 fn models_menu(ui: &mut Ui, app: &mut RSpiceApp) {

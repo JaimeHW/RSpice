@@ -1345,9 +1345,6 @@ impl Command {
                 )
                 .unwrap_or("the active dataset is incompatible with this viewer")
             }
-            Self::VerificationPage(crate::workbench::state::VerificationPage::Drc) => {
-                "no retained layout, qualified rule deck, or immutable marker database is available"
-            }
             Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
             Self::ModelCreateProjectCopy => super::selected_model_for_project_copy(app)
                 .err()

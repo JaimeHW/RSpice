@@ -2,8 +2,8 @@
 //!
 //! Ownership is the shared invariant. The executor owns the active run, so
 //! stopping follows the target's cancellation capability and clearing results
-//! cannot remove the run underneath it. A verification route opens only where
-//! the evidence pipeline behind it exists, and stepping through violations
+//! cannot remove the run underneath it. A verification route opens its page,
+//! and stepping through violations
 //! keeps advancing rather than restarting once a jump has changed workspace.
 
 use super::*;
@@ -23,35 +23,6 @@ fn tuning_command_opens_the_transactional_sandbox() {
     assert_eq!(
         app.state.workbench.verification_page,
         VerificationPage::Tuning
-    );
-}
-
-#[test]
-fn physical_drc_command_is_inaccessible_without_physical_evidence_pipeline() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.workspace = Workspace::Project;
-    app.state.workbench.verification_page = VerificationPage::Yield;
-    let command = Command::VerificationPage(VerificationPage::Drc);
-
-    assert!(!command.is_enabled(&app));
-    assert_eq!(
-        command.availability(&app),
-        CommandAvailability::Disabled(
-            "no retained layout, qualified rule deck, or immutable marker database is available"
-        )
-    );
-    command.execute(&mut app);
-
-    assert_eq!(app.state.workbench.workspace, Workspace::Project);
-    assert_eq!(
-        app.state.workbench.verification_page,
-        VerificationPage::Yield
-    );
-    assert!(
-        app.state
-            .log_buffer
-            .entries()
-            .any(|message| message.message.contains("Physical DRC is unavailable"))
     );
 }
 

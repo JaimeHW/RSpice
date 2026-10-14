@@ -636,18 +636,11 @@ fn current_canonical_route_is_the_primary_workspace_source_of_truth() {
 }
 
 #[test]
-fn restored_unavailable_verification_page_fails_closed_to_cockpit() {
-    let mut state = WorkbenchState::default();
-    state.verification_page = VerificationPage::Drc;
+fn a_session_saved_on_the_removed_drc_page_restores_to_the_first_page() {
+    let restored: VerificationPage =
+        serde_json::from_value(serde_json::json!("Drc")).expect("the old page name decodes");
 
-    state.reconcile_restored_navigation();
-
-    assert_eq!(state.verification_page, VerificationPage::Yield);
-    assert!(
-        state
-            .take_route_diagnostic()
-            .is_some_and(|message| message.contains("executable evidence pipeline"))
-    );
+    assert_eq!(restored, VerificationPage::Yield);
 }
 
 #[test]
@@ -893,9 +886,9 @@ fn browser_effect_overflow_reaches_the_workbench_recovery_gate() {
 }
 
 #[test]
-fn verification_routes_are_the_exact_canonical_seven() {
+fn verification_routes_are_the_exact_canonical_six() {
     assert_eq!(
-        VerificationPage::ALL,
+        VerificationPage::NAVIGATION,
         [
             VerificationPage::Yield,
             VerificationPage::Corners,
@@ -903,17 +896,8 @@ fn verification_routes_are_the_exact_canonical_seven() {
             VerificationPage::Optimization,
             VerificationPage::DeviceSafety,
             VerificationPage::Regression,
-            VerificationPage::Drc,
         ]
     );
-    assert!(
-        VerificationPage::ALL
-            .into_iter()
-            .filter(|page| page.is_operational())
-            .all(|page| page != VerificationPage::Drc)
-    );
-    assert!(VerificationPage::Tuning.is_operational());
-    assert!(!VerificationPage::Drc.is_operational());
 }
 
 #[test]

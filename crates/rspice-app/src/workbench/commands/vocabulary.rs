@@ -921,9 +921,6 @@ impl Command {
             Self::VerificationPage(VerificationPage::Regression) => {
                 spec("regression", "Regression plan", "Verify")
             }
-            Self::VerificationPage(VerificationPage::Drc) => {
-                spec("open-drc", "Physical DRC unavailable", "Verify")
-            }
             Self::ProjectPage(ProjectPage::Overview) => {
                 spec("project-overview", "Open project overview", "Project")
             }

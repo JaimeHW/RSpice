@@ -1067,7 +1067,6 @@ impl Command {
             Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
             Self::ExpressionDiagnostics => state.simulation.retained.has_results(),
             Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
-            Self::VerificationPage(page) if !page.is_operational() => false,
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => !state.log_buffer.is_empty(),
                 ConsolePage::Interactive => !state.script_console.history.is_empty(),
@@ -2058,13 +2057,6 @@ impl Command {
             Self::EditSpecifications => {
                 crate::workbench::documents::result_document::open_specification_editor(
                     &mut app.state,
-                );
-            }
-            Self::VerificationPage(VerificationPage::Drc) => {
-                app.state.push_user_message(
-                    crate::diagnostics::ConsoleMessage::warning(
-                        "Physical DRC is unavailable until a retained layout source, qualified rule deck, and immutable marker database are integrated.",
-                    ),
                 );
             }
             Self::VerificationPage(page) => {

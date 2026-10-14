@@ -2173,19 +2173,6 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
             );
             property_row(ui, "Verdict", "requires configured tolerance contract");
         }
-        VerificationPage::Drc => {
-            section_header(ui, "Physical evidence", Some("unavailable"));
-            property_row(ui, "Layout source", "not attached");
-            property_row(ui, "Rule deck", "not attached");
-            property_row(ui, "Marker database", "unavailable");
-            property_row(ui, "Sign-off", "blocked");
-            section_header(ui, "Release consumption", None);
-            muted_inspector_copy(
-                ui,
-                "Physical verification owns marker disposition. Release closure consumes this \
-                 exact database and cannot override it.",
-            );
-        }
     }
 }
 

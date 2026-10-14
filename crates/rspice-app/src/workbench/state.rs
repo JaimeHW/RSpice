@@ -696,7 +696,14 @@ impl LibraryCellviewPage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum VerificationPage {
     #[default]
-    #[serde(alias = "Cockpit", alias = "Specifications", alias = "Checks")]
+    // A session saved while the placeholder DRC page existed restores to the
+    // first page.
+    #[serde(
+        alias = "Cockpit",
+        alias = "Specifications",
+        alias = "Checks",
+        alias = "Drc"
+    )]
     Yield,
     Corners,
     Tuning,
@@ -704,24 +711,9 @@ pub enum VerificationPage {
     DeviceSafety,
     #[serde(alias = "History")]
     Regression,
-    Drc,
 }
 
 impl VerificationPage {
-    /// Persisted route catalog. Physical DRC remains decodable for backward
-    /// compatibility but is absent from navigation until layout/rule-deck
-    /// evidence has a production executor.
-    #[cfg(test)]
-    pub const ALL: [Self; 7] = [
-        Self::Yield,
-        Self::Corners,
-        Self::Tuning,
-        Self::Optimization,
-        Self::DeviceSafety,
-        Self::Regression,
-        Self::Drc,
-    ];
-
     pub const NAVIGATION: [Self; 6] = [
         Self::Yield,
         Self::Corners,
@@ -731,14 +723,6 @@ impl VerificationPage {
         Self::Regression,
     ];
 
-    /// Whether this route is backed by an executable, retained-evidence
-    /// workflow. Unavailable routes remain decodable for old sessions and may
-    /// remain visible where the mockup requires a capability boundary, but are
-    /// never selectable.
-    pub const fn is_operational(self) -> bool {
-        !matches!(self, Self::Drc)
-    }
-
     pub const fn label(self) -> &'static str {
         match self {
             Self::Yield => "PVT & Monte Carlo verification",
@@ -747,7 +731,6 @@ impl VerificationPage {
             Self::Optimization => "Optimization candidate",
             Self::DeviceSafety => "Safe-operating-area verification",
             Self::Regression => "Golden regression comparison",
-            Self::Drc => "Design-rule checking",
         }
     }
 }
@@ -1720,13 +1703,6 @@ impl WorkbenchState {
                 layout.inspector_width_custom = false;
             }
             self.layout_schema_version = LAYOUT_SCHEMA_VERSION;
-        }
-        if !self.verification_page.is_operational() {
-            self.route_diagnostic = Some(format!(
-                "The restored {} verification page was not opened because its executable evidence pipeline is unavailable.",
-                self.verification_page.label()
-            ));
-            self.verification_page = VerificationPage::Yield;
         }
         if self.navigation.recovered_invalid_routes() {
             self.route_diagnostic = Some(
