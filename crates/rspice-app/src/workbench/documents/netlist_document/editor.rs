@@ -20,6 +20,7 @@ use rspice_core::abort_signal::{AbortSignal, NoAbort};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
+use crate::ui::widgets::Problem;
 use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
 use crate::workbench::{AppState, MessageId};
 
@@ -217,7 +218,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             |logical_line| {
                 diagnostics
                     .severity_for_line(logical_line)
-                    .map(|severity| diagnostic_color(severity, &c))
+                    .and_then(diagnostic_problem)
             },
             |logical_line| {
                 diagnostics.severity_for_line(logical_line).map(|severity| {
@@ -488,15 +489,13 @@ fn diagnostic_label(severity: DiagnosticSeverity) -> &'static str {
     }
 }
 
-fn diagnostic_color(
-    severity: DiagnosticSeverity,
-    c: &crate::ui::palette::Palette,
-) -> egui::Color32 {
+/// The gutter mark a diagnostic earns: a warning or an error, and nothing for
+/// a note or a hint.
+fn diagnostic_problem(severity: DiagnosticSeverity) -> Option<Problem> {
     match severity {
-        DiagnosticSeverity::Hint => c.text_dim,
-        DiagnosticSeverity::Error => c.err,
-        DiagnosticSeverity::Warning => c.warn,
-        DiagnosticSeverity::Info => c.text_dim,
+        DiagnosticSeverity::Error => Some(Problem::Failure),
+        DiagnosticSeverity::Warning => Some(Problem::Warning),
+        DiagnosticSeverity::Info | DiagnosticSeverity::Hint => None,
     }
 }
 

@@ -14,6 +14,8 @@ use std::sync::Arc;
 
 use egui::{Color32, FontId, Key, Modifiers, Response, Sense, Stroke, Ui, Vec2};
 
+use crate::ui::widgets::{Problem, paint_problem_mark};
+
 use super::text_document_model::{TextDocumentModel, TextSelection};
 use super::text_editor_commands::{
     ByteSelection, EditorSyntax, EditorViewCommand, StandardCommand, StructuralCommand,
@@ -26,6 +28,11 @@ const COLUMN_OVERSCAN: usize = 24;
 const MAXIMUM_COLUMN_SCAN_LINES_PER_FRAME: usize = 16_384;
 const RIGHT_PADDING: f32 = 24.0;
 const BOTTOM_PADDING: f32 = 32.0;
+/// Side of a diagnostic's mark in the gutter, between the line number and the
+/// code: small enough to sit in the number's right padding.
+const GUTTER_MARK_SIDE: f32 = 8.0;
+/// Width of the change bar an edited line carries at the gutter's edge.
+const CHANGE_BAR_WIDTH: f32 = 2.0;
 /// Keep the accessibility tree proportional to what assistive technology can
 /// use interactively. Exposing an entire release-scale source file would make
 /// every caret move rebuild millions of characters of AccessKit state.
@@ -124,8 +131,9 @@ pub(crate) struct VirtualEditorOutput {
 /// `source_revision` is the application document revision, not a frame counter.
 /// `layout_line` receives a bounded horizontal slice and its logical line so a
 /// language service can lay it out without constructing a whole-document
-/// galley. `line_severity` returns the strongest current diagnostic color for
-/// a zero-based logical line. `line_diagnostic_context` is called at most once
+/// galley. `line_problem` returns the mark the strongest current diagnostic on
+/// a zero-based logical line earns: a warning or an error, or none for a note
+/// or a hint. `line_diagnostic_context` is called at most once
 /// per frame, for the active line only, and should return a concise summary
 /// from a publication-time index rather than scanning diagnostics.
 pub(crate) fn show_virtual_text_editor(
@@ -138,7 +146,7 @@ pub(crate) fn show_virtual_text_editor(
     requested_line: Option<usize>,
     style: &VirtualEditorStyle<'_>,
     mut layout_line: impl FnMut(&Ui, &str, usize, FontId) -> Arc<egui::Galley>,
-    mut line_severity: impl FnMut(usize) -> Option<Color32>,
+    mut line_problem: impl FnMut(usize) -> Option<Problem>,
     mut line_diagnostic_context: impl FnMut(usize) -> Option<String>,
 ) -> VirtualEditorOutput {
     let session_id = editor_id.with("virtual-session");
@@ -416,12 +424,15 @@ pub(crate) fn show_virtual_text_editor(
                         style.text,
                     );
 
-                    let severity = line_severity(line.logical_line);
-                    let number_color = severity.unwrap_or(if is_active {
+                    // The line number is neutral. A warning or an error on
+                    // the line is a mark between the number and the code; an
+                    // edited line is a change bar at the gutter's edge.
+                    let problem = line_problem(line.logical_line);
+                    let number_color = if is_active {
                         style.text_dim
                     } else {
                         style.text_faint
-                    });
+                    };
                     let number_right = sticky_separator - 10.0;
                     ui.painter().text(
                         egui::pos2(number_right, row_rect.center().y),
@@ -430,16 +441,22 @@ pub(crate) fn show_virtual_text_editor(
                         style.font.clone(),
                         number_color,
                     );
-                    if let Some(color) = severity {
-                        ui.painter().circle_filled(
-                            egui::pos2(sticky_separator - 4.5, row_rect.center().y),
-                            2.4,
-                            color,
+                    if let Some(problem) = problem {
+                        paint_problem_mark(
+                            ui.painter(),
+                            egui::Rect::from_center_size(
+                                egui::pos2(sticky_separator - 4.5, row_rect.center().y),
+                                Vec2::splat(GUTTER_MARK_SIDE),
+                            ),
+                            problem,
                         );
                     } else if style.edited_lines.contains(&line.logical_line) {
-                        ui.painter().circle_filled(
-                            egui::pos2(sticky_separator - 4.5, row_rect.center().y),
-                            2.4,
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_max(
+                                egui::pos2(sticky_separator - 1.0 - CHANGE_BAR_WIDTH, row_top),
+                                egui::pos2(sticky_separator - 1.0, row_top + style.line_height),
+                            ),
+                            0.0,
                             style.accent,
                         );
                     }

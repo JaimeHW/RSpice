@@ -13,6 +13,7 @@ use egui::{Color32, FontId, Stroke, Ui};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
+use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::MessageId;
 use crate::workbench::documents::text_editor_commands::{
     EditorSyntax, consume_standard_command, consume_structural_shortcut, show_go_to_line,
@@ -23,6 +24,8 @@ const FONT_SIZE: f32 = 11.0;
 const LINE_HEIGHT: f32 = 17.05;
 const GUTTER_WIDTH: f32 = 47.0;
 const NUMBER_RIGHT_PADDING: f32 = 11.0;
+/// Side of a diagnostic's gutter mark, set in the line number's right padding.
+const GUTTER_MARK_SIDE: f32 = 8.0;
 const CODE_LEFT_PADDING: f32 = 12.0;
 // One editor substrate must own cursor, folding, multi-selection, IME, and
 // undo semantics at every document size. Keeping a second small-file TextEdit
@@ -404,9 +407,7 @@ fn show_code_document_impl(
             |logical_line| {
                 diagnostic_view
                     .severity_for_line(logical_line.saturating_add(1))
-                    .map(|severity| {
-                        diagnostic_color(severity, colors.err, colors.warn, colors.info)
-                    })
+                    .and_then(diagnostic_problem)
             },
             |logical_line| {
                 diagnostic_view
@@ -552,10 +553,8 @@ fn show_code_document_impl(
                             colors.err,
                         );
                     }
-                    let severity = diagnostic_view.severity_for_line(line_number);
-                    let color = severity.map_or(colors.text_faint, |severity| {
-                        diagnostic_color(severity, colors.err, colors.warn, colors.info)
-                    });
+                    // The number is neutral; a warning or an error on the
+                    // line is a mark in the number's right padding.
                     painter.text(
                         egui::pos2(
                             output.response.rect.left() + GUTTER_WIDTH - NUMBER_RIGHT_PADDING,
@@ -564,13 +563,19 @@ fn show_code_document_impl(
                         egui::Align2::RIGHT_CENTER,
                         line_number.to_string(),
                         gutter_font.clone(),
-                        color,
+                        colors.text_faint,
                     );
-                    if severity.is_some() {
-                        painter.circle_filled(
-                            egui::pos2(output.response.rect.left() + GUTTER_WIDTH - 5.0, y),
-                            2.5,
-                            color,
+                    if let Some(problem) = diagnostic_view
+                        .severity_for_line(line_number)
+                        .and_then(diagnostic_problem)
+                    {
+                        paint_problem_mark(
+                            painter,
+                            egui::Rect::from_center_size(
+                                egui::pos2(output.response.rect.left() + GUTTER_WIDTH - 5.0, y),
+                                egui::Vec2::splat(GUTTER_MARK_SIDE),
+                            ),
+                            problem,
                         );
                     }
                 }
@@ -785,6 +790,16 @@ fn byte_offset_line(source: &str, offset: usize) -> usize {
         .filter(|byte| **byte == b'\n')
         .count()
         + 1
+}
+
+/// The gutter mark a diagnostic earns: only a warning or an error is marked.
+/// A note or a hint keeps its squiggle and leaves the gutter alone.
+const fn diagnostic_problem(severity: CodeEditorSeverity) -> Option<Problem> {
+    match severity {
+        CodeEditorSeverity::Error => Some(Problem::Failure),
+        CodeEditorSeverity::Warning => Some(Problem::Warning),
+        CodeEditorSeverity::Info | CodeEditorSeverity::Hint => None,
+    }
 }
 
 const fn diagnostic_color(
