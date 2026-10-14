@@ -353,9 +353,17 @@ impl<'u> FormRows<'u> {
             color,
         );
         let value = text.to_owned();
+        // A hover-only allocation gets no bounds of its own, and a line a
+        // reader cannot locate is a line they cannot tell belongs to its field.
         self.ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Label);
             node.set_value(value.clone());
+            node.set_bounds(egui::accesskit::Rect {
+                x0: rect.min.x.into(),
+                y0: rect.min.y.into(),
+                x1: rect.max.x.into(),
+                y1: rect.max.y.into(),
+            });
         });
         if elided {
             response.on_hover_text(text);
