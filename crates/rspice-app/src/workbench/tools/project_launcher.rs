@@ -1900,6 +1900,69 @@ mod tests {
         );
     }
 
+    /// A recoverable checkpoint already passed its integrity check, so the
+    /// summary does not say "verified"; it counts in the singular when there
+    /// is one, and names the baseline only when it is not an exact match.
+    #[test]
+    fn a_recovery_summary_counts_and_never_reports_success() {
+        let verified = |available, note: Option<&str>, changed| RecoveryIntegrity::Verified {
+            baseline_available: available,
+            components: 3,
+            wires: 1,
+            changed_objects: changed,
+            baseline_note: note.map(str::to_owned),
+        };
+        assert_eq!(
+            integrity_summary(&verified(true, None, Some(1))),
+            "3 components · 1 wire · 1 structural change"
+        );
+        assert_eq!(
+            integrity_summary(&verified(true, Some("changed"), Some(2))),
+            "3 components · 1 wire · 2 structural changes · saved baseline changed or unrecorded"
+        );
+        assert_eq!(
+            integrity_summary(&verified(false, Some("unavailable"), None)),
+            "3 components · 1 wire · change count unavailable · baseline unavailable"
+        );
+    }
+
+    /// Every contract value starts after the full label column. The column
+    /// was a sized allocation that shrank to its label, so "Saved source" ran
+    /// straight into the path beside it.
+    #[test]
+    fn recovery_contract_values_start_after_the_label_column() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let viewport = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1440.0, 900.0));
+        let layout = LauncherLayout::resolve(viewport);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(viewport),
+                ..Default::default()
+            },
+            |ui| recovery_contract_row(ui, "Saved source", "C:\\work\\rc_lowpass.rsch", layout),
+        );
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree")
+            .nodes;
+        let left = |text: &str| {
+            nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(text) || node.value() == Some(text))
+                .and_then(|(_, node)| node.bounds())
+                .unwrap_or_else(|| panic!("no node for {text}"))
+                .x0
+        };
+        assert!(
+            left("C:\\work\\rc_lowpass.rsch") - left("Saved source")
+                >= f64::from(RECOVERY_CONTRACT_LABEL_COLUMN),
+            "the value starts inside the label column"
+        );
+    }
+
     #[test]
     fn launcher_dismissal_returns_through_canonical_history() {
         let mut app = RSpiceApp::test_instance();

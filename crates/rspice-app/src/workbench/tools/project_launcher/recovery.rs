@@ -327,7 +327,16 @@ fn candidate_state(recoverable: bool) -> (&'static str, Option<Problem>) {
 }
 
 pub(super) fn recovery_summary(candidate: &RecoveryCandidate) -> String {
-    match &candidate.integrity {
+    integrity_summary(&candidate.integrity)
+}
+
+/// What the checkpoint holds, plus the baseline only when it is not the
+/// ordinary exact match. A checkpoint that is listed as recoverable passed its
+/// integrity check, so saying "verified" would only report success.
+pub(super) fn integrity_summary(integrity: &RecoveryIntegrity) -> String {
+    let count =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    match integrity {
         RecoveryIntegrity::Verified {
             baseline_available,
             baseline_note,
@@ -337,18 +346,19 @@ pub(super) fn recovery_summary(candidate: &RecoveryCandidate) -> String {
         } => {
             let delta = changed_objects.map_or_else(
                 || "change count unavailable".to_owned(),
-                |count| format!("{count} structural changes"),
+                |changed| count(changed, "structural change", "structural changes"),
             );
-            format!(
-                "{components} components · {wires} wires · {delta} · {}",
-                if *baseline_available && baseline_note.is_none() {
-                    "checkpoint and baseline verified"
-                } else if *baseline_available {
-                    "checkpoint verified · saved baseline changed or unrecorded"
-                } else {
-                    "checkpoint verified · baseline unavailable"
-                }
-            )
+            let mut summary = format!(
+                "{} · {} · {delta}",
+                count(*components, "component", "components"),
+                count(*wires, "wire", "wires"),
+            );
+            if !baseline_available {
+                summary.push_str(" · baseline unavailable");
+            } else if baseline_note.is_some() {
+                summary.push_str(" · saved baseline changed or unrecorded");
+            }
+            summary
         }
         RecoveryIntegrity::Invalid(error) => error.clone(),
     }
@@ -386,12 +396,8 @@ pub(super) fn recovery_contract(
                     baseline_note,
                     ..
                 } => {
-                    recovery_contract_row(
-                        ui,
-                        "Protected data",
-                        "Saved source and checkpoint remain unchanged; recovery opens as an unsaved project.",
-                        layout,
-                    );
+                    // The page heading already says recovery never overwrites
+                    // the saved project; a row repeating it is not kept.
                     recovery_contract_row(
                         ui,
                         "Recommended action",
@@ -420,6 +426,9 @@ pub(super) fn recovery_contract(
             }
         });
 }
+
+/// Width of the label column in a desktop recovery contract row.
+pub(super) const RECOVERY_CONTRACT_LABEL_COLUMN: f32 = 170.0;
 
 pub(super) fn recovery_contract_row(ui: &mut Ui, label: &str, value: &str, layout: LauncherLayout) {
     let t = Tokens::get(ui.ctx());
@@ -481,12 +490,18 @@ pub(super) fn recovery_contract_row(ui: &mut Ui, label: &str, value: &str, layou
                     .wrap(),
                 );
             };
-            ui.horizontal(|ui| {
+            // The label cell keeps its full column even when the label is
+            // shorter, so every value starts on the same line; a sized
+            // allocation alone shrinks to the label and the value ran into it.
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.allocate_ui_with_layout(
-                    vec2(170.0, 18.0),
+                    vec2(RECOVERY_CONTRACT_LABEL_COLUMN, 18.0),
                     egui::Layout::left_to_right(Align::Center),
-                    add_label,
+                    |ui| {
+                        ui.set_min_size(vec2(RECOVERY_CONTRACT_LABEL_COLUMN, 18.0));
+                        add_label(ui);
+                    },
                 );
                 add_value(ui);
             });
