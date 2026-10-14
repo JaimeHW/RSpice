@@ -492,22 +492,6 @@ fn specification_bound_autoscale_commits_the_exact_data_and_limit_envelope() {
 }
 
 #[test]
-fn transfer_function_result_resolves_the_canonical_xf_viewer_contract() {
-    let analysis_ids = [analysis_manifest_id(AnalysisType::Tf)];
-    assert_eq!(analysis_ids, ["xf"]);
-    assert_eq!(
-        viewer_compatibility(
-            "viewer-transfer-function",
-            ViewerCapabilities {
-                analysis_ids: &analysis_ids,
-                external_capabilities: &[],
-            },
-        ),
-        ViewerCompatibility::Compatible
-    );
-}
-
-#[test]
 fn comparison_source_projection_preserves_dc_and_hb_specialist_modes() {
     let dc = AnalysisResult::new(1, AnalysisType::DcSweep, "DC");
     assert_eq!(
@@ -773,74 +757,6 @@ fn project_document_owns_comparison_receipts_and_studio_only_projects_them() {
             .visualization_studio
             .difference_trace_sets
             .is_empty()
-    );
-}
-
-/// What "feature complete" means for the Results workspace, stated as a
-/// gate rather than a claim: a sheet answers for every view the product
-/// manifest puts in this release's scope. Publish a release-target row with
-/// no sheet behind it and this fails.
-#[test]
-fn every_release_target_viewer_document_ships_a_renderer() {
-    use crate::results::viewer_catalog::ViewerReleaseClass;
-
-    let mut in_scope = 0;
-    for definition in VIEWER_DOCUMENTS {
-        if definition.release != ViewerReleaseClass::ReleaseTarget {
-            continue;
-        }
-        in_scope += 1;
-        assert!(
-            ResultViewer::from_viewer_document_id(definition.id).is_some(),
-            "{} is in this release's scope but no sheet draws it",
-            definition.id
-        );
-    }
-    assert!(
-        in_scope > 0,
-        "the catalog declares no view in release scope"
-    );
-}
-
-/// The viewer library publishes every designed view, and most of them this
-/// build does not draw. The row a reader cannot click has to say which kind
-/// of unavailable it is: "requires X analysis data" is an instruction they
-/// can act on, so a view no sheet draws must not borrow that phrasing — it
-/// reports the manifest's own release scope instead.
-#[test]
-fn a_view_no_sheet_draws_reports_its_release_scope_not_a_data_requirement() {
-    use sections::resolved_viewer_availability;
-
-    let app = app_with_exact_source();
-    let analysis_ids = available_analysis_ids(&app.state);
-    let mut drawable = 0;
-    for definition in VIEWER_DOCUMENTS {
-        let availability = resolved_viewer_availability(
-            &app.state,
-            definition,
-            ViewerCapabilities {
-                analysis_ids: &analysis_ids,
-                external_capabilities: &[],
-            },
-        );
-        let ships_a_renderer = ResultViewer::from_viewer_document_id(definition.id).is_some()
-            && definition.release
-                == crate::results::viewer_catalog::ViewerReleaseClass::ReleaseTarget;
-        drawable += usize::from(ships_a_renderer);
-        match availability {
-            Ok(_) => assert!(ships_a_renderer, "{} drew without a sheet", definition.id),
-            Err(reason) => assert_eq!(
-                reason == definition.unavailable_reason(),
-                !ships_a_renderer,
-                "{} reports the wrong kind of unavailable: {reason}",
-                definition.id
-            ),
-        }
-    }
-    assert!(
-        drawable > 0 && drawable < VIEWER_DOCUMENTS.len(),
-        "the catalog and the shipped renderers have stopped disagreeing; \
-         fold this expectation into whichever is now the whole truth"
     );
 }
 

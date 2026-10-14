@@ -39,8 +39,6 @@ use egui::{Align, Id, Layout, Ui, vec2};
 use crate::analysis::calculator;
 use crate::diagnostics::ConsoleMessage;
 use crate::product::{AnalysisInstanceId, DatasetBinding, DatasetId, ResultDocumentId};
-#[cfg(test)]
-use crate::results::viewer_catalog::VIEWER_DOCUMENTS;
 use crate::results::viewer_catalog::{
     ViewerArt, ViewerCapabilities, ViewerCompatibility, ViewerDocumentDefinition,
     viewer_compatibility, viewer_document,

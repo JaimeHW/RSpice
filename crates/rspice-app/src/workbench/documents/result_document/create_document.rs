@@ -240,7 +240,7 @@ pub(super) fn analysis_matches_viewer(
         || (analysis == AnalysisType::Corner && viewer.analysis_ids.contains(&"temp"))
 }
 
-const fn analysis_manifest_id(analysis: AnalysisType) -> &'static str {
+pub(super) const fn analysis_manifest_id(analysis: AnalysisType) -> &'static str {
     match analysis {
         AnalysisType::DcOp => "op",
         AnalysisType::DcSweep | AnalysisType::Parametric => "dc",

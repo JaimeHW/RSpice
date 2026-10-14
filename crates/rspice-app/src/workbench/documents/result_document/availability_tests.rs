@@ -1938,3 +1938,49 @@ fn a_failed_frequency_response_is_not_offered_as_a_bode_sheet() {
         "a failed solve was offered a frequency-response sheet"
     );
 }
+
+#[test]
+fn transfer_function_result_resolves_the_canonical_xf_viewer_contract() {
+    use crate::results::viewer_catalog::{
+        ViewerCapabilities, ViewerCompatibility, viewer_compatibility,
+    };
+
+    let analysis_ids = [create_document::analysis_manifest_id(AnalysisType::Tf)];
+    assert_eq!(analysis_ids, ["xf"]);
+    assert_eq!(
+        viewer_compatibility(
+            "viewer-transfer-function",
+            ViewerCapabilities {
+                analysis_ids: &analysis_ids,
+                external_capabilities: &[],
+            },
+        ),
+        ViewerCompatibility::Compatible
+    );
+}
+
+/// What "feature complete" means for the Results workspace, stated as a
+/// gate rather than a claim: a sheet answers for every view the product
+/// manifest puts in this release's scope. Publish a release-target row with
+/// no sheet behind it and this fails.
+#[test]
+fn every_release_target_viewer_document_ships_a_renderer() {
+    use crate::results::viewer_catalog::{VIEWER_DOCUMENTS, ViewerReleaseClass};
+
+    let mut in_scope = 0;
+    for definition in VIEWER_DOCUMENTS {
+        if definition.release != ViewerReleaseClass::ReleaseTarget {
+            continue;
+        }
+        in_scope += 1;
+        assert!(
+            ResultViewer::from_viewer_document_id(definition.id).is_some(),
+            "{} is in this release's scope but no sheet draws it",
+            definition.id
+        );
+    }
+    assert!(
+        in_scope > 0,
+        "the catalog declares no view in release scope"
+    );
+}

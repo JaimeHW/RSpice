@@ -410,3 +410,43 @@ fn viewer_requirement(viewer: &ViewerDocumentDefinition) -> String {
         viewer.analysis_ids.join(" or ").to_ascii_uppercase()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_results::result_presentation::ResultViewer;
+
+    /// The viewer list publishes every designed view, and most of them this
+    /// build does not draw. The row a reader cannot pick has to say which kind
+    /// of unavailable it is: "analysis required" is an instruction they can
+    /// act on, so a view no sheet draws must not borrow that phrasing — it
+    /// reports the manifest's own release scope instead.
+    #[test]
+    fn a_view_no_sheet_draws_reports_its_release_scope_not_a_data_requirement() {
+        let mut drawable = 0;
+        for definition in VIEWER_DOCUMENTS {
+            let ships_a_renderer = ResultViewer::from_viewer_document_id(definition.id).is_some()
+                && definition.release == ViewerReleaseClass::ReleaseTarget;
+            drawable += usize::from(ships_a_renderer);
+            for compatibility in [
+                ViewerCompatibility::Compatible,
+                ViewerCompatibility::MissingAnalysis {
+                    accepted_analysis_ids: definition.analysis_ids,
+                },
+            ] {
+                let status = viewer_status(definition, compatibility, true);
+                assert_eq!(
+                    status == definition.unavailable_reason(),
+                    !ships_a_renderer,
+                    "{} reports the wrong kind of unavailable: {status}",
+                    definition.id
+                );
+            }
+        }
+        assert!(
+            drawable > 0 && drawable < VIEWER_DOCUMENTS.len(),
+            "the catalog and the shipped renderers have stopped disagreeing; \
+             fold this expectation into whichever is now the whole truth"
+        );
+    }
+}
