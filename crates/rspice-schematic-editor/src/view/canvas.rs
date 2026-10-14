@@ -244,7 +244,8 @@ fn keyboard_focus_label(
     }
 }
 
-/// Publish accessible canvas and selection state.
+/// Publish accessible canvas and selection state, and paint the focus ring
+/// when Tab moved focus here.
 pub fn finish(
     ui: &Ui,
     response: &Response,
@@ -274,7 +275,10 @@ pub fn finish(
             node.set_label(selection_status);
             node.set_live(egui::accesskit::Live::Polite);
         });
-    // No focus ring around the canvas. It takes keyboard focus on every press
-    // so its shortcuts work, so a ring framed the drawing for as long as anyone
-    // worked in it. Keyboard focus on an object inside it draws its own outline.
+    // The canvas takes keyboard focus on every press so its shortcuts work, so
+    // only focus that Tab moved here shows the ring: a press never frames the
+    // drawing. Painted last so the schematic artwork does not cover it.
+    if rspice_ui_kit::theme::focus_is_visible(ui.ctx(), response) {
+        rspice_ui_kit::theme::paint_focus_ring(ui, response, available);
+    }
 }

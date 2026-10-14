@@ -31,6 +31,68 @@ pub fn paint_focus_ring(ui: &egui::Ui, response: &egui::Response, rect: egui::Re
     );
 }
 
+/// Whether a widget's keyboard focus should show, decided the way a browser
+/// decides `:focus-visible`: focus that Tab moved there shows, and focus a
+/// pointer press gave does not. For surfaces that take focus on every press so
+/// their shortcuts work, such as the drawing canvases, where a ring would frame
+/// the work for as long as anyone used it.
+///
+/// Call it every frame the widget is drawn, not only while it is focused, so it
+/// sees the input that moved focus.
+pub fn focus_is_visible(ctx: &Context, response: &egui::Response) -> bool {
+    let tab_moved_focus = tab_moved_focus_last(ctx);
+    let id = response.id.with("focus-visible");
+    if !response.has_focus() {
+        ctx.data_mut(|data| data.remove::<bool>(id));
+        return false;
+    }
+    // A press on the focused widget takes the ring away again.
+    let pressed_here =
+        response.contains_pointer() && ctx.input(|input| input.pointer.any_pressed());
+    let visible = match ctx.data(|data| data.get_temp::<bool>(id)) {
+        Some(visible) => visible && !pressed_here,
+        None => tab_moved_focus && !pressed_here,
+    };
+    ctx.data_mut(|data| data.insert_temp(id, visible));
+    visible
+}
+
+/// Whether the last input that moves focus was Tab rather than a pointer press.
+fn tab_moved_focus_last(ctx: &Context) -> bool {
+    #[derive(Clone, Copy, Default)]
+    struct Modality {
+        frame: Option<u64>,
+        tab: bool,
+    }
+    let id = egui::Id::new("rspice.focus-modality");
+    let frame = ctx.cumulative_frame_nr();
+    let mut modality = ctx
+        .data(|data| data.get_temp::<Modality>(id))
+        .unwrap_or_default();
+    if modality.frame != Some(frame) {
+        ctx.input(|input| {
+            for event in &input.events {
+                match event {
+                    egui::Event::Key {
+                        key: egui::Key::Tab,
+                        pressed: true,
+                        ..
+                    } => modality.tab = true,
+                    egui::Event::PointerButton { pressed: true, .. }
+                    | egui::Event::Touch {
+                        phase: egui::TouchPhase::Start,
+                        ..
+                    } => modality.tab = false,
+                    _ => {}
+                }
+            }
+        });
+        modality.frame = Some(frame);
+        ctx.data_mut(|data| data.insert_temp(id, modality));
+    }
+    modality.tab
+}
+
 /// The user-selected theme. Cheap to copy and compare; persisted with the
 /// application state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -645,6 +707,79 @@ mod tests {
 
         assert!(restored.colorblind_traces);
         assert!(restored.tokens().color_safe_traces);
+    }
+
+    /// One frame of a canvas-like surface that, like the drawing canvases,
+    /// takes focus on every press. Returns (has focus, ring visible).
+    fn focus_frame(ctx: &Context, events: Vec<egui::Event>) -> (bool, bool) {
+        let mut result = (false, false);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 400.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            let response = ui.interact(
+                egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(200.0, 200.0)),
+                egui::Id::new("focus-visible-canvas"),
+                egui::Sense::click_and_drag(),
+            );
+            if response.is_pointer_button_down_on() {
+                response.request_focus();
+            }
+            result = (response.has_focus(), focus_is_visible(ui.ctx(), &response));
+        });
+        result
+    }
+
+    fn press(pressed: bool) -> Vec<egui::Event> {
+        let at = egui::pos2(60.0, 60.0);
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    }
+
+    fn tab() -> Vec<egui::Event> {
+        vec![egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]
+    }
+
+    fn settle(ctx: &Context, events: Vec<egui::Event>) -> (bool, bool) {
+        focus_frame(ctx, events);
+        focus_frame(ctx, Vec::new());
+        focus_frame(ctx, Vec::new())
+    }
+
+    #[test]
+    fn a_press_focuses_a_canvas_without_showing_its_ring() {
+        let ctx = Context::default();
+        focus_frame(&ctx, Vec::new());
+        focus_frame(&ctx, press(true));
+        assert_eq!(settle(&ctx, press(false)), (true, false));
+    }
+
+    #[test]
+    fn tab_into_a_canvas_shows_its_ring_until_a_press_lands_on_it() {
+        let ctx = Context::default();
+        focus_frame(&ctx, Vec::new());
+        assert_eq!(settle(&ctx, tab()), (true, true));
+
+        focus_frame(&ctx, press(true));
+        assert_eq!(settle(&ctx, press(false)), (true, false));
     }
 
     #[test]

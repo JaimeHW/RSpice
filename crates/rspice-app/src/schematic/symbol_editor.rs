@@ -9,6 +9,7 @@ use egui::{Sense, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::{PortSpec, SymbolDocument, SymbolEditorMetadata};
+use crate::ui::theme;
 use crate::ui::widgets::DialogChoice;
 use crate::workbench::AppState;
 pub(crate) use rspice_schematic_editor::symbol_editor::draw_document_preview;
@@ -118,8 +119,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             &state.ui.symbol.editor,
             &state.workspace.content.active_view,
         );
-        // No focus ring: the canvas takes keyboard focus on every press for
-        // its shortcuts, so a ring would frame the drawing the whole time.
+        // The canvas takes keyboard focus on every press for its shortcuts, so
+        // only focus that Tab moved here shows the ring: a press never frames
+        // the drawing. Painted after the artwork so the ring is not drawn over.
+        if theme::focus_is_visible(ui.ctx(), &response) {
+            theme::paint_focus_ring(ui, &response, rect);
+        }
         let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
         let operating_system = ui.ctx().os();
         response.widget_info(|| {
