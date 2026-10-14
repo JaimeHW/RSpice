@@ -681,12 +681,17 @@ struct BundleIncludeProvider<'a> {
 impl<'a> BundleIncludeProvider<'a> {
     fn new(bundle: &'a ProjectSourceBundle, include_paths: &[String]) -> Self {
         let files = std::iter::once((bundle.root().logical_path(), bundle.root().content()))
-            .chain(bundle.files().iter().filter_map(|file| {
-                // The compile leaves the build profile out of the closure.
-                (bundle.role_for_path(file.logical_path())
-                    != Some(ProjectSourceRole::VerilogABuildProfile))
-                .then(|| (file.logical_path(), file.content()))
-            }))
+            .chain(
+                bundle
+                    .files()
+                    .iter()
+                    // The compile leaves the build profile out of the closure.
+                    .filter(|file| {
+                        bundle.role_for_path(file.logical_path())
+                            != Some(ProjectSourceRole::VerilogABuildProfile)
+                    })
+                    .map(|file| (file.logical_path(), file.content())),
+            )
             .map(|(path, source)| (fold(path), (path, source)))
             .collect();
         Self {
