@@ -13,10 +13,11 @@ use rspice_design_model::{
     Point, cell_view::CellViewRef, port::PortSpec, symbol_pin::SymbolPinSide,
 };
 use rspice_ui_kit::accessibility::plural_suffix;
-use rspice_ui_kit::panels::inspector::{muted_inspector_copy, section_header};
+use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
-    Problem, StatusMark, WorkbenchIcon, labeled_icon_button, property_row, property_row_combo,
-    property_row_input, property_row_status,
+    PANEL_INSET, Problem, StatusMark, WorkbenchIcon, labeled_icon_button, panel_bleed, panel_inset,
+    property_row, property_row_combo, property_row_input, property_row_status, section_block_gap,
+    section_header,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -176,11 +177,15 @@ impl InspectorEdit {
 fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: &[PortSpec]) {
     let t = Tokens::get(ui.ctx());
     let summary = document.pin_summary(ports);
+    let inset = panel_inset(ui);
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 82.0), egui::Sense::hover());
+    // The band reaches the panel's edges; its text keeps the panel inset on
+    // the right.
+    let band = panel_bleed(ui, rect);
     let preview = egui::Rect::from_min_max(
-        rect.min,
-        egui::pos2((rect.left() + 82.0).min(rect.right()), rect.bottom()),
+        band.min,
+        egui::pos2((band.left() + 82.0).min(band.right()), band.bottom()),
     );
     ui.painter().rect_filled(preview, 0.0, t.color.canvas_bg);
     ui.painter().vline(
@@ -189,8 +194,8 @@ fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: 
         egui::Stroke::new(1.0, t.color.border),
     );
     ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
+        band.x_range(),
+        band.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
     super::draw_document_preview(
@@ -202,9 +207,9 @@ fn hero(ui: &mut Ui, reference: &CellViewRef, document: &SymbolDocument, ports: 
         t.color.symbol,
     );
 
-    let text_left = preview.right() + 10.0;
+    let text_left = preview.right() + PANEL_INSET;
     let painter = ui.painter().with_clip_rect(egui::Rect::from_x_y_ranges(
-        text_left..=(rect.right() - 10.0),
+        text_left..=(rect.right() - inset).max(text_left),
         rect.y_range(),
     ));
     let at = |y: f32| egui::pos2(text_left, rect.top() + y);
@@ -486,8 +491,8 @@ fn pin_section(
     }
 
     property_row(ui, "Netlist order", &format!("{} of {total}", order + 1));
+    section_block_gap(ui);
     ui.horizontal(|ui| {
-        ui.add_space(8.0);
         if ui
             .add_enabled(order > 0, egui::Button::new("Move earlier"))
             .clicked()
@@ -566,7 +571,7 @@ fn pin_section(
         edit.session.undo_recorded = false;
         changed = true;
     }
-    ui.add_space(4.0);
+    section_block_gap(ui);
     if ui
         .add_sized(
             [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
@@ -732,7 +737,6 @@ fn visibility_row(ui: &mut Ui, label: &str, shown: &mut bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let before = *shown;
     ui.horizontal(|ui| {
-        ui.add_space(8.0);
         ui.add_sized(
             [112.0, t.metrics.ctl_h],
             egui::Label::new(
