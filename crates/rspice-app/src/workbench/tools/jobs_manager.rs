@@ -840,25 +840,6 @@ fn render_inspector(
                     "Runtime",
                     snapshot.current_target.label(),
                 );
-                crate::workbench::design_system::property_row(
-                    ui,
-                    "Parallel slots",
-                    "1 qualified analysis slot",
-                );
-                crate::workbench::design_system::property_row(
-                    ui,
-                    "Memory budget",
-                    if cfg!(target_arch = "wasm32") {
-                        "Browser managed"
-                    } else {
-                        "Process managed"
-                    },
-                );
-                crate::workbench::design_system::property_row(
-                    ui,
-                    "Failure policy",
-                    "Exact per-analysis outcome",
-                );
             });
             crate::workbench::design_system::property_card(ui, "Selected run manifest", |ui| {
                 if let Some(row) = snapshot.selected() {
@@ -2029,5 +2010,35 @@ mod tests {
             pending_task_outcome(SimulationRunLifecycle::Running, true, false, 0.7).0,
             "queued"
         );
+    }
+
+    /// The execution-target card states the runtime this build runs on. It
+    /// once also listed "Parallel slots", "Memory budget" and "Failure policy",
+    /// which were literals rather than settings, so they must stay deleted.
+    #[test]
+    fn execution_target_card_lists_only_the_live_runtime() {
+        let mut state = AppState::default();
+        state.simulation.start_run();
+        let snapshot = JobsSnapshot::capture(&state, None, JobsPlanScope::AllPlans);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            render_inspector(ui, &snapshot, &mut None, &mut None);
+        });
+        let text = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree")
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Runtime"), "{text}");
+        for constant in ["Parallel slots", "Memory budget", "Failure policy"] {
+            assert!(!text.contains(constant), "{constant} came back:\n{text}");
+        }
     }
 }
