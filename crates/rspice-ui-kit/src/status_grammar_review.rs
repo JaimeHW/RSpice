@@ -1,20 +1,23 @@
 //! The status grammar as PNGs for a person to look at: the four toast
-//! severities, a command form's refusal, and an inspector of property rows,
-//! problem marks, sentence-case headers, a code inspector warning, the
-//! bordered and filled destructive buttons and a stacked field label, in both
-//! themes.
+//! severities, a command form's refusal, and a panel built from rows the
+//! product's panels really show — one of each panel primitive, on the panel
+//! inset and rhythm — in both themes, with the panel's measured geometry
+//! written beside it.
 //!
 //! Nothing here asserts; the contract tests beside each primitive do. The one
 //! test is ignored and writes to `RSPICE_RASTER_DIR` (default: the system
 //! temp directory).
 
-use egui::{Color32, Ui};
+use egui::Ui;
 
 use crate::panels::{
-    Ink, Problem, code_inspector_section, inspector, property_row, property_row_ink,
-    property_row_problem, schematic_property_row,
+    Problem, PropertyRowAction, PropertyRowCaption, WorkbenchIcon, code_inspector_section,
+    inspector, panel_body, problem_line, property_row, property_row_input,
+    property_row_input_action, property_row_input_captioned, property_row_input_with_hint,
+    property_row_problem, section_block_gap, section_header, section_header_action,
+    section_header_explained, subsection_header,
 };
-use crate::raster::{Canvas, render, render_themed};
+use crate::raster::{Canvas, render};
 use crate::tokens::Mode;
 use crate::widgets::{Button, CommandForm, NotificationCategory, ToastKind, Toasts};
 
@@ -120,73 +123,207 @@ fn render_the_status_grammar_for_review() {
     });
     write("k1-command-form-refusal", &form);
 
-    let inspector_pass = |ui: &mut Ui, background: Color32| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(background))
-            .show(ui, |ui| {
-                inspector::begin_inspector_sections(ui);
-                inspector::section_header(ui, "Terminal placement", Some("3 pins"));
-                property_row(ui, "Instance", "R1");
-                property_row_problem(ui, "Pin 1", "placed", None);
-                property_row_problem(ui, "Pin 2", "unplaced", Some(Problem::Warning));
-                property_row_problem(ui, "Pin 3", "off grid", Some(Problem::Failure));
-                property_row_ink(ui, "Source", "inherited", Ink::Faint);
-                inspector::inspector_problem(ui, Problem::Warning, "Two pins share one location.");
-                inspector::schematic_section_header(
-                    ui,
-                    "Drawing sheet",
-                    Some("inherited \u{b7} project default"),
-                );
-                schematic_property_row(ui, "Format", "A3 landscape");
-                let _ =
-                    inspector::schematic_section_header_action(ui, "Net classes", "+ Add", true);
-                let _ =
-                    crate::widgets::section_header(ui, "Run history for DC sweep", Some("Clear"));
-                crate::widgets::pane_section_label(ui, "Environment");
-                code_inspector_section(
-                    ui,
-                    "Diagnostics",
-                    Some("2 advisories"),
-                    Some(Problem::Warning),
-                    |ui| {
-                        crate::widgets::problem_line(
-                            ui,
-                            Problem::Warning,
-                            "Parameter gain is declared and never read.",
-                        );
-                        crate::widgets::problem_line(
-                            ui,
-                            Problem::Warning,
-                            "Net vx is created implicitly.",
-                        );
-                    },
-                );
-                code_inspector_section(ui, "Debugger", Some("Paused"), None, |_| {});
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let _ = Button::new("Remove").destructive(true).show(ui);
-                    let _ = Button::new("Duplicate").show(ui);
-                    let _ = Button::new("Delete").accent().destructive(true).show(ui);
-                });
-                ui.add_space(10.0);
-                let mut name = String::from("vout");
-                crate::widgets::field_label(ui, "Net name", |ui| {
-                    ui.text_edit_singleline(&mut name);
-                });
-                ui.add_space(6.0);
-                crate::widgets::read_only_value(ui, "Document naming policy", "As typed");
-            });
-    };
-    write(
-        "k1-inspector-grammar-dark",
-        &render(egui::vec2(360.0, 900.0), inspector_pass),
-    );
     let light = crate::Theme {
         mode: Mode::Light,
         ..crate::Theme::default()
     };
-    write(
-        "k1-inspector-grammar-light",
-        &render_themed(light, egui::vec2(360.0, 900.0), inspector_pass),
-    );
+    for (stem, theme) in [
+        ("k3-panel-grammar-dark", crate::Theme::default()),
+        ("k3-panel-grammar-light", light),
+    ] {
+        let mut instance = String::from("D1");
+        let mut value = String::new();
+        let mut temperature = String::new();
+        let mut perimeter = String::from("0");
+        let mut watch = String::new();
+        let mut policy = String::from("uncaught exceptions");
+        crate::raster::write_panel_review(
+            &directory,
+            stem,
+            theme,
+            egui::vec2(312.0, 1400.0),
+            10.0,
+            |ui, _| {
+                let panel = crate::tokens::Tokens::get(ui.ctx()).color.bg_panel;
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(panel))
+                    .show(ui, |ui| {
+                        panel_grammar_sheet(
+                            ui,
+                            &mut instance,
+                            &mut value,
+                            &mut temperature,
+                            &mut perimeter,
+                            &mut watch,
+                            &mut policy,
+                        );
+                    });
+            },
+        );
+    }
 }
+
+/// Rows the product's panels really show, one of each panel primitive: the
+/// design inspector on a diode bound to its catalog model, the Verilog-A
+/// inspector on a module that failed to compile, the Waves details panel's
+/// measurements, the Automation inspector's debugger and watches, and the
+/// source-document inspector's file operations.
+#[allow(clippy::too_many_arguments)]
+fn panel_grammar_sheet(
+    ui: &mut Ui,
+    instance: &mut String,
+    value: &mut String,
+    temperature: &mut String,
+    perimeter: &mut String,
+    watch: &mut String,
+    policy: &mut String,
+) {
+    panel_body(ui, |ui| {
+        panel_grammar_rows(ui, instance, value, temperature, perimeter, watch, policy);
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn panel_grammar_rows(
+    ui: &mut Ui,
+    instance: &mut String,
+    value: &mut String,
+    temperature: &mut String,
+    perimeter: &mut String,
+    watch: &mut String,
+    policy: &mut String,
+) {
+    let _ = section_header_action(ui, "Identity", "Properties\u{2026}", true);
+    property_row_input(ui, "Instance", instance, false);
+    let _ = property_row_input_action(
+        ui,
+        "Value",
+        value,
+        false,
+        PropertyRowAction {
+            icon: WorkbenchIcon::Sliders,
+            label: "Tune value",
+            enabled: true,
+            disabled_reason: None,
+        },
+    );
+    property_row(ui, "Library cell", "primitives/Diode");
+    property_row(ui, "View", "symbol \u{b7} spice");
+    section_block_gap(ui);
+    let _ = Button::new("Open model source\u{2026}").ghost().show(ui);
+
+    section_header(ui, "Simulation parameters", Some("editable"));
+    property_row(ui, "Model", "junction");
+    property_row(ui, "Section", "Not selected");
+    property_row_input_with_hint(
+        ui,
+        "Temperature",
+        temperature,
+        "inherit \u{b7} 27 \u{b0}C",
+        false,
+    );
+    property_row_input_captioned(
+        ui,
+        "Perimeter",
+        perimeter,
+        "",
+        false,
+        PropertyRowCaption {
+            unit: Some("m"),
+            description: None,
+        },
+    );
+
+    section_header(ui, "Checks", Some("stale"));
+    property_row_problem(
+        ui,
+        "Connectivity",
+        "pending recheck",
+        Some(Problem::Warning),
+    );
+    property_row_problem(
+        ui,
+        "Floating nets",
+        "pending recheck",
+        Some(Problem::Warning),
+    );
+    property_row(ui, "Last checked", "rerun for topology revision 3");
+
+    section_header_explained(
+        ui,
+        "Measurements",
+        "linear interpolation",
+        "Values between samples are read off a straight line between them.",
+    );
+    crate::widgets::measurement_table(
+        ui,
+        &[
+            ("V(out) min", "4.100000 V"),
+            ("V(out) max", "5.900000 V"),
+            ("V(out) rms", "5.040311 V"),
+        ],
+    );
+
+    code_inspector_section(
+        ui,
+        "Diagnostics",
+        Some("1 error"),
+        Some(Problem::Failure),
+        |ui| {
+            problem_line(
+                ui,
+                Problem::Failure,
+                "Code generation error: Cannot compile expression: Unknown identifier: gain",
+            );
+        },
+    );
+    code_inspector_section(ui, "Parameters", Some("compile required"), None, |ui| {
+        inspector::muted_inspector_copy(
+            ui,
+            "Compile the module to list the parameters an instance takes.",
+        );
+    });
+
+    code_inspector_section(ui, "Debug", Some("inactive"), None, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(4.0);
+            let _ = Button::new("Start").show(ui);
+            let _ = Button::new("Continue").enabled(false).show(ui);
+            let _ = Button::new("Pause").enabled(false).show(ui);
+            let _ = Button::new("Step over").enabled(false).show(ui);
+        });
+        section_block_gap(ui);
+        property_row(ui, "Current line", "\u{2014}");
+        property_row(ui, "Exception policy", "uncaught exceptions");
+        egui::ComboBox::from_id_salt("k3-review.exception-policy")
+            .selected_text(policy.as_str())
+            .width(ui.available_width().max(1.0))
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    policy,
+                    "uncaught exceptions".to_owned(),
+                    "uncaught exceptions",
+                );
+            });
+        subsection_header(ui, "WATCHES");
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(watch)
+                    .hint_text("expression")
+                    .desired_width((ui.available_width() - 48.0).max(60.0)),
+            );
+            let _ = Button::new("Add").show(ui);
+        });
+    });
+
+    code_inspector_section(ui, "File operations", None, None, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::Vec2::splat(6.0);
+            let _ = Button::new("New source\u{2026}").show(ui);
+            let _ = Button::new("Rename\u{2026}").show(ui);
+            let _ = Button::new("Move\u{2026}").show(ui);
+            let _ = Button::new("Delete\u{2026}").show(ui);
+        });
+    });
+}
+
