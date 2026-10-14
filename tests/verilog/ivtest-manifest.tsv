@@ -87,8 +87,8 @@ array_lval_select4b	vlg	ce	L4	refused:force	Parse error: Verilog-AMS digital con
 array_lval_select5	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 array_lval_select6	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
 array_packed_2d	vlg	gold	L1	fail	compile error: Parse error: Expected declared name, found LBracket
-array_select	vlg	passed	L1	fail	run-time error: process initial #2 could not run: numeric conversion at value 4 failed: real array index is unknown, unrepresentable or outside the declared bounds
-array_select_a	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+array_select	vlg	passed	L1	pass	PASSED
+array_select_a	vlg	passed	L5	pass	PASSED
 array_word_check	vlg	gold	L5	fail	compile error: Semantic error: Invalid expression: argument 2 of `$dumpvars` names a module instance, block or signal, not an expression
 array_word_width	vlg	gold	L1	pass	matches the gold file
 array_word_width2	vlg	passed	L1	pass	PASSED
@@ -233,7 +233,7 @@ br_gh199a	vlg	passed	L1	pass	PASSED
 br_gh199b	vlg	passed	L1	pass	PASSED
 br_gh19a	vlg	passed	L1	pass	PASSED
 br_gh19b	vlg	passed	L1	pass	PASSED
-br_gh209	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+br_gh209	vlg	gold	L5	pass	work/br_gh209.dat matches the gold file
 br_gh22	vlg	passed	L1	pass	PASSED
 br_gh244a	vlg	passed	L1	pass	PASSED
 br_gh244b	vlg	passed	L1	pass	PASSED
@@ -472,13 +472,13 @@ event_list	vlg	passed	L3	pass	PASSED
 event_list2	vlg	passed	L1	pass	PASSED
 event_list3	vlg	gold	L1	pass	matches the gold file
 extend	vlg	passed	L1	pass	PASSED
-fdisplay1	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fwrite`) is not supported yet
-fdisplay2	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
-fdisplay_fail_fd	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fdisplay`) is not supported yet
-fdisplay_fail_mcd	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fdisplay`) is not supported yet
+fdisplay1	vlg	gold	L5	pass	matches the gold file
+fdisplay2	vlg	gold	L5	pass	work/fdisplay2.out matches the gold file
+fdisplay_fail_fd	vlg	gold	L5	pass	matches the gold file
+fdisplay_fail_mcd	vlg	gold	L5	pass	matches the gold file
 fifo	vlg	passed	L5	pass	PASSED
-fopen1	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
-fopen2	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fopen1	vlg	passed	L5	pass	PASSED
+fopen2	vlg	passed	L5	pass	PASSED
 for3.16A	vlg	passed	L1	pass	PASSED
 force1	vlg	passed	L4	fail	compile error: Parse error: Expected LParen, found LBracket
 force2	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
@@ -495,10 +495,10 @@ fork3.19B	vlg	passed	L3	pass	PASSED
 format	vlg	gold	L1	fail	differs from the gold file at line 5 (5 lines against 5)
 fr47	vlg	passed	L3	pass	PASSED
 fread	vlg	passed	-	excluded:systemverilog:string	
-fscanf_u	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
-fscanf_u_warn	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
-fscanf_z	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
-fscanf_z_warn	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fscanf_u	vlg	passed	L5	pass	PASSED
+fscanf_u_warn	vlg	gold	L5	pass	matches the gold file
+fscanf_z	vlg	passed	L5	pass	PASSED
+fscanf_z_warn	vlg	gold	L5	pass	matches the gold file
 function1	vlg	gold	L3	pass	matches the gold file
 function2	vlg	passed	L3	pass	PASSED
 function3	vlg	passed	L3	pass	PASSED
@@ -596,7 +596,7 @@ mangle	vlg	passed	L1	refused:escaped-ground-or-comma-bearing	Parse error: Unsupp
 mangle_1	vlg	passed	L4	refused:module-item	Parse error: Unsupported module item: m
 many_drivers	vlg	passed	L1	fail	no PASSED line (15 output lines)
 mcl2	vlg	gold	L1	pass	matches the gold file
-mem1	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
+mem1	vlg	gold	L5	pass	matches the gold file
 mem2port	vlg	passed	L1	pass	PASSED
 memassign	vlg	passed	L1	pass	PASSED
 memidx	vlg	passed	L1	pass	PASSED
@@ -740,7 +740,7 @@ pr1026	vlg	gold	L1	racy	passes in reverse order only; differs from the gold file
 pr1029	vlg	passed	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.eric` is not a continuous net, branch, parameter or analog function
 pr1032	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 pr1033	vlg	gold	L1	pass	matches the gold file
-pr1065	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1065	vlg	gold	L5	pass	matches the gold file
 pr1072	vlg	passed	L1	pass	PASSED
 pr1077	vlg	gold	-	excluded:flag-g2	
 pr1087	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `INST_COUNTER`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this comp...
@@ -824,7 +824,7 @@ pr1675789b	vlg	passed	L4	pass	PASSED
 pr1676071	vlg	passed	-	excluded:systemverilog:bit	
 pr1676836	vlg	passed	L1	pass	PASSED
 pr1682887	vlg	passed	L3	pass	PASSED
-pr1687193	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1687193	vlg	gold	L5	pass	matches the gold file
 pr1688717	vlg	gold	L4	pass	matches the gold file
 pr1690058	vlg	passed	L1	pass	PASSED
 pr1691599b	vlg	passed	L1	pass	PASSED
@@ -901,7 +901,7 @@ pr1799904	vlg	gold	L1	pass	matches the gold file
 pr1804877	vlg	gold	L1	pass	matches the gold file
 pr1805837	vlg	gold	L1	pass	matches the gold file
 pr1812297	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `ttop` is not declared in this module or its generated ancestors or enclosing instances
-pr1819452	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1819452	vlg	gold	L5	pass	matches the gold file
 pr1820472	vlg	gold	L1	pass	matches the gold file
 pr1822658	vlg	passed	L1	pass	PASSED
 pr1823732	vlg	gold	L1	pass	matches the gold file
@@ -934,7 +934,7 @@ pr1869781	vlg	passed	L1	pass	PASSED
 pr1873146	vlg	passed	L6	fail	compile error: Parse error: Expected LParen, found LBracket
 pr1875866	vlg	passed	L1	pass	PASSED
 pr1875866b	vlg	passed	L1	pass	PASSED
-pr1876798	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1876798	vlg	gold	L5	pass	matches the gold file
 pr1877740	vlg	passed	L1	pass	PASSED
 pr1877743	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 pr1878909	vlg	passed	L4	refused:module-instance	Parse error: Unsupported module instance `test_mod0`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compile...
@@ -986,8 +986,8 @@ pr1960619	vlg	gold	-	excluded:flag-gno-io-range-error
 pr1960625	vlg	passed	L1	pass	PASSED
 pr1960633	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr1963240	vlg	gold	L1	pass	matches the gold file
-pr1963960	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
-pr1963962	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$dumpfile`) is not supported yet
+pr1963960	vlg	passed	L5	pass	PASSED
+pr1963962	vlg	gold	L5	pass	matches the gold file
 pr1971662a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
 pr1971662b	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
 pr1978358	vlg	passed	-	excluded:systemverilog:var	
@@ -999,7 +999,7 @@ pr1985582	vlg	gold	L3	pass	matches the gold file
 pr1988302	vlg	passed	L1	pass	PASSED
 pr1988302b	vlg	ce	L1	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: generated scope `V` with index None is missing or not source-visible
 pr1988310	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: generated scope `foo_task` with index None is missing or not source-visible
-pr1990029	vlg	passed	L5	refused:hdl.system_task.file_io	testbench gap: no defines (__ICARUS__); HDL file and waveform I/O (`$fopen`) is not supported yet
+pr1990029	vlg	passed	L5	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr1990164	vlg	passed	L1	pass	PASSED
 pr1990269	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr1992244	vlg	passed	L1	pass	PASSED
@@ -1014,7 +1014,7 @@ pr2018235a	vlg	passed	L1	pass	PASSED
 pr2018235b	vlg	passed	L1	pass	PASSED
 pr2018305	vlg	passed	L1	pass	PASSED
 pr2019553	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
-pr2029336	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr2029336	vlg	gold	L5	pass	work/pr2029336.out matches the gold file
 pr2030767	vlg	passed	L1	pass	PASSED
 pr2036953	vlg	passed	L1	pass	PASSED
 pr2038048	vlg	passed	L1	pass	PASSED
@@ -1130,7 +1130,7 @@ pr2597278b	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: 
 pr2605006	vlg	passed	L1	pass	PASSED
 pr2673846	vlg	passed	L1	pass	PASSED
 pr2688910	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `.passed` is not a continuous net, branch, parameter or analog function
-pr2709097	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+pr2709097	vlg	passed	L5	pass	PASSED
 pr2715547	vlg	passed	L1	pass	PASSED
 pr2715558	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 pr2715558b	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
@@ -1144,7 +1144,7 @@ pr2725700a	vlg	passed	L7	refused:bufif0	Parse error: Unsupported module item: bu
 pr2725700b	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `bufs`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler ela...
 pr2725700c	vlg	passed	L7	refused:module-instance	Parse error: Unsupported module instance `bufs`: an instance array range; IEEE 1364-2005 section 12.1.2 declares one instance per element, and this compiler ela...
 pr2728032	vlg	passed	L6	refused:delay-control	Parse error: Unsupported delay control: separate rise, fall and turn-off delays (IEEE 1364-2005 section 7.14); write a single delay expression instead
-pr2728547	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sscanf`) is not supported yet
+pr2728547	vlg	passed	L5	pass	PASSED
 pr2728812a	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
 pr2728812b	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
 pr2728812c	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Hash
@@ -1155,7 +1155,7 @@ pr2785294	vlg	gold	L1	fail	differs from the gold file at line 2 (25 lines agains
 pr2788686	vlg	passed	L3	pass	PASSED
 pr2790236	vlg	passed	L1	pass	PASSED
 pr2792883	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: a parameter declaration cannot reference outside its module (VAMS-2023 6.7.1)
-pr2792897	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+pr2792897	vlg	passed	L5	pass	PASSED
 pr2794144	vlg	ce	L1	fail	compiled without error; ran to quiescence
 pr2800985a	vlg	passed	-	excluded:nonstandard-systf:$fputc	
 pr2801134	vlg	passed	L1	pass	PASSED
@@ -1177,8 +1177,8 @@ pr2835632a	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 pr2835632b	vlg	passed	L4	pass	PASSED
 pr2837451	vlg	passed	L1	pass	PASSED
 pr2842185	vlg	passed	L3	pass	PASSED
-pr2842621	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fstrobe`) is not supported yet
-pr2842621_std	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fstrobe`) is not supported yet
+pr2842621	vlg	gold	L5	pass	matches the gold file
+pr2842621_std	vlg	passed	L5	pass	PASSED
 pr2848986	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: `evt` is a named event, which has no value to read; wait for it with `@evt` (IEEE 1364-2005 section 9.7.3)
 pr2849783	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
 pr2865563	vlg	passed	L1	pass	PASSED
@@ -1210,7 +1210,7 @@ pr2941939	vlg	passed	L6	refused:supply1	Parse error: Verilog-AMS digital constru
 pr2943394	vlg	passed	L4	refused:release	Parse error: Verilog-AMS digital construct not yet supported: `release`
 pr2951657	vlg	passed	L1	pass	PASSED
 pr2969724	vlg	passed	L1	pass	PASSED
-pr2971207	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$swrite`) is not supported yet
+pr2971207	vlg	passed	L5	pass	PASSED
 pr2972866	vlg	gold	-	excluded:systemverilog:+=	
 pr2973532	vlg	passed	L1	pass	PASSED
 pr2974051	vlg	passed	L1	pass	PASSED
@@ -1223,7 +1223,7 @@ pr2986497	vlg	co	-	excluded:systemverilog:var
 pr2986528	vlg	passed	L1	racy	passes in source order only; no PASSED line (2 output lines)
 pr2991457	vlg	passed	L1	pass	PASSED
 pr2991457b	vlg	passed	L1	pass	PASSED
-pr2994193	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$dumpfile`) is not supported yet
+pr2994193	vlg	passed	L5	pass	PASSED
 pr2998515	vlg	passed	L1	pass	PASSED
 pr3011327	vlg	passed	L1	pass	PASSED
 pr3012758	vlg	passed	L1	fail	compile error: I/O error: Preprocessor error: line 3: Invalid include syntax: `TESTFILE
@@ -1250,10 +1250,10 @@ pr307	vlg	passed	L1	pass	PASSED
 pr3077640	vlg	passed	L1	pass	PASSED
 pr3078759	vlg	co	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 pr307a	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `r` is not declared in this module or its generated ancestors or enclosing instances
-pr3098439	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
-pr3098439a	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
-pr3098439b	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
-pr3103880	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+pr3098439	vlg	passed	L5	pass	PASSED
+pr3098439a	vlg	passed	L5	pass	PASSED
+pr3098439b	vlg	passed	L5	pass	PASSED
+pr3103880	vlg	passed	L5	pass	PASSED
 pr3104254	vlg	passed	L1	pass	PASSED
 pr3112073a	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Identifier
 pr312	vlg	passed	L1	pass	PASSED
@@ -1264,7 +1264,7 @@ pr3194155	vlg	gold	L7	fail	compile error: Parse error: Expected LParen, found In
 pr3197861	vlg	passed	-	excluded:systemverilog:var	
 pr3197917	vlg	passed	L4	fail	compile error: Parse error: Expected RParen, found LBracket
 pr3270320	vlg	ce	L3	pass	language error: Semantic error: Undeclared symbol: 'missing'
-pr3284821	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+pr3284821	vlg	passed	L5	pass	PASSED
 pr3292735	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found LParen
 pr3296466a	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
 pr3296466b	vlg	passed	L7	refused:tran	Parse error: Unsupported module item: tran
@@ -1282,7 +1282,7 @@ pr3441576	vlg	gold	L1	refused:feature	Semantic error: Unsupported feature: `@*` 
 pr3445452	vlg	passed	L3	pass	PASSED
 pr3452808	vlg	passed	L6	refused:not	Parse error: Unsupported `not` gate: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the resolution cann...
 pr3465541	vlg	passed	L6	refused:not	Parse error: Unsupported `not` gate: a drive-strength specification; this compiler resolves nets at one strength, so a strength that changes the resolution cann...
-pr3477107	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$swrite`) is not supported yet
+pr3477107	vlg	passed	L5	pass	PASSED
 pr3499807	vlg	gold	L6	refused:supply0	Parse error: Verilog-AMS digital construct not yet supported: `supply0`
 pr3522653	vlg	gold	L1	pass	matches the gold file
 pr3527022	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Hash
@@ -1309,7 +1309,7 @@ pr508	vlg	passed	L3	pass	PASSED
 pr509	vlg	passed	L1	pass	PASSED
 pr509b	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 pr511	vlg	passed	L3	pass	PASSED
-pr513	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+pr513	vlg	passed	L5	pass	PASSED
 pr522	vlg	gold	L3	pass	matches the gold file
 pr524	vlg	gold	L3	pass	matches the gold file
 pr527	vlg	gold	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
@@ -1350,11 +1350,11 @@ pr632	vlg	gold	L1	pass	matches the gold file
 pr673	vlg	gold	L1	pass	matches the gold file
 pr675	vlg	passed	L1	pass	PASSED
 pr678	vlg	passed	L1	pass	PASSED
-pr690	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
+pr690	vlg	passed	L5	pass	PASSED
 pr693	vlg	gold	L1	pass	matches the gold file
 pr699	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
 pr699b	vlg	passed	L4	refused:force	Parse error: Verilog-AMS digital construct not yet supported: `force`
-pr704	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
+pr704	vlg	passed	L5	racy	passes in source order only; no PASSED line (2 output lines)
 pr707	vlg	passed	L7	refused:primitive	Parse error: Verilog-AMS digital construct not yet supported: `primitive`
 pr708	vlg	passed	L1	refused:$realtobits	Semantic error: Unsupported feature: a real value has no four-state form here: Verilog-AMS LRM 2.4 section 3.7 converts one to bits with the explicit `$realtobi...
 pr710	vlg	passed	L3	pass	PASSED
@@ -1410,7 +1410,7 @@ ptest011	vlg	passed	L1	fail	compile error: Semantic error: Invalid expression: p
 pullupdown	vlg	passed	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 pullupdown2	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
 pullupdown3	vlg	passed	L7	refused:pullup	Parse error: Unsupported module item: pullup
-pv_undef_sig_sel	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+pv_undef_sig_sel	vlg	passed	L5	pass	PASSED
 pv_wr_vec4	vlg	passed	L4	pass	PASSED
 pv_wr_vec4_nb	vlg	passed	L4	pass	PASSED
 pv_wr_vec4_nb_ec	vlg	passed	L4	deviation	IEEE 1364-2005 §11.6.4: an event-controlled nonblocking update goes to the nonblocking region; Icarus applies it when `-> e` fires, and each check after a trigger expects that
@@ -1426,15 +1426,15 @@ queue	vlg	passed	-	excluded:nonstandard-systf:$q_add
 queue_stat	vlg	gold	-	excluded:nonstandard-systf:$q_add	
 ram16x1	vlg	passed	L1	pass	PASSED
 random	vlg	gold	-	excluded:systemverilog:++	
-readmem-error	vlg	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
-readmemb1	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
-readmemb2	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
-readmemb3	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemb`) is not supported yet
-readmemh1	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
-readmemh1a	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
-readmemh2	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
-readmemh3	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
-readmemh4	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$readmemh`) is not supported yet
+readmem-error	vlg	gold	L5	pass	matches the gold file
+readmemb1	vlg	passed	L5	pass	PASSED
+readmemb2	vlg	passed	L5	pass	PASSED
+readmemb3	vlg	passed	L5	pass	PASSED
+readmemh1	vlg	passed	L5	pass	PASSED
+readmemh1a	vlg	passed	L5	pass	PASSED
+readmemh2	vlg	passed	L5	pass	PASSED
+readmemh3	vlg	passed	L5	pass	PASSED
+readmemh4	vlg	passed	L5	pass	PASSED
 readmemh5	vlg	ce	L5	refused:feature	Semantic error: Unsupported feature: slice of unpacked array `array` requires whole-array value lowering
 real	vlg	passed	L3	pass	PASSED
 real10	vlg	passed	L1	pass	PASSED
@@ -1480,10 +1480,10 @@ rptconcat	vlg	passed	L1	pass	PASSED
 rtran	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 rtranif0	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
 rtranif1	vlg	gold	L7	fail	compile error: Parse error: Expected assignment target, found LParen
-scanf	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sscanf`) is not supported yet
-scanf2	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sscanf`) is not supported yet
-scanf3	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sscanf`) is not supported yet
-scanf4	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sscanf`) is not supported yet
+scanf	vlg	passed	L5	pass	PASSED
+scanf2	vlg	passed	L5	pass	PASSED
+scanf3	vlg	passed	L5	pass	PASSED
+scanf4	vlg	passed	L5	pass	PASSED
 sched1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay on a continuous assignment has no lowered form yet: it is a transport delay on the driver, which needs the kernel's...
 sched2	vlg	passed	L1	pass	PASSED
 schedule	vlg	passed	L3	pass	PASSED
@@ -1558,11 +1558,11 @@ signed6	vlg	passed	L1	pass	PASSED
 signed7	vlg	passed	L1	pass	PASSED
 signed8	vlg	passed	L1	pass	PASSED
 signed9	vlg	passed	L1	pass	PASSED
-signed_a	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+signed_a	vlg	passed	L5	deviation	IEEE 1364-2005 §5.2.2: an address outside the memory's bounds reads x, so array[b] with b = 2**120 + 7 is 4'bxxxx; Icarus truncates the address to 32 bits and reads array[7]
 signed_equality	vlg	passed	L1	pass	PASSED
 signed_net_display	vlg	passed	L5	refused:for	Parse error: Unsupported module item: for
 signed_part	vlg	passed	L4	pass	PASSED
-signed_pv	vlg	passed	L5	refused:hdl.system_task.file_io	testbench gap: no defines (__ICARUS__); HDL file and waveform I/O (`$sformat`) is not supported yet
+signed_pv	vlg	passed	L5	pass	testbench gap: no defines (__ICARUS__); PASSED
 sp2	vlg	gold	-	excluded:systemverilog-systf:$bits	
 specify1	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
 specify2	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
@@ -1571,8 +1571,8 @@ specify4	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supporte
 specify5	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 specify_01	vlg	passed	L6	refused:hdl.option.specify	testbench gap: no root selection (-s test); `specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 sqrt32	vlg	passed	-	excluded:systemverilog:bit	
-sscanf_u	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
-sscanf_z	vlg	passed	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$sformat`) is not supported yet
+sscanf_u	vlg	passed	L5	pass	PASSED
+sscanf_z	vlg	passed	L5	pass	PASSED
 stask_parm1	vlg	passed	L1	pass	PASSED
 stask_parm2	vlg	gold	L1	pass	matches the gold file
 stask_sens_null_arg	vlg	passed	L1	pass	PASSED
@@ -1943,15 +1943,15 @@ dffsynth6	vvp	passed	-	excluded:flag-S
 dffsynth7	vvp	passed	-	excluded:flag-S	
 dffsynth8	vvp	-	-	excluded:type-NI	
 dffsynth9	vvp	passed	-	excluded:flag-S	
-dumpfile	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$dumpvars`) is not supported yet
+dumpfile	vvp	gold	L5	pass	matches the gold file
 early_sig_elab1	vvp	passed	-	excluded:systemverilog-systf:$bits	
 early_sig_elab2	vvp	passed	-	excluded:systemverilog-systf:$bits	
 early_sig_elab3	vvp	ce	-	excluded:systemverilog-systf:$bits	
 eofmt_percent	vvp	gold	L1	pass	matches the gold file
 fdisplay3	vvp	-	-	excluded:type-EF	
 final3	vvp	passed	-	excluded:flag-g2009	
-fmonitor1	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
-fmonitor2	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fopen`) is not supported yet
+fmonitor1	vvp	gold	L5	pass	matches the gold file
+fmonitor2	vvp	gold	L5	pass	matches the gold file
 fread-error	vvp	-	-	excluded:type-EF	
 line_directive	vvp	gold	-	excluded:flag-g2009	
 localparam_type	vvp	gold	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
@@ -2115,7 +2115,7 @@ vams_abs1	vvp	passed	-	excluded:flag-gverilog-ams
 vams_abs2	vvp	passed	-	excluded:flag-gverilog-ams	
 vams_abs3	vvp	passed	-	excluded:flag-gverilog-ams	
 vardly_undefined_vec	vvp	passed	-	excluded:systemverilog:var	
-vvp_quiet_mode	vvp	gold	L5	refused:hdl.system_task.file_io	HDL file and waveform I/O (`$fdisplay`) is not supported yet
+vvp_quiet_mode	vvp	gold	-	excluded:vvp-flag-ql-	
 warn_opt_sys_tf	vvp	-	-	excluded:type-EF	
 wreal	vvp	passed	-	excluded:flag-gverilog-ams	
 writemem-invalid	vvp	-	-	excluded:type-EF	
