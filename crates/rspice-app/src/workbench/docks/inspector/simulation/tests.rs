@@ -165,6 +165,199 @@ fn verify_corners() -> RSpiceApp {
     verify_app(VerificationPage::Corners)
 }
 
+fn inspector_context() -> egui::Context {
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    crate::ui::Theme::default().apply(&ctx);
+    ctx
+}
+
+/// One frame of the inspector dock at its default width, fed `events`: every
+/// run of text it painted, with where it landed.
+fn simulate_pass(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            egui::Shape::Text(text) if !text.galley.text().trim().is_empty() => out.push((
+                text.galley.text().to_owned(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+            )),
+            _ => {}
+        }
+    }
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(INSPECTOR_DEFAULT_WIDTH, 800.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ui| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| super::super::show(ui, app));
+        },
+    );
+    let mut painted = Vec::new();
+    for shape in &output.shapes {
+        walk(&shape.shape, &mut painted);
+    }
+    painted
+}
+
+fn simulate_text(app: &mut RSpiceApp) -> Vec<String> {
+    let ctx = inspector_context();
+    simulate_pass(&ctx, app, Vec::new());
+    simulate_pass(&ctx, app, Vec::new())
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect()
+}
+
+/// What the old inspector stated about an analysis, none of which is the
+/// last run: the setup is the Analyses page's, and the identity is internal.
+const SETUP_ROWS: [&str; 10] = [
+    "Name",
+    "Type",
+    "Instance",
+    "Configuration",
+    "Run set",
+    "Revision",
+    "Prerequisites",
+    "Configuration valid",
+    "Execution context",
+    "Engine status",
+];
+
+fn assert_no_setup_rows(painted: &[String]) {
+    for row in SETUP_ROWS {
+        assert!(
+            !painted.iter().any(|text| text == row),
+            "the Simulate inspector still states {row:?}: {painted:?}"
+        );
+    }
+}
+
+#[test]
+fn a_completed_last_run_states_its_status_runtime_and_results_link() {
+    let mut app = simulate_last_run_ok();
+    let painted = simulate_text(&mut app);
+
+    for expected in ["Status", "Complete", "Runtime", "1.84 s", "Open results"] {
+        assert!(
+            painted.iter().any(|text| text == expected),
+            "{expected:?} is missing: {painted:?}"
+        );
+    }
+    assert_no_setup_rows(&painted);
+}
+
+#[test]
+fn a_failed_last_run_states_the_failure_and_the_engine_message() {
+    let mut app = simulate_last_run_failed();
+    let painted = simulate_text(&mut app);
+
+    for expected in [
+        "Failed",
+        "Timestep too small at t = 1.25 µs",
+        "Runtime",
+        "420 ms",
+    ] {
+        assert!(
+            painted.iter().any(|text| text == expected),
+            "{expected:?} is missing: {painted:?}"
+        );
+    }
+    assert!(!painted.iter().any(|text| text == "Complete"));
+    assert_no_setup_rows(&painted);
+}
+
+#[test]
+fn an_analysis_never_run_says_so_and_offers_no_results() {
+    let mut app = simulate_app();
+    let painted = simulate_text(&mut app);
+
+    assert!(
+        painted.iter().any(|text| text == "Not run yet."),
+        "{painted:?}"
+    );
+    for absent in ["Status", "Runtime", "Open results"] {
+        assert!(
+            !painted.iter().any(|text| text == absent),
+            "{absent:?} is stated for a run that never happened: {painted:?}"
+        );
+    }
+    assert_no_setup_rows(&painted);
+}
+
+#[test]
+fn a_run_of_another_analysis_is_not_this_ones_last_run() {
+    let mut app = simulate_app();
+    let other = AnalysisInstanceId::new();
+    assert_ne!(other, first_instance(&app));
+    retain_run(&mut app, other, None, 1.84);
+    let painted = simulate_text(&mut app);
+
+    assert!(
+        painted.iter().any(|text| text == "Not run yet."),
+        "{painted:?}"
+    );
+}
+
+#[test]
+fn open_results_selects_the_last_run_in_the_results_workspace() {
+    let mut app = simulate_last_run_ok();
+    let mut older = SimulationRun::new(11);
+    older
+        .restore_lifecycle(SimulationRunLifecycle::Completed, 0.5)
+        .expect("a finite elapsed time");
+    app.state.simulation.retained.runs.push(older);
+    app.state.simulation.view.active_run_idx = Some(1);
+
+    let ctx = inspector_context();
+    simulate_pass(&ctx, &mut app, Vec::new());
+    let link = simulate_pass(&ctx, &mut app, Vec::new())
+        .into_iter()
+        .find(|(text, _)| text == "Open results")
+        .map(|(_, rect)| rect.center())
+        .expect("the results link is painted");
+    simulate_pass(
+        &ctx,
+        &mut app,
+        vec![
+            egui::Event::PointerMoved(link),
+            egui::Event::PointerButton {
+                pos: link,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ],
+    );
+    simulate_pass(
+        &ctx,
+        &mut app,
+        vec![egui::Event::PointerButton {
+            pos: link,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+
+    assert_eq!(app.state.workbench.workspace, Workspace::Results);
+    assert_eq!(
+        app.state.simulation.active_run().map(|run| run.id),
+        Some(12)
+    );
+}
+
 /// One review panel: its file name and the app state it renders.
 type ReviewPanel = (&'static str, fn() -> RSpiceApp);
 
