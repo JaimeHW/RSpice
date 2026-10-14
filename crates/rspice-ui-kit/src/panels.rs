@@ -1044,6 +1044,13 @@ impl RowSlot {
     fn field(&self) -> Rect {
         body::row_field(self.value)
     }
+
+    /// Put the cursor back under the row once a widget has been placed in it.
+    /// Placing a field leaves the cursor under the field, a pixel above the
+    /// row's bottom, so the next row would start a pixel inside this one.
+    fn close(&self, ui: &mut Ui) {
+        let _ = ui.advance_cursor_after_rect(self.rect);
+    }
 }
 
 /// A row's column widths before it is allocated, so a row that measures its
@@ -1109,9 +1116,28 @@ fn announce_row(ui: &Ui, response: &Response, label: &str, value: &str) {
 
 /// The margin a single-line field takes so its text sits centred in `field`.
 fn field_margin(ui: &Ui, field: Rect, horizontal: i8) -> egui::Margin {
-    let text = ui.text_style_height(&egui::TextStyle::Monospace);
-    let vertical = ((field.height() - text) * 0.5).floor().clamp(0.0, 12.0) as i8;
-    egui::Margin::symmetric(horizontal, vertical)
+    hinted_field_margin(ui, field, horizontal, false)
+}
+
+/// [`field_margin`] for a field that may be showing its hint. egui sets a hint
+/// in the body face, which is taller than the field's mono face, so while the
+/// hint shows the margin is measured against the hint. Either way the margins
+/// fill `field` exactly, the odd pixel below, so an empty field and a filled
+/// one are one height.
+fn hinted_field_margin(ui: &Ui, field: Rect, horizontal: i8, hint_shown: bool) -> egui::Margin {
+    let mut text = ui.text_style_height(&egui::TextStyle::Monospace);
+    if hint_shown {
+        let hint_font = egui::FontSelection::Default.resolve(ui.style());
+        text = text.max(ui.fonts_mut(|fonts| fonts.row_height(&hint_font)));
+    }
+    let room = (field.height() - text).clamp(0.0, 24.0);
+    let top = (room * 0.5).floor();
+    egui::Margin {
+        left: horizontal,
+        right: horizontal,
+        top: top as i8,
+        bottom: (room - top).floor() as i8,
+    }
 }
 
 /// Property row whose right-hand column is a sentence or a list rather than a
@@ -1203,11 +1229,14 @@ pub fn property_row_input_with_hint(
     hint: &str,
     invalid: bool,
 ) -> Response {
-    property_row_text_edit(
+    let hint_shown = hint_shows(value, hint);
+    property_row_text_edit_in(
         ui,
         label,
-        egui::TextEdit::singleline(value).hint_text(hint),
+        hinted_edit(value, hint),
         invalid,
+        None,
+        hint_shown,
     )
 }
 
@@ -1220,13 +1249,32 @@ pub fn property_row_input_with_hint_labelled(
     invalid: bool,
     label_width: f32,
 ) -> Response {
+    let hint_shown = hint_shows(value, hint);
     property_row_text_edit_in(
         ui,
         label,
-        egui::TextEdit::singleline(value).hint_text(hint),
+        hinted_edit(value, hint),
         invalid,
         Some(label_width),
+        hint_shown,
     )
+}
+
+/// Whether a field holding `value` shows `hint` in its place.
+pub(crate) fn hint_shows(value: &str, hint: &str) -> bool {
+    value.is_empty() && !hint.is_empty()
+}
+
+/// A single-line editor over `value`, with `hint` only when there is one: egui
+/// lays even an empty hint out in place of empty text, in a taller face than
+/// the field's, so an empty field given `""` grew a pixel past its row.
+pub(crate) fn hinted_edit<'t>(value: &'t mut String, hint: &str) -> egui::TextEdit<'t> {
+    let edit = egui::TextEdit::singleline(value);
+    if hint.is_empty() {
+        edit
+    } else {
+        edit.hint_text(hint.to_owned())
+    }
 }
 
 /// Editable property row with caller-owned identity and single-line editor options.
@@ -1236,7 +1284,7 @@ pub fn property_row_text_edit(
     edit: egui::TextEdit<'_>,
     invalid: bool,
 ) -> Response {
-    property_row_text_edit_in(ui, label, edit, invalid, None)
+    property_row_text_edit_in(ui, label, edit, invalid, None, false)
 }
 
 fn property_row_text_edit_in(
@@ -1245,6 +1293,7 @@ fn property_row_text_edit_in(
     edit: egui::TextEdit<'_>,
     invalid: bool,
     label_width: Option<f32>,
+    hint_shown: bool,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
     let (slot, _) = row_slot(ui, label_width, Sense::hover());
@@ -1252,12 +1301,13 @@ fn property_row_text_edit_in(
     let value_rect = slot.field();
     let mut edit = edit
         .font(egui::TextStyle::Monospace)
-        .margin(field_margin(ui, value_rect, 8))
+        .margin(hinted_field_margin(ui, value_rect, 8, hint_shown))
         .desired_width(value_rect.width());
     if invalid {
         edit = edit.text_color(t.color.err);
     }
     let response = ui.put(value_rect, edit);
+    slot.close(ui);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label);
         node.set_description(if invalid {
@@ -1372,6 +1422,7 @@ pub fn property_row_input_action(
             },
         )
         .inner;
+    slot.close(ui);
     let edit_response = match elided {
         Some(full) => edit_response.on_hover_text(full),
         None => edit_response,
@@ -1531,6 +1582,7 @@ fn property_row_combo_in(
             });
         },
     );
+    slot.close(ui);
     *selected != before
 }
 

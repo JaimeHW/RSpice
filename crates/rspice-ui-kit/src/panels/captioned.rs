@@ -88,21 +88,22 @@ pub fn property_row_input_captioned(
         .as_ref()
         .map_or(0.0, |galley| galley.size().x + UNIT_GAP);
     let trailing = (FIELD_INSET + unit_room).min(f32::from(i8::MAX));
+    let margin = super::hinted_field_margin(ui, value_rect, 0, super::hint_shows(value, hint));
+    // Where a typed value's text sits, hint or not, so the unit holds still.
     let field_inset_y = super::field_margin(ui, value_rect, 0).top;
-    let mut edit = egui::TextEdit::singleline(value)
-        .hint_text(hint)
+    let mut edit = super::hinted_edit(value, hint)
         .font(egui::TextStyle::Monospace)
         .margin(egui::Margin {
             left: FIELD_INSET as i8,
             right: trailing as i8,
-            top: field_inset_y,
-            bottom: field_inset_y,
+            ..margin
         })
         .desired_width(value_rect.width());
     if invalid {
         edit = edit.text_color(t.color.err);
     }
     let response = ui.put(value_rect, edit);
+    slot.close(ui);
     if let Some(galley) = unit {
         // On the value's baseline. The field sets its text at its top inset,
         // not at its centre, and the two faces sit differently in their rows.
