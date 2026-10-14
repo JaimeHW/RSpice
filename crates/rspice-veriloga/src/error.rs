@@ -343,6 +343,17 @@ pub enum SemanticErrorKind {
         variable: &'static str,
     },
 
+    /// A name of the list of ports that no `input`, `output` or `inout`
+    /// declaration gives a direction, completed by a variable declaration.
+    ///
+    /// IEEE 1364-2005 section 12.3.3 declares every port of the list of ports
+    /// with a direction; a variable declaration alone does not make one.
+    #[error(
+        "Port '{name}' has no direction declaration; IEEE 1364-2005 section 12.3.3 declares \
+         each port as input, output or inout"
+    )]
+    PortWithoutDirection { name: smol_str::SmolStr },
+
     #[error("Invalid contribution: cannot contribute to {0}")]
     InvalidContribution(String),
 
@@ -418,6 +429,7 @@ impl SemanticErrorKind {
             Self::PortNoDiscipline(_) => "VA-SEM-PORT-WITHOUT-DISCIPLINE",
             Self::UnpackedPortArray { .. } => "VA-SEM-UNPACKED-PORT-ARRAY",
             Self::VariableInputPort { .. } => "VA-SEM-VARIABLE-INPUT-PORT",
+            Self::PortWithoutDirection { .. } => "VA-SEM-PORT-WITHOUT-DIRECTION",
             Self::InvalidContribution(_) => "VA-SEM-INVALID-CONTRIBUTION",
             Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
             Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",

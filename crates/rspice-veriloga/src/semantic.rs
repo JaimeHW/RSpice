@@ -2052,11 +2052,12 @@ impl SemanticAnalyzer {
                     }
                     if !matches!(port_info.get(&item.name), Some((PortDirection::Output, _))) {
                         return Err(SemanticError::new(
-                            SemanticErrorKind::InvalidContribution(format!(
-                                "`{}` is an integer variable port; only output ports may be variables",
-                                item.name
-                            )), item.span
-                        ).into());
+                            SemanticErrorKind::PortWithoutDirection {
+                                name: item.name.clone(),
+                            },
+                            item.span,
+                        )
+                        .into());
                     }
                     if !item.dimensions.is_empty() {
                         return Err(SemanticError::new(

@@ -312,6 +312,31 @@ fn a_root_input_port_may_not_be_a_variable() {
         .expect("an output port may be a reg");
 }
 
+/// IEEE 1364-2005 section 12.3.3 declares every port of the list of ports
+/// `input`, `output` or `inout`. A variable declaration does not give a port
+/// a direction: an RSpice-authored probe has Icarus `-g2005` reject
+/// `module m(q); integer q;` with "Port q (1) of module m has no direction
+/// declaration".
+#[test]
+fn a_port_an_integer_completes_still_needs_a_direction() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            "module m(q); integer q; initial q = 5; endmodule\n",
+            Some("m"),
+        )
+        .expect_err("a port with no direction");
+    let message = error.to_string();
+    assert!(
+        message.contains("Port 'q' has no direction declaration") && message.contains("12.3.3"),
+        "{message}"
+    );
+    assert_eq!(
+        error.diagnostic_code(),
+        "VA-SEM-PORT-WITHOUT-DIRECTION",
+        "{message}"
+    );
+}
+
 #[test]
 fn a_digital_name_may_not_collide_with_an_analog_one() {
     let message = analyze_error(&digital_module("    reg gain;"));
