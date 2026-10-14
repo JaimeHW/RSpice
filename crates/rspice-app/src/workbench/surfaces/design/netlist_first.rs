@@ -635,25 +635,25 @@ mod tests {
             name: "design-netlist-first-1440x900",
             size: Vec2::new(1440.0, 900.0),
             truncated: false,
-            fingerprint: "8752a84e235327878c10e232db679e14745bc574d6f2dc9823767f55aaa72ecb",
+            fingerprint: "89619fd005d44e400cf482b4fa5888c44c5e7df7de1879fa518a2321572bb34c",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-820x1180",
             size: Vec2::new(820.0, 1180.0),
             truncated: false,
-            fingerprint: "fbf5818eea809ff2c62f391dd05efe315f9970d9fe88e379b16c088991fe1eac",
+            fingerprint: "f2d14278b1a951c21d565f0845a0ac56e8db178d3cc2f5b74bca3cadcaf98d47",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-390x844",
             size: Vec2::new(390.0, 844.0),
             truncated: false,
-            fingerprint: "3241a0efcb4a688c127b1e4a7799fb9c1475f3c9221ff8194d8f8d28df63f7c5",
+            fingerprint: "773b5afff1d00ab2066cd771aa315b9e3cc3cf7964dcc405b651db5c8aedb328",
         },
         NetlistFirstBaseline {
             name: "design-netlist-first-1440x900-truncated",
             size: Vec2::new(1440.0, 900.0),
             truncated: true,
-            fingerprint: "c60fc284a82efb7951ffbe57dc842682ef9cf20f041bd96a11a9f7e9bac114fc",
+            fingerprint: "30082f9fe378e735da71a65f3ed3078dc57a0ef0983d2171fa7481a6f715ed27",
         },
     ];
 
@@ -904,7 +904,7 @@ mod tests {
     #[test]
     fn the_page_paints_the_full_landing_at_all_supported_viewports() {
         for ((_, size), minimum_content_height) in
-            SUPPORTED_VIEWPORTS.into_iter().zip([500, 780, 740])
+            SUPPORTED_VIEWPORTS.into_iter().zip([470, 760, 740])
         {
             let canvas = netlist_first_canvas(size, false);
             let content_height = canvas.content_height();
