@@ -580,9 +580,15 @@ pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot, state: &mut PlotViewSta
             }
         }
         if !lines.is_empty() {
+            // Each line leads with a short swatch in its series colour; the
+            // words themselves are foreground text.
+            const SWATCH_W: f32 = 10.0;
+            const SWATCH_GAP: f32 = 4.0;
             let line_height = 14.0;
             let box_height = 8.0 + line_height * lines.len() as f32;
             let box_width = 8.0
+                + SWATCH_W
+                + SWATCH_GAP
                 + lines
                     .iter()
                     .map(|(_, text)| text.len() as f32 * 6.2)
@@ -602,15 +608,21 @@ pub fn plot_pane(ui: &mut egui::Ui, plot: &HydratedPlot, state: &mut PlotViewSta
                 },
             );
             for (row, (color, text)) in lines.iter().enumerate() {
-                painter.text(
-                    Pos2::new(
-                        readout.min.x + 4.0,
-                        readout.min.y + 4.0 + line_height * row as f32,
+                let top = readout.min.y + 4.0 + line_height * row as f32;
+                painter.rect_filled(
+                    Rect::from_min_size(
+                        Pos2::new(readout.min.x + 4.0, top + line_height * 0.5 - 2.0),
+                        Vec2::new(SWATCH_W, 2.0),
                     ),
+                    0.0,
+                    *color,
+                );
+                painter.text(
+                    Pos2::new(readout.min.x + 4.0 + SWATCH_W + SWATCH_GAP, top),
                     Align2::LEFT_TOP,
                     text,
                     FontId::monospace(10.0),
-                    *color,
+                    palette.foreground,
                 );
             }
         }

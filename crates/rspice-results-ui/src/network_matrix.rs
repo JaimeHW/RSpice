@@ -134,7 +134,12 @@ fn heat_legend(ui: &mut Ui, floor: &mut f64, palette: &rspice_ui_kit::palette::P
             );
         }
         ui.label("0 dB");
-        ui.colored_label(palette.warn, "> 0 dB");
+        // The key is a cell of the colour a gain above 0 dB paints, beside
+        // neutral words.
+        let (key, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(key, 0.0, heat_color(1.0, *floor, palette));
+        ui.label("> 0 dB");
         ui.label("Color clips at limits; values remain exact.");
     });
 }

@@ -86,15 +86,21 @@ pub fn square_xy_view_change(
 /// One row of a point readout card.
 pub type CardRow = (String, String);
 
+/// Length and thickness of the trace swatch in front of a card title, and
+/// the air between the swatch and the title.
+const CARD_SWATCH: egui::Vec2 = egui::vec2(12.0, 2.0);
+const CARD_SWATCH_GAP: f32 = 6.0;
+
 /// The floating point-readout card the XY viewers show on hover/pin:
-/// colored mono title + k/v rows, anchored beside the point and clamped
-/// to the plot. Painted, not laid out — it floats over the chart.
+/// a short line swatch in the trace's colour, a mono title in primary text,
+/// then k/v rows, anchored beside the point and clamped to the plot.
+/// Painted, not laid out — it floats over the chart.
 pub fn point_card(
     ui: &Ui,
     bounds: egui::Rect,
     anchor: egui::Pos2,
     title: &str,
-    title_color: egui::Color32,
+    swatch: egui::Color32,
     rows: &[CardRow],
 ) {
     let t = Tokens::get(ui.ctx());
@@ -104,8 +110,9 @@ pub fn point_card(
     let title_galley = painter.layout_no_wrap(
         title.to_owned(),
         theme::mono(11.0, FontWeight::Medium),
-        title_color,
+        c.text,
     );
+    let title_indent = CARD_SWATCH.x + CARD_SWATCH_GAP;
     let mut key_width = 0.0f32;
     let mut value_width = 0.0f32;
     let galleys: Vec<_> = rows
@@ -125,7 +132,8 @@ pub fn point_card(
         .collect();
 
     let (pad_x, pad_y, gap, line_h) = (9.0, 6.0, 12.0, 16.0);
-    let width = (key_width + gap + value_width).max(title_galley.size().x) + pad_x * 2.0;
+    let width =
+        (key_width + gap + value_width).max(title_indent + title_galley.size().x) + pad_x * 2.0;
     let height = pad_y * 2.0 + line_h * (rows.len() as f32 + 1.0);
 
     let mut origin = anchor + egui::vec2(14.0, -height - 8.0);
@@ -145,10 +153,19 @@ pub fn point_card(
         egui::Stroke::new(1.0, c.border_strong),
         egui::StrokeKind::Inside,
     );
+    let title_center_y = origin.y + pad_y + title_galley.size().y * 0.5;
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            egui::pos2(origin.x + pad_x + CARD_SWATCH.x * 0.5, title_center_y),
+            CARD_SWATCH,
+        ),
+        0.0,
+        swatch,
+    );
     painter.galley(
-        egui::pos2(origin.x + pad_x, origin.y + pad_y),
+        egui::pos2(origin.x + pad_x + title_indent, origin.y + pad_y),
         title_galley,
-        title_color,
+        c.text,
     );
     for (i, (kg, vg)) in galleys.into_iter().enumerate() {
         let y = origin.y + pad_y + line_h * (i as f32 + 1.0);
@@ -164,7 +181,8 @@ pub fn point_card(
     }
 }
 
-/// Dimmed names and mono values, with accent highlighting for key rows.
+/// Dimmed names and mono values. A key row is set in primary text with a
+/// semibold value: weight, not colour, since accent means selection.
 pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -179,8 +197,15 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
         );
         let value_galley = ui.painter().layout(
             value.clone(),
-            theme::mono(tokens::FS_1, FontWeight::Regular),
-            if *highlight { c.accent } else { c.text },
+            theme::mono(
+                tokens::FS_1,
+                if *highlight {
+                    FontWeight::SemiBold
+                } else {
+                    FontWeight::Regular
+                },
+            ),
+            c.text,
             value_width,
         );
         let row_height = 25.0_f32.max(name_galley.size().y.max(value_galley.size().y) + 8.0);

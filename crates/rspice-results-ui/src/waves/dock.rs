@@ -565,11 +565,12 @@ pub fn marker_section(
                 "Saved with the project"
             });
         // The kind is stated, not cycled: a click that silently reclassifies
-        // what a marker asserts is a decision made by accident.
+        // what a marker asserts is a decision made by accident. The id
+        // already carries the marker's colour, so the kind is plain words.
         row_ui.label(
             egui::RichText::new(kind.label())
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(color),
+                .color(c.text_dim),
         );
         // Which store owns the marker changes what removing it means, so the
         // row states it rather than leaving the reader to infer it.
