@@ -194,235 +194,91 @@ impl<'a> ExprParser<'a> {
         }
     }
 
-    /// Parse boolean OR expressions (`|` in Xyce, `||` in HSPICE).
+    /// Parse the binary operators, loosest first: boolean OR (`|` in Xyce,
+    /// `||` in HSPICE), boolean AND (`&`, `&&`), comparison (`>`, `>=`, `<`,
+    /// `<=`, `<>`, `=`, `==`, `!=`), additive (`+`, `-`), modulo (`%`, looser
+    /// than `*` and `/` as in Xyce) and multiplicative (`*`, `/`). Every level
+    /// is left-associative.
     fn parse_or(&mut self) -> Result<Expr, ExprError> {
-        let mut left = self.parse_and()?;
-
-        loop {
-            self.skip_ws();
-            if self.consume('|') {
-                self.consume('|');
-                self.skip_ws();
-                let right = self.parse_and()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::Or,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else {
-                break;
-            }
-        }
-
-        Ok(left)
+        self.parse_binary(BinaryLevel::Or)
     }
 
-    /// Parse boolean AND expressions (`&` in Xyce, `&&` in HSPICE).
-    fn parse_and(&mut self) -> Result<Expr, ExprError> {
-        let mut left = self.parse_comparison()?;
-
-        loop {
-            self.skip_ws();
-            if self.consume('&') {
-                self.consume('&');
-                self.skip_ws();
-                let right = self.parse_comparison()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::And,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else {
-                break;
-            }
-        }
-
-        Ok(left)
-    }
-
-    /// Parse comparison expressions (>, <, >=, <=, ==, !=)
-    fn parse_comparison(&mut self) -> Result<Expr, ExprError> {
-        let mut left = self.parse_additive()?;
-
-        loop {
-            self.skip_ws();
-            let start_pos = self.pos;
-
-            if self.consume('>') {
-                if self.consume('=') {
-                    self.skip_ws();
-                    let right = self.parse_additive()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Ge,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                    left = Self::checked_expr(left)?;
-                } else {
-                    self.skip_ws();
-                    let right = self.parse_additive()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Gt,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                    left = Self::checked_expr(left)?;
-                }
-            } else if self.consume('<') {
-                if self.consume('=') {
-                    self.skip_ws();
-                    let right = self.parse_additive()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Le,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                    left = Self::checked_expr(left)?;
-                } else if self.consume('>') {
-                    // ngspice numparam inequality spelling: `a <> b`.
-                    self.skip_ws();
-                    let right = self.parse_additive()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Ne,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                    left = Self::checked_expr(left)?;
-                } else {
-                    self.skip_ws();
-                    let right = self.parse_additive()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Lt,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                    left = Self::checked_expr(left)?;
-                }
-            } else if self.consume('=') {
-                // Both `==` and the ngspice numparam single `=` compare for
-                // equality; assignment never occurs inside an expression.
-                self.consume('=');
-                self.skip_ws();
-                let right = self.parse_additive()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::Eq,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else if self.consume('!') {
-                if self.consume('=') {
-                    self.skip_ws();
-                    let right = self.parse_additive()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Ne,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                    left = Self::checked_expr(left)?;
-                } else {
-                    self.pos = start_pos;
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        Ok(left)
-    }
-
-    /// Parse additive expressions (+, -)
-    fn parse_additive(&mut self) -> Result<Expr, ExprError> {
-        let mut left = self.parse_modulo()?;
-
-        loop {
-            self.skip_ws();
-            if self.consume('+') {
-                self.skip_ws();
-                let right = self.parse_modulo()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::Add,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else if self.consume('-') {
-                self.skip_ws();
-                let right = self.parse_modulo()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::Sub,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else {
-                break;
-            }
-        }
-
-        Ok(left)
-    }
-
-    /// Parse modulo expressions (%), lower precedence than * and / like Xyce.
-    fn parse_modulo(&mut self) -> Result<Expr, ExprError> {
-        let mut left = self.parse_multiplicative()?;
-
-        loop {
-            self.skip_ws();
-            if self.consume('%') {
-                self.skip_ws();
-                let right = self.parse_multiplicative()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::Mod,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else {
-                break;
-            }
-        }
-
-        Ok(left)
-    }
-
-    /// Parse multiplicative expressions (*, /)
-    fn parse_multiplicative(&mut self) -> Result<Expr, ExprError> {
+    /// Precedence climbing over [`BinaryLevel`]: the operand below the
+    /// tightest level, then every operator at `lowest` or tighter, each
+    /// folding left onto what is parsed so far with its right operand parsed
+    /// one level tighter.
+    ///
+    /// One frame per operator level reached rather than one per level of the
+    /// grammar: a parenthesis re-enters the whole grammar, and six recursive
+    /// frames per nesting level spent most of a 1 MiB thread's stack in an
+    /// unoptimized build before the nesting limit could refuse the input.
+    fn parse_binary(&mut self, lowest: BinaryLevel) -> Result<Expr, ExprError> {
         let mut left = self.parse_unary()?;
-
         loop {
             self.skip_ws();
-            if self.consume('*') {
-                if self.consume('*') {
-                    self.pos -= 2;
-                    break;
-                }
-                self.skip_ws();
-                let right = self.parse_unary()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::Mul,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else if self.consume('/') {
-                self.skip_ws();
-                let right = self.parse_unary()?;
-                left = Expr::BinOp {
-                    op: BinOpKind::Div,
-                    left: Box::new(left),
-                    right: Box::new(right),
-                };
-                left = Self::checked_expr(left)?;
-            } else {
+            let start = self.pos;
+            let Some((op, level)) = self.binary_operator() else {
+                self.pos = start;
+                break;
+            };
+            if level < lowest {
+                self.pos = start;
                 break;
             }
+            self.skip_ws();
+            let right = self.parse_binary(level.tighter())?;
+            left = Self::checked_expr(Expr::BinOp {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            })?;
         }
-
         Ok(left)
+    }
+
+    /// Consume one binary operator and name it with its level, or `None`
+    /// where the text there is none. The caller restores the position on
+    /// `None`. A `!` that is not `!=` is a prefix, and `**` is the power
+    /// operator, which [`Self::parse_power`] owns.
+    fn binary_operator(&mut self) -> Option<(BinOpKind, BinaryLevel)> {
+        let level = |op| match op {
+            BinOpKind::Or => BinaryLevel::Or,
+            BinOpKind::And => BinaryLevel::And,
+            BinOpKind::Add | BinOpKind::Sub => BinaryLevel::Additive,
+            BinOpKind::Mod => BinaryLevel::Modulo,
+            BinOpKind::Mul | BinOpKind::Div => BinaryLevel::Multiplicative,
+            _ => BinaryLevel::Comparison,
+        };
+        let op = match self.advance()? {
+            '|' => {
+                self.consume('|');
+                BinOpKind::Or
+            }
+            '&' => {
+                self.consume('&');
+                BinOpKind::And
+            }
+            '>' if self.consume('=') => BinOpKind::Ge,
+            '>' => BinOpKind::Gt,
+            '<' if self.consume('=') => BinOpKind::Le,
+            // ngspice numparam inequality spelling: `a <> b`.
+            '<' if self.consume('>') => BinOpKind::Ne,
+            '<' => BinOpKind::Lt,
+            // Both `==` and the ngspice numparam single `=` compare for
+            // equality; assignment never occurs inside an expression.
+            '=' => {
+                self.consume('=');
+                BinOpKind::Eq
+            }
+            '!' if self.consume('=') => BinOpKind::Ne,
+            '+' => BinOpKind::Add,
+            '-' => BinOpKind::Sub,
+            '%' => BinOpKind::Mod,
+            '*' if !self.check('*') => BinOpKind::Mul,
+            '/' => BinOpKind::Div,
+            _ => return None,
+        };
+        Some((op, level(op)))
     }
 
     /// Parse power expressions (^ / **), left-associative like ngspice
@@ -560,30 +416,7 @@ impl<'a> ExprParser<'a> {
         // in the AST; the runtime behavioral compiler performs the actual
         // file lookup after parameter expansion.
         if self.consume('"') {
-            let mut value = String::new();
-            loop {
-                let Some(character) = self.advance() else {
-                    return Err(ExprError::MissingCloseQuote);
-                };
-                match character {
-                    '"' => break,
-                    '\\' => {
-                        let Some(escaped) = self.advance() else {
-                            return Err(ExprError::MissingCloseQuote);
-                        };
-                        value.push(escaped);
-                    }
-                    _ => value.push(character),
-                }
-            }
-            return Ok(if self.control_vectors {
-                // A quoted control vector may contain operator characters,
-                // including ':' in SENS model/design-parameter names. Keep
-                // ordinary expressions' string literals and ternary grammar.
-                Expr::Param(value.to_uppercase())
-            } else {
-                Expr::StringLiteral(value)
-            });
+            return self.parse_string_literal();
         }
 
         // Number
@@ -601,6 +434,38 @@ impl<'a> ExprParser<'a> {
         }
 
         Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')))
+    }
+
+    /// Parse a double-quoted string after its opening `"`.
+    ///
+    /// Apart from [`Self::parse_primary`] so that its locals stay out of the
+    /// frame every parenthesis recurses through.
+    #[inline(never)]
+    fn parse_string_literal(&mut self) -> Result<Expr, ExprError> {
+        let mut value = String::new();
+        loop {
+            let Some(character) = self.advance() else {
+                return Err(ExprError::MissingCloseQuote);
+            };
+            match character {
+                '"' => break,
+                '\\' => {
+                    let Some(escaped) = self.advance() else {
+                        return Err(ExprError::MissingCloseQuote);
+                    };
+                    value.push(escaped);
+                }
+                _ => value.push(character),
+            }
+        }
+        Ok(if self.control_vectors {
+            // A quoted control vector may contain operator characters,
+            // including ':' in SENS model/design-parameter names. Keep
+            // ordinary expressions' string literals and ternary grammar.
+            Expr::Param(value.to_uppercase())
+        } else {
+            Expr::StringLiteral(value)
+        })
     }
 
     /// Parse a number with optional SPICE suffix
@@ -691,6 +556,48 @@ impl<'a> ExprParser<'a> {
 
     /// Parse identifier or function call
     fn parse_ident_or_fn(&mut self) -> Result<Expr, ExprError> {
+        let name = match self.parse_identifier()? {
+            Identifier::Operand(operand) => return Ok(operand),
+            Identifier::Call(name) => name,
+        };
+        // A two-letter `I<lead>` name is also a legal `.FUNC` name, so
+        // `ID(2)` or `IC(a+1)` must keep their argument expressions. A
+        // bare device name, or a list the ordinary grammar rejects (a
+        // hierarchical `X1:Q1` or wildcard reference), is a raw probe.
+        if is_lead_current_call_name(&name) {
+            let arguments_start = self.pos;
+            match self.parse_call_arguments() {
+                Ok(args)
+                    if !is_bare_probe_reference(
+                        &self.input[arguments_start..self.pos - ')'.len_utf8()],
+                    ) =>
+                {
+                    return Ok(Expr::FnCall { name, args });
+                }
+                Err(error) if self.aborted => return Err(error),
+                _ => self.pos = arguments_start,
+            }
+        }
+        if is_raw_probe_accessor(&name)
+            || (self.control_vectors
+                && name
+                    .rsplit_once('.')
+                    .is_some_and(|(_, probe)| matches!(probe, "V" | "I" | "N")))
+        {
+            let args = self.parse_raw_probe_arguments()?;
+            return Ok(Expr::FnCall { name, args });
+        }
+        let args = self.parse_call_arguments()?;
+        Ok(Expr::FnCall { name, args })
+    }
+
+    /// Scan the identifier at the cursor: a complete operand, or the name of
+    /// a call with the cursor past its `(`.
+    ///
+    /// Apart from [`Self::parse_ident_or_fn`] so that the scan's locals stay
+    /// out of the frame every nested call's argument recurses through.
+    #[inline(never)]
+    fn parse_identifier(&mut self) -> Result<Identifier, ExprError> {
         let start = self.pos;
 
         // Device parameters are atomic probe names. Keep their brackets and
@@ -727,7 +634,9 @@ impl<'a> ExprParser<'a> {
                 if end == start + 1 || self.pos == parameter_start || !self.consume(']') {
                     return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
                 }
-                return Ok(Expr::Param(self.input[start..self.pos].to_uppercase()));
+                return Ok(Identifier::Operand(Expr::Param(
+                    self.input[start..self.pos].to_uppercase(),
+                )));
             }
         }
 
@@ -748,72 +657,51 @@ impl<'a> ExprParser<'a> {
 
         // Check for function call
         if self.consume('(') {
-            // A two-letter `I<lead>` name is also a legal `.FUNC` name, so
-            // `ID(2)` or `IC(a+1)` must keep their argument expressions. A
-            // bare device name, or a list the ordinary grammar rejects (a
-            // hierarchical `X1:Q1` or wildcard reference), is a raw probe.
-            if is_lead_current_call_name(&name) {
-                let arguments_start = self.pos;
-                match self.parse_call_arguments() {
-                    Ok(args)
-                        if !is_bare_probe_reference(
-                            &self.input[arguments_start..self.pos - ')'.len_utf8()],
-                        ) =>
-                    {
-                        return Ok(Expr::FnCall { name, args });
-                    }
-                    Err(error) if self.aborted => return Err(error),
-                    _ => self.pos = arguments_start,
-                }
-            }
-            if is_raw_probe_accessor(&name)
-                || (self.control_vectors
-                    && name
-                        .rsplit_once('.')
-                        .is_some_and(|(_, probe)| matches!(probe, "V" | "I" | "N")))
-            {
-                let mut args = Vec::new();
-                loop {
-                    self.skip_ws();
-                    let argument_start = self.pos;
-                    while let Some(ch) = self.peek() {
-                        if matches!(ch, ',' | ')') {
-                            break;
-                        }
-                        if self.advance().is_none() {
-                            break;
-                        }
-                    }
-                    let argument = self.input[argument_start..self.pos].trim();
-                    if argument.is_empty() {
-                        if args.is_empty() && self.check(')') {
-                            break;
-                        }
-                        return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
-                    }
-                    args.push(Expr::Param(argument.to_uppercase()));
-                    self.skip_ws();
-                    if self.consume(',') {
-                        continue;
-                    }
+            return Ok(Identifier::Call(name));
+        }
+        Ok(Identifier::Operand(match name.as_str() {
+            "PI" => Expr::Number(std::f64::consts::PI),
+            "EXP" => Expr::Number(std::f64::consts::E),
+            "TRUE" => Expr::Number(1.0),
+            "FALSE" => Expr::Number(0.0),
+            _ => Expr::Param(name),
+        }))
+    }
+
+    /// Parse a raw probe's argument list after `(`, through the closing `)`:
+    /// each argument is a name taken verbatim, never an expression.
+    #[inline(never)]
+    fn parse_raw_probe_arguments(&mut self) -> Result<Vec<Expr>, ExprError> {
+        let mut args = Vec::new();
+        loop {
+            self.skip_ws();
+            let argument_start = self.pos;
+            while let Some(ch) = self.peek() {
+                if matches!(ch, ',' | ')') {
                     break;
                 }
-                if !self.consume(')') {
-                    return Err(ExprError::MissingCloseParen);
+                if self.advance().is_none() {
+                    break;
                 }
-                return Ok(Expr::FnCall { name, args });
             }
-            let args = self.parse_call_arguments()?;
-            Ok(Expr::FnCall { name, args })
-        } else {
-            match name.as_str() {
-                "PI" => Ok(Expr::Number(std::f64::consts::PI)),
-                "EXP" => Ok(Expr::Number(std::f64::consts::E)),
-                "TRUE" => Ok(Expr::Number(1.0)),
-                "FALSE" => Ok(Expr::Number(0.0)),
-                _ => Ok(Expr::Param(name)),
+            let argument = self.input[argument_start..self.pos].trim();
+            if argument.is_empty() {
+                if args.is_empty() && self.check(')') {
+                    break;
+                }
+                return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
             }
+            args.push(Expr::Param(argument.to_uppercase()));
+            self.skip_ws();
+            if self.consume(',') {
+                continue;
+            }
+            break;
         }
+        if !self.consume(')') {
+            return Err(ExprError::MissingCloseParen);
+        }
+        Ok(args)
     }
 
     /// Parse ordinary call arguments after `(`, through the closing `)`.
@@ -840,6 +728,43 @@ impl<'a> ExprParser<'a> {
             return Err(ExprError::MissingCloseParen);
         }
         Ok(args)
+    }
+}
+
+/// What [`ExprParser::parse_identifier`] found at the cursor.
+enum Identifier {
+    /// A complete operand: a parameter, a named constant, or a device
+    /// parameter probe `@dev[param]`.
+    Operand(Expr),
+    /// A call's name, with the cursor past its `(`.
+    Call(String),
+}
+
+/// The binary operator levels, loosest first, and past the tightest of them
+/// the unary operand that no binary operator continues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum BinaryLevel {
+    Or,
+    And,
+    Comparison,
+    Additive,
+    Modulo,
+    Multiplicative,
+    Operand,
+}
+
+impl BinaryLevel {
+    /// The level a right operand is parsed at: one tighter, so that a second
+    /// operator of this level folds left.
+    fn tighter(self) -> Self {
+        match self {
+            Self::Or => Self::And,
+            Self::And => Self::Comparison,
+            Self::Comparison => Self::Additive,
+            Self::Additive => Self::Modulo,
+            Self::Modulo => Self::Multiplicative,
+            Self::Multiplicative | Self::Operand => Self::Operand,
+        }
     }
 }
 

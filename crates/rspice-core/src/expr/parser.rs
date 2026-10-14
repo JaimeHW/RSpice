@@ -558,128 +558,29 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_or(&mut self) -> Expr {
-        let mut left = self.parse_and();
-        while self.current == Token::Or {
-            self.advance();
-            let right = self.parse_and();
-            left = Expr::Binary {
-                op: BinaryOp::Or,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-            left = self.checked_expr(left);
-        }
-        left
+        self.parse_binary(BinaryLevel::Or)
     }
 
-    fn parse_and(&mut self) -> Expr {
-        let mut left = self.parse_equality();
-        while self.current == Token::And {
-            self.advance();
-            let right = self.parse_equality();
-            left = Expr::Binary {
-                op: BinaryOp::And,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-            left = self.checked_expr(left);
-        }
-        left
-    }
-
-    fn parse_equality(&mut self) -> Expr {
-        let mut left = self.parse_comparison();
-        loop {
-            let op = match &self.current {
-                Token::Eq => BinaryOp::Eq,
-                Token::Ne => BinaryOp::Ne,
-                _ => break,
-            };
-            self.advance();
-            let right = self.parse_comparison();
-            left = Expr::Binary {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-            left = self.checked_expr(left);
-        }
-        left
-    }
-
-    fn parse_comparison(&mut self) -> Expr {
-        let mut left = self.parse_additive();
-        loop {
-            let op = match &self.current {
-                Token::Lt => BinaryOp::Lt,
-                Token::Le => BinaryOp::Le,
-                Token::Gt => BinaryOp::Gt,
-                Token::Ge => BinaryOp::Ge,
-                _ => break,
-            };
-            self.advance();
-            let right = self.parse_additive();
-            left = Expr::Binary {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-            left = self.checked_expr(left);
-        }
-        left
-    }
-
-    fn parse_additive(&mut self) -> Expr {
-        let mut left = self.parse_modulo();
-        loop {
-            let op = match &self.current {
-                Token::Plus => BinaryOp::Add,
-                Token::Minus => BinaryOp::Sub,
-                _ => break,
-            };
-            self.advance();
-            let right = self.parse_modulo();
-            left = Expr::Binary {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-            left = self.checked_expr(left);
-        }
-        left
-    }
-
-    fn parse_modulo(&mut self) -> Expr {
-        let mut left = self.parse_multiplicative();
-        while self.current == Token::Percent {
-            self.advance();
-            let right = self.parse_multiplicative();
-            left = Expr::Binary {
-                op: BinaryOp::Mod,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-            left = self.checked_expr(left);
-        }
-        left
-    }
-
-    fn parse_multiplicative(&mut self) -> Expr {
+    /// Precedence climbing over levels 2 to 8 above: the unary operand,
+    /// then every operator at `lowest` or tighter, each folding left onto
+    /// what is parsed so far with its right operand parsed one level tighter.
+    ///
+    /// One frame per operator level reached rather than one per level of the
+    /// grammar: a parenthesis re-enters the whole grammar, and seven recursive
+    /// frames per nesting level spent much of a 1 MiB thread's stack in an
+    /// unoptimized build before the nesting limit could refuse the input.
+    fn parse_binary(&mut self, lowest: BinaryLevel) -> Expr {
         let mut left = self.parse_unary();
-        loop {
-            let op = match &self.current {
-                Token::Star => BinaryOp::Mul,
-                Token::Slash => BinaryOp::Div,
-                _ => break,
-            };
+        while let Some((op, level)) = binary_operator(&self.current)
+            && level >= lowest
+        {
             self.advance();
-            let right = self.parse_unary();
-            left = Expr::Binary {
+            let right = self.parse_binary(level.tighter());
+            left = self.checked_expr(Expr::Binary {
                 op,
                 left: Box::new(left),
                 right: Box::new(right),
-            };
-            left = self.checked_expr(left);
+            });
         }
         left
     }
@@ -1013,6 +914,57 @@ impl<'a> Parser<'a> {
 
 fn looks_like_file_table_path(value: &str) -> bool {
     value.contains('.') || value.contains('/') || value.contains('\\')
+}
+
+/// The binary operator levels, loosest first, and past the tightest of them
+/// the unary operand that no binary operator continues.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum BinaryLevel {
+    Or,
+    And,
+    Equality,
+    Comparison,
+    Additive,
+    Modulo,
+    Multiplicative,
+    Operand,
+}
+
+impl BinaryLevel {
+    /// The level a right operand is parsed at: one tighter, so that a second
+    /// operator of this level folds left.
+    fn tighter(self) -> Self {
+        match self {
+            Self::Or => Self::And,
+            Self::And => Self::Equality,
+            Self::Equality => Self::Comparison,
+            Self::Comparison => Self::Additive,
+            Self::Additive => Self::Modulo,
+            Self::Modulo => Self::Multiplicative,
+            Self::Multiplicative | Self::Operand => Self::Operand,
+        }
+    }
+}
+
+/// The binary operator a token spells, with its level, or `None` where the
+/// token is not one. `^` is the power operator, which `parse_power` owns.
+fn binary_operator(token: &Token) -> Option<(BinaryOp, BinaryLevel)> {
+    Some(match token {
+        Token::Or => (BinaryOp::Or, BinaryLevel::Or),
+        Token::And => (BinaryOp::And, BinaryLevel::And),
+        Token::Eq => (BinaryOp::Eq, BinaryLevel::Equality),
+        Token::Ne => (BinaryOp::Ne, BinaryLevel::Equality),
+        Token::Lt => (BinaryOp::Lt, BinaryLevel::Comparison),
+        Token::Le => (BinaryOp::Le, BinaryLevel::Comparison),
+        Token::Gt => (BinaryOp::Gt, BinaryLevel::Comparison),
+        Token::Ge => (BinaryOp::Ge, BinaryLevel::Comparison),
+        Token::Plus => (BinaryOp::Add, BinaryLevel::Additive),
+        Token::Minus => (BinaryOp::Sub, BinaryLevel::Additive),
+        Token::Percent => (BinaryOp::Mod, BinaryLevel::Modulo),
+        Token::Star => (BinaryOp::Mul, BinaryLevel::Multiplicative),
+        Token::Slash => (BinaryOp::Div, BinaryLevel::Multiplicative),
+        _ => return None,
+    })
 }
 
 /// Parse an expression string into AST with strict error reporting.

@@ -81,8 +81,20 @@ fn runtime_function_expansion_cannot_build_an_unbounded_boxed_tree() {
 fn recursive_expression_forms_return_diagnostics_on_a_desktop_sized_stack() {
     // A separate thread exercises the Windows executable's usual 1 MiB stack,
     // independently of the test runner's larger stack.
+    recursive_expression_forms_return_diagnostics_within(1024 * 1024);
+}
+
+#[test]
+fn recursive_expression_forms_keep_a_quarter_of_a_desktop_stack_spare() {
+    // The same work a quarter MiB short of the desktop stack: the nesting
+    // limits leave at least that much of a 1 MiB thread unused in an
+    // unoptimized build, whatever features the build carries.
+    recursive_expression_forms_return_diagnostics_within(768 * 1024);
+}
+
+fn recursive_expression_forms_return_diagnostics_within(stack_size: usize) {
     std::thread::Builder::new()
-        .stack_size(1024 * 1024)
+        .stack_size(stack_size)
         .spawn(|| {
             let nesting = 4096;
             let expressions = [
