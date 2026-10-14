@@ -8,7 +8,7 @@ use rspice_results::report_document::ReportDocument;
 use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Dialog, DialogChoice, DialogInitialFocus, input_row, select},
+    widgets::{Dialog, DialogChoice, DialogInitialFocus, Problem, input_row, problem_line, select},
 };
 
 pub trait DialogHost {
@@ -44,7 +44,7 @@ fn create_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
         return;
     }
     const TEMPLATE_LABELS: [&str; 3] = [
-        "Release verification 4.2",
+        "Release verification",
         "Design review",
         "Model qualification",
     ];
@@ -95,18 +95,13 @@ fn create_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
                     .create_document_template = index;
             }
         });
-        ui.add_space(8.0);
-        ui.label(
-            "The document is created only when this transaction commits; opening Report Authoring never changes the project.",
-        );
         if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                host.blocked_reason(),
-            );
+            ui.add_space(8.0);
+            problem_line(ui, Problem::Failure, host.blocked_reason());
         }
         if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+            ui.add_space(8.0);
+            problem_line(ui, Problem::Failure, error);
         }
         Some(response.id)
     });
@@ -134,7 +129,7 @@ fn add_page_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
         .show_with_initial_body_focus(ctx, |ui| {
             let response = input_row(ui, "Page title", &mut host.editor().add_page_title);
             if let Some(error) = &error {
-                ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+                problem_line(ui, Problem::Failure, error);
             }
             Some(response.id)
         });
@@ -175,7 +170,7 @@ fn page_properties_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
         })
         .unwrap_or_default();
     const TEMPLATE_LABELS: [&str; 3] = [
-        "Release verification 4.2",
+        "Release verification",
         "Design review",
         "Model qualification",
     ];
@@ -270,7 +265,7 @@ fn page_properties_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
                 }
             });
             if let Some(error) = &error {
-                ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+                problem_line(ui, Problem::Failure, error);
             }
             Some(response.id)
         });
@@ -304,13 +299,10 @@ fn remove_report_block_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) 
     .show(ctx, |ui| {
         ui.label(format!("Element: {block_title}"));
         if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                host.blocked_reason(),
-            );
+            problem_line(ui, Problem::Failure, host.blocked_reason());
         }
         if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+            problem_line(ui, Problem::Failure, error);
         }
     });
     match choice {
@@ -435,13 +427,10 @@ fn insert_result_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut 
             "The block remains linked to one exact immutable visualization revision."
         });
         if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                host.blocked_reason(),
-            );
+            problem_line(ui, Problem::Failure, host.blocked_reason());
         }
         if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+            problem_line(ui, Problem::Failure, error);
         }
         Some(focus.id)
     });
@@ -653,20 +642,14 @@ fn add_report_element_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
                 }
             });
             if run_options.is_empty() {
-                ui.colored_label(
-                    Tokens::get(ui.ctx()).color.warn,
-                    "Run and retain an analysis before adding this source-derived element.",
-                );
+                problem_line(ui, Problem::Warning, "Run an analysis first.");
             }
         }
         if !writable {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                host.blocked_reason(),
-            );
+            problem_line(ui, Problem::Failure, host.blocked_reason());
         }
         if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+            problem_line(ui, Problem::Failure, error);
         }
         Some(focus.id)
     });

@@ -10,7 +10,7 @@ use rspice_results::report_document::{
 use rspice_ui_kit::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::Button,
+    widgets::{Button, Problem, paint_problem_mark},
 };
 use std::borrow::Cow;
 
@@ -164,7 +164,7 @@ fn section_heading(ui: &mut Ui, marker: &str, title: &str, description: &str) {
                     ui,
                     marker,
                     theme::mono(tokens::FS_2, FontWeight::SemiBold),
-                    PAPER_ACCENT,
+                    PAPER_TEXT,
                 );
             },
         );
@@ -353,12 +353,26 @@ fn page_elements(
                                     );
                                 });
                                 row.col(|ui| {
-                                    let (state, color) = report_block_state(host, block);
-                                    ui.label(
-                                        egui::RichText::new(state)
-                                            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                                            .color(color),
-                                    );
+                                    let state = report_block_state(host, block);
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 6.0;
+                                        if state == BlockState::SourceMissing {
+                                            let (mark, _) = ui.allocate_exact_size(
+                                                Vec2::splat(11.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            paint_problem_mark(
+                                                ui.painter(),
+                                                mark,
+                                                Problem::Warning,
+                                            );
+                                        }
+                                        ui.label(
+                                            egui::RichText::new(state.label())
+                                                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+                                                .color(state.ink()),
+                                        );
+                                    });
                                 });
                                 row.col(|ui| {
                                     let mut enabled = block.enabled();
@@ -416,20 +430,6 @@ fn page_elements(
             host.insert_result();
         }
     });
-    let banner = egui::Frame::new()
-        .fill(PAPER)
-        .outer_margin(egui::Margin::same(8))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            paper_label(
-                ui,
-                "Release closure validates this artifact against exact immutable result revisions and dataset bindings before building a signed package. Report elements may state blocked gates but cannot change source-owned gate state.",
-                theme::sans(tokens::FS_1, FontWeight::Regular),
-                PAPER_TEXT,
-            );
-        });
-    paint_dashed_rect(ui, banner.response.rect, PAPER_BORDER);
 }
 
 pub fn report_block_element_title(kind: &ReportBlockKind) -> Cow<'_, str> {
@@ -465,25 +465,58 @@ fn report_block_bound_source(kind: &ReportBlockKind) -> String {
     )
 }
 
-fn report_block_state(host: &impl PreviewHost, block: &ReportBlock) -> (&'static str, Color32) {
+/// Where one report element's content comes from, as the element table states
+/// it. Only a source that has gone missing is a problem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockState {
+    Excluded,
+    Frozen,
+    SourceMissing,
+    Bound,
+    Authored,
+}
+
+impl BlockState {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Excluded => "excluded",
+            Self::Frozen => "frozen",
+            Self::SourceMissing => "source missing",
+            Self::Bound => "bound",
+            Self::Authored => "authored",
+        }
+    }
+
+    /// Neutral paper ink: the warning mark, not the words, says a source is
+    /// missing.
+    fn ink(self) -> Color32 {
+        match self {
+            Self::Excluded => PAPER_FAINT,
+            Self::SourceMissing => PAPER_TEXT,
+            Self::Frozen | Self::Bound | Self::Authored => PAPER_MUTED,
+        }
+    }
+}
+
+fn report_block_state(host: &impl PreviewHost, block: &ReportBlock) -> BlockState {
     if !block.enabled() {
-        ("excluded", PAPER_FAINT)
+        BlockState::Excluded
     } else if block
         .kind()
         .reference()
         .is_some_and(ReportReferenceMode::is_frozen)
     {
-        ("frozen", Color32::from_rgb(72, 122, 78))
+        BlockState::Frozen
     } else if block
         .kind()
         .reference()
         .is_some_and(|reference| !host.reference_resolves(reference))
     {
-        ("source missing", Color32::from_rgb(177, 64, 52))
+        BlockState::SourceMissing
     } else if block.kind().reference().is_some() {
-        ("bound", Color32::from_rgb(72, 122, 78))
+        BlockState::Bound
     } else {
-        ("authored", PAPER_MUTED)
+        BlockState::Authored
     }
 }
 

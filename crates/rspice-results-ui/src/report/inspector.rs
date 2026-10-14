@@ -8,7 +8,10 @@ use rspice_results::report_document::{
     ReportTablePrecision,
 };
 use rspice_ui_kit::{
-    panels::{code_inspector_property_list, code_inspector_section, property_row},
+    panels::{
+        Problem, code_inspector_property_list, code_inspector_section,
+        inspector::inspector_problem, property_row, property_row_problem,
+    },
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Button, select},
@@ -207,7 +210,9 @@ pub fn show(
                         property_row(ui, "Artifact identity", &document.id().to_string());
                         property_row(ui, "Bound result", &bound_result);
                         property_row(ui, "Candidate", "Not attached");
-                        property_row(
+                        // The one statement of the binding: a mark when it is
+                        // incomplete, plain words when it is not.
+                        property_row_problem(
                             ui,
                             "Compatibility",
                             if exact_binding {
@@ -215,16 +220,12 @@ pub fn show(
                             } else {
                                 "result binding incomplete"
                             },
+                            (!exact_binding).then_some(Problem::Warning),
                         );
                         property_row(ui, "Package owner", "Release closure");
                         property_row(ui, "Physical DRC", "No retained DRC evidence");
                     });
-                    release_handoff_card(
-                        ui,
-                        document,
-                        host.bound_result_label(document).1,
-                        &mut open_release_owner,
-                    );
+                    release_handoff_card(ui, document, &mut open_release_owner);
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.add_space(10.0);
@@ -235,9 +236,7 @@ pub fn show(
                     ui.add_space(8.0);
                 });
                 if let Some(error) = host.transaction_error() {
-                    ui.add_space(8.0);
-                    ui.colored_label(t.color.err, error);
-                    ui.add_space(8.0);
+                    inspector_problem(ui, Problem::Failure, error);
                 }
             });
     });
@@ -337,12 +336,7 @@ where
     false
 }
 
-fn release_handoff_card(
-    ui: &mut Ui,
-    document: &ReportDocument,
-    exact_result_binding: bool,
-    open_owner: &mut bool,
-) {
+fn release_handoff_card(ui: &mut Ui, document: &ReportDocument, open_owner: &mut bool) {
     let t = Tokens::get(ui.ctx());
     let shown = egui::Frame::new()
         .fill(t.color.bg_panel_2)
@@ -350,29 +344,6 @@ fn release_handoff_card(
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("OWNED BY RELEASE CLOSURE")
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text_dim),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(if exact_result_binding {
-                            "ready for candidate review"
-                        } else {
-                            "binding incomplete"
-                        })
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(if exact_result_binding {
-                            t.color.ok
-                        } else {
-                            t.color.err
-                        }),
-                    );
-                });
-            });
-            ui.add_space(5.0);
             let id = document.id().to_string();
             ui.label(
                 egui::RichText::new(format!(
@@ -381,13 +352,6 @@ fn release_handoff_card(
                 ))
                 .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
                 .color(t.color.text),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "Compatibility review only; packaging and promotion remain external.",
-                )
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
             );
             ui.add_space(6.0);
             let button_width = ui.available_width();

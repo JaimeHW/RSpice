@@ -14,7 +14,7 @@ use rspice_ui_kit::{
     panels::{WorkbenchIcon, code_inspector_section, heading, icon_button, workspace_title_row},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Button, select},
+    widgets::{Button, Problem, problem_line, select},
 };
 
 pub trait ComposerHost: PreviewHost + InspectorHost {
@@ -179,7 +179,7 @@ pub fn show(ui: &mut Ui, host: &mut impl ComposerHost) {
                 heading(
                     ui,
                     "Engineering report composer",
-                    Some("Open a project before creating a project-owned report document."),
+                    Some("Open a project to create a report."),
                 );
             });
             return;
@@ -329,13 +329,7 @@ fn report_title_row(ui: &mut Ui, host: &mut impl ComposerHost) {
 }
 
 fn report_title_heading(ui: &mut Ui) {
-    heading(
-        ui,
-        "Engineering report composer",
-        Some(
-            "Author traceable pages, locked run references, publication plots and machine-readable appendices. Release closure alone owns package assembly and promotion.",
-        ),
-    );
+    heading(ui, "Engineering report composer", None);
 }
 
 fn report_release_button(ui: &mut Ui, host: &mut impl ComposerHost, width: f32) {
@@ -408,7 +402,7 @@ fn empty_report_workspace(ui: &mut Ui, host: &mut impl ComposerHost) {
                     .color(t.color.text_dim),
                 );
                 ui.add_space(16.0);
-                if Button::new("Plan report artifact...")
+                if Button::new("Plan report artifact…")
                     .accent()
                     .enabled(writable)
                     .show(ui)
@@ -418,10 +412,7 @@ fn empty_report_workspace(ui: &mut Ui, host: &mut impl ComposerHost) {
                 }
                 if !writable {
                     ui.add_space(8.0);
-                    ui.colored_label(
-                        t.color.err,
-                        PreviewHost::blocked_reason(host),
-                    );
+                    problem_line(ui, Problem::Failure, PreviewHost::blocked_reason(host));
                 }
             });
         });
@@ -731,14 +722,7 @@ fn page_settings(
 
                 if let Some(error) = host.transaction_error() {
                     ui.add_space(8.0);
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(error)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.err),
-                        )
-                        .wrap(),
-                    );
+                    problem_line(ui, Problem::Failure, error);
                 }
             });
     });

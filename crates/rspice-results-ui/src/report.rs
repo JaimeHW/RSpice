@@ -61,41 +61,6 @@ fn paper_switch(ui: &mut Ui, value: &mut bool) -> egui::Response {
     response
 }
 
-fn paint_dashed_rect(ui: &Ui, rect: Rect, color: Color32) {
-    const DASH: f32 = 4.0;
-    const GAP: f32 = 3.0;
-    let stroke = Stroke::new(1.0, color);
-    let painter = ui.painter();
-
-    let mut x = rect.left();
-    while x < rect.right() {
-        let end = (x + DASH).min(rect.right());
-        painter.line_segment(
-            [egui::pos2(x, rect.top()), egui::pos2(end, rect.top())],
-            stroke,
-        );
-        painter.line_segment(
-            [egui::pos2(x, rect.bottom()), egui::pos2(end, rect.bottom())],
-            stroke,
-        );
-        x += DASH + GAP;
-    }
-
-    let mut y = rect.top();
-    while y < rect.bottom() {
-        let end = (y + DASH).min(rect.bottom());
-        painter.line_segment(
-            [egui::pos2(rect.left(), y), egui::pos2(rect.left(), end)],
-            stroke,
-        );
-        painter.line_segment(
-            [egui::pos2(rect.right(), y), egui::pos2(rect.right(), end)],
-            stroke,
-        );
-        y += DASH + GAP;
-    }
-}
-
 pub const INITIAL_PAGES: [(&str, &str); 7] = [
     ("1", "Executive summary"),
     ("2", "Design and configuration"),
@@ -140,7 +105,7 @@ pub fn paint_pane_separators(ui: &Ui, rect: Rect, separators: PaneSeparators, co
 
 pub fn report_template_label(template: ReportTemplate) -> &'static str {
     match template {
-        ReportTemplate::ReleaseVerification42 => "Release verification 4.2",
+        ReportTemplate::ReleaseVerification42 => "Release verification",
         ReportTemplate::DesignReview => "Design review",
         ReportTemplate::ModelQualification => "Model qualification",
     }
