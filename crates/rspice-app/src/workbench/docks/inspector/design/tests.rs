@@ -2243,3 +2243,33 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
         "{painted}"
     );
 }
+
+/// Each of the shipped inverter's transistors names a model the built-in
+/// library resolves, and keeps W and L as instance parameters. Its value once
+/// read "NMOS W=1u L=0.18u": the Model property holding the instance
+/// parameters too, which the inspector read whole as a model name and
+/// reported missing.
+#[test]
+fn the_cmos_inverter_example_binds_models_the_library_resolves() {
+    let mut state = AppState::default();
+    crate::workbench::examples::load_example("CMOS Inverter", &mut state.schematic);
+    for (name, model) in [("MP", "RSPICE_PMOS"), ("MN", "RSPICE_NMOS")] {
+        let component = state
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("the inverter has no {name}"));
+        assert_eq!(
+            component_model_evidence(&state, component),
+            ComponentModelEvidence::resolved(model),
+            "{name}'s model binding"
+        );
+        let params = rspice_design::parameters::parse_params_string(&component.params);
+        assert!(
+            params.contains_key("w") && params.contains_key("l"),
+            "{name} keeps W and L as instance parameters: {params:?}"
+        );
+    }
+}

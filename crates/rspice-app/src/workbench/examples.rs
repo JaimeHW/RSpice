@@ -314,17 +314,23 @@ fn build_common_emitter(state: &mut SchematicState) {
 fn build_cmos_inverter(state: &mut SchematicState) {
     let mut id = 1u64;
 
+    // A MOSFET's value is its model, the Model property; W and L are
+    // instance parameters with properties of their own. Both transistors run
+    // the foundation cards the built-in library ships.
+    //
     // Pull-up PMOS — mirror_v puts S on top: S (260,80), G (220,120),
     // D (260,160), bulk (260,120).
-    let mp = Component::new(id, ComponentType::Pmos, Point::new(240, 120))
+    let mut mp = Component::new(id, ComponentType::Pmos, Point::new(240, 120))
         .with_mirror_v(true)
-        .with_name_value("MP", "PMOS W=2u L=0.18u");
+        .with_name_value("MP", "RSPICE_PMOS");
+    mp.params = "w=2u l=0.18u".to_owned();
     id += 1;
     state.document_mut_for_test().components.push(mp);
 
     // Pull-down NMOS — D (260,200), G (220,240), S (260,280), bulk (260,240).
-    let mn = Component::new(id, ComponentType::Nmos, Point::new(240, 240))
-        .with_name_value("MN", "NMOS W=1u L=0.18u");
+    let mut mn = Component::new(id, ComponentType::Nmos, Point::new(240, 240))
+        .with_name_value("MN", "RSPICE_NMOS");
+    mn.params = "w=1u l=0.18u".to_owned();
     id += 1;
     state.document_mut_for_test().components.push(mn);
 
