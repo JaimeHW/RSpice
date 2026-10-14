@@ -982,6 +982,56 @@ fn a_vector_discrete_port_bridges_one_net_per_bit() {
     );
 }
 
+/// An analog net bus on a port takes one deck node per member, leading index
+/// first, as a vector port does (IEEE 1364-2005 section 12.3.9: the port's
+/// MSB meets the connection's first position). `p[1]` is 2k to ground and
+/// `p[0]` 1k, so behind a 1k upper leg the first node reads 2/3 and the second
+/// 1/2; a swapped or dropped member reads otherwise. The same holds with a
+/// discrete half added, and for a child whose bus port its parent connects by
+/// concatenation.
+#[test]
+fn an_analog_bus_port_takes_one_deck_node_per_member() {
+    const LAWS: &str = "analog begin I(p[0], n) <+ k * V(p[0], n) / 1k; \
+                        I(p[1], n) <+ k * V(p[1], n) / 2k; end";
+    let analog = format!(
+        "`include \"disciplines.vams\"\n\
+         module bus(p, n); inout [1:0] p; inout n; electrical [1:0] p; electrical n;\n\
+         \x20 localparam real k = 1.0;\n  {LAWS}\nendmodule\n"
+    );
+    let mixed = format!(
+        "`include \"disciplines.vams\"\n\
+         module bus(p, n); inout [1:0] p; inout n; electrical [1:0] p; electrical n;\n\
+         \x20 integer k; initial k = 1;\n  {LAWS}\nendmodule\n"
+    );
+    let nested = format!(
+        "`include \"disciplines.vams\"\n\
+         module leaf(p, n); inout [1:0] p; inout n; electrical [1:0] p; electrical n;\n\
+         \x20 localparam real k = 1.0;\n  {LAWS}\nendmodule\n\
+         module bus(a, b, n); inout a, b, n; electrical a, b, n; leaf u({{a, b}}, n); endmodule\n"
+    );
+    for (label, source) in [("analog", analog), ("mixed", mixed), ("nested", nested)] {
+        let model = ModelFile::new(&format!("bus_{label}"), &source);
+        let deck = format!(
+            "* an analog bus port\nv1 in 0 dc 1\nr1 in a 1k\nr2 in b 1k\nx1 a b 0 bus\n\
+             .va \"{}\" module=bus\n.op\n.end\n",
+            model.deck_path()
+        );
+        let netlist = Netlist::parse(&deck).expect("the deck parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|error| panic!("{label}: the operating point must solve: {error}"));
+        for (node, expected) in [("a", 2.0 / 3.0), ("b", 0.5)] {
+            let voltage = result
+                .try_voltage_named(node)
+                .unwrap_or_else(|| panic!("{label}: node {node} is absent"));
+            assert!(
+                (voltage - expected).abs() < 1e-9,
+                "{label}: V({node}) is {voltage}, expected {expected}"
+            );
+        }
+    }
+}
+
 #[test]
 fn a_named_block_counter_keeps_its_state_through_the_engine_route() {
     let local_source = VECTOR_PORT.replace(

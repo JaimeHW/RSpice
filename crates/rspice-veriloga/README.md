@@ -1122,8 +1122,10 @@ exercised by the test suite:
   relationships. Invalid attributes and incompatible relationship overrides
   are diagnosed. Connection metadata retains source-defined natures even
   without connect rules; both compatibility APIs apply the same nature rules.
-  Analog net buses and ground declarations on module ports remain
-  unsupported; connect those ports to ground in the containing circuit.
+  An analog net bus on a port takes one deck node per member, leading
+  index first, at the root and through a child's connection. Ground
+  declarations on module ports remain unsupported; connect those ports to
+  ground in the containing circuit.
 - **Control flow**, lowered to guarded dataflow: `if`/`else`, `case`,
   compile-time-bounded `for`/`repeat` loops, event controls
   (`initial_step`, `final_step`, `cross`, `above`, `timer`)
