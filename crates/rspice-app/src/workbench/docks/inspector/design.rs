@@ -35,10 +35,10 @@ use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
-    Problem, PropertyRowCaption, WorkbenchIcon, property_row_captioned, property_row_combo,
-    property_row_flagged, property_row_input_action, property_row_input_captioned,
-    property_row_input_with_hint, problem_line, schematic_property_row as property_row,
-    schematic_property_row_problem as property_row_problem,
+    Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row_captioned,
+    property_row_combo, property_row_flagged, property_row_input_action,
+    property_row_input_captioned, property_row_input_with_hint,
+    schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
 };
 use crate::workbench::state::{InlineEditField, ModelsPage, VerificationPage, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
@@ -512,7 +512,10 @@ fn object_title(ui: &mut Ui, name: &str, kind: Option<&str>, occurrence: Option<
     job.append(
         name,
         0.0,
-        egui::TextFormat::simple(theme::sans(tokens::FS_2, FontWeight::SemiBold), t.color.text),
+        egui::TextFormat::simple(
+            theme::sans(tokens::FS_2, FontWeight::SemiBold),
+            t.color.text,
+        ),
     );
     if let Some(kind) = kind {
         job.append(
@@ -537,10 +540,7 @@ fn object_title(ui: &mut Ui, name: &str, kind: Option<&str>, occurrence: Option<
     job.wrap = egui::text::TextWrapping::truncate_at_width((rect.width() - 2.0 * inset).max(1.0));
     let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
     ui.painter().galley(
-        egui::pos2(
-            rect.left() + inset,
-            rect.center().y - galley.size().y * 0.5,
-        ),
+        egui::pos2(rect.left() + inset, rect.center().y - galley.size().y * 0.5),
         galley,
         t.color.text,
     );
@@ -772,7 +772,11 @@ fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     }
     if !overflow.is_clear() {
-        problem_line(ui, Problem::Warning, &drawing_sheet_overflow_text(&overflow));
+        problem_line(
+            ui,
+            Problem::Warning,
+            &drawing_sheet_overflow_text(&overflow),
+        );
     }
     if writable || !overflow.is_clear() {
         action_stack(ui, |ui| {
@@ -892,12 +896,7 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             if selected.len() == 1 { "" } else { "s" }
         )
     });
-    object_title(
-        ui,
-        &format!("{total} selected"),
-        instances.as_deref(),
-        None,
-    );
+    object_title(ui, &format!("{total} selected"), instances.as_deref(), None);
 
     // The set's instances, one row each: a click picks that one out of the
     // set. The toolbar, the context menu and the keys act on the set itself.

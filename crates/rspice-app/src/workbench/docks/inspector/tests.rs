@@ -1224,7 +1224,12 @@ fn design_net_app() -> RSpiceApp {
         .find(|net| net.name.eq_ignore_ascii_case("out"))
         .expect("the inverter's output is labelled out");
     for wire in out.wire_ids {
-        app.state.schematic.session.editor.selection.select_wire(wire);
+        app.state
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(wire);
     }
     app
 }
@@ -1247,7 +1252,12 @@ fn design_multi_app() -> RSpiceApp {
         .last()
         .map(|wire| wire.id)
         .expect("the inverter is wired");
-    app.state.schematic.session.editor.selection.select_wire(stub);
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(stub);
     app
 }
 
@@ -1276,11 +1286,13 @@ MN out in 0 0 nch W=1u L=0.18u
         .iter()
         .zip(&solution.node_voltages)
         .skip(1)
-        .map(|(name, value)| rspice_results::operating_point::OperatingPointValue {
-            name: format!("V({name})"),
-            value: *value,
-            unit: "V".to_owned(),
-        })
+        .map(
+            |(name, value)| rspice_results::operating_point::OperatingPointValue {
+                name: format!("V({name})"),
+                value: *value,
+                unit: "V".to_owned(),
+            },
+        )
         .collect();
 
     let mut app = cmos_inverter_app();
@@ -1316,23 +1328,27 @@ MN out in 0 0 nch W=1u L=0.18u
         .start_prepared_run(receipt)
         .expect("the run starts")
         .add_analysis(
-            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::DcOp, "Operating point")
-                .with_provenance(
-                    crate::state::AnalysisResultProvenance::new_with_source_domain(
-                        crate::state::AnalysisResultSourceDomain::SimulationPlan,
-                        analysis_id,
-                        project_revision,
-                        crate::product::ContentDigest::from_bytes([0x44; 32]),
-                        Vec::new(),
-                    )
-                    .expect("valid prepared analysis provenance"),
+            crate::state::AnalysisResult::new(
+                1,
+                crate::state::AnalysisType::DcOp,
+                "Operating point",
+            )
+            .with_provenance(
+                crate::state::AnalysisResultProvenance::new_with_source_domain(
+                    crate::state::AnalysisResultSourceDomain::SimulationPlan,
+                    analysis_id,
+                    project_revision,
+                    crate::product::ContentDigest::from_bytes([0x44; 32]),
+                    Vec::new(),
                 )
-                .with_dc_op(rspice_results::operating_point::DcOpResult {
-                    node_voltages,
-                    branch_currents: Vec::new(),
-                    power_dissipation: Vec::new(),
-                })
-                .with_device_op(report),
+                .expect("valid prepared analysis provenance"),
+            )
+            .with_dc_op(rspice_results::operating_point::DcOpResult {
+                node_voltages,
+                branch_currents: Vec::new(),
+                power_dissipation: Vec::new(),
+            })
+            .with_device_op(report),
         );
     let generated = crate::simulation::netlist_gen::generate_netlist(&app.state.schematic);
     let point_to_net = generated

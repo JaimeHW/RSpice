@@ -989,7 +989,11 @@ const BJT_OP_SET: OpQuantitySet = &[
     ("gm", "gm", "S"),
     ("beta", "β", ""),
 ];
-const DIODE_OP_SET: OpQuantitySet = &[("id", "Id", "A"), ("vd", "Vd", "V"), ("power", "Power", "W")];
+const DIODE_OP_SET: OpQuantitySet = &[
+    ("id", "Id", "A"),
+    ("vd", "Vd", "V"),
+    ("power", "Power", "W"),
+];
 
 /// The designer set for a reported device family, or `None` for a family
 /// without one, whose currents, terminal voltages and power are shown as the
@@ -1052,10 +1056,7 @@ pub(super) fn operating_point_rows(
                 if let Some(first) = label.get_mut(..1) {
                     first.make_ascii_uppercase();
                 }
-                rows.push((
-                    label,
-                    fmt_si_significant(*value, unit, significant_digits),
-                ));
+                rows.push((label, fmt_si_significant(*value, unit, significant_digits)));
             }
         }
     }
@@ -1118,7 +1119,10 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
             ui,
             "Operating point",
             "stale, rerun",
-            &format!("Run {} solved an earlier version of this schematic.", run.id),
+            &format!(
+                "Run {} solved an earlier version of this schematic.",
+                run.id
+            ),
         );
     }
     let digits = usize::from(

@@ -503,12 +503,22 @@ fn the_net_panel_states_scope_and_pins_only() {
         .schematic
         .document_mut_for_test()
         .wires
-        .push(crate::state::Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
+        .push(crate::state::Wire::segment(
+            1,
+            Point::new(0, 0),
+            Point::new(40, 0),
+        ));
     app.state.sync_active_schematic_to_workspace();
     let nets = sheet_connectivity(&app.state).nets;
     let name = nets.first().expect("the wire is a net").name.clone();
     let painted = painted_panel(|ui| net_panel(ui, &mut app, &name, &nets));
-    for gone in ["Class", "Conductors", "Terminals\n", "Operating point", "Checks"] {
+    for gone in [
+        "Class",
+        "Conductors",
+        "Terminals\n",
+        "Operating point",
+        "Checks",
+    ] {
         assert!(!painted.contains(gone), "{gone}: {painted}");
     }
     assert!(painted.contains("No pins on this net."), "{painted}");
@@ -588,7 +598,10 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
     state.dialogs.drc_checked_version = state.schematic.topology_version();
 
     fn of_type(state: &AppState, violation_type: rspice_design::drc::DrcViolationType) -> usize {
-        current_findings(state, |violation| violation.violation_type == violation_type).len()
+        current_findings(state, |violation| {
+            violation.violation_type == violation_type
+        })
+        .len()
     }
     use rspice_design::drc::DrcViolationType::{FloatingNode, UnconnectedPin};
     assert_eq!(of_type(&state, UnconnectedPin), 1);
@@ -1365,8 +1378,8 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
 #[test]
 fn a_device_below_the_root_is_read_under_its_instance_path() {
     let mut state = AppState::default();
-    let component = Component::new(7, ComponentType::Nmos, Point::origin())
-        .with_name_value("MN", "nch");
+    let component =
+        Component::new(7, ComponentType::Nmos, Point::origin()).with_name_value("MN", "nch");
     assert_eq!(
         device_engine_name(&state, &component).as_deref(),
         Some("mn")
@@ -1535,7 +1548,13 @@ fn an_unbound_probe_states_its_missing_signal_as_a_problem() {
         "the unbound signal carries a warning"
     );
     let painted = painted_panel(|ui| probe_panel(ui, &mut app, 5));
-    for gone in ["PROBE-5", "Anchor", "Center marker", "Delete probe", "Show in results"] {
+    for gone in [
+        "PROBE-5",
+        "Anchor",
+        "Center marker",
+        "Delete probe",
+        "Show in results",
+    ] {
         assert!(!painted.contains(gone), "{gone}: {painted}");
     }
 }
@@ -2131,7 +2150,10 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
     assert_eq!(evidence.problem, None, "a current compile says nothing");
 
     let identity = painted_panel(|ui| identity_section(ui, &mut app, &component));
-    assert!(identity.lines().any(|line| line == "veriloga"), "{identity}");
+    assert!(
+        identity.lines().any(|line| line == "veriloga"),
+        "{identity}"
+    );
     assert!(!identity.contains("spice"), "{identity}");
     assert!(
         identity.lines().any(|line| line == "Open Verilog-A view")
@@ -2214,7 +2236,10 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
     );
     let painted = painted_panel(|ui| component_panel(ui, &mut app, id, &sheet));
     assert!(
-        painted.lines().next().is_some_and(|line| line.ends_with("/XAFE")),
+        painted
+            .lines()
+            .next()
+            .is_some_and(|line| line.ends_with("/XAFE")),
         "{painted}"
     );
 }
