@@ -3134,28 +3134,42 @@ impl Engine {
         } else {
             None
         };
-        // Generated instances take their previous accepted spans from the same
+        // Verilog-A instances take their previous accepted spans from the same
         // place the capacitor and inductor walks above take theirs: the step
         // geometry is the circuit's, not any one family's.
-        #[cfg(feature = "veriloga-builtins-base")]
-        let veriloga_limit = Self::veriloga_ngspice_truncation_limit(
-            circuit,
-            candidate_solution,
-            TruncationStep {
-                method,
-                trap_order,
-                dt,
-            },
-            mosfet_history.accepted_dt_prev,
-            mosfet_history.accepted_dt_prev_prev,
-            NgspiceTruncationTolerances {
-                reltol,
-                current_abstol,
-                charge_abstol,
-                trtol,
-            },
-        );
-        #[cfg(not(feature = "veriloga-builtins-base"))]
+        //
+        // The walk is asked exactly when the per-step limit asks it: on either
+        // route, and only for a deck that carries a Verilog-A instance. Which
+        // models a build compiles in must not reach a deck's answer. Gated on
+        // the generated catalog alone, a runtime or mixed instance's charges
+        // dropped out of the order-two trial whenever the build carried no
+        // generated model, so the deck stayed at first order; asked for a deck
+        // with no instance at all, the walk's chargeless bound sent the trial
+        // down the charge path instead of the voltage estimate, but only in a
+        // build that compiled the walk in.
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let veriloga_limit = if circuit.has_any_veriloga_devices() {
+            Self::veriloga_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                TruncationStep {
+                    method,
+                    trap_order,
+                    dt,
+                },
+                mosfet_history.accepted_dt_prev,
+                mosfet_history.accepted_dt_prev_prev,
+                NgspiceTruncationTolerances {
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                },
+            )
+        } else {
+            None
+        };
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
         let veriloga_limit: Option<Value> = None;
         Self::min_truncation_limit(
             Self::min_truncation_limit(

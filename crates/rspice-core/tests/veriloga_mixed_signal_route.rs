@@ -5806,12 +5806,21 @@ fn continuous_operators_read_a_discrete_step_at_its_left_limit() {
             );
         }
     }
-    // A first-order lag integrated from the edge lags the exact response and
-    // never leads it; read with the new value over the step into the edge,
-    // it led by 0.32.
+    // A first-order lag holds 0 up to the edge and then follows the step to
+    // the integration's own error. Over a step of `h`, the distance still to
+    // go shrinks by `1 / (1 + h/τ)` under backward Euler and by
+    // `(1 - h/2τ) / (1 + h/2τ)` under the trapezoidal rule — a little slower
+    // and a little faster than `exp(-h/τ)` — and every step after the edge is
+    // one or the other, so the response lies between the two products taken
+    // over the run's own steps from the edge. Read with the new value over the
+    // step into the edge, it stood at 0.32 there and led both. And once the
+    // edge is behind it the solver takes the lag to second order: a build
+    // that left the module's charge out of the order-two trial held it at
+    // backward Euler for the whole run.
+    const LAG: f64 = 2.0e-9;
     let lag = |time: f64| {
         if time > DISCRETE_EDGE {
-            1.0 - (-(time - DISCRETE_EDGE) / 2.0e-9).exp()
+            1.0 - (-(time - DISCRETE_EDGE) / LAG).exp()
         } else {
             0.0
         }
@@ -5826,13 +5835,31 @@ fn continuous_operators_read_a_discrete_step_at_its_left_limit() {
         let result = discrete_edge_run(name, body, "rout out 0 1k", 20.0e-9);
         let out = waveform(&result, "out");
         assert_eq!(at_discrete_edge(&result, &out), 0.0, "{name} at the edge");
-        for (time, value) in result.time.iter().zip(&out) {
+        let (mut euler, mut trapezoid) = (1.0_f64, 1.0_f64);
+        let mut second_order = false;
+        for (span, value) in result.time.windows(2).zip(&out[1..]) {
+            let time = span[1];
+            if time <= DISCRETE_EDGE {
+                assert_eq!(*value, 0.0, "{name}: V(out) at {time:e} s, before the edge");
+                continue;
+            }
+            let ratio = (span[1] - span[0]) / LAG;
+            euler /= 1.0 + ratio;
+            trapezoid *= (1.0 - ratio / 2.0) / (1.0 + ratio / 2.0);
+            let (low, high) = (1.0 - euler, 1.0 - trapezoid);
             assert!(
-                *value <= lag(*time) + 1e-12,
-                "{name}: V(out) at {time:e} s is {value}, ahead of the exact lag {}",
-                lag(*time)
+                low - 1e-12 <= *value && *value <= high + 1e-12,
+                "{name}: V(out) at {time:e} s is {value}, outside [{low}, {high}], the \
+                 backward-Euler and trapezoidal responses over the run's steps from the edge \
+                 (the exact lag is {})",
+                lag(time)
             );
+            second_order |= *value > low + 1e-6;
         }
+        assert!(
+            second_order,
+            "{name}: the lag stayed at backward Euler for the whole run"
+        );
     }
 }
 
