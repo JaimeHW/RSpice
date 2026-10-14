@@ -3220,19 +3220,17 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 let element = self.array_element(*array, *index, *signed)?;
                 let declaration = self.signal(array.base)?;
                 if declaration.kind.is_real() {
+                    // IEEE 1364-2005 section 5.2.2 makes an invalid index
+                    // (outside the bounds, or with an x or z bit) read x,
+                    // which a real cannot hold, and says no more. Read 0.0,
+                    // as IEEE 1800-2017 Table 7-1 and Icarus do; a write
+                    // through such an index changes nothing (below).
                     let value = match element {
                         Some(id) => self
                             .environment
                             .read_real_signal(id)
                             .ok_or(DigitalEvalError::SignalUnavailable(id))?,
-                        // Keep the existing checked real-array policy until the
-                        // language-level invalid-real contract is qualified.
-                        None => {
-                            return Err(DigitalEvalError::InvalidNumericConversion {
-                                value: *index,
-                                detail: "real array index is unknown, unrepresentable or outside the declared bounds",
-                            });
-                        }
+                        None => 0.0,
                     };
                     Ok(DigitalScalar::Real(value))
                 } else {

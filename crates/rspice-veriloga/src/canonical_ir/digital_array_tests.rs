@@ -605,13 +605,15 @@ fn digital_arrays_handle_invalid_addresses_without_aliasing() {
         for address in &addresses {
             let mut store = Store::new(&plan);
             store.bits[2] = address.clone();
+            store.reals[3] = 7.5;
             let outcome = start(&plan, &plan.processes[0], &mut store);
             if real {
-                assert!(matches!(
-                    outcome,
-                    Err(DigitalEvalError::InvalidNumericConversion { .. })
-                ));
-                assert!(store.writes.is_empty());
+                // A real element read through an invalid index is 0.0, and
+                // a write through one changes nothing (Icarus, IEEE 1800
+                // Table 7-1).
+                assert_eq!(outcome.unwrap(), DigitalProcessOutcome::Finished);
+                assert_eq!(store.reals[3], 0.0);
+                assert_eq!(store.writes, [id(3), id(2)]);
             } else {
                 assert_eq!(outcome.unwrap(), DigitalProcessOutcome::Finished);
                 assert_eq!(

@@ -1747,6 +1747,64 @@ fn unlanded_options_are_refused_as_not_supported_yet() {
     assert!(!text.contains("lane"), "{text}");
 }
 
+/// An unpacked real array read through an invalid index, out of bounds or
+/// with an `x` bit, is 0.0, and a blocking or nonblocking write through one
+/// changes nothing; an integral array's element reads `x` (IEEE 1364-2005
+/// section 5.2.2). Expected text is what Icarus Verilog 13.0 printed for the
+/// same source.
+#[test]
+fn a_real_array_reads_zero_through_an_invalid_index() {
+    let report = testbench(
+        &[(
+            "tb.v",
+            r#"module tb;
+  real r [1:3];
+  reg [7:0] v [1:3];
+  integer i, k;
+  reg [3:0] xi;
+  real q;
+  initial begin
+    for (i = 1; i <= 3; i = i + 1) begin
+      r[i] = i + 0.5;
+      v[i] = i;
+    end
+    xi = 4'bx01x;
+    k = 7;
+    q = r[0];      $display("r[0] = %f", q);
+    q = r[4];      $display("r[4] = %f", q);
+    q = r[k];      $display("r[k] = %f", q);
+    q = r[xi];     $display("r[xi] = %f", q);
+    q = r[-1];     $display("r[-1] = %f", q);
+    $display("v[0] = %b v[k] = %b v[xi] = %b", v[0], v[k], v[xi]);
+    $display("sum = %f", r[k] + 1.0);
+    r[0] = 9.0;
+    r[k] = 9.0;
+    r[xi] = 9.0;
+    r[4] <= 9.0;
+    v[xi] = 8'hff;
+    #1;
+    $display("r = %f %f %f", r[1], r[2], r[3]);
+    $display("v = %h %h %h", v[1], v[2], v[3]);
+  end
+endmodule
+"#,
+        )],
+        &HdlTestbenchOptions::default(),
+    );
+    assert_eq!(
+        stdout(&report),
+        "r[0] = 0.000000\n\
+         r[4] = 0.000000\n\
+         r[k] = 0.000000\n\
+         r[xi] = 0.000000\n\
+         r[-1] = 0.000000\n\
+         v[0] = xxxxxxxx v[k] = xxxxxxxx v[xi] = xxxxxxxx\n\
+         sum = 1.000000\n\
+         r = 1.500000 2.500000 3.500000\n\
+         v = 01 02 03\n"
+    );
+}
+
 /// Indexed part-selects (IEEE 1364-2005 section 5.2.1) read and write at a
 /// run-time base on descending, ascending and offset vectors, array elements
 /// and a function result, with out-of-range bits reading `x` and left
