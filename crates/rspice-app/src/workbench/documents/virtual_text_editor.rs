@@ -320,6 +320,27 @@ pub(crate) fn show_virtual_text_editor(
                     session.drag_anchor = None;
                     session.column_drag = false;
                 }
+                // A right-click (or a long press) opens the context menu on
+                // what it points at: outside the selection it first moves the
+                // caret there, inside it keeps the selection the menu acts on.
+                if (response.secondary_clicked() || response.long_touched())
+                    && let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
+                {
+                    let (line, column) =
+                        hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                    let index = session.model.char_at_line_column(line, column);
+                    let inside_selection = session.model.selections().iter().any(|selection| {
+                        let range = selection.range();
+                        range.start < range.end && range.start <= index && index <= range.end
+                    });
+                    if !inside_selection {
+                        session
+                            .model
+                            .set_selections(vec![TextSelection::caret(index)]);
+                        session.preferred_column = None;
+                    }
+                    response.request_focus();
+                }
 
                 let events = if response.has_focus() {
                     ui.input(|input| input.events.clone())

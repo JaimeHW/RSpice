@@ -858,6 +858,14 @@ impl Command {
             | Self::UnfoldAtCaret
             | Self::FoldAll
             | Self::UnfoldAll => false,
+            Self::GoToDefinition | Self::FindReferences => state
+                .ui
+                .active_source_editor
+                .is_some_and(|editor| editor.navigable),
+            Self::RenameSymbol => state
+                .ui
+                .active_source_editor
+                .is_some_and(|editor| editor.navigable && editor.editable),
             // This gate was written for the compile command and never
             // attached, so the button stayed enabled with no bundle, no
             // selected source, an empty root, a compile already running, or a
@@ -1981,6 +1989,12 @@ impl Command {
             | Self::UnfoldAtCaret
             | Self::FoldAll
             | Self::UnfoldAll => {}
+            Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol => {
+                if let Err(error) = crate::workbench::app::navigate_active_source(app, self) {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+                }
+            }
             Self::CompareGeneratedRevisions => {
                 app.state.ui.netlist.comparison_dialog.open = true;
                 app.state

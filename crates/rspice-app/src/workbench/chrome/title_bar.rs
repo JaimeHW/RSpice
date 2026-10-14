@@ -1379,6 +1379,9 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::FormatDocument => WorkbenchIcon::Format,
         Command::FoldSelection | Command::FoldAll => WorkbenchIcon::ChevronRight,
         Command::UnfoldAtCaret | Command::UnfoldAll => WorkbenchIcon::ChevronDown,
+        Command::GoToDefinition => WorkbenchIcon::ArrowRight,
+        Command::FindReferences => WorkbenchIcon::Search,
+        Command::RenameSymbol => WorkbenchIcon::Label,
         _ => WorkbenchIcon::File,
     }
 }
@@ -1391,6 +1394,50 @@ fn menu_separator(ui: &mut Ui) {
         rect.top() + 4.5,
         egui::Stroke::new(1.0, t.color.border),
     );
+}
+
+/// The source editor's right-click menu, drawn with the menu bar's own rows
+/// and separators so its row height, text edge and rules match the menus
+/// above it. A long press opens it on touch.
+///
+/// The language group shows only where the document's language service can
+/// answer it; mutating rows are disabled on a read-only source.
+pub(in crate::workbench) fn source_editor_context_menu(response: &Response, app: &mut RSpiceApp) {
+    let ctx = response.ctx.clone();
+    let large_targets = ctx.content_rect().width() <= 820.0
+        || Tokens::get(&ctx).metrics.ctl_h >= MENU_TOUCH_ROW_HEIGHT;
+    let popup_id = Popup::default_response_id(response);
+    Popup::context_menu(response).show(|ui| {
+        configure_menu_popup(ui, large_targets);
+        ui.ctx().accesskit_node_builder(popup_id, |node| {
+            node.set_role(egui::accesskit::Role::Menu);
+            node.set_label("Source editor menu");
+        });
+        begin_menu_render(ui.ctx(), popup_id);
+        let navigation = [
+            Command::GoToDefinition,
+            Command::FindReferences,
+            Command::RenameSymbol,
+        ];
+        if navigation
+            .iter()
+            .any(|command| command.availability(app) != CommandAvailability::Hidden)
+        {
+            for command in navigation {
+                command_item(ui, app, command);
+            }
+            menu_separator(ui);
+        }
+        for command in [Command::Cut, Command::Copy, Command::Paste] {
+            command_item(ui, app, command);
+        }
+        menu_separator(ui);
+        for command in [Command::ToggleLineComment, Command::FormatDocument] {
+            command_item(ui, app, command);
+        }
+        let render_state = finish_menu_render(ui.ctx());
+        handle_popup_keyboard(ui.ctx(), popup_id, response, &render_state.rows);
+    });
 }
 
 fn shortcut_for_occurrence(

@@ -98,8 +98,9 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
     }
 }
 
-/// Render the editor and diagnostics strip.
-pub fn show(ui: &mut Ui, state: &mut AppState) {
+/// Render the editor and diagnostics strip. Returns the source well, for its
+/// right-click menu.
+pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let editable = super::active_netlist_source_is_editable(state);
@@ -324,7 +325,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     } else if let Some(symbol) = hover_symbol
         && let Some(hover) = super::language::symbol_hover(state, &symbol)
     {
-        editor_response.on_hover_ui_at_pointer(|ui| {
+        editor_response.clone().on_hover_ui_at_pointer(|ui| {
             ui.set_max_width(360.0);
             ui.label(egui::RichText::new(hover.title).strong());
             ui.label(hover.detail);
@@ -332,6 +333,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     } else if let Some(hover) = hover_value.as_ref() {
         show_value_hover(&editor_response, hover);
     }
+    editor_response
 }
 
 /// One mono line reading `token = value`, with the provenance or the reason

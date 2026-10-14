@@ -259,12 +259,15 @@ fn diagnostic_line(diagnostic: &CodeEditorDiagnostic) -> Option<usize> {
     })
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct CodeDocumentInteraction {
     pub changed: bool,
     pub cursor_char_index: usize,
     pub selected_char_range: Option<(usize, usize)>,
     pub breakpoint_toggled: Option<usize>,
+    /// The source well, for its right-click menu. An empty document is a
+    /// plain text field with nothing to act on, and has none.
+    pub response: Option<egui::Response>,
 }
 
 pub fn show_code_document_interaction_versioned(
@@ -430,12 +433,12 @@ fn show_code_document_impl(
                     })
             },
         );
-        let _ = output.response;
         return CodeDocumentInteraction {
             changed: output.changed,
             cursor_char_index: output.cursor_char_index,
             selected_char_range: output.selected_char_range,
             breakpoint_toggled: output.breakpoint_toggled,
+            response: Some(output.response),
         };
     }
     let standard_changed = consume_standard_command(ui, editor_id, source, editable);
@@ -592,6 +595,7 @@ fn show_code_document_impl(
         cursor_char_index,
         selected_char_range,
         breakpoint_toggled,
+        response: None,
     }
 }
 

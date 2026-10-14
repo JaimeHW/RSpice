@@ -104,6 +104,118 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
     code_workspace::open_language_tools_in_bundle(app, language, bundle_id, &logical_path, caret)
 }
 
+/// Go to definition, Find references and Rename symbol from the caret of the
+/// source editor on screen.
+///
+/// A netlist answers through its own language service. Verilog-A and
+/// Automation answer through the project source index: Go to definition
+/// moves the caret straight to the definition, opening its file when it lives
+/// in another file of the bundle; Find references and Rename open this
+/// dialog's References view, which lists the references and carries the
+/// rename transaction.
+pub(crate) fn navigate_active_source(
+    app: &mut RSpiceApp,
+    command: crate::workbench::commands::vocabulary::Command,
+) -> Result<(), String> {
+    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::documents::netlist_document::language as netlist;
+
+    let Some(language) = code_workspace::active_source_language(
+        app.state.workbench.workspace,
+        &app.state.workspace,
+        app.state.ui.code_workspace.page,
+    ) else {
+        let message = match command {
+            Command::GoToDefinition => Some(netlist::go_to_definition_at_cursor(&mut app.state)?),
+            Command::FindReferences => Some(netlist::find_references_at_cursor(&mut app.state)?),
+            Command::RenameSymbol => {
+                netlist::begin_rename_at_cursor(&mut app.state)?;
+                None
+            }
+            _ => None,
+        };
+        if let Some(message) = message {
+            app.state.push_user_message(ConsoleMessage::info(message));
+        }
+        return Ok(());
+    };
+    let bundle_id = code_workspace::active_source_bundle(&app.state.workspace, language)
+        .map(crate::state::ProjectSourceBundle::id)
+        .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
+    let logical_path = code_workspace::active_bundle_path(
+        &app.state.workspace,
+        &app.state.ui.code_workspace,
+        language,
+    )
+    .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
+    let caret = app
+        .state
+        .ui
+        .code_workspace
+        .source_carets
+        .get(&(bundle_id, logical_path.clone()))
+        .copied()
+        .unwrap_or(0);
+    // The dialog's own state, built from the exact closure on screen. Go to
+    // definition borrows it for the answer and leaves an open dialog as it
+    // found it.
+    let previous = app.state.ui.code_workspace.language_tools.take();
+    if let Err(error) =
+        code_workspace::open_language_tools_in_bundle(app, language, bundle_id, &logical_path, caret)
+    {
+        app.state.ui.code_workspace.language_tools = previous;
+        return Err(error);
+    }
+    if command != Command::GoToDefinition {
+        if let Some(tools) = app.state.ui.code_workspace.language_tools.as_mut() {
+            tools.view = LanguageToolView::References;
+        }
+        return Ok(());
+    }
+    let tools = std::mem::replace(&mut app.state.ui.code_workspace.language_tools, previous)
+        .ok_or_else(|| "The source index could not be built.".to_owned())?;
+    if tools.query.is_empty() {
+        return Err("Place the caret on a name to go to its definition.".to_owned());
+    }
+    let definitions = tools.index.definitions(&tools.query);
+    // A definition in the file on screen wins; otherwise the bundle's first.
+    let definition = definitions
+        .iter()
+        .find(|symbol| {
+            crate::state::project_source_paths_equal(&symbol.logical_path, &logical_path)
+        })
+        .or_else(|| definitions.first())
+        .ok_or_else(|| {
+            format!(
+                "No definition of {} exists in this source bundle.",
+                tools.query
+            )
+        })?;
+    if !crate::state::project_source_paths_equal(&definition.logical_path, &logical_path) {
+        match language {
+            crate::state::ProjectSourceLanguage::VerilogA => {
+                app.state.ui.code_workspace.veriloga.selected_file =
+                    Some(code_workspace::VerilogAFileSelection {
+                        bundle_id,
+                        logical_path: definition.logical_path.clone(),
+                    });
+            }
+            crate::state::ProjectSourceLanguage::RSpiceAutomation => {
+                app.state.ui.code_workspace.automation.selected_file =
+                    Some(definition.logical_path.clone());
+            }
+        }
+    }
+    // The page hands this to the editor it draws next, which is the
+    // definition's file.
+    app.state.ui.source_editor_request = Some(
+        crate::workbench::documents::text_editor_commands::SourceEditorRequest::RevealLine(
+            definition.line,
+        ),
+    );
+    Ok(())
+}
+
 pub(crate) fn language_tools_are_available(state: &AppState) -> bool {
     code_workspace::active_source_language(
         state.workbench.workspace,

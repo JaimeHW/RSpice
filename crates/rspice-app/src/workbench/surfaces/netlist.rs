@@ -174,9 +174,12 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                         crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
                             &app.state,
                         ),
+                    navigable: true,
                 },
             );
-            crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
+            let response =
+                crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
+            crate::workbench::chrome::title_bar::source_editor_context_menu(&response, app);
         }
     });
     search::find_replace_window(ui.ctx(), app);

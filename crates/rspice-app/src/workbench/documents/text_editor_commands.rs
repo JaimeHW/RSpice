@@ -227,6 +227,9 @@ pub(crate) fn take_queued_standard_command(
 pub(crate) struct ActiveSourceEditor {
     pub id: Id,
     pub editable: bool,
+    /// Its language service answers go to definition, find references and
+    /// rename for this document.
+    pub navigable: bool,
 }
 
 /// What the application asks of the active source editor. Each one is

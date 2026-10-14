@@ -319,3 +319,217 @@ fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
         );
     }
 }
+
+/// A module whose last statement continues onto a line that starts with a
+/// use of the parameter `g`, so a press anywhere left of the code on that
+/// line puts the caret on it.
+const NAVIGABLE_MODULE: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real g = 1m;\n  analog I(p, n) <+\ng * V(p, n);\nendmodule\n";
+
+/// The editor's top-left corner, as a screen reader is told it.
+fn editor_origin(output: &egui::FullOutput) -> egui::Pos2 {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .and_then(|update| {
+            update.nodes.iter().find(|(_, node)| {
+                node.value() == Some("Verilog-A source editor")
+                    || node.label() == Some("Verilog-A source editor")
+            })
+        })
+        .and_then(|(_, node)| node.bounds())
+        .map(|bounds| egui::pos2(bounds.x0 as f32, bounds.y0 as f32))
+        .expect("the Verilog-A source editor is on screen")
+}
+
+/// Where the gutter of the one-based `line` is: a press there lands on the
+/// line's first column.
+fn gutter_of_line(origin: egui::Pos2, line: usize) -> egui::Pos2 {
+    // The code document's top padding and line height.
+    egui::pos2(origin.x + 6.0, origin.y + 8.0 + 17.05 * (line as f32 - 0.5))
+}
+
+fn menu_item(output: &egui::FullOutput, label: &str) -> Option<(egui::Rect, bool)> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()?
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.role() == egui::accesskit::Role::MenuItem && node.label() == Some(label)
+        })
+        .and_then(|(_, node)| {
+            node.bounds().map(|bounds| {
+                (
+                    egui::Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                    ),
+                    !node.is_disabled(),
+                )
+            })
+        })
+}
+
+fn press(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    at: egui::Pos2,
+    button: egui::PointerButton,
+) -> egui::FullOutput {
+    frame_with(ctx, app, vec![egui::Event::PointerMoved(at)]);
+    let mut output = None;
+    for pressed in [true, false] {
+        output = Some(frame_with(
+            ctx,
+            app,
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        ));
+    }
+    output.expect("a frame")
+}
+
+/// Right-click the gutter of the Verilog-A source's one-based `line` and let
+/// the menu settle.
+fn right_click_line(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    line: usize,
+) -> egui::FullOutput {
+    let origin = editor_origin(&frame(ctx, app, DESKTOP));
+    press(
+        ctx,
+        app,
+        gutter_of_line(origin, line),
+        egui::PointerButton::Secondary,
+    );
+    let mut output = frame(ctx, app, DESKTOP);
+    for _ in 0..4 {
+        output = frame(ctx, app, DESKTOP);
+    }
+    output
+}
+
+const CONTEXT_MENU: [&str; 8] = [
+    "Go to definition",
+    "Find references",
+    "Rename symbol…",
+    "Cut selection",
+    "Copy selection",
+    "Paste",
+    "Toggle line comment",
+    "Format document",
+];
+
+#[test]
+fn right_click_opens_the_source_menu_and_toggle_line_comment_acts_on_the_clicked_line() {
+    let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
+    let original = root_text(&app, bundle_id);
+    let second_line = original.lines().nth(1).expect("a second line").to_owned();
+
+    let output = right_click_line(&ctx, &mut app, 2);
+    let rows = CONTEXT_MENU.map(|label| {
+        menu_item(&output, label).unwrap_or_else(|| panic!("the menu offers {label}"))
+    });
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[0].0.center().y < pair[1].0.center().y),
+        "the menu lists its rows in order"
+    );
+    assert!(
+        rows.iter().all(|(_, enabled)| *enabled),
+        "every row is live on an editable source"
+    );
+
+    press(
+        &ctx,
+        &mut app,
+        rows[6].0.center(),
+        egui::PointerButton::Primary,
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(
+        root_text(&app, bundle_id),
+        original.replacen(&second_line, &format!("// {second_line}"), 1),
+        "Toggle line comment commented the line the menu was opened on"
+    );
+}
+
+#[test]
+fn on_a_read_only_source_the_menu_disables_cut_and_paste() {
+    let (ctx, mut app, _) = veriloga_with_focused_editor();
+    app.state.workbench.safe_mode.activate(
+        crate::workbench::state::LocalSafeModeOptions {
+            open_project_read_only: true,
+            ..crate::workbench::state::LocalSafeModeOptions::default()
+        },
+        String::new(),
+    );
+    let output = right_click_line(&ctx, &mut app, 2);
+    let enabled = |label| {
+        menu_item(&output, label)
+            .unwrap_or_else(|| panic!("the menu offers {label}"))
+            .1
+    };
+    assert!(!enabled("Cut selection"));
+    assert!(!enabled("Paste"));
+    assert!(!enabled("Toggle line comment"));
+    assert!(!enabled("Rename symbol…"));
+    assert!(enabled("Copy selection"), "reading stays possible");
+    assert!(enabled("Go to definition"));
+}
+
+#[test]
+fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
+    let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
+    app.state
+        .workspace
+        .content
+        .replace_project_source_bundle_file(bundle_id, "model.va", NAVIGABLE_MODULE.to_owned())
+        .expect("the module is replaced");
+    frame(&ctx, &mut app, DESKTOP);
+
+    let output = right_click_line(&ctx, &mut app, 6);
+    let caret = |app: &RSpiceApp| {
+        app.state
+            .ui
+            .code_workspace
+            .source_carets
+            .get(&(bundle_id, "model.va".to_owned()))
+            .copied()
+    };
+    let line_start = |line: usize| {
+        NAVIGABLE_MODULE
+            .split_inclusive('\n')
+            .take(line - 1)
+            .map(|text| text.chars().count())
+            .sum::<usize>()
+    };
+    assert_eq!(
+        caret(&app),
+        Some(line_start(6)),
+        "the right-click put the caret on the use of g"
+    );
+    let (row, enabled) = menu_item(&output, "Go to definition").expect("Go to definition");
+    assert!(enabled);
+    press(&ctx, &mut app, row.center(), egui::PointerButton::Primary);
+    for _ in 0..3 {
+        frame(&ctx, &mut app, DESKTOP);
+    }
+    assert_eq!(
+        caret(&app),
+        Some(line_start(4)),
+        "the caret moved to the parameter's definition"
+    );
+    assert!(
+        app.state.ui.code_workspace.language_tools.is_none(),
+        "Go to definition jumps rather than opening the tools dialog"
+    );
+}

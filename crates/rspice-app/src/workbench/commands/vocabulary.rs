@@ -242,6 +242,11 @@ pub enum Command {
     UnfoldAtCaret,
     FoldAll,
     UnfoldAll,
+    /// Language navigation from the caret of the active source editor, for
+    /// languages whose language service answers it.
+    GoToDefinition,
+    FindReferences,
+    RenameSymbol,
     CompareGeneratedRevisions,
     ClearResults,
     ToggleLinkedCursors,
@@ -754,6 +759,9 @@ impl Command {
             Self::UnfoldAtCaret => spec("unfold-at-caret", "Unfold at caret", "View"),
             Self::FoldAll => spec("fold-all", "Fold all", "View"),
             Self::UnfoldAll => spec("unfold-all", "Unfold all", "View"),
+            Self::GoToDefinition => spec("go-to-definition", "Go to definition", "Code"),
+            Self::FindReferences => spec("find-references", "Find references", "Code"),
+            Self::RenameSymbol => spec("rename-symbol", "Rename symbol\u{2026}", "Code"),
             Self::CompareGeneratedRevisions => spec(
                 "compare-generated-revisions",
                 "Compare generated revisions",
@@ -1333,6 +1341,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::UnfoldAtCaret,
     Command::FoldAll,
     Command::UnfoldAll,
+    Command::GoToDefinition,
+    Command::FindReferences,
+    Command::RenameSymbol,
     Command::CompareGeneratedRevisions,
     Command::ExportWaveformsCsv,
     Command::ClearResults,

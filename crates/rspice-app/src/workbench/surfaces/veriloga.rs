@@ -251,6 +251,10 @@ fn source_editor(
         crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
             id: editor_id,
             editable: writable,
+            // The build profile beside the module is TOML, which the
+            // language service does not index, and a built-in header is
+            // not part of the bundle it indexes.
+            navigable: editable && editor_language == CodeEditorLanguage::VerilogA,
         },
     );
     let interaction = egui::Frame::new()
@@ -292,6 +296,11 @@ fn source_editor(
             interaction
         })
         .inner;
+    // A built-in header keeps the menu for reading: its writes are disabled
+    // and its language group hidden through the editor published above.
+    if let Some(response) = interaction.response.as_ref() {
+        crate::workbench::chrome::title_bar::source_editor_context_menu(response, app);
+    }
     if !editable {
         return;
     }

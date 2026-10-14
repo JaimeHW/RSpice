@@ -706,6 +706,12 @@ fn code_pane(
         crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
             id: editor_id,
             editable,
+            // The project index navigates Python and the Automation script;
+            // run plans and manifests are data.
+            navigable: matches!(
+                language,
+                CodeEditorLanguage::Python | CodeEditorLanguage::Automation
+            ),
         },
     );
     let interaction = egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
@@ -815,6 +821,9 @@ fn code_pane(
             .code_workspace
             .source_selections
             .remove(&selection_key);
+    }
+    if let Some(response) = interaction.response.as_ref() {
+        crate::workbench::chrome::title_bar::source_editor_context_menu(response, app);
     }
     if crate::workbench::documents::text_editor_commands::take_format_document_request(
         ui, editor_id,

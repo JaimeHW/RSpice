@@ -333,6 +333,21 @@ const UNFOLD_AT_CARET: &[ShortcutBinding] = &[primary(
     chord(Key::CloseBracket, true, false, true, "Ctrl+Shift+]"),
     ALL,
 )];
+// F12 opens a browser's developer tools, so definition and references are
+// desktop keys. F2 is Rename selection on a schematic and Rename symbol in
+// a focused source editor; as with Ctrl+D the focused surface decides.
+const GO_TO_DEFINITION: &[ShortcutBinding] = &[primary(
+    chord(Key::F12, false, false, false, "F12"),
+    DESKTOP,
+)];
+const FIND_REFERENCES: &[ShortcutBinding] = &[primary(
+    chord(Key::F12, false, false, true, "Shift+F12"),
+    DESKTOP,
+)];
+const RENAME_SYMBOL: &[ShortcutBinding] = &[primary(
+    chord(Key::F2, false, false, false, "F2"),
+    DESKTOP_BROWSER,
+)];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
 const ZOOM_IN: &[ShortcutBinding] = &[
@@ -820,7 +835,10 @@ impl Command {
             | Self::FoldSelection
             | Self::UnfoldAtCaret
             | Self::FoldAll
-            | Self::UnfoldAll => ShortcutContext::SourceEditor,
+            | Self::UnfoldAll
+            | Self::GoToDefinition
+            | Self::FindReferences
+            | Self::RenameSymbol => ShortcutContext::SourceEditor,
             _ => ShortcutContext::Global,
         }
     }
@@ -829,6 +847,15 @@ impl Command {
     /// reader. Elsewhere it is hidden rather than offered disabled.
     pub(crate) const fn source_editor_only(self) -> bool {
         matches!(self.shortcut_context(), ShortcutContext::SourceEditor)
+    }
+
+    /// The language-service group: offered only where the document's
+    /// language service can answer it.
+    pub(crate) const fn navigates_source_language(self) -> bool {
+        matches!(
+            self,
+            Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol
+        )
     }
 
     pub const fn shortcut_bindings(self) -> &'static [ShortcutBinding] {
@@ -961,6 +988,9 @@ impl Command {
             Self::GoToLine => GO_TO_LINE,
             Self::FoldSelection => FOLD_SELECTION,
             Self::UnfoldAtCaret => UNFOLD_AT_CARET,
+            Self::GoToDefinition => GO_TO_DEFINITION,
+            Self::FindReferences => FIND_REFERENCES,
+            Self::RenameSymbol => RENAME_SYMBOL,
             _ => NONE,
         }
     }
@@ -992,7 +1022,11 @@ impl Command {
                 "finish or cancel the active application dialog before changing window ownership",
             );
         }
-        if self.source_editor_only() && app.state.ui.active_source_editor.is_none() {
+        if self.source_editor_only()
+            && app.state.ui.active_source_editor.is_none_or(|editor| {
+                self.navigates_source_language() && !editor.navigable
+            })
+        {
             return CommandAvailability::Hidden;
         }
         if self.is_enabled(app) {
@@ -1478,13 +1512,21 @@ mod tests {
         }
     }
 
+    /// F2 renames whatever the focused surface holds: the schematic selection
+    /// on a canvas, the symbol under the caret in a source editor. The two
+    /// owners live in contexts that can never be active together.
     #[test]
     fn rename_shortcut_is_unambiguous_and_desktop_browser_only() {
         for platform in [CommandPlatform::Desktop, CommandPlatform::Browser] {
             assert_eq!(
                 binding_owners(RENAME_SELECTION[0].chord, platform),
-                vec![Command::RenameSelection]
+                vec![Command::RenameSelection, Command::RenameSymbol]
             );
+            assert!(!crate::workbench::shortcuts::shortcut_contexts_overlap(
+                Command::RenameSelection.shortcut_context(),
+                Command::RenameSymbol.shortcut_context(),
+            ));
+            assert_eq!(Command::RenameSymbol.default_shortcut_label(platform), "F2");
             assert_eq!(
                 Command::RenameSelection.default_shortcut_label(platform),
                 "F2"

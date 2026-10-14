@@ -163,7 +163,7 @@ pub(crate) use dialogs::source_document::{
 };
 
 pub(crate) use dialogs::source_language_tools::{
-    language_tools_are_available, open_active_language_tools,
+    language_tools_are_available, navigate_active_source, open_active_language_tools,
 };
 
 pub(crate) use dialogs::veriloga_build_settings::{
