@@ -88,11 +88,12 @@ fn render_every_verify_page() {
             let mut app = fixture();
             app.state.workbench.activate(Workspace::Verify);
             app.state.workbench.verification_page = page;
-            let canvas = crate::ui::raster::render(vec2(PAGE_WIDTH, PAGE_HEIGHT), |ui, background| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(background))
-                    .show(ui, |ui| super::show(ui, &mut app));
-            });
+            let canvas =
+                crate::ui::raster::render(vec2(PAGE_WIDTH, PAGE_HEIGHT), |ui, background| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE.fill(background))
+                        .show(ui, |ui| super::show(ui, &mut app));
+                });
             let height = canvas.content_height().max(1);
             let path = directory.join(format!("verify-{page:?}-{state}.png").to_lowercase());
             std::fs::write(&path, canvas.png(height)).expect("write page render");

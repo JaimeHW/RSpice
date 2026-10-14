@@ -169,7 +169,8 @@ fn verify_corners() -> RSpiceApp {
 type ReviewPanel = (&'static str, fn() -> RSpiceApp);
 
 fn review_directory() -> std::path::PathBuf {
-    std::env::var("RSPICE_RASTER_DIR").map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from)
+    std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from)
 }
 
 /// The Simulate and Verify inspectors as PNGs, with their measured geometry
@@ -180,7 +181,10 @@ fn render_the_simulate_and_verify_inspectors_for_review() {
     let directory = review_directory();
     let panels: [ReviewPanel; 7] = [
         ("simulate-inspector-last-run-ok", simulate_last_run_ok),
-        ("simulate-inspector-last-run-failed", simulate_last_run_failed),
+        (
+            "simulate-inspector-last-run-failed",
+            simulate_last_run_failed,
+        ),
         ("simulate-inspector-never-run", simulate_app),
         ("verify-inspector-yield-mc", verify_monte_carlo),
         ("verify-inspector-yield-empty", verify_yield_empty),
