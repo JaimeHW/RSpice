@@ -369,96 +369,91 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                     action = Some(NetlistToolbarAction::RelinkDependency);
                 }
             } else {
-            match active {
-                ActiveNetlistDocument::Generated => {
-                    let source_exists = app.state.workspace.content.netlist_source.is_some();
-                    let (label, full_label, candidate) = if source_exists {
-                        (
-                            messages.text(MessageId::NetlistOpenEditableCompact),
-                            messages.text(MessageId::NetlistOpenEditable),
-                            NetlistToolbarAction::OpenOwned,
-                        )
-                    } else if generated_ready {
-                        (
-                            messages.text(MessageId::NetlistCreateEditableCompact),
-                            messages.text(MessageId::NetlistCreateEditable),
-                            NetlistToolbarAction::OpenOwnershipDialog(
-                                crate::state::OwnedNetlistEditStrategy::OwnedSource,
-                            ),
-                        )
-                    } else {
-                        (
-                            messages.text(MessageId::CodeSourceCreateTitle),
-                            messages.text(MessageId::CodeSourceCreateTitle),
-                            NetlistToolbarAction::BeginFirstTopDeck,
-                        )
-                    };
-                    let primary_ready = source_exists
-                        || generated_ready
-                        || app.state.project_lifecycle.is_open();
-                    let primary = ui
-                        .add_enabled_ui(primary_ready, |ui| {
-                            ui.add_sized(
-                                [PHONE_PRIMARY_WIDTH, 28.0],
-                                egui::Button::new(&label).truncate(),
+                match active {
+                    ActiveNetlistDocument::Generated => {
+                        let source_exists = app.state.workspace.content.netlist_source.is_some();
+                        let (label, full_label, candidate) = if source_exists {
+                            (
+                                messages.text(MessageId::NetlistOpenEditableCompact),
+                                messages.text(MessageId::NetlistOpenEditable),
+                                NetlistToolbarAction::OpenOwned,
                             )
-                        })
-                        .inner
-                        .on_hover_text(full_label)
-                        .on_disabled_hover_text(generation_block_reason(&app.state));
-                    if primary.clicked()
-                    {
-                        action = Some(candidate);
+                        } else if generated_ready {
+                            (
+                                messages.text(MessageId::NetlistCreateEditableCompact),
+                                messages.text(MessageId::NetlistCreateEditable),
+                                NetlistToolbarAction::OpenOwnershipDialog(
+                                    crate::state::OwnedNetlistEditStrategy::OwnedSource,
+                                ),
+                            )
+                        } else {
+                            (
+                                messages.text(MessageId::CodeSourceCreateTitle),
+                                messages.text(MessageId::CodeSourceCreateTitle),
+                                NetlistToolbarAction::BeginFirstTopDeck,
+                            )
+                        };
+                        let primary_ready = source_exists
+                            || generated_ready
+                            || app.state.project_lifecycle.is_open();
+                        let primary = ui
+                            .add_enabled_ui(primary_ready, |ui| {
+                                ui.add_sized(
+                                    [PHONE_PRIMARY_WIDTH, 28.0],
+                                    egui::Button::new(&label).truncate(),
+                                )
+                            })
+                            .inner
+                            .on_hover_text(full_label)
+                            .on_disabled_hover_text(generation_block_reason(&app.state));
+                        if primary.clicked() {
+                            action = Some(candidate);
+                        }
                     }
-                }
-                ActiveNetlistDocument::OwnedSource => {
-                    let save_ready = owned_source_save_ready(app);
-                    let save = ui
-                        .add_enabled_ui(save_ready, |ui| {
-                            ui.add_sized(
+                    ActiveNetlistDocument::OwnedSource => {
+                        let save_ready = owned_source_save_ready(app);
+                        let save = ui
+                            .add_enabled_ui(save_ready, |ui| {
+                                ui.add_sized(
+                                    [PHONE_PRIMARY_WIDTH, 28.0],
+                                    egui::Button::new(save_source_label.as_str()).truncate(),
+                                )
+                            })
+                            .inner
+                            .on_disabled_hover_text(
+                                messages.text(MessageId::NetlistValidateBeforeSave),
+                            );
+                        if save.clicked() {
+                            action = Some(NetlistToolbarAction::Save);
+                        }
+                    }
+                    ActiveNetlistDocument::GeneratedDiff => {
+                        if ui
+                            .add_sized(
                                 [PHONE_PRIMARY_WIDTH, 28.0],
                                 egui::Button::new(
-                                    save_source_label.as_str(),
+                                    messages.text(MessageId::NetlistReturnGeneratedPrimary),
                                 )
                                 .truncate(),
                             )
-                        })
-                        .inner
-                        .on_disabled_hover_text(
-                            messages.text(MessageId::NetlistValidateBeforeSave),
-                        );
-                    if save.clicked()
-                    {
-                        action = Some(NetlistToolbarAction::Save);
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::CloseComparison);
+                        }
                     }
-                }
-                ActiveNetlistDocument::GeneratedDiff => {
-                    if ui
-                        .add_sized(
-                            [PHONE_PRIMARY_WIDTH, 28.0],
-                            egui::Button::new(
-                                messages.text(MessageId::NetlistReturnGeneratedPrimary),
+                    ActiveNetlistDocument::RunSnapshot => {
+                        if ui
+                            .add_sized(
+                                [PHONE_PRIMARY_WIDTH, 28.0],
+                                egui::Button::new(messages.text(MessageId::NetlistReturnPrimary))
+                                    .truncate(),
                             )
-                            .truncate(),
-                        )
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::CloseComparison);
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::CloseRunSnapshot);
+                        }
                     }
                 }
-                ActiveNetlistDocument::RunSnapshot => {
-                    if ui
-                        .add_sized(
-                            [PHONE_PRIMARY_WIDTH, 28.0],
-                            egui::Button::new(messages.text(MessageId::NetlistReturnPrimary))
-                                .truncate(),
-                        )
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::CloseRunSnapshot);
-                    }
-                }
-            }
             }
             if let Some(run) = run_control(ui, app, messages) {
                 action = Some(run);
@@ -520,111 +515,108 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                     action = Some(NetlistToolbarAction::CopyDependency);
                 }
             } else {
-            match active {
-                ActiveNetlistDocument::Generated => {
-                    let mut override_clicked = false;
-                    if !compact && app.state.workspace.content.netlist_source.is_none() {
-                        ui.add_enabled_ui(generated_ready, |ui| {
-                            override_clicked = icon_button(
-                                ui,
-                                WorkbenchIcon::More,
-                                "Create a narrow generated-source override",
-                                false,
-                                vec2(28.0, 28.0),
+                match active {
+                    ActiveNetlistDocument::Generated => {
+                        let mut override_clicked = false;
+                        if !compact && app.state.workspace.content.netlist_source.is_none() {
+                            ui.add_enabled_ui(generated_ready, |ui| {
+                                override_clicked = icon_button(
+                                    ui,
+                                    WorkbenchIcon::More,
+                                    "Create a narrow generated-source override",
+                                    false,
+                                    vec2(28.0, 28.0),
+                                )
+                                .clicked();
+                            })
+                            .response
+                            .on_disabled_hover_text(generation_block_reason(&app.state));
+                        }
+                        if override_clicked {
+                            action = Some(NetlistToolbarAction::OpenOwnershipDialog(
+                                crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
+                            ));
+                        }
+                        let source_exists = app.state.workspace.content.netlist_source.is_some();
+                        let (label, candidate) = if source_exists {
+                            (
+                                messages.text(MessageId::NetlistOpenEditable),
+                                NetlistToolbarAction::OpenOwned,
                             )
-                            .clicked();
-                        })
-                        .response
-                        .on_disabled_hover_text(generation_block_reason(&app.state));
+                        } else if generated_ready {
+                            (
+                                messages.text(MessageId::NetlistCreateEditable),
+                                NetlistToolbarAction::OpenOwnershipDialog(
+                                    crate::state::OwnedNetlistEditStrategy::OwnedSource,
+                                ),
+                            )
+                        } else {
+                            (
+                                messages.text(MessageId::CodeSourceCreateTitle),
+                                NetlistToolbarAction::BeginFirstTopDeck,
+                            )
+                        };
+                        let primary_ready = source_exists
+                            || generated_ready
+                            || app.state.project_lifecycle.is_open();
+                        let response = ui
+                            .add_enabled(
+                                primary_ready,
+                                egui::Button::new(&label).min_size(vec2(0.0, 28.0)),
+                            )
+                            .on_disabled_hover_text(generation_block_reason(&app.state));
+                        if response.clicked() {
+                            action = Some(candidate);
+                        }
                     }
-                    if override_clicked {
-                        action = Some(NetlistToolbarAction::OpenOwnershipDialog(
-                            crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
-                        ));
+                    ActiveNetlistDocument::OwnedSource => {
+                        let save_ready = owned_source_save_ready(app);
+                        if ui
+                            .add_enabled(save_ready, egui::Button::new(save_source_label.as_str()))
+                            .on_disabled_hover_text(
+                                messages.text(MessageId::NetlistValidateBeforeSave),
+                            )
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::Save);
+                        }
+                        if ui
+                            .button(messages.text(MessageId::NetlistValidateSource))
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::Validate);
+                        }
+                        if generated_ready {
+                            if ui
+                                .button(messages.text(MessageId::NetlistReturnPrimary))
+                                .clicked()
+                            {
+                                action = Some(NetlistToolbarAction::OpenGenerated);
+                            }
+                        } else if ui
+                            .button(messages.text(MessageId::CodeSourceLifecycleTitle))
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::ManageTopDecks);
+                        }
                     }
-                    let source_exists = app.state.workspace.content.netlist_source.is_some();
-                    let (label, candidate) = if source_exists {
-                        (
-                            messages.text(MessageId::NetlistOpenEditable),
-                            NetlistToolbarAction::OpenOwned,
-                        )
-                    } else if generated_ready {
-                        (
-                            messages.text(MessageId::NetlistCreateEditable),
-                            NetlistToolbarAction::OpenOwnershipDialog(
-                                crate::state::OwnedNetlistEditStrategy::OwnedSource,
-                            ),
-                        )
-                    } else {
-                        (
-                            messages.text(MessageId::CodeSourceCreateTitle),
-                            NetlistToolbarAction::BeginFirstTopDeck,
-                        )
-                    };
-                    let primary_ready = source_exists
-                        || generated_ready
-                        || app.state.project_lifecycle.is_open();
-                    let response = ui
-                        .add_enabled(
-                            primary_ready,
-                            egui::Button::new(&label).min_size(vec2(0.0, 28.0)),
-                        )
-                        .on_disabled_hover_text(generation_block_reason(&app.state));
-                    if response.clicked() {
-                        action = Some(candidate);
-                    }
-                }
-                ActiveNetlistDocument::OwnedSource => {
-                    let save_ready = owned_source_save_ready(app);
-                    if ui
-                        .add_enabled(
-                            save_ready,
-                            egui::Button::new(save_source_label.as_str()),
-                        )
-                        .on_disabled_hover_text(
-                            messages.text(MessageId::NetlistValidateBeforeSave),
-                        )
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::Save);
-                    }
-                    if ui
-                        .button(messages.text(MessageId::NetlistValidateSource))
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::Validate);
-                    }
-                    if generated_ready {
+                    ActiveNetlistDocument::GeneratedDiff => {
                         if ui
                             .button(messages.text(MessageId::NetlistReturnPrimary))
                             .clicked()
                         {
-                            action = Some(NetlistToolbarAction::OpenGenerated);
+                            action = Some(NetlistToolbarAction::CloseComparison);
                         }
-                    } else if ui
-                        .button(messages.text(MessageId::CodeSourceLifecycleTitle))
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::ManageTopDecks);
+                    }
+                    ActiveNetlistDocument::RunSnapshot => {
+                        if ui
+                            .button(messages.text(MessageId::NetlistReturnPrimary))
+                            .clicked()
+                        {
+                            action = Some(NetlistToolbarAction::CloseRunSnapshot);
+                        }
                     }
                 }
-                ActiveNetlistDocument::GeneratedDiff => {
-                    if ui
-                        .button(messages.text(MessageId::NetlistReturnPrimary))
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::CloseComparison);
-                    }
-                }
-                ActiveNetlistDocument::RunSnapshot => {
-                    if ui
-                        .button(messages.text(MessageId::NetlistReturnPrimary))
-                        .clicked()
-                    {
-                        action = Some(NetlistToolbarAction::CloseRunSnapshot);
-                    }
-                }
-            }
             }
             if let Some(run) = run_control(ui, app, messages) {
                 action = Some(run);

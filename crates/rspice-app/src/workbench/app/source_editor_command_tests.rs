@@ -85,7 +85,8 @@ fn veriloga_with_selected_first_line() -> (egui::Context, RSpiceApp, ProjectSour
         .wires
         .push(Wire::segment(7, Point::new(0, 0), Point::new(100, 0)));
     app.state.schematic.session.editor.selection.select_wire(7);
-    let editor = code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    let editor =
+        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
     frame_with(
@@ -157,10 +158,14 @@ fn edit_cut_cuts_the_source_selection_and_leaves_the_schematic_alone() {
         "Edit > Cut removed the selected source text"
     );
     assert!(
-        output.platform_output.commands.iter().any(|command| matches!(
-            command,
-            egui::OutputCommand::CopyText(text) if text == FIRST_LINE
-        )),
+        output
+            .platform_output
+            .commands
+            .iter()
+            .any(|command| matches!(
+                command,
+                egui::OutputCommand::CopyText(text) if text == FIRST_LINE
+            )),
         "the cut text went to the clipboard"
     );
     assert!(
@@ -197,10 +202,14 @@ fn edit_select_all_then_copy_reach_the_source_editor() {
     let output = frame(&ctx, &mut app, DESKTOP);
 
     assert!(
-        output.platform_output.commands.iter().any(|command| matches!(
-            command,
-            egui::OutputCommand::CopyText(text) if *text == original
-        )),
+        output
+            .platform_output
+            .commands
+            .iter()
+            .any(|command| matches!(
+                command,
+                egui::OutputCommand::CopyText(text) if *text == original
+            )),
         "Select all then Copy put the whole source on the clipboard"
     );
     assert!(
@@ -397,11 +406,7 @@ fn press(
 
 /// Right-click the gutter of the Verilog-A source's one-based `line` and let
 /// the menu settle.
-fn right_click_line(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    line: usize,
-) -> egui::FullOutput {
+fn right_click_line(ctx: &egui::Context, app: &mut RSpiceApp, line: usize) -> egui::FullOutput {
     let origin = editor_origin(&frame(ctx, app, DESKTOP));
     press(
         ctx,

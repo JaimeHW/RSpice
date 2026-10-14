@@ -323,8 +323,7 @@ const GO_TO_MATCHING_BRACKET: &[ShortcutBinding] = &[primary(
     chord(Key::Backslash, true, false, true, "Ctrl+Shift+\\"),
     ALL,
 )];
-const GO_TO_LINE: &[ShortcutBinding] =
-    &[primary(chord(Key::G, true, false, false, "Ctrl+G"), ALL)];
+const GO_TO_LINE: &[ShortcutBinding] = &[primary(chord(Key::G, true, false, false, "Ctrl+G"), ALL)];
 const FOLD_SELECTION: &[ShortcutBinding] = &[primary(
     chord(Key::OpenBracket, true, false, true, "Ctrl+Shift+["),
     ALL,
@@ -1023,9 +1022,11 @@ impl Command {
             );
         }
         if self.source_editor_only()
-            && app.state.ui.active_source_editor.is_none_or(|editor| {
-                self.navigates_source_language() && !editor.navigable
-            })
+            && app
+                .state
+                .ui
+                .active_source_editor
+                .is_none_or(|editor| self.navigates_source_language() && !editor.navigable)
         {
             return CommandAvailability::Hidden;
         }

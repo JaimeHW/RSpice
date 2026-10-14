@@ -344,9 +344,7 @@ impl Command {
             }
             Self::DeleteLine => SourceEditorRequest::Structural(StructuralCommand::DeleteLine),
             Self::MoveLineUp => SourceEditorRequest::Structural(StructuralCommand::MoveLineUp),
-            Self::MoveLineDown => {
-                SourceEditorRequest::Structural(StructuralCommand::MoveLineDown)
-            }
+            Self::MoveLineDown => SourceEditorRequest::Structural(StructuralCommand::MoveLineDown),
             Self::GoToMatchingBracket => {
                 SourceEditorRequest::Structural(StructuralCommand::MatchBracket)
             }

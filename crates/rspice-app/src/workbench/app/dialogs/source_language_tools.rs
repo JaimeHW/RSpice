@@ -160,9 +160,13 @@ pub(crate) fn navigate_active_source(
     // definition borrows it for the answer and leaves an open dialog as it
     // found it.
     let previous = app.state.ui.code_workspace.language_tools.take();
-    if let Err(error) =
-        code_workspace::open_language_tools_in_bundle(app, language, bundle_id, &logical_path, caret)
-    {
+    if let Err(error) = code_workspace::open_language_tools_in_bundle(
+        app,
+        language,
+        bundle_id,
+        &logical_path,
+        caret,
+    ) {
         app.state.ui.code_workspace.language_tools = previous;
         return Err(error);
     }
