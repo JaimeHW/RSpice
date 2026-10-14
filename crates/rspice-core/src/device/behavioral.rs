@@ -22,6 +22,7 @@ use thiserror::Error;
 pub(crate) mod breakpoints;
 mod history;
 pub(crate) mod integrals;
+mod partials;
 mod physical;
 pub(crate) use history::BehavioralAcceptedState;
 pub(crate) use integrals::BehavioralFqPoint;
@@ -285,6 +286,8 @@ pub struct BehavioralVoltageSource {
     transient_voltage_lte_excluded: bool,
     /// Partials of an expression that are constants. See [`ConstantPartials`].
     constant_partials: ConstantPartials,
+    /// Every input's analytic partial in one pass; see `partials.rs`.
+    analytic_partials: partials::AnalyticPartials,
 }
 
 /// Field by field, so that `clone_from` keeps the destination's name and
@@ -318,6 +321,7 @@ impl Clone for BehavioralVoltageSource {
             expression_dialect,
             transient_voltage_lte_excluded,
             constant_partials,
+            analytic_partials,
         } = self;
         Self {
             name: name.clone(),
@@ -343,6 +347,7 @@ impl Clone for BehavioralVoltageSource {
             expression_dialect: *expression_dialect,
             transient_voltage_lte_excluded: *transient_voltage_lte_excluded,
             constant_partials: constant_partials.clone(),
+            analytic_partials: analytic_partials.clone(),
         }
     }
 
@@ -371,6 +376,7 @@ impl Clone for BehavioralVoltageSource {
             expression_dialect,
             transient_voltage_lte_excluded,
             constant_partials,
+            analytic_partials,
         } = source;
         self.name.clone_from(name);
         self.node_pos = *node_pos;
@@ -395,6 +401,7 @@ impl Clone for BehavioralVoltageSource {
         self.expression_dialect = *expression_dialect;
         self.transient_voltage_lte_excluded = *transient_voltage_lte_excluded;
         self.constant_partials.clone_from(constant_partials);
+        self.analytic_partials.clone_from(analytic_partials);
     }
 }
 
@@ -539,6 +546,7 @@ impl BehavioralVoltageSource {
             expression_dialect: ExpressionDialect::Ngspice,
             transient_voltage_lte_excluded,
             constant_partials: ConstantPartials::default(),
+            analytic_partials: partials::AnalyticPartials::default(),
         })
     }
 
@@ -809,24 +817,34 @@ impl BehavioralVoltageSource {
             self.node_partials.copy_from_slice(node_partials);
             self.branch_partials.copy_from_slice(branch_partials);
         } else {
+            let environment = BehavioralEnvironment {
+                time,
+                frequency: self.frequency,
+                temperature: self.temperature,
+                gmin: self.gmin,
+                expression_dialect: self.expression_dialect,
+                logarithm_domain: LogarithmDomain::Ieee,
+            };
+            self.analytic_partials.evaluate(
+                &self.ast,
+                &self.program,
+                &self.node_values,
+                &self.branch_values,
+                environment,
+            );
             let mut analytic_everywhere = true;
             for idx in 0..self.node_bindings.len() {
                 self.node_partials[idx] = if self.node_bindings[idx].is_some() {
-                    let analytic = analytic_expression_partial(
-                        &self.ast,
-                        &self.program,
-                        &self.node_values,
-                        &self.branch_values,
-                        BehavioralEnvironment {
-                            time,
-                            frequency: self.frequency,
-                            temperature: self.temperature,
-                            gmin: self.gmin,
-                            expression_dialect: self.expression_dialect,
-                            logarithm_domain: LogarithmDomain::Ieee,
-                        },
-                        DerivativeTarget::Node(idx),
-                    );
+                    let analytic = self.analytic_partials.node(idx).unwrap_or_else(|| {
+                        analytic_expression_partial(
+                            &self.ast,
+                            &self.program,
+                            &self.node_values,
+                            &self.branch_values,
+                            environment,
+                            DerivativeTarget::Node(idx),
+                        )
+                    });
                     analytic_everywhere &= analytic.is_some();
                     analytic
                         .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
@@ -838,21 +856,16 @@ impl BehavioralVoltageSource {
             }
             for idx in 0..self.branch_bindings.len() {
                 self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
-                    let analytic = analytic_expression_partial(
-                        &self.ast,
-                        &self.program,
-                        &self.node_values,
-                        &self.branch_values,
-                        BehavioralEnvironment {
-                            time,
-                            frequency: self.frequency,
-                            temperature: self.temperature,
-                            gmin: self.gmin,
-                            expression_dialect: self.expression_dialect,
-                            logarithm_domain: LogarithmDomain::Ieee,
-                        },
-                        DerivativeTarget::Branch(idx),
-                    );
+                    let analytic = self.analytic_partials.branch(idx).unwrap_or_else(|| {
+                        analytic_expression_partial(
+                            &self.ast,
+                            &self.program,
+                            &self.node_values,
+                            &self.branch_values,
+                            environment,
+                            DerivativeTarget::Branch(idx),
+                        )
+                    });
                     analytic_everywhere &= analytic.is_some();
                     analytic
                         .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
@@ -2419,6 +2432,8 @@ pub struct BehavioralCurrentSource {
     two_terminal_observables: bool,
     /// Partials of an expression that are constants. See [`ConstantPartials`].
     constant_partials: ConstantPartials,
+    /// Every input's analytic partial in one pass; see `partials.rs`.
+    analytic_partials: partials::AnalyticPartials,
 }
 
 /// Field by field, for the reason given on [`BehavioralVoltageSource`]'s
@@ -2447,6 +2462,7 @@ impl Clone for BehavioralCurrentSource {
             expression_dialect,
             two_terminal_observables,
             constant_partials,
+            analytic_partials,
         } = self;
         Self {
             name: name.clone(),
@@ -2470,6 +2486,7 @@ impl Clone for BehavioralCurrentSource {
             expression_dialect: *expression_dialect,
             two_terminal_observables: *two_terminal_observables,
             constant_partials: constant_partials.clone(),
+            analytic_partials: analytic_partials.clone(),
         }
     }
 
@@ -2496,6 +2513,7 @@ impl Clone for BehavioralCurrentSource {
             expression_dialect,
             two_terminal_observables,
             constant_partials,
+            analytic_partials,
         } = source;
         self.name.clone_from(name);
         self.node_pos = *node_pos;
@@ -2518,6 +2536,7 @@ impl Clone for BehavioralCurrentSource {
         self.expression_dialect = *expression_dialect;
         self.two_terminal_observables = *two_terminal_observables;
         self.constant_partials.clone_from(constant_partials);
+        self.analytic_partials.clone_from(analytic_partials);
     }
 }
 
@@ -2615,6 +2634,7 @@ impl BehavioralCurrentSource {
             expression_dialect: ExpressionDialect::Ngspice,
             two_terminal_observables: false,
             constant_partials: ConstantPartials::default(),
+            analytic_partials: partials::AnalyticPartials::default(),
         })
     }
 
@@ -2867,24 +2887,34 @@ impl BehavioralCurrentSource {
             self.node_partials.copy_from_slice(node_partials);
             self.branch_partials.copy_from_slice(branch_partials);
         } else {
+            let environment = BehavioralEnvironment {
+                time,
+                frequency: self.frequency,
+                temperature: self.temperature,
+                gmin: self.gmin,
+                expression_dialect: self.expression_dialect,
+                logarithm_domain: LogarithmDomain::Ieee,
+            };
+            self.analytic_partials.evaluate(
+                &self.ast,
+                &self.program,
+                &self.node_values,
+                &self.branch_values,
+                environment,
+            );
             let mut analytic_everywhere = true;
             for idx in 0..self.node_bindings.len() {
                 self.node_partials[idx] = if self.node_bindings[idx].is_some() {
-                    let analytic = analytic_expression_partial(
-                        &self.ast,
-                        &self.program,
-                        &self.node_values,
-                        &self.branch_values,
-                        BehavioralEnvironment {
-                            time,
-                            frequency: self.frequency,
-                            temperature: self.temperature,
-                            gmin: self.gmin,
-                            expression_dialect: self.expression_dialect,
-                            logarithm_domain: LogarithmDomain::Ieee,
-                        },
-                        DerivativeTarget::Node(idx),
-                    );
+                    let analytic = self.analytic_partials.node(idx).unwrap_or_else(|| {
+                        analytic_expression_partial(
+                            &self.ast,
+                            &self.program,
+                            &self.node_values,
+                            &self.branch_values,
+                            environment,
+                            DerivativeTarget::Node(idx),
+                        )
+                    });
                     analytic_everywhere &= analytic.is_some();
                     analytic
                         .or_else(|| self.integral_partial(time, DerivativeTarget::Node(idx)))
@@ -2896,21 +2926,16 @@ impl BehavioralCurrentSource {
             }
             for idx in 0..self.branch_bindings.len() {
                 self.branch_partials[idx] = if self.branch_bindings[idx].is_some() {
-                    let analytic = analytic_expression_partial(
-                        &self.ast,
-                        &self.program,
-                        &self.node_values,
-                        &self.branch_values,
-                        BehavioralEnvironment {
-                            time,
-                            frequency: self.frequency,
-                            temperature: self.temperature,
-                            gmin: self.gmin,
-                            expression_dialect: self.expression_dialect,
-                            logarithm_domain: LogarithmDomain::Ieee,
-                        },
-                        DerivativeTarget::Branch(idx),
-                    );
+                    let analytic = self.analytic_partials.branch(idx).unwrap_or_else(|| {
+                        analytic_expression_partial(
+                            &self.ast,
+                            &self.program,
+                            &self.node_values,
+                            &self.branch_values,
+                            environment,
+                            DerivativeTarget::Branch(idx),
+                        )
+                    });
                     analytic_everywhere &= analytic.is_some();
                     analytic
                         .or_else(|| self.integral_partial(time, DerivativeTarget::Branch(idx)))
