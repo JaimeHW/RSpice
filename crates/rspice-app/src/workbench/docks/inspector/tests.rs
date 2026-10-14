@@ -892,6 +892,83 @@ fn the_result_inspector_routes_through_the_workspace_memos() {
     );
 }
 
+/// The Design and Verilog-A inspectors state problems with a mark and say
+/// nothing about success: no colored status text, no status dots, no success
+/// or neutral marks.
+///
+/// `veriloga_compile_status` is left out of the scan: it is the editor strip's
+/// compile status, which the strip paints, not the inspector.
+#[test]
+fn the_design_and_veriloga_inspectors_paint_no_status_color() {
+    const BANNED: &[&str] = &[
+        "colored_label",
+        "status_dot(",
+        "StatusMark::Success",
+        "StatusMark::Neutral",
+        "t.color.ok",
+        "t.color.info",
+    ];
+    let without_fn = |source: String, name: &str| {
+        let lines = source.lines().collect::<Vec<_>>();
+        let start = lines
+            .iter()
+            .position(|line| line.contains(&format!("fn {name}(")))
+            .unwrap_or_else(|| panic!("the scanned source no longer declares {name}"));
+        let end = start
+            + lines[start..]
+                .iter()
+                .position(|line| *line == "}")
+                .expect("the function closes at column 0");
+        lines
+            .iter()
+            .enumerate()
+            .map(|(index, line)| {
+                if (start..=end).contains(&index) {
+                    ""
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let files = [
+        (
+            "design.rs",
+            crate::source_guard::without_test_items(include_str!("design.rs")),
+        ),
+        (
+            "design/component.rs",
+            crate::source_guard::without_test_items(include_str!("design/component.rs")),
+        ),
+        (
+            "design/inline_instance.rs",
+            crate::source_guard::without_test_items(include_str!("design/inline_instance.rs")),
+        ),
+        (
+            "veriloga_inspector.rs",
+            without_fn(
+                crate::source_guard::without_test_items(include_str!(
+                    "../../documents/code_workspace/veriloga_inspector.rs"
+                )),
+                "veriloga_compile_status",
+            ),
+        ),
+    ];
+    for (file, source) in files {
+        for (number, line) in source.lines().enumerate() {
+            for pattern in BANNED {
+                assert!(
+                    !line.contains(pattern),
+                    "{file}:{} paints status with `{pattern}`: {}",
+                    number + 1,
+                    line.trim()
+                );
+            }
+        }
+    }
+}
+
 /// A finished 1 ms transient on the Waves sheet, the way James had it open:
 /// `V(out)` swinging inside 4…6 V with its pane active, the trace selected,
 /// and the solver's convergence evidence retained with no forced points.

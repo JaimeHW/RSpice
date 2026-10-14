@@ -371,34 +371,18 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         node.set_label(title.as_str());
         node.set_level(2);
     });
-    if app.state.workbench.workspace == Workspace::Design {
-        let job = egui::text::LayoutJob::single_section(
-            title.to_ascii_uppercase(),
-            egui::TextFormat {
-                font_id: theme::sans(tokens::FS_2, FontWeight::SemiBold),
-                color: t.color.text,
-                extra_letter_spacing: 0.065 * tokens::FS_2,
-                ..Default::default()
-            },
-        );
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-        ui.painter().galley(
-            egui::pos2(
-                rect.left() + PANEL_INSET,
-                rect.center().y - galley.size().y * 0.5,
-            ),
-            galley,
-            t.color.text,
-        );
+    let size = if app.state.workbench.workspace == Workspace::Design {
+        tokens::FS_2
     } else {
-        ui.painter().text(
-            egui::pos2(rect.left() + PANEL_INSET, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            title.to_ascii_uppercase(),
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-        );
-    }
+        tokens::FS_0
+    };
+    ui.painter().text(
+        egui::pos2(rect.left() + PANEL_INSET, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &title,
+        theme::sans(size, FontWeight::SemiBold),
+        t.color.text,
+    );
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -651,11 +635,10 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(ui, "Checks", &checks);
     property_row(ui, "Configuration", active_configuration);
     property_row(ui, "Consumers", &usage.len().to_string());
-    property_row(
-        ui,
-        "Where used",
-        usage.first().map_or("project root", String::as_str),
-    );
+    // A view nothing instantiates has no consumer to name.
+    if let Some(consumer) = usage.first() {
+        property_row(ui, "Where used", consumer);
+    }
 
     section_header(ui, "Actions", None);
     if inspector_action_enabled(ui, "Open selected view", open_target.is_some())

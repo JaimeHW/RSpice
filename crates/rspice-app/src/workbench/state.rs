@@ -117,12 +117,12 @@ impl Workspace {
         match self {
             Self::Project => "Project details",
             Self::Design => "Inspector",
-            Self::Simulate => "Analysis inspector",
+            Self::Simulate => "Analysis",
             Self::Stimulus => "Definition details",
             Self::Results => "Data inspector",
-            Self::Verify => "Evidence inspector",
+            Self::Verify => "Verification",
             Self::Models => "Model details",
-            Self::Netlist => "Source inspector",
+            Self::Netlist => "Source",
         }
     }
 }
