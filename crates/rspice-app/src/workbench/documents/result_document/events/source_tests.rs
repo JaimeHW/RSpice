@@ -71,7 +71,7 @@ fn event_source_unattributed_codes_do_not_claim_native_drive_strength() {
     );
     pick(&mut state, EventSelectionSource::ExactDigital, "clk", 0);
     let text = panel_text(&mut state);
-    assert!(text.contains("SELECTED EVENT"), "{text}");
+    assert!(text.contains("Selected event"), "{text}");
     assert!(!text.contains("Drive strength"), "{text}");
     assert!(text.contains("Source not recorded"), "{text}");
     assert!(!text.contains("exact committed"), "{text}");

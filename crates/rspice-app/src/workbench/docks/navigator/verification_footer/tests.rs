@@ -1308,7 +1308,7 @@ fn the_simulation_rail_derives_what_it_states_once_a_frame() {
     reset();
     let painted = navigator_painted_lines(228.0, app);
     assert!(
-        painted.iter().any(|(text, _)| text == "RUN SET"),
+        painted.iter().any(|(text, _)| text == "Run set"),
         "the frame drew the simulation rail"
     );
 
@@ -1350,12 +1350,12 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
 
     let unfiltered = rail("");
     for line in [
-        "LAB CHARACTERIZATION",
+        "Lab characterization",
         "Analyses",
-        "RUN SET",
+        "Run set",
         "Supply voltage",
         "Variation",
-        "CAPABILITY POLICY",
+        "Capability policy",
     ] {
         assert!(
             unfiltered.iter().any(|painted| painted.as_str() == line),
@@ -1372,14 +1372,14 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
         "the axis whose name matches survives; the rail painted {filtered:?}"
     );
     assert!(
-        filtered.iter().any(|painted| painted.as_str() == "RUN SET"),
+        filtered.iter().any(|painted| painted.as_str() == "Run set"),
         "and the section that kept a row keeps its header; it painted {filtered:?}"
     );
     for dropped in [
         "Variation",
         "Analyses",
-        "LAB CHARACTERIZATION",
-        "CAPABILITY POLICY",
+        "Lab characterization",
+        "Capability policy",
     ] {
         assert!(
             !filtered.iter().any(|painted| painted.as_str() == dropped),

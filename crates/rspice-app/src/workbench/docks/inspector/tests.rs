@@ -1105,7 +1105,7 @@ fn the_waves_details_panel_states_ranges_status_and_method_as_rows_and_meta() {
     assert!(
         nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Heading
-                && node.label() == Some("MEASUREMENTS, linear interpolation")
+                && node.label() == Some("Measurements, linear interpolation")
         }),
         "the measurements header does not carry its method as metadata"
     );

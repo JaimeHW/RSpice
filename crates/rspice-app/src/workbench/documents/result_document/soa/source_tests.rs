@@ -217,9 +217,9 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     let second = soa_state(1, 32, 3.2).simulation.retained.runs[0].analyses[0].clone();
     state.simulation.retained.runs[0].add_analysis(second);
     pick(&mut state);
-    assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
+    assert!(paint(&mut state, true).contains("Selected SOA rule"));
     state.simulation.view.active_analysis_idx = Some(1);
-    assert!(!paint(&mut state, true).contains("SELECTED SOA RULE"));
+    assert!(!paint(&mut state, true).contains("Selected SOA rule"));
     assert!(state.ui.results.session.selected_soa_rule.is_some());
     state.simulation.view.active_analysis_idx = Some(0);
     let analysis = &mut state.simulation.retained.runs[0].analyses[0];
@@ -231,7 +231,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     evaluations.reverse();
     // Rules have a canonical retained order; waveform storage does not.
     assert!(analysis.validate_retained_evidence().is_err());
-    assert!(!paint(&mut state, true).contains("SELECTED SOA RULE"));
+    assert!(!paint(&mut state, true).contains("Selected SOA rule"));
     assert!(state.ui.results.session.selected_soa_rule.is_some());
     let analysis = &mut state.simulation.retained.runs[0].analyses[0];
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = analysis.result_payload.as_mut()
@@ -241,7 +241,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
     evaluations.reverse();
     analysis.validate_retained_evidence().unwrap();
     let reordered = paint(&mut state, true);
-    assert!(reordered.contains("SELECTED SOA RULE"), "{reordered}");
+    assert!(reordered.contains("Selected SOA rule"), "{reordered}");
     assert!(reordered.contains("M0000"), "{reordered}");
     let Some(AnalysisResultPayload::Soa {
         source_history: _,
@@ -264,7 +264,7 @@ fn soa_source_rule_selection_survives_navigation_but_not_rule_removal() {
 fn soa_source_inspector_blocks_invalid_and_failed_evidence_until_repaired() {
     let mut state = soa_state(1, 32, 3.0);
     pick(&mut state);
-    assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
+    assert!(paint(&mut state, true).contains("Selected SOA rule"));
     let valid = state.simulation.retained.runs[0].analyses[0].clone();
     let Some(AnalysisResultPayload::Soa { evaluations, .. }) = state.simulation.retained.runs[0]
         .analyses[0]
@@ -275,15 +275,15 @@ fn soa_source_inspector_blocks_invalid_and_failed_evidence_until_repaired() {
     };
     evaluations[0].limit_value = f64::NAN;
     let invalid = paint(&mut state, true);
-    assert!(!invalid.contains("SELECTED SOA RULE"), "{invalid}");
+    assert!(!invalid.contains("Selected SOA rule"), "{invalid}");
     assert!(state.ui.results.session.selected_soa_rule.is_some());
     state.simulation.retained.runs[0].analyses[0] = valid;
     state.simulation.retained.runs[0].analyses[0].success = false;
     let failed = paint(&mut state, true);
-    assert!(!failed.contains("SELECTED SOA RULE"), "{failed}");
+    assert!(!failed.contains("Selected SOA rule"), "{failed}");
     assert!(state.ui.results.session.selected_soa_rule.is_some());
     state.simulation.retained.runs[0].analyses[0].success = true;
-    assert!(paint(&mut state, true).contains("SELECTED SOA RULE"));
+    assert!(paint(&mut state, true).contains("Selected SOA rule"));
 }
 
 #[test]

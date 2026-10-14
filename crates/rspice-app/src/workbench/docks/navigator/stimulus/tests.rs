@@ -474,7 +474,7 @@ fn the_inspector_cards_every_adopter_in_the_design() {
     let published = inspector(&mut app.state);
 
     assert!(
-        published.contains(&"ADOPTERS, 2".to_owned()),
+        published.contains(&"Adopters, 2".to_owned()),
         "{published:?}"
     );
     for reference in ["V1", "V2"] {
@@ -502,7 +502,7 @@ fn the_inspector_says_how_to_adopt_when_nothing_has() {
     let published = inspector(&mut app.state);
 
     assert!(
-        published.contains(&"ADOPTERS, 0".to_owned()),
+        published.contains(&"Adopters, 0".to_owned()),
         "{published:?}"
     );
     assert!(
@@ -516,7 +516,7 @@ fn the_inspector_says_how_to_adopt_when_nothing_has() {
     assert!(
         !published
             .iter()
-            .any(|run| run.starts_with("ANALYSIS CONSUMERS")),
+            .any(|run| run.starts_with("Analysis consumers")),
         "{published:?}"
     );
 }
@@ -532,7 +532,7 @@ fn the_engine_contract_is_the_card_the_netlister_writes_for_the_family() {
     let published = inspector(&mut app.state);
 
     assert!(
-        published.contains(&"ENGINE CONTRACT \u{b7} PULSE".to_owned()),
+        published.contains(&"Engine contract \u{b7} PULSE".to_owned()),
         "{published:?}"
     );
     let empty = StimulusDefinition::new(

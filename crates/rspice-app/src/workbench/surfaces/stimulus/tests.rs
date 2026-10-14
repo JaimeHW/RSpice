@@ -193,10 +193,10 @@ fn every_band_publishes_its_own_strings() {
         "Fit",
         "Transient",
         "engine evaluator",
-        // Program. Section heads publish their title uppercased, which is how
-        // a reader hears them in every other workspace.
-        "BIAS & SMALL-SIGNAL",
-        "TRANSIENT SHAPE \u{b7} SIN",
+        // Program. Section heads publish their title as written, which is
+        // how a reader hears them in every other workspace.
+        "Bias & small-signal",
+        "Transient shape \u{b7} SIN",
         "Frequency (FREQ) *",
         // Realization.
         "Realization \u{b7} no adopters",

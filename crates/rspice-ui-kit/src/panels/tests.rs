@@ -244,8 +244,8 @@ fn overconstrained_section_header_wraps_instead_of_eliding_both_columns() {
     );
     assert!(section_header_wraps(100.0, 180.0, 0.0, false));
     assert_eq!(
-        section_header_full_text("LONG ENGINEERING TITLE", Some("complete metadata")),
-        "LONG ENGINEERING TITLE, complete metadata"
+        section_header_full_text("Long engineering title", Some("complete metadata")),
+        "Long engineering title, complete metadata"
     );
 }
 
@@ -304,7 +304,7 @@ fn property_controls_and_section_headers_expose_their_full_accessible_names() {
 
     assert!(nodes.iter().any(|(_, node)| {
         node.role() == egui::accesskit::Role::Heading
-            && node.label() == Some("LONG ENGINEERING SECTION TITLE, complete metadata")
+            && node.label() == Some("Long engineering section title, complete metadata")
             && node.level() == Some(3)
     }));
     assert!(nodes.iter().any(|(_, node)| {
@@ -496,10 +496,82 @@ fn the_label_column_cap_clears_the_widest_label_the_workbench_ships() {
     );
 }
 
+/// Every section header, and the stacked field label, paints its words
+/// exactly as the caller wrote them: sentence case stays sentence case, an
+/// acronym stays an acronym, and no letter tracking spreads them.
 #[test]
-fn schematic_section_heading_uses_the_mockup_tracking() {
-    assert_eq!(tokens::FS_2, 13.0);
-    assert!((SCHEMATIC_SECTION_TITLE_TRACKING - 0.715).abs() <= 0.001);
+fn every_section_header_and_field_label_paints_its_title_verbatim() {
+    fn texts(shape: &Shape, out: &mut Vec<egui::epaint::TextShape>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+            Shape::Text(text) => out.push(text.clone()),
+            _ => {}
+        }
+    }
+    const TITLE: &str = "Run history for DC sweep";
+    type Header = fn(&mut Ui);
+    let headers: [(&str, Header); 9] = [
+        ("section_header", |ui| section_header(ui, TITLE, Some("3"))),
+        ("section_header_explained", |ui| {
+            section_header_explained(ui, TITLE, "3", "Three runs")
+        }),
+        ("schematic_section_header", |ui| {
+            schematic_section_header(ui, TITLE, None)
+        }),
+        ("inspector::section_header", |ui| {
+            inspector::section_header(ui, TITLE, None)
+        }),
+        ("inspector::schematic_section_header_action", |ui| {
+            let _ = inspector::schematic_section_header_action(ui, TITLE, "Clear", true);
+        }),
+        ("widgets::section_header", |ui| {
+            let _ = crate::widgets::section_header(ui, TITLE, Some("Clear"));
+        }),
+        ("widgets::pane_section_label", |ui| {
+            crate::widgets::pane_section_label(ui, TITLE)
+        }),
+        ("code_inspector_section", |ui| {
+            code_inspector_section(ui, TITLE, Some("3"), None, |_| {})
+        }),
+        ("widgets::field_label", |ui| {
+            crate::widgets::field_label(ui, TITLE, |_| {})
+        }),
+    ];
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    for (name, header) in headers {
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(420.0);
+                header(ui);
+            });
+        });
+        let mut painted = Vec::new();
+        for clipped in &output.shapes {
+            texts(&clipped.shape, &mut painted);
+        }
+        let title = painted
+            .iter()
+            .find(|text| text.galley.text() == TITLE)
+            .unwrap_or_else(|| {
+                panic!(
+                    "{name} did not paint {TITLE:?}; painted {:?}",
+                    painted
+                        .iter()
+                        .map(|text| text.galley.text())
+                        .collect::<Vec<_>>()
+                )
+            });
+        assert!(
+            title
+                .galley
+                .job
+                .sections
+                .iter()
+                .all(|section| section.format.extra_letter_spacing == 0.0),
+            "{name} tracks its title"
+        );
+    }
 }
 
 #[test]
@@ -787,7 +859,7 @@ fn a_wrapped_section_header_sets_its_metadata_under_the_title() {
             .find_map(|shape| painted_text_rect(&shape.shape, wanted))
             .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
     };
-    let title = find("DRAWING SHEET");
+    let title = find("Drawing sheet");
     let metadata = find(meta);
 
     assert!(

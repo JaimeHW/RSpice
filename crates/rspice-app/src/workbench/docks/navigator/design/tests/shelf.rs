@@ -955,7 +955,7 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
     let mut shelf = ShelfHarness::opened().settled();
 
     let (text, _) = shelf.frame(Vec::new());
-    assert!(paints_line(&text, "PINNED"), "the fresh band is painted");
+    assert!(paints_line(&text, "Pinned"), "the fresh band is painted");
     for shipped in ["Resistor", "Capacitor", "Ground"] {
         assert!(
             paints_line(&text, shipped),
@@ -987,7 +987,7 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
     }
     let (text, _) = shelf.frame(Vec::new());
     assert!(
-        !paints_line(&text, "PINNED"),
+        !paints_line(&text, "Pinned"),
         "an emptied set leaves no band at all: {text}"
     );
     assert!(
@@ -1065,7 +1065,7 @@ fn placement_feeds_recent_front_ordered_and_deduplicated() {
         stored_recent(&shelf.app.state),
         vec![key(ComponentType::Diode)]
     );
-    assert!(paints_line(&text, "RECENT"), "the band appears: {text}");
+    assert!(paints_line(&text, "Recent"), "the band appears: {text}");
 
     place(&mut shelf.app.state, ComponentType::Nmos);
     let _ = shelf.frame(Vec::new());
@@ -1145,7 +1145,7 @@ fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
     toggle_pin(&mut shelf.app.state, &entry);
     let (text, _) = shelf.frame(Vec::new());
     assert!(
-        !paints_line(&text, "RECENT"),
+        !paints_line(&text, "Recent"),
         "the only recent part is pinned, so the band has nothing left: {text}"
     );
     assert!(
@@ -1161,7 +1161,7 @@ fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
     toggle_pin(&mut shelf.app.state, &entry);
     let (text, _) = shelf.frame(Vec::new());
     assert!(
-        paints_line(&text, "RECENT") && paints_line(&text, "Diode"),
+        paints_line(&text, "Recent") && paints_line(&text, "Diode"),
         "unpinning returns it to the band: {text}"
     );
 }
@@ -1187,7 +1187,7 @@ fn a_design_that_grows_without_the_shelf_writes_no_history() {
         "nothing was offered"
     );
     assert!(
-        !paints_line(&text, "RECENT"),
+        !paints_line(&text, "Recent"),
         "so there is no band to paint: {text}"
     );
 }
@@ -1449,7 +1449,7 @@ fn a_tool_the_reader_put_away_credits_no_later_growth() {
         stored_recent(&shelf.app.state)
     );
     assert!(
-        !paints_line(&text, "RECENT"),
+        !paints_line(&text, "Recent"),
         "so there is no band to paint: {text}"
     );
 }
@@ -1672,8 +1672,8 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
     let mut shelf = shelf.settled();
     let (text, runs) = shelf.frame(Vec::new());
     assert!(
-        paints_line(&text, "STIMULUS LIBRARY"),
-        "the section states itself, in the uppercase every shelf header uses: {text}"
+        paints_line(&text, "Stimulus library"),
+        "the section states itself, in the sentence case every shelf header uses: {text}"
     );
     assert!(
         paints_line(&text, "V \u{00b7} SIN \u{00b7} 1kHz"),

@@ -403,7 +403,7 @@ fn hist_source_moments_preserve_representable_tiny_and_large_statistics() {
 fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
     let mut variable = super::tests::mc_variable("gain");
     let mut legacy = state_with(variable.clone());
-    assert!(!paint(&mut legacy, true).contains("CONFIDENCE IN MEAN"));
+    assert!(!paint(&mut legacy, true).contains("Confidence in mean"));
     variable.mean_confidence = Some(rspice_results::monte_carlo::MonteCarloMeanConfidence {
         level_pct: 90.0,
         method: rspice_results::monte_carlo::MonteCarloMeanMethod::PercentileBootstrap {
@@ -420,7 +420,7 @@ fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
     let mut state = state_with(variable);
     let text = paint(&mut state, true);
     for expected in [
-        "CONFIDENCE IN MEAN",
+        "Confidence in mean",
         "90%",
         "Mean interval",
         "Percentile bootstrap",

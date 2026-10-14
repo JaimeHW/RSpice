@@ -796,70 +796,43 @@ pub fn labeled_icon_button_sized(
     response.on_hover_text(label)
 }
 
+/// A panel section's header: its title as written — sentence case, no
+/// letter tracking — with optional metadata at the trailing edge.
 pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    section_header_with_typography(ui, title, meta, tokens::FS_0, 0.0, None);
+    section_header_with_typography(ui, title, meta, tokens::FS_0, None);
 }
 
 /// [`section_header`] whose metadata needs a sentence to be read correctly:
 /// `explanation` is the header's hover text in place of its own words.
 pub fn section_header_explained(ui: &mut Ui, title: &str, meta: &str, explanation: &str) {
-    section_header_with_typography(ui, title, Some(meta), tokens::FS_0, 0.0, Some(explanation));
+    section_header_with_typography(ui, title, Some(meta), tokens::FS_0, Some(explanation));
 }
 
 /// Schematic-dock section heading from the upgraded design mockup.
 ///
-/// This stays separate from [`section_header`] so the schematic's 13 px,
-/// tracked EDA headings do not silently enlarge unrelated workspaces.
+/// This stays separate from [`section_header`] so the schematic's 13 px
+/// headings do not silently enlarge unrelated workspaces.
 pub fn schematic_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    section_header_with_typography(
-        ui,
-        title,
-        meta,
-        tokens::FS_2,
-        SCHEMATIC_SECTION_TITLE_TRACKING,
-        None,
-    );
+    section_header_with_typography(ui, title, meta, tokens::FS_2, None);
 }
 
-const SCHEMATIC_SECTION_TITLE_TRACKING: f32 = 0.055 * tokens::FS_2;
-
-fn tracked_galley(
+fn header_galley(
     ui: &Ui,
     text: String,
     font_id: egui::FontId,
     color: Color32,
-    extra_letter_spacing: f32,
 ) -> std::sync::Arc<egui::Galley> {
-    let job = egui::text::LayoutJob::single_section(
-        text,
-        egui::TextFormat {
-            font_id,
-            color,
-            extra_letter_spacing,
-            ..Default::default()
-        },
-    );
-    ui.fonts_mut(|fonts| fonts.layout_job(job))
+    ui.fonts_mut(|fonts| fonts.layout_no_wrap(text, font_id, color))
 }
 
-fn tracked_wrapped_galley(
+fn wrapped_header_galley(
     ui: &Ui,
     text: String,
     font_id: egui::FontId,
     color: Color32,
-    extra_letter_spacing: f32,
     max_width: f32,
 ) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::single_section(
-        text,
-        egui::TextFormat {
-            font_id,
-            color,
-            extra_letter_spacing,
-            ..Default::default()
-        },
-    );
-    job.wrap.max_width = max_width.max(1.0);
+    let mut job = egui::text::LayoutJob::simple(text, font_id, color, max_width.max(1.0));
     job.wrap.max_rows = 2;
     job.wrap.break_anywhere = true;
     ui.fonts_mut(|fonts| fonts.layout_job(job))
@@ -874,23 +847,16 @@ fn section_header_with_typography(
     title: &str,
     meta: Option<&str>,
     title_size: f32,
-    title_tracking: f32,
     explanation: Option<&str>,
 ) {
     let t = Tokens::get(ui.ctx());
     let title_font = theme::sans(title_size, FontWeight::SemiBold);
     let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let title = title.to_uppercase();
+    let title = title.to_owned();
     let content_width = (ui.available_width() - 20.0).max(0.0);
-    let title_width = tracked_galley(
-        ui,
-        title.clone(),
-        title_font.clone(),
-        t.color.text_dim,
-        title_tracking,
-    )
-    .size()
-    .x;
+    let title_width = header_galley(ui, title.clone(), title_font.clone(), t.color.text_dim)
+        .size()
+        .x;
     let meta_width = meta.map_or(0.0, |meta| {
         ui.painter()
             .layout_no_wrap(meta.to_owned(), meta_font.clone(), t.color.text_faint)
@@ -940,14 +906,8 @@ fn section_header_with_typography(
                 Pos2::new(content_left, rect.top()),
                 Pos2::new(content_right, rect.bottom()),
             );
-            let title_galley = tracked_wrapped_galley(
-                ui,
-                title,
-                title_font,
-                t.color.text_dim,
-                title_tracking,
-                title_rect.width(),
-            );
+            let title_galley =
+                wrapped_header_galley(ui, title, title_font, t.color.text_dim, title_rect.width());
             ui.painter().with_clip_rect(title_rect).galley(
                 Pos2::new(
                     title_rect.left(),
@@ -962,7 +922,7 @@ fn section_header_with_typography(
         // block in the band. Right-aligned on a line of its own, the metadata
         // hung under nothing and read as a layout fault.
         let title = elide_text(ui, &title, &title_font, content_width);
-        let title_galley = tracked_galley(ui, title, title_font, t.color.text_dim, title_tracking);
+        let title_galley = header_galley(ui, title, title_font, t.color.text_dim);
         let meta = meta.map(|meta| {
             let meta = elide_text(ui, meta, &meta_font, content_width);
             ui.painter()
@@ -999,7 +959,7 @@ fn section_header_with_typography(
         Pos2::new(title_right.max(content_left), rect.bottom()),
     );
     let title = elide_text(ui, &title, &title_font, title_rect.width());
-    let title_galley = tracked_galley(ui, title, title_font, t.color.text_dim, title_tracking);
+    let title_galley = header_galley(ui, title, title_font, t.color.text_dim);
     ui.painter().with_clip_rect(title_rect).galley(
         Pos2::new(
             title_rect.left(),

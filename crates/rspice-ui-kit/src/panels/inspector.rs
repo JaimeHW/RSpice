@@ -87,7 +87,7 @@ pub fn section_header_explained(ui: &mut Ui, title: &str, meta: &str, explanatio
 }
 
 /// Schematic-dock section heading: the same rhythm as [`section_header`] with
-/// the schematic's larger, tracked EDA typography.
+/// the schematic's larger EDA typography.
 pub fn schematic_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
     close_open_section(ui);
     design_schematic_section_header(ui, title, meta);
@@ -119,16 +119,11 @@ pub fn schematic_section_header_action(
     ui.painter()
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
 
-    let title_job = egui::text::LayoutJob::single_section(
-        title.to_uppercase(),
-        egui::TextFormat {
-            font_id: theme::sans(tokens::FS_2, FontWeight::SemiBold),
-            color: t.color.text_dim,
-            extra_letter_spacing: 0.055 * tokens::FS_2,
-            ..Default::default()
-        },
+    let title_galley = ui.painter().layout_no_wrap(
+        title.to_owned(),
+        theme::sans(tokens::FS_2, FontWeight::SemiBold),
+        t.color.text_dim,
     );
-    let title_galley = ui.fonts_mut(|fonts| fonts.layout_job(title_job));
     ui.painter().galley(
         Pos2::new(
             rect.left() + 10.0,

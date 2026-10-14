@@ -994,8 +994,7 @@ fn the_plan_headers_actions_end_at_the_panes_right_edge() {
                 // A Label publishes its text as a value, not as a label.
                 egui::accesskit::Role::Label => {
                     let text = node.value().unwrap_or_default().to_string();
-                    if text.starts_with("SIMULATION PLAN")
-                        || text.starts_with("Lab characterization")
+                    if text.starts_with("Lab characterization")
                         || text.contains("enabled instances")
                     {
                         heading_right = heading_right.max(bounds.x1);
