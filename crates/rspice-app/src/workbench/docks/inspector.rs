@@ -897,38 +897,14 @@ fn inspector_action_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
     response.clicked()
 }
 
+/// The schematics that place `reference`, each once.
 fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
-    fn collect(
-        schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
-        owner: &str,
-        reference: &CellViewRef,
-        consumers: &mut Vec<String>,
-    ) {
-        if schematic.as_ref().components.iter().any(|component| {
-            component.library_cell.as_ref().is_some_and(|binding| {
-                binding.library.eq_ignore_ascii_case(&reference.library)
-                    && binding.cell.eq_ignore_ascii_case(&reference.cell)
-                    && binding.view.eq_ignore_ascii_case(&reference.view)
-            })
-        }) {
-            consumers.push(owner.to_owned());
-        }
-    }
-
-    let mut consumers = Vec::new();
-    let active_key = app.state.workspace.content.active_view.key();
-    collect(
-        &app.state.schematic,
-        &app.state.workspace.content.active_view.display_path(),
-        reference,
-        &mut consumers,
-    );
-    for (key, schematic) in &app.state.workspace.content.schematic_buffers {
-        if key != &active_key {
-            collect(schematic, key, reference, &mut consumers);
-        }
-    }
-    consumers.sort_by_key(|item| item.to_ascii_lowercase());
+    let mut consumers = app
+        .state
+        .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
+        .into_iter()
+        .map(|usage| usage.schematic.display_path())
+        .collect::<Vec<_>>();
     consumers.dedup();
     consumers
 }

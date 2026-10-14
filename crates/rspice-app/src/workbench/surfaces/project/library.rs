@@ -895,42 +895,11 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
 }
 
 fn library_view_usage(state: &AppState, reference: &CellViewRef) -> Vec<String> {
-    let mut consumers = Vec::new();
-    let active_key = state.workspace.content.active_view.key();
-    collect_library_view_usage(
-        &state.schematic,
-        &state.workspace.content.active_view.display_path(),
-        reference,
-        &mut consumers,
-    );
-    for (key, schematic) in &state.workspace.content.schematic_buffers {
-        if key == &active_key {
-            continue;
-        }
-        collect_library_view_usage(schematic, key, reference, &mut consumers);
-    }
-    consumers.sort_by_key(|consumer| consumer.to_ascii_lowercase());
-    consumers.dedup();
-    consumers
-}
-
-fn collect_library_view_usage(
-    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
-    owner: &str,
-    reference: &CellViewRef,
-    consumers: &mut Vec<String>,
-) {
-    for component in &schematic.as_ref().components {
-        let Some(binding) = component.library_cell.as_ref() else {
-            continue;
-        };
-        if binding.library.eq_ignore_ascii_case(&reference.library)
-            && binding.cell.eq_ignore_ascii_case(&reference.cell)
-            && binding.view.eq_ignore_ascii_case(&reference.view)
-        {
-            consumers.push(format!("{owner} / {}", component.name));
-        }
-    }
+    state
+        .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
+        .into_iter()
+        .map(|usage| format!("{} / {}", usage.schematic.display_path(), usage.instance))
+        .collect()
 }
 
 fn show_library_usage_report(ctx: &Context) {

@@ -14,6 +14,7 @@
 //! fields are defined here.
 
 pub(in crate::workbench) mod active_viewer;
+pub(in crate::workbench) mod cell_usage;
 pub(in crate::workbench) mod design_checks;
 pub(in crate::workbench) mod design_history;
 mod full_screen;
