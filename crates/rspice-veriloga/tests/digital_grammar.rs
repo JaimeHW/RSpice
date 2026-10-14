@@ -270,6 +270,48 @@ fn an_unpacked_port_array_is_a_language_error() {
     }
 }
 
+/// IEEE 1364-2005 section 12.3.3 lets only an output port be a variable, and
+/// the rule is the module's own: a root answers to it as a child does. An
+/// RSpice-authored probe has Icarus `-g2005` reject the non-ANSI forms at a
+/// root ("declared as input and as a reg type"). Icarus accepts the ANSI
+/// `input reg` spelling and reads the port as a net, a form the standard's
+/// grammar (IEEE 1364-2005 A.2.1.2, `input [net_type] ...`) does not have.
+#[test]
+fn a_root_input_port_may_not_be_a_variable() {
+    for (form, source) in [
+        ("input reg", "module top(a); input a; reg a; endmodule\n"),
+        ("inout reg", "module top(a); inout a; reg a; endmodule\n"),
+        ("ANSI input reg", "module top(input reg a); endmodule\n"),
+        ("ANSI inout reg", "module top(inout reg a); endmodule\n"),
+        ("ANSI input real", "module top(input real a); endmodule\n"),
+        (
+            "input integer",
+            "module top(a); input a; integer a; initial a = 1; endmodule\n",
+        ),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir_module(source, Some("top"))
+            .expect_err(form);
+        let message = error.to_string();
+        assert!(
+            message.contains("only an output port be a variable") && message.contains("12.3.3"),
+            "{form}: {message}"
+        );
+        assert_eq!(
+            error.diagnostic_code(),
+            "VA-SEM-VARIABLE-INPUT-PORT",
+            "{form}: {message}"
+        );
+    }
+    // An output port is the one a variable may complete.
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(
+            "module top(q); output q; reg q; initial q = 1'b1; endmodule\n",
+            Some("top"),
+        )
+        .expect("an output port may be a reg");
+}
+
 #[test]
 fn a_digital_name_may_not_collide_with_an_analog_one() {
     let message = analyze_error(&digital_module("    reg gain;"));

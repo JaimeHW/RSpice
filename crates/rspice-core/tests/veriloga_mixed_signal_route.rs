@@ -2352,7 +2352,7 @@ endmodule
 }
 
 #[test]
-fn a_partly_electrical_input_variable_preserves_its_direct_event_bits() {
+fn a_partly_electrical_input_bus_preserves_its_direct_event_bits() {
     let source = ModelFile::new(
         "partial_source",
         r#"
@@ -2363,14 +2363,14 @@ module partial_source(q); output q; reg q; initial begin q=0; #1 q=1; end endmod
         "partial_sink",
         r#"
 module partial_sink(d,q);
- input [1:0] d; reg [1:0] d;
+ input [1:0] d; wire [1:0] d;
  output q; reg q; initial q=0;
  always @(d) q <= (d === 2'b11);
 endmodule
 "#,
     );
     let deck = format!(
-        "* input variable across physical and event nodes\nVupper high ref pwl(0 0 0.5n 0 1n 3.3)\nXd low partial_source\nXs high low out partial_sink\nRout out ref 1k\n.va \"{}\" partial_source\n.va \"{}\" partial_sink\n.end\n",
+        "* input bus across physical and event nodes\nVupper high ref pwl(0 0 0.5n 0 1n 3.3)\nXd low partial_source\nXs high low out partial_sink\nRout out ref 1k\n.va \"{}\" partial_source\n.va \"{}\" partial_sink\n.end\n",
         source.deck_path(),
         sink.deck_path()
     );

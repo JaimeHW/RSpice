@@ -368,24 +368,8 @@ fn classify_boundary_ports(
             rspice_veriloga::ast::PortDirection::Output => BoundaryDirection::DiscreteToAnalog,
             rspice_veriloga::ast::PortDirection::Inout => BoundaryDirection::Bidirectional,
         };
-        // IEEE 1364-2005 section 12.3.3's `inout_declaration` takes a net type
-        // and nothing else: a bidirectional port's value is resolved from every
-        // driver on it, and a variable holds one procedural value. Refused at
-        // the X-card that names the port, because the linker that would
-        // otherwise find it reports a whole-circuit failure with no instance.
-        if direction == BoundaryDirection::Bidirectional && signal.procedurally_assignable {
-            return Err(refuse(
-                &element.name,
-                subckt_name,
-                ElaborationErrorKind::PortDiscipline,
-                format!(
-                    "declares bidirectional port '{}' as a variable; an `inout` port must be a \
-                     net (`wire`, `tri` or `wreal`), because a bidirectional boundary is \
-                     resolved from every driver on it",
-                    port.name
-                ),
-            ));
-        }
+        // An `inout` port is a net here: the compiler refused a variable one
+        // (IEEE 1364-2005 section 12.3.3).
         let bits = (if signal.kind.is_real() {
             Some(vec![0])
         } else {

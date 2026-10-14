@@ -327,6 +327,22 @@ pub enum SemanticErrorKind {
     )]
     UnpackedPortArray { name: smol_str::SmolStr },
 
+    /// An `input` or `inout` port declared as a variable: a `reg`, `integer`,
+    /// `time` or `real`.
+    ///
+    /// IEEE 1364-2005 section 12.3.3 lets only an output port be a variable.
+    /// The rule belongs to the module, so it holds for a root as much as for a
+    /// child.
+    #[error(
+        "Port '{name}' is declared both `{direction}` and `{variable}`; IEEE 1364-2005 section \
+         12.3.3 lets only an output port be a variable"
+    )]
+    VariableInputPort {
+        name: smol_str::SmolStr,
+        direction: &'static str,
+        variable: &'static str,
+    },
+
     #[error("Invalid contribution: cannot contribute to {0}")]
     InvalidContribution(String),
 
@@ -401,6 +417,7 @@ impl SemanticErrorKind {
             Self::DuplicateSymbol { .. } => "VA-SEM-DUPLICATE-SYMBOL",
             Self::PortNoDiscipline(_) => "VA-SEM-PORT-WITHOUT-DISCIPLINE",
             Self::UnpackedPortArray { .. } => "VA-SEM-UNPACKED-PORT-ARRAY",
+            Self::VariableInputPort { .. } => "VA-SEM-VARIABLE-INPUT-PORT",
             Self::InvalidContribution(_) => "VA-SEM-INVALID-CONTRIBUTION",
             Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
             Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",

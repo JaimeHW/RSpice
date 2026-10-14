@@ -1291,11 +1291,40 @@ impl SemanticAnalyzer {
             }
         }
         self.promote_module_level_numeric_variables(module, &mut signals, &mut seen);
+        self.reject_variable_input_ports(module, &signals);
         self.push_implicit_port_nets(module, &mut signals, &mut seen);
         for signal in &mut signals {
             signal.element_alias = self.physical_nodes.real_aliases.get(&signal.name).cloned();
         }
         signals
+    }
+
+    /// IEEE 1364-2005 section 12.3.3: only an output port may be a variable.
+    /// The rule binds every module, a root as much as a child, so it is
+    /// checked against the module's own declarations rather than where an
+    /// instance binds its ports. An integer port answers to it where module
+    /// variables are promoted, and is never pushed as a signal.
+    fn reject_variable_input_ports(&mut self, module: &Module, signals: &[AnalyzedDigitalSignal]) {
+        for declaration in &module.port_declarations {
+            if declaration.direction == PortDirection::Output {
+                continue;
+            }
+            for name in &declaration.names {
+                if let Some(signal) = signals
+                    .iter()
+                    .find(|signal| signal.name == *name && signal.class.is_variable())
+                {
+                    self.record_error_at(
+                        SemanticErrorKind::VariableInputPort {
+                            name: name.clone(),
+                            direction: declaration.direction.label(),
+                            variable: signal.class.keyword(),
+                        },
+                        signal.span,
+                    );
+                }
+            }
+        }
     }
 
     /// Assign real/integer storage to the context that writes it (VAMS-2023
@@ -1388,10 +1417,14 @@ impl SemanticAnalyzer {
                 }
                 if let Some(port) = integer_port {
                     if port.direction != PortDirection::Output {
-                        self.record_error_at(SemanticErrorKind::InvalidContribution(format!(
-                            "`{}` is an integer variable port; only output ports may be variables",
-                            item.name
-                        )), item.span);
+                        self.record_error_at(
+                            SemanticErrorKind::VariableInputPort {
+                                name: item.name.clone(),
+                                direction: port.direction.label(),
+                                variable: "integer",
+                            },
+                            item.span,
+                        );
                         continue;
                     }
                     if port.discipline.is_some()

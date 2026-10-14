@@ -385,8 +385,11 @@ fn the_wrong_number_of_nets_is_port_count_on_both_routes() {
     assert_eq!(mixed_error.module.as_deref(), Some("mdiv"));
 }
 
+/// An `inout` port declared a variable is a language error of the module
+/// (IEEE 1364-2005 section 12.3.3), so the compiler refuses it before any
+/// X-card could try to bridge it.
 #[test]
-fn a_port_this_route_cannot_bridge_is_port_discipline() {
+fn an_inout_variable_port_is_refused_by_the_compiler() {
     let bidirectional = ModelFile::new("bidirectional", BIDIRECTIONAL_MIXED);
     let declared = elaboration_error(&format!(
         "* a bidirectional discrete boundary\n\
@@ -399,12 +402,20 @@ fn a_port_this_route_cannot_bridge_is_port_discipline() {
          .end\n",
         bidirectional.deck_path()
     ));
-    assert_eq!(declared.kind, ElaborationErrorKind::PortDiscipline);
-    assert_eq!(declared.instance.as_deref(), Some("x1"));
-    assert!(declared.detail.contains("'io'"), "{declared}");
+    assert_eq!(declared.kind, ElaborationErrorKind::CompileRefusal);
+    assert!(
+        declared
+            .compiler_diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code == "VA-SEM-VARIABLE-INPUT-PORT"),
+        "{declared}"
+    );
+}
 
-    // The same kind for a port the deck wired somewhere it cannot go, because
-    // both are answered at the same terminal of the same symbol.
+#[test]
+fn a_port_this_route_cannot_bridge_is_port_discipline() {
+    // A port the deck wired somewhere it cannot go is answered at the terminal
+    // of the symbol that names it.
     let mixed = ModelFile::new("port_to_ground", MIXED_DIVIDER);
     let connected = elaboration_error(&format!(
         "* a discrete boundary tied to ground\n\

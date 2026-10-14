@@ -624,7 +624,7 @@ impl DigitalElaborator<'_> {
         )?;
         let borrowed: Vec<_> = connections.iter().map(Option::as_ref).collect();
         let (signals, mut scope, port_drivers, bit_aliases) =
-            self.bind_ports(instance, child, parent_scope, path, &borrowed)?;
+            self.bind_ports(child, parent_scope, path, &borrowed)?;
         scope.connections = super::node_vectors::ConnectionScope::new(child_source, child);
         scope.constants = super::DigitalConstants::from_module(child_source);
         scope.time_scale = child_source.time_scale;
@@ -690,7 +690,6 @@ impl DigitalElaborator<'_> {
     /// assignments and wire-bit aliases its port connections produce.
     fn bind_ports(
         &self,
-        instance: &ModuleInstance,
         child: &AnalyzedModule,
         parent_scope: &Scope,
         path: &str,
@@ -716,21 +715,9 @@ impl DigitalElaborator<'_> {
                 // same occurrence. They never become discrete signal storage.
                 continue;
             };
+            // Only an output port is a variable here: the module's own
+            // analysis refused any other (IEEE 1364-2005 section 12.3.3).
             let is_variable = declared.class.is_variable();
-            if is_variable && port.direction != PortDirection::Output {
-                return Err(semantic_error(
-                    SemanticErrorKind::InvalidContribution(format!(
-                        "`{}`, which module `{}` declares both a `{}` port and a `{}`; IEEE \
-                         1364-2005 section 12.3.3 lets only an output port be a variable",
-                        port.name,
-                        instance.module,
-                        direction_keyword(port.direction),
-                        declared.class.keyword()
-                    )),
-                    declared.span,
-                ));
-            }
-
             let resizes_variable = is_variable && !declared.class.is_real();
             let own = element_binding_name(declared, &child.digital.signals, path)?;
             let form = connections[index]

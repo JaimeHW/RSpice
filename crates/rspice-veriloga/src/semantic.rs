@@ -2037,6 +2037,19 @@ impl SemanticAnalyzer {
                         .lookup(&item.name)
                         .is_some_and(|symbol| symbol.kind == SymbolKind::Port);
                 if completes_integer_port {
+                    if let Some((direction @ (PortDirection::Input | PortDirection::Inout), _)) =
+                        port_info.get(&item.name)
+                    {
+                        return Err(SemanticError::new(
+                            SemanticErrorKind::VariableInputPort {
+                                name: item.name.clone(),
+                                direction: direction.label(),
+                                variable: "integer",
+                            },
+                            item.span,
+                        )
+                        .into());
+                    }
                     if !matches!(port_info.get(&item.name), Some((PortDirection::Output, _))) {
                         return Err(SemanticError::new(
                             SemanticErrorKind::InvalidContribution(format!(
