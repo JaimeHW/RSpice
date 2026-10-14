@@ -1091,8 +1091,8 @@ fn placed_mode_states_each_placed_port_without_offering_to_edit_it() {
     );
 
     for expected in [
-        "PORT 1",
-        "PORT 2",
+        "Port 1",
+        "Port 2",
         "PIN",
         "POUT",
         "AC drive \u{00b7} Z0 50",

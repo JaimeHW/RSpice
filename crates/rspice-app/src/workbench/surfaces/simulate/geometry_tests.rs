@@ -71,91 +71,49 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
     painted_lines(&output.shapes)
 }
 
-/// The analysis header's identity line never reaches its availability chip.
+/// The analysis header states the kind and lifecycle, never the instance's
+/// UUID, and a production analysis says nothing about its availability.
 ///
-/// The two are positioned by different measurements. The chip is laid out from
-/// the header's trailing inset; the identity line — `<kind> · <id> · lifecycle
-/// <state>` — is given whatever the chip leaves and used to be hard-clipped at
-/// that boundary. A hard clip cuts a glyph in half and says nothing about what
-/// was removed: the line read `transient · 4f2a1b3c-9d` and there was no way
-/// to tell that the identity continued, or that a lifecycle state had been on
-/// the end of it.
-///
-/// So the line is elided, and both halves of that are pinned at the width the
-/// gate measures. At 1016 the full line fits and stops short of the chip; at
-/// 860 it does not fit, ends in the ellipsis, and still stops short. The
-/// mockup's own rule for this row is `overflow:hidden; text-overflow:ellipsis`.
-///
-/// These are viewport widths, and the studio surface no longer gets all of one:
-/// it withholds its scrollbar's thirteen-point track whether or not a bar is
-/// showing, so a route is laid out in thirteen points less than the window. The
-/// wide probe was 1000 and measured a surface of exactly that; it names 1016
-/// now for the same reason, and for the same surface with a little room to
-/// spare.
-///
-/// The narrow probe was 950 and is 860, because the header's trailing group
-/// stopped holding two buttons: `Options…` went with the per-analysis options
-/// themselves, which are a section under the form now, and the room it gave
-/// back moved the elision threshold down past 890. 860 is inside the band that
-/// elides and clear of the narrow widths at which the availability chip itself
-/// stops being painted, which is what a probe of this row needs on both sides.
+/// The line used to read `<kind> · <id> · lifecycle <state>` beside an
+/// availability chip that said "Production" in green on every default
+/// analysis. The identity is internal and the default is not news, so the line
+/// is `<kind> · <state>` and the trailing edge holds only the Name… action,
+/// which the line stops short of. These are viewport widths; the surface
+/// withholds its scrollbar's thirteen-point track from them.
 #[test]
-fn the_analysis_header_identity_elides_instead_of_reaching_its_availability_chip() {
-    /// The header band: the chip and the identity line are the only two things
-    /// painted in the top 120 points of the form.
+fn the_analysis_header_states_kind_and_lifecycle_short_of_its_action() {
+    /// The header band: the title, the identity line and the action are the
+    /// only things painted in the top 120 points of the form.
     const HEADER_BAND: f32 = 120.0;
 
-    let header_geometry = |width: f32| -> (PaintedLine, PaintedLine) {
+    for width in [1016.0, 860.0] {
         let lines = analyses_route_painted_lines(width);
         let header: Vec<_> = lines
             .iter()
             .filter(|line| line.top < HEADER_BAND)
             .cloned()
             .collect();
-        let chip = header
-            .iter()
-            .find(|line| line.text == "Production")
-            .cloned()
-            .unwrap_or_else(|| {
-                panic!("the header states the analysis's availability at {width}: {header:?}")
-            });
-        // Matched on the kind rather than the whole line, because the line is
-        // exactly what elision shortens and the instance id is minted per run.
+        assert!(
+            !header.iter().any(|line| line.text == "Production"),
+            "a production analysis states no availability at {width}: {header:?}"
+        );
         let identity = header
             .iter()
-            .find(|line| line.text.starts_with("Transient · "))
-            .cloned()
+            .find(|line| line.text == "Transient · draft")
             .unwrap_or_else(|| {
-                panic!("the header states the instance's identity at {width}: {header:?}")
+                panic!("the header states the kind and lifecycle at {width}: {header:?}")
             });
-        (identity, chip)
-    };
-
-    let (identity, chip) = header_geometry(1016.0);
-    assert!(
-        identity.text.ends_with("· lifecycle draft"),
-        "at 1016 the identity line fits whole: {:?}",
-        identity.text
-    );
-    assert!(
-        identity.right < chip.left,
-        "the identity line runs to {} and the chip starts at {}",
-        identity.right,
-        chip.left
-    );
-
-    let (identity, chip) = header_geometry(860.0);
-    assert!(
-        identity.text.ends_with('\u{2026}'),
-        "a line that no longer fits has to say it was shortened: {:?}",
-        identity.text
-    );
-    assert!(
-        identity.right < chip.left,
-        "the elided identity line runs to {} and the chip starts at {}",
-        identity.right,
-        chip.left
-    );
+        let action = header
+            .iter()
+            .find(|line| line.text == "Name\u{2026}")
+            .unwrap_or_else(|| panic!("the header offers Name… at {width}: {header:?}"));
+        assert!(
+            identity.right < action.left,
+            "the identity line runs to {} and the action starts at {}",
+            identity.right,
+            action.left
+        );
+    }
 }
 
 /// The Analyses route with one analysis of `kind` selected, at `width`.
@@ -198,18 +156,12 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
 
 /// Every word a field may state in the helper slot beside its caption.
 ///
-/// A closed set, because the field constructors are its only writers: the form
-/// names the notation or says the domain constrains the choice, and an option
-/// field names where its value came from. Asserted to be *found* below, so a
-/// slot renamed out from under this cannot leave the gate matching nothing.
-const FIELD_HELPERS: [&str; 6] = [
-    "engineering notation",
-    "domain constrained",
-    "Celsius",
-    "plan policy",
-    "override",
-    "engine default",
-];
+/// A closed set, because the field constructors are its only writers: a field
+/// whose emptiness selects the default says `default`, an option this
+/// analysis or its study states says so, and a temperature names its unit.
+/// Asserted to be *found* below, so a slot renamed out from under this cannot
+/// leave the gate matching nothing.
+const FIELD_HELPERS: [&str; 4] = ["Celsius", "default", "override", "study default"];
 
 /// No field caption runs under the helper beside it, on any analysis form.
 ///
@@ -282,7 +234,7 @@ fn no_field_caption_overlaps_the_helper_beside_it() {
     // would pass forever.
     let kinds = AnalysisKind::ALL.len();
     assert!(
-        forms >= kinds - 4 && helpers > 2 * forms,
+        forms >= kinds - 4 && helpers > forms,
         "the sweep opened {forms} of {kinds} forms and found {helpers} helpers"
     );
 }

@@ -50,7 +50,7 @@ pub(super) fn envelope_time_input_row(
     locale: UiNumberLocale,
 ) -> Response {
     let response = if uses_two_column_fields(ui) {
-        field_cell(ui, label, Some("engineering notation"), |ui| {
+        field_cell(ui, label, None, |ui| {
             mono_input_with_suffix(ui, label, value, "s")
         })
     } else {
@@ -125,7 +125,7 @@ pub(super) fn envelope_choice_row(
     };
 
     if uses_two_column_fields(ui) {
-        return field_cell(ui, label, Some("domain constrained"), add_control);
+        return field_cell(ui, label, None, add_control);
     }
 
     let t = Tokens::get(ui.ctx());

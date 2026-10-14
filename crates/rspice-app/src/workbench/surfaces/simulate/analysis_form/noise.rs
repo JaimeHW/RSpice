@@ -103,19 +103,14 @@ pub(super) fn noise_sweep_row(
     explicit_frequencies: &mut String,
 ) {
     if uses_two_column_fields(ui) {
-        field_cell(
-            ui,
-            NOISE_FIELD_LABELS[0],
-            Some("domain constrained"),
-            |ui| {
-                ui.horizontal(|ui| noise_sweep_control(ui, sweep, explicit_frequencies));
-            },
-        );
+        field_cell(ui, NOISE_FIELD_LABELS[0], None, |ui| {
+            ui.horizontal(|ui| noise_sweep_control(ui, sweep, explicit_frequencies));
+        });
     } else {
         full_width_field(
             ui,
             NOISE_FIELD_LABELS[0],
-            Some("domain constrained"),
+            None,
             Tokens::get(ui.ctx()).metrics.ctl_h,
             |ui| ui.horizontal(|ui| noise_sweep_control(ui, sweep, explicit_frequencies)),
         );

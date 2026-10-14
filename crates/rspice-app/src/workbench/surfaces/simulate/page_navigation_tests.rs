@@ -158,16 +158,18 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
     state.simulation.view.active_analysis_idx = holds_analysis.then_some(0);
 }
 
-/// The plan heading says whether a prior dataset exists; both controls beside
-/// it are the ways of acting on that sentence, and both are drawn whether or
-/// not there is one so the reader is never left guessing that a route exists.
+/// The plan heading is the plan's name; the two controls beside it say whether
+/// a prior dataset exists by what they name, and both are drawn whether or not
+/// there is one so the reader is never left guessing that a route exists.
 #[test]
 fn the_plan_heading_offers_its_prior_dataset_and_the_split_stage() {
     let empty = render_with(SimulationPage::Analyses, 1400.0, |_| {});
-    assert!(
-        empty.contains("no prior dataset"),
-        "the heading states the absence:\n{empty}"
-    );
+    for gone in ["no prior dataset", "catalog types", "enabled instances"] {
+        assert!(
+            !empty.contains(gone),
+            "the heading carries no description of the plan:\n{empty}"
+        );
+    }
     assert!(
         empty.contains("Open prior run"),
         "and the route to one is still drawn, disabled:\n{empty}"
@@ -184,12 +186,8 @@ fn the_plan_heading_offers_its_prior_dataset_and_the_split_stage() {
         );
     });
     assert!(
-        retained.contains("prior Run 1 immutable"),
-        "the heading names the run it found:\n{retained}"
-    );
-    assert!(
         retained.contains("Open Run 1"),
-        "and the control names the same one, so the two cannot disagree:\n{retained}"
+        "the control names the run it found:\n{retained}"
     );
 }
 
@@ -580,12 +578,9 @@ fn the_heading_the_hop_and_the_contract_card_agree_about_the_prior_run() {
         );
     });
     assert!(
-        dispatched.contains("no prior dataset"),
-        "a run holding nothing is not a dataset the heading may claim:\n{dispatched}"
-    );
-    assert!(
         dispatched.contains("Open prior run"),
-        "so the hop names no run either, and stays disabled:\n{dispatched}"
+        "a run holding nothing is not a dataset the hop may name, so it stays \
+         disabled:\n{dispatched}"
     );
     assert!(
         dispatched.contains("No prior datasets"),
@@ -599,12 +594,8 @@ fn the_heading_the_hop_and_the_contract_card_agree_about_the_prior_run() {
         );
     });
     assert!(
-        landed.contains("prior Run 1 immutable"),
-        "once a result lands the heading names the run:\n{landed}"
-    );
-    assert!(
         landed.contains("Open Run 1"),
-        "the hop names the same one:\n{landed}"
+        "once a result lands the hop names the run:\n{landed}"
     );
     assert!(
         landed.contains("Run 1 retained · immutable"),

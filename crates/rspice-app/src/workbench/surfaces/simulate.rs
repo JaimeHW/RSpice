@@ -44,7 +44,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, mono_input, select,
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, mono_input,
+    paint_problem_mark, select,
 };
 use crate::workbench::app_state::SimSetupState;
 use crate::workbench::state::{
@@ -60,7 +61,7 @@ use rspice_simulation::runner::{TfRunConfig, infer_tf_run_config};
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     StatusMark, WorkbenchIcon, elide_text, heading, property_row, property_row_control_columns,
-    property_row_toned, property_row_wrapped, status_dot, workspace_title_row,
+    property_row_problem, property_row_wrapped, workspace_title_row,
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
@@ -69,6 +70,10 @@ const TITLE_ACTION_SPACING: f32 = 6.0;
 /// The narrowest the plan heading is allowed to become before the title row
 /// gives up on holding the actions beside it.
 const TITLE_HEADING_MIN_WIDTH: f32 = 220.0;
+/// Side of a problem mark painted into a row's line, and the advance from its
+/// left edge to the words after it: the kit's own row metrics.
+const ROW_MARK_SIDE: f32 = 11.0;
+const ROW_MARK_ADVANCE: f32 = 17.0;
 const ANALYSIS_ROW_HEIGHT: f32 = 53.0;
 const ANALYSIS_GROUP_HEADER_HEIGHT: f32 = 26.0;
 const ANALYSIS_INDEX_DIAMETER: f32 = 22.0;
@@ -238,12 +243,6 @@ struct AnalysisStackRow {
     /// authorized a task for it. `None` when the plan has never run, or when
     /// this instance was added since.
     run_state: Option<InstanceRunState>,
-    /// The identity's leading characters, which is as much of it as a 53-point
-    /// row can carry beside the summary. The full identity is a property row in
-    /// the contract block, where it can be read and copied whole; leading the
-    /// meta line with all thirty-six characters spent the row on a string
-    /// nobody reads across and clipped the summary that says what will run.
-    short_id: String,
     summary: String,
     /// What this instance costs the queue: points, tasks, modelled duration.
     /// `None` for a disabled instance, which contributes nothing and is priced
@@ -566,8 +565,8 @@ fn ordered_instance_stack(
         Ok(rows) => rows,
         Err(error) => {
             flat_notice(ui, |ui| {
-                status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
-                page_kit::note_line(ui, &error, page_kit::Tone::Error);
+                page_kit::note_line(ui, "Plan unavailable", page_kit::Tone::Error);
+                page_kit::note_line(ui, &error, page_kit::Tone::Dim);
             });
             return;
         }
@@ -585,12 +584,7 @@ fn ordered_instance_stack(
             // screen — the panel collapsed, and focus mode. The empty rail is
             // where a plan is started, so it carries the action itself.
             flat_notice(ui, |ui| {
-                status_dot(ui, t.color.warn, "No analysis instances");
-                page_kit::note_line(
-                    ui,
-                    "This plan runs nothing until it holds one.",
-                    page_kit::Tone::Dim,
-                );
+                page_kit::note_line(ui, "No analysis instances", page_kit::Tone::Text);
                 ui.add_space(4.0);
                 add_analysis = Button::new(Command::AddAnalysis.spec().label)
                     .accent()
@@ -673,7 +667,7 @@ fn analysis_group_header(ui: &mut Ui, label: &str, count: usize) {
     ui.painter().text(
         rect.left_center() + vec2(10.0, 0.0),
         Align2::LEFT_CENTER,
-        label.to_uppercase(),
+        label,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text_faint,
     );
@@ -807,16 +801,19 @@ fn analysis_stack_row(
     // instance resolves its name to the kind label, so this row reads exactly
     // as it did before anyone named anything.
     let first_line = format!("{} · {}", row.kind.stable_id().to_uppercase(), row.name);
-    let second_line = format!("{} · {}", row.short_id, row.summary);
-    let (status, status_color) = if row.issue_count > 0 {
-        ("dependency blocked", t.color.err)
+    let second_line = row.summary.as_str();
+    // A blocked dependency is the row's one problem and leads the line with its
+    // mark. A production analysis is the default and says nothing about it; any
+    // other availability is named, neutrally.
+    let blocked = row.issue_count > 0;
+    let status = if blocked {
+        Some("dependency blocked")
     } else {
-        let color = if availability_label(row.kind) == "Production" {
-            t.color.ok
-        } else {
-            t.color.warn
-        };
-        (availability_label(row.kind), color)
+        Some(availability_label(row.kind)).filter(|label| *label != "Production")
+    };
+    let status_line = match status {
+        Some(status) => format!("{status} · {}", row.lifecycle),
+        None => row.lifecycle.to_string(),
     };
     let line_top = rect.top() + 7.0;
     paint_text_elided_to_fit(
@@ -846,7 +843,7 @@ fn analysis_stack_row(
             egui::pos2(text_left, line_top + 14.0),
             egui::pos2((text_right - cost_width).max(text_left), line_top + 27.0),
         ),
-        &second_line,
+        second_line,
         meta_font.clone(),
         t.color.text_faint.gamma_multiply(opacity),
     );
@@ -867,49 +864,53 @@ fn analysis_stack_row(
     }
     // The run chip sits at the end of the status line rather than in the line,
     // because it is the one fact here that changes without the plan changing.
-    // Its own colour, too: "failed" and "not production" are different kinds of
-    // bad news and a single tone for the line would merge them.
-    let run_chip = row.run_state.map(|state| {
-        (
-            state.label(),
-            match state {
-                InstanceRunState::Running => t.color.accent,
-                InstanceRunState::Complete => t.color.ok,
-                InstanceRunState::Failed => t.color.err,
-                InstanceRunState::Queued => t.color.text_faint,
-            },
-        )
+    // A finished run is the normal state and says nothing; the results are in
+    // Results. A failed one carries its mark.
+    let run_chip = row.run_state.and_then(|state| match state {
+        InstanceRunState::Complete => None,
+        InstanceRunState::Failed => Some((state.label(), t.color.text_dim, true)),
+        InstanceRunState::Running => Some((state.label(), t.color.text_dim, false)),
+        InstanceRunState::Queued => Some((state.label(), t.color.text_faint, false)),
     });
     let chip_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let chip_width = run_chip.map_or(0.0, |(label, _)| {
+    let chip_width = run_chip.map_or(0.0, |(label, _, failed)| {
         ui.painter()
             .layout_no_wrap(label.to_owned(), chip_font.clone(), t.color.text)
             .size()
             .x
             + ANALYSIS_SWITCH_LABEL_GAP
+            + if failed { ROW_MARK_ADVANCE } else { 0.0 }
     });
+    let status_top = line_top + 28.0;
+    let status_bottom = rect.bottom() - 3.0;
+    let status_center = (status_top + status_bottom) * 0.5;
+    let status_left = if blocked {
+        paint_row_mark(ui, text_left, status_center, Problem::Failure)
+    } else {
+        text_left
+    };
     paint_text_elided_to_fit(
         ui,
         Rect::from_min_max(
-            egui::pos2(text_left, line_top + 28.0),
-            egui::pos2(
-                (text_right - chip_width).max(text_left),
-                rect.bottom() - 3.0,
-            ),
+            egui::pos2(status_left, status_top),
+            egui::pos2((text_right - chip_width).max(status_left), status_bottom),
         ),
-        &format!("{status} · {}", row.lifecycle),
+        &status_line,
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        status_color.gamma_multiply(opacity),
+        t.color.text_faint.gamma_multiply(opacity),
     );
-    if let Some((label, color)) = run_chip {
+    if let Some((label, color, failed)) = run_chip {
+        let chip_left = (text_right - chip_width + ANALYSIS_SWITCH_LABEL_GAP).max(text_left);
+        let chip_left = if failed {
+            paint_row_mark(ui, chip_left, status_center, Problem::Failure)
+        } else {
+            chip_left
+        };
         paint_text_elided_to_fit(
             ui,
             Rect::from_min_max(
-                egui::pos2(
-                    (text_right - chip_width + ANALYSIS_SWITCH_LABEL_GAP).max(text_left),
-                    line_top + 28.0,
-                ),
-                egui::pos2(text_right, rect.bottom() - 3.0),
+                egui::pos2(chip_left, status_top),
+                egui::pos2(text_right.max(chip_left), status_bottom),
             ),
             label,
             chip_font,
@@ -929,6 +930,20 @@ fn analysis_stack_row(
     } else {
         None
     }
+}
+
+/// Paint `problem`'s mark at `left`, centred on `center_y`; returns where the
+/// words after it start.
+fn paint_row_mark(ui: &Ui, left: f32, center_y: f32, problem: Problem) -> f32 {
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            egui::pos2(left + ROW_MARK_SIDE * 0.5, center_y),
+            Vec2::splat(ROW_MARK_SIDE),
+        ),
+        problem,
+    );
+    left + ROW_MARK_ADVANCE
 }
 
 /// Paint one line into `rect`, elided rather than cut.
@@ -1030,16 +1045,6 @@ fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunS
         .collect()
 }
 
-/// The leading characters of an instance identity, for the rail's meta line.
-///
-/// Elided by [`crate::product::short_identity`], which is where the width every
-/// short identity in this workbench is abbreviated to is decided. Not a second
-/// identity: nothing resolves an instance by this string, and the row's
-/// accessibility name still carries the whole one.
-fn short_instance_id(id: AnalysisInstanceId) -> String {
-    crate::product::short_identity(id)
-}
-
 fn analysis_stack_rows(
     app: &RSpiceApp,
     participation: &participation::PlanParticipation,
@@ -1069,7 +1074,6 @@ fn analysis_stack_rows(
                     .iter()
                     .find(|(id, _)| *id == instance.id())
                     .map(|(_, state)| *state),
-                short_id: short_instance_id(instance.id()),
                 summary: setup.analysis_draft_summary(instance.draft()),
                 workload: workload
                     .as_ref()
@@ -1097,16 +1101,6 @@ struct PriorPlanRun {
 }
 
 impl PriorPlanRun {
-    /// How the plan heading names it, mid-sentence among the plan's standing
-    /// facts.
-    fn heading_claim(self) -> String {
-        if self.executing {
-            format!("Run {} in progress", self.sequence)
-        } else {
-            format!("prior Run {} immutable", self.sequence)
-        }
-    }
-
     /// How the analysis contract card names it, as a value on its own row.
     fn contract_summary(self) -> String {
         if self.executing {
@@ -1167,38 +1161,11 @@ fn prior_plan_run(app: &RSpiceApp) -> Option<PriorPlanRun> {
 
 fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let plan_name = app.state.sim_setup.active_plan_name().as_str().to_owned();
-    // The heading states whether a prior dataset exists; the two controls
-    // below make that statement reachable. All three read the one derivation,
-    // so the sentence, the hop's label and the hop's own availability are
-    // three views of a single answer rather than three answers.
+    // The heading is the plan's name. What the plan holds is the rail's, and
+    // its last run is the hop's: the hop's label and its own availability read
+    // the one derivation, so they cannot disagree.
     let prior = prior_plan_run(app);
-    let (description, plan_available) = match app.state.sim_setup.stable_analysis_plan() {
-        Ok(plan) => {
-            let enabled = plan
-                .instances()
-                .iter()
-                .filter(|instance| instance.enabled())
-                .count();
-            let prior = prior.map_or_else(
-                || "no prior dataset".to_owned(),
-                PriorPlanRun::heading_claim,
-            );
-            (
-                format!(
-                    "{enabled} enabled instances · {} active · {} catalog types · {} executable · {} PVT points · {prior}",
-                    plan.instances().len(),
-                    AnalysisKind::MANIFEST_ORDER.len(),
-                    AnalysisKind::MANIFEST_ORDER
-                        .into_iter()
-                        .filter(|kind| kind.execution_blocker().is_none())
-                        .count(),
-                    app.state.sim_setup.run_set.point_count().max(1),
-                ),
-                true,
-            )
-        }
-        Err(error) => (format!("Stable plan unavailable · {error}"), false),
-    };
+    let plan_available = app.state.sim_setup.stable_analysis_plan().is_ok();
 
     // The split toggle sits beside the hop because both answer "and now show
     // me what the last run produced" — one by leaving this page, one by
@@ -1253,7 +1220,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                     // than the reserve wraps inside the heading's own column
                     // instead of running under the group.
                     ui.set_width(heading_width);
-                    heading(ui, &plan_name, Some(&description));
+                    heading(ui, &plan_name, None);
                 },
             );
             if let Some(chip) = &chip {
@@ -1278,7 +1245,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
                 .clicked();
         });
     } else {
-        heading(ui, &plan_name, Some(&description));
+        heading(ui, &plan_name, None);
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = TITLE_ACTION_SPACING;
@@ -1588,16 +1555,7 @@ fn analysis_editor(
         Ok(None) => {
             app.state.workbench.simulation_surface_editor_anchor_y = None;
             flat_notice(ui, |ui| {
-                status_dot(
-                    ui,
-                    Tokens::get(ui.ctx()).color.warn,
-                    "No active analysis instance",
-                );
-                page_kit::note_line(
-                    ui,
-                    "The stable plan is empty. Add an analysis from Simulation Studio.",
-                    page_kit::Tone::Dim,
-                );
+                page_kit::note_line(ui, "Add an analysis to start.", page_kit::Tone::Dim);
             });
             return;
         }
@@ -1605,8 +1563,8 @@ fn analysis_editor(
             app.state.workbench.simulation_surface_editor_anchor_y = None;
             record_failure(&mut app.state, "Analysis editor", &error);
             flat_notice(ui, |ui| {
-                status_dot(ui, Tokens::get(ui.ctx()).color.err, "Plan unavailable");
-                page_kit::note_line(ui, &error, page_kit::Tone::Error);
+                page_kit::note_line(ui, "Plan unavailable", page_kit::Tone::Error);
+                page_kit::note_line(ui, &error, page_kit::Tone::Dim);
             });
             return;
         }
@@ -1643,8 +1601,8 @@ fn analysis_editor(
     let editor_response = egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         let rename_requested = analysis_form_header(ui, &selected, validation_error.as_deref());
-        if availability_label(selected.kind) != "Production" {
-            capability_banner(ui, selected.kind);
+        if let Some(blocker) = selected.kind.execution_blocker() {
+            capability_banner(ui, blocker);
         }
         lifecycle_toolbar(ui, &selected, &mut action);
         analysis_contract(
@@ -1804,8 +1762,7 @@ fn analysis_form_header(
         egui::pos2(rect.left() + 11.0, rect.center().y - 12.0),
         Vec2::splat(24.0),
     );
-    ui.painter().rect_filled(icon_rect, 3.0, t.color.accent_dim);
-    analysis_icon(selected.kind).paint(ui.painter(), icon_rect.shrink(4.0), t.color.accent);
+    analysis_icon(selected.kind).paint(ui.painter(), icon_rect.shrink(4.0), t.color.text_dim);
     let text_left = icon_rect.right() + 9.0;
     // The workbench's own button rather than egui's, laid out right-to-left
     // from the header's trailing inset. The rect this replaces was authored
@@ -1826,36 +1783,40 @@ fn analysis_form_header(
         .on_hover_text("Name this analysis instance so every surface reports it by that name")
         .clicked();
     let actions_left = trailing.min_rect().left();
-    let (status, color) = if selected.issues.is_empty()
-        && selected.contextual_dependency_error.is_none()
-        && validation_error.is_none()
-    {
-        (
-            availability_label(selected.kind),
-            if availability_label(selected.kind) == "Production" {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
-        )
+    // A blocked analysis says so with its mark; a production one says nothing
+    // about its availability, and any other availability is named neutrally.
+    let blocked = !selected.issues.is_empty()
+        || selected.contextual_dependency_error.is_some()
+        || validation_error.is_some();
+    let status = if blocked {
+        Some("preflight blocked")
     } else {
-        ("preflight blocked", t.color.err)
+        Some(availability_label(selected.kind)).filter(|label| *label != "Production")
     };
-    let status_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let status_right = actions_left - 8.0;
-    let status_width = ui
-        .painter()
-        .layout_no_wrap(status.to_owned(), status_font.clone(), color)
-        .size()
-        .x;
-    ui.painter().text(
-        egui::pos2(status_right, rect.center().y),
-        Align2::RIGHT_CENTER,
-        status,
-        status_font,
-        color,
-    );
-    let text_right = (status_right - status_width - 10.0).max(text_left);
+    let status_left = status.map_or(status_right, |status| {
+        let status_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+        let galley = ui
+            .painter()
+            .layout_no_wrap(status.to_owned(), status_font, t.color.text_dim);
+        let text_left = status_right - galley.size().x;
+        ui.painter().galley(
+            egui::pos2(text_left, rect.center().y - galley.size().y * 0.5),
+            galley,
+            t.color.text_dim,
+        );
+        if blocked {
+            paint_row_mark(
+                ui,
+                text_left - ROW_MARK_ADVANCE,
+                rect.center().y,
+                Problem::Failure,
+            ) - ROW_MARK_ADVANCE
+        } else {
+            text_left
+        }
+    });
+    let text_right = (status_left - 10.0).max(text_left);
     // The title is the instance, the line under it is the kind. When nothing
     // has been named the two agree, which is the state every plan starts in.
     paint_text_elided_to_fit(
@@ -1874,12 +1835,7 @@ fn analysis_form_header(
             egui::pos2(text_left, rect.top() + 21.0),
             egui::pos2(text_right, rect.bottom() - 3.0),
         ),
-        &format!(
-            "{} · {} · lifecycle {}",
-            selected.kind.label(),
-            selected.id,
-            selected.lifecycle
-        ),
+        &format!("{} · {}", selected.kind.label(), selected.lifecycle),
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_faint,
     );
@@ -1929,32 +1885,17 @@ fn analysis_icon(kind: AnalysisKind) -> WorkbenchIcon {
     }
 }
 
-fn capability_banner(ui: &mut Ui, kind: AnalysisKind) {
+/// Why this build cannot run the selected analysis. Its configuration stays
+/// editable; the form under the banner says so by being there.
+fn capability_banner(ui: &mut Ui, blocker: &str) {
     let t = Tokens::get(ui.ctx());
     let content_width = (ui.available_width() - 16.0).max(1.0);
     let response = egui::Frame::new()
-        .fill(t.color.accent_dim)
+        .fill(t.color.bg_panel_2)
         .inner_margin(egui::Margin::symmetric(8, 7))
         .show(ui, |ui| {
             ui.set_width(content_width);
-            let copy = kind.execution_blocker().map_or_else(
-                || {
-                    format!(
-                        "{} is retained for design review and produces non-sign-off data.",
-                        availability_label(kind)
-                    )
-                },
-                |blocker| {
-                    format!(
-                        "Execution is blocked: {blocker}. The configuration remains editable and persistent."
-                    )
-                },
-            );
-            ui.label(
-                egui::RichText::new(copy)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-            );
+            page_kit::note_line(ui, &format!("Can't run: {blocker}."), page_kit::Tone::Error);
         })
         .response;
     ui.painter().hline(
@@ -2107,12 +2048,6 @@ fn analysis_contract(
             let mut property_action = None;
             let mut open_dataset = false;
             let mut properties = |ui: &mut Ui| {
-                property_row(ui, "Stable instance identity", &selected.id.to_string());
-                property_row(
-                    ui,
-                    "Ordered position",
-                    &format!("{} / {}", selected.position + 1, selected.plan_length),
-                );
                 property_action = analysis_form::prerequisite_rows(ui, selected);
                 if let Some(asked) = participation::participation_row(ui, resolved, selected.id) {
                     *participation_action = Some(asked);
@@ -2125,11 +2060,13 @@ fn analysis_contract(
                     Ok(statement) => property_row(ui, "Plan statement", statement).on_hover_text(
                         "The exact directive this instance contributes to the executable deck.",
                     ),
-                    Err(error) => property_row_toned(ui, "Plan statement", error, t.color.warn)
-                        .on_hover_text(
-                            "This analysis emits no directive until its configuration resolves, \
-                             so it would contribute nothing to the deck.",
-                        ),
+                    Err(error) => {
+                        property_row_problem(ui, "Plan statement", error, Some(Problem::Warning))
+                            .on_hover_text(
+                                "This analysis emits no directive until its configuration \
+                                 resolves, so it would contribute nothing to the deck.",
+                            )
+                    }
                 };
                 property_row(ui, "Prior datasets", datasets.summary);
                 // The row above names the run; this opens it. Kept as a
@@ -2147,36 +2084,34 @@ fn analysis_contract(
                         .clicked();
                 }
             };
+            // The dependency graph speaks only when something in it is wrong: a
+            // valid graph is the normal state and says nothing.
             let mut evidence = |ui: &mut Ui| {
-                let (color, title, detail) = if let Some(issue) = selected.issues.first() {
-                    (
-                        t.color.err,
+                let problem = if let Some(issue) = selected.issues.first() {
+                    Some((
+                        page_kit::Tone::Error,
                         "Dependency graph blocked",
                         format_plan_issue(issue),
-                    )
+                    ))
                 } else if let Some(error) = &selected.contextual_dependency_error {
-                    (t.color.err, "Dependency graph blocked", error.clone())
+                    Some((
+                        page_kit::Tone::Error,
+                        "Dependency graph blocked",
+                        error.clone(),
+                    ))
                 } else if selected.repair_label.is_some() || selected.configure_pss_label.is_some() {
-                    (
-                        t.color.warn,
+                    Some((
+                        page_kit::Tone::Warn,
                         "Prerequisites not prepared",
-                        "This disabled analysis does not block preflight, but its required prerequisite chain must be prepared before it can be enabled."
-                            .to_owned(),
-                    )
+                        "Prepare its prerequisites before enabling it.".to_owned(),
+                    ))
                 } else {
-                    (
-                        t.color.ok,
-                        "Dependency graph valid",
-                        "Dependency identity, order, and enabled state are valid for this instance."
-                            .to_owned(),
-                    )
+                    None
                 };
-                status_dot(ui, color, title);
-                ui.label(
-                    egui::RichText::new(detail)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
+                if let Some((tone, title, detail)) = problem {
+                    page_kit::note_line(ui, title, tone);
+                    page_kit::note_line(ui, &detail, page_kit::Tone::Dim);
+                }
                 if let Some(repair_label) = selected.repair_label.as_deref() {
                     ui.add_space(7.0);
                     if Button::new(repair_label)

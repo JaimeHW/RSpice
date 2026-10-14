@@ -7,10 +7,9 @@
 //! now read the same way, in the same two-column grid, with the same label over
 //! the same well.
 //!
-//! The field's hint slot is where the table's Origin column went. Start time
-//! says "engineering notation" there; an option says `plan policy`, `override`
-//! or `engine default`, which is the one fact a table of identical numbers
-//! existed to carry.
+//! The field's hint slot is where the table's Origin column went: an option
+//! says `default` there, or `override` once this analysis states a value,
+//! which is the one fact a table of identical numbers existed to carry.
 //!
 //! Which options appear is [`super::super::advanced_options::form_rows`]: the
 //! ones this analysis owns, never the plan's global policy. What a field edit
@@ -128,7 +127,12 @@ fn grouped(sections: &[AdvancedOptionSection]) -> Vec<(&'static str, Vec<&Advanc
 /// asks for.
 fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
     let label = row.option.label();
-    let origin = advanced_options::origin_hint(row);
+    // An inherited value, from the plan or from the engine, is the default;
+    // only a value this analysis or its study states is named for its source.
+    let origin = match advanced_options::origin_hint(row) {
+        advanced_options::PLAN_ORIGIN | advanced_options::ENGINE_ORIGIN => "default",
+        own => own,
+    };
     match row.option.value_kind() {
         OverrideValueKind::Flag => option_field(ui, label, origin, |ui| {
             let mut setting = row.effective.trim().eq_ignore_ascii_case("on");

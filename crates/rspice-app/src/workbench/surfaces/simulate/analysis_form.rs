@@ -327,7 +327,7 @@ fn engineering_input_row(ui: &mut Ui, label: &str, value: &mut String) -> Respon
     if !uses_two_column_fields(ui) {
         return inspector_input_row(ui, label, value);
     }
-    field_cell(ui, label, Some("engineering notation"), |ui| {
+    field_cell(ui, label, None, |ui| {
         mono_input(ui, label, value, ui.available_width())
     })
 }
@@ -343,7 +343,7 @@ fn engineering_input_row_enabled(
             .add_enabled_ui(enabled, |ui| inspector_input_row(ui, label, value))
             .inner;
     }
-    field_cell(ui, label, Some("engineering notation"), |ui| {
+    field_cell(ui, label, None, |ui| {
         ui.add_enabled_ui(enabled, |ui| {
             mono_input(ui, label, value, ui.available_width())
         })
@@ -366,9 +366,8 @@ fn quantity_input_row(
 
 /// A quantity row whose helper states something the label cannot.
 ///
-/// The ordinary row spends its helper slot on `engineering notation`, which is
-/// true of every quantity field on the page and is worth saying once a form
-/// rather than once a row. A field where *leaving it empty* selects a
+/// The ordinary row leaves its helper slot empty. A field where *leaving it
+/// empty* selects a
 /// behaviour has a fact the reader cannot infer from the label, and this is
 /// where that fact goes: the caption row's right edge, beside the name of the
 /// thing it qualifies, rather than as a note under the control where it would
@@ -462,7 +461,7 @@ fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> 
     if !uses_two_column_fields(ui) {
         return inspector_choice_row(ui, label, options, value);
     }
-    field_cell(ui, label, Some("domain constrained"), |ui| {
+    field_cell(ui, label, None, |ui| {
         let options = options
             .iter()
             .map(|option| (*option).to_owned())
@@ -495,20 +494,15 @@ fn periodic_carrier_row(ui: &mut Ui, value: &mut usize) -> bool {
 
 /// A tolerance well whose emptiness selects the plan's own policy.
 ///
-/// The hint slot is the whole of what distinguishes this from an ordinary
-/// engineering field: a blank well here is not an omission, it is the
-/// selection "whatever the Solver options channel states deck-wide", and the
-/// slot says so in that channel's own words. A written value is this
-/// analysis's, and the card then states it; the two cases read differently
-/// because they are different, and a field that said `engineering notation`
-/// in both would leave the reader to guess which one an empty well was.
+/// A blank well here is not an omission, it is the selection "whatever the
+/// Solver options channel states deck-wide", and the hint slot says `default`.
+/// A written value is this analysis's own and needs no word beside it.
 fn plan_policy_tolerance_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
-    let hint = if value.trim().is_empty() {
-        "plan policy"
+    if value.trim().is_empty() {
+        hinted_input_row(ui, label, value, "default")
     } else {
-        "engineering notation"
-    };
-    hinted_input_row(ui, label, value, hint)
+        engineering_input_row(ui, label, value)
+    }
 }
 
 fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {
@@ -653,30 +647,24 @@ fn choice_row_with_disabled(
             "analysis-field-disabled-stacked-{}-{label}",
             ui.id().value()
         );
-        return full_width_field(
-            ui,
-            label,
-            Some("domain constrained"),
-            Tokens::get(ui.ctx()).metrics.ctl_h,
-            |ui| {
-                if let Some(index) = select_with_disabled(
-                    ui,
-                    &salt,
-                    label,
-                    current,
-                    &options,
-                    disabled,
-                    ui.available_width(),
-                ) {
-                    *value = index;
-                    true
-                } else {
-                    false
-                }
-            },
-        );
+        return full_width_field(ui, label, None, Tokens::get(ui.ctx()).metrics.ctl_h, |ui| {
+            if let Some(index) = select_with_disabled(
+                ui,
+                &salt,
+                label,
+                current,
+                &options,
+                disabled,
+                ui.available_width(),
+            ) {
+                *value = index;
+                true
+            } else {
+                false
+            }
+        });
     }
-    field_cell(ui, label, Some("domain constrained"), |ui| {
+    field_cell(ui, label, None, |ui| {
         let options = options
             .iter()
             .map(|option| (*option).to_owned())
@@ -883,7 +871,7 @@ fn named_periodic_source_row(
     };
 
     if uses_two_column_fields(ui) {
-        return field_cell(ui, label, Some("domain constrained"), add_control);
+        return field_cell(ui, label, None, add_control);
     }
 
     let t = Tokens::get(ui.ctx());
@@ -912,7 +900,7 @@ fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
     if !uses_two_column_fields(ui) {
         return inspector_switch_row(ui, label, value);
     }
-    field_cell(ui, label, Some("domain constrained"), |ui| {
+    field_cell(ui, label, None, |ui| {
         let row_size = vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
         ui.allocate_ui_with_layout(row_size, Layout::left_to_right(Align::Center), |ui| {
             // The cell owns the full grid column, but the switch keeps its
@@ -932,9 +920,7 @@ fn switch_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
 
 /// A switch whose hint slot says what turning it on produces.
 ///
-/// [`switch_row`] fills that slot with "domain constrained", which is true of
-/// every boolean and therefore says nothing about any particular one. A switch
-/// whose whole point is an output the reader has to know where to look for —
+/// [`switch_row`] leaves that slot empty. A switch whose whole point is an output the reader has to know where to look for —
 /// the solver trace, which appears in the Console and nowhere else — says that
 /// there instead.
 fn hinted_switch_row(ui: &mut Ui, label: &str, value: &mut bool, hint: &str) -> bool {
@@ -978,23 +964,16 @@ fn property_row(ui: &mut Ui, label: &str, value: &str) {
     });
 }
 
-/// Mono sub-header inside a form ("TONE 2", "PORT 1").
+/// Mono sub-header inside a form ("Tone 2", "Port 1"), as written.
 fn sub_header(ui: &mut Ui, text: &str) {
     clear_pending_cell(ui);
     let t = Tokens::get(ui.ctx());
     ui.add_space(6.0);
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &text.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
-            color: t.color.text_faint,
-            extra_letter_spacing: 0.08 * tokens::FS_0,
-            ..Default::default()
-        },
-    );
-    ui.add(egui::Label::new(job));
+    ui.add(egui::Label::new(
+        egui::RichText::new(text)
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_faint),
+    ));
 }
 
 /// A full-width line of prose under the rows it is about.
@@ -1015,9 +994,12 @@ fn field_prose(ui: &mut Ui, text: &str, color: egui::Color32) {
     );
 }
 
-/// A full-width advisory: something here will refuse the run.
+/// A full-width advisory: something here will refuse the run. Its warning
+/// mark says so; the words stay neutral.
 fn field_advisory(ui: &mut Ui, text: &str) {
-    field_prose(ui, text, Tokens::get(ui.ctx()).color.warn);
+    clear_pending_cell(ui);
+    ui.add_space(2.0);
+    super::page_kit::note_line(ui, text, super::page_kit::Tone::Warn);
 }
 
 /// A full-width note: something the design holds, which the reader may take or
@@ -1194,10 +1176,6 @@ pub(super) fn prerequisite_rows(
     ui: &mut Ui,
     selected: &super::SelectedAnalysis,
 ) -> Option<super::AnalysisAction> {
-    if selected.prerequisite_roles.is_empty() {
-        super::property_row(ui, "Prerequisites", "none declared");
-        return None;
-    }
     let mut requested = None;
     for prerequisite in &selected.prerequisite_roles {
         let bound = selected
