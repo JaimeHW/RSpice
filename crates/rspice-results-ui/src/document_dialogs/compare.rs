@@ -163,15 +163,15 @@ pub fn show(ctx: &Context, draft: &mut CompareDraft, choices: &CompareChoices) -
             ) {
                 draft.alignment = alignments[alignment];
             }
-            if draft.alignment != ComparisonAlignmentDraft::AbsoluteXAxis {
-                if let Some(index) = rows.select(
+            if draft.alignment != ComparisonAlignmentDraft::AbsoluteXAxis
+                && let Some(index) = rows.select(
                     "Signal",
                     "rspice.compare.signal",
                     &draft.signal,
                     &choices.signals,
-                ) {
-                    draft.signal = choices.signals[index].clone();
-                }
+                )
+            {
+                draft.signal = choices.signals[index].clone();
             }
             match draft.alignment {
                 ComparisonAlignmentDraft::FirstThresholdCrossing => {
