@@ -1145,6 +1145,27 @@ pub fn property_row_problem(
     value: &str,
     problem: Option<Problem>,
 ) -> Response {
+    property_row_with_problem(ui, label, value, problem, tokens::FS_0)
+}
+
+/// [`property_row_problem`] with the schematic inspector's body-sized value:
+/// with no problem it is a plain [`schematic_property_row`], to the pixel.
+pub fn schematic_property_row_problem(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    problem: Option<Problem>,
+) -> Response {
+    property_row_with_problem(ui, label, value, problem, tokens::FS_1)
+}
+
+fn property_row_with_problem(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    problem: Option<Problem>,
+    value_size: f32,
+) -> Response {
     let palette = Tokens::get(ui.ctx()).color;
     let response = property_row_with_tone(
         ui,
@@ -1152,7 +1173,7 @@ pub fn property_row_problem(
         value,
         palette.text,
         problem.map(|problem| (problem.mark(), problem.color(&palette))),
-        tokens::FS_0,
+        value_size,
         elide_text,
     );
     if let Some(problem) = problem {

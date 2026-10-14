@@ -644,6 +644,29 @@ fn a_problem_row_keeps_its_value_neutral_and_only_marks_a_problem() {
         assert_eq!(value(&inked).fallback_color, expected, "{ink:?}");
         assert_eq!(value(&inked).pos, value(&plain).pos, "{ink:?}");
     }
+
+    // The schematic inspector's variant sets its value a size up, and is its
+    // own plain row when there is nothing to mark.
+    let schematic = render(&|ui| {
+        schematic_property_row(ui, "Terminal", "unplaced");
+    });
+    let schematic_clear = render(&|ui| {
+        schematic_property_row_problem(ui, "Terminal", "unplaced", None);
+    });
+    assert_eq!(value(&schematic_clear).pos, value(&schematic).pos);
+    assert_eq!(
+        value(&schematic_clear).galley.size(),
+        value(&schematic).galley.size()
+    );
+    let schematic_marked = render(&|ui| {
+        schematic_property_row_problem(ui, "Terminal", "unplaced", Some(Problem::Warning));
+    });
+    assert_eq!(value(&schematic_marked).fallback_color, palette.text);
+    assert!(
+        stroke_colors(&schematic_marked)
+            .iter()
+            .all(|color| *color == palette.warn)
+    );
 }
 
 /// An inspector problem starts on the inset a note starts on, with its words
