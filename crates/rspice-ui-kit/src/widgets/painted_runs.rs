@@ -133,11 +133,14 @@ fn walk(shape: &egui::epaint::Shape, clip: Rect, into: &mut PaintedRuns, screen:
         }
         egui::epaint::Shape::Rect(painted) => {
             // The scrim covers the viewport and the shadow is a blurred rect
-            // wider than the card it sits under; neither is the surface. Of
-            // what is left, the surface is the largest, because every strip
-            // inside it is a part of it.
+            // wider than the card it sits under; neither is the surface. Nor
+            // is an unfilled frame: a body that scrolls lays its whole content
+            // out in one, taller than the card it scrolls inside. Of what is
+            // left, the surface is the largest, because every strip inside it
+            // is a part of it.
             let rect = painted.rect;
             if painted.blur_width == 0.0
+                && painted.fill.a() > 0
                 && rect.width() < screen.x - 1.0
                 && rect.area() > into.surface.area()
             {

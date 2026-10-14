@@ -43,7 +43,7 @@ mod view_switch;
 pub use button::{Button, IconButton};
 pub use chip::chip;
 pub(crate) use command_form::middle_elided;
-pub use command_form::{CommandForm, FieldLine, FormRows};
+pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords};
 pub use dialog::{
     Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse, DialogSize,
     DialogTransactionTone,
