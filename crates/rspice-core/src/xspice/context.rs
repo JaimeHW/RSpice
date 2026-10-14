@@ -613,44 +613,17 @@ pub struct CmContext {
     event_loads_revision: u64,
     /// Output port values by name
     outputs: CopyOnWrite<HashMap<String, OutputValue>>,
-    /// Connected analog node index per scalar analog port (0 = ground).
-    port_nodes: CopyOnWrite<HashMap<String, usize>>,
-    /// Connected terminal pair per scalar or differential analog port.
-    port_terminals: CopyOnWrite<HashMap<String, (usize, usize)>>,
-    /// Connected terminal pairs per analog vector port element.
-    port_vector_terminals: CopyOnWrite<HashMap<String, Vec<(usize, usize)>>>,
-    /// MNA matrix column for scalar branch-current control ports.
-    port_control_columns: CopyOnWrite<HashMap<String, usize>>,
-    /// Connected width per port. Scalar ports have width 1.
-    port_widths: CopyOnWrite<HashMap<String, usize>>,
+    /// The port wiring and the parameters, behind one pointer; see
+    /// [`ContextSetup`].
+    setup: CopyOnWrite<ContextSetup>,
 
     //-------------------------------------------------------------------------
     // Parameters
     //-------------------------------------------------------------------------
-    /// Instance parameters by name
-    params: CopyOnWrite<HashMap<String, Value>>,
-    /// Complex parameters by name
-    complex_params: CopyOnWrite<HashMap<String, Complex64>>,
-    /// String parameters (paths, etc.)
-    string_params: CopyOnWrite<HashMap<String, String>>,
-    /// Monotonic revisions for string parameters by canonical name.
-    string_param_revisions: CopyOnWrite<HashMap<String, u64>>,
     /// Next revision assigned by `set_string_param`.
     next_string_param_revision: u64,
-    /// String-vector parameters by name
-    string_vector_params: CopyOnWrite<HashMap<String, Vec<String>>>,
-    /// Complex-vector parameters by name
-    complex_vector_params: CopyOnWrite<HashMap<String, Vec<Complex64>>>,
-    /// Real-vector parameters by name
-    real_vector_params: CopyOnWrite<HashMap<String, Vec<Value>>>,
-    /// Monotonic revisions for real-vector parameters by canonical name.
-    real_vector_param_revisions: CopyOnWrite<HashMap<String, u64>>,
     /// Next revision assigned by `set_real_vector_param`.
     next_real_vector_param_revision: u64,
-    /// Integer-vector parameters by name
-    integer_vector_params: CopyOnWrite<HashMap<String, Vec<i64>>>,
-    /// Parameters explicitly supplied by the instance or model card.
-    provided_params: CopyOnWrite<HashSet<String>>,
 
     //-------------------------------------------------------------------------
     // Internal State
@@ -697,6 +670,50 @@ pub struct CmContext {
     static_stamps: Vec<(usize, usize, Value)>,
     /// Static-only RHS contributions retained for Xyce OneStep history.
     static_rhs: Vec<(usize, Value)>,
+}
+
+/// What a context is configured with before it first evaluates: its port
+/// wiring and its parameters.
+///
+/// Written while the instance is built (and again only if the circuit's node
+/// count changes, or a sweep sets a parameter), read by every evaluation, so
+/// one shared pointer carries all fifteen tables. A context is copied with
+/// every instance copy and every rollback backup, and each table behind a
+/// pointer of its own was a reference count to raise on the copy and lower
+/// on the drop; a write to any of them copies the group, which no evaluation
+/// makes.
+#[derive(Debug, Clone, Default)]
+struct ContextSetup {
+    /// Connected analog node index per scalar analog port (0 = ground).
+    port_nodes: HashMap<String, usize>,
+    /// Connected terminal pair per scalar or differential analog port.
+    port_terminals: HashMap<String, (usize, usize)>,
+    /// Connected terminal pairs per analog vector port element.
+    port_vector_terminals: HashMap<String, Vec<(usize, usize)>>,
+    /// MNA matrix column for scalar branch-current control ports.
+    port_control_columns: HashMap<String, usize>,
+    /// Connected width per port. Scalar ports have width 1.
+    port_widths: HashMap<String, usize>,
+    /// Instance parameters by name
+    params: HashMap<String, Value>,
+    /// Complex parameters by name
+    complex_params: HashMap<String, Complex64>,
+    /// String parameters (paths, etc.)
+    string_params: HashMap<String, String>,
+    /// Monotonic revisions for string parameters by canonical name.
+    string_param_revisions: HashMap<String, u64>,
+    /// String-vector parameters by name
+    string_vector_params: HashMap<String, Vec<String>>,
+    /// Complex-vector parameters by name
+    complex_vector_params: HashMap<String, Vec<Complex64>>,
+    /// Real-vector parameters by name
+    real_vector_params: HashMap<String, Vec<Value>>,
+    /// Monotonic revisions for real-vector parameters by canonical name.
+    real_vector_param_revisions: HashMap<String, u64>,
+    /// Integer-vector parameters by name
+    integer_vector_params: HashMap<String, Vec<i64>>,
+    /// Parameters explicitly supplied by the instance or model card.
+    provided_params: HashSet<String>,
 }
 
 /// A context's output values and partials, captured by
@@ -761,23 +778,9 @@ impl CmContext {
             port_vector_total_loads: CopyOnWrite::default(),
             event_loads_revision: 0,
             outputs: CopyOnWrite::default(),
-            port_nodes: CopyOnWrite::default(),
-            port_terminals: CopyOnWrite::default(),
-            port_vector_terminals: CopyOnWrite::default(),
-            port_control_columns: CopyOnWrite::default(),
-            port_widths: CopyOnWrite::default(),
-            params: CopyOnWrite::default(),
-            complex_params: CopyOnWrite::default(),
-            string_params: CopyOnWrite::default(),
-            string_param_revisions: CopyOnWrite::default(),
+            setup: CopyOnWrite::default(),
             next_string_param_revision: 1,
-            string_vector_params: CopyOnWrite::default(),
-            complex_vector_params: CopyOnWrite::default(),
-            real_vector_params: CopyOnWrite::default(),
-            real_vector_param_revisions: CopyOnWrite::default(),
             next_real_vector_param_revision: 1,
-            integer_vector_params: CopyOnWrite::default(),
-            provided_params: CopyOnWrite::default(),
             state: Vec::new(),
             state_prev: Vec::new(),
             int_state: Vec::new(),
@@ -2125,65 +2128,72 @@ impl CmContext {
 
     /// Register connected node for an analog scalar port (0 = ground).
     pub fn set_port_node(&mut self, name: &str, node: usize) {
-        self.port_nodes.insert(name.to_string(), node);
-        self.port_terminals.insert(name.to_string(), (node, 0));
+        let setup = &mut *self.setup;
+        setup.port_nodes.insert(name.to_string(), node);
+        setup.port_terminals.insert(name.to_string(), (node, 0));
     }
 
     /// Register connected terminal pair for a scalar or differential analog port.
     pub fn set_port_terminals(&mut self, name: &str, pos: usize, neg: usize) {
-        self.port_nodes.insert(name.to_string(), pos);
-        self.port_terminals.insert(name.to_string(), (pos, neg));
+        let setup = &mut *self.setup;
+        setup.port_nodes.insert(name.to_string(), pos);
+        setup.port_terminals.insert(name.to_string(), (pos, neg));
     }
 
     /// Register connected terminal pairs for an analog vector port.
     pub fn set_port_vector_terminals(&mut self, name: &str, terminals: Vec<(usize, usize)>) {
-        self.port_vector_terminals
+        self.setup
+            .port_vector_terminals
             .insert(name.to_string(), terminals);
     }
 
     /// Register the matrix column for a branch-current input port.
     pub fn set_port_control_column(&mut self, name: &str, column: usize) {
-        self.port_control_columns.insert(name.to_string(), column);
+        self.setup
+            .port_control_columns
+            .insert(name.to_string(), column);
     }
 
     /// Get connected node for an analog scalar port (0 = ground).
     pub fn port_node(&self, name: &str) -> Option<usize> {
-        self.port_nodes.get(name).copied()
+        self.setup.port_nodes.get(name).copied()
     }
 
     /// Get connected terminal pair for a scalar or differential analog port.
     pub fn port_node_pair(&self, name: &str) -> Option<(usize, usize)> {
-        self.port_terminals.get(name).copied()
+        self.setup.port_terminals.get(name).copied()
     }
 
     /// Get connected terminal pair for one analog vector port element.
     pub fn port_vector_node_pair(&self, name: &str, index: usize) -> Option<(usize, usize)> {
-        self.port_vector_terminals
+        self.setup
+            .port_vector_terminals
             .get(name)
             .and_then(|pairs| pairs.get(index).copied())
     }
 
     /// Get matrix column for a branch-current input port.
     pub fn port_control_column(&self, name: &str) -> Option<usize> {
-        self.port_control_columns.get(name).copied()
+        self.setup.port_control_columns.get(name).copied()
     }
 
     /// Register connected width for a port.
     pub fn set_port_width(&mut self, name: &str, width: usize) {
-        self.port_widths.insert(name.to_string(), width);
+        self.setup.port_widths.insert(name.to_string(), width);
     }
 
     /// Get connected width for a port, defaulting to scalar.
     pub fn port_width(&self, name: &str) -> usize {
-        self.port_widths.get(name).copied().unwrap_or(1)
+        self.setup.port_widths.get(name).copied().unwrap_or(1)
     }
 
     /// Clear port-node mapping for current evaluation pass.
     pub fn clear_port_nodes(&mut self) {
-        self.port_nodes.clear();
-        self.port_terminals.clear();
-        self.port_vector_terminals.clear();
-        self.port_control_columns.clear();
+        let setup = &mut *self.setup;
+        setup.port_nodes.clear();
+        setup.port_terminals.clear();
+        setup.port_vector_terminals.clear();
+        setup.port_control_columns.clear();
     }
 
     /// Get all pending events and clear the queue.
@@ -2281,25 +2291,30 @@ impl CmContext {
     /// Get parameter value
     pub fn param(&self, name: &str) -> Value {
         let key = Self::canonical_param_lookup_key(name);
-        self.params.get(key.as_ref()).copied().unwrap_or(0.0)
+        self.setup.params.get(key.as_ref()).copied().unwrap_or(0.0)
     }
 
     /// Get parameter with default
     pub fn param_or(&self, name: &str, default: Value) -> Value {
         let key = Self::canonical_param_lookup_key(name);
-        self.params.get(key.as_ref()).copied().unwrap_or(default)
+        self.setup
+            .params
+            .get(key.as_ref())
+            .copied()
+            .unwrap_or(default)
     }
 
     /// Get complex parameter
     pub fn complex_param(&self, name: &str) -> Option<Complex64> {
         let key = Self::canonical_param_lookup_key(name);
-        self.complex_params.get(key.as_ref()).copied()
+        self.setup.complex_params.get(key.as_ref()).copied()
     }
 
     /// Get complex parameter with default
     pub fn complex_param_or(&self, name: &str, default: Complex64) -> Complex64 {
         let key = Self::canonical_param_lookup_key(name);
-        self.complex_params
+        self.setup
+            .complex_params
             .get(key.as_ref())
             .copied()
             .unwrap_or(default)
@@ -2308,19 +2323,23 @@ impl CmContext {
     /// Get string parameter
     pub fn string_param(&self, name: &str) -> Option<&str> {
         let key = Self::canonical_param_lookup_key(name);
-        self.string_params.get(key.as_ref()).map(|s| s.as_str())
+        self.setup
+            .string_params
+            .get(key.as_ref())
+            .map(|s| s.as_str())
     }
 
     /// Get the revision assigned when a string parameter was last set.
     pub(crate) fn string_param_revision(&self, name: &str) -> Option<u64> {
         let key = Self::canonical_param_lookup_key(name);
-        self.string_param_revisions.get(key.as_ref()).copied()
+        self.setup.string_param_revisions.get(key.as_ref()).copied()
     }
 
     /// Get string-vector parameter
     pub fn string_vector_param(&self, name: &str) -> Option<&[String]> {
         let key = Self::canonical_param_lookup_key(name);
-        self.string_vector_params
+        self.setup
+            .string_vector_params
             .get(key.as_ref())
             .map(|values| values.as_slice())
     }
@@ -2328,7 +2347,8 @@ impl CmContext {
     /// Get complex-vector parameter
     pub fn complex_vector_param(&self, name: &str) -> Option<&[Complex64]> {
         let key = Self::canonical_param_lookup_key(name);
-        self.complex_vector_params
+        self.setup
+            .complex_vector_params
             .get(key.as_ref())
             .map(|values| values.as_slice())
     }
@@ -2336,7 +2356,8 @@ impl CmContext {
     /// Get real-vector parameter
     pub fn real_vector_param(&self, name: &str) -> Option<&[Value]> {
         let key = Self::canonical_param_lookup_key(name);
-        self.real_vector_params
+        self.setup
+            .real_vector_params
             .get(key.as_ref())
             .map(|values| values.as_slice())
     }
@@ -2344,13 +2365,17 @@ impl CmContext {
     /// Get the revision assigned when a real-vector parameter was last set.
     pub(crate) fn real_vector_param_revision(&self, name: &str) -> Option<u64> {
         let key = Self::canonical_param_lookup_key(name);
-        self.real_vector_param_revisions.get(key.as_ref()).copied()
+        self.setup
+            .real_vector_param_revisions
+            .get(key.as_ref())
+            .copied()
     }
 
     /// Get integer-vector parameter
     pub fn integer_vector_param(&self, name: &str) -> Option<&[i64]> {
         let key = Self::canonical_param_lookup_key(name);
-        self.integer_vector_params
+        self.setup
+            .integer_vector_params
             .get(key.as_ref())
             .map(|values| values.as_slice())
     }
@@ -2358,22 +2383,27 @@ impl CmContext {
     /// Return true when a parameter was explicitly supplied instead of coming from a default.
     pub fn param_was_provided(&self, name: &str) -> bool {
         let key = Self::canonical_param_lookup_key(name);
-        self.provided_params.contains(key.as_ref())
+        self.setup.provided_params.contains(key.as_ref())
     }
 
     /// Mark a parameter as explicitly supplied by the instance or model card.
     pub fn mark_param_provided(&mut self, name: &str) {
-        self.provided_params.insert(Self::canonical_param_key(name));
+        self.setup
+            .provided_params
+            .insert(Self::canonical_param_key(name));
     }
 
     /// Set parameter value
     pub fn set_param(&mut self, name: &str, value: Value) {
-        self.params.insert(Self::canonical_param_key(name), value);
+        self.setup
+            .params
+            .insert(Self::canonical_param_key(name), value);
     }
 
     /// Set complex parameter
     pub fn set_complex_param(&mut self, name: &str, value: Complex64) {
-        self.complex_params
+        self.setup
+            .complex_params
             .insert(Self::canonical_param_key(name), value);
     }
 
@@ -2385,19 +2415,22 @@ impl CmContext {
         if self.next_string_param_revision == 0 {
             self.next_string_param_revision = 1;
         }
-        self.string_params.insert(key.clone(), value.to_string());
-        self.string_param_revisions.insert(key, revision);
+        let setup = &mut *self.setup;
+        setup.string_params.insert(key.clone(), value.to_string());
+        setup.string_param_revisions.insert(key, revision);
     }
 
     /// Set string-vector parameter
     pub fn set_string_vector_param(&mut self, name: &str, value: Vec<String>) {
-        self.string_vector_params
+        self.setup
+            .string_vector_params
             .insert(Self::canonical_param_key(name), value);
     }
 
     /// Set complex-vector parameter
     pub fn set_complex_vector_param(&mut self, name: &str, value: Vec<Complex64>) {
-        self.complex_vector_params
+        self.setup
+            .complex_vector_params
             .insert(Self::canonical_param_key(name), value);
     }
 
@@ -2409,13 +2442,15 @@ impl CmContext {
         if self.next_real_vector_param_revision == 0 {
             self.next_real_vector_param_revision = 1;
         }
-        self.real_vector_params.insert(key.clone(), value);
-        self.real_vector_param_revisions.insert(key, revision);
+        let setup = &mut *self.setup;
+        setup.real_vector_params.insert(key.clone(), value);
+        setup.real_vector_param_revisions.insert(key, revision);
     }
 
     /// Set integer-vector parameter
     pub fn set_integer_vector_param(&mut self, name: &str, value: Vec<i64>) {
-        self.integer_vector_params
+        self.setup
+            .integer_vector_params
             .insert(Self::canonical_param_key(name), value);
     }
 
@@ -2931,7 +2966,7 @@ impl CmContext {
                 &before.output_analog_transitions,
             )
             && same(&self.resources, &before.resources)
-            && same(&self.params, &before.params);
+            && same(&self.setup, &before.setup);
         debug_assert!(
             unchanged,
             "code model '{model}' declares that a probe writes only its outputs, \

@@ -257,10 +257,12 @@ fn named<T, U>(map: &HashMap<String, T>, f: impl Fn(&T) -> U) -> Named<U> {
     v
 }
 fn restored<T, U>(v: &Named<T>, f: impl Fn(&T) -> U) -> CopyOnWrite<HashMap<String, U>> {
+    restored_map(v, f).into()
+}
+fn restored_map<T, U>(v: &Named<T>, f: impl Fn(&T) -> U) -> HashMap<String, U> {
     v.iter()
         .map(|(name, value)| (name.clone(), f(value)))
-        .collect::<HashMap<_, _>>()
-        .into()
+        .collect()
 }
 fn ordered<T>(v: &Named<T>) -> Result<(), String> {
     if v.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
@@ -368,8 +370,8 @@ impl CmContext {
         })?;
         b.map(&self.input_event_times, |b, _| b.add(1))?;
         b.map(&self.input_vector_event_times, |b, v| b.add(v.len()))?;
-        b.map(&self.string_param_revisions, |b, _| b.add(1))?;
-        b.map(&self.real_vector_param_revisions, |b, _| b.add(1))?;
+        b.map(&self.setup.string_param_revisions, |b, _| b.add(1))?;
+        b.map(&self.setup.real_vector_param_revisions, |b, _| b.add(1))?;
         b.map(&self.transient_histories, |b, v| {
             b.add(v.len())?;
             for sample in v {
@@ -458,43 +460,46 @@ fn identity(ctx: &CmContext, ports: &ContextPortLayout, matrix_size: usize) -> [
     if let Some(v) = ctx.digital_delay_type {
         h.word(v as u64);
     }
-    h.map(&ctx.port_nodes, |h, v| h.word(*v as u64));
-    h.map(&ctx.port_terminals, |h, v| {
+    let setup = &*ctx.setup;
+    h.map(&setup.port_nodes, |h, v| h.word(*v as u64));
+    h.map(&setup.port_terminals, |h, v| {
         h.word(v.0 as u64);
         h.word(v.1 as u64);
     });
-    h.map(&ctx.port_vector_terminals, |h, v| {
+    h.map(&setup.port_vector_terminals, |h, v| {
         h.vec(v, |h, v| {
             h.word(v.0 as u64);
             h.word(v.1 as u64);
         })
     });
-    h.map(&ctx.port_control_columns, |h, v| h.word(*v as u64));
-    h.map(&ctx.port_widths, |h, v| h.word(*v as u64));
+    h.map(&setup.port_control_columns, |h, v| h.word(*v as u64));
+    h.map(&setup.port_widths, |h, v| h.word(*v as u64));
     h.map(&ctx.port_total_loads, |h, v| h.real(*v));
     h.map(&ctx.port_vector_total_loads, |h, v| {
         h.vec(v, |h, v| h.real(*v))
     });
-    h.map(&ctx.params, |h, v| h.real(*v));
-    h.map(&ctx.complex_params, |h, v| {
+    h.map(&setup.params, |h, v| h.real(*v));
+    h.map(&setup.complex_params, |h, v| {
         h.real(v.re);
         h.real(v.im);
     });
-    h.map(&ctx.string_params, |h, v| h.string(v));
-    h.map(&ctx.string_vector_params, |h, v| {
+    h.map(&setup.string_params, |h, v| h.string(v));
+    h.map(&setup.string_vector_params, |h, v| {
         h.vec(v, |h, v| h.string(v))
     });
-    h.map(&ctx.complex_vector_params, |h, v| {
+    h.map(&setup.complex_vector_params, |h, v| {
         h.vec(v, |h, v| {
             h.real(v.re);
             h.real(v.im);
         })
     });
-    h.map(&ctx.real_vector_params, |h, v| h.vec(v, |h, v| h.real(*v)));
-    h.map(&ctx.integer_vector_params, |h, v| {
+    h.map(&setup.real_vector_params, |h, v| {
+        h.vec(v, |h, v| h.real(*v))
+    });
+    h.map(&setup.integer_vector_params, |h, v| {
         h.vec(v, |h, v| h.word(*v as u64))
     });
-    let mut provided: Vec<_> = ctx.provided_params.iter().collect();
+    let mut provided: Vec<_> = setup.provided_params.iter().collect();
     provided.sort_unstable();
     h.word(provided.len() as u64);
     for name in provided {
@@ -566,9 +571,9 @@ impl ContextRuntimeCheckpoint {
             vector_times: named(&ctx.input_vector_event_times, |v| {
                 v.iter().map(|v| v.map(f64::to_bits)).collect()
             }),
-            string_revisions: named(&ctx.string_param_revisions, |v| *v),
+            string_revisions: named(&ctx.setup.string_param_revisions, |v| *v),
             next_string_revision: ctx.next_string_param_revision,
-            real_revisions: named(&ctx.real_vector_param_revisions, |v| *v),
+            real_revisions: named(&ctx.setup.real_vector_param_revisions, |v| *v),
             next_real_revision: ctx.next_real_vector_param_revision,
             state: bits(&ctx.state),
             state_prev: bits(&ctx.state_prev),
@@ -653,9 +658,10 @@ impl ContextRuntimeCheckpoint {
         c.input_vector_event_times = restored(&self.vector_times, |v| {
             v.iter().map(|v| v.map(f64::from_bits)).collect()
         });
-        c.string_param_revisions = restored(&self.string_revisions, |v| *v);
+        let setup = &mut *c.setup;
+        setup.string_param_revisions = restored_map(&self.string_revisions, |v| *v);
+        setup.real_vector_param_revisions = restored_map(&self.real_revisions, |v| *v);
         c.next_string_param_revision = self.next_string_revision;
-        c.real_vector_param_revisions = restored(&self.real_revisions, |v| *v);
         c.next_real_vector_param_revision = self.next_real_revision;
         c.state = values(&self.state);
         c.state_prev = values(&self.state_prev);
@@ -846,11 +852,11 @@ impl ContextRuntimeCheckpoint {
         }
         if !revision_valid(
             &self.string_revisions,
-            &ctx.string_params,
+            &ctx.setup.string_params,
             self.next_string_revision,
         ) || !revision_valid(
             &self.real_revisions,
-            &ctx.real_vector_params,
+            &ctx.setup.real_vector_params,
             self.next_real_revision,
         ) {
             return Err("invalid XSPICE parameter cache revision".into());

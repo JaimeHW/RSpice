@@ -359,9 +359,12 @@ fn context_checkpoint_preserves_wrapped_revisions_and_close_history_replacements
     let restored = image
         .restore(&receiving, &ports, 4e-9, 4, Default::default())
         .unwrap();
-    assert_eq!(restored.string_param_revisions["mode"], u64::MAX);
+    assert_eq!(restored.setup.string_param_revisions["mode"], u64::MAX);
     assert_eq!(restored.next_string_param_revision, 1);
-    assert_eq!(restored.real_vector_param_revisions["table"], u64::MAX);
+    assert_eq!(
+        restored.setup.real_vector_param_revisions["table"],
+        u64::MAX
+    );
     assert_eq!(restored.next_real_vector_param_revision, 1);
     assert_eq!(capture(&restored, &ports, 4e-9), image);
 }
