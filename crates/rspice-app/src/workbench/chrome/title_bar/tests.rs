@@ -75,6 +75,47 @@ fn the_painted_desktop_title_names_no_project_when_none_is_open() {
     assert!(painted(true).contains("Untitled Project"));
 }
 
+/// Unsaved project changes are stated once, as a `*` after the visible title,
+/// the way Virtuoso and ADS mark them. The status bar no longer says it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn unsaved_project_changes_put_a_star_after_the_painted_title() {
+    fn painted(app: &RSpiceApp, width: f32) -> String {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let bounds = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 32.0));
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ctx, |ui| paint_title_context(ui, app, bounds, false, false));
+        });
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(painted) => Some(painted.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    let mut app = title_test_app();
+    app.state.workbench.workspace = Workspace::Design;
+    assert_eq!(painted(&app, 640.0), "Untitled Project");
+
+    app.state.schematic.session.is_dirty = true;
+    assert_eq!(painted(&app, 640.0), "Untitled Project*");
+    assert!(
+        painted(&app, 90.0).ends_with("\u{2026}*"),
+        "a narrow title shortens the name and keeps the marker: {}",
+        painted(&app, 90.0)
+    );
+
+    app.state.project_lifecycle.authority.close_project();
+    assert_eq!(painted(&app, 640.0), "RSpice Workbench");
+}
+
 fn title_key_event(key: Key) -> egui::Event {
     egui::Event::Key {
         key,

@@ -5,10 +5,10 @@ use egui::{Align, Frame, Layout, Panel, Sense, Ui, Vec2};
 use crate::simulation::status::EngineAvailability;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
 
 use super::super::commands::vocabulary::Command;
-use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::Workspace;
 
@@ -44,12 +44,6 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let engineering = engineering_context_summary(app, results_view.as_ref());
             let selection = selection_summary(app);
             let sheet_position = sheet_position_summary(&app.state);
-            let revision = revision_status_summary(
-                app.state.project_lifecycle.is_open(),
-                app.state.schematic.session.is_dirty || app.state.workspace.any_dirty(),
-                app.state.workspace.content.project.revision().get(),
-                app.state.workspace.content.project.display_name(),
-            );
             let zoom_command = if app.state.workbench.workspace == Workspace::Results {
                 Command::ZoomFit
             } else {
@@ -66,36 +60,14 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 format!("{}%", (zoom_factor(app) * 100.0).round())
             };
             let availability = app.simulation_controller.engine_availability();
-            let (engine, cancellation_pending) =
-                simulation_engine_status(&app.state.simulation, &availability);
-            let engine_color = if availability.failure_reason().is_some() {
-                t.color.err
-            } else if cancellation_pending || availability == EngineAvailability::Starting {
-                t.color.warn
-            } else if availability == EngineAvailability::Restartable {
-                t.color.text_dim
-            } else if app.state.simulation.execution.has_active_execution() {
-                t.color.accent
-            } else {
-                t.color.ok
-            };
-            let engine_wash = if availability == EngineAvailability::Ready
-                && !cancellation_pending
-                && app.state.simulation.execution.has_active_execution()
-            {
-                t.color.accent_dim
-            } else {
-                semantic_wash(engine_color, t.mode)
-            };
+            let engine = simulation_engine_status(&app.state.simulation, &availability);
+            let engine_mark = engine_status_mark(
+                &availability,
+                app.state.simulation.execution.has_active_execution(),
+            );
             let platform = platform_label();
-            let check_mark = StatusMark::Check(check_tone(app, &t));
-            let revision_mark =
-                revision_status_mark(app.state.project_lifecycle.is_open(), revision.dirty, &t);
-            let engine_mark = StatusMark::Dot {
-                color: engine_color,
-                wash: engine_wash,
-            };
-            let left_desired = desired_status_width(ui, &check, check_mark)
+            let check_mark = check_problem(app).map_or(StatusMark::None, StatusMark::Problem);
+            let left_desired = optional_status_width(ui, check.as_deref(), check_mark)
                 + if visibility.coordinates {
                     desired_status_width(ui, &engineering, StatusMark::None)
                 } else {
@@ -108,10 +80,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 }
                 + sheet_position.as_ref().map_or(0.0, |(text, _)| {
                     desired_status_width(ui, text, StatusMark::None)
-                })
-                + desired_status_width(ui, &revision.text, revision_mark);
+                });
             let right_desired = desired_status_width(ui, &zoom, StatusMark::None)
-                + desired_status_width(ui, &engine, engine_mark)
+                + optional_status_width(ui, engine.as_deref(), engine_mark)
                 + if visibility.platform {
                     desired_status_width(ui, &platform, StatusMark::Processor)
                 } else {
@@ -125,7 +96,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     |ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
                         let desired = [
-                            desired_status_width(ui, &check, check_mark),
+                            optional_status_width(ui, check.as_deref(), check_mark),
                             if visibility.coordinates {
                                 desired_status_width(ui, &engineering, StatusMark::None)
                             } else {
@@ -139,10 +110,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             sheet_position.as_ref().map_or(0.0, |(text, _)| {
                                 desired_status_width(ui, text, StatusMark::None)
                             }),
-                            desired_status_width(ui, &revision.text, revision_mark),
                         ];
                         let widths = fit_status_widths(desired, groups.left);
-                        if status_item_sized(ui, &check, check_mark, true, widths[0]).clicked() {
+                        if let Some(check) = check.as_deref()
+                            && status_item_sized(ui, check, check_mark, true, widths[0]).clicked()
+                        {
                             Command::OpenProblems.execute(app);
                         }
                         if visibility.coordinates {
@@ -158,13 +130,6 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             status_item_sized(ui, text, StatusMark::None, false, widths[3])
                                 .on_hover_text(detail);
                         }
-                        let revision_response =
-                            status_item_sized(ui, &revision.text, revision_mark, false, widths[4]);
-                        ui.ctx()
-                            .accesskit_node_builder(revision_response.id, |node| {
-                                node.set_description(revision.detail.clone());
-                            });
-                        revision_response.on_hover_text(&revision.detail);
                     },
                 );
 
@@ -180,7 +145,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         let widths = fit_status_widths(
                             [
                                 desired_status_width(ui, &zoom, zoom_mark),
-                                desired_status_width(ui, &engine, engine_mark),
+                                optional_status_width(ui, engine.as_deref(), engine_mark),
                                 if visibility.platform {
                                     desired_status_width(ui, &platform, platform_mark)
                                 } else {
@@ -205,10 +170,12 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         {
                             zoom_command.execute(app);
                         }
-                        // The engine chip reports what the solver did; the
-                        // dataset it produced is the one thing a reader wants
+                        // The engine chip reports what the solver is doing; the
+                        // dataset it produces is the one thing a reader wants
                         // next, so the chip is the route to it rather than a
-                        // label about it.
+                        // label about it. An idle, ready engine is nothing to
+                        // report, so the bar shows no chip then.
+                        if let Some(engine) = engine.as_deref() {
                         let can_retry = (availability == EngineAvailability::Restartable || availability.failure_reason().is_some())
                             && !app.state.simulation.execution.has_active_execution();
                         let can_open = availability == EngineAvailability::Ready
@@ -223,7 +190,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 if !can_open && !can_retry {
                                     ui.disable();
                                 }
-                                status_item_sized(ui, &engine, engine_mark, true, widths[1])
+                                status_item_sized(ui, engine, engine_mark, true, widths[1])
                             })
                             .inner;
                         if can_retry {
@@ -254,6 +221,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 _ => "No run has retained a dataset yet, so there is nothing to open in Results.",
                             });
                             engine_response.on_disabled_hover_text(detail);
+                        }
                         }
                         if visibility.platform {
                             status_item_sized(ui, &platform, platform_mark, false, widths[2]);
@@ -326,16 +294,14 @@ fn status_group_allocation(
     }
 }
 
-fn check_summary(app: &RSpiceApp) -> String {
-    // With nothing open, any retained result describes the bootstrap
-    // placeholder rather than the reader's work, and reporting its findings
-    // beside "No project loaded" states both at once.
+/// The checks segment, or nothing.
+///
+/// With nothing open, any retained result describes the bootstrap placeholder
+/// rather than the reader's work, and the coordinate segment already says no
+/// project is loaded. Checks that have never run are not a finding either.
+fn check_summary(app: &RSpiceApp) -> Option<String> {
     if !app.state.project_lifecycle.is_open() {
-        return if netlist_diagnostics_own_status(app) {
-            "No netlist diagnostics".to_owned()
-        } else {
-            "No schematic checks".to_owned()
-        };
+        return None;
     }
     if netlist_diagnostics_own_status(app) {
         let summary = app.state.ui.netlist.diagnostics.summary();
@@ -354,18 +320,18 @@ fn check_summary(app: &RSpiceApp) -> String {
             use std::fmt::Write as _;
             let _ = write!(label, " · {} stale", summary.stale);
         }
-        return label;
+        return Some(label);
     }
     match &app.state.dialogs.drc_results {
-        None => "Checks not run".to_owned(),
+        None => None,
         Some(_)
             if app.state.dialogs.drc_checked_version != app.state.schematic.topology_version() =>
         {
-            "Checks stale · run again".to_owned()
+            Some("Checks stale · run again".to_owned())
         }
         Some(result) => {
             let summary = result.summary();
-            format!(
+            Some(format!(
                 "Schematic checks · {} error{} · {} advisor{}",
                 summary.critical + summary.errors,
                 if summary.critical + summary.errors == 1 {
@@ -375,40 +341,43 @@ fn check_summary(app: &RSpiceApp) -> String {
                 },
                 summary.warnings,
                 if summary.warnings == 1 { "y" } else { "ies" }
-            )
+            ))
         }
     }
 }
 
-fn check_tone(app: &RSpiceApp, tokens: &Tokens) -> egui::Color32 {
+/// The mark in front of the checks segment: a failure while anything errors,
+/// a warning while anything advises or the checks are stale, and nothing at
+/// zero and zero, the way a compiler's problem count reads.
+fn check_problem(app: &RSpiceApp) -> Option<Problem> {
     if !app.state.project_lifecycle.is_open() {
-        return tokens.color.text_faint;
+        return None;
     }
     if netlist_diagnostics_own_status(app) {
         let summary = app.state.ui.netlist.diagnostics.summary();
         return if summary.current_errors > 0 {
-            tokens.color.err
+            Some(Problem::Failure)
         } else if summary.current_warnings > 0 || summary.stale > 0 {
-            tokens.color.warn
-        } else if summary.current_information > 0 || summary.current_hints > 0 {
-            tokens.color.info
+            Some(Problem::Warning)
         } else {
-            tokens.color.ok
+            None
         };
     }
     match &app.state.dialogs.drc_results {
-        None => tokens.color.warn,
+        None => None,
         Some(_)
             if app.state.dialogs.drc_checked_version != app.state.schematic.topology_version() =>
         {
-            tokens.color.warn
+            Some(Problem::Warning)
         }
         Some(result) => {
             let summary = result.summary();
             if summary.critical + summary.errors > 0 {
-                tokens.color.err
+                Some(Problem::Failure)
+            } else if summary.warnings > 0 {
+                Some(Problem::Warning)
             } else {
-                tokens.color.ok
+                None
             }
         }
     }
@@ -427,26 +396,20 @@ fn simulation_progress_percent(progress: f64) -> u8 {
     (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
+/// The engine segment, or nothing while the engine sits ready and idle.
 fn simulation_engine_status(
     simulation: &crate::state::SimulationState,
     availability: &EngineAvailability,
-) -> (String, bool) {
+) -> Option<String> {
     if availability.failure_reason().is_some() {
-        return ("Engine unavailable".to_owned(), false);
+        return Some("Engine unavailable".to_owned());
     }
     if *availability == EngineAvailability::Starting && !simulation.cancellation_is_pending() {
-        return ("Engine starting".to_owned(), false);
+        return Some("Engine starting".to_owned());
     }
     if !simulation.execution.has_active_execution() {
-        return (
-            if *availability == EngineAvailability::Restartable {
-                "Engine stopped"
-            } else {
-                "Engine ready"
-            }
-            .to_owned(),
-            false,
-        );
+        return (*availability == EngineAvailability::Restartable)
+            .then(|| "Engine stopped".to_owned());
     }
     let phase = match simulation.active_execution_lifecycle() {
         Some(crate::state::SimulationRunLifecycle::Preparing) => "preparing",
@@ -461,62 +424,26 @@ fn simulation_engine_status(
         )
         | None => "running",
     };
-    let cancellation_pending = simulation.cancellation_is_pending();
-    let phase = if cancellation_pending {
+    let phase = if simulation.cancellation_is_pending() {
         "stopping"
     } else {
         phase
     };
-    (
-        format!(
-            "Engine {phase} · {}%",
-            simulation_progress_percent(simulation.execution.progress)
-        ),
-        cancellation_pending,
-    )
+    Some(format!(
+        "Engine {phase} · {}%",
+        simulation_progress_percent(simulation.execution.progress)
+    ))
 }
 
-fn semantic_wash(color: egui::Color32, mode: crate::ui::tokens::Mode) -> egui::Color32 {
-    let alpha = if mode == crate::ui::tokens::Mode::Light {
-        23
+/// The mark in front of the engine segment: a failure when the engine cannot
+/// run, the one live dot while a run is in progress, and nothing otherwise.
+fn engine_status_mark(availability: &EngineAvailability, run_in_progress: bool) -> StatusMark {
+    if availability.failure_reason().is_some() {
+        StatusMark::Problem(Problem::Failure)
+    } else if run_in_progress {
+        StatusMark::Live
     } else {
-        28
-    };
-    egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct RevisionStatus {
-    text: String,
-    detail: String,
-    dirty: bool,
-}
-
-fn revision_status_summary(
-    project_open: bool,
-    dirty: bool,
-    revision: u64,
-    project_name: &str,
-) -> RevisionStatus {
-    if !project_open {
-        return RevisionStatus {
-            text: "No project".to_owned(),
-            detail: "No project open".to_owned(),
-            dirty: false,
-        };
-    }
-    if dirty {
-        RevisionStatus {
-            text: "Unsaved changes".to_owned(),
-            detail: format!("Unsaved changes in {project_name}; press Control S to save"),
-            dirty: true,
-        }
-    } else {
-        RevisionStatus {
-            text: "Saved".to_owned(),
-            detail: format!("Project saved; no unsaved changes at revision {revision}"),
-            dirty: false,
-        }
+        StatusMark::None
     }
 }
 
@@ -729,34 +656,11 @@ fn zoom_factor(app: &RSpiceApp) -> f64 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StatusMark {
     None,
-    Check(egui::Color32),
-    Dot {
-        color: egui::Color32,
-        wash: egui::Color32,
-    },
-    ProjectState {
-        color: egui::Color32,
-        filled: bool,
-    },
+    /// A warning or a failure the reader has to notice.
+    Problem(Problem),
+    /// A run in progress: the bar's one live indicator.
+    Live,
     Processor,
-}
-
-fn revision_status_mark(project_open: bool, dirty: bool, tokens: &Tokens) -> StatusMark {
-    if dirty {
-        StatusMark::ProjectState {
-            color: tokens.color.warn,
-            filled: true,
-        }
-    } else {
-        StatusMark::ProjectState {
-            color: if project_open {
-                tokens.color.text_dim
-            } else {
-                tokens.color.text_faint
-            },
-            filled: false,
-        }
-    }
 }
 
 fn status_padding_x(ui: &egui::Ui) -> f32 {
@@ -770,15 +674,19 @@ fn status_padding_x(ui: &egui::Ui) -> f32 {
 fn status_mark_size(mark: StatusMark) -> f32 {
     match mark {
         StatusMark::None => 0.0,
-        StatusMark::Check(_) => 14.0,
-        StatusMark::Dot { .. } => 6.0,
-        StatusMark::ProjectState { .. } => 7.0,
+        StatusMark::Problem(_) => 11.0,
+        StatusMark::Live => 6.0,
         StatusMark::Processor => 16.0,
     }
 }
 
 fn status_text_font() -> egui::FontId {
     theme::mono(STATUS_FONT_SIZE, FontWeight::Regular)
+}
+
+/// The width a segment that may be absent asks for: none when it is.
+fn optional_status_width(ui: &egui::Ui, text: Option<&str>, mark: StatusMark) -> f32 {
+    text.map_or(0.0, |text| desired_status_width(ui, text, mark))
 }
 
 fn desired_status_width(ui: &egui::Ui, text: &str, mark: StatusMark) -> f32 {
@@ -833,6 +741,11 @@ fn status_item_sized(
         Sense::hover().difference(Sense::focusable_noninteractive())
     };
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ui.available_height()), sense);
+    // A screen reader cannot see the mark, so it hears the severity first.
+    let announced = match mark {
+        StatusMark::Problem(problem) => problem.announce(text),
+        StatusMark::None | StatusMark::Live | StatusMark::Processor => text.to_owned(),
+    };
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             if interactive {
@@ -841,7 +754,7 @@ fn status_item_sized(
                 egui::WidgetType::Label
             },
             ui.is_enabled(),
-            text,
+            &announced,
         )
     });
 
@@ -861,24 +774,12 @@ fn status_item_sized(
             Vec2::splat(mark_size),
         );
         match mark {
-            StatusMark::Check(color) => {
-                WorkbenchIcon::Check.paint(ui.painter(), mark_rect, color);
+            StatusMark::Problem(problem) => {
+                paint_problem_mark(ui.painter(), mark_rect, problem);
             }
-            StatusMark::Dot { color, wash } => {
-                ui.painter().circle_filled(mark_rect.center(), 5.0, wash);
-                ui.painter().circle_filled(mark_rect.center(), 3.0, color);
-            }
-            StatusMark::ProjectState { color, filled } => {
-                ui.painter().circle(
-                    mark_rect.center(),
-                    3.0,
-                    if filled {
-                        color
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    },
-                    egui::Stroke::new(1.0, color),
-                );
+            StatusMark::Live => {
+                ui.painter()
+                    .circle_filled(mark_rect.center(), 3.0, t.color.accent);
             }
             StatusMark::Processor => paint_processor(ui.painter(), mark_rect, t.color.text_dim),
             StatusMark::None => {}
@@ -1022,14 +923,68 @@ mod tests {
         );
 
         assert_eq!(
-            check_summary(&app),
-            "Netlist diagnostics · 1 error · 1 advisory"
+            check_summary(&app).as_deref(),
+            Some("Netlist diagnostics · 1 error · 1 advisory")
         );
-        assert!(!check_summary(&app).contains("Schematic"));
+        assert_eq!(check_problem(&app), Some(Problem::Failure));
+    }
+
+    /// The checks segment is a problem count. A closed project, or checks
+    /// that have never run, put nothing on the bar; zero and zero is a count
+    /// with no mark; advisories and staleness earn a warning, errors a failure.
+    #[test]
+    fn the_checks_segment_marks_only_a_problem_and_is_absent_until_checks_run() {
+        use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+
+        let violation = |kind| {
+            DrcViolation::new(
+                1,
+                kind,
+                "fixture",
+                DrcLocation::NetLabel {
+                    name: "OUT".to_owned(),
+                },
+            )
+        };
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.authority.close_project();
+        assert_eq!(check_summary(&app), None);
+        assert_eq!(check_problem(&app), None);
+
+        app.state.project_lifecycle.authority.open_session();
+        app.state.workbench.activate(Workspace::Design);
+        app.state.dialogs.drc_results = None;
         assert_eq!(
-            check_tone(&app, &Tokens::default()),
-            Tokens::default().color.err
+            check_summary(&app),
+            None,
+            "checks that never ran say nothing"
         );
+        assert_eq!(check_problem(&app), None);
+
+        app.state.dialogs.drc_results = Some(DrcResult::new());
+        app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+        assert_eq!(
+            check_summary(&app).as_deref(),
+            Some("Schematic checks · 0 errors · 0 advisories")
+        );
+        assert_eq!(check_problem(&app), None, "zero and zero carries no mark");
+
+        let mut advisory = DrcResult::new();
+        advisory.add_violation(violation(DrcViolationType::UnconnectedPin));
+        app.state.dialogs.drc_results = Some(advisory);
+        assert_eq!(check_problem(&app), Some(Problem::Warning));
+
+        let mut failing = DrcResult::new();
+        failing.add_violation(violation(DrcViolationType::ShortedOutputs));
+        app.state.dialogs.drc_results = Some(failing);
+        assert_eq!(check_problem(&app), Some(Problem::Failure));
+
+        app.state.dialogs.drc_checked_version = app.state.schematic.topology_version() + 1;
+        assert_eq!(
+            check_summary(&app).as_deref(),
+            Some("Checks stale · run again")
+        );
+        assert_eq!(check_problem(&app), Some(Problem::Warning));
     }
 
     #[test]
@@ -1059,10 +1014,10 @@ mod tests {
         assert!(app.state.active_result_uses_manual_deck());
         assert!(netlist_diagnostics_own_status(&app));
         assert_eq!(
-            check_summary(&app),
-            "Netlist diagnostics · 0 errors · 0 advisories"
+            check_summary(&app).as_deref(),
+            Some("Netlist diagnostics · 0 errors · 0 advisories")
         );
-        assert!(!check_summary(&app).contains("Schematic"));
+        assert_eq!(check_problem(&app), None);
     }
 
     /// The coordinate and selection segments sit side by side. They answer
@@ -1127,32 +1082,6 @@ mod tests {
     }
 
     #[test]
-    fn revision_mark_uses_shape_and_tone_for_saved_dirty_and_closed_states() {
-        let tokens = Tokens::default();
-        assert_eq!(
-            revision_status_mark(true, false, &tokens),
-            StatusMark::ProjectState {
-                color: tokens.color.text_dim,
-                filled: false,
-            }
-        );
-        assert_eq!(
-            revision_status_mark(true, true, &tokens),
-            StatusMark::ProjectState {
-                color: tokens.color.warn,
-                filled: true,
-            }
-        );
-        assert_eq!(
-            revision_status_mark(false, false, &tokens),
-            StatusMark::ProjectState {
-                color: tokens.color.text_faint,
-                filled: false,
-            }
-        );
-    }
-
-    #[test]
     fn status_groups_use_intrinsic_widths_and_space_between() {
         assert_eq!(
             status_group_allocation(420.0, 310.0, 1_440.0),
@@ -1191,33 +1120,61 @@ mod tests {
         simulation.execution.is_running = false;
 
         assert_eq!(
-            simulation_engine_status(&simulation, &EngineAvailability::Ready),
-            ("Engine preparing · 38%".to_owned(), false)
+            simulation_engine_status(&simulation, &EngineAvailability::Ready).as_deref(),
+            Some("Engine preparing · 38%")
         );
 
         simulation.request_abort_active_run().unwrap();
         assert_eq!(
-            simulation_engine_status(&simulation, &EngineAvailability::Ready),
-            ("Engine stopping · 38%".to_owned(), true)
+            simulation_engine_status(&simulation, &EngineAvailability::Ready).as_deref(),
+            Some("Engine stopping · 38%")
         );
     }
 
+    /// An idle engine that is ready is nothing to report, so the bar shows no
+    /// engine segment at all; every other idle state still names itself.
     #[test]
-    fn idle_engine_status_requires_actual_backend_readiness() {
+    fn idle_engine_status_says_nothing_while_the_engine_is_ready() {
         let simulation = crate::state::SimulationState::default();
         for (availability, expected) in [
-            (EngineAvailability::Ready, "Engine ready"),
-            (EngineAvailability::Starting, "Engine starting"),
-            (EngineAvailability::Restartable, "Engine stopped"),
+            (EngineAvailability::Ready, None),
+            (EngineAvailability::Starting, Some("Engine starting")),
+            (EngineAvailability::Restartable, Some("Engine stopped")),
             (
                 EngineAvailability::Unavailable("worker module missing".into()),
-                "Engine unavailable",
+                Some("Engine unavailable"),
             ),
         ] {
             assert_eq!(
-                simulation_engine_status(&simulation, &availability),
-                (expected.to_owned(), false)
+                simulation_engine_status(&simulation, &availability).as_deref(),
+                expected
             );
+        }
+    }
+
+    /// The engine segment's one dot means a run is live. Unavailability is a
+    /// failure mark, and no other state carries a mark at all.
+    #[test]
+    fn the_engine_mark_is_a_live_dot_only_while_a_run_is_in_progress() {
+        let unavailable = EngineAvailability::Unavailable("worker module missing".into());
+        assert_eq!(
+            engine_status_mark(&unavailable, false),
+            StatusMark::Problem(Problem::Failure)
+        );
+        assert_eq!(
+            engine_status_mark(&unavailable, true),
+            StatusMark::Problem(Problem::Failure)
+        );
+        assert_eq!(
+            engine_status_mark(&EngineAvailability::Ready, true),
+            StatusMark::Live
+        );
+        for availability in [
+            EngineAvailability::Ready,
+            EngineAvailability::Starting,
+            EngineAvailability::Restartable,
+        ] {
+            assert_eq!(engine_status_mark(&availability, false), StatusMark::None);
         }
     }
 
@@ -1228,44 +1185,16 @@ mod tests {
         simulation.execution.active_execution = Some(identity);
         simulation.execution.progress = 0.375;
         assert_eq!(
-            simulation_engine_status(&simulation, &EngineAvailability::Starting),
-            ("Engine starting".to_owned(), false)
+            simulation_engine_status(&simulation, &EngineAvailability::Starting).as_deref(),
+            Some("Engine starting")
         );
         assert_eq!(
             simulation_engine_status(
                 &simulation,
                 &EngineAvailability::Unavailable("worker initialization failed".into())
-            ),
-            ("Engine unavailable".to_owned(), false)
-        );
-    }
-
-    #[test]
-    fn revision_status_distinguishes_saved_unsaved_and_closed_projects() {
-        assert_eq!(
-            revision_status_summary(true, false, 7, "Precision Sensor AFE"),
-            RevisionStatus {
-                text: "Saved".to_owned(),
-                detail: "Project saved; no unsaved changes at revision 7".to_owned(),
-                dirty: false,
-            }
-        );
-        assert_eq!(
-            revision_status_summary(true, true, 7, "Precision Sensor AFE"),
-            RevisionStatus {
-                text: "Unsaved changes".to_owned(),
-                detail: "Unsaved changes in Precision Sensor AFE; press Control S to save"
-                    .to_owned(),
-                dirty: true,
-            }
-        );
-        assert_eq!(
-            revision_status_summary(false, true, 7, "Precision Sensor AFE"),
-            RevisionStatus {
-                text: "No project".to_owned(),
-                detail: "No project open".to_owned(),
-                dirty: false,
-            }
+            )
+            .as_deref(),
+            Some("Engine unavailable")
         );
     }
 

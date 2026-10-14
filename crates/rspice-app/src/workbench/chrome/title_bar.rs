@@ -1783,7 +1783,8 @@ fn paint_title_context(
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let dirty = app.state.schematic.session.is_dirty || app.state.workspace.any_dirty();
+    let dirty = app.state.project_lifecycle.is_open()
+        && (app.state.schematic.session.is_dirty || app.state.workspace.any_dirty());
     let cell = active_title_cell(app);
     let full = title_context_text(app, compact);
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
@@ -1795,7 +1796,26 @@ fn paint_title_context(
         bounds.left() + 5.0
     };
     let available_text_width = (clip.right() - text_origin).max(12.0);
-    let text = ellipsize_to_width(&painter, &full, &font, available_text_width);
+    // Unsaved project changes are a `*` after the title, as Virtuoso and ADS
+    // mark them. The marker is set aside before the name is shortened, so a
+    // narrow title loses letters of the name, never the marker.
+    let marker_width = if dirty {
+        painter
+            .layout_no_wrap(UNSAVED_TITLE_MARKER.to_owned(), font.clone(), t.color.text)
+            .size()
+            .x
+    } else {
+        0.0
+    };
+    let mut text = ellipsize_to_width(
+        &painter,
+        &full,
+        &font,
+        (available_text_width - marker_width).max(12.0),
+    );
+    if dirty {
+        text.push_str(UNSAVED_TITLE_MARKER);
+    }
     let galley = painter.layout_no_wrap(text, font, t.color.text);
     let total_width = galley.size().x;
     let left = if left_aligned {
@@ -1832,6 +1852,9 @@ fn paint_title_context(
         }
     });
 }
+
+/// What follows the title while the project has unsaved changes.
+const UNSAVED_TITLE_MARKER: &str = "*";
 
 /// The text the centred title paints.
 ///

@@ -1294,9 +1294,11 @@ fn document_tab(
         suffix_x += TAB_CONTENT_GAP;
     }
     if dirty {
+        // The tab's unsaved marker is a live state, not a warning, so it is
+        // painted in the secondary text tone rather than in amber.
         let center = egui::pos2(suffix_x + TAB_DIRTY_SIZE * 0.5, rect.center().y);
         ui.painter()
-            .circle_filled(center, TAB_DIRTY_SIZE * 0.5, t.color.warn);
+            .circle_filled(center, TAB_DIRTY_SIZE * 0.5, t.color.text_dim);
         suffix_x += TAB_DIRTY_SIZE;
         if closable {
             suffix_x += TAB_CONTENT_GAP;
