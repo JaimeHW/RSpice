@@ -1764,3 +1764,89 @@ fn unlanded_tasks_and_options_are_refused_as_not_supported_yet() {
     );
     assert!(!text.contains("lane"), "{text}");
 }
+
+/// Indexed part-selects (IEEE 1364-2005 section 5.2.1) read and write at a
+/// run-time base on descending, ascending and offset vectors, array elements
+/// and a function result, with out-of-range bits reading `x` and left
+/// unwritten, an `x` base reading all `x` and writing nothing, and
+/// nonblocking writes capturing the base when scheduled. A string operand is
+/// eight bits per character (section 3.6), and a conversion to real treats `x`
+/// and `z` bits as 0 (section 4.8.2).
+#[test]
+fn indexed_part_selects_strings_and_real_conversion_run_as_icarus_runs_them() {
+    let report = bench(
+        r#"module tb;
+  reg [7:0] d;
+  reg [0:7] a;
+  reg [11:4] o;
+  reg [7:0] m [0:3];
+  reg [15:0] s;
+  reg signed [95:0] u;
+  integer i;
+  reg [3:0] ix;
+  real r;
+  function [15:0] f;
+    input integer k;
+    begin
+      f = 16'h0000;
+      f[k +: 4] = 4'hf;
+      f[k + 8 -: 2] = 2'b10;
+    end
+  endfunction
+  initial begin
+    d = 8'b1010_0110; a = 8'b1010_0110; o = 8'b1100_0011;
+    i = 2;
+    $display("r1 %b %b %b %b", d[i +: 4], d[i+3 -: 4], a[i +: 4], a[i+3 -: 4]);
+    $display("r2 %b %b %b", o[i+4 +: 4], o[9 -: 3], o[i +: 4]);
+    i = 6;  $display("r3 %b %b", d[i +: 4], a[i +: 4]);
+    i = -2; $display("r4 %b %b", d[i +: 4], a[i +: 4]);
+    i = 20; $display("r5 %b", d[i +: 4]);
+    ix = 4'bx01x; $display("r6 %b", d[ix +: 2]);
+    i = 1;
+    d[i +: 3] = 3'b000; $display("w1 %b", d);
+    a[i +: 3] = 3'b111; $display("w2 %b", a);
+    i = 6; d[i +: 4] = 4'b0101; $display("w3 %b", d);
+    i = -1; d[i -: 2] = 2'b11; $display("w4 %b", d);
+    d[ix +: 2] = 2'b00; $display("w5 %b", d);
+    o[i+8 +: 2] = 2'b01; $display("w6 %b", o);
+    m[1] = 8'h00; i = 3; m[1][i +: 2] = 2'b11; $display("w7 %b %b", m[1], m[1][i-1 +: 4]);
+    $display("f %h %h", f(0), f(13));
+    i = 0; d = 0;
+    d[i +: 2] <= 2'b11;
+    i = 4;
+    d[i +: 2] <= 2'b10;
+    m[2] = 0;
+    m[2][i -: 3] <= 3'b101;
+    $display("n0 %b %b", d, m[2]);
+    #1 $display("n1 %b %b", d, m[2]);
+    s = i ? "1" : "0"; $display("s1 %h", s);
+    s = "ab"; $display("s2 %h %s", s, s);
+    u = {1'bx, 93'b0, 1'bz, 1'b1}; r = u + 0.5; $display("x1 %f", r);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "r1 1001 1001 1001 1001\n\
+         r2 0000 000 11xx\n\
+         r3 xx10 10xx\n\
+         r4 10xx xx10\n\
+         r5 xxxx\n\
+         r6 xx\n\
+         w1 10100000\n\
+         w2 11110110\n\
+         w3 01100000\n\
+         w4 01100000\n\
+         w5 01100000\n\
+         w6 11001011\n\
+         w7 00011000 0110\n\
+         f 010f e000\n\
+         n0 00000000 00000000\n\
+         n1 00100011 00010100\n\
+         s1 0031\n\
+         s2 6162 ab\n\
+         x1 1.500000\n"
+    );
+}

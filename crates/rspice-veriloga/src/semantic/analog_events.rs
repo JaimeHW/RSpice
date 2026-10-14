@@ -333,6 +333,9 @@ impl Lower {
                 Expression::Identifier(id) => Some(&mut id.name),
                 Expression::ArrayAccess(access) => Some(&mut access.array),
                 Expression::Digital(DigitalExpr::PartSelect(select)) => Some(&mut select.name),
+                Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => {
+                    Some(&mut select.name)
+                }
                 Expression::Digital(DigitalExpr::ArraySelect(select)) => Some(&mut select.name),
                 _ => None,
             };

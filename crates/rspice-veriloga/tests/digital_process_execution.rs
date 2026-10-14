@@ -5086,11 +5086,11 @@ fn dynamic_bit_writes_validate_source_and_artifact_types() {
             .function
             .values
             .iter_mut()
-            .find(|node| matches!(node.kind, CfgValueKind::DigitalBitNonblockingWrite { .. }))
+            .find(|node| matches!(node.kind, CfgValueKind::DigitalPackedNonblockingWrite { .. }))
             .unwrap();
-        let CfgValueKind::DigitalBitNonblockingWrite {
+        let CfgValueKind::DigitalPackedNonblockingWrite {
             signal,
-            index,
+            select,
             bounds,
             region,
             ..
@@ -5108,7 +5108,10 @@ fn dynamic_bit_writes_validate_source_and_artifact_types() {
                 "scheduling region"
             }
             2 => {
-                *index = node.id;
+                *select = rspice_veriloga::canonical_ir::digital::DigitalArrayWriteSelect::Bit {
+                    index: node.id,
+                    signed: false,
+                };
                 "numeric selector"
             }
             _ => {
@@ -6638,6 +6641,8 @@ fn four_state_conditionals_skip_inactive_real_reads_and_capture_before_wait() {
       endmodule
     "#,
     );
+    // Past the finite real range, so converting it would fail.
+    h.set("poison", &"1".repeat(1200));
     h.set("select", "1");
     let wait = expect_suspended(h.start(0));
     assert_eq!(h.get("q"), format!("{:064b}", 0x55));

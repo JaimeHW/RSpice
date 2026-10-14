@@ -3407,3 +3407,77 @@ fn routine_ports_and_fork_declarations_follow_ieee_1364() {
     assert_eq!(routine.arguments[0].ty.kind, DigitalRoutineValueKind::Real);
     assert!(routine.arguments[1].ty.range.is_some());
 }
+
+/// IEEE 1364-2005 section 5.2.1: `+:` and `-:` are one token each, select at
+/// a run-time base with a positive constant width, of a vector or of one
+/// array element after all its coordinates, and a continuous target's base is
+/// constant (section A.8.5).
+#[test]
+fn indexed_part_selects_parse_and_check_their_width_base_and_target() {
+    let file = parse(
+        "module m; reg [7:0] v; reg [7:0] mem [0:3]; integer i; reg [1:0] q;\n\
+         \x20 initial begin q = v[i +: 2]; q = mem[i][i -: 2]; v[i+1 -: 2] = q; {mem[0][i +: 2], v[0 +: 2]} = 4'h0; end\n\
+         endmodule\n",
+    );
+    let module = parsed_module(&file);
+    let DigitalStatement::Block(block) = &module.digital_processes[0].body else {
+        panic!("expected a block");
+    };
+    let DigitalStatement::BlockingAssign(read) = &block.statements[0] else {
+        panic!("expected an assignment");
+    };
+    let Expression::Digital(DigitalExpr::IndexedPartSelect(select)) = &read.value else {
+        panic!("expected an indexed part-select, got {:?}", read.value);
+    };
+    assert!(select.ascending && select.indices.is_empty());
+    let DigitalStatement::BlockingAssign(element) = &block.statements[1] else {
+        panic!("expected an assignment");
+    };
+    let Expression::Digital(DigitalExpr::IndexedPartSelect(select)) = &element.value else {
+        panic!("expected an indexed part-select of an element");
+    };
+    assert!(!select.ascending && select.indices.len() == 1);
+    let DigitalStatement::BlockingAssign(write) = &block.statements[2] else {
+        panic!("expected an assignment");
+    };
+    assert!(matches!(
+        &write.target,
+        DigitalLValue::IndexedPartSelect(select) if !select.ascending
+    ));
+    analyze(
+        "module m; reg [7:0] v; reg [7:0] mem [0:3]; integer i; reg [1:0] q; wire [7:0] w;\n\
+         \x20 parameter P = 2; assign w[P +: 2] = q;\n\
+         \x20 initial begin q = v[i +: P]; mem[i][i -: 2] = q; end\n\
+         endmodule\n",
+    );
+    assert!(parse_error("module m; reg [7:0] v; reg q; initial q = v[0 + : 1]; endmodule").contains("Invalid expression"));
+    for (source, expected) in [
+        (
+            "module m; reg [7:0] v; integer w; reg q; initial q = |v[0 +: w]; endmodule",
+            "positive constant",
+        ),
+        (
+            "module m; reg [7:0] v; reg q; initial q = |v[1 +: 0]; endmodule",
+            "positive constant",
+        ),
+        (
+            "module m; reg s, q; initial q = s[0 +: 1]; endmodule",
+            "a scalar has no selectable bits",
+        ),
+        (
+            "module m; reg [7:0] mem [0:3]; reg q; initial q = mem[0 +: 1]; endmodule",
+            "follows 0 unpacked indices",
+        ),
+        (
+            "module m; wire [7:0] w; integer i; reg [1:0] q; assign w[i +: 2] = q; endmodule",
+            "continuous bit driver",
+        ),
+        (
+            "module m; reg [7:0] v; reg q; initial q = v[nope +: 1]; endmodule",
+            "nope",
+        ),
+    ] {
+        let error = analyze_error(source);
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+}

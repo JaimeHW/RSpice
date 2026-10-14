@@ -968,6 +968,12 @@ impl Unroller<'_> {
                 self.substitute(&mut select.msb);
                 self.substitute(&mut select.lsb);
             }
+            DigitalExpr::IndexedPartSelect(select) => {
+                self.rename(&mut select.name);
+                for child in select.children_mut() {
+                    self.substitute(child);
+                }
+            }
             DigitalExpr::Xnor(xnor) => {
                 self.substitute(&mut xnor.left);
                 self.substitute(&mut xnor.right);
@@ -1013,6 +1019,12 @@ impl Unroller<'_> {
                 self.rename(name);
                 self.substitute(msb);
                 self.substitute(lsb);
+            }
+            DigitalLValue::IndexedPartSelect(select) => {
+                self.rename(&mut select.name);
+                for child in select.children_mut() {
+                    self.substitute(child);
+                }
             }
             DigitalLValue::Concat { elements, .. } => {
                 for element in elements {

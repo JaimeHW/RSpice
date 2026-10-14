@@ -92,6 +92,21 @@ fn packed_selection_type(
                 width: width.unwrap(),
             }
         }
+        DigitalArrayWriteSelect::Indexed { base, width, .. } => {
+            if real
+                || width == 0
+                || width > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
+                || !matches!(
+                    function.value(base).value_type,
+                    CfgValueType::Real | CfgValueType::Integer | CfgValueType::FourState { .. }
+                )
+            {
+                return Err(error(
+                    "digital indexed part write requires integral storage, a numeric base and a positive width",
+                ));
+            }
+            CfgValueType::FourState { width }
+        }
     })
 }
 
@@ -713,8 +728,8 @@ impl CanonicalDigitalPlan {
                         | CfgValueKind::DigitalDriverWrite { target, .. } => {
                             event_signals.contains(&target.signal)
                         }
-                        CfgValueKind::DigitalBitBlockingWrite { signal, .. }
-                        | CfgValueKind::DigitalBitNonblockingWrite { signal, .. } => {
+                        CfgValueKind::DigitalPackedBlockingWrite { signal, .. }
+                        | CfgValueKind::DigitalPackedNonblockingWrite { signal, .. } => {
                             event_signals.contains(signal)
                         }
                         CfgValueKind::DigitalArrayBlockingWrite { array, .. }
@@ -823,6 +838,30 @@ impl CanonicalDigitalPlan {
                             {
                                 return Err(error(
                                     "digital bit select has inconsistent input, index or declared bounds",
+                                ));
+                            }
+                        }
+                        CfgValueKind::DigitalIndexedPartSelect {
+                            input,
+                            base,
+                            bounds,
+                            width,
+                            ..
+                        } => {
+                            let declared = bounds.0.abs_diff(bounds.1).checked_add(1);
+                            if *width == 0
+                                || *width > crate::semantic::MAX_DIGITAL_VECTOR_WIDTH
+                                || value.value_type != (CfgValueType::FourState { width: *width })
+                                || !matches!(
+                                    function.value(*base).value_type,
+                                    CfgValueType::FourState { .. }
+                                        | CfgValueType::Integer
+                                        | CfgValueType::Real
+                                )
+                                || !matches!(function.value(*input).value_type, CfgValueType::FourState { width: w } if Some(u64::from(w)) == declared)
+                            {
+                                return Err(error(
+                                    "digital indexed part-select has inconsistent input, base, width or declared bounds",
                                 ));
                             }
                         }
@@ -1126,47 +1165,49 @@ impl CanonicalDigitalPlan {
                                 ));
                             }
                         }
-                        CfgValueKind::DigitalBitBlockingWrite {
+                        CfgValueKind::DigitalPackedBlockingWrite {
                             signal,
-                            index,
-                            signed,
+                            select,
                             bounds,
                             value: rhs,
                         }
-                        | CfgValueKind::DigitalBitNonblockingWrite {
+                        | CfgValueKind::DigitalPackedNonblockingWrite {
                             signal,
-                            index,
-                            signed,
+                            select,
                             bounds,
                             value: rhs,
                             ..
                         } => {
                             let Some(signal) = self.signal(*signal) else {
-                                return Err(error("digital bit write names an undeclared signal"));
+                                return Err(error(
+                                    "digital packed write names an undeclared signal",
+                                ));
                             };
-                            let expected = packed_write_type(
-                                function,
-                                signal,
-                                *bounds,
-                                DigitalArrayWriteSelect::Bit {
-                                    index: *index,
-                                    signed: *signed,
-                                },
-                            )?;
+                            // Whole and constant-part writes have their own fixed-target kinds.
+                            if !matches!(
+                                select,
+                                DigitalArrayWriteSelect::Bit { .. }
+                                    | DigitalArrayWriteSelect::Indexed { .. }
+                            ) {
+                                return Err(error(
+                                    "digital packed write requires a run-time selection",
+                                ));
+                            }
+                            let expected = packed_write_type(function, signal, *bounds, *select)?;
                             if value.value_type != CfgValueType::Effect
                                 || function.value(*rhs).value_type != expected
                             {
                                 return Err(error(
-                                    "digital bit write has the wrong effect or value type",
+                                    "digital packed write has the wrong effect or value type",
                                 ));
                             }
-                            if let CfgValueKind::DigitalBitNonblockingWrite {
+                            if let CfgValueKind::DigitalPackedNonblockingWrite {
                                 region, wait, ..
                             } = kind
                             {
                                 if *region != DigitalSchedulingRegion::NonBlockingAssign {
                                     return Err(error(
-                                        "digital bit nonblocking write has the wrong scheduling region",
+                                        "digital packed nonblocking write has the wrong scheduling region",
                                     ));
                                 }
                                 if let Some(wait) = wait {
@@ -1680,8 +1721,8 @@ impl CanonicalDigitalPlan {
                     | CfgValueKind::DigitalBlockingWrite { .. }
                     | CfgValueKind::DigitalNonblockingWrite { .. }
                     | CfgValueKind::DigitalDriverWrite { .. }
-                    | CfgValueKind::DigitalBitBlockingWrite { .. }
-                    | CfgValueKind::DigitalBitNonblockingWrite { .. }
+                    | CfgValueKind::DigitalPackedBlockingWrite { .. }
+                    | CfgValueKind::DigitalPackedNonblockingWrite { .. }
                     | CfgValueKind::DigitalArrayBlockingWrite { .. }
                     | CfgValueKind::DigitalArrayNonblockingWrite { .. } => {
                         return Err(error("digital observer must only read and report"));
@@ -1742,8 +1783,8 @@ pub(crate) fn event_expression_schedule(
                     | CfgValueKind::DigitalSystemFunction { .. }
                     | CfgValueKind::DigitalCallOutput { .. }
                     | CfgValueKind::DigitalArrayBlockingWrite { .. }
-                    | CfgValueKind::DigitalBitBlockingWrite { .. }
-                    | CfgValueKind::DigitalBitNonblockingWrite { .. }
+                    | CfgValueKind::DigitalPackedBlockingWrite { .. }
+                    | CfgValueKind::DigitalPackedNonblockingWrite { .. }
                     | CfgValueKind::DigitalArrayNonblockingWrite { .. }
                     | CfgValueKind::DigitalAnalogPotential { .. }
                     | CfgValueKind::DigitalAnalogFlow { .. }
@@ -1857,8 +1898,8 @@ fn expression_dependencies(
                 | CfgValueKind::DigitalSystemFunction { .. }
                 | CfgValueKind::DigitalCallOutput { .. }
                 | CfgValueKind::DigitalArrayBlockingWrite { .. }
-                | CfgValueKind::DigitalBitBlockingWrite { .. }
-                | CfgValueKind::DigitalBitNonblockingWrite { .. }
+                | CfgValueKind::DigitalPackedBlockingWrite { .. }
+                | CfgValueKind::DigitalPackedNonblockingWrite { .. }
                 | CfgValueKind::DigitalArrayNonblockingWrite { .. }
                 | CfgValueKind::DigitalBlockingWrite { .. }
                 | CfgValueKind::DigitalNonblockingWrite { .. }

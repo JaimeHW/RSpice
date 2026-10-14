@@ -193,6 +193,7 @@ fn lvalue_expressions<'a>(target: &'a DigitalLValue, out: &mut Vec<&'a Expressio
         DigitalLValue::BitSelect { index, .. } => out.push(index),
         DigitalLValue::PartSelect { msb, lsb, .. } => out.extend([&**msb, &**lsb]),
         DigitalLValue::ArraySelect(select) => out.extend(select.children()),
+        DigitalLValue::IndexedPartSelect(select) => out.extend(select.children()),
         DigitalLValue::Concat { elements, .. } => {
             for element in elements {
                 lvalue_expressions(element, out);

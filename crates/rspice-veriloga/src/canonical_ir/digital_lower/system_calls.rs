@@ -149,6 +149,9 @@ fn expression_as_target(argument: &Expression) -> Option<DigitalLValue> {
         Expression::Digital(crate::ast::DigitalExpr::ArraySelect(select)) => {
             DigitalLValue::ArraySelect(select.clone())
         }
+        Expression::Digital(crate::ast::DigitalExpr::IndexedPartSelect(select)) => {
+            DigitalLValue::IndexedPartSelect(select.clone())
+        }
         _ => return None,
     })
 }

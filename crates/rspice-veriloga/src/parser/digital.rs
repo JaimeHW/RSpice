@@ -17,6 +17,13 @@ use crate::lexer::TokenKind;
 use crate::source::Span;
 use smol_str::SmolStr;
 
+/// What follows `name[index]` when another bracket opens: a packed bit or
+/// constant part of an array element, or an indexed part-select.
+pub(super) enum PackedSelection {
+    Array(ArraySelectExpr),
+    Indexed(IndexedPartSelectExpr),
+}
+
 /// The operator an IEEE 1800-2017 section 11.4.1 compound assignment applies.
 /// `>>>` is a [`DigitalExpr`] rather than a [`BinaryOp`], so it has its own arm.
 #[derive(Debug, Clone, Copy)]
@@ -147,8 +154,7 @@ impl Parser<'_> {
         let start = self.current_span();
         self.advance();
         let msb = self.parse_expression()?;
-        // An indexed part-select opener here would be `+:` / `-:`, which this
-        // wave does not implement; the `:` requirement refuses it by position.
+        // A declared range is `[msb:lsb]`; `+:` / `-:` select, they declare nothing.
         self.expect(TokenKind::Colon)?;
         let lsb = self.parse_expression()?;
         self.expect(TokenKind::RBracket)?;
@@ -863,6 +869,9 @@ impl Parser<'_> {
             DigitalLValue::ArraySelect(select) => {
                 Expression::Digital(DigitalExpr::ArraySelect(select.clone()))
             }
+            DigitalLValue::IndexedPartSelect(select) => {
+                Expression::Digital(DigitalExpr::IndexedPartSelect(select.clone()))
+            }
             DigitalLValue::Concat { elements, span } => {
                 Expression::ArrayLiteral(ArrayLiteralExpr {
                     elements: elements
@@ -1376,6 +1385,16 @@ impl Parser<'_> {
         }
 
         let first = self.parse_expression()?;
+        if let Some((ascending, width)) = self.parse_indexed_part_width()? {
+            return Ok(DigitalLValue::IndexedPartSelect(IndexedPartSelectExpr {
+                name,
+                indices: Vec::new(),
+                base: Box::new(first),
+                width: Box::new(width),
+                ascending,
+                span: start.extend(self.previous_span()),
+            }));
+        }
         if self.match_token(TokenKind::Colon) {
             let lsb = self.parse_expression()?;
             self.expect(TokenKind::RBracket)?;
@@ -1388,9 +1407,10 @@ impl Parser<'_> {
         }
         self.expect(TokenKind::RBracket)?;
         if self.check(TokenKind::LBracket) {
-            return Ok(DigitalLValue::ArraySelect(
-                self.parse_array_packed_select(name, first, start)?,
-            ));
+            return Ok(match self.parse_array_packed_select(name, first, start)? {
+                PackedSelection::Array(select) => DigitalLValue::ArraySelect(select),
+                PackedSelection::Indexed(select) => DigitalLValue::IndexedPartSelect(select),
+            });
         }
         Ok(DigitalLValue::BitSelect {
             name,
@@ -1404,11 +1424,23 @@ impl Parser<'_> {
         name: SmolStr,
         index: Expression,
         start: crate::Span,
-    ) -> Result<ArraySelectExpr, ParseError> {
+    ) -> Result<PackedSelection, ParseError> {
         let mut additional_indices = Vec::new();
         let select = loop {
             self.expect(TokenKind::LBracket)?;
             let first = self.parse_expression()?;
+            if let Some((ascending, width)) = self.parse_indexed_part_width()? {
+                let mut indices = vec![index];
+                indices.append(&mut additional_indices);
+                return Ok(PackedSelection::Indexed(IndexedPartSelectExpr {
+                    name,
+                    indices,
+                    base: Box::new(first),
+                    width: Box::new(width),
+                    ascending,
+                    span: start.extend(self.previous_span()),
+                }));
+            }
             if self.match_token(TokenKind::Colon) {
                 let lsb = self.parse_expression()?;
                 self.expect(TokenKind::RBracket)?;
@@ -1424,13 +1456,13 @@ impl Parser<'_> {
                 break PackedSelect::Bit(Box::new(first));
             }
         };
-        Ok(ArraySelectExpr {
+        Ok(PackedSelection::Array(ArraySelectExpr {
             name,
             index: Box::new(index),
             additional_indices,
             select,
             span: start.extend(self.previous_span()),
-        })
+        }))
     }
 
     /// Refuse the procedural statement under the cursor by name.

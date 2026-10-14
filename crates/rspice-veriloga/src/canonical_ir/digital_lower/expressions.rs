@@ -29,6 +29,7 @@ fn children(expression: &Expression) -> Vec<&Expression> {
         Expression::Digital(DigitalExpr::Reduction(value)) => vec![&value.operand],
         Expression::ArrayAccess(value) => vec![&value.index],
         Expression::Digital(DigitalExpr::PartSelect(value)) => vec![&value.msb, &value.lsb],
+        Expression::Digital(DigitalExpr::IndexedPartSelect(value)) => value.children(),
         Expression::Digital(DigitalExpr::ArraySelect(value)) => value.children(),
         Expression::ArrayLiteral(value) => {
             let mut children = Vec::new();
@@ -107,6 +108,13 @@ impl Shapes {
             .and_then(|count| u32::try_from(count).ok())
     }
 
+    /// An indexed part-select's width: a positive bounded constant.
+    fn indexed_width(&self, width: &Expression) -> Option<u32> {
+        self.constant(width)
+            .and_then(|width| u32::try_from(width).ok())
+            .filter(|width| (1..=crate::semantic::MAX_DIGITAL_VECTOR_WIDTH).contains(width))
+    }
+
     fn part_width(&self, msb: &Expression, lsb: &Expression) -> u32 {
         self.constant(msb)
             .zip(self.constant(lsb))
@@ -168,6 +176,9 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
             Expression::Digital(DigitalExpr::PartSelect(value)) => {
                 result.prepare_constant(lowerer, &value.msb);
                 result.prepare_constant(lowerer, &value.lsb);
+            }
+            Expression::Digital(DigitalExpr::IndexedPartSelect(value)) => {
+                result.prepare_constant(lowerer, &value.width);
             }
             Expression::Digital(DigitalExpr::ArraySelect(value)) => {
                 if let PackedSelect::Part { msb, lsb } = &value.select {
@@ -287,6 +298,12 @@ fn shapes(lowerer: &ProcessLowerer<'_>, root: &Expression) -> Shapes {
             },
             Expression::Digital(DigitalExpr::PartSelect(value)) => Shape {
                 width: result.part_width(&value.msb, &value.lsb),
+                signed: false,
+                real: false,
+            },
+            // Section 5.5.1: a part-select is unsigned, whatever it selects.
+            Expression::Digital(DigitalExpr::IndexedPartSelect(value)) => Shape {
+                width: result.indexed_width(&value.width).unwrap_or(1),
                 signed: false,
                 real: false,
             },
@@ -427,6 +444,10 @@ enum Work<'a> {
     ArrayOffset(BlockId, Vec<(i64, i64)>, Vec<bool>),
     BitSelect(BlockId, ValueId, VectorBounds, bool),
     ArraySelect(BlockId, &'a crate::ast::ArraySelectExpr, VectorBounds),
+    /// Input, its authored range, base signedness, width, `+:`.
+    IndexedSelect(BlockId, ValueId, VectorBounds, bool, u32, bool),
+    /// An array element read, then its indexed part.
+    IndexedArraySelect(BlockId, &'a crate::ast::IndexedPartSelectExpr, VectorBounds, u32),
     LogicalLeft(BlockId, LogicalOp, &'a Expression),
     LogicalRight(LogicalFrame),
     Conditional(BlockId, &'a crate::ast::ConditionalExpr, ConditionalDomain),
@@ -552,6 +573,40 @@ pub(super) fn lower_prepared(
                 } else {
                     lowerer.analog_array_read_value(block, name, span, index, signed)
                 });
+                continue;
+            }
+            Work::IndexedSelect(block, input, range, signed, width, ascending) => {
+                let base = values.pop().expect("indexed part base");
+                values.push(lowerer.builder.push(
+                    block,
+                    CfgValueType::FourState { width },
+                    CfgValueKind::DigitalIndexedPartSelect {
+                        input,
+                        base,
+                        signed,
+                        bounds: (range.msb, range.lsb),
+                        width,
+                        ascending,
+                    },
+                ));
+                continue;
+            }
+            Work::IndexedArraySelect(block, select, range, width) => {
+                let input = values.pop().expect("array word");
+                let signed = shapes.get(&select.base).signed;
+                pending.push(Work::IndexedSelect(
+                    block,
+                    input,
+                    range,
+                    signed,
+                    width,
+                    select.ascending,
+                ));
+                pending.push(Work::Expression(
+                    block,
+                    &select.base,
+                    value_mode(shapes.get(&select.base)),
+                ));
                 continue;
             }
             Work::BitSelect(block, input, range, signed) => {
@@ -747,6 +802,79 @@ pub(super) fn lower_prepared(
                     lowerer.unknown(1)
                 };
                 values.push(value);
+            }
+            // IEEE 1364-2005 section 5.2.1: `width` bits from a run-time base.
+            Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => {
+                let Some(width) = shapes.indexed_width(&select.width) else {
+                    lowerer.error(
+                        "the width of an indexed part-select must be a positive constant expression",
+                        select.width.span(),
+                    );
+                    values.push(lowerer.unknown(1));
+                    continue;
+                };
+                if select.indices.is_empty() {
+                    let Some(input) =
+                        lowerer.packed_named_value(block, &select.name, select.span)
+                    else {
+                        values.push(lowerer.unknown(width));
+                        continue;
+                    };
+                    pending.push(Work::IndexedSelect(
+                        block,
+                        input,
+                        lowerer.declared_range_of(&select.name),
+                        shapes.get(&select.base).signed,
+                        width,
+                        select.ascending,
+                    ));
+                    pending.push(Work::Expression(
+                        block,
+                        &select.base,
+                        value_mode(shapes.get(&select.base)),
+                    ));
+                    continue;
+                }
+                let rank = lowerer.array_rank(&select.name);
+                let array = lowerer
+                    .digital_array(&select.name)
+                    .filter(|array| rank == select.indices.len() && !lowerer.real_signal(array.base));
+                let Some(array) = array else {
+                    lowerer.error(
+                        "an indexed part-select after array coordinates requires every unpacked \
+                         coordinate of an integral discrete array",
+                        select.span,
+                    );
+                    values.push(lowerer.unknown(width));
+                    continue;
+                };
+                let range = lowerer.signals[usize::from(array.base)].declared_range();
+                pending.push(Work::IndexedArraySelect(block, select, range, width));
+                pending.push(Work::ArrayRead(
+                    block,
+                    &select.name,
+                    select.span,
+                    rank == 1 && shapes.get(&select.indices[0]).signed,
+                ));
+                if rank > 1 {
+                    let dimensions = lowerer
+                        .array_dimensions(&select.name)
+                        .expect("resolved array")
+                        .to_vec();
+                    let signed = select
+                        .indices
+                        .iter()
+                        .map(|index| shapes.get(index).signed)
+                        .collect();
+                    pending.push(Work::ArrayOffset(block, dimensions, signed));
+                }
+                pending.extend(
+                    select
+                        .indices
+                        .iter()
+                        .rev()
+                        .map(|index| Work::Expression(block, index, value_mode(shapes.get(index)))),
+                );
             }
             Expression::Digital(DigitalExpr::ArraySelect(access)) => {
                 let rank = lowerer.array_rank(&access.name);

@@ -2827,6 +2827,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
             };
             i64::try_from(index).map_err(|_| DigitalEvalError::InvalidWriteTarget(signal))
         };
+        let Some(select) = self.resolve_indexed_select(select, authored)? else {
+            return Ok(None);
+        };
         let select = match select {
             DigitalArrayWriteSelect::Whole => DigitalWriteSelect::Whole,
             DigitalArrayWriteSelect::Bit { index, signed } => {
@@ -2849,8 +2852,35 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     lsb: translate(lsb)?,
                 }
             }
+            DigitalArrayWriteSelect::Indexed { .. } => unreachable!("resolved to a part above"),
         };
         Ok(Some(DigitalWriteTarget { signal, select }))
+    }
+
+    /// Resolve an indexed part-select's run-time base to the constant part it
+    /// names (IEEE 1364-2005 section 5.2.1). `None` when the base has `x` or
+    /// `z` bits or names no representable index: such a write has no effect.
+    fn resolve_indexed_select(
+        &self,
+        select: super::digital::DigitalArrayWriteSelect,
+        authored: super::VectorBounds,
+    ) -> Result<Option<super::digital::DigitalArrayWriteSelect>, DigitalEvalError> {
+        use super::digital::DigitalArrayWriteSelect;
+        let DigitalArrayWriteSelect::Indexed {
+            base,
+            signed,
+            width,
+            ascending,
+        } = select
+        else {
+            return Ok(Some(select));
+        };
+        Ok(self
+            .selection_index(base, signed)?
+            .and_then(|base| {
+                super::digital::indexed_part_bounds(authored, base, width, ascending)
+            })
+            .map(|(msb, lsb)| DigitalArrayWriteSelect::Part { msb, lsb }))
     }
 
     fn array_write_target(
@@ -3228,26 +3258,18 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     Ok(DigitalScalar::FourState(value))
                 }
             }
-            CfgValueKind::DigitalBitBlockingWrite {
+            CfgValueKind::DigitalPackedBlockingWrite {
                 signal,
-                index,
-                signed,
+                select,
                 bounds,
                 value,
-            } => {
-                let select = super::digital::DigitalArrayWriteSelect::Bit {
-                    index: *index,
-                    signed: *signed,
-                };
-                match self.packed_write_target(*signal, *bounds, select)? {
-                    Some(target) => self.blocking_write(&target, *value),
-                    None => Ok(DigitalScalar::Effect),
-                }
-            }
-            CfgValueKind::DigitalBitNonblockingWrite {
+            } => match self.packed_write_target(*signal, *bounds, *select)? {
+                Some(target) => self.blocking_write(&target, *value),
+                None => Ok(DigitalScalar::Effect),
+            },
+            CfgValueKind::DigitalPackedNonblockingWrite {
                 signal,
-                index,
-                signed,
+                select,
                 bounds,
                 value,
                 region,
@@ -3258,11 +3280,7 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     Some(wait) => self.capture_wait(wait)?,
                     None => None,
                 };
-                let select = super::digital::DigitalArrayWriteSelect::Bit {
-                    index: *index,
-                    signed: *signed,
-                };
-                match self.packed_write_target(*signal, *bounds, select)? {
+                match self.packed_write_target(*signal, *bounds, *select)? {
                     Some(target) => self.nonblocking_write(&target, *value, *region, wait),
                     None => Ok(DigitalScalar::Effect),
                 }
@@ -3692,7 +3710,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     msb: bounds.0,
                     lsb: bounds.1,
                 };
-                let select = match *select {
+                let Some(select) = self.resolve_indexed_select(*select, range)? else {
+                    return Ok(DigitalScalar::FourState(current));
+                };
+                let select = match select {
                     DigitalArrayWriteSelect::Whole => DigitalWriteSelect::Whole,
                     DigitalArrayWriteSelect::Bit { index, signed } => {
                         let Some(index) = self
@@ -3706,6 +3727,9 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                     DigitalArrayWriteSelect::Part { msb, lsb } => {
                         DigitalWriteSelect::Part { msb, lsb }
                     }
+                    DigitalArrayWriteSelect::Indexed { .. } => {
+                        unreachable!("resolved to a part above")
+                    }
                 };
                 let width = select
                     .checked_width(range)
@@ -3713,6 +3737,40 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 let replacement = self.four_state(*value)?.resized(width);
                 patch(&mut current, select.low_position(range), &replacement);
                 Ok(DigitalScalar::FourState(current))
+            }
+            CfgValueKind::DigitalIndexedPartSelect {
+                input,
+                base,
+                signed,
+                bounds,
+                width,
+                ascending,
+            } => {
+                let range = super::VectorBounds {
+                    msb: bounds.0,
+                    lsb: bounds.1,
+                };
+                // The stored position of the part's least significant bit.
+                let low = self
+                    .selection_index(*base, *signed)?
+                    .and_then(|base| {
+                        super::digital::indexed_part_bounds(range, base, *width, *ascending)
+                    })
+                    .and_then(|(msb, lsb)| {
+                        let msb = range.checked_position_of(msb)?;
+                        Some(msb.min(range.checked_position_of(lsb)?))
+                    });
+                let mut part = FourStateValue::splat(*width, FourStateBit::Unknown);
+                if let Some(low) = low {
+                    let input = self.four_state(*input)?;
+                    for offset in 0..*width {
+                        let source = i128::from(low) + i128::from(offset);
+                        if (0..i128::from(input.width())).contains(&source) {
+                            part.set_bit(offset, input.bit(source as u32));
+                        }
+                    }
+                }
+                Ok(DigitalScalar::FourState(part))
             }
             CfgValueKind::DigitalPartSelect { input, msb, lsb } => {
                 let (input, msb, lsb) = (*input, *msb, *lsb);

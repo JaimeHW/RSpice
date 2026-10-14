@@ -171,6 +171,11 @@ fn walk_roots(
                     visit(msb, &locals);
                     visit(lsb, &locals);
                 }
+                DigitalLValue::IndexedPartSelect(select) => {
+                    for child in select.children() {
+                        visit(child, &locals);
+                    }
+                }
                 DigitalLValue::Concat { elements, .. } => {
                     pending.extend(elements.iter().map(Work::Target))
                 }
@@ -307,6 +312,11 @@ pub(super) fn rewrite_roots(body: &mut DigitalStatement, visit: &mut impl FnMut(
                     visit(msb);
                     visit(lsb);
                 }
+                DigitalLValue::IndexedPartSelect(select) => {
+                    for child in select.children_mut() {
+                        visit(child);
+                    }
+                }
                 DigitalLValue::Concat { elements, .. } => {
                     pending.extend(elements.iter_mut().map(Work::Target))
                 }
@@ -336,6 +346,7 @@ pub(crate) fn system_call_output_name(argument: &Expression) -> Option<&smol_str
         Expression::ArrayAccess(access) => Some(&access.array),
         Expression::Digital(DigitalExpr::PartSelect(select)) => Some(&select.name),
         Expression::Digital(DigitalExpr::ArraySelect(select)) => Some(&select.name),
+        Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => Some(&select.name),
         _ => None,
     }
 }

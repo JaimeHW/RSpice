@@ -1220,10 +1220,10 @@ pub enum DigitalExpr {
     /// Four-state literal: `4'b10x1`, `8'hzF`, `'bx`.
     FourState(FourStateLit),
     /// Constant part-select of a vector: `bus[7:4]`.
-    ///
-    /// The indexed forms `bus[base +: width]` and `bus[base -: width]` are not
-    /// part of this wave and are refused by name.
     PartSelect(PartSelectExpr),
+    /// Indexed part-select: `bus[base +: width]`, `bus[base -: width]`, also
+    /// of an unpacked array element (IEEE 1364-2005 section 5.2.1).
+    IndexedPartSelect(IndexedPartSelectExpr),
     /// Packed bit or constant part of an unpacked array element.
     ArraySelect(ArraySelectExpr),
     /// Bitwise XNOR: `a ~^ b`, `a ^~ b` (IEEE 1364-2005 section 5.1.9).
@@ -1258,6 +1258,7 @@ impl DigitalExpr {
         match self {
             Self::FourState(literal) => literal.span,
             Self::PartSelect(select) => select.span,
+            Self::IndexedPartSelect(select) => select.span,
             Self::ArraySelect(select) => select.span,
             Self::Xnor(xnor) => xnor.span,
             Self::CaseEquality(equality) => equality.span,
@@ -1271,6 +1272,7 @@ impl DigitalExpr {
         match self {
             Self::FourState(_) => "four-state literal",
             Self::PartSelect(_) => "part-select",
+            Self::IndexedPartSelect(_) => "indexed part-select",
             Self::ArraySelect(_) => "array element or packed select",
             Self::Xnor(_) => "bitwise XNOR operator",
             Self::CaseEquality(_) => "case equality operator",
@@ -1285,6 +1287,7 @@ impl DigitalExpr {
         match self {
             Self::FourState(_) => Vec::new(),
             Self::PartSelect(select) => vec![&select.msb, &select.lsb],
+            Self::IndexedPartSelect(select) => select.children(),
             Self::ArraySelect(select) => select.children(),
             Self::Xnor(xnor) => vec![&xnor.left, &xnor.right],
             Self::CaseEquality(equality) => vec![&equality.left, &equality.right],
@@ -1306,6 +1309,7 @@ impl DigitalExpr {
             | Self::Reduction(_)
             | Self::ArithmeticShiftRight(_) => None,
             Self::PartSelect(select) => Some(&select.name),
+            Self::IndexedPartSelect(select) => Some(&select.name),
             Self::ArraySelect(select) => Some(&select.name),
         }
     }
@@ -1401,6 +1405,38 @@ pub struct PartSelectExpr {
     pub msb: Box<Expression>,
     pub lsb: Box<Expression>,
     pub span: Span,
+}
+
+/// Indexed part-select `name[base +: width]` or `name[base -: width]`, with
+/// the unpacked coordinates of an array element before it when the name is an
+/// array: `mem[i][base +: width]` (IEEE 1364-2005 section 5.2.1).
+///
+/// The width is a positive constant; the base may vary at run time. `+:`
+/// names `width` bits counting up in index from `base`, `-:` counting down.
+#[derive(Debug, Clone)]
+pub struct IndexedPartSelectExpr {
+    pub name: SmolStr,
+    /// Unpacked coordinates before the select; empty for a vector.
+    pub indices: Vec<Expression>,
+    pub base: Box<Expression>,
+    pub width: Box<Expression>,
+    /// `+:` when true, `-:` when false.
+    pub ascending: bool,
+    pub span: Span,
+}
+
+impl IndexedPartSelectExpr {
+    pub fn children(&self) -> Vec<&Expression> {
+        let mut children: Vec<&Expression> = self.indices.iter().collect();
+        children.extend([self.base.as_ref(), self.width.as_ref()]);
+        children
+    }
+
+    pub fn children_mut(&mut self) -> Vec<&mut Expression> {
+        let mut children: Vec<&mut Expression> = self.indices.iter_mut().collect();
+        children.extend([self.base.as_mut(), self.width.as_mut()]);
+        children
+    }
 }
 
 /// The packed selection applied after choosing an unpacked array element.
@@ -2455,6 +2491,8 @@ pub enum DigitalLValue {
     },
     /// Packed selection inside an unpacked array element.
     ArraySelect(ArraySelectExpr),
+    /// An indexed part-select: `bus[i +: 4]`, `mem[j][i -: 2]`.
+    IndexedPartSelect(IndexedPartSelectExpr),
     /// A concatenation of targets: `{carry, sum}`
     Concat {
         elements: Vec<DigitalLValue>,
@@ -2470,6 +2508,7 @@ impl DigitalLValue {
             | Self::PartSelect { span, .. }
             | Self::Concat { span, .. } => *span,
             Self::ArraySelect(select) => select.span,
+            Self::IndexedPartSelect(select) => select.span,
         }
     }
 
@@ -2486,6 +2525,7 @@ impl DigitalLValue {
             | Self::BitSelect { name, span, .. }
             | Self::PartSelect { name, span, .. } => names.push((name, *span)),
             Self::ArraySelect(select) => names.push((&select.name, select.span)),
+            Self::IndexedPartSelect(select) => names.push((&select.name, select.span)),
             Self::Concat { elements, .. } => {
                 for element in elements {
                     element.collect_written_names(names);

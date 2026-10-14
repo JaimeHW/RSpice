@@ -1873,8 +1873,8 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalArrayOffset { .. }
             | CfgValueKind::DigitalArrayRead { .. }
             | CfgValueKind::DigitalArrayBlockingWrite { .. }
-            | CfgValueKind::DigitalBitBlockingWrite { .. }
-            | CfgValueKind::DigitalBitNonblockingWrite { .. }
+            | CfgValueKind::DigitalPackedBlockingWrite { .. }
+            | CfgValueKind::DigitalPackedNonblockingWrite { .. }
             | CfgValueKind::DigitalArrayNonblockingWrite { .. }
             | CfgValueKind::DigitalSignalRead { .. }
         | CfgValueKind::DigitalRealSignalRead { .. }
@@ -1910,6 +1910,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalShift { .. }
         | CfgValueKind::DigitalPartSelect { .. }
             | CfgValueKind::DigitalBitSelect { .. }
+            | CfgValueKind::DigitalIndexedPartSelect { .. }
             | CfgValueKind::DigitalPackedUpdate { .. }
         | CfgValueKind::DigitalConcat { .. }
         | CfgValueKind::DigitalSelect { .. }

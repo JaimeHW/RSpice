@@ -8,6 +8,7 @@ fn reads(expression: &Expression, locals: &BTreeSet<SmolStr>, used: &mut HashSet
             Expression::Identifier(id) => &id.name,
             Expression::ArrayAccess(access) => &access.array,
             Expression::Digital(DigitalExpr::PartSelect(select)) => &select.name,
+            Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => &select.name,
             Expression::Digital(DigitalExpr::ArraySelect(select)) => &select.name,
             _ => return,
         };
@@ -48,6 +49,12 @@ pub(super) fn used(module: &SpecializedModule) -> HashSet<SmolStr> {
                     reads(lsb, &empty, &mut used);
                 }
                 DigitalLValue::ArraySelect(select) => {
+                    used.insert(select.name.clone());
+                    for value in select.children() {
+                        reads(value, &empty, &mut used);
+                    }
+                }
+                DigitalLValue::IndexedPartSelect(select) => {
                     used.insert(select.name.clone());
                     for value in select.children() {
                         reads(value, &empty, &mut used);

@@ -821,7 +821,7 @@ fn expression_sites(function: &CfgFunction) -> HashSet<Vec<DigitalEventExpressio
         if let CfgValueKind::DigitalNonblockingWrite {
             wait: Some(wait), ..
         }
-        | CfgValueKind::DigitalBitNonblockingWrite {
+        | CfgValueKind::DigitalPackedNonblockingWrite {
             wait: Some(wait), ..
         }
         | CfgValueKind::DigitalArrayNonblockingWrite {

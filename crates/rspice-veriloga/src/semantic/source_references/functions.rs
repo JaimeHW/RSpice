@@ -192,6 +192,9 @@ impl Resolver {
                 Expression::Digital(DigitalExpr::ArraySelect(select)) => {
                     self.bind_function_value(owner, target, &mut select.name, span, locals)?;
                 }
+                Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => {
+                    self.bind_function_value(owner, target, &mut select.name, span, locals)?;
+                }
                 Expression::Call(call) => self.bind_function_call(owner, target, call)?,
                 Expression::SystemFunction(function)
                     if function.name == "$limit"

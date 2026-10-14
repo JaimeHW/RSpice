@@ -92,6 +92,9 @@ fn scope(
                         Expression::Digital(DigitalExpr::ArraySelect(select)) => {
                             (&select.name, select.span)
                         }
+                        Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => {
+                            (&select.name, select.span)
+                        }
                         _ => return,
                     };
                     candidates.push((name.clone(), span));

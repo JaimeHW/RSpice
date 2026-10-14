@@ -953,6 +953,11 @@ pub(super) fn for_child_mut<'a>(
                 visit(&mut expr.msb);
                 visit(&mut expr.lsb);
             }
+            DigitalExpr::IndexedPartSelect(select) => {
+                for child in select.children_mut() {
+                    visit(child);
+                }
+            }
             DigitalExpr::Xnor(expr) => {
                 visit(&mut expr.left);
                 visit(&mut expr.right);

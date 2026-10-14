@@ -119,7 +119,8 @@ use super::ids::{
 use crate::ast::DigitalProcessKind as AstKind;
 use crate::ast::{
     ArrayLiteralElement, BinaryOp, BranchAccess, DigitalAssign, DigitalCase, DigitalLValue,
-    DigitalStatement, EdgeKind, Expression, ReductionOp, TimingControl, UnaryOp, WrealResolution,
+    DigitalStatement, EdgeKind, Expression, IndexedPartSelectExpr, ReductionOp, TimingControl,
+    UnaryOp, WrealResolution,
 };
 use crate::four_state::FourStateBit;
 use crate::semantic::{
@@ -2966,6 +2967,9 @@ impl ProcessLowerer<'_> {
                     self.write_with_wait(block, element, slice, nonblocking, wait.clone());
                 }
             }
+            DigitalLValue::IndexedPartSelect(select) => {
+                self.write_indexed_part(block, select, value, nonblocking, wait);
+            }
             // Unobserved blocking-only locals remain SSA definitions. Deferred
             // or observed locals were promoted before lowering and use the
             // stored-write paths below.
@@ -3051,37 +3055,7 @@ impl ProcessLowerer<'_> {
                     );
                     return;
                 };
-                // Capture each coordinate once, in source order, before a delayed NBA.
-                let (index, signed) = if rank == 1 {
-                    (
-                        self.array_index_value(block, indices[0]),
-                        self.self_signed(indices[0]),
-                    )
-                } else {
-                    let dimensions = self
-                        .array_declaration(&access.name)
-                        .expect("discrete array")
-                        .dimensions
-                        .clone();
-                    let indices = indices
-                        .into_iter()
-                        .map(|index| {
-                            let signed = self.self_signed(index);
-                            (self.array_index_value(block, index), signed)
-                        })
-                        .collect();
-                    (
-                        self.builder.push(
-                            block,
-                            CfgValueType::FourState { width: 64 },
-                            CfgValueKind::DigitalArrayOffset {
-                                dimensions,
-                                indices,
-                            },
-                        ),
-                        false,
-                    )
-                };
+                let (index, signed) = self.array_element_index(block, &access.name, &indices);
                 let range = self.signals[usize::from(array.base)].declared_range();
                 let select = match packed {
                     None => super::digital::DigitalArrayWriteSelect::Whole,
@@ -3178,25 +3152,25 @@ impl ProcessLowerer<'_> {
                     return;
                 };
                 let range = self.signals[usize::from(signal)].declared_range();
-                let signed = self.self_signed(index);
-                let index = self.array_index_value(block, index);
+                let select = super::digital::DigitalArrayWriteSelect::Bit {
+                    signed: self.self_signed(index),
+                    index: self.array_index_value(block, index),
+                };
                 let value = self.resize(block, value, 1, false);
                 let bounds = (range.msb, range.lsb);
                 let kind = if nonblocking {
-                    CfgValueKind::DigitalBitNonblockingWrite {
+                    CfgValueKind::DigitalPackedNonblockingWrite {
                         signal,
-                        index,
-                        signed,
+                        select,
                         bounds,
                         value,
                         region: DigitalSchedulingRegion::NonBlockingAssign,
                         wait,
                     }
                 } else {
-                    CfgValueKind::DigitalBitBlockingWrite {
+                    CfgValueKind::DigitalPackedBlockingWrite {
                         signal,
-                        index,
-                        signed,
+                        select,
                         bounds,
                         value,
                     }
@@ -3223,6 +3197,202 @@ impl ProcessLowerer<'_> {
                 self.builder.push(block, CfgValueType::Effect, kind);
             }
         }
+    }
+
+    /// The element index of a write to a discrete array, with whether it is
+    /// signed. Each coordinate is captured once, in source order, before a
+    /// delayed NBA.
+    fn array_element_index(
+        &mut self,
+        block: BlockId,
+        name: &str,
+        indices: &[&Expression],
+    ) -> (ValueId, bool) {
+        if let [index] = indices {
+            return (
+                self.array_index_value(block, index),
+                self.self_signed(index),
+            );
+        }
+        let dimensions = self
+            .array_declaration(name)
+            .expect("discrete array")
+            .dimensions
+            .clone();
+        let indices = indices
+            .iter()
+            .map(|index| {
+                let signed = self.self_signed(index);
+                (self.array_index_value(block, index), signed)
+            })
+            .collect();
+        (
+            self.builder.push(
+                block,
+                CfgValueType::FourState { width: 64 },
+                CfgValueKind::DigitalArrayOffset {
+                    dimensions,
+                    indices,
+                },
+            ),
+            false,
+        )
+    }
+
+    /// The constant width of an indexed part-select (IEEE 1364-2005 section
+    /// 5.2.1), reported when it is not a positive bounded constant.
+    fn indexed_part_width(&mut self, select: &IndexedPartSelectExpr) -> Option<u32> {
+        let width = self
+            .constant(&select.width)
+            .and_then(|width| u32::try_from(width).ok())
+            .filter(|width| (1..=crate::semantic::MAX_DIGITAL_VECTOR_WIDTH).contains(width));
+        if width.is_none() {
+            self.error(
+                "the width of an indexed part-select must be a positive constant expression",
+                select.width.span(),
+            );
+        }
+        width
+    }
+
+    /// A procedural write through `name[base +: width]` or `name[base -:
+    /// width]`, of a vector or of an array element (IEEE 1364-2005 section
+    /// 5.2.1). The base is evaluated at the write, so a nonblocking write
+    /// captures it when scheduled; bits outside the target, or every bit when
+    /// the base has `x` or `z`, are left unwritten.
+    fn write_indexed_part(
+        &mut self,
+        block: BlockId,
+        select: &IndexedPartSelectExpr,
+        value: ValueId,
+        nonblocking: bool,
+        wait: Option<DigitalWait>,
+    ) {
+        let Some(width) = self.indexed_part_width(select) else {
+            return;
+        };
+        let name = &select.name;
+        let value = self.resize(block, value, width, false);
+        let packed = |lowerer: &mut Self, block| super::digital::DigitalArrayWriteSelect::Indexed {
+            signed: lowerer.self_signed(&select.base),
+            base: lowerer.array_index_value(block, &select.base),
+            width,
+            ascending: select.ascending,
+        };
+        if !select.indices.is_empty() {
+            let Some(array) = self.digital_array(name) else {
+                self.error(
+                    "an indexed part-select after array coordinates requires a discrete unpacked array",
+                    select.span,
+                );
+                return;
+            };
+            if self.array_rank(name) != select.indices.len() || self.real_signal(array.base) {
+                self.error(
+                    "an indexed part-select requires every unpacked coordinate of an integral array",
+                    select.span,
+                );
+                return;
+            }
+            let indices: Vec<&Expression> = select.indices.iter().collect();
+            let (index, signed) = self.array_element_index(block, name, &indices);
+            let range = self.signals[usize::from(array.base)].declared_range();
+            let bounds = (range.msb, range.lsb);
+            let select = packed(self, block);
+            let kind = if nonblocking {
+                CfgValueKind::DigitalArrayNonblockingWrite {
+                    array,
+                    bounds,
+                    index,
+                    signed,
+                    select,
+                    value,
+                    region: DigitalSchedulingRegion::NonBlockingAssign,
+                    wait,
+                }
+            } else {
+                CfgValueKind::DigitalArrayBlockingWrite {
+                    array,
+                    bounds,
+                    index,
+                    signed,
+                    select,
+                    value,
+                }
+            };
+            self.builder.push(block, CfgValueType::Effect, kind);
+            return;
+        }
+        if let Some(local) = self.ssa_local(name) {
+            if nonblocking {
+                self.error(
+                    format!(
+                        "a nonblocking assignment to the process-local `{name}` requires shared local storage"
+                    ),
+                    select.span,
+                );
+                return;
+            }
+            if self.local_is_real(local) {
+                self.error(
+                    "packed assignment requires an integral local; a real has no selectable bits",
+                    select.span,
+                );
+                return;
+            }
+            let range = self.locals[usize::from(local)].bounds;
+            let select = packed(self, block);
+            let input = self.read_local(block, local);
+            let updated = self.builder.push(
+                block,
+                CfgValueType::FourState {
+                    width: self.local_width(local),
+                },
+                CfgValueKind::DigitalPackedUpdate {
+                    input,
+                    bounds: (range.msb, range.lsb),
+                    select,
+                    value,
+                },
+            );
+            self.write_local(block, local, updated);
+            return;
+        }
+        let Some(signal) = self.resolved_signal(name) else {
+            self.error(
+                "a procedural indexed part write requires digital variable storage",
+                select.span,
+            );
+            return;
+        };
+        if self.real_signal(signal) {
+            self.error(
+                "packed assignment requires integral storage; a real has no selectable bits",
+                select.span,
+            );
+            return;
+        }
+        let range = self.signals[usize::from(signal)].declared_range();
+        let bounds = (range.msb, range.lsb);
+        let select = packed(self, block);
+        let kind = if nonblocking {
+            CfgValueKind::DigitalPackedNonblockingWrite {
+                signal,
+                select,
+                bounds,
+                value,
+                region: DigitalSchedulingRegion::NonBlockingAssign,
+                wait,
+            }
+        } else {
+            CfgValueKind::DigitalPackedBlockingWrite {
+                signal,
+                select,
+                bounds,
+                value,
+            }
+        };
+        self.builder.push(block, CfgValueType::Effect, kind);
     }
 
     /// Emit the driver-write nodes for one continuous assignment's target.
@@ -3379,6 +3549,47 @@ impl ProcessLowerer<'_> {
                 };
                 return self.array_driver_target(&access.name, &indices, packed, access.span);
             }
+            // A continuous target's base is constant (IEEE 1364-2005 section
+            // A.8.5), so the select names one constant part.
+            DigitalLValue::IndexedPartSelect(select) => {
+                let width = self.indexed_part_width(select)?;
+                let base = self.constant_index(&select.base)?;
+                let Some((msb, lsb)) = super::digital::indexed_part_bounds(
+                    self.declared_range_of(&select.name),
+                    base,
+                    width,
+                    select.ascending,
+                ) else {
+                    self.error(
+                        "an indexed part-select names indices outside the signed 64-bit range",
+                        select.span,
+                    );
+                    return None;
+                };
+                let part = DigitalWriteSelect::Part { msb, lsb };
+                if !select.indices.is_empty() {
+                    let indices: Vec<&Expression> = select.indices.iter().collect();
+                    let element =
+                        self.array_driver_target(&select.name, &indices, None, select.span)?;
+                    return Some(DigitalWriteTarget {
+                        signal: element.signal,
+                        select: part,
+                    });
+                }
+                return match self.resolved_signal(&select.name) {
+                    Some(signal) => Some(DigitalWriteTarget {
+                        signal,
+                        select: part,
+                    }),
+                    None => {
+                        self.error(
+                            "an indexed part-select target requires a discrete-domain signal",
+                            select.span,
+                        );
+                        None
+                    }
+                };
+            }
             _ => {}
         }
         let (name, span, select) = match target {
@@ -3404,7 +3615,9 @@ impl ProcessLowerer<'_> {
                     },
                 )
             }
-            DigitalLValue::ArraySelect(_) => unreachable!("array target resolved above"),
+            DigitalLValue::ArraySelect(_) | DigitalLValue::IndexedPartSelect(_) => {
+                unreachable!("array and indexed targets resolved above")
+            }
             DigitalLValue::Concat { .. } => unreachable!("a concatenation is split before here"),
         };
         match self.resolved_signal(name) {
@@ -3484,6 +3697,7 @@ impl ProcessLowerer<'_> {
                 .digital_array(name)
                 .map_or(1, |array| self.width_of(array.base)),
             DigitalLValue::PartSelect { msb, lsb, .. } => self.part_select_width(msb, lsb),
+            DigitalLValue::IndexedPartSelect(select) => self.indexed_select_width(select),
             DigitalLValue::Concat { elements, .. } => {
                 elements.iter().map(|part| self.lvalue_width(part)).sum()
             }
@@ -4052,6 +4266,15 @@ impl ProcessLowerer<'_> {
         self.constant(msb)
             .zip(self.constant(lsb))
             .and_then(|(msb, lsb)| Self::bounded_part_width(msb, lsb))
+            .unwrap_or(1)
+    }
+
+    /// An indexed part-select's width for inference; actual lowering reports
+    /// a width that is not a positive bounded constant.
+    fn indexed_select_width(&self, select: &IndexedPartSelectExpr) -> u32 {
+        self.constant(&select.width)
+            .and_then(|width| u32::try_from(width).ok())
+            .filter(|width| (1..=crate::semantic::MAX_DIGITAL_VECTOR_WIDTH).contains(width))
             .unwrap_or(1)
     }
 
@@ -4763,8 +4986,19 @@ impl ProcessLowerer<'_> {
                     CfgValueKind::FourStateConstant(value),
                 )
             }
+            Expression::StringLit(literal) => {
+                let value = string_literal_value(&literal.value);
+                self.builder.push_leaf(
+                    CfgValueType::FourState {
+                        width: value.width(),
+                    },
+                    CfgValueKind::FourStateConstant(value),
+                )
+            }
             Expression::Digital(
-                crate::ast::DigitalExpr::ArraySelect(_) | crate::ast::DigitalExpr::PartSelect(_),
+                crate::ast::DigitalExpr::ArraySelect(_)
+                | crate::ast::DigitalExpr::PartSelect(_)
+                | crate::ast::DigitalExpr::IndexedPartSelect(_),
             ) => {
                 unreachable!("iterative packed selection lowering")
             }
@@ -4966,6 +5200,7 @@ impl ProcessLowerer<'_> {
                         })
             }
             Expression::Digital(crate::ast::DigitalExpr::PartSelect(_))
+            | Expression::Digital(crate::ast::DigitalExpr::IndexedPartSelect(_))
             | Expression::Digital(crate::ast::DigitalExpr::ArraySelect(_))
             | Expression::ArrayLiteral(_) => false,
             // Rules (g) and (h).
@@ -5004,7 +5239,9 @@ impl ProcessLowerer<'_> {
                 literal.value.width()
             }
             Expression::Digital(
-                crate::ast::DigitalExpr::ArraySelect(_) | crate::ast::DigitalExpr::PartSelect(_),
+                crate::ast::DigitalExpr::ArraySelect(_)
+                | crate::ast::DigitalExpr::PartSelect(_)
+                | crate::ast::DigitalExpr::IndexedPartSelect(_),
             ) => {
                 unreachable!("iterative packed selection typing")
             }
@@ -5044,6 +5281,7 @@ impl ProcessLowerer<'_> {
                     1
                 }
             }
+            Expression::StringLit(literal) => string_literal_value(&literal.value).width(),
             Expression::ArrayLiteral(_) => unreachable!("iterative concatenation typing"),
             // `$realtobits` is 64 bits by the format it names, not by the
             // context it sits in: it is double-precision's own pattern, and a
@@ -5288,6 +5526,28 @@ fn signal_name(expression: &Expression) -> Option<&str> {
     }
 }
 
+/// IEEE 1364-2005 section 3.6: a string operand is an unsigned constant of
+/// eight bits per character, the first character most significant. The empty
+/// string is one zero byte.
+fn string_literal_value(text: &str) -> FourStateValue {
+    let bytes = text.as_bytes();
+    let width = u32::try_from(bytes.len().max(1))
+        .ok()
+        .and_then(|count| count.checked_mul(8))
+        .filter(|width| *width <= crate::semantic::MAX_DIGITAL_VECTOR_WIDTH)
+        .unwrap_or(crate::semantic::MAX_DIGITAL_VECTOR_WIDTH);
+    let mut value = FourStateValue::zero(width);
+    for (position, byte) in bytes.iter().rev().enumerate() {
+        for bit in 0..8 {
+            let at = position * 8 + bit;
+            if (byte >> bit) & 1 == 1 && at < width as usize {
+                value.set_bit(at as u32, FourStateBit::One);
+            }
+        }
+    }
+    value
+}
+
 fn collect_lvalue_index_reads(target: &DigitalLValue, reads: &mut BTreeSet<String>) {
     match target {
         DigitalLValue::Identifier { .. } => {}
@@ -5300,6 +5560,11 @@ fn collect_lvalue_index_reads(target: &DigitalLValue, reads: &mut BTreeSet<Strin
         DigitalLValue::PartSelect { msb, lsb, .. } => {
             collect_expression_reads(msb, reads);
             collect_expression_reads(lsb, reads);
+        }
+        DigitalLValue::IndexedPartSelect(select) => {
+            for child in select.children() {
+                collect_expression_reads(child, reads);
+            }
         }
         DigitalLValue::Concat { elements, .. } => {
             for element in elements {

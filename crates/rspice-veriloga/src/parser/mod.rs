@@ -2817,6 +2817,10 @@ impl<'a> Parser<'a> {
         let mut left = self.parse_multiplicative()?;
 
         loop {
+            // `base +: width` ends the base here; the bracket parses the rest.
+            if self.indexed_part_select_follows().is_some() {
+                break;
+            }
             let op = match self.current().kind {
                 TokenKind::Plus => {
                     self.advance();
@@ -3108,6 +3112,18 @@ impl<'a> Parser<'a> {
                 // subset — a constant part-select `bus[msb:lsb]`.
                 if self.match_token(TokenKind::LBracket) {
                     let index = self.parse_expression()?;
+                    if let Some((ascending, width)) = self.parse_indexed_part_width()? {
+                        return Ok(Expression::Digital(DigitalExpr::IndexedPartSelect(
+                            IndexedPartSelectExpr {
+                                name,
+                                indices: Vec::new(),
+                                base: Box::new(index),
+                                width: Box::new(width),
+                                ascending,
+                                span: start.extend(self.previous_span()),
+                            },
+                        )));
+                    }
                     if self.match_token(TokenKind::Colon) {
                         let lsb = self.parse_expression()?;
                         self.expect(TokenKind::RBracket)?;
@@ -3122,9 +3138,16 @@ impl<'a> Parser<'a> {
                     }
                     self.expect(TokenKind::RBracket)?;
                     if self.check(TokenKind::LBracket) {
-                        return Ok(Expression::Digital(DigitalExpr::ArraySelect(
-                            self.parse_array_packed_select(name, index, start)?,
-                        )));
+                        return Ok(Expression::Digital(
+                            match self.parse_array_packed_select(name, index, start)? {
+                                digital::PackedSelection::Array(select) => {
+                                    DigitalExpr::ArraySelect(select)
+                                }
+                                digital::PackedSelection::Indexed(select) => {
+                                    DigitalExpr::IndexedPartSelect(select)
+                                }
+                            },
+                        ));
                     }
                     return Ok(Expression::ArrayAccess(ArrayAccessExpr {
                         normalized: false,
@@ -3633,6 +3656,37 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_identifier(context)
+    }
+
+    /// Whether the cursor spells `+:` (`Some(true)`) or `-:` (`Some(false)`)
+    /// with nothing between the two tokens: an indexed part-select's operator
+    /// (IEEE 1364-2005 section 5.2.1).
+    fn indexed_part_select_follows(&self) -> Option<bool> {
+        let current = self.current();
+        let next = self.tokens.get(self.pos + 1)?;
+        if next.kind != TokenKind::Colon || current.span.end != next.span.start {
+            return None;
+        }
+        match current.kind {
+            TokenKind::Plus => Some(true),
+            TokenKind::Minus => Some(false),
+            _ => None,
+        }
+    }
+
+    /// After `name[` and the first expression: `+: width]` or `-: width]`,
+    /// consumed when present.
+    pub(super) fn parse_indexed_part_width(
+        &mut self,
+    ) -> Result<Option<(bool, Expression)>, ParseError> {
+        let Some(ascending) = self.indexed_part_select_follows() else {
+            return Ok(None);
+        };
+        self.advance();
+        self.advance();
+        let width = self.parse_expression()?;
+        self.expect(TokenKind::RBracket)?;
+        Ok(Some((ascending, width)))
     }
 
     fn peek_is(&self, kind: TokenKind) -> bool {

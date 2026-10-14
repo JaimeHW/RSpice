@@ -132,6 +132,11 @@ impl ProcessLowerer<'_> {
                     required.insert(local);
                 }
             }
+            DigitalLValue::IndexedPartSelect(select) => {
+                if let Some(local) = self.lookup_local(&select.name) {
+                    required.insert(local);
+                }
+            }
             DigitalLValue::Concat { elements, .. } => {
                 for element in elements {
                     self.mark_target(element, required);

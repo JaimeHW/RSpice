@@ -495,6 +495,9 @@ pub(crate) fn expression_as_lvalue(expression: &Expression) -> Option<DigitalLVa
         Expression::Digital(DigitalExpr::ArraySelect(select)) => {
             DigitalLValue::ArraySelect(select.clone())
         }
+        Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => {
+            DigitalLValue::IndexedPartSelect(select.clone())
+        }
         Expression::ArrayLiteral(literal) if !literal.assignment_pattern => DigitalLValue::Concat {
             elements: literal
                 .elements

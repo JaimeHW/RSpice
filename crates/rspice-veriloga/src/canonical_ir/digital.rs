@@ -648,23 +648,69 @@ impl DigitalWriteSelect {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DigitalArrayWriteSelect {
     Whole,
-    Bit { index: ValueId, signed: bool },
-    Part { msb: i64, lsb: i64 },
+    Bit {
+        index: ValueId,
+        signed: bool,
+    },
+    Part {
+        msb: i64,
+        lsb: i64,
+    },
+    /// `[base +: width]` (`ascending`) or `[base -: width]`, IEEE 1364-2005
+    /// section 5.2.1: a constant width at a run-time base, resolved through
+    /// [`indexed_part_bounds`] to a [`Self::Part`] when written.
+    Indexed {
+        base: ValueId,
+        signed: bool,
+        width: u32,
+        ascending: bool,
+    },
 }
 
 impl DigitalArrayWriteSelect {
     pub fn operand(self) -> Option<ValueId> {
         match self {
             Self::Bit { index, .. } => Some(index),
+            Self::Indexed { base, .. } => Some(base),
             _ => None,
         }
     }
 
     pub fn map_operands(&mut self, map: &mut impl FnMut(ValueId) -> ValueId) {
-        if let Self::Bit { index, .. } = self {
-            *index = map(*index);
+        match self {
+            Self::Bit { index, .. } => *index = map(*index),
+            Self::Indexed { base, .. } => *base = map(*base),
+            Self::Whole | Self::Part { .. } => {}
         }
     }
+}
+
+/// The part an indexed part-select names once its base is known, as `(msb,
+/// lsb)` indices written in the direction `bounds` was declared in.
+///
+/// IEEE 1364-2005 section 5.2.1: `+:` names `width` indices counting up from
+/// `base`, `-:` counting down, and the declared direction decides which end
+/// is most significant (`v[0 +: 8]` is `v[7:0]` of a `[31:0]` vector and
+/// `v[0:7]` of a `[0:31]` one). `None` when the indices are not representable,
+/// which places every bit outside any vector.
+pub(crate) fn indexed_part_bounds(
+    bounds: VectorBounds,
+    base: i64,
+    width: u32,
+    ascending: bool,
+) -> Option<(i64, i64)> {
+    let span = i64::from(width.checked_sub(1)?);
+    let low = if ascending {
+        base
+    } else {
+        base.checked_sub(span)?
+    };
+    let high = low.checked_add(span)?;
+    Some(if bounds.msb >= bounds.lsb {
+        (high, low)
+    } else {
+        (low, high)
+    })
 }
 
 /// The destination of one write.

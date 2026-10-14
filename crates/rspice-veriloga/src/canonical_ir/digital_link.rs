@@ -795,13 +795,13 @@ fn relocate_value(
                 relocate_wait(wait, map);
             }
         }
-        CfgValueKind::DigitalBitNonblockingWrite { signal, wait, .. } => {
+        CfgValueKind::DigitalPackedNonblockingWrite { signal, wait, .. } => {
             *signal = map.signals[usize::from(*signal)];
             if let Some(wait) = wait {
                 relocate_wait(wait, map);
             }
         }
-        CfgValueKind::DigitalBitBlockingWrite { signal, .. }
+        CfgValueKind::DigitalPackedBlockingWrite { signal, .. }
         | CfgValueKind::DigitalSignalRead { signal }
         | CfgValueKind::DigitalRealSignalRead { signal } => {
             *signal = map.signals[usize::from(*signal)];
@@ -850,6 +850,7 @@ fn relocate_value(
         | CfgValueKind::DigitalShift { .. }
         | CfgValueKind::DigitalPartSelect { .. }
         | CfgValueKind::DigitalBitSelect { .. }
+        | CfgValueKind::DigitalIndexedPartSelect { .. }
         | CfgValueKind::DigitalPackedUpdate { .. }
         | CfgValueKind::DigitalConcat { .. }
         | CfgValueKind::DigitalSelect { .. } => {}

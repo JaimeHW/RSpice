@@ -1446,8 +1446,8 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalArrayOffset { .. }
             | CfgValueKind::DigitalArrayRead { .. }
             | CfgValueKind::DigitalArrayBlockingWrite { .. }
-            | CfgValueKind::DigitalBitBlockingWrite { .. }
-            | CfgValueKind::DigitalBitNonblockingWrite { .. }
+            | CfgValueKind::DigitalPackedBlockingWrite { .. }
+            | CfgValueKind::DigitalPackedNonblockingWrite { .. }
             | CfgValueKind::DigitalArrayNonblockingWrite { .. }
             | CfgValueKind::DigitalSignalRead { .. }
             | CfgValueKind::DigitalRealSignalRead { .. }
@@ -1478,6 +1478,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalShift { .. }
             | CfgValueKind::DigitalPartSelect { .. }
             | CfgValueKind::DigitalBitSelect { .. }
+            | CfgValueKind::DigitalIndexedPartSelect { .. }
             | CfgValueKind::DigitalPackedUpdate { .. }
             | CfgValueKind::DigitalConcat { .. }
             | CfgValueKind::DigitalSelect { .. }

@@ -558,11 +558,11 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalArrayRead { array, signed, .. } => {
                 write!(out, "digital-array-read:{array:?}:{signed}")
             }
-            CfgValueKind::DigitalBitBlockingWrite { signal, signed, bounds, .. } => {
-                write!(out, "digital-bit-blocking-write:{signal}:{signed}:{bounds:?}")
+            CfgValueKind::DigitalPackedBlockingWrite { signal, select, bounds, .. } => {
+                write!(out, "digital-packed-blocking-write:{signal}:{select:?}:{bounds:?}")
             }
-            CfgValueKind::DigitalBitNonblockingWrite { signal, signed, bounds, region, wait, .. } => {
-                write!(out, "digital-bit-nonblocking-write:{signal}:{signed}:{bounds:?}:{region:?}:{wait:?}")
+            CfgValueKind::DigitalPackedNonblockingWrite { signal, select, bounds, region, wait, .. } => {
+                write!(out, "digital-packed-nonblocking-write:{signal}:{select:?}:{bounds:?}:{region:?}:{wait:?}")
             }
             CfgValueKind::DigitalArrayBlockingWrite { array, signed, select, bounds, .. } => {
                 write!(out, "digital-array-blocking-write:{array:?}:{signed}:{select:?}:{bounds:?}")
@@ -641,6 +641,16 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalBitSelect { bounds, signed, .. } => {
                 write!(out, "digital-bit-select:{bounds:?}:{signed}")
             }
+            CfgValueKind::DigitalIndexedPartSelect {
+                signed,
+                bounds,
+                width,
+                ascending,
+                ..
+            } => write!(
+                out,
+                "digital-indexed-part-select:{bounds:?}:{signed}:{width}:{ascending}"
+            ),
             CfgValueKind::DigitalPackedUpdate { bounds, select, .. } => {
                 write!(out, "digital-packed-update:{bounds:?}:{select:?}")
             }

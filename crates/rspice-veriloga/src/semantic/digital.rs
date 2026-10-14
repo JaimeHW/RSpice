@@ -2338,6 +2338,78 @@ impl SemanticAnalyzer {
                 self.check_digital_expression(msb, signals, index);
                 self.check_digital_expression(lsb, signals, index);
             }
+            DigitalLValue::IndexedPartSelect(select) => {
+                if self.check_assignable(&select.name, select.span, signals, index, procedural) {
+                    self.check_indexed_part_select(select, signals, index, procedural);
+                }
+                for child in select.children() {
+                    self.check_digital_expression(child, signals, index);
+                }
+            }
+        }
+    }
+
+    /// IEEE 1364-2005 section 5.2.1: an indexed part-select names `width`
+    /// bits of a vector, or of an array element after all its unpacked
+    /// coordinates, and its width is a positive constant expression.
+    ///
+    /// The base may vary at run time except in a continuous assignment's
+    /// target, whose net_lvalue takes a constant range expression (section
+    /// A.8.5).
+    fn check_indexed_part_select(
+        &mut self,
+        select: &IndexedPartSelectExpr,
+        signals: &[AnalyzedDigitalSignal],
+        index: &HashMap<SmolStr, usize>,
+        runtime_base: bool,
+    ) {
+        let name = &select.name;
+        let rank = self.unpacked_rank(name, signals, index);
+        if select.indices.len() != rank {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "indexed part-select of `{name}` follows {} unpacked indices, but `{name}` \
+                     has {rank}; IEEE 1364-2005 section 5.2.1 selects bits of a vector or of \
+                     one array element",
+                    select.indices.len()
+                )),
+                select.span,
+            );
+            return;
+        }
+        if rank == 0 {
+            self.check_bit_index(name, &select.base, signals, index, SelectBound::RuntimeBit);
+        } else {
+            let mut coordinates = select.indices.iter().cloned();
+            let first = coordinates.next().expect("rank is positive");
+            self.check_array_packed_select(
+                &ArraySelectExpr {
+                    name: name.clone(),
+                    index: Box::new(first),
+                    additional_indices: coordinates.collect(),
+                    select: PackedSelect::Bit(select.base.clone()),
+                    span: select.span,
+                },
+                signals,
+                index,
+            );
+        }
+        let width = self
+            .digital_selector_value(&select.width, index)
+            .and_then(|value| value.as_exact_i64());
+        if !width.is_some_and(|width| {
+            width > 0 && width <= i64::from(MAX_DIGITAL_VECTOR_WIDTH)
+        }) {
+            self.record_error_at(
+                SemanticErrorKind::InvalidExpression(format!(
+                    "the width of an indexed part-select of `{name}` must be a positive constant \
+                     expression; IEEE 1364-2005 section 5.2.1"
+                )),
+                select.width.span(),
+            );
+        }
+        if !runtime_base && self.digital_selector_value(&select.base, index).is_none() {
+            self.refuse_run_time_select_bound(name, &select.base, SelectBound::FixedBit);
         }
     }
 
@@ -2875,6 +2947,8 @@ impl SemanticAnalyzer {
                             SelectBound::Part,
                         );
                         self.check_part_select_direction(name, select.span, high, low);
+                    } else if let DigitalExpr::IndexedPartSelect(select) = digital {
+                        self.check_indexed_part_select(select, signals, index, true);
                     }
                 }
                 for child in digital.children() {
