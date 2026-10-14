@@ -677,10 +677,7 @@ fn add_bundle_file(
 /// clean.
 pub(crate) fn invalidate_veriloga_evidence(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
     mark_bundle_unsaved(app, bundle_id);
-    cancel_veriloga_compile(app);
-    app.state.ui.code_workspace.veriloga.receipt = None;
-    Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
-    app.state.ui.code_workspace.veriloga.last_failure_token = None;
+    app.state.ui.code_workspace.veriloga.void_evidence();
 }
 
 /// The persisted bundle changed: the project has unsaved source, and so does
@@ -774,6 +771,32 @@ pub(crate) fn request_veriloga_compile(app: &mut RSpiceApp) -> Result<(), String
     }
     app.state.ui.code_workspace.veriloga.compile_request = Some(selected);
     Ok(())
+}
+
+/// Write `profile` as the build profile of the bundle `expected` names, while
+/// that bundle is still exactly what it was: over the profile document it
+/// holds, as any edit of a source file is made, or as a new profile document
+/// when it holds none yet. Returns whether anything changed.
+pub(crate) fn write_veriloga_build_profile(
+    app: &mut RSpiceApp,
+    expected: &SelectedVerilogASource,
+    profile: &super::veriloga_profile::VerilogABuildProfile,
+) -> Result<bool, String> {
+    let current = super::veriloga_profile::resolve_veriloga_build_profile(expected.bundle())?;
+    match current.logical_path {
+        Some(path) => replace_selected_veriloga_file(app, expected, &path, profile.to_toml()?),
+        None => {
+            let project_id = app.state.workspace.content.project.id();
+            if !selected_veriloga_source(app)?.matches_token(project_id, expected.token(project_id))
+            {
+                return Err(
+                    "The active Verilog-A source changed before its build profile could be written."
+                        .to_owned(),
+                );
+            }
+            add_build_profile_document(app, expected, profile).map(|_| true)
+        }
+    }
 }
 
 fn persist_legacy_build_profile(
@@ -1484,6 +1507,42 @@ mod tests {
         assert_eq!(request.bundle().revision(), bundle.revision());
         assert_eq!(request.bundle().closure_digest(), bundle.closure_digest());
         assert!(request.bundle().contains_file(profile_path));
+    }
+
+    /// A build profile written over the one a bundle holds is an ordinary
+    /// edit of that document: the revision moves, the compile evidence goes,
+    /// and the profile reads back as written.
+    #[test]
+    fn a_build_profile_is_written_over_the_document_the_bundle_holds() {
+        let mut app = portless_module();
+        request_veriloga_compile(&mut app).unwrap();
+        app.state.ui.code_workspace.veriloga.compile_request = None;
+        let selected = selected_veriloga_source(&app).unwrap();
+        let revision = selected.bundle().revision();
+        let mut profile =
+            super::super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())
+                .unwrap()
+                .profile;
+        profile.targets.generated_rust = true;
+
+        assert!(write_veriloga_build_profile(&mut app, &selected, &profile).unwrap());
+
+        let after = selected_veriloga_source(&app).unwrap();
+        assert!(after.bundle().revision() > revision);
+        assert_eq!(
+            after
+                .bundle()
+                .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
+                .count(),
+            1,
+            "written over, not beside"
+        );
+        let resolved =
+            super::super::veriloga_profile::resolve_veriloga_build_profile(after.bundle()).unwrap();
+        assert_eq!(resolved.profile, profile);
+        let stale = write_veriloga_build_profile(&mut app, &selected, &profile)
+            .expect_err("a write is bound to the closure it was made against");
+        assert!(stale.contains("changed"), "{stale}");
     }
 
     #[test]

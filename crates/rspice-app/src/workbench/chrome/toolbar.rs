@@ -765,12 +765,13 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 
 /// Toolbar of an open Verilog-A cell view.
 ///
-/// Compile and the cross-link to the generated deck, then the source tools,
-/// Format first. The toolbar is the only place those two actions live, so they
-/// come first: where it keeps only its first tools, on a phone, they are what
-/// it keeps. Format is in the editor's own menu as well, and every source tool
-/// is in the command palette. A schematic's placement and transform tools have
-/// nothing to act on here.
+/// Compile and the cross-link to the generated deck, then the build settings
+/// Compile reads, then the source tools, Format first. The toolbar is the only
+/// place the first two actions live, so they come first: where it keeps only
+/// its first tools, on a phone, they are what it keeps. Build settings, Format
+/// and every source tool are in the command palette as well, and Format in the
+/// editor's own menu. A schematic's placement and transform tools have nothing
+/// to act on here.
 fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_text_command(
         ui,
@@ -781,6 +782,13 @@ fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         layout,
     );
     generated_netlist_tool(ui, app, layout);
+    toolbar_icon_command(
+        ui,
+        app,
+        Command::VerilogABuildSettings,
+        WorkbenchIcon::Sliders,
+        layout,
+    );
     context_separator(ui, layout);
     veriloga_format_tool(ui, app, layout);
     toolbar_icon_command(

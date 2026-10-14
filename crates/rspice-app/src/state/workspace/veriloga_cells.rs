@@ -40,7 +40,7 @@ pub(crate) struct ModuleSurvey {
 }
 
 /// Read the modules `bundle` declares.
-fn survey_veriloga_bundle(bundle: &ProjectSourceBundle) -> Result<ModuleSurvey, String> {
+pub(crate) fn survey_veriloga_bundle(bundle: &ProjectSourceBundle) -> Result<ModuleSurvey, String> {
     survey_veriloga_sources(bundle.root().logical_path(), &|path| {
         bundle.file_content(path)
     })

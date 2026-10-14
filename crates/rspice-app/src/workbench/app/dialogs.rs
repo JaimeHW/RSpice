@@ -51,6 +51,7 @@ pub(in crate::workbench) mod state;
 pub(in crate::workbench) mod stimulus_link;
 pub(in crate::workbench) mod symbol_definition;
 pub(in crate::workbench) mod unpublish_web;
+pub(in crate::workbench) mod veriloga_build_settings;
 pub(in crate::workbench) mod visibility_options;
 pub(in crate::workbench) mod window_session;
 

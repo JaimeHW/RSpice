@@ -1337,6 +1337,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         | Command::CheckAndSave
         | Command::ModelValidate => WorkbenchIcon::Check,
         Command::CompileVerilogA => WorkbenchIcon::Code,
+        Command::VerilogABuildSettings => WorkbenchIcon::Sliders,
         Command::AccountOrganization | Command::License => WorkbenchIcon::User,
         Command::KeyboardShortcuts => WorkbenchIcon::Search,
         Command::HelpCenter => WorkbenchIcon::Info,

@@ -166,6 +166,10 @@ pub(crate) use dialogs::source_language_tools::{
     language_tools_are_available, open_active_language_tools,
 };
 
+pub(crate) use dialogs::veriloga_build_settings::{
+    VerilogABuildSettingsDraft, open_veriloga_build_settings, veriloga_build_settings_available,
+};
+
 pub(crate) use dialogs::create_model_bound_symbol::{
     CreateModelBoundSymbolDialogState, open_create_model_bound_symbol_dialog,
     open_create_subcircuit_bound_symbol_dialog,
@@ -923,6 +927,7 @@ impl RSpiceApp {
         self.render_new_veriloga_device_form(ctx);
         self.render_veriloga_import_dialog(ctx);
         self.render_veriloga_replace_dialog(ctx);
+        self.render_veriloga_build_settings(ctx);
         self.process_copy_cell_dialog(ctx);
         self.process_rename_cell_dialog(ctx);
         self.process_library_deletion_review_dialog(ctx);
@@ -1501,6 +1506,9 @@ mod veriloga_flow_tests;
 
 #[cfg(test)]
 mod veriloga_panel_tests;
+
+#[cfg(test)]
+mod veriloga_build_settings_tests;
 
 #[cfg(test)]
 mod tests {

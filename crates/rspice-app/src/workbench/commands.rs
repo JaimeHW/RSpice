@@ -801,6 +801,11 @@ impl Command {
             // read-only project -- and then the surface refused the request it
             // had just been handed.
             Self::CompileVerilogA => code_context::resolve_veriloga_compile(app).is_some(),
+            // Build settings opens on a read-only project too, to be read;
+            // its Save is what that refuses.
+            Self::VerilogABuildSettings => {
+                crate::workbench::app::veriloga_build_settings_available(app)
+            }
             Self::CompareGeneratedRevisions => {
                 netlist_page_is_visible(state)
                     && !state.ui.netlist.generated_history.is_empty()
@@ -2130,6 +2135,13 @@ impl Command {
                 if let Err(error) =
                     crate::workbench::documents::code_workspace::request_veriloga_compile(app)
                 {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+                }
+            }
+            Self::VerilogABuildSettings => {
+                activate_workspace(app, Workspace::Design);
+                if let Err(error) = crate::workbench::app::open_veriloga_build_settings(app) {
                     app.state
                         .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
                 }

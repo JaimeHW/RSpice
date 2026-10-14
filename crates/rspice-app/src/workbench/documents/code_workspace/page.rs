@@ -212,6 +212,20 @@ pub struct VerilogAWorkbenchState {
     pub placement_handoffs: Vec<VerilogAPlacementHandoff>,
 }
 
+impl VerilogAWorkbenchState {
+    /// Drop what the last compile proved, and stop a compile still running:
+    /// the source either was of is not the source any more. Browser work is
+    /// terminated too, so an abandoned compile never holds the next one up.
+    pub(crate) fn void_evidence(&mut self) {
+        #[cfg(target_arch = "wasm32")]
+        rspice_simulation::project_veriloga::compile_service::cancel_compile();
+        self.pending = None;
+        self.receipt = None;
+        Arc::make_mut(&mut self.last_failure).clear();
+        self.last_failure_token = None;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerilogAImportTarget {
     pub project_id: crate::product::ProjectId,

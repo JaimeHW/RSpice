@@ -26,7 +26,7 @@ pub(super) fn validate_lcv_name(name: &str, field_label: &str) -> Option<String>
 }
 
 impl RSpiceApp {
-    pub(super) fn persist_global_veriloga_library_with_feedback(&mut self) {
+    pub(in crate::workbench::app) fn persist_global_veriloga_library_with_feedback(&mut self) {
         if let Err(err) =
             save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)
         {

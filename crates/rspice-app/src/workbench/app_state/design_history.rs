@@ -25,6 +25,9 @@ mod compensation;
 mod component_rename;
 mod instance_removal;
 mod reference_preparation;
+mod veriloga_build;
+
+pub(crate) use veriloga_build::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -92,6 +95,7 @@ enum ProjectDesignBody {
     ModelDefinition(Box<ModelDefinitionRecord>),
     ModelLibraries(Box<ModelLibrariesRecord>),
     ModelResolutions(Box<ModelResolutionRecordsRecord>),
+    VerilogABuildSettings(Box<veriloga_build::VerilogABuildSettingsRecord>),
 }
 
 /// Reference-changing history is prepared exactly once before navigation or a
@@ -1128,6 +1132,7 @@ impl ProjectDesignBody {
             Self::ModelDefinition(record) => record.after_design_matches(state),
             Self::ModelLibraries(record) => record.after_design_matches(state),
             Self::ModelResolutions(record) => record.after_design_matches(state),
+            Self::VerilogABuildSettings(record) => record.after_design_matches(state),
         }
     }
 
@@ -1141,6 +1146,7 @@ impl ProjectDesignBody {
             Self::ModelDefinition(record) => record.before_design_matches(state),
             Self::ModelLibraries(record) => record.before_design_matches(state),
             Self::ModelResolutions(record) => record.before_design_matches(state),
+            Self::VerilogABuildSettings(record) => record.before_design_matches(state),
         }
     }
 
@@ -1154,6 +1160,7 @@ impl ProjectDesignBody {
             Self::ModelDefinition(record) => record.validate_mutation(state, operation),
             Self::ModelLibraries(record) => record.validate_mutation(state, operation),
             Self::ModelResolutions(record) => record.validate_mutation(state, operation),
+            Self::VerilogABuildSettings(record) => record.validate_mutation(state, operation),
         }
     }
 
@@ -1167,6 +1174,7 @@ impl ProjectDesignBody {
             Self::ModelDefinition(record) => &record.description,
             Self::ModelLibraries(record) => &record.description,
             Self::ModelResolutions(record) => &record.description,
+            Self::VerilogABuildSettings(record) => &record.description,
         }
     }
 
@@ -1181,6 +1189,7 @@ impl ProjectDesignBody {
             Self::ModelDefinition(record) => record.apply_before(state),
             Self::ModelLibraries(record) => record.apply_before(state),
             Self::ModelResolutions(record) => record.apply_before(state),
+            Self::VerilogABuildSettings(record) => record.apply_before(state),
         }
     }
 
@@ -1195,6 +1204,7 @@ impl ProjectDesignBody {
             Self::ModelDefinition(record) => record.apply_after(state),
             Self::ModelLibraries(record) => record.apply_after(state),
             Self::ModelResolutions(record) => record.apply_after(state),
+            Self::VerilogABuildSettings(record) => record.apply_after(state),
         }
     }
 }

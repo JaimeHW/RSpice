@@ -566,6 +566,38 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
     }
 }
 
+/// Build settings is a palette row while a Verilog-A view is in front, which
+/// is how a phone reaches it: its toolbar keeps Compile and Generated netlist.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn veriloga_build_settings_is_a_palette_command_that_opens_its_form() {
+    use crate::workbench::app::veriloga_design_tests::{
+        add_veriloga_cell, open_in_design, open_project_app,
+    };
+
+    let mut app = open_project_app();
+    let find = |app: &RSpiceApp| {
+        app.palette_rows(
+            "Build settings",
+            PaletteScope::All,
+            CommandPlatform::Desktop,
+            egui::os::OperatingSystem::Windows,
+        )
+        .into_iter()
+        .find(|row| row.entry.command() == Some(Command::VerilogABuildSettings))
+    };
+    assert!(
+        find(&app).is_none_or(|row| row.blocked.is_some()),
+        "with no Verilog-A view there are no settings to open"
+    );
+    let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    let row = find(&app).expect("the palette finds Build settings");
+    assert!(row.blocked.is_none(), "{:?}", row.blocked);
+    row.entry.execute(&mut app).expect("the command runs");
+    assert!(app.state.dialogs.veriloga_build_settings.is_some());
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn loaded_model_records_are_searchable_and_select_the_catalog_record() {

@@ -219,6 +219,8 @@ pub struct DialogState {
     pub(crate) new_view_library_revision: u64,
     /// New Verilog-A device: a cell whose module the reader writes next.
     pub(crate) new_veriloga_device: NewVerilogADeviceFormState,
+    /// Build settings: the open Verilog-A view's build profile, as a form.
+    pub(crate) veriloga_build_settings: Option<crate::workbench::app::VerilogABuildSettingsDraft>,
     /// Copy Cell dialog
     pub copy_cell_dialog: bool,
     /// Copy Cell source library
@@ -511,6 +513,7 @@ impl DialogState {
             || self.new_cell_dialog
             || self.new_view_dialog
             || self.new_veriloga_device.open
+            || self.veriloga_build_settings.is_some()
             || self.copy_cell_dialog
             || self.rename_cell_dialog
             || self.rename_view_dialog

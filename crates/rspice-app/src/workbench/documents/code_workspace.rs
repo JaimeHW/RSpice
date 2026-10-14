@@ -76,6 +76,7 @@ pub(crate) use veriloga::{
     import_dropped_veriloga_source, replace_selected_veriloga_file, request_veriloga_compile,
     request_veriloga_source_replacement, selected_veriloga_editor_snapshot,
     selected_veriloga_source, viewed_veriloga_header, writable_libraries,
+    write_veriloga_build_profile,
 };
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
 pub(crate) use veriloga_inspector::{

@@ -343,6 +343,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
         clicked.bundle().closure_digest(),
         "the compile is of the closure the click took"
     );
+    assert!(app.state.dialogs.veriloga_build_settings.is_none());
     assert!(
         !app.state.application_modal_open(),
         "nothing modal stands between the click and the compiler"

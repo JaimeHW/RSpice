@@ -278,6 +278,7 @@ pub enum Command {
     StimulusPlaceDefinition,
     StimulusShowAdopter,
     CompileVerilogA,
+    VerilogABuildSettings,
     AutomationConsole,
     CommandPalette,
     KeyboardShortcuts,
@@ -1000,6 +1001,9 @@ impl Command {
                 "Stimulus",
             ),
             Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A", "Models"),
+            Self::VerilogABuildSettings => {
+                spec("veriloga-build-settings", "Build settings", "Models")
+            }
             Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Command reference", "Help"),
@@ -1344,6 +1348,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StimulusPlaceDefinition,
     Command::StimulusShowAdopter,
     Command::CompileVerilogA,
+    Command::VerilogABuildSettings,
     Command::AutomationConsole,
     Command::CommandPalette,
     Command::KeyboardShortcuts,

@@ -37,8 +37,9 @@ use crate::workbench::app::DialogState;
 pub use active_viewer::ActiveViewer;
 pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
 pub(crate) use design_history::{
-    DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta,
-    publish_symbol_definition_candidate, publish_symbol_definition_candidate_with_fixture,
+    DesignManagementHistoryEntry, SymbolDefinitionFixtureDelta, VerilogABuildSettingsHistoryEntry,
+    VerilogAModuleBinding, publish_symbol_definition_candidate,
+    publish_symbol_definition_candidate_with_fixture,
 };
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};

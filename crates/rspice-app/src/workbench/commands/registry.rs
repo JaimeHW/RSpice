@@ -555,6 +555,7 @@ impl Command {
                 | Self::StimulusPlaceDefinition
                 | Self::StimulusShowAdopter
                 | Self::CompileVerilogA
+                | Self::VerilogABuildSettings
                 | Self::AutomationConsole
                 | Self::VisualizationStudio
                 | Self::ReportAuthoring
