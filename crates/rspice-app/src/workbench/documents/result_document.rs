@@ -10,6 +10,7 @@ mod bars;
 mod bode;
 mod box_violin;
 mod create_document;
+mod document_edit;
 mod events;
 mod eye;
 mod fft;
@@ -220,6 +221,8 @@ pub(crate) fn open_dataset_browser(app: &mut RSpiceApp) {
 pub(crate) fn open_create_document(app: &mut RSpiceApp) {
     create_document::open(app);
 }
+
+pub(crate) use document_edit::{add_pane_available, open_add_pane};
 
 pub(crate) fn visualization_source_dataset(
     run: &crate::state::SimulationRun,
@@ -1665,6 +1668,7 @@ pub(crate) fn show_persistent_document(
     persistent_document::show(ui, app, document_id);
     waves::marker_dialog::show(ui.ctx(), &mut app.state);
     create_document::show(ui.ctx(), app);
+    document_edit::show(ui.ctx(), app);
 }
 
 /// Resolve and select the primary binding of a project-owned result document.
@@ -2138,12 +2142,20 @@ fn show_docbar_for_family(ui: &mut Ui, app: &mut RSpiceApp, family_label: Option
         family_label.is_none_or(|family| family_allows_viewer(family, viewer))
             && viewer_availability(&app.state, viewer).available
     });
-    let actions = chrome::bars::document_bar(ui, app.state.ui.results.session.viewer, available);
+    let source = if family_label.is_some() {
+        chrome::bars::DocumentBarSource::Document
+    } else {
+        chrome::bars::DocumentBarSource::QuickView
+    };
+    let actions =
+        chrome::bars::document_bar(ui, app.state.ui.results.session.viewer, available, source);
     if let Some(viewer) = actions.viewer {
         app.state.ui.results.session.viewer = viewer;
     }
     if actions.create_document {
         create_document::open(app);
+    } else if actions.add_pane {
+        document_edit::open_add_pane(&mut app.state);
     } else if actions.open_properties {
         crate::workbench::documents::visualization_studio::open(app);
         crate::workbench::documents::visualization_studio::open_document_properties(app);

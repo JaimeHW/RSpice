@@ -950,7 +950,11 @@ impl Command {
             Self::ReportPageProperties => {
                 super::surfaces::report_authoring::can_edit_page_properties(state)
             }
-            Self::AddVisualizationPane | Self::ExportVisualizationDocument => {
+            Self::AddVisualizationPane => {
+                state.workbench.current_route().surface_id() == super::SurfaceId::Results
+                    && crate::workbench::documents::result_document::add_pane_available(state)
+            }
+            Self::ExportVisualizationDocument => {
                 state.workbench.current_route().surface_id()
                     == super::SurfaceId::VisualizationStudio
                     && state.project_lifecycle.is_open()
@@ -2149,7 +2153,7 @@ impl Command {
                 super::surfaces::report_authoring::open_page_properties(app);
             }
             Self::AddVisualizationPane => {
-                crate::workbench::documents::visualization_studio::open_add_pane(app)
+                crate::workbench::documents::result_document::open_add_pane(&mut app.state);
             }
             Self::VisualizationTraceManager => {
                 open_studio_tool(app, "Trace and family manager");

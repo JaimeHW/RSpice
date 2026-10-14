@@ -18,7 +18,16 @@ use rspice_ui_kit::{
 pub struct DocumentBarActions {
     pub viewer: Option<ResultViewer>,
     pub create_document: bool,
+    pub add_pane: bool,
     pub open_properties: bool,
+}
+
+/// What the bar is in front of: a dataset's quick view, or a project result
+/// document, which can take more panes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentBarSource {
+    QuickView,
+    Document,
 }
 
 pub enum SpecificationAction {
@@ -73,6 +82,7 @@ pub fn document_bar(
     ui: &mut Ui,
     current: ResultViewer,
     available: impl IntoIterator<Item = ResultViewer>,
+    source: DocumentBarSource,
 ) -> DocumentBarActions {
     let mut actions = DocumentBarActions::default();
     docbar_at_height(ui, ResultBarMetrics::of(ui).viewer_tabs, |ui| {
@@ -80,12 +90,24 @@ pub fn document_bar(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             actions.open_properties =
                 viewer_picker(ui, WorkbenchIcon::Sliders, "Properties…", "Plot properties");
-            actions.create_document = viewer_picker(
-                ui,
-                WorkbenchIcon::Add,
-                "Create result document…",
-                "Create a dataset-bound result document",
-            );
+            match source {
+                DocumentBarSource::QuickView => {
+                    actions.create_document = viewer_picker(
+                        ui,
+                        WorkbenchIcon::Add,
+                        "Create result document…",
+                        "Create a dataset-bound result document",
+                    );
+                }
+                DocumentBarSource::Document => {
+                    actions.add_pane = viewer_picker(
+                        ui,
+                        WorkbenchIcon::Add,
+                        "Add pane…",
+                        "Add a pane to this result document",
+                    );
+                }
+            }
             viewer_picker_separator(ui);
 
             let tabs_size = ui.available_size();

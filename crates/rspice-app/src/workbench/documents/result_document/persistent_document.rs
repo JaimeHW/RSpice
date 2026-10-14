@@ -16,7 +16,8 @@ use crate::product::{
 use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
     Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, EntityRef, Marker,
-    Measurement, Page, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace, TypedValue,
+    Measurement, Page, PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace,
+    TypedValue,
 };
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::workbench::{AppState, RSpiceApp};
@@ -237,6 +238,38 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     if strip_height > 0.0 {
         super::waves::readout_strip(ui, &mut app.state, strip_height);
     }
+}
+
+/// The page and pane the reader is working in, resolved exactly as [`show`]
+/// resolves them: the remembered selection while it still exists, otherwise
+/// the first page and its first pane.
+pub(super) fn reading_position(
+    state: &AppState,
+    document_id: ResultDocumentId,
+) -> Option<(PageId, PaneId)> {
+    let document = state
+        .workspace
+        .content
+        .visualization_document(document_id)?;
+    let page = state
+        .ui
+        .results
+        .session
+        .persistent_document_page(document_id)
+        .and_then(|selected| document.pages().iter().find(|page| page.id == selected))
+        .or_else(|| document.pages().first())?;
+    let panes = ordered_page_panes(document.panes(), page);
+    let pane_id = resolved_active_pane_id(
+        state
+            .ui
+            .results
+            .session
+            .persistent_document_pane(document_id)
+            .map(PaneId::get),
+        panes.iter().map(|pane| pane.id.get()),
+    )?;
+    let pane = panes.into_iter().find(|pane| pane.id.get() == pane_id)?;
+    Some((page.id, pane.id))
 }
 
 fn resolved_active_pane_id(
@@ -591,7 +624,7 @@ fn projection(state: &AppState, document_id: ResultDocumentId) -> Option<Documen
     Some(DocumentProjection { pages })
 }
 
-fn ordered_page_panes<'a>(panes: &'a [Pane], page: &Page) -> Vec<&'a Pane> {
+pub(super) fn ordered_page_panes<'a>(panes: &'a [Pane], page: &Page) -> Vec<&'a Pane> {
     let mut panes = panes
         .iter()
         .filter(|pane| pane.page_id == page.id)
@@ -642,8 +675,7 @@ fn render_pane(
     let is_active = pane.id.get() == active_pane_id;
     let viewer = pane_viewer(is_active, active_viewer, &pane.viewer_id);
     persistent::pane_frame(ui, pane.id, is_active, |ui| {
-        let activated_pane_id =
-            pane_header(ui, app, pane, viewer, is_active).then_some(pane.id.get());
+        let activated_pane_id = pane_header(ui, app, pane, viewer, is_active);
         persistent::evidence_bar(ui, pane.id, &pane.measurements, &pane.annotations);
         let viewer_height = ui.available_height().max(1.0);
         ui.allocate_ui_with_layout(
@@ -667,13 +699,16 @@ fn pane_viewer(
     }
 }
 
+/// Draw one pane's header and carry out what the reader asked of it. Returns
+/// the pane's serial when the reader activated it.
 fn pane_header(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     pane: &PaneProjection,
     viewer: Option<ResultViewer>,
     is_active: bool,
-) -> bool {
+) -> Option<u64> {
+    let menu = super::document_edit::pane_menu(&app.state, pane.document_id, pane.id);
     let viewer_title = viewer.map_or_else(
         || pane.viewer_id.as_str(),
         |viewer| {
@@ -683,7 +718,7 @@ fn pane_header(
                 .map_or(viewer.tab_label(), |document| document.title)
         },
     );
-    let clicked = persistent::pane_header(
+    let action = persistent::pane_header(
         ui,
         &pane.title,
         viewer_title,
@@ -696,8 +731,17 @@ fn pane_header(
             measurements: pane.measurements.len(),
             annotations: pane.annotations.len(),
         },
+        menu,
     );
-    clicked && select_pane_context(&mut app.state, pane).is_ok()
+    match action? {
+        persistent::PaneHeaderAction::Activate => select_pane_context(&mut app.state, pane)
+            .is_ok()
+            .then_some(pane.id.get()),
+        persistent::PaneHeaderAction::Remove => {
+            super::document_edit::remove_pane(&mut app.state, pane.document_id, pane.id);
+            None
+        }
+    }
 }
 
 fn render_pane_viewer(

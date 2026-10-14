@@ -1358,6 +1358,9 @@ pub struct WorkbenchState {
     /// Runtime-only draft for the project-owned result-document transaction.
     #[serde(skip)]
     pub create_result_document: CreateResultDocumentDialogState,
+    /// Runtime-only draft of the form open over a project result document.
+    #[serde(skip)]
+    pub result_document_dialog: Option<rspice_results_ui::document_dialogs::ResultDocumentDialog>,
     /// Runtime-only external-result draft. Retained history changes only when
     /// this transaction explicitly commits.
     #[serde(skip)]
@@ -1511,6 +1514,7 @@ impl Default for WorkbenchState {
             specialist_tool_browser: SpecialistToolBrowserState::default(),
             visualization_studio: rspice_results_ui::studio::session::VisualizationStudioState::default(),
             create_result_document: CreateResultDocumentDialogState::default(),
+            result_document_dialog: None,
             result_import: ResultImportDialogState::default(),
             report_authoring: ReportAuthoringState::default(),
             model_editor: crate::workbench::documents::model_editor::ModelEditorState::default(),
@@ -1561,6 +1565,7 @@ impl WorkbenchState {
             || self.notification_center_open
             || self.model_correlation.dialog_open()
             || self.create_result_document.open
+            || self.result_document_dialog.is_some()
             || self.result_import.open
             || self.models_view.dialog.is_some()
             || self.simulation_workflow.is_some()

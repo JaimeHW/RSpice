@@ -227,7 +227,10 @@ fn run_analysis_ids(run: &SimulationRun) -> Vec<&'static str> {
     ids
 }
 
-fn analysis_matches_viewer(viewer: &ViewerDocumentDefinition, analysis: AnalysisType) -> bool {
+pub(super) fn analysis_matches_viewer(
+    viewer: &ViewerDocumentDefinition,
+    analysis: AnalysisType,
+) -> bool {
     viewer.analysis_ids.is_empty()
         || viewer.analysis_ids.contains(&analysis_manifest_id(analysis))
         // TEMP is the canonical tabular temperature-sweep authority. RSpice's
@@ -472,7 +475,10 @@ fn resolve_draft<'a>(
     })
 }
 
-fn source_analysis_identity(run: &SimulationRun, analysis: &AnalysisResult) -> AnalysisInstanceId {
+pub(super) fn source_analysis_identity(
+    run: &SimulationRun,
+    analysis: &AnalysisResult,
+) -> AnalysisInstanceId {
     analysis.provenance().map_or_else(
         || {
             let name = format!("legacy-analysis-v1/{}", analysis.id);
@@ -834,7 +840,7 @@ fn append_component_rows(
     Ok(())
 }
 
-fn pane_kind(art: ViewerArt) -> PaneKind {
+pub(super) fn pane_kind(art: ViewerArt) -> PaneKind {
     match art {
         ViewerArt::Smith => PaneKind::Smith,
         ViewerArt::Polar => PaneKind::Polar,

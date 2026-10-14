@@ -1031,11 +1031,7 @@ impl Command {
             Self::ReportPageProperties => {
                 spec("report-page-properties", "Page properties", "Results")
             }
-            Self::AddVisualizationPane => spec(
-                "visualization-add-pane",
-                "Add visualization pane",
-                "Results",
-            ),
+            Self::AddVisualizationPane => spec("visualization-add-pane", "Add pane…", "Results"),
             Self::VisualizationTraceManager => {
                 spec("trace-manager", "Trace and family manager…", "Results")
             }

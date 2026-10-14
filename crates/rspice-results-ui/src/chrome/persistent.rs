@@ -196,14 +196,31 @@ pub struct PaneCounts {
     pub annotations: usize,
 }
 
-/// Return an activation request; the host validates and applies the selection.
+/// What the reader asked of one pane through its header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneHeaderAction {
+    /// Work in this pane.
+    Activate,
+    /// Take this pane out of the document.
+    Remove,
+}
+
+/// Which of the header's context-menu edits the host can carry out.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PaneMenu {
+    /// A page keeps at least one pane, so its last one cannot be removed.
+    pub removable: bool,
+}
+
+/// Return the reader's request; the host validates and applies it.
 pub fn pane_header(
     ui: &mut Ui,
     display_title: &str,
     viewer_title: &str,
     is_active: bool,
     counts: PaneCounts,
-) -> bool {
+    menu: PaneMenu,
+) -> Option<PaneHeaderAction> {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 25.0), Sense::click());
     ui.painter().rect_filled(
@@ -254,7 +271,17 @@ pub fn pane_header(
             tab_label.clone(),
         )
     });
-    response
+    let mut action = None;
+    response.context_menu(|ui| {
+        if ui
+            .add_enabled(menu.removable, egui::Button::new("Remove pane"))
+            .clicked()
+        {
+            action = Some(PaneHeaderAction::Remove);
+            ui.close();
+        }
+    });
+    let clicked = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .on_hover_text(format!(
             "{} axes · {} traces · {} cursors · {} markers · {} measurements · {} annotations",
@@ -265,7 +292,8 @@ pub fn pane_header(
             counts.measurements,
             counts.annotations
         ))
-        .clicked()
+        .clicked();
+    action.or(clicked.then_some(PaneHeaderAction::Activate))
 }
 
 /// State why Latest tracking cannot advance while preserving the retained view.
