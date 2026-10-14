@@ -31,6 +31,10 @@
 //!   `^<path>:<line>:<white space>: `, each directly after the message or
 //!   after another of its continuation lines.
 //!
+//! A file the design wrote (a `diff` test) and its gold first lose their VCD
+//! tool-identity blocks, `$date ... $end` and `$version ... $end`, and
+//! nothing else.
+//!
 //! Line ends are compared after `\r\n` becomes `\n`. A gold file that still
 //! differs is a failure, never a tolerance.
 //!
@@ -282,6 +286,40 @@ pub fn normalize(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// A written file with its VCD tool-identity blocks dropped: `$date ... $end`
+/// and `$version ... $end` (IEEE 1364-2005 section 18.2.3.1), which name the
+/// day the dump was made and the tool that made it, never the design. A
+/// written file and its gold both lose them before they are compared;
+/// nothing else in either is touched.
+pub fn drop_vcd_identity(text: &str) -> String {
+    let opens = |line: &str| {
+        let line = line.trim_start();
+        ["$date", "$version"].iter().any(|keyword| {
+            line.strip_prefix(keyword)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+        })
+    };
+    let mut in_block = false;
+    text.split_inclusive('\n')
+        .filter(|line| {
+            if !in_block && !opens(line) {
+                return true;
+            }
+            // The block's last line is the one that holds its `$end`, which
+            // may be the line that opened it.
+            let body = if in_block {
+                line.trim_start()
+            } else {
+                line.trim_start()
+                    .trim_start_matches("$version")
+                    .trim_start_matches("$date")
+            };
+            in_block = !body.contains("$end");
+            false
+        })
+        .collect()
+}
+
 /// Whether the output has a line that passes the self-checking rule.
 pub fn has_passed_line(stdout: &str, strict: bool) -> bool {
     stdout
@@ -388,7 +426,8 @@ pub fn judge(class: Class, expectation: &Expectation, end: &RunEnd) -> Verdict {
                     if !files.iter().any(|file| same_path(&file.path, produced)) {
                         return Verdict::Fail(format!("did not write {produced}"));
                     }
-                    match compare_gold(&written, gold, false, *skip) {
+                    let (written, gold) = (drop_vcd_identity(&written), drop_vcd_identity(gold));
+                    match compare_gold(&written, &gold, false, *skip) {
                         Ok(()) => Verdict::Pass(format!("{produced} matches the gold file")),
                         Err(detail) => Verdict::Fail(format!("{produced} {detail}")),
                     }
@@ -850,6 +889,43 @@ mod tests {
         ] {
             assert!(!is_icarus_text(line), "{line}");
         }
+    }
+
+    #[test]
+    fn a_written_file_loses_exactly_its_vcd_identity_blocks() {
+        let icarus = "$date\n\tSun May 15 18:09:25 2022\n$end\n$version\n\tIcarus Verilog\n$end\n\
+                      $timescale\n\t1s\n$end\n$comment Show the parameter values. $end\n";
+        assert_eq!(
+            drop_vcd_identity(icarus),
+            "$timescale\n\t1s\n$end\n$comment Show the parameter values. $end\n"
+        );
+        // One-line blocks, and keywords that only begin a longer word.
+        assert_eq!(
+            drop_vcd_identity("$date today $end\n$version RSpice $end\n$dates\n$versions $end\n"),
+            "$dates\n$versions $end\n"
+        );
+        let rspice = "$version\n  RSpice\n$end\n$timescale 1s $end\n";
+        assert_eq!(drop_vcd_identity(rspice), "$timescale 1s $end\n");
+        // A diff test compares what is left.
+        let diff = Expectation::Diff {
+            produced: "work/d.vcd".to_owned(),
+            gold: icarus.to_owned(),
+            skip: 0,
+        };
+        let wrote = RunEnd::Completed {
+            end: "finish".to_owned(),
+            stdout: String::new(),
+            files: vec![ProducedFile {
+                path: "work/d.vcd".to_owned(),
+                text: "$date\n  Oct 13\n$end\n$version\n  RSpice\n$end\n$timescale\n\t1s\n$end\n\
+                       $comment Show the parameter values. $end\n"
+                    .to_owned(),
+            }],
+        };
+        assert!(matches!(
+            judge(Class::Gold, &diff, &wrote),
+            Verdict::Pass(_)
+        ));
     }
 
     #[test]
