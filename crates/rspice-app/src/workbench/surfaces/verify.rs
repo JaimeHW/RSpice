@@ -1,5 +1,18 @@
 //! Verification evidence, specifications, checks and history.
+//!
+//! Every Verify page has one grammar, the ADE results view's: a toolbar row
+//! (title, the run it reads when there is a choice, one summary line, its
+//! actions), one dense table of the run's own values, the detail of a row only
+//! when that row is selected, and — when the run holds nothing for the page —
+//! one line saying what produces data, with the action that produces it.
 
+mod corners;
+mod optimization;
+mod regression_contract;
+mod regression_panel;
+mod safety;
+mod table;
+mod toolbar;
 mod tuning;
 
 use egui::{ScrollArea, Ui};
@@ -13,19 +26,17 @@ use crate::workbench::RSpiceApp;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{card, heading, property_row, workspace_title_row};
-use super::super::state::VerificationPage;
+use super::super::state::{VerificationPage, VerificationSessionState};
 use tuning::{
     revert_tuning_session, sync_tuning_session, tuning, tuning_commit_block_reason,
     tuning_is_dirty, tuning_is_valid, tuning_review_dialog,
 };
 
-mod corners;
-mod regression_contract;
-mod regression_panel;
-
 use corners::*;
+use optimization::*;
 use regression_contract::*;
 use regression_panel::*;
+use safety::*;
 
 const VERIFY_RESPONSIVE_BREAKPOINT: f32 = 820.0;
 const VERIFY_KPI_BREAKPOINT: f32 = 1_260.0;
@@ -40,10 +51,101 @@ const TABLE_MARK_SIDE: f32 = 11.0;
 const TABLE_MARK_ADVANCE: f32 = 17.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.workbench.verification_page == VerificationPage::Tuning {
+    let page = app.state.workbench.verification_page;
+    if page == VerificationPage::Tuning {
         sync_tuning_session(app);
     }
+    // A refused action is stated under the toolbar of the page it was taken
+    // on; another page has no business repeating it.
+    let shown_page = egui::Id::new("workbench.verify.shown_page");
+    if ui
+        .ctx()
+        .data(|data| data.get_temp::<VerificationPage>(shown_page))
+        != Some(page)
+    {
+        app.state.workbench.verification.action_problem = None;
+        ui.ctx().data_mut(|data| data.insert_temp(shown_page, page));
+    }
     let ctx = ui.ctx().clone();
+    let t = Tokens::get(ui.ctx());
+    let surface = ui.available_rect_before_wrap();
+    ui.painter().rect_filled(surface, 0.0, t.color.bg_app);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        match page {
+            VerificationPage::Corners => corners(ui, app),
+            VerificationPage::Optimization => optimization(ui, app),
+            VerificationPage::DeviceSafety => device_safety(ui, app),
+            VerificationPage::Yield | VerificationPage::Tuning | VerificationPage::Regression => {
+                legacy_page(ui, app);
+            }
+        }
+    });
+    regression_baseline_picker(&ctx, app);
+    tuning_review_dialog(&ctx, app);
+}
+
+/// The runs a page could read: the run it reads now, and every other run that
+/// holds the page's evidence.
+fn run_choice(
+    app: &RSpiceApp,
+    holds: impl Fn(&crate::state::SimulationRun) -> bool,
+) -> toolbar::RunChoice {
+    let selected = verification_run_index(app);
+    toolbar::RunChoice {
+        candidates: app
+            .state
+            .simulation
+            .retained
+            .runs
+            .iter()
+            .enumerate()
+            .filter(|(index, run)| Some(*index) == selected || holds(run))
+            .map(|(index, run)| (index, run.label.clone()))
+            .collect(),
+        selected,
+    }
+}
+
+/// Make the run the reader picked on a toolbar the one Verify reads.
+fn select_verification_run(simulation: &mut crate::state::SimulationState, index: usize) {
+    let _ = simulation.select_run(index);
+}
+
+/// `summary` naming the run it describes, for a toolbar with no run selector
+/// to name it.
+fn append_run(summary: toolbar::Summary, run: Option<&str>) -> toolbar::Summary {
+    match run {
+        Some(run) => toolbar::Summary {
+            text: format!("{} \u{00b7} {run}", summary.text),
+            ..summary
+        },
+        None => summary,
+    }
+}
+
+/// Record how the action the reader just took went: a refusal is stated under
+/// the toolbar, and an action that worked clears it and says nothing.
+fn record_action(session: &mut VerificationSessionState, result: Result<(), String>) {
+    session.action_problem = result.err();
+}
+
+/// The refusal of the last action, under the toolbar it was taken on.
+fn action_problem_line(ui: &mut Ui, app: &RSpiceApp) {
+    if let Some(problem) = &app.state.workbench.verification.action_problem {
+        let _ = crate::ui::widgets::problem_line(ui, Problem::Failure, problem);
+    }
+}
+
+/// The limits the active plan judges its outputs by.
+fn verification_specs(app: &RSpiceApp) -> Vec<SpecEntry> {
+    verification_plan_id(app).map_or_else(
+        || app.state.workspace.content.specs.clone(),
+        |plan_id| app.state.workspace.content.active_specs(plan_id).to_vec(),
+    )
+}
+
+fn legacy_page(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     let viewport_height = ui.available_height();
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
@@ -64,50 +166,33 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 let body_viewport_height =
                     remaining_viewport_height(viewport_height, consumed_height);
                 match app.state.workbench.verification_page {
-                    VerificationPage::Yield => cockpit(ui, app, body_viewport_height),
-                    VerificationPage::Corners => corners(ui, app),
                     VerificationPage::Tuning => tuning(ui, app),
-                    VerificationPage::Optimization => optimization(ui, app),
-                    VerificationPage::DeviceSafety => device_safety(ui, app),
                     VerificationPage::Regression => regression(ui, app, body_viewport_height),
+                    _ => cockpit(ui, app, body_viewport_height),
                 }
             });
     });
-    regression_baseline_picker(&ctx, app);
-    tuning_review_dialog(&ctx, app);
 }
 
 fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
     let (title, description) = match app.state.workbench.verification_page {
-        VerificationPage::Yield => (
-            "PVT & Monte Carlo verification",
-            "Yield, retained-run specification margins, and traceable measurement evidence from the active project.",
-        ),
-        VerificationPage::Corners => (
-            "Process-corner verification",
-            "Retained corner sweep values and source-attributed execution state from the active immutable dataset.",
-        ),
         VerificationPage::Tuning => (
             "Live design-space exploration",
             "Explore bounded active-plan variables without changing authoritative design data; review commits one plan revision and dispatches a retained production run.",
-        ),
-        VerificationPage::Optimization => (
-            "Optimization candidate",
-            "Bounded design variables and convergence evidence produced by the production optimization engine.",
-        ),
-        VerificationPage::DeviceSafety => (
-            "Safe-operating-area verification",
-            "Electrical SOA evidence from executed analyses; geometry remains owned by Physical DRC.",
         ),
         VerificationPage::Regression => (
             "Golden regression comparison",
             "Candidate and immutable baseline measurements are aligned without inventing tolerance or pass criteria.",
         ),
+        _ => (
+            "PVT & Monte Carlo verification",
+            "Yield, retained-run specification margins, and traceable measurement evidence from the active project.",
+        ),
     };
     let page = app.state.workbench.verification_page;
     let available = ui.available_width().max(1.0);
     let action_width = match page {
-        VerificationPage::Corners | VerificationPage::Regression => 238.0,
+        VerificationPage::Regression => 238.0,
         VerificationPage::Tuning => 284.0,
         _ => 0.0,
     };
@@ -137,44 +222,6 @@ fn verification_heading(ui: &mut Ui, app: &mut RSpiceApp) {
 fn verification_header_actions(ui: &mut Ui, app: &mut RSpiceApp, page: VerificationPage) {
     ui.spacing_mut().item_spacing.x = 6.0;
     match page {
-        VerificationPage::Corners => {
-            let has_corner_result = latest_analysis(app, crate::state::AnalysisType::Corner)
-                .is_some_and(|result| !result.waveforms.is_empty());
-            let export = Button::new("Export matrix").enabled(has_corner_result);
-            let export = if has_corner_result {
-                export.accent()
-            } else {
-                export
-            };
-            if export
-                .show(ui)
-                .on_disabled_hover_text(
-                    "Run and retain a process-corner analysis before exporting.",
-                )
-                .clicked()
-            {
-                export_active_corner_matrix(app);
-            }
-            let nominal_available = corner_nominal_index(app).is_some();
-            if Button::new("Compare nominal")
-                .enabled(nominal_available)
-                .show(ui)
-                .on_disabled_hover_text(
-                    "A revision-matched TT, nominal-voltage, room-temperature point is required.",
-                )
-                .clicked()
-            {
-                app.state.workbench.verification.corner_compare_nominal =
-                    !app.state.workbench.verification.corner_compare_nominal;
-                app.state.workbench.verification.action_receipt =
-                    if app.state.workbench.verification.corner_compare_nominal {
-                        "Corner matrix now reports exact deltas from the retained nominal point."
-                            .to_owned()
-                    } else {
-                        "Corner matrix restored to absolute retained values.".to_owned()
-                    };
-            }
-        }
         VerificationPage::Regression => {
             let can_run = regression_run_pair(app).is_some();
             let run = Button::new("Run regression").enabled(can_run);
@@ -224,6 +271,7 @@ fn verification_header_actions(ui: &mut Ui, app: &mut RSpiceApp, page: Verificat
             }
         }
         VerificationPage::Yield
+        | VerificationPage::Corners
         | VerificationPage::Optimization
         | VerificationPage::DeviceSafety => {}
     }
@@ -256,15 +304,7 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
                             || !regression_waveform_pairs(run, candidate).is_empty())
                 })
         })
-        .map(|run| {
-            (
-                run.run_id,
-                run.id,
-                run.label.clone(),
-                run.dataset_id.to_string(),
-                run.prepared_receipt().is_some(),
-            )
-        })
+        .map(|run| (run.run_id, run.id, run.label.clone()))
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| right.1.cmp(&left.1));
 
@@ -293,13 +333,6 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
         .max_width(width)
         .show(ctx, |ui| {
             let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new("Choose the baseline run.")
-                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-            ui.add_space(6.0);
-
             if candidates.is_empty() {
                 ui.label(
                     egui::RichText::new("No other runs to compare against.")
@@ -318,31 +351,16 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
                             .stroke(egui::Stroke::new(1.0, t.color.border))
                             .show(ui, |ui| {
                                 ui.set_width((list_width - 2.0).max(1.0));
-                                for (run_id, _, label, dataset, prepared) in &candidates {
+                                for (run_id, _, label) in &candidates {
                                     let is_selected = selected == Some(*run_id);
                                     let response = ui.selectable_label(
                                         is_selected,
                                         egui::RichText::new(label)
-                                            .font(theme::sans(tokens::FS_1, FontWeight::Medium)),
+                                            .font(theme::sans(tokens::FS_1, FontWeight::Regular)),
                                     );
                                     if response.clicked() {
                                         selected = Some(*run_id);
                                     }
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.add_space(10.0);
-                                        ui.label(
-                                            egui::RichText::new(format!(
-                                                "Dataset {dataset} · {}",
-                                                if *prepared {
-                                                    "prepared snapshot retained"
-                                                } else {
-                                                    "legacy retained provenance"
-                                                }
-                                            ))
-                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                            .color(t.color.text_dim),
-                                        );
-                                    });
                                 }
                             });
                     });
@@ -369,22 +387,15 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
     if commit {
         if let Some(run_id) = selected {
             if let Err(error) = commit_regression_baseline(app, run_id) {
-                app.state.workbench.verification.action_receipt =
-                    format!("Regression baseline was not changed: {error}");
+                app.state.workbench.verification.action_problem =
+                    Some(format!("The baseline was not changed: {error}"));
                 app.state
                     .workbench
                     .verification
                     .regression_baseline_picker_selection = selected;
                 return;
             }
-            let run_number = candidates
-                .iter()
-                .find(|row| row.0 == run_id)
-                .map(|row| row.1)
-                .unwrap_or_default();
-            app.state.workbench.verification.action_receipt = format!(
-                "Run {run_number} is the selected immutable regression baseline. Run regression to create a comparison receipt."
-            );
+            app.state.workbench.verification.action_problem = None;
         }
         open = false;
     }
@@ -1525,133 +1536,6 @@ fn render_data_table(
         });
 }
 
-fn render_virtual_data_table(
-    ui: &mut Ui,
-    id: &str,
-    headers: &[(String, f32)],
-    row_count: usize,
-    rows_are_actionable: bool,
-    mut row_at: impl FnMut(usize) -> Vec<TableCell>,
-) -> Option<usize> {
-    let t = Tokens::get(ui.ctx());
-    let mut clicked_row = None;
-    let viewport_width = ui.available_width().max(1.0);
-    let responsive_width = ui.ctx().content_rect().width();
-    let row_height = verification_table_row_height(responsive_width);
-    egui::ScrollArea::horizontal()
-        .id_salt(id)
-        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-        .show(ui, |ui| {
-            let width = verification_table_width(responsive_width, viewport_width, None);
-            ui.set_min_width(width);
-            let (head, head_response) =
-                ui.allocate_exact_size(egui::vec2(width, 27.0), egui::Sense::hover());
-            head_response.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Label,
-                    ui.is_enabled(),
-                    format!(
-                        "Table columns: {}",
-                        headers
-                            .iter()
-                            .map(|(label, _)| label.as_str())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                )
-            });
-            ui.painter().rect_filled(head, 0.0, t.color.bg_panel_2);
-            paint_table_cells(ui, head, headers, true, |label| {
-                TableCell::text(label.to_uppercase())
-            });
-            ui.painter().hline(
-                head.x_range(),
-                head.bottom(),
-                egui::Stroke::new(1.0, t.color.border),
-            );
-
-            if row_count == 0 {
-                let empty_message = verification_table_empty_message(id);
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
-                response.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Label,
-                        ui.is_enabled(),
-                        empty_message,
-                    )
-                });
-                ui.painter().text(
-                    rect.left_center() + egui::vec2(8.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    empty_message,
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.text_dim,
-                );
-                return;
-            }
-
-            let visible_rows = row_count.min(12);
-            egui::ScrollArea::vertical()
-                .id_salt(format!("{id}.rows"))
-                .max_height(row_height * visible_rows as f32)
-                .auto_shrink([false, true])
-                .show_rows(ui, row_height, row_count, |ui, range| {
-                    for row_index in range {
-                        let cells = row_at(row_index);
-                        let (rect, response) = ui.allocate_exact_size(
-                            egui::vec2(width, row_height),
-                            if rows_are_actionable {
-                                egui::Sense::click()
-                            } else {
-                                egui::Sense::hover()
-                            },
-                        );
-                        response.widget_info(|| {
-                            let widget_type = if rows_are_actionable {
-                                egui::WidgetType::Button
-                            } else {
-                                egui::WidgetType::Label
-                            };
-                            egui::WidgetInfo::labeled(
-                                widget_type,
-                                ui.is_enabled(),
-                                headers
-                                    .iter()
-                                    .zip(&cells)
-                                    .map(|((header, _), cell)| format!("{header}: {}", cell.text))
-                                    .collect::<Vec<_>>()
-                                    .join(", "),
-                            )
-                        });
-                        if response.hovered() {
-                            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-                        }
-                        if rows_are_actionable && response.clicked() {
-                            clicked_row = Some(row_index);
-                        }
-                        paint_table_cells(ui, rect, headers, false, |label| {
-                            let index = headers
-                                .iter()
-                                .position(|(header, _)| header == label)
-                                .unwrap_or(0);
-                            cells
-                                .get(index)
-                                .cloned()
-                                .unwrap_or_else(|| TableCell::text("\u{2014}"))
-                        });
-                        ui.painter().hline(
-                            rect.x_range(),
-                            rect.bottom(),
-                            egui::Stroke::new(1.0, t.color.border),
-                        );
-                        theme::paint_focus_ring(ui, &response, rect);
-                    }
-                });
-        });
-    clicked_row
-}
-
 fn verification_table_width(
     viewport_width: f32,
     surface_width: f32,
@@ -2077,24 +1961,6 @@ fn open_analysis_configuration(
 /// Historical results remain immutable and are intentionally unaffected.
 pub(super) fn invalidate_plan_bound_preflight(app: &mut RSpiceApp) {
     app.invalidate_simulation_preflight();
-}
-
-fn record_verification_action(app: &mut RSpiceApp, result: Result<(), String>, success: &str) {
-    app.state.workbench.verification.action_receipt = match result {
-        Ok(()) => success.to_owned(),
-        Err(error) => format!("Action blocked: {error}"),
-    };
-}
-
-fn action_receipt(ui: &mut Ui, app: &RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    card(ui, "Verification action receipt", |ui| {
-        ui.label(
-            egui::RichText::new(&app.state.workbench.verification.action_receipt)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        );
-    });
 }
 
 #[derive(Debug, Clone, PartialEq)]

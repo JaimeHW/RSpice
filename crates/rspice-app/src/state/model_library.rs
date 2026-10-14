@@ -82,7 +82,7 @@ pub use rspice_model_library::{
     ModelValidationFindingSeverity, SimulationPlanModelBinding,
 };
 pub use rspice_model_library::{ModelLevel, ModelType};
-pub use rspice_model_library::{ModelLibrary, ModelSourceAuthority, PackPartPin, labelled_pack};
+pub use rspice_model_library::{ModelLibrary, ModelSourceAuthority, PackPartPin};
 #[cfg(test)]
 pub use rspice_model_library::{
     ModelSourceContent, ModelSourceEdge, ModelSourcePin, ModelSubcircuitInterface,

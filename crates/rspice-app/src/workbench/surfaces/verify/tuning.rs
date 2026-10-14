@@ -146,8 +146,7 @@ pub(super) fn revert_tuning_session(app: &mut RSpiceApp) {
     session.tuning_instance_binding = None;
     session.tuning_selected_variable = None;
     session.tuning_focus_variable = None;
-    session.action_receipt =
-        "The tuning sandbox was restored to the committed active-plan values.".to_owned();
+    session.action_problem = None;
 }
 
 fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable> {
@@ -534,11 +533,7 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     if commit {
         let result = commit_tuning_and_run(app);
         let succeeded = result.is_ok();
-        record_verification_action(
-            app,
-            result,
-            "Tuned variables were committed as one plan revision and dispatched through the production run pipeline.",
-        );
+        record_action(&mut app.state.workbench.verification, result);
         if succeeded {
             open = false;
         }
@@ -684,7 +679,6 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         tuning_baseline_card(ui, app);
     }
     tuning_specification_contract(ui, app, &specs, dirty_count > 0);
-    action_receipt(ui, app);
 }
 
 fn tuning_variable_card(

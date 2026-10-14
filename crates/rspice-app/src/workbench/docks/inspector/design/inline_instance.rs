@@ -684,19 +684,7 @@ pub(super) fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> 
     });
     session.tuning_selected_variable = Some(variable.id);
     session.tuning_focus_variable = Some(variable.id);
-    session.action_receipt = if creates_variable {
-        format!(
-            "{} is staged as a new typed {} variable for {}; the schematic and plan are unchanged.",
-            variable.name,
-            variable.quantity.label(),
-            component.name
-        )
-    } else {
-        format!(
-            "{} is selected for {}; edits remain sandboxed until explicit review and commit.",
-            variable.name, component.name
-        )
-    };
+    session.action_problem = None;
     Ok(())
 }
 
@@ -867,7 +855,8 @@ pub(super) fn edit_row_with_hint(
         match stage_component_tuning(app, component.id) {
             Ok(()) => tuning.execute(app),
             Err(error) => {
-                app.state.workbench.verification.action_receipt = format!("Tune blocked: {error}");
+                app.state.workbench.verification.action_problem =
+                    Some(format!("Could not tune {}: {error}", component.name));
                 app.state
                     .push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
                         "Could not tune {}: {error}",

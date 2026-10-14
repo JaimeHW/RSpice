@@ -1,260 +1,655 @@
-//! Corners, optimization and SOA: verification beyond the nominal run.
+//! Process corners: the ADE Assembler detail view of one corner run.
 //!
-//! Each of these panes reports evidence from runs other than the nominal one,
-//! and each states which run it came from. A corner without a completed run,
-//! an optimization without a converged result, or an SoA rule with no
-//! evaluation is shown as missing evidence rather than folded into the
-//! nominal verdict — the nominal case passing says nothing about the corners.
+//! Rows are outputs, columns are corners, and a cell is the value that output
+//! took at that corner — coloured only when it breaks its limit or sits within
+//! [`NEAR_LIMIT_FRACTION`] of it. Every value is read from the run itself: the
+//! measurements a corner family's members retained, the measurements of the
+//! point results the run solved for each corner, and the corner waveforms whose
+//! samples line up one-for-one with the corners. Nothing is interpolated and no
+//! row is invented; a corner a row has no value for is an em dash.
+//!
+//! The nominal column is the run's own reference corner, taken out of the
+//! corner columns rather than repeated beside them. A run that solved no corner
+//! at the reference point has no nominal column at all.
 
+use super::table::{Cell, Column, DataTable, Verdict};
+use super::toolbar::{PageToolbar, Summary, ToolbarAction, empty_line};
 use super::*;
 
-use crate::workbench::AppState;
+/// A value within this fraction of its limit is near it: of the limit's own
+/// magnitude for a one-sided limit, of the span for a range.
+pub(super) const NEAR_LIMIT_FRACTION: f64 = 0.05;
+/// Least width of a corner or nominal column.
+const CORNER_COLUMN_MIN_W: f32 = 88.0;
+
+/// One corner's process, supply and temperature, read back from its label.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CornerPoint {
+    pub(super) process: String,
+    pub(super) voltage: Option<f64>,
+    pub(super) temperature: f64,
+}
+
+/// Read a corner label of the form `TT_1.80V_27C` back into its point.
+///
+/// The executor writes `{process}_{volts}V_{celsius}C` with as many decimals as
+/// it likes; a label in any other shape is not a point this can name, and the
+/// column keeps the label as written.
+pub(super) fn parse_corner_label(label: &str) -> Option<CornerPoint> {
+    let mut parts = label.rsplitn(3, '_');
+    let temperature = parts.next()?.strip_suffix('C')?.parse::<f64>().ok()?;
+    let voltage = parts.next()?.strip_suffix('V')?.parse::<f64>().ok()?;
+    let process = parts.next()?.trim();
+    (!process.is_empty() && temperature.is_finite() && voltage.is_finite()).then(|| CornerPoint {
+        process: process.to_owned(),
+        voltage: Some(voltage),
+        temperature,
+    })
+}
+
+/// One corner column: its short head, and the full point for its tooltip.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CornerColumn {
+    pub(super) head: String,
+    pub(super) detail: String,
+    point: Option<CornerPoint>,
+}
+
+/// One output across every corner.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CornerRow {
+    pub(super) output: String,
+    pub(super) unit: String,
+    pub(super) spec: Option<SpecEntry>,
+    pub(super) values: Vec<Option<f64>>,
+}
+
+impl CornerRow {
+    /// The verdict on one value, when the row has a limit to judge it by.
+    pub(super) fn verdict_of(&self, value: f64) -> Option<Verdict> {
+        self.spec.as_ref().map(|spec| judge(spec, value))
+    }
+
+    /// The row's verdict across every corner it has a value for.
+    pub(super) fn verdict(&self) -> Option<Verdict> {
+        self.values
+            .iter()
+            .flatten()
+            .filter_map(|value| self.verdict_of(*value))
+            .reduce(Verdict::worst)
+    }
+}
+
+/// A value against its limit: a failure, a value near the limit, or a pass.
+pub(super) fn judge(spec: &SpecEntry, value: f64) -> Verdict {
+    if !spec.passes(value) {
+        Verdict::Fail
+    } else if normalized_margin(spec, value).is_some_and(|margin| margin < NEAR_LIMIT_FRACTION) {
+        Verdict::Near
+    } else {
+        Verdict::Pass
+    }
+}
+
+/// The whole matrix one corner run answers.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct CornerMatrix {
+    pub(super) columns: Vec<CornerColumn>,
+    /// The column that is the run's reference corner.
+    pub(super) nominal: Option<usize>,
+    pub(super) rows: Vec<CornerRow>,
+}
+
+impl CornerMatrix {
+    /// The corner columns other than the nominal one, in run order.
+    pub(super) fn corner_indices(&self) -> Vec<usize> {
+        (0..self.columns.len())
+            .filter(|index| Some(*index) != self.nominal)
+            .collect()
+    }
+
+    /// How many limited rows pass and how many have a limit, and the corner
+    /// whose worst failure is worst.
+    fn tally(&self) -> (usize, usize, usize, Option<usize>) {
+        let limited = self
+            .rows
+            .iter()
+            .filter(|row| row.verdict().is_some())
+            .count();
+        let failing = self
+            .rows
+            .iter()
+            .filter(|row| row.verdict() == Some(Verdict::Fail))
+            .count();
+        let near = self
+            .rows
+            .iter()
+            .filter(|row| row.verdict() == Some(Verdict::Near))
+            .count();
+        let worst = self
+            .rows
+            .iter()
+            .filter_map(|row| row.spec.as_ref().map(|spec| (row, spec)))
+            .flat_map(|(row, spec)| {
+                row.values
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(column, value)| {
+                        let value = (*value)?;
+                        (!spec.passes(value)).then(|| {
+                            (
+                                column,
+                                normalized_margin(spec, value).unwrap_or(f64::NEG_INFINITY),
+                            )
+                        })
+                    })
+            })
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .map(|(column, _)| column);
+        (limited - failing, limited, near, worst)
+    }
+
+    /// The toolbar's one line about this matrix.
+    pub(super) fn summary(&self) -> Summary {
+        let corners = self.columns.len();
+        let corner_word = if corners == 1 { "corner" } else { "corners" };
+        let (passing, limited, near, worst) = self.tally();
+        if limited == 0 {
+            let outputs = self.rows.len();
+            return Summary::plain(format!(
+                "{outputs} output{} across {corners} {corner_word}",
+                if outputs == 1 { "" } else { "s" }
+            ));
+        }
+        let mut text = format!("{passing} / {limited} outputs pass across {corners} {corner_word}");
+        if let Some(worst) = worst.and_then(|column| self.columns.get(column)) {
+            text.push_str(&format!(" \u{00b7} worst {}", worst.head));
+            return Summary::failing(text);
+        }
+        if near > 0 {
+            text.push_str(&format!(" \u{00b7} {near} near limit"));
+        }
+        Summary::plain(text)
+    }
+}
+
+/// Where the reference corner sits: the plan's reference process at its
+/// reference temperature.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct ReferenceCorner {
+    pub(super) process: String,
+    pub(super) temperature: f64,
+}
+
+fn same_quantity(left: f64, right: f64) -> bool {
+    (left - right).abs() <= 1.0e-9 * left.abs().max(right.abs()).max(1.0)
+}
+
+fn point_matches(
+    column: &CornerPoint,
+    solved: &rspice_results::provenance::AnalysisResultPvtPoint,
+) -> bool {
+    column.process.eq_ignore_ascii_case(solved.process())
+        && same_quantity(column.temperature, solved.temperature_celsius())
+        && match (column.voltage, solved.supply_voltage()) {
+            (Some(left), Some(right)) => same_quantity(left, right),
+            _ => true,
+        }
+}
+
+/// The compact number a corner head spells: as few digits as the value needs.
+fn head_number(value: f64) -> String {
+    let rounded = (value * 1.0e6).round() / 1.0e6;
+    format!("{rounded}").replace('-', "\u{2212}")
+}
+
+fn corner_columns(labels: &[String]) -> Vec<CornerColumn> {
+    let points = labels
+        .iter()
+        .map(|label| parse_corner_label(label))
+        .collect::<Vec<_>>();
+    let all_parsed = points.iter().all(Option::is_some);
+    let distinct = |key: &dyn Fn(&CornerPoint) -> String| {
+        let mut seen = points.iter().flatten().map(key).collect::<Vec<_>>();
+        seen.sort();
+        seen.dedup();
+        seen.len()
+    };
+    let vary_process = distinct(&|point| point.process.to_ascii_uppercase()) > 1;
+    let vary_voltage = distinct(&|point| point.voltage.map_or_else(String::new, head_number)) > 1;
+    let vary_temperature = distinct(&|point| head_number(point.temperature)) > 1;
+    labels
+        .iter()
+        .zip(points)
+        .map(|(label, point)| {
+            let Some(point) = point.filter(|_| all_parsed) else {
+                return CornerColumn {
+                    head: label.clone(),
+                    detail: label.clone(),
+                    point: None,
+                };
+            };
+            let voltage = point
+                .voltage
+                .map(|volts| format!("{} V", head_number(volts)));
+            let temperature = format!("{} \u{00b0}C", head_number(point.temperature));
+            let mut head = Vec::new();
+            if vary_process || !(vary_voltage || vary_temperature) {
+                head.push(point.process.clone());
+            }
+            if vary_voltage && let Some(voltage) = &voltage {
+                head.push(voltage.clone());
+            }
+            if vary_temperature {
+                head.push(temperature.clone());
+            }
+            let detail = [Some(point.process.clone()), voltage, Some(temperature)]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" \u{00b7} ");
+            CornerColumn {
+                head: head.join(" "),
+                detail,
+                point: Some(point),
+            }
+        })
+        .collect()
+}
+
+/// The unit a corner waveform's samples are in: what the producer stated, or
+/// what its name says it is.
+fn waveform_unit(waveform: &crate::state::WaveformData) -> String {
+    waveform.unit.clone().unwrap_or_else(|| {
+        let name = waveform.name.trim_start_matches('|');
+        if name.starts_with("V(") {
+            "V".to_owned()
+        } else if name.starts_with("I(") {
+            "A".to_owned()
+        } else {
+            String::new()
+        }
+    })
+}
+
+/// Build the matrix one corner family and the run that holds it answer.
+///
+/// `plan_labels` names the corners when the family carries no labels of its
+/// own; `specs` are the limits the rows are judged by.
+pub(super) fn corner_matrix(
+    run: &crate::state::SimulationRun,
+    family: &crate::state::AnalysisResult,
+    plan_labels: Option<Vec<String>>,
+    specs: &[SpecEntry],
+    reference: Option<&ReferenceCorner>,
+) -> CornerMatrix {
+    let axis = family
+        .waveforms
+        .first()
+        .map_or(0, |waveform| waveform.x.len());
+    let labels = match &family.family_metadata {
+        Some(crate::state::AnalysisResultFamilyMetadata::Corner { corner_labels, .. })
+            if !corner_labels.is_empty() =>
+        {
+            corner_labels.clone()
+        }
+        _ => plan_labels
+            .filter(|labels| axis == 0 || labels.len() == axis)
+            .unwrap_or_else(|| (1..=axis).map(|index| format!("Point {index}")).collect()),
+    };
+    let columns = corner_columns(&labels);
+    let width = columns.len();
+    let spec_for = |name: &str| {
+        specs
+            .iter()
+            .find(|spec| spec.measurement.eq_ignore_ascii_case(name))
+    };
+
+    // Measured outputs, in the order they are first met.
+    let mut measured: Vec<CornerRow> = Vec::new();
+    let mut record = |name: &str, unit: Option<&str>, column: usize, value: f64| {
+        let spec = spec_for(name);
+        let index = measured
+            .iter()
+            .position(|row| row.output.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| {
+                measured.push(CornerRow {
+                    output: name.to_owned(),
+                    unit: spec
+                        .map(|spec| spec.unit.clone())
+                        .or_else(|| unit.map(str::to_owned))
+                        .unwrap_or_default(),
+                    spec: spec.cloned(),
+                    values: vec![None; width],
+                });
+                measured.len() - 1
+            });
+        let slot = &mut measured[index].values[column];
+        // Two answers for one corner keep the worse against the limit, the
+        // way every other specification join reduces them.
+        *slot = Some(match (*slot, spec) {
+            (Some(held), Some(spec))
+                if verification_margin(spec, held) < verification_margin(spec, value) =>
+            {
+                held
+            }
+            (Some(held), None) => held,
+            _ => value,
+        });
+    };
+
+    if let Some(metadata) = &family.family_metadata {
+        for member in metadata.member_measurements() {
+            let crate::state::FamilyMemberId::Corner { index, label } = &member.member else {
+                continue;
+            };
+            let Some(column) = labels
+                .iter()
+                .position(|candidate| candidate == label)
+                .or(Some(*index))
+                .filter(|column| *column < width)
+            else {
+                continue;
+            };
+            for evidence in member
+                .measurements
+                .iter()
+                .filter(|evidence| evidence.is_measured())
+            {
+                let unit = spec_for(&evidence.name).map_or("", |spec| spec.unit.as_str());
+                if let Ok(Some(value)) = evidence.value_in_unit(unit)
+                    && value.is_finite()
+                {
+                    let native = evidence.unit.as_ref().and_then(|unit| unit.symbol());
+                    record(&evidence.name, native, column, value);
+                }
+            }
+        }
+    }
+
+    let mut nominal = None;
+    for analysis in run
+        .analyses
+        .iter()
+        .filter(|analysis| verified_analysis(analysis))
+    {
+        let Some(solved) = analysis
+            .provenance()
+            .and_then(|provenance| provenance.pvt_point())
+        else {
+            continue;
+        };
+        let Some(column) = columns.iter().position(|column| {
+            column
+                .point
+                .as_ref()
+                .is_some_and(|point| point_matches(point, solved))
+        }) else {
+            continue;
+        };
+        if solved.is_nominal() {
+            nominal = Some(column);
+        }
+        for measurement in analysis
+            .measurements
+            .iter()
+            .filter(|measurement| measurement.passed && measurement.error.is_none())
+        {
+            let unit = spec_for(&measurement.name).map_or("", |spec| spec.unit.as_str());
+            if let Ok(Some(value)) = measurement.value_in_unit(unit)
+                && value.is_finite()
+            {
+                let native = measurement
+                    .units
+                    .as_ref()
+                    .and_then(|units| units.value.symbol());
+                record(&measurement.name, native, column, value);
+            }
+        }
+    }
+
+    let waveforms = family
+        .waveforms
+        .iter()
+        .filter(|waveform| width > 0 && waveform.y.len() == width && waveform.x.len() == width)
+        .map(|waveform| CornerRow {
+            output: waveform.name.clone(),
+            unit: spec_for(&waveform.name)
+                .map_or_else(|| waveform_unit(waveform), |spec| spec.unit.clone()),
+            spec: spec_for(&waveform.name).cloned(),
+            values: waveform
+                .y
+                .iter()
+                .map(|value| value.is_finite().then_some(*value))
+                .collect(),
+        });
+
+    // Limited rows first, in the order the specifications are authored, then
+    // the other measurements, then the corner waveforms.
+    let mut rows = measured.into_iter().chain(waveforms).collect::<Vec<_>>();
+    rows.sort_by_key(|row| {
+        row.spec.as_ref().map_or(usize::MAX, |spec| {
+            specs
+                .iter()
+                .position(|candidate| candidate == spec)
+                .unwrap_or(usize::MAX - 1)
+        })
+    });
+
+    let nominal = nominal.or_else(|| {
+        let reference = reference?;
+        let candidates = columns
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| {
+                column.point.as_ref().is_some_and(|point| {
+                    point.process.eq_ignore_ascii_case(&reference.process)
+                        && same_quantity(point.temperature, reference.temperature)
+                })
+            })
+            .collect::<Vec<_>>();
+        match candidates.as_slice() {
+            [(index, _)] => Some(*index),
+            several => several
+                .iter()
+                .find(|(_, column)| {
+                    column
+                        .point
+                        .as_ref()
+                        .and_then(|point| point.voltage)
+                        .is_some_and(|volts| same_quantity(volts, 1.0))
+                })
+                .map(|(index, _)| *index),
+        }
+    });
+
+    CornerMatrix {
+        columns,
+        nominal,
+        rows,
+    }
+}
+
+/// What the corners toolbar can do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CornerAction {
+    CompareNominal,
+    Export,
+}
 
 pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
-    let result = latest_analysis(app, crate::state::AnalysisType::Corner);
-    let point_count = result
-        .and_then(|analysis| analysis.waveforms.first())
-        .map_or(0, |waveform| waveform.x.len());
-    let signal_count = result.map_or(0, |analysis| analysis.waveforms.len());
-    // `AnalysisResult::measurements` has no corner-point identity. It must not
-    // be presented as a pointwise specification matrix until that provenance
-    // is retained by the result schema.
-    let configured_specifications = app.state.workspace.content.specs.len();
-    let (elapsed, run_detail) = verification_run(app).map_or_else(
-        || ("—".to_owned(), "No run selected".to_owned()),
-        |run| {
-            (
-                format_value(run.elapsed_time, "s"),
-                format!("Run {}", run.id),
+    let runs = run_choice(app, |run| {
+        run.analyses.iter().any(|analysis| {
+            analysis.analysis_type == crate::state::AnalysisType::Corner
+                && verified_analysis(analysis)
+        })
+    });
+    let run_name = verification_run(app).map(|run| format!("Run {}", run.id));
+    let reference = ReferenceCorner {
+        process: app
+            .state
+            .sim_setup
+            .reference_pvt
+            .process
+            .short_name()
+            .to_owned(),
+        temperature: app.state.sim_setup.reference_pvt.temperature_celsius,
+    };
+    let matrix = latest_analysis(app, crate::state::AnalysisType::Corner)
+        .zip(verification_run(app))
+        .map(|(family, run)| {
+            corner_matrix(
+                run,
+                family,
+                corner_point_labels(app, family),
+                &verification_specs(app),
+                Some(&reference),
             )
-        },
-    );
-    let items = [
-        KpiTile::new(
-            "PVT points",
-            point_count.to_string(),
-            if point_count == 0 {
-                "No corner run".to_owned()
+        });
+    let compare = app.state.workbench.verification.corner_compare_nominal;
+
+    let mut actions = Vec::new();
+    let mut toolbar_actions = Vec::new();
+    if let Some(matrix) = matrix.as_ref().filter(|matrix| !matrix.rows.is_empty()) {
+        if matrix.nominal.is_some() {
+            actions.push(CornerAction::CompareNominal);
+            toolbar_actions.push(ToolbarAction::new("Compare nominal").toggled(compare));
+        }
+        actions.push(CornerAction::Export);
+        toolbar_actions.push(ToolbarAction::new("Export CSV"));
+    }
+    let summary = matrix
+        .as_ref()
+        .filter(|matrix| !matrix.rows.is_empty())
+        .map(|matrix| {
+            let summary = matrix.summary();
+            if runs.offers_choice() {
+                summary
             } else {
-                run_detail
+                append_run(summary, run_name.as_deref())
+            }
+        });
+    let output = PageToolbar {
+        title: "Process corners",
+        runs: &runs,
+        summary,
+        actions: &toolbar_actions,
+    }
+    .show(ui);
+    match output.action.and_then(|index| actions.get(index)) {
+        Some(CornerAction::CompareNominal) => {
+            app.state.workbench.verification.corner_compare_nominal = !compare;
+        }
+        Some(CornerAction::Export) => export_active_corner_matrix(app),
+        None => {}
+    }
+    if let Some(index) = output.run {
+        select_verification_run(&mut app.state.simulation, index);
+    }
+    action_problem_line(ui, app);
+
+    let Some(matrix) = matrix else {
+        let text = run_name.map_or_else(
+            || "No corner run. Enable corners in the run set, then run the plan.".to_owned(),
+            |run| {
+                format!("No corner run in {run}. Enable corners in the run set, then run the plan.")
             },
-        ),
-        KpiTile::new("Signals", signal_count.to_string(), ""),
-        KpiTile::new("Specifications", configured_specifications.to_string(), ""),
-        KpiTile::new("Runtime", elapsed, ""),
-    ];
-    verification_kpi_strip(ui, &items);
+        );
+        if empty_line(ui, &text, Some("Open run set")) {
+            Command::SimulationPage(crate::workbench::state::SimulationPage::RunSet).execute(app);
+        }
+        return;
+    };
+    if matrix.rows.is_empty() {
+        if empty_line(
+            ui,
+            "This corner run kept no outputs. Add measurements to the plan's outputs, then run it again.",
+            Some("Open outputs"),
+        ) {
+            Command::SimulationPage(crate::workbench::state::SimulationPage::Outputs).execute(app);
+        }
+        return;
+    }
+    corner_table(ui, &matrix, compare && matrix.nominal.is_some());
+}
 
-    if let Some(result) = result {
-        let axis = result
-            .waveforms
-            .first()
-            .map(|waveform| waveform.x.as_slice())
-            .unwrap_or(&[]);
-        if axis.is_empty() {
-            card(ui, "Corner result integrity", |ui| {
-                ui.label("Corner result has no sweep axis.");
-            });
-        } else {
-            let mut headers = vec![("Signal".to_owned(), 0.24)];
-            let point_fraction = 0.76 / axis.len() as f32;
-            let point_labels = corner_point_labels(app, result);
-            headers.extend(axis.iter().enumerate().map(|(index, value)| {
-                let label = point_labels
-                    .as_ref()
-                    .and_then(|labels| labels.get(index))
-                    .cloned()
-                    .unwrap_or_else(|| format!("P{:02} · {}", index + 1, format_scalar(*value)));
-                (label, point_fraction)
-            }));
-            let nominal_index = app
-                .state
-                .workbench
-                .verification
-                .corner_compare_nominal
-                .then(|| corner_nominal_index(app))
-                .flatten();
-            let rows = result
-                .waveforms
-                .iter()
-                .map(|waveform| {
-                    let aligned = waveform.x.as_slice() == axis && waveform.y.len() == axis.len();
-                    // A trace that does not share the sweep's points is the
-                    // finding; a trace that does is the normal state and says
-                    // nothing.
-                    let mut row = vec![if aligned {
-                        TableCell::text(&waveform.name)
-                    } else {
-                        TableCell::problem(&waveform.name, Problem::Failure)
-                    }];
-                    if aligned {
-                        let nominal = nominal_index
-                            .and_then(|index| waveform.y.get(index))
-                            .copied();
-                        row.extend(waveform.y.iter().map(|value| {
-                            TableCell::mono(nominal.map_or_else(
-                                || format_scalar(*value),
-                                |nominal| signed_scalar(*value - nominal),
-                            ))
-                        }));
-                    } else {
-                        row.extend((0..axis.len()).map(|_| TableCell::mono("—")));
+fn corner_table(ui: &mut Ui, matrix: &CornerMatrix, compare: bool) {
+    let t = Tokens::get(ui.ctx());
+    let head_font = theme::sans(tokens::FS_0, FontWeight::Medium);
+    let column_width = |head: &str| {
+        let measured = ui
+            .painter()
+            .layout_no_wrap(head.to_owned(), head_font.clone(), t.color.text)
+            .size()
+            .x;
+        (measured + 20.0).max(CORNER_COLUMN_MIN_W)
+    };
+    let limited = matrix.rows.iter().any(|row| row.spec.is_some());
+    let corners = matrix.corner_indices();
+    let mut columns = vec![Column::name("Output", 150.0)];
+    if limited {
+        columns.push(Column::words("Spec", 104.0));
+    }
+    if let Some(nominal) = matrix.nominal {
+        let column = &matrix.columns[nominal];
+        columns.push(
+            Column::number("Nominal", column_width("Nominal"))
+                .tooltip(format!("Nominal: {}", column.detail)),
+        );
+    }
+    for index in &corners {
+        let column = &matrix.columns[*index];
+        columns
+            .push(Column::number(&column.head, column_width(&column.head)).tooltip(&column.detail));
+    }
+    if limited {
+        columns.push(Column::words("Pass/fail", 70.0));
+    }
+    let height = ui.available_height();
+    DataTable::new("verify.corners.matrix", &columns, matrix.rows.len())
+        .max_height(height)
+        .show(ui, |index| {
+            let row = &matrix.rows[index];
+            let nominal = matrix.nominal.and_then(|column| row.values[column]);
+            let value_cell = |value: Option<f64>, relative: bool| {
+                let Some(value) = value else {
+                    return Cell::absent();
+                };
+                let text = match nominal.filter(|_| relative) {
+                    Some(reference) => {
+                        let delta = value - reference;
+                        let sign = if delta > 0.0 { "+" } else { "" };
+                        format!("{sign}{}", format_value(delta, &row.unit))
                     }
-                    row
-                })
-                .collect::<Vec<_>>();
-            table_section_header(
-                ui,
-                "PVT matrix",
-                nominal_index.is_some().then_some("delta from nominal"),
-                None,
-            );
-            render_data_table(
-                ui,
-                "verify-corner-matrix",
-                &headers,
-                &rows,
-                Some((220.0 + axis.len() as f32 * 88.0).max(1_450.0)),
-            );
-            corner_evidence_details(ui, app, result);
-            if let Some(run_id) = verification_run(app).map(|run| run.id) {
-                executed_deck_section(ui, &mut app.state, run_id);
-            }
-        }
-    } else {
-        card(ui, "Corner evidence", |ui| {
-            ui.label("No corner run in the selected run.");
-        });
-    }
-}
-
-/// What this run's models were, and the source one of its points solved.
-///
-/// Both halves are read out of the sealed decks the run itself executed rather
-/// than re-derived from the project. A project that has moved on since the run
-/// would answer a different question with exactly the same confidence, which
-/// is the failure mode attribution exists to prevent: every phrase here is a
-/// comment the engine was actually handed.
-///
-/// A run whose decks this session no longer holds states that. It does not
-/// fall back to the working deck, which is a different document.
-fn executed_deck_section(ui: &mut Ui, state: &mut AppState, run_id: u64) {
-    table_section_header(
-        ui,
-        "Executed deck and model sources",
-        Some("as this run's own sealed sources state them"),
-        None,
-    );
-    let held: Option<(Vec<String>, Vec<String>)> = state
-        .simulation
-        .retained
-        .executed_decks
-        .get(run_id)
-        .map(|deck| {
-            (
-                deck.points
-                    .iter()
-                    .map(|point| point.label.clone())
-                    .collect(),
-                deck.model_sources(),
-            )
-        });
-    let Some((labels, sources)) = held else {
-        property_row(
-            ui,
-            "Executed deck",
-            &format!(
-                "not retained \u{2014} {}",
-                crate::state::absent_deck_reason()
-            ),
-        );
-        return;
-    };
-    if sources.is_empty() {
-        property_row(
-            ui,
-            "Model sources",
-            "this deck seals no model source of its own",
-        );
-    } else {
-        for (index, source) in sources.iter().enumerate() {
-            model_source_row(ui, state, index, source);
-        }
-    }
-    let selected = state
-        .workbench
-        .verification
-        .executed_deck_point
-        .min(labels.len().saturating_sub(1));
-    ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("verify-executed-deck-point")
-            .selected_text(labels.get(selected).cloned().unwrap_or_default())
-            .show_ui(ui, |ui| {
-                for (index, label) in labels.iter().enumerate() {
-                    ui.selectable_value(
-                        &mut state.workbench.verification.executed_deck_point,
-                        index,
-                        label,
-                    );
+                    None => format_value(value, &row.unit),
+                };
+                let cell = Cell::number(text);
+                match row.verdict_of(value) {
+                    Some(verdict) => cell.judged(verdict),
+                    None => cell,
                 }
-            });
-        if ui
-            .button("Open executed deck")
-            .on_hover_text(
-                "Opens the exact source this point's engine read, as a read-only document \
-                 sealed with the run.",
-            )
-            .clicked()
-        {
-            // The route reports whether it found the point's bytes, and a
-            // silent no-op on a control that promises a document is the one
-            // outcome a reader cannot tell from success. The list above is
-            // rebuilt every frame from the same retained record, so this fires
-            // when it was released between the frame that drew it and the
-            // click.
-            if !crate::workbench::documents::netlist_document::reveal_executed_deck(
-                state, run_id, selected,
-            ) {
-                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(format!(
-                    "The deck Run {run_id} executed at '{}' cannot be opened: {}.",
-                    labels.get(selected).map_or("this point", String::as_str),
-                    crate::state::absent_deck_reason()
-                )));
+            };
+            let mut cells = vec![Cell::text(&row.output)];
+            if limited {
+                cells.push(
+                    row.spec
+                        .as_ref()
+                        .map_or_else(Cell::empty, |spec| Cell::number(spec.limit_text())),
+                );
             }
-        }
-    });
-}
-
-/// One model source this run was given, and the route back to it.
-///
-/// A source sealed under a pack release is the one kind this workspace can
-/// route to, because the release is a thing the Model Hub ledger lists. The
-/// pack identity is read back out of the label the deck carries rather than
-/// looked up in the project, so the row cannot offer a route to a release the
-/// run did not actually use.
-fn model_source_row(ui: &mut Ui, state: &mut AppState, index: usize, source: &str) {
-    let label = format!("Model source {}", index + 1);
-    let Some((pack_id, _)) = crate::state::model_library::labelled_pack(source) else {
-        property_row(ui, &label, source);
-        return;
-    };
-    let pack_id = pack_id.to_owned();
-    ui.horizontal(|ui| {
-        property_row(ui, &label, source);
-        if ui
-            .button("Open in Models")
-            .on_hover_text("Selects this release in the Model Hub ledger.")
-            .clicked()
-        {
-            state.workbench.models_view.catalog_scope =
-                crate::workbench::state::ModelsCatalogScope::InstalledPacks;
-            state.workbench.models_view.selected_pack = Some(pack_id.clone());
-            state.workbench.models_page = crate::workbench::state::ModelsPage::Models;
-            state
-                .workbench
-                .activate(crate::workbench::state::Workspace::Models);
-        }
-    });
+            if matrix.nominal.is_some() {
+                cells.push(value_cell(nominal, false));
+            }
+            cells.extend(
+                corners
+                    .iter()
+                    .map(|column| value_cell(row.values[*column], compare)),
+            );
+            if limited {
+                cells.push(row.verdict().map_or_else(Cell::empty, Cell::verdict));
+            }
+            cells
+        });
 }
 
 pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
@@ -272,12 +667,10 @@ pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
     if let Some(index) = analysis_index {
         app.state.simulation.select_analysis(index);
         Command::ExportWaveformsCsv.execute(app);
-        app.state.workbench.verification.action_receipt =
-            "The retained process-corner matrix was selected for CSV export.".to_owned();
+        app.state.workbench.verification.action_problem = None;
     } else {
-        app.state.workbench.verification.action_receipt =
-            "Corner export blocked: no source-attributed successful corner result is active."
-                .to_owned();
+        app.state.workbench.verification.action_problem =
+            Some("Nothing to export: this run holds no completed corner result.".to_owned());
     }
 }
 
@@ -308,405 +701,4 @@ pub(super) fn corner_point_labels(
         .corner_names();
     let points = result.waveforms.first()?.x.len();
     (labels.len() == points).then_some(labels)
-}
-
-pub(super) fn corner_nominal_index(app: &RSpiceApp) -> Option<usize> {
-    let result = latest_analysis(app, crate::state::AnalysisType::Corner)?;
-    let labels = corner_point_labels(app, result)?;
-    let exact_nominal = format!(
-        "TT_1.00V_{:.0}C",
-        app.state.sim_setup.reference_pvt.temperature_celsius
-    );
-    labels.iter().position(|label| label == &exact_nominal)
-}
-
-/// What stands between this corner run and an exact reproduction of it.
-///
-/// Stated only when something does. The "Worst PVT points" table this
-/// replaced could hold nothing in this build — corner results carry no
-/// point-attributed measurements — so its only row was a placeholder; and a run
-/// that reproduces is the normal state, which needs no rows saying so.
-pub(super) fn corner_evidence_details(
-    ui: &mut Ui,
-    app: &RSpiceApp,
-    result: &crate::state::AnalysisResult,
-) {
-    let mut findings = Vec::new();
-    if verification_run(app)
-        .and_then(|run| run.prepared_receipt())
-        .is_none()
-    {
-        findings.push("This run kept no prepared snapshot, so it cannot be rerun exactly.");
-    }
-    if result.provenance.is_none() {
-        findings.push("This corner result predates source tracking.");
-    }
-    if findings.is_empty() {
-        return;
-    }
-    table_section_header(ui, "Run reproducibility", None, None);
-    for finding in findings {
-        crate::ui::widgets::problem_line(ui, Problem::Warning, finding);
-    }
-}
-
-pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Optimization execution", |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if Button::new("Run optimization").accent().show(ui).clicked() {
-                let result = request_analysis_run(
-                    app,
-                    &[crate::simulation::plan::AnalysisKind::Optimization],
-                );
-                record_verification_action(
-                    app,
-                    result,
-                    "Optimization was dispatched through the active production analysis plan.",
-                );
-            }
-            if Button::new("Configure optimization").show(ui).clicked() {
-                let result = open_analysis_configuration(
-                    app,
-                    crate::simulation::plan::AnalysisKind::Optimization,
-                );
-                record_verification_action(
-                    app,
-                    result,
-                    "The typed optimization configuration was opened.",
-                );
-            }
-        });
-        if let Some(result) = latest_analysis(app, crate::state::AnalysisType::Optimization) {
-            let iterations = result
-                .waveforms
-                .first()
-                .map_or(0, |waveform| waveform.x.len());
-            property_row(ui, "Retained result", &format!("{iterations} iterations"));
-            property_row(ui, "Dataset", "immutable active result");
-        } else {
-            execution_card_note(
-                ui,
-                "No optimization result is retained. Configure a bounded variable set and execute the production optimization analysis to create evidence.",
-            );
-        }
-    });
-    if let Some(result) = latest_analysis(app, crate::state::AnalysisType::Optimization) {
-        let headers = vec![
-            ("Trace".to_owned(), 0.46),
-            ("Samples".to_owned(), 0.22),
-            ("Final value".to_owned(), 0.32),
-        ];
-        let rows = result
-            .waveforms
-            .iter()
-            .map(|waveform| {
-                vec![
-                    TableCell::text(&waveform.name),
-                    TableCell::mono(waveform.y.len().to_string()),
-                    TableCell::mono(
-                        waveform
-                            .y
-                            .last()
-                            .map_or_else(|| "—".to_owned(), |value| format_scalar(*value)),
-                    ),
-                ]
-            })
-            .collect::<Vec<_>>();
-        table_section_header(ui, "Candidate traces", None, None);
-        // The run's state, stated once rather than on every trace.
-        if !result.success {
-            crate::ui::widgets::problem_line(ui, Problem::Failure, "Run failed");
-        }
-        render_data_table(ui, "verify-optimization-results", &headers, &rows, None);
-    }
-    action_receipt(ui, app);
-}
-
-pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(ui, "Safe operating area", |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if Button::new("Run SOA checks").accent().show(ui).clicked() {
-                let result =
-                    request_analysis_run(app, &[crate::simulation::plan::AnalysisKind::Soa]);
-                record_verification_action(
-                    app,
-                    result,
-                    "SOA checks were dispatched through the active plan.",
-                );
-            }
-            if Button::new("Edit SOA checks").show(ui).clicked() {
-                let result =
-                    open_analysis_configuration(app, crate::simulation::plan::AnalysisKind::Soa);
-                record_verification_action(app, result, "The SOA configuration was opened.");
-            }
-        });
-        execution_card_note(
-            ui,
-            "SOA checks evaluate device operating stress against configured limits.",
-        );
-    });
-
-    let soa_payload =
-        latest_validated_analysis(app, crate::state::AnalysisType::Soa).and_then(|analysis| {
-            match &analysis.result_payload {
-                Some(crate::state::AnalysisResultPayload::Soa {
-                    source_history: _,
-                    evaluations,
-                    violations,
-                }) => Some((evaluations.as_slice(), violations.as_slice())),
-                _ => None,
-            }
-        });
-    let soa_headers = vec![
-        ("Rule".to_owned(), 0.27),
-        ("Device / net".to_owned(), 0.16),
-        ("Observed".to_owned(), 0.15),
-        ("Limit".to_owned(), 0.14),
-        ("Margin".to_owned(), 0.13),
-        ("Cross-probe".to_owned(), 0.15),
-    ];
-    let mut cross_probe_device = None;
-    if let Some((evaluations, _violations)) = soa_payload {
-        let pass_count = evaluations
-            .iter()
-            .filter(|evaluation| evaluation.verdict == crate::state::SoaRuleVerdictEvidence::Pass)
-            .count();
-        let warning_count = evaluations
-            .iter()
-            .filter(|evaluation| {
-                evaluation.verdict == crate::state::SoaRuleVerdictEvidence::Warning
-            })
-            .count();
-        let blocking_count = evaluations
-            .len()
-            .saturating_sub(pass_count)
-            .saturating_sub(warning_count);
-        let status = if blocking_count > 0 {
-            format!("{blocking_count} blocking · {warning_count} warning")
-        } else if warning_count > 0 {
-            format!("{pass_count} pass · {warning_count} near limit")
-        } else {
-            format!("{pass_count} / {} pass", evaluations.len())
-        };
-        table_section_header(ui, "Electrical-stress rule results", Some(&status), None);
-        let clicked_rule = render_virtual_data_table(
-            ui,
-            "verify-soa-rule-results",
-            &soa_headers,
-            evaluations.len(),
-            true,
-            |index| {
-                let evaluation = &evaluations[index];
-                let margin = (evaluation.limit_value - evaluation.worst_actual_value)
-                    / evaluation.limit_value.abs();
-                let verdict = soa_rule_verdict(evaluation.verdict);
-                vec![
-                    TableCell::mono(format!(
-                        "{} · {}",
-                        soa_parameter_display(evaluation.parameter),
-                        evaluation.description
-                    )),
-                    TableCell::mono(&evaluation.device_id),
-                    TableCell::mono(format_value(
-                        evaluation.worst_actual_value,
-                        &evaluation.unit,
-                    )),
-                    TableCell::mono(format_value(evaluation.limit_value, &evaluation.unit)),
-                    TableCell::verdict(
-                        if evaluation.limit_value == 0.0 {
-                            "—".to_owned()
-                        } else {
-                            format!("{:+.2}%", margin * 100.0)
-                        },
-                        verdict,
-                    ),
-                    TableCell::mono(format!("Open {}", evaluation.device_id)),
-                ]
-            },
-        );
-        cross_probe_device = clicked_rule.map(|index| evaluations[index].device_id.clone());
-    } else {
-        table_section_header(
-            ui,
-            "Electrical-stress rule results",
-            Some("no validated active-dataset evidence"),
-            None,
-        );
-        let _ = render_virtual_data_table(
-            ui,
-            "verify-soa-rule-results",
-            &soa_headers,
-            0,
-            false,
-            |_| Vec::new(),
-        );
-    }
-    if let Some(device_id) = cross_probe_device {
-        let result = cross_probe_soa_device(app, &device_id);
-        record_verification_action(
-            app,
-            result,
-            &format!("Cross-probed SOA evidence to schematic device '{device_id}'."),
-        );
-    }
-
-    action_receipt(ui, app);
-}
-
-pub(super) fn execution_card_note(ui: &mut Ui, note: &str) {
-    ui.add_space(8.0);
-    ui.add(egui::Label::new(note).wrap());
-}
-
-pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Result<(), String> {
-    let component_id = app
-        .state
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.name.eq_ignore_ascii_case(device_id))
-        .map(|component| component.id)
-        .ok_or_else(|| {
-            format!("SOA device '{device_id}' is not present in the active schematic revision")
-        })?;
-    app.state
-        .schematic
-        .session
-        .editor
-        .selection
-        .select_only_component(component_id);
-    app.state
-        .workbench
-        .activate(super::super::super::state::Workspace::Design);
-    Ok(())
-}
-
-pub(super) fn soa_parameter_display(parameter: crate::state::SoaParameterEvidence) -> &'static str {
-    use crate::state::SoaParameterEvidence;
-    match parameter {
-        SoaParameterEvidence::GateSourceVoltage => "VGS max",
-        SoaParameterEvidence::DrainSourceVoltage => "VDS max",
-        SoaParameterEvidence::GateDrainVoltage => "VGD max",
-        SoaParameterEvidence::BaseEmitterVoltage => "VBE max",
-        SoaParameterEvidence::CollectorEmitterVoltage => "VCE max",
-        SoaParameterEvidence::BaseCollectorVoltage => "VBC max",
-        SoaParameterEvidence::DrainCurrent => "ID max",
-        SoaParameterEvidence::CollectorCurrent => "IC max",
-        SoaParameterEvidence::PowerDissipation => "Power max",
-        SoaParameterEvidence::Temperature => "Temperature max",
-        SoaParameterEvidence::GateSourceVoltagePositive => "Vgs + max",
-        SoaParameterEvidence::GateSourceVoltageNegative => "Vgs − max",
-        SoaParameterEvidence::DrainSourceVoltagePositive => "Vds + max",
-        SoaParameterEvidence::DrainSourceVoltageNegative => "Vds − max",
-        SoaParameterEvidence::GateDrainVoltagePositive => "Vgd + max",
-        SoaParameterEvidence::GateDrainVoltageNegative => "Vgd − max",
-        SoaParameterEvidence::BaseEmitterVoltagePositive => "Vbe + max",
-        SoaParameterEvidence::BaseEmitterVoltageNegative => "Vbe − max",
-        SoaParameterEvidence::CollectorEmitterVoltagePositive => "Vce + max",
-        SoaParameterEvidence::CollectorEmitterVoltageNegative => "Vce − max",
-        SoaParameterEvidence::BaseCollectorVoltagePositive => "Vbc + max",
-        SoaParameterEvidence::BaseCollectorVoltageNegative => "Vbc − max",
-        SoaParameterEvidence::DrainCurrentPositive => "Id + max",
-        SoaParameterEvidence::DrainCurrentNegative => "Id − max",
-        SoaParameterEvidence::CollectorCurrentPositive => "Ic + max",
-        SoaParameterEvidence::CollectorCurrentNegative => "Ic − max",
-        SoaParameterEvidence::GateCurrent => "Ig max",
-        SoaParameterEvidence::GateCurrentPositive => "Ig + max",
-        SoaParameterEvidence::GateCurrentNegative => "Ig − max",
-        SoaParameterEvidence::SourceCurrent => "Is max",
-        SoaParameterEvidence::SourceCurrentPositive => "Is + max",
-        SoaParameterEvidence::SourceCurrentNegative => "Is − max",
-        SoaParameterEvidence::BaseCurrent => "Ib max",
-        SoaParameterEvidence::BaseCurrentPositive => "Ib + max",
-        SoaParameterEvidence::BaseCurrentNegative => "Ib − max",
-        SoaParameterEvidence::EmitterCurrent => "Ie max",
-        SoaParameterEvidence::EmitterCurrentPositive => "Ie + max",
-        SoaParameterEvidence::EmitterCurrentNegative => "Ie − max",
-        SoaParameterEvidence::CollectorSubstrateVoltage => "Collector to substrate voltage max",
-        SoaParameterEvidence::CollectorSubstrateVoltagePositive => {
-            "Collector to substrate voltage positive max"
-        }
-        SoaParameterEvidence::CollectorSubstrateVoltageNegative => {
-            "Collector to substrate voltage negative max"
-        }
-        SoaParameterEvidence::BaseSubstrateVoltage => "Base to substrate voltage max",
-        SoaParameterEvidence::BaseSubstrateVoltagePositive => {
-            "Base to substrate voltage positive max"
-        }
-        SoaParameterEvidence::BaseSubstrateVoltageNegative => {
-            "Base to substrate voltage negative max"
-        }
-        SoaParameterEvidence::EmitterSubstrateVoltage => "Emitter to substrate voltage max",
-        SoaParameterEvidence::EmitterSubstrateVoltagePositive => {
-            "Emitter to substrate voltage positive max"
-        }
-        SoaParameterEvidence::EmitterSubstrateVoltageNegative => {
-            "Emitter to substrate voltage negative max"
-        }
-        SoaParameterEvidence::SubstrateCurrent => "Substrate current max",
-        SoaParameterEvidence::SubstrateCurrentPositive => "Substrate current positive max",
-        SoaParameterEvidence::SubstrateCurrentNegative => "Substrate current negative max",
-        SoaParameterEvidence::AnodeCathodeVoltage => "Diode anode to cathode voltage max",
-        SoaParameterEvidence::AnodeCathodeVoltagePositive => {
-            "Diode anode to cathode voltage positive max"
-        }
-        SoaParameterEvidence::AnodeCathodeVoltageNegative => {
-            "Diode anode to cathode voltage negative max"
-        }
-        SoaParameterEvidence::AnodeCurrent => "Diode anode current max",
-        SoaParameterEvidence::AnodeCurrentPositive => "Diode anode current positive max",
-        SoaParameterEvidence::AnodeCurrentNegative => "Diode anode current negative max",
-
-        SoaParameterEvidence::BodySourceVoltage => "Vbs max",
-        SoaParameterEvidence::BodySourceVoltagePositive => "Vbs positive max",
-        SoaParameterEvidence::BodySourceVoltageNegative => "Vbs negative max",
-        SoaParameterEvidence::BodyDrainVoltage => "Vbd max",
-        SoaParameterEvidence::BodyDrainVoltagePositive => "Vbd positive max",
-        SoaParameterEvidence::BodyDrainVoltageNegative => "Vbd negative max",
-        SoaParameterEvidence::GateBodyVoltage => "Vgb max",
-        SoaParameterEvidence::GateBodyVoltagePositive => "Vgb positive max",
-        SoaParameterEvidence::GateBodyVoltageNegative => "Vgb negative max",
-        SoaParameterEvidence::BulkCurrent => "Bulk / body-contact current max",
-        SoaParameterEvidence::BulkCurrentPositive => "Bulk / body-contact current positive max",
-        SoaParameterEvidence::BulkCurrentNegative => "Bulk / body-contact current negative max",
-        SoaParameterEvidence::BackgateSourceVoltage => "Ves (back gate to source) max",
-        SoaParameterEvidence::BackgateSourceVoltagePositive => {
-            "Ves (back gate to source) positive max"
-        }
-        SoaParameterEvidence::BackgateSourceVoltageNegative => {
-            "Ves (back gate to source) negative max"
-        }
-        SoaParameterEvidence::BackgateDrainVoltage => "Ved (back gate to drain) max",
-        SoaParameterEvidence::BackgateDrainVoltagePositive => {
-            "Ved (back gate to drain) positive max"
-        }
-        SoaParameterEvidence::BackgateDrainVoltageNegative => {
-            "Ved (back gate to drain) negative max"
-        }
-        SoaParameterEvidence::GateBackgateVoltage => "Vge (gate to back gate) max",
-        SoaParameterEvidence::GateBackgateVoltagePositive => "Vge (gate to back gate) positive max",
-        SoaParameterEvidence::GateBackgateVoltageNegative => "Vge (gate to back gate) negative max",
-        SoaParameterEvidence::BackgateCurrent => "Back-gate current max",
-        SoaParameterEvidence::BackgateCurrentPositive => "Back-gate current positive max",
-        SoaParameterEvidence::BackgateCurrentNegative => "Back-gate current negative max",
-        SoaParameterEvidence::BodyBackgateVoltage => "Body contact to back gate voltage max",
-        SoaParameterEvidence::BodyBackgateVoltagePositive => {
-            "Body contact to back gate voltage positive max"
-        }
-        SoaParameterEvidence::BodyBackgateVoltageNegative => {
-            "Body contact to back gate voltage negative max"
-        }
-    }
-}
-
-/// The verdict an SOA rule's margin cell is painted with: a near-limit rule in
-/// the warning colour, a violated one in the error colour, a pass neutral.
-pub(super) fn soa_rule_verdict(verdict: crate::state::SoaRuleVerdictEvidence) -> Verdict {
-    use crate::state::SoaRuleVerdictEvidence;
-    match verdict {
-        SoaRuleVerdictEvidence::Pass => Verdict::Pass,
-        SoaRuleVerdictEvidence::Warning => Verdict::Near,
-        SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => Verdict::Fail,
-    }
 }

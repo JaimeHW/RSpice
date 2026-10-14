@@ -106,12 +106,10 @@ pub struct VerificationSessionState {
     /// immutable.
     #[serde(default)]
     pub corner_compare_nominal: bool,
-    /// Which point of the active run the executed-deck viewer opens.
-    ///
-    /// Review state, and never durable: it indexes the points of one session's
-    /// retained decks, and a restored session holds none of them.
+    /// The Monte Carlo yield row whose histogram the page shows, by the
+    /// specification's measurement name. Review state only.
     #[serde(skip)]
-    pub executed_deck_point: usize,
+    pub yield_selected_spec: Option<String>,
     #[serde(skip)]
     pub regression_comparison: Option<RegressionComparisonReceipt>,
     #[serde(skip)]
@@ -148,12 +146,11 @@ pub struct VerificationSessionState {
     /// dialog is transient and never restores across an application session.
     #[serde(skip)]
     pub tuning_review_open: bool,
-    #[serde(skip, default = "default_verification_action_receipt")]
-    pub action_receipt: String,
-}
-
-pub(super) fn default_verification_action_receipt() -> String {
-    "No verification action has been committed this session.".to_owned()
+    /// Why the last Verify action the reader took could not be carried out,
+    /// stated under the toolbar until the next action. An action that worked
+    /// leaves nothing here: its result is the page itself.
+    #[serde(skip)]
+    pub action_problem: Option<String>,
 }
 
 impl Default for VerificationSessionState {
@@ -161,7 +158,7 @@ impl Default for VerificationSessionState {
         Self {
             regression_baseline_run: None,
             corner_compare_nominal: false,
-            executed_deck_point: 0,
+            yield_selected_spec: None,
             regression_comparison: None,
             regression_baseline_picker_open: false,
             regression_baseline_picker_selection: None,
@@ -175,7 +172,7 @@ impl Default for VerificationSessionState {
             tuning_focus_variable: None,
             tuning_baseline_run: None,
             tuning_review_open: false,
-            action_receipt: default_verification_action_receipt(),
+            action_problem: None,
         }
     }
 }

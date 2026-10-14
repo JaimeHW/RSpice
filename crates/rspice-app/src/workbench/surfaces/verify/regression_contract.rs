@@ -1044,7 +1044,8 @@ pub(super) fn remove_orphaned_regression_rules(
 pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
     if let Err(error) = commit_regression_tolerance_drafts(app) {
         app.state.workbench.verification.regression_comparison = None;
-        app.state.workbench.verification.action_receipt = format!("Regression blocked: {error}.");
+        app.state.workbench.verification.action_problem =
+            Some(format!("Regression not run: {error}."));
         return;
     }
     let rules = app
@@ -1066,8 +1067,8 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
     let regression_policy = active_regression_specification_policy(app);
     let Some((baseline, current)) = regression_run_pair(app) else {
         app.state.workbench.verification.regression_comparison = None;
-        app.state.workbench.verification.action_receipt =
-            "Regression blocked: select a distinct retained baseline first.".to_owned();
+        app.state.workbench.verification.action_problem =
+            Some("Regression not run: select a baseline run other than this one.".to_owned());
         return;
     };
     let baseline_run = baseline.run_id;
@@ -1120,11 +1121,6 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
     let changed_checks = checks.iter().filter(|check| check.changed()).count();
     let aligned_checks = checks.len();
     let aligned_waveforms = waveforms.len();
-    let passing = failed_checks == 0
-        && failed_waveforms == 0
-        && unconfigured_targets == 0
-        && unevaluated_targets == 0
-        && (aligned_checks > 0 || aligned_waveforms > 0);
     let receipt = super::super::super::state::RegressionComparisonReceipt {
         plan_id,
         plan_revision,
@@ -1147,19 +1143,9 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
         unconfigured_targets,
         unevaluated_targets,
     };
-    let action_receipt = if passing {
-        format!(
-            "Regression passed: {passed_checks}/{} measurements and {passed_waveforms}/{} waveforms satisfy the persisted tolerance contract.",
-            aligned_checks, aligned_waveforms
-        )
-    } else {
-        format!(
-            "Regression failed closed: {failed_checks} measurement failures, {failed_waveforms} waveform failures, {unconfigured_targets} unconfigured targets, and {unevaluated_targets} unevaluated targets."
-        )
-    };
     drop(waveforms);
     app.state.workbench.verification.regression_comparison = Some(receipt);
-    app.state.workbench.verification.action_receipt = action_receipt;
+    app.state.workbench.verification.action_problem = None;
 }
 
 #[derive(Debug, Clone)]
@@ -1499,7 +1485,7 @@ pub(super) fn regression_ci_documents(
 pub(super) fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) {
     use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
-    let result: Result<Option<(std::path::PathBuf, bool)>, String> = (|| {
+    let result: Result<(), String> = (|| {
         let Some(path) = app.export_workflow_io.show_save_dialog(SaveDialogConfig {
             title: "Export Golden Regression JUnit and TAP",
             default_name: "rspice-golden-regression-ci.zip",
@@ -1507,7 +1493,7 @@ pub(super) fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) 
             filter_extensions: &["zip"],
         })?
         else {
-            return Ok(None);
+            return Ok(());
         };
         let package = crate::workbench::workflows::export_workflow::deterministic_stored_zip(&[
             ("rspice-golden-regression.xml", junit.as_bytes()),
@@ -1515,28 +1501,12 @@ pub(super) fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) 
         ])
         .map_err(|error| error.to_string())?;
         let destination = app.export_workflow_io.observe_destination(&path)?;
-        app.export_workflow_io.write_bytes_file_observed(
-            &destination,
-            &package,
-            "application/zip",
-        )?;
-        Ok(Some((
-            path,
-            app.export_workflow_io.saved_paths_are_reopenable(),
-        )))
+        app.export_workflow_io
+            .write_bytes_file_observed(&destination, &package, "application/zip")
     })();
-    app.state.workbench.verification.action_receipt = match result {
-        Ok(Some((path, true))) => format!(
-            "Exported atomic Golden Regression JUnit and TAP evidence package to '{}'.",
-            path.display()
-        ),
-        Ok(Some((path, false))) => format!(
-            "Golden Regression JUnit and TAP evidence package download started for '{}'.",
-            path.display()
-        ),
-        Ok(None) => "Golden Regression CI export was canceled.".to_owned(),
-        Err(error) => format!("Golden Regression CI export failed: {error}"),
-    };
+    app.state.workbench.verification.action_problem = result
+        .err()
+        .map(|error| format!("JUnit / TAP export failed: {error}"));
 }
 
 impl RegressionVerdict {

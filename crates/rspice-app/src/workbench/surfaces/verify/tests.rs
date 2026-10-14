@@ -1978,3 +1978,241 @@ fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
         "the gate served a verdict from the previous dataset generation"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The page grammar: corners, SOA, optimization
+// ---------------------------------------------------------------------------
+
+use super::table::Verdict as CellVerdict;
+
+#[test]
+fn corner_labels_read_back_into_their_point() {
+    assert_eq!(
+        parse_corner_label("SS_1.620000V_-40.000000C"),
+        Some(CornerPoint {
+            process: "SS".to_owned(),
+            voltage: Some(1.62),
+            temperature: -40.0,
+        })
+    );
+    assert_eq!(
+        parse_corner_label("TT_MC_1.00V_27C").map(|point| point.process),
+        Some("TT_MC".to_owned())
+    );
+    assert_eq!(parse_corner_label("Point 3"), None);
+    assert_eq!(parse_corner_label("TT_1.8_27C"), None);
+}
+
+fn fixture_corner_matrix() -> CornerMatrix {
+    let app = super::raster::corner_app();
+    let run = verification_run(&app).expect("the fixture selects its run");
+    let family =
+        latest_analysis(&app, AnalysisType::Corner).expect("the fixture holds a corner run");
+    corner_matrix(
+        run,
+        family,
+        None,
+        &verification_specs(&app),
+        Some(&ReferenceCorner {
+            process: "TT".to_owned(),
+            temperature: 27.0,
+        }),
+    )
+}
+
+#[test]
+fn the_corner_matrix_reads_every_output_at_every_corner_from_the_run() {
+    let matrix = fixture_corner_matrix();
+    assert_eq!(
+        matrix
+            .columns
+            .iter()
+            .map(|column| column.head.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "TT 1.8 V 27 °C",
+            "SS 1.62 V 125 °C",
+            "SS 1.62 V −40 °C",
+            "FF 1.98 V 125 °C",
+            "FF 1.98 V −40 °C",
+            "SF 1.8 V 27 °C",
+            "FS 1.8 V 27 °C",
+        ]
+    );
+    assert_eq!(matrix.columns[1].detail, "SS · 1.62 V · 125 °C");
+    assert_eq!(
+        matrix.nominal,
+        Some(0),
+        "TT at 27 °C is the reference corner"
+    );
+    assert_eq!(matrix.corner_indices(), [1, 2, 3, 4, 5, 6]);
+    assert_eq!(
+        matrix
+            .rows
+            .iter()
+            .map(|row| row.output.as_str())
+            .collect::<Vec<_>>(),
+        ["gain", "bw", "pm", "idd", "V(out)", "V(bias)"],
+        "limited outputs in specification order, then the corner waveforms"
+    );
+    let gain = &matrix.rows[0];
+    assert_eq!(gain.values[1], Some(39.4));
+    assert_eq!(gain.verdict_of(39.4), Some(CellVerdict::Fail));
+    assert_eq!(gain.verdict(), Some(CellVerdict::Fail));
+    assert_eq!(matrix.rows[2].verdict_of(47.0), Some(CellVerdict::Near));
+    assert_eq!(matrix.rows[3].verdict(), Some(CellVerdict::Near));
+    assert_eq!(matrix.rows[1].verdict(), Some(CellVerdict::Pass));
+    assert_eq!(
+        matrix.rows[4].verdict(),
+        None,
+        "a node voltage has no limit"
+    );
+    assert_eq!(matrix.rows[4].unit, "V");
+    assert_eq!(
+        matrix.summary(),
+        super::toolbar::Summary::failing(
+            "3 / 4 outputs pass across 7 corners · worst SS 1.62 V 125 °C"
+        )
+    );
+}
+
+#[test]
+fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
+    let app = super::raster::corner_app();
+    let run = verification_run(&app).expect("run");
+    let family = latest_analysis(&app, AnalysisType::Corner).expect("corner run");
+    let matrix = corner_matrix(
+        run,
+        family,
+        None,
+        &verification_specs(&app),
+        Some(&ReferenceCorner {
+            process: "TT".to_owned(),
+            temperature: 85.0,
+        }),
+    );
+    assert_eq!(matrix.nominal, None);
+    assert_eq!(matrix.corner_indices().len(), 7);
+}
+
+#[test]
+fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
+    let app = super::raster::soa_app();
+    let analysis = latest_validated_analysis(&app, AnalysisType::Soa)
+        .expect("the SOA fixture's evidence validates");
+    let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
+        &analysis.result_payload
+    else {
+        panic!("the fixture holds an SOA payload");
+    };
+    let rows = soa_rows(evaluations);
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.device.as_str(), row.verdict))
+            .collect::<Vec<_>>(),
+        [
+            ("M3", CellVerdict::Fail),
+            ("M1", CellVerdict::Fail),
+            ("M2", CellVerdict::Near),
+            ("M1", CellVerdict::Pass),
+            ("M4", CellVerdict::Pass),
+        ]
+    );
+    assert_eq!(
+        soa_summary(&rows),
+        Some(super::toolbar::Summary::failing(
+            "2 violations on 2 devices"
+        ))
+    );
+    assert_eq!(soa_summary(&rows[3..]), None, "a clean run says nothing");
+}
+
+#[test]
+fn optimization_iterations_put_the_cost_first_and_name_the_best() {
+    let app = super::raster::optimization_app();
+    let result = latest_analysis(&app, AnalysisType::Optimization).expect("optimization run");
+    let table = IterationTable::from_result(result).expect("iterations");
+    assert_eq!(
+        table
+            .traces
+            .iter()
+            .map(|(head, _)| head.as_str())
+            .collect::<Vec<_>>(),
+        ["Cost", "IBIAS", "W1"]
+    );
+    assert_eq!(table.best, Some(23));
+    assert_eq!(
+        table.summary().text,
+        "converged · best cost 20.04 m at iteration 23 · 24 iterations"
+    );
+}
+
+/// Every seeded page opens with a 36 px toolbar whose title starts on the
+/// panel inset, then a table of 24 px head and rows directly under it, with
+/// every right-aligned column ending on one edge and nothing past the insets.
+#[test]
+fn seeded_verify_pages_follow_the_table_grammar() {
+    use super::raster::{PAGE_WIDTH, corner_app, optimization_app, page_geometry, soa_app};
+
+    for (page, app) in [
+        (VerificationPage::Corners, corner_app()),
+        (VerificationPage::DeviceSafety, soa_app()),
+        (VerificationPage::Optimization, optimization_app()),
+    ] {
+        let geometry = page_geometry(app, page);
+        let toolbar = geometry.one("toolbar").expect("toolbar");
+        assert_eq!(toolbar.height(), super::toolbar::TOOLBAR_H, "{page:?}");
+        assert_eq!(toolbar.left(), 0.0, "{page:?}");
+        assert_eq!(
+            geometry.one("toolbar.title").expect("title").left(),
+            10.0,
+            "{page:?}"
+        );
+        let head = geometry.one("table.head").expect("table head");
+        assert_eq!(head.height(), 24.0, "{page:?}");
+        assert_eq!(
+            head.top(),
+            toolbar.bottom(),
+            "{page:?}: nothing between toolbar and table"
+        );
+        let rows = geometry.all("table.row");
+        assert!(!rows.is_empty(), "{page:?}");
+        assert!(rows.iter().all(|row| row.height() == 24.0), "{page:?}");
+        assert_eq!(rows[0].top(), head.bottom(), "{page:?}");
+        for (column, edges) in geometry.right_edges() {
+            assert_eq!(
+                edges.len(),
+                1,
+                "{page:?} {column}: numbers end on one edge, {edges:?}"
+            );
+        }
+        assert_eq!(
+            geometry.outside_insets(PAGE_WIDTH),
+            Vec::<String>::new(),
+            "{page:?}"
+        );
+        assert!(
+            geometry.one("toolbar.summary").is_some(),
+            "{page:?} states a summary"
+        );
+    }
+}
+
+/// A page with nothing to show is its toolbar and one line saying what
+/// produces data: no table, no tiles.
+#[test]
+fn empty_verify_pages_are_one_line_under_the_toolbar() {
+    for page in [
+        VerificationPage::Corners,
+        VerificationPage::DeviceSafety,
+        VerificationPage::Optimization,
+    ] {
+        let geometry = super::raster::page_geometry(RSpiceApp::test_instance(), page);
+        let toolbar = geometry.one("toolbar").expect("toolbar");
+        let empty = geometry.one("empty").expect("empty line");
+        assert_eq!(empty.top(), toolbar.bottom(), "{page:?}");
+        assert_eq!(empty.height(), super::toolbar::EMPTY_LINE_H, "{page:?}");
+        assert!(geometry.one("table.head").is_none(), "{page:?}");
+        assert!(geometry.one("toolbar.summary").is_none(), "{page:?}");
+    }
+}

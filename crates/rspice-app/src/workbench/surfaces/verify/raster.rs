@@ -1,33 +1,274 @@
-//! Review renders of the Verify pages.
+//! Review renders of the Verify pages, the fixtures they read, and the page
+//! geometry both the renders and the layout tests measure.
 //!
-//! Each page is rendered twice: on a project that has run nothing, and on one
-//! holding a Monte Carlo run of a gain specification with three failing
-//! samples, so the empty states and the populated tables can both be looked
-//! at. The PNGs go to `RSPICE_RASTER_DIR` (default: the system temp directory).
+//! Each page is rendered on a project that has run nothing and on one holding
+//! real retained evidence for that page: a corner run with a failing and a
+//! near-limit cell, forty Monte Carlo samples of which three fail, an SOA run
+//! with two violations, an optimizer's iterations. The PNGs, and a text report
+//! of where the toolbar, the table head, the rows and the right-aligned numbers
+//! landed, go to `RSPICE_RASTER_DIR` (default: the system temp directory).
+//!
+//! The geometry is published by the widgets themselves through [`probe`], which
+//! exists only in test builds: a measurement read back from the pixels would be
+//! a second account of where the code put things.
 
-use egui::vec2;
+use egui::{Rect, vec2};
 
-use crate::state::{SimulationRun, SimulationRunLifecycle, SpecEntry, SpecPointScope};
+use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+use crate::state::{
+    AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, FamilyMeasurementEvidence,
+    FamilyMemberId, FamilyMemberMeasurements, SimulationRun, SimulationRunLifecycle, SpecEntry,
+    SpecPointScope, WaveformData,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{VerificationPage, Workspace};
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
 };
 
-const PAGE_WIDTH: f32 = 1100.0;
-const PAGE_HEIGHT: f32 = 1400.0;
+pub(super) const PAGE_WIDTH: f32 = 1100.0;
+pub(super) const PAGE_HEIGHT: f32 = 720.0;
+
+/// Rects the Verify widgets published this pass, by what they are.
+#[derive(Debug, Clone, Default)]
+struct Probes(Vec<(String, Rect)>);
+
+fn probes_id() -> egui::Id {
+    egui::Id::new("workbench.verify.raster.probes")
+}
+
+/// Publish where one element landed, for the geometry report.
+pub(super) fn probe(ui: &egui::Ui, key: &str, rect: Rect) {
+    ui.ctx().data_mut(|data| {
+        data.get_temp_mut_or_default::<Probes>(probes_id())
+            .0
+            .push((key.to_owned(), rect));
+    });
+}
+
+fn take_probes(ctx: &egui::Context) -> Vec<(String, Rect)> {
+    ctx.data_mut(|data| {
+        let probes = data.get_temp::<Probes>(probes_id()).unwrap_or_default();
+        data.remove::<Probes>(probes_id());
+        probes.0
+    })
+}
+
+/// Where one page's elements landed on its last pass.
+#[derive(Debug, Clone, Default)]
+pub(super) struct PageGeometry {
+    probes: Vec<(String, Rect)>,
+}
+
+impl PageGeometry {
+    pub(super) fn all(&self, key: &str) -> Vec<Rect> {
+        self.probes
+            .iter()
+            .filter(|(name, _)| name == key)
+            .map(|(_, rect)| *rect)
+            .collect()
+    }
+
+    pub(super) fn one(&self, key: &str) -> Option<Rect> {
+        self.all(key).into_iter().next()
+    }
+
+    /// Every right-aligned table column's distinct right edges, by column.
+    pub(super) fn right_edges(&self) -> Vec<(String, Vec<f32>)> {
+        let mut columns: Vec<(String, Vec<f32>)> = Vec::new();
+        for (name, rect) in &self.probes {
+            if !name.starts_with("table.right.") {
+                continue;
+            }
+            let edge = (rect.right() * 10.0).round() / 10.0;
+            match columns.iter_mut().find(|(column, _)| column == name) {
+                Some((_, edges)) if !edges.contains(&edge) => edges.push(edge),
+                Some(_) => {}
+                None => columns.push((name.clone(), vec![edge])),
+            }
+        }
+        columns
+    }
+
+    /// Every element whose words start left of the panel inset or end past
+    /// the page's right inset.
+    pub(super) fn outside_insets(&self, width: f32) -> Vec<String> {
+        self.probes
+            .iter()
+            .filter(|(name, _)| {
+                name.starts_with("table.right.")
+                    || name.starts_with("toolbar.")
+                    || name.starts_with("empty.")
+            })
+            .filter(|(_, rect)| rect.left() < 9.5 || rect.right() > width - 9.5)
+            .map(|(name, rect)| format!("{name} {:.1}..{:.1}", rect.left(), rect.right()))
+            .collect()
+    }
+
+    pub(super) fn report(&self, name: &str, width: f32) -> String {
+        let mut lines = vec![format!("{name} ({width} px)")];
+        let span = |rect: Rect| {
+            format!(
+                "{:.1}..{:.1} (h {:.1}) x {:.1}..{:.1}",
+                rect.top(),
+                rect.bottom(),
+                rect.height(),
+                rect.left(),
+                rect.right()
+            )
+        };
+        if let Some(toolbar) = self.one("toolbar") {
+            lines.push(format!("  toolbar        {}", span(toolbar)));
+        }
+        if let Some(title) = self.one("toolbar.title") {
+            lines.push(format!("  title left x   {:.1}", title.left()));
+        }
+        if let Some(summary) = self.one("toolbar.summary") {
+            lines.push(format!("  summary        {}", span(summary)));
+        }
+        let actions = self.all("toolbar.action");
+        if !actions.is_empty() {
+            let right = actions.iter().map(|rect| rect.right()).fold(0.0, f32::max);
+            lines.push(format!(
+                "  actions        {} · right gap {:.1}",
+                actions
+                    .iter()
+                    .map(|rect| format!("{:.1}..{:.1}", rect.left(), rect.right()))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                width - right
+            ));
+        }
+        if let Some(empty) = self.one("empty") {
+            lines.push(format!("  empty line     {}", span(empty)));
+        }
+        if let Some(text) = self.one("empty.text") {
+            lines.push(format!("  empty text x   {:.1}", text.left()));
+        }
+        if let Some(head) = self.one("table.head") {
+            lines.push(format!("  table head     {}", span(head)));
+            if let Some(toolbar) = self.one("toolbar") {
+                lines.push(format!(
+                    "  toolbar→head   {:.1}",
+                    head.top() - toolbar.bottom()
+                ));
+            }
+        }
+        let rows = self.all("table.row");
+        if !rows.is_empty() {
+            let mut heights = rows
+                .iter()
+                .map(|rect| format!("{:.1}", rect.height()))
+                .collect::<Vec<_>>();
+            heights.dedup();
+            lines.push(format!(
+                "  rows           {} · h {}",
+                rows.len(),
+                heights.join(", ")
+            ));
+            if let Some(head) = self.one("table.head") {
+                lines.push(format!(
+                    "  head→row 1     {:.1}",
+                    rows[0].top() - head.bottom()
+                ));
+            }
+        }
+        for (column, edges) in self.right_edges() {
+            lines.push(format!(
+                "  {column} right edges {}",
+                edges
+                    .iter()
+                    .map(|edge| format!("{edge:.1}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        for (key, prefix) in [("histogram", "histogram     "), ("split", "split         ")] {
+            if let Some(rect) = self.one(key) {
+                lines.push(format!("  {prefix} {}", span(rect)));
+            }
+        }
+        let outside = self.outside_insets(width);
+        lines.push(format!(
+            "  outside insets {}",
+            if outside.is_empty() {
+                "none".to_owned()
+            } else {
+                outside.join("; ")
+            }
+        ));
+        lines.join("\n") + "\n"
+    }
+}
+
+/// Lay one page out at the review size and read back where it put things,
+/// without rasterizing it.
+pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageGeometry {
+    app.state.workbench.activate(Workspace::Verify);
+    app.state.workbench.verification_page = page;
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut probes = Vec::new();
+    for _ in 0..3 {
+        let _ = take_probes(&ctx);
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(PAGE_WIDTH, PAGE_HEIGHT),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| super::show(ui, &mut app));
+            },
+        );
+        probes = take_probes(&ctx);
+    }
+    PageGeometry { probes }
+}
+
+fn attributed(analysis: AnalysisResult) -> AnalysisResult {
+    analysis.with_provenance(
+        crate::state::AnalysisResultProvenance::new(
+            AnalysisInstanceId::new(),
+            ObjectRevision::INITIAL,
+            ContentDigest::from_bytes([0x5a; 32]),
+            Vec::new(),
+        )
+        .expect("fixture provenance is internally valid"),
+    )
+}
+
+fn limit(measurement: &str, min: Option<f64>, max: Option<f64>, unit: &str) -> SpecEntry {
+    SpecEntry {
+        measurement: measurement.to_owned(),
+        expression: String::new(),
+        min,
+        max,
+        unit: unit.to_owned(),
+        scope: SpecPointScope::AllPoints,
+    }
+}
+
+/// An app whose one run, Run 3, holds `analysis` and is the run Verify reads.
+fn app_with_run(analysis: AnalysisResult) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let mut run = SimulationRun::new(3);
+    run.restore_lifecycle(SimulationRunLifecycle::Completed, 12.4)
+        .expect("a finite elapsed time");
+    run.add_analysis(attributed(analysis));
+    app.state.simulation.retained.runs = vec![run].into();
+    app.state.simulation.view.active_run_idx = Some(0);
+    app
+}
 
 /// Forty Monte Carlo samples of a 40 dB gain floor, three of them under it.
 pub(super) fn monte_carlo_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.content.specs.push(SpecEntry {
-        measurement: "gain".to_owned(),
-        expression: String::new(),
-        min: Some(40.0),
-        max: None,
-        unit: "dB".to_owned(),
-        scope: SpecPointScope::AllPoints,
-    });
+    set_limits(&mut app, vec![limit("gain", Some(40.0), None, "dB")]);
     let samples = (0..40)
         .map(|index| match index {
             7 => 39.2,
@@ -70,6 +311,288 @@ pub(super) fn monte_carlo_app() -> RSpiceApp {
     app
 }
 
+/// The corners of the corner fixture: process, supply, temperature.
+pub(super) const FIXTURE_CORNERS: [(&str, f64, f64); 7] = [
+    ("TT", 1.8, 27.0),
+    ("SS", 1.62, 125.0),
+    ("SS", 1.62, -40.0),
+    ("FF", 1.98, 125.0),
+    ("FF", 1.98, -40.0),
+    ("SF", 1.8, 27.0),
+    ("FS", 1.8, 27.0),
+];
+
+/// A seven-corner run of four limited outputs and two node voltages: gain
+/// fails at SS 125 °C, and phase margin and supply current sit near their
+/// limits at FF 125 °C.
+pub(super) fn corner_app() -> RSpiceApp {
+    let outputs: [(&str, [f64; 7]); 4] = [
+        ("gain", [42.3, 39.4, 42.6, 43.0, 44.2, 42.4, 42.9]),
+        (
+            "bw",
+            [18.2e6, 11.9e6, 14.0e6, 24.1e6, 26.5e6, 16.0e6, 17.1e6],
+        ),
+        ("pm", [62.0, 58.1, 60.4, 47.0, 52.3, 61.0, 63.2]),
+        (
+            "idd",
+            [
+                0.82e-3, 0.71e-3, 0.66e-3, 1.16e-3, 0.95e-3, 0.80e-3, 0.84e-3,
+            ],
+        ),
+    ];
+    let labels = FIXTURE_CORNERS
+        .iter()
+        .map(|(process, volts, celsius)| format!("{process}_{volts:.6}V_{celsius:.6}C"))
+        .collect::<Vec<_>>();
+    let members = labels
+        .iter()
+        .enumerate()
+        .map(|(index, label)| {
+            FamilyMemberMeasurements::new(
+                FamilyMemberId::Corner {
+                    index,
+                    label: label.clone(),
+                },
+                outputs
+                    .iter()
+                    .map(|(name, values)| FamilyMeasurementEvidence {
+                        unit: None,
+                        name: (*name).to_owned(),
+                        value: Some(values[index]),
+                        passed: true,
+                        error: None,
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    let axis = (0..FIXTURE_CORNERS.len())
+        .map(|index| index as f64)
+        .collect::<Vec<_>>();
+    let analysis = AnalysisResult::new(1, AnalysisType::Corner, "Corners")
+        .with_family_metadata(AnalysisResultFamilyMetadata::Corner {
+            x_values: axis.clone(),
+            x_label: "Corner Index".to_owned(),
+            x_unit: String::new(),
+            temperatures_c: FIXTURE_CORNERS.iter().map(|corner| corner.2).collect(),
+            corner_labels: labels,
+            failed_corners: 0,
+            member_measurements: members,
+        })
+        .with_waveforms(vec![
+            WaveformData::new(
+                "V(out)",
+                axis.clone(),
+                vec![0.912, 0.884, 0.901, 0.934, 0.951, 0.903, 0.915],
+                "#4c9be8",
+            ),
+            WaveformData::new(
+                "V(bias)",
+                axis,
+                vec![0.612, 0.655, 0.641, 0.578, 0.590, 0.620, 0.606],
+                "#d0a03c",
+            ),
+        ]);
+    let mut app = app_with_run(analysis);
+    set_limits(
+        &mut app,
+        vec![
+            limit("gain", Some(40.0), None, "dB"),
+            limit("bw", Some(10.0e6), None, "Hz"),
+            limit("pm", Some(45.0), None, "deg"),
+            limit("idd", None, Some(1.2e-3), "A"),
+        ],
+    );
+    app
+}
+
+/// Make `specs` the limits the active plan judges its outputs by.
+fn set_limits(app: &mut RSpiceApp, specs: Vec<SpecEntry>) {
+    match app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .ok()
+        .map(|plan| plan.id())
+    {
+        Some(plan_id) => app
+            .state
+            .workspace
+            .content
+            .replace_active_specs(plan_id, specs),
+        None => app.state.workspace.content.specs = specs,
+    }
+}
+
+/// An SOA run of five checks on four devices: two violations, one check near
+/// its limit, two clean.
+pub(super) fn soa_app() -> RSpiceApp {
+    use crate::state::{
+        SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence, SoaViolationEvidence,
+        SoaViolationSeverityEvidence,
+    };
+
+    const SAMPLES: usize = 64;
+    let time: Vec<f64> = (0..SAMPLES).map(|index| index as f64 * 1.0e-9).collect();
+    let checks = [
+        (
+            "M1",
+            SoaParameterEvidence::GateSourceVoltage,
+            1.98,
+            1.20,
+            "V",
+        ),
+        (
+            "M1",
+            SoaParameterEvidence::DrainSourceVoltage,
+            3.3,
+            3.52,
+            "V",
+        ),
+        (
+            "M2",
+            SoaParameterEvidence::DrainSourceVoltage,
+            3.3,
+            3.08,
+            "V",
+        ),
+        (
+            "M3",
+            SoaParameterEvidence::DrainSourceVoltage,
+            3.3,
+            3.61,
+            "V",
+        ),
+        (
+            "M4",
+            SoaParameterEvidence::DrainCurrent,
+            10.0e-3,
+            4.1e-3,
+            "A",
+        ),
+    ];
+    let mut waveforms = Vec::new();
+    let mut evaluations = Vec::new();
+    let mut violations = Vec::new();
+    for (device, parameter, limit_value, worst, unit) in checks {
+        let verdict = match crate::results::safety::SoaThresholds::default()
+            .verdict(worst, limit_value)
+        {
+            crate::results::safety::SoARuleVerdict::Pass => SoaRuleVerdictEvidence::Pass,
+            crate::results::safety::SoARuleVerdict::Warning => SoaRuleVerdictEvidence::Warning,
+            crate::results::safety::SoARuleVerdict::Violation => SoaRuleVerdictEvidence::Violation,
+            crate::results::safety::SoARuleVerdict::Critical => SoaRuleVerdictEvidence::Critical,
+        };
+        let worst_time_s = time[SAMPLES - 1];
+        waveforms.push(
+            WaveformData::new(
+                crate::results::safety::soa_stress_waveform_name(
+                    device,
+                    parameter.runtime_parameter(),
+                ),
+                time.clone(),
+                (0..SAMPLES)
+                    .map(|index| worst * (index as f64 + 1.0) / SAMPLES as f64)
+                    .collect::<Vec<_>>(),
+                "#00aaff",
+            )
+            .with_unit(unit),
+        );
+        evaluations.push(SoaEvaluationEvidence {
+            duration: None,
+            thresholds: Default::default(),
+            envelope: None,
+            derating: None,
+            device_id: device.to_owned(),
+            parameter,
+            limit_value,
+            worst_actual_value: worst,
+            worst_time_s,
+            sample_count: SAMPLES as u64,
+            unit: unit.to_owned(),
+            description: format!(
+                "{device} {}",
+                super::safety::soa_parameter_display(parameter)
+            ),
+            verdict,
+        });
+        let severity = match verdict {
+            SoaRuleVerdictEvidence::Pass => None,
+            SoaRuleVerdictEvidence::Warning => Some(SoaViolationSeverityEvidence::Warning),
+            SoaRuleVerdictEvidence::Violation => Some(SoaViolationSeverityEvidence::Violation),
+            SoaRuleVerdictEvidence::Critical => Some(SoaViolationSeverityEvidence::Critical),
+        };
+        if let Some(severity) = severity {
+            violations.push(SoaViolationEvidence {
+                device_id: device.to_owned(),
+                parameter,
+                limit_value,
+                actual_value: worst,
+                time_s: worst_time_s,
+                severity,
+            });
+        }
+    }
+    app_with_run(
+        AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+            .with_family_metadata(AnalysisResultFamilyMetadata::Soa { time })
+            .with_waveforms(waveforms)
+            .with_result_payload(crate::state::AnalysisResultPayload::Soa {
+                source_history: None,
+                evaluations,
+                violations,
+            }),
+    )
+}
+
+/// Twenty-four optimizer iterations over two variables, converged.
+pub(super) fn optimization_app() -> RSpiceApp {
+    let iterations = (0..24).map(f64::from).collect::<Vec<_>>();
+    let cost = iterations
+        .iter()
+        .map(|step| 0.8 * (-step / 5.0).exp() + 0.012)
+        .collect::<Vec<_>>();
+    let width = iterations
+        .iter()
+        .map(|step| 2.0e-6 + 1.6e-6 * (1.0 - (-step / 6.0).exp()))
+        .collect::<Vec<_>>();
+    let bias = iterations
+        .iter()
+        .map(|step| 40.0e-6 - 12.0e-6 * (1.0 - (-step / 4.0).exp()))
+        .collect::<Vec<_>>();
+    let best_cost = cost.iter().copied().fold(f64::INFINITY, f64::min);
+    app_with_run(
+        AnalysisResult::new(1, AnalysisType::Optimization, "Optimization")
+            .with_waveforms(vec![
+                WaveformData::new("OPT_COST", iterations.clone(), cost, "#4c9be8"),
+                WaveformData::new("OPT_W1", iterations.clone(), width.clone(), "#d0a03c"),
+                WaveformData::new("OPT_IBIAS", iterations.clone(), bias.clone(), "#8bc34a"),
+            ])
+            .with_family_metadata(AnalysisResultFamilyMetadata::Optimization {
+                iterations,
+                best_cost,
+                best_variables: [("W1".to_owned(), width[23]), ("IBIAS".to_owned(), bias[23])]
+                    .into_iter()
+                    .collect(),
+                best_objectives: Vec::new(),
+                best_constraints: Vec::new(),
+                converged: true,
+            }),
+    )
+}
+
+/// The fixture that seeds one page with real evidence.
+fn seeded(page: VerificationPage) -> RSpiceApp {
+    match page {
+        VerificationPage::Corners => corner_app(),
+        VerificationPage::DeviceSafety => soa_app(),
+        VerificationPage::Optimization => optimization_app(),
+        VerificationPage::Yield | VerificationPage::Tuning | VerificationPage::Regression => {
+            monte_carlo_app()
+        }
+    }
+}
+
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
 fn render_every_verify_page() {
@@ -81,10 +604,16 @@ fn render_every_verify_page() {
     let stderr = std::io::stderr();
     let mut report = stderr.lock();
     for page in VerificationPage::NAVIGATION {
-        for (state, fixture) in [
-            ("empty", RSpiceApp::test_instance as fn() -> RSpiceApp),
-            ("mc", monte_carlo_app),
-        ] {
+        for state in ["empty", "seeded"] {
+            let fixture = || {
+                if state == "seeded" {
+                    seeded(page)
+                } else {
+                    RSpiceApp::test_instance()
+                }
+            };
+            let name = format!("verify-{page:?}-{state}").to_lowercase();
+            let geometry = page_geometry(fixture(), page);
             let mut app = fixture();
             app.state.workbench.activate(Workspace::Verify);
             app.state.workbench.verification_page = page;
@@ -95,8 +624,13 @@ fn render_every_verify_page() {
                         .show(ui, |ui| super::show(ui, &mut app));
                 });
             let height = canvas.content_height().max(1);
-            let path = directory.join(format!("verify-{page:?}-{state}.png").to_lowercase());
+            let path = directory.join(format!("{name}.png"));
             std::fs::write(&path, canvas.png(height)).expect("write page render");
+            std::fs::write(
+                directory.join(format!("{name}.txt")),
+                geometry.report(&name, PAGE_WIDTH),
+            )
+            .expect("write page geometry");
             writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
                 .expect("write raster report");
         }

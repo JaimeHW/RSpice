@@ -389,22 +389,15 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
     render_data_table(ui, "verify-regression-checks", &headers, &rows, None);
     drop(waveforms);
     if remove_orphans_requested {
-        app.state.workbench.verification.action_receipt = match remove_orphaned_regression_rules(
-            app,
-            &orphan_targets,
-        ) {
-            Ok(removed) => format!(
-                "Removed {removed} orphaned regression tolerance rule(s). Configure replacement targets before the next governed comparison."
-            ),
-            Err(error) => format!("Orphaned tolerance removal blocked: {error}."),
-        };
+        let result = remove_orphaned_regression_rules(app, &orphan_targets).map(|_| ());
+        record_action(&mut app.state.workbench.verification, result);
     }
     if export_requested && let Some(documents) = export_documents {
         match documents {
             Ok((junit, tap)) => export_regression_ci(app, &junit, &tap),
             Err(error) => {
-                app.state.workbench.verification.action_receipt =
-                    format!("Golden Regression CI export blocked: {error}.");
+                app.state.workbench.verification.action_problem =
+                    Some(format!("JUnit / TAP export failed: {error}."));
             }
         }
     }
@@ -414,7 +407,6 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         app.state.workbench.verification.regression_tolerance_drafts =
             regression_session.regression_tolerance_drafts;
     }
-    action_receipt(ui, app);
 }
 
 /// A regression check's verdict cell: a failure in the error colour, a pass
