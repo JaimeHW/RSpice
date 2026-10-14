@@ -714,7 +714,7 @@ patch1268	vlg	passed	L1	pass	PASSED
 pca1	vlg	passed	L1	refused:assign	Parse error: Verilog-AMS digital construct not yet supported: `assign`
 pic	vlg	gold	L5	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `piccpu_inst.d` is not a continuous net, branch, parameter or analog function
 port-test2	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found Comma
-port-test3	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `data`, which module `CPU` declares both a `inout` port and a `reg`; IEEE 1364-2005 section 12.3.3 le...
+port-test3	vlg	ce	L1	pass	language error: Semantic error: Port 'data' is declared both `inout` and `reg`; IEEE 1364-2005 section 12.3.3 lets only an output port be a variable
 port-test4a	vlg	ce	L1	pass	language error: Parse error: Expected port name, found RParen
 port-test4b	vlg	ce	L1	pass	language error: Parse error: Expected port name, found RParen
 port-test5	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (2 output lines)
