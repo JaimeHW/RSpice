@@ -729,7 +729,7 @@ impl Command {
             Self::GenerateNetlist => {
                 spec("generated-netlist", "Open generated netlist", "Simulate")
             }
-            Self::FindCodeDocument => spec("find-code", "Find in Code document…", "Code"),
+            Self::FindCodeDocument => spec("find-code", "Find in source…", "Code"),
             Self::ValidateCodeDocument => {
                 spec("validate-code", "Validate active Code document", "Code")
             }
