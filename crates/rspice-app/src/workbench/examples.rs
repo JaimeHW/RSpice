@@ -334,16 +334,19 @@ fn build_cmos_inverter(state: &mut SchematicState) {
     id += 1;
     state.document_mut_for_test().components.push(mn);
 
-    // Supply — vertical at R0: + (360,60), − (360,100).
+    // Supply — vertical at R0: + (360,60), − (360,100). The foundation cards
+    // threshold at ±1 V, so the rail sits well above |Vtn| + |Vtp|: at 1.8 V
+    // both transistors would be off around mid-rail and the output would float
+    // through every transition.
     let vdd = Component::new(id, ComponentType::VoltageSource, Point::new(360, 80))
-        .with_name_value("VDD", "1.8");
+        .with_name_value("VDD", "3.3");
     id += 1;
     state.document_mut_for_test().components.push(vdd);
 
     // Input pulse — vertical at R0: + (120,220), − (120,260).
     let mut vin = Component::new(id, ComponentType::VoltageSourcePulse, Point::new(120, 240))
         .with_name_value("VIN", "0");
-    vin.params = "v2=1.8 td=0 tr=1n tf=1n pw=5n per=10n".to_owned();
+    vin.params = "v2=3.3 td=0 tr=1n tf=1n pw=5n per=10n".to_owned();
     id += 1;
     state.document_mut_for_test().components.push(vin);
 
