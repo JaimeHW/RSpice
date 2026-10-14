@@ -6,62 +6,68 @@
 //! permission manifest were authored by the workspace and then unreachable,
 //! because only the bundle root was ever opened.
 //!
-//! Rows state the role the bundle records, never a guess from the filename.
-//! A starter name is not identity — `characterize.py` is the Python entry
-//! because the bundle says so, not because of its extension.
+//! Rows state the role the bundle records, never a guess from the filename,
+//! and only a role other than ordinary source: a label every row wears tells
+//! the reader nothing. A starter name is not identity — `characterize.py` is
+//! the Python entry because the bundle says so, not because of its extension.
+//!
+//! Below the files, the Verilog-A rail states what the file in front of the
+//! reader includes and where each include resolved, and what it declares.
 
 use super::*;
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
+use crate::workbench::app_state::AppState;
+use crate::workbench::design_system::{Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, SourceOutlineRow, VerilogAFileSelection, document_navigation,
+    self, CodeSourceFileAction, SourceIncludeTarget, SourceNavigation, SourceOutlineGroup,
+    VerilogAFileSelection, VerilogAHeaderView, document_navigation,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// The rail of a Verilog-A cell view's bundle, with its file operations.
 pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::VerilogA;
-    let active = active_path(app, language);
-    let files = bundle_rows(app, language);
-    // A Verilog-A bundle is module source plus the policy that builds it, and
-    // the two read differently enough to earn separate sections.
-    let (build, sources): (Vec<_>, Vec<_>) = files
-        .into_iter()
-        .partition(|row| row.role == Some(ProjectSourceRole::VerilogABuildProfile));
-    let actions = active_bundle(app, language).map(|bundle| FileActions {
+    let actions = active_bundle(&app.state, language).map(|bundle| FileActions {
         bundle_id: bundle.id(),
         root: bundle.root().logical_path().to_owned(),
         writable: !app.state.active_view_read_only()
             && code_workspace::source_file_mutation_block_reason(app, language).is_none(),
     });
-
-    show_rail(
-        ui,
-        app,
-        "workbench.veriloga.navigator",
-        &[
-            (MessageId::CodeNavigatorProjectSources, sources),
-            (MessageId::CodeNavigatorIncludesAndBuild, build),
-        ],
-        active,
+    let rail = Rail {
+        id_salt: "workbench.veriloga.navigator",
+        // One list: the build profile is a file of the bundle like any
+        // other, and its row says what it is.
+        files_title: MessageId::CodeNavigatorFiles,
+        files: bundle_rows(&app.state, language),
+        active: active_path(&app.state, language),
         language,
         actions,
-    );
+    };
+    show_rail(ui, app, rail);
 }
 
 pub(super) fn automation(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::RSpiceAutomation;
-    let active = active_path(app, language);
-    let files = bundle_rows(app, language);
-    show_rail(
-        ui,
-        app,
-        "workbench.automation.navigator",
-        &[(MessageId::CodeNavigatorWorkflowFiles, files)],
-        active,
+    let rail = Rail {
+        id_salt: "workbench.automation.navigator",
+        files_title: MessageId::CodeNavigatorWorkflowFiles,
+        files: bundle_rows(&app.state, language),
+        active: active_path(&app.state, language),
         language,
-        None,
-    );
+        actions: None,
+    };
+    show_rail(ui, app, rail);
+}
+
+/// Everything one rail lists, gathered before it paints.
+struct Rail {
+    id_salt: &'static str,
+    files_title: MessageId,
+    files: Vec<BundleRow>,
+    active: Option<String>,
+    language: ProjectSourceLanguage,
+    actions: Option<FileActions>,
 }
 
 /// New, rename and delete for a bundle's files, offered by the rail that
@@ -208,8 +214,8 @@ struct BundleRow {
     role: Option<ProjectSourceRole>,
 }
 
-fn bundle_rows(app: &RSpiceApp, language: ProjectSourceLanguage) -> Vec<BundleRow> {
-    let Some(bundle) = active_bundle(app, language) else {
+fn bundle_rows(state: &AppState, language: ProjectSourceLanguage) -> Vec<BundleRow> {
+    let Some(bundle) = active_bundle(state, language) else {
         return Vec::new();
     };
     let root = bundle.root();
@@ -240,195 +246,406 @@ fn leaf_name(logical_path: &str) -> String {
         .to_owned()
 }
 
-/// What the bundle records this file as.
+/// What the bundle records this file as, when that is something other than
+/// ordinary source.
 ///
 /// `ProjectSourceRole::label` prefixes the language, which is noise in a rail
 /// already scoped to it, so the rail states the short form. The match is
 /// exhaustive on purpose: a new role has to be given a name here rather than
 /// silently reading as ordinary source.
-const fn role_message(role: Option<ProjectSourceRole>) -> MessageId {
+const fn role_message(role: Option<ProjectSourceRole>) -> Option<MessageId> {
     match role {
-        Some(ProjectSourceRole::VerilogABuildProfile) => MessageId::CodeNavigatorRoleBuildProfile,
-        Some(ProjectSourceRole::AutomationEntry) => MessageId::CodeNavigatorRoleEntry,
-        Some(ProjectSourceRole::AutomationRunPlan) => MessageId::CodeNavigatorRoleRunPlan,
+        Some(ProjectSourceRole::VerilogABuildProfile) => {
+            Some(MessageId::CodeNavigatorRoleBuildProfile)
+        }
+        Some(ProjectSourceRole::AutomationEntry) => Some(MessageId::CodeNavigatorRoleEntry),
+        Some(ProjectSourceRole::AutomationRunPlan) => Some(MessageId::CodeNavigatorRoleRunPlan),
         Some(ProjectSourceRole::AutomationEnvironmentLock) => {
-            MessageId::CodeNavigatorRoleEnvironmentLock
+            Some(MessageId::CodeNavigatorRoleEnvironmentLock)
         }
         Some(ProjectSourceRole::AutomationPermissionManifest) => {
-            MessageId::CodeNavigatorRolePermissions
+            Some(MessageId::CodeNavigatorRolePermissions)
         }
-        None => MessageId::CodeNavigatorRoleSource,
+        None => None,
     }
 }
 
 /// The bundle this rail lists: the one every editor host and command resolves,
 /// so the rail can never offer the files of a bundle the editor is not showing.
 fn active_bundle(
-    app: &RSpiceApp,
+    state: &AppState,
     language: ProjectSourceLanguage,
 ) -> Option<&crate::state::ProjectSourceBundle> {
-    crate::workbench::documents::code_workspace::active_source_bundle(
-        &app.state.workspace,
-        language,
-    )
+    code_workspace::active_source_bundle(&state.workspace, language)
 }
 
-fn active_path(app: &RSpiceApp, language: ProjectSourceLanguage) -> Option<String> {
-    crate::workbench::documents::code_workspace::active_bundle_path(
-        &app.state.workspace,
-        &app.state.ui.code_workspace,
-        language,
-    )
+fn active_path(state: &AppState, language: ProjectSourceLanguage) -> Option<String> {
+    code_workspace::active_bundle_path(&state.workspace, &state.ui.code_workspace, language)
 }
 
-fn select(app: &mut RSpiceApp, language: ProjectSourceLanguage, logical_path: &str) {
-    let Some(bundle_id) = active_bundle(app, language).map(crate::state::ProjectSourceBundle::id)
+/// Choose `logical_path` of the bundle in front of the reader. A built-in
+/// header open in the editor gives way to it: choosing a file is choosing to
+/// edit.
+fn select(state: &mut AppState, language: ProjectSourceLanguage, logical_path: &str) {
+    let Some(bundle_id) = active_bundle(state, language).map(crate::state::ProjectSourceBundle::id)
     else {
         return;
     };
     match language {
         ProjectSourceLanguage::VerilogA => {
-            app.state.ui.code_workspace.veriloga.selected_file = Some(VerilogAFileSelection {
+            let veriloga = &mut state.ui.code_workspace.veriloga;
+            veriloga.viewed_header = None;
+            veriloga.selected_file = Some(VerilogAFileSelection {
                 bundle_id,
                 logical_path: logical_path.to_owned(),
             });
         }
         ProjectSourceLanguage::RSpiceAutomation => {
-            app.state.ui.code_workspace.automation.selected_file = Some(logical_path.to_owned());
+            state.ui.code_workspace.automation.selected_file = Some(logical_path.to_owned());
         }
     }
 }
 
-fn show_rail(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    id_salt: &str,
-    sections: &[(MessageId, Vec<BundleRow>)],
-    active: Option<String>,
-    language: ProjectSourceLanguage,
-    actions: Option<FileActions>,
-) {
+/// What a click in the rail asked for, applied once the rows are painted.
+enum RailRequest {
+    Select(String),
+    FileAction(CodeSourceFileAction, String),
+    /// Edit `path` with its caret on `line`.
+    Reveal {
+        path: String,
+        line: usize,
+    },
+    /// Read a built-in header in the editor well.
+    ViewHeader(&'static str),
+}
+
+fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
     let messages = app.state.ui.messages();
-    let mut selected = None;
-    let mut requested_line = None;
-    let mut requested_action = None;
-    let outline = match (
-        active.as_deref(),
-        crate::workbench::documents::code_workspace::active_source_bundle(
-            &app.state.workspace,
-            language,
+    let language = rail.language;
+    let bundle = code_workspace::active_source_bundle(&app.state.workspace, language);
+    let bundle_id = bundle.map(crate::state::ProjectSourceBundle::id);
+    let navigation = match (rail.active.as_deref(), bundle) {
+        (Some(path), Some(bundle)) => document_navigation(
+            app.state.workspace.content.project.id(),
+            bundle,
+            &mut app.state.ui.code_workspace.source_index_cache,
+            path,
         ),
-    ) {
-        (Some(path), Some(bundle)) => {
-            document_navigation(
-                app.state.workspace.content.project.id(),
-                bundle,
-                &mut app.state.ui.code_workspace.source_index_cache,
+        _ => SourceNavigation::default(),
+    };
+    let header = bundle_id
+        .zip(rail.active.as_deref())
+        .and_then(|(bundle_id, path)| {
+            code_workspace::viewed_veriloga_header(
+                &app.state.ui.code_workspace.veriloga,
+                bundle_id,
                 path,
             )
-            .outline
-        }
-        _ => Vec::new(),
-    };
+        })
+        .map(|(identity, _)| identity);
+    let mut request = None;
 
     ScrollArea::vertical()
-        .id_salt(id_salt)
+        .id_salt(rail.id_salt)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let mut any_file = false;
-            for (index, (title, rows)) in sections.iter().enumerate() {
-                if rows.is_empty() {
-                    continue;
-                }
-                any_file = true;
-                // The file operations sit in the first section's header: the
-                // sources are what they create, rename and delete.
-                let header_actions = actions.as_ref().filter(|_| index == 0);
-                let top = ui.cursor().top();
-                section_header(
-                    ui,
-                    &messages.text(*title),
-                    header_actions
-                        .is_none()
-                        .then(|| rows.len().to_string())
-                        .as_deref(),
-                );
-                if let (Some(file_actions), Some(path)) = (header_actions, active.as_deref()) {
-                    let header = egui::Rect::from_x_y_ranges(
-                        ui.max_rect().x_range(),
-                        top..=ui.cursor().top(),
-                    );
-                    if let Some(action) =
-                        header_file_actions(ui, header, file_actions, path, messages)
-                    {
-                        requested_action = Some((action, path.to_owned()));
-                    }
-                }
-                for row in rows {
-                    let is_active = active.as_deref() == Some(row.logical_path.as_str());
-                    let response = nav_row_response(
-                        ui,
-                        source_row_icon(row.role),
-                        &row.label,
-                        is_active,
-                        Some(&messages.text(role_message(row.role))),
-                    );
-                    if response.clicked() {
-                        selected = Some(row.logical_path.clone());
-                    }
-                    if let Some(file_actions) = actions.as_ref()
-                        && let Some(action) =
-                            row_file_actions(&response, file_actions, &row.logical_path, messages)
-                    {
-                        requested_action = Some((action, row.logical_path.clone()));
-                    }
-                }
-            }
-            if !any_file {
+            if rail.files.is_empty() {
                 muted(ui, &messages.text(MessageId::CodeNavigatorNoBundle));
                 return;
             }
-
-            let Some(active) = active.as_deref() else {
+            files_section(ui, &rail, header, messages, &mut request);
+            let Some(active) = rail.active.as_deref() else {
                 return;
             };
-            section_header(
-                ui,
-                &messages.format(
-                    MessageId::CodeNavigatorFileOutline,
-                    &[("document", &leaf_name(active))],
-                ),
-                Some(&outline.len().to_string()),
-            );
-            if outline.is_empty() {
-                muted(ui, &messages.text(MessageId::CodeNavigatorNoIndexedSymbol));
-                return;
+            if language == ProjectSourceLanguage::VerilogA {
+                includes_section(ui, &navigation, header, messages, &mut request);
             }
-            for row in &outline {
-                if outline_row(ui, row, messages) {
-                    requested_line = Some(row.line);
-                }
-            }
+            outline_section(ui, &navigation, active, messages, &mut request);
         });
 
-    if let Some(logical_path) = selected {
-        select(app, language, &logical_path);
+    match request {
+        None => {}
+        Some(RailRequest::Select(path)) => select(&mut app.state, language, &path),
+        Some(RailRequest::FileAction(action, path)) => {
+            if let Some(file_actions) = rail.actions.as_ref() {
+                open_file_action(app, language, file_actions.bundle_id, action, &path);
+            }
+        }
+        Some(RailRequest::Reveal { path, line }) => {
+            select(&mut app.state, language, &path);
+            if let Some(bundle_id) = bundle_id {
+                // The shared code editor consumes this on its next frame,
+                // which is the frame it shows `path` in.
+                crate::workbench::documents::text_editor_commands::queue_reveal_line(
+                    ui.ctx(),
+                    code_workspace::source_editor_id(language, bundle_id, &path),
+                    line,
+                );
+            }
+        }
+        Some(RailRequest::ViewHeader(identity)) => {
+            if let (Some(bundle_id), Some(over)) = (bundle_id, rail.active) {
+                app.state.ui.code_workspace.veriloga.viewed_header = Some(VerilogAHeaderView {
+                    bundle_id,
+                    over,
+                    identity,
+                });
+            }
+        }
     }
-    if let (Some((action, path)), Some(file_actions)) = (requested_action, actions.as_ref()) {
-        open_file_action(app, language, file_actions.bundle_id, action, &path);
+}
+
+/// The bundle's files, with the file operations in the section's header: the
+/// files are what they create, rename and delete.
+fn files_section(
+    ui: &mut Ui,
+    rail: &Rail,
+    header: Option<&'static str>,
+    messages: MessageCatalog,
+    request: &mut Option<RailRequest>,
+) {
+    let top = ui.cursor().top();
+    section_header(
+        ui,
+        &messages.text(rail.files_title),
+        rail.actions
+            .is_none()
+            .then(|| rail.files.len().to_string())
+            .as_deref(),
+    );
+    if let (Some(file_actions), Some(path)) = (rail.actions.as_ref(), rail.active.as_deref()) {
+        let band = egui::Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top());
+        if let Some(action) = header_file_actions(ui, band, file_actions, path, messages) {
+            *request = Some(RailRequest::FileAction(action, path.to_owned()));
+        }
     }
-    if let Some(line) = requested_line
-        && let Some(active) = active.as_deref()
-        && let Some(editor_id) = code_editor_id(app, language, active)
-    {
-        // The shared code editor already consumes this; it simply had no
-        // producer, which is why no outline could scroll a document.
-        crate::workbench::documents::text_editor_commands::queue_reveal_line(
-            ui.ctx(),
-            editor_id,
-            line,
+    for row in &rail.files {
+        // A header open in the editor is what the reader is looking at; no
+        // file row claims the editor then.
+        let is_active =
+            header.is_none() && rail.active.as_deref() == Some(row.logical_path.as_str());
+        let role = role_message(row.role).map(|role| messages.text(role));
+        let response = nav_row_response(
+            ui,
+            source_row_icon(row.role),
+            &row.label,
+            is_active,
+            role.as_deref(),
         );
+        if response.clicked() {
+            *request = Some(RailRequest::Select(row.logical_path.clone()));
+        }
+        if let Some(file_actions) = rail.actions.as_ref()
+            && let Some(action) =
+                row_file_actions(&response, file_actions, &row.logical_path, messages)
+        {
+            *request = Some(RailRequest::FileAction(action, row.logical_path.clone()));
+        }
+    }
+}
+
+/// Every include the file pulls in and where it resolved. A project file
+/// opens for editing, a built-in header opens read-only in the same well, and
+/// a name nothing holds is marked and takes the reader to its directive.
+fn includes_section(
+    ui: &mut Ui,
+    navigation: &SourceNavigation,
+    header: Option<&'static str>,
+    messages: MessageCatalog,
+    request: &mut Option<RailRequest>,
+) {
+    section_header(
+        ui,
+        &messages.text(MessageId::CodeNavigatorIncludes),
+        Some(&navigation.includes.len().to_string()),
+    );
+    for include in &navigation.includes {
+        match &include.target {
+            SourceIncludeTarget::Project(path) => {
+                let response =
+                    nav_row_response(ui, source_row_icon(None), &leaf_name(path), false, None)
+                        .on_hover_text(path);
+                if response.clicked() {
+                    *request = Some(RailRequest::Select(path.clone()));
+                }
+            }
+            SourceIncludeTarget::BuiltIn(identity) => {
+                let response = nav_row_response(
+                    ui,
+                    source_row_icon(None),
+                    &leaf_name(identity),
+                    header == Some(*identity),
+                    Some(&messages.text(MessageId::CodeNavigatorIncludeBuiltIn)),
+                )
+                .on_hover_text(*identity);
+                if response.clicked() {
+                    *request = Some(RailRequest::ViewHeader(identity));
+                }
+            }
+            SourceIncludeTarget::Missing { including, line } => {
+                let response =
+                    nav_row_response(ui, source_row_icon(None), &include.requested, false, None);
+                // The mark carries the severity at the row's trailing edge,
+                // where the other rows state where their include resolved;
+                // the name beside it stays neutral.
+                let rect = response.rect;
+                paint_problem_mark(
+                    ui.painter(),
+                    egui::Rect::from_center_size(
+                        egui::pos2(rect.right() - rect.height() * 0.5, rect.center().y),
+                        Vec2::splat(rect.height() * 0.4),
+                    ),
+                    Problem::Failure,
+                );
+                let announced = Problem::Failure.announce(&include.requested);
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::SelectableLabel,
+                        ui.is_enabled(),
+                        &announced,
+                    )
+                });
+                let response =
+                    response.on_hover_text(messages.text(MessageId::CodeNavigatorIncludeNotFound));
+                if response.clicked() {
+                    *request = Some(RailRequest::Reveal {
+                        path: including.clone(),
+                        line: *line,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// What the file declares, a row per name, grouped by kind under a caption.
+fn outline_section(
+    ui: &mut Ui,
+    navigation: &SourceNavigation,
+    active: &str,
+    messages: MessageCatalog,
+    request: &mut Option<RailRequest>,
+) {
+    section_header(
+        ui,
+        &messages.text(MessageId::CodeNavigatorOutline),
+        Some(&navigation.outline.len().to_string()),
+    );
+    let mut group = None;
+    for row in &navigation.outline {
+        if row.group != group {
+            if let Some(next) = row.group {
+                group_caption(ui, &messages.text(outline_group_title(next)));
+            }
+            group = row.group;
+        }
+        let clicked = match row.group {
+            Some(kind) => {
+                // The name is the row's identity and reads whole; the detail
+                // takes what is left beside it and elides. A quarter of the
+                // row is the icon column and the gaps around the detail.
+                let name_width = ui
+                    .painter()
+                    .layout_no_wrap(
+                        row.name.clone(),
+                        theme::sans(tokens::FS_0, FontWeight::Regular),
+                        egui::Color32::PLACEHOLDER,
+                    )
+                    .size()
+                    .x;
+                let detail = elide_text(
+                    ui,
+                    &row.detail,
+                    &theme::mono(tokens::FS_0, FontWeight::Regular),
+                    ui.available_width() * 0.75 - name_width,
+                );
+                let response = nav_row_response(
+                    ui,
+                    outline_group_icon(kind),
+                    &row.name,
+                    false,
+                    (!detail.is_empty()).then_some(detail.as_str()),
+                );
+                let response = if detail == row.detail {
+                    response
+                } else {
+                    response.on_hover_text(&row.detail)
+                };
+                response.clicked()
+            }
+            // An Automation outline is a list of the lines that declare.
+            None => nav_row_response(
+                ui,
+                WorkbenchIcon::Code,
+                &if row.detail.is_empty() {
+                    row.name.clone()
+                } else {
+                    format!("{} {}", row.name, row.detail)
+                },
+                false,
+                None,
+            )
+            .clicked(),
+        };
+        if clicked {
+            *request = Some(RailRequest::Reveal {
+                path: active.to_owned(),
+                line: row.line,
+            });
+        }
+    }
+}
+
+/// A group's caption, taking exactly one row of the list.
+///
+/// The caption is the navigator's own label row, which reserves a minimum
+/// height of its own a point taller than a compact row. Laid into a band of
+/// the list's row height, it keeps the outline on the pitch of every other
+/// row in the rail instead of drifting a point per group; centred on the
+/// band at the height it measured last frame, its text sits on the line a
+/// row's text does.
+fn group_caption(ui: &mut Ui, text: &str) {
+    let band = egui::Rect::from_min_size(
+        ui.cursor().min,
+        Vec2::new(ui.available_width(), Tokens::get(ui.ctx()).metrics.row_h),
+    );
+    let measured = ui.id().with("group-caption-height");
+    let height = ui
+        .data(|data| data.get_temp::<f32>(measured))
+        .unwrap_or(band.height());
+    let mut caption = ui.new_child(
+        egui::UiBuilder::new().max_rect(egui::Rect::from_center_size(
+            band.center(),
+            Vec2::new(band.width(), height),
+        )),
+    );
+    empty_navigator_row(&mut caption, text);
+    let drawn = caption.min_rect().height();
+    ui.data_mut(|data| data.insert_temp(measured, drawn));
+    ui.advance_cursor_after_rect(band);
+}
+
+const fn outline_group_title(group: SourceOutlineGroup) -> MessageId {
+    match group {
+        SourceOutlineGroup::Module => MessageId::CodeNavigatorOutlineModule,
+        SourceOutlineGroup::Ports => MessageId::CodeNavigatorOutlinePorts,
+        SourceOutlineGroup::Parameters => MessageId::CodeNavigatorOutlineParameters,
+        SourceOutlineGroup::Variables => MessageId::CodeNavigatorOutlineVariables,
+        SourceOutlineGroup::Nets => MessageId::CodeNavigatorOutlineNets,
+        SourceOutlineGroup::Functions => MessageId::CodeNavigatorOutlineFunctions,
+    }
+}
+
+/// A kind's own glyph where the icon set has one that fits. Variables and
+/// functions have none, and share the code mark; their caption names them.
+const fn outline_group_icon(group: SourceOutlineGroup) -> WorkbenchIcon {
+    match group {
+        SourceOutlineGroup::Module => WorkbenchIcon::VerilogA,
+        SourceOutlineGroup::Ports => WorkbenchIcon::Pin,
+        SourceOutlineGroup::Parameters => WorkbenchIcon::Sliders,
+        SourceOutlineGroup::Nets => WorkbenchIcon::Wire,
+        SourceOutlineGroup::Variables | SourceOutlineGroup::Functions => WorkbenchIcon::Code,
     }
 }
 
@@ -446,86 +663,5 @@ fn source_row_icon(role: Option<ProjectSourceRole>) -> WorkbenchIcon {
     }
 }
 
-fn outline_row(ui: &mut Ui, row: &SourceOutlineRow, messages: MessageCatalog) -> bool {
-    let label = if row.detail.is_empty() {
-        row.name.clone()
-    } else {
-        format!("{} {}", row.name, row.detail)
-    };
-    nav_row_indented(
-        ui,
-        WorkbenchIcon::Code,
-        &label,
-        false,
-        Some(&messages.format(
-            MessageId::CodeNavigatorOutlineLine,
-            &[("line", &row.line.to_string())],
-        )),
-        1,
-    )
-}
-
-fn code_editor_id(
-    app: &RSpiceApp,
-    language: ProjectSourceLanguage,
-    active_path: &str,
-) -> Option<egui::Id> {
-    let bundle_id = active_bundle(app, language).map(crate::state::ProjectSourceBundle::id)?;
-    Some(
-        crate::workbench::documents::code_workspace::source_editor_id(
-            language,
-            bundle_id,
-            active_path,
-        ),
-    )
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The defect this rail exists for: `selected_file` had no UI writer, so
-    /// every file in a bundle except the root was unreachable. Assert the
-    /// bundle's whole file set is offered, and that choosing one is what
-    /// changes the selection.
-    #[test]
-    fn every_file_in_the_bundle_is_offered_and_selectable() {
-        let mut app = RSpiceApp::test_instance();
-        let language = ProjectSourceLanguage::RSpiceAutomation;
-        let rows = bundle_rows(&app, language);
-        assert!(
-            rows.len() > 1,
-            "an automation bundle carries an entry, a run plan, a lock, and a manifest"
-        );
-
-        let root = active_path(&app, language).expect("bundle root is the default document");
-        let other = rows
-            .iter()
-            .find(|row| row.logical_path != root)
-            .expect("a non-root file to select");
-        let target = other.logical_path.clone();
-
-        select(&mut app, language, &target);
-
-        assert_eq!(
-            active_path(&app, language).as_deref(),
-            Some(target.as_str())
-        );
-    }
-
-    /// A row states the role the bundle recorded. Nothing here is inferred
-    /// from the filename.
-    #[test]
-    fn rows_state_the_recorded_role_rather_than_guessing_from_the_name() {
-        let app = RSpiceApp::test_instance();
-        let messages = MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
-        let rows = bundle_rows(&app, ProjectSourceLanguage::RSpiceAutomation);
-        let roles = rows
-            .iter()
-            .map(|row| messages.text(role_message(row.role)))
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert!(roles.contains("run plan"), "roles were {roles:?}");
-        assert!(roles.contains("permissions"), "roles were {roles:?}");
-    }
-}
+mod tests;

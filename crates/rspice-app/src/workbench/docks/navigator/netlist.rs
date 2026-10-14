@@ -2264,17 +2264,6 @@ pub(super) fn nav_row_response(
     nav_row_indented_response(ui, icon, label, selected, meta, 0)
 }
 
-pub(super) fn nav_row_indented(
-    ui: &mut Ui,
-    icon: WorkbenchIcon,
-    label: &str,
-    selected: bool,
-    meta: Option<&str>,
-    level: usize,
-) -> bool {
-    nav_row_indented_response(ui, icon, label, selected, meta, level).clicked()
-}
-
 pub(super) fn nav_row_indented_response(
     ui: &mut Ui,
     icon: WorkbenchIcon,

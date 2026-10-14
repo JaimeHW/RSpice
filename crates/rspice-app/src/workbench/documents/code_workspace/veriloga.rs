@@ -625,6 +625,23 @@ pub(crate) fn active_veriloga_file_path(
         .unwrap_or_else(|| selected.document().logical_path().to_owned())
 }
 
+/// The built-in header the editor well shows in place of `active_path` of
+/// `bundle_id`, by its canonical identity and exact text, when one is open.
+pub(crate) fn viewed_veriloga_header(
+    state: &super::page::VerilogAWorkbenchState,
+    bundle_id: ProjectSourceId,
+    active_path: &str,
+) -> Option<(&'static str, &'static str)> {
+    state
+        .viewed_header
+        .as_ref()
+        .filter(|header| {
+            header.bundle_id == bundle_id
+                && crate::state::project_source_paths_equal(&header.over, active_path)
+        })
+        .and_then(|header| super::builtin_header(header.identity))
+}
+
 fn add_bundle_file(
     app: &mut RSpiceApp,
     bundle_id: ProjectSourceId,

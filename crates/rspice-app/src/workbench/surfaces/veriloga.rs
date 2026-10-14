@@ -44,18 +44,32 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
         };
         let active_path =
             crate::workbench::documents::code_workspace::active_veriloga_file_path(app, &selected);
-        let editor_language = if selected.bundle().role_for_path(&active_path)
-            == Some(crate::state::ProjectSourceRole::VerilogABuildProfile)
+        // A built-in header the navigator opened is read in this same well,
+        // in place of the file, and never edited.
+        let header = crate::workbench::documents::code_workspace::viewed_veriloga_header(
+            &app.state.ui.code_workspace.veriloga,
+            selected.bundle().id(),
+            &active_path,
+        );
+        let editor_language = if header.is_none()
+            && selected.bundle().role_for_path(&active_path)
+                == Some(crate::state::ProjectSourceRole::VerilogABuildProfile)
         {
             CodeEditorLanguage::Toml
         } else {
             CodeEditorLanguage::VerilogA
         };
-        let mut source = selected
-            .bundle()
-            .file_content(&active_path)
-            .unwrap_or_else(|| selected.document().content())
-            .to_owned();
+        let (shown_path, mut source) = match header {
+            Some((identity, text)) => (identity.to_owned(), text.to_owned()),
+            None => (
+                active_path.clone(),
+                selected
+                    .bundle()
+                    .file_content(&active_path)
+                    .unwrap_or_else(|| selected.document().content())
+                    .to_owned(),
+            ),
+        };
         let diagnostics = current_diagnostics(app, &selected);
         // The inspector dock states the module's facts, so the editor takes
         // the whole document well at every width. A second copy of them beside
@@ -70,10 +84,11 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
             &mut editor_ui,
             app,
             &selected,
-            &active_path,
+            &shown_path,
             &mut source,
             &diagnostics,
             editor_language,
+            header.is_none(),
         );
         ui.allocate_rect(available, Sense::hover());
     });
@@ -438,6 +453,9 @@ fn source_editor(
     source: &mut String,
     diagnostics: &CodeDiagnosticCollection,
     editor_language: CodeEditorLanguage,
+    // False for a built-in header: it is read here, and nothing that writes
+    // a file, searches the bundle, or records a place in it applies.
+    editable: bool,
 ) {
     let t = Tokens::get(ui.ctx());
     let editor_id = egui::Id::new((
@@ -519,13 +537,16 @@ fn source_editor(
     crate::workbench::documents::text_editor_commands::editor_command_menu(
         &mut menu_ui,
         editor_id,
-        true,
-        true,
-        true,
+        editable,
+        editable,
+        editable,
     );
     // Replacing the file from disk is this menu's explicit, confirmed
     // transaction; File > Import never does it.
-    if crate::workbench::documents::text_editor_commands::take_replace_source_request(ui, editor_id)
+    if editable
+        && crate::workbench::documents::text_editor_commands::take_replace_source_request(
+            ui, editor_id,
+        )
         && let Err(error) =
             crate::workbench::documents::code_workspace::request_veriloga_source_replacement(
                 app,
@@ -535,10 +556,13 @@ fn source_editor(
         app.state.push_user_message(ConsoleMessage::warning(error));
     }
     interface_strip(ui, &mut app.state, selected);
-    let search_input =
-        crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
-            ui, editor_id,
-        );
+    let search_input = editable
+        .then(|| {
+            crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
+                ui, editor_id,
+            )
+        })
+        .flatten();
     let preceding_input = search_input
         .as_ref()
         .map(|input| input.preceding_scope(ui.ctx()));
@@ -557,10 +581,10 @@ fn source_editor(
                 editor_language,
                 diagnostics,
                 Some(active_path),
-                true,
+                editable,
                 messages,
             );
-            if interaction.changed {
+            if editable && interaction.changed {
                 match crate::workbench::documents::code_workspace::replace_selected_veriloga_file(
                     app,
                     selected,
@@ -581,6 +605,9 @@ fn source_editor(
             interaction
         })
         .inner;
+    if !editable {
+        return;
+    }
     // Every request below names the bundle this editor is showing, never a
     // language-wide default: Find, Format and the language tools must act on
     // the cell view in front of the reader.

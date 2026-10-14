@@ -235,6 +235,9 @@ pub struct VerilogAWorkbenchState {
     pub replace_review: Option<VerilogAReplaceReview>,
     /// Selected source document in the model-project navigator.
     pub selected_file: Option<VerilogAFileSelection>,
+    /// A built-in standard header the editor well shows read-only in place of
+    /// the selected file. Choosing a file of the bundle returns to editing.
+    pub(crate) viewed_header: Option<VerilogAHeaderView>,
     pub pending: Option<PendingVerilogACompile>,
     pub receipt: Option<VerilogACompileReceipt>,
     pub last_failure: Arc<super::CodeDiagnosticCollection>,
@@ -297,6 +300,19 @@ pub struct VerilogAImportFormState {
 pub struct VerilogAFileSelection {
     pub bundle_id: crate::state::ProjectSourceId,
     pub logical_path: String,
+}
+
+/// A built-in header open read-only in the Verilog-A editor well.
+///
+/// It stands in for one file of one bundle: the file selected when it was
+/// opened. A different bundle in front of the reader, or a different file
+/// selected by anything, and the well shows that file again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct VerilogAHeaderView {
+    pub(crate) bundle_id: crate::state::ProjectSourceId,
+    pub(crate) over: String,
+    /// The header's canonical identity, `@rspice/stdlib/disciplines.vams`.
+    pub(crate) identity: &'static str,
 }
 
 #[derive(Debug, Clone, Default)]

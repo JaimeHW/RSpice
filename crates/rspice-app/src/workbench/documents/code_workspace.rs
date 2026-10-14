@@ -40,6 +40,7 @@ pub(crate) use language_services::{
     commit_language_code_action, commit_language_completion, commit_language_rename,
     open_language_tools, open_language_tools_in_bundle,
 };
+pub(crate) use page::VerilogAHeaderView;
 pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
     AutomationDispatchSnapshot, AutomationExceptionPolicy, AutomationExecutionState,
@@ -59,7 +60,10 @@ pub(crate) use source_files::{
     source_bundle_contains_document, source_bundle_document_is_editable,
     source_document_is_editable, source_file_mutation_block_reason,
 };
-pub(crate) use source_navigation::{SourceIndexCache, SourceOutlineRow, document_navigation};
+pub(crate) use source_navigation::{
+    SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,
+    document_navigation,
+};
 pub(crate) use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
     open_active_source_search, open_source_search, open_source_search_in_bundle,
@@ -72,7 +76,8 @@ pub(crate) use veriloga::{
     commit_veriloga_source_replacement, compile_project_bundle_receipt,
     compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_source,
     replace_selected_veriloga_file, request_veriloga_source_replacement,
-    selected_veriloga_editor_snapshot, selected_veriloga_source, writable_libraries,
+    selected_veriloga_editor_snapshot, selected_veriloga_source, viewed_veriloga_header,
+    writable_libraries,
 };
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
 pub(crate) use veriloga_inspector::{
