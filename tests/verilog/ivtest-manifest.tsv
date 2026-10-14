@@ -612,9 +612,9 @@ modparam	vlg	passed	L1	pass	testbench gap: no root selection (-s top); PASSED
 module3.12A	vlg	passed	L1	pass	testbench gap: no root selection (-s main); PASSED
 module3.12B	vlg	passed	L1	pass	PASSED
 module_inout_port_list_def	vlg	ce	L1	pass	language error: Parse error: Invalid port declaration
-module_inout_port_type	vlg	ce	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_inout_port_type	vlg	ce	L3	pass	language error: Parse error: Invalid port declaration
 module_input_port_list_def	vlg	ce	L4	pass	language error: Parse error: Invalid port declaration
-module_input_port_type	vlg	ce	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_input_port_type	vlg	ce	L3	pass	language error: Parse error: Invalid port declaration
 module_nonansi_fail1	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail10	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail11	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
@@ -640,8 +640,8 @@ module_nonansi_vec_fail1	vlg	ce	L1	fail	compiled without error; ran to quiescenc
 module_nonansi_vec_fail2	vlg	ce	L1	fail	compiled without error; ran to quiescence
 module_nonansi_vec_fail3	vlg	ce	L1	fail	compiled without error; ran to quiescence
 module_output_port_list_def	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
-module_output_port_var1	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
-module_output_port_var2	vlg	passed	L3	refused:time	Parse error: Verilog-AMS digital construct not yet supported: `time`
+module_output_port_var1	vlg	passed	L3	pass	PASSED
+module_output_port_var2	vlg	passed	L3	pass	PASSED
 module_port_range_mismatch	vlg	ce	L1	fail	compiled without error; ran to quiescence
 modulus	vlg	passed	L1	pass	PASSED
 modulus2	vlg	passed	L1	pass	PASSED
