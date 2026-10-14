@@ -188,15 +188,13 @@ fn parameters_section(
     let count = parameters
         .as_ref()
         .map(|parameters| parameters.len().to_string());
-    let (status, problem) = match count.as_deref() {
-        Some(count) => (count, None),
-        None => (required.as_str(), Some(Problem::Warning)),
-    };
+    // Not compiled yet is where the module is, not a fault in it.
+    let status = count.as_deref().unwrap_or(required.as_str());
     code_inspector_section(
         ui,
         &messages.text(MessageId::VerilogAParameters),
         Some(status),
-        problem,
+        None,
         |ui| match parameters.as_deref() {
             None => muted_row(ui, &messages.text(MessageId::VerilogAParametersNotCompiled)),
             Some([]) => muted_row(ui, &messages.text(MessageId::VerilogANoParameters)),
@@ -661,7 +659,7 @@ fn diagnostics_section(
             ui,
             &messages.text(MessageId::VerilogADiagnostics),
             Some(&messages.text(MessageId::VerilogACompileRequired)),
-            Some(Problem::Warning),
+            None,
             |ui| {
                 muted_row(
                     ui,

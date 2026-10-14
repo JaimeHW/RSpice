@@ -1036,8 +1036,9 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationExecutionPreview),
+        // A non-sign-off plan is a kind of plan, not a fault in one.
         Some(&preview_status),
-        (!preview.release_ready).then_some(Problem::Warning),
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -1139,10 +1140,12 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.ui.messages();
     let redacted = messages.text(MessageId::AutomationRedacted);
     let phase = app.state.ui.code_workspace.automation.debug.phase;
+    // Paused, running and stopped are where the session is, not something
+    // wrong with it; only a failed session is marked.
     let problem = match phase {
-        AutomationDebugPhase::Paused => Some(Problem::Warning),
         AutomationDebugPhase::Failed => Some(Problem::Failure),
-        AutomationDebugPhase::Running
+        AutomationDebugPhase::Paused
+        | AutomationDebugPhase::Running
         | AutomationDebugPhase::Inactive
         | AutomationDebugPhase::Stopped => None,
     };
