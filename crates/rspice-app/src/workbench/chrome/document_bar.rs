@@ -1,7 +1,8 @@
 //! Workspace-scoped document tabs. Stable project identities drive every tab;
 //! the shell never fabricates datasets, source files, or verification records.
 
-use egui::{Frame, Layout, Panel, Sense, Ui, Vec2};
+use egui::containers::menu::MenuButton;
+use egui::{Frame, Layout, Panel, Rect, Sense, Ui, Vec2};
 
 use crate::state::ViewType;
 use crate::ui::theme::{self, FontWeight};
@@ -14,12 +15,19 @@ use super::super::layout::LayoutSpec;
 use super::super::state::{Workspace, WorkspaceDocumentId};
 
 const TAB_MAX_WIDTH: f32 = 190.0;
+/// The narrowest a tab shrinks to before the strip scrolls instead: its icon,
+/// about eleven characters of its name, and its close button.
+const TAB_MIN_WIDTH: f32 = 140.0;
 const TAB_PADDING_X: f32 = 10.0;
 const TAB_ICON_SIZE: f32 = 16.0;
 const TAB_CONTENT_GAP: f32 = 7.0;
 const TAB_CLOSE_SIZE: f32 = 16.0;
 const TAB_DIRTY_SIZE: f32 = 6.0;
 const TAB_ACTIVE_EDGE: f32 = 2.0;
+const STRIP_FADE_WIDTH: f32 = 24.0;
+const HIDDEN_BUTTON_WIDTH: f32 = 40.0;
+/// Past this many hidden tabs, their menu offers a filter.
+const HIDDEN_MENU_FILTER_THRESHOLD: usize = 8;
 
 pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
@@ -41,39 +49,266 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let rect = ui.max_rect();
+            let height = layout.document_bar_height;
             ui.painter().hline(
                 rect.x_range(),
                 (rect.bottom() - 0.5).max(rect.top()),
                 egui::Stroke::new(1.0, t.color.border),
             );
+            let natural = documents
+                .iter()
+                .map(|document| {
+                    natural_tab_width(
+                        ui.painter(),
+                        &document.label,
+                        document.dirty,
+                        document_is_closable(&app.state, &document.id),
+                    )
+                })
+                .collect::<Vec<_>>();
+            let hidden_button_width = HIDDEN_BUTTON_WIDTH.max(t.metrics.ctl_h);
+            let fit = StripFit::resolve(&natural, rect.width(), hidden_button_width);
             ui.horizontal(|ui| {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(ui.available_width().max(1.0), layout.document_bar_height),
-                    Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        egui::ScrollArea::horizontal()
-                            .id_salt("workbench.document_tabs.scroll")
-                            .scroll_bar_visibility(
-                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                            )
-                            .show(ui, |ui| {
-                                let tabs = ui.horizontal(|ui| {
-                                    document_tabs(
-                                        ui,
-                                        &mut app.state,
-                                        &documents,
-                                        layout.document_bar_height,
-                                    );
-                                });
-                                ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
-                                    node.set_role(egui::accesskit::Role::TabList);
-                                    node.set_label("Open documents");
-                                });
-                            });
-                    },
-                );
+                let scroll = ui
+                    .allocate_ui_with_layout(
+                        Vec2::new(fit.tabs_width, height),
+                        Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            // The track, not the content: the button after it
+                            // must sit at the strip's right end.
+                            ui.set_min_width(fit.tabs_width);
+                            egui::ScrollArea::horizontal()
+                                .id_salt("workbench.document_tabs.scroll")
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                                )
+                                .show(ui, |ui| {
+                                    let tabs = ui.horizontal(|ui| {
+                                        document_tabs(
+                                            ui,
+                                            &mut app.state,
+                                            &documents,
+                                            height,
+                                            fit.cap,
+                                        )
+                                    });
+                                    ui.ctx().accesskit_node_builder(tabs.response.id, |node| {
+                                        node.set_role(egui::accesskit::Role::TabList);
+                                        node.set_label("Open documents");
+                                    });
+                                    tabs.inner
+                                })
+                        },
+                    )
+                    .inner;
+                paint_scroll_fades(ui, &scroll, t.color.bg_panel);
+                if fit.overflowing {
+                    let hidden = documents
+                        .iter()
+                        .zip(&scroll.inner)
+                        .filter(|(_, tab)| !in_view(scroll.inner_rect, **tab))
+                        .map(|(document, _)| document)
+                        .collect::<Vec<_>>();
+                    hidden_documents_button(
+                        ui,
+                        &mut app.state,
+                        &hidden,
+                        Vec2::new(hidden_button_width, height),
+                    );
+                }
             });
         });
+}
+
+/// How the strip's tabs share its width.
+///
+/// Tabs keep their own widths while they fit. Past that they shrink evenly,
+/// the narrow ones keeping theirs, down to [`TAB_MIN_WIDTH`]. Only past that
+/// does the strip scroll, and only then does it give up room for the button
+/// that lists the tabs scrolled out of view.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct StripFit {
+    /// The widest a tab may be, when the tabs do not fit at their own widths.
+    cap: Option<f32>,
+    /// The width the tabs scroll within.
+    tabs_width: f32,
+    /// Whether some tabs are out of view even at the narrowest a tab may be.
+    overflowing: bool,
+}
+
+impl StripFit {
+    fn resolve(natural: &[f32], strip_width: f32, hidden_button_width: f32) -> Self {
+        let narrowest: f32 = natural.iter().map(|width| width.min(TAB_MIN_WIDTH)).sum();
+        let overflowing = narrowest > strip_width + 0.5;
+        let tabs_width = if overflowing {
+            (strip_width - hidden_button_width).max(1.0)
+        } else {
+            strip_width
+        };
+        Self {
+            cap: shared_width_cap(natural, tabs_width),
+            tabs_width,
+            overflowing,
+        }
+    }
+}
+
+/// The widest a tab may be for the tabs to fill `available`, or `None` when
+/// they fit at their own widths. Tabs narrower than the cap keep their width,
+/// and the cap never goes below [`TAB_MIN_WIDTH`].
+fn shared_width_cap(natural: &[f32], available: f32) -> Option<f32> {
+    if natural.iter().sum::<f32>() <= available + 0.5 {
+        return None;
+    }
+    let mut widths = natural.to_vec();
+    widths.sort_by(f32::total_cmp);
+    let mut remaining = available;
+    for (index, width) in widths.iter().enumerate() {
+        let share = remaining / (widths.len() - index) as f32;
+        if *width > share {
+            return Some(share.max(TAB_MIN_WIDTH));
+        }
+        remaining -= width;
+    }
+    None
+}
+
+/// Fade the strip's ends where tabs carry on out of view, above the hairline.
+fn paint_scroll_fades(
+    ui: &Ui,
+    scroll: &egui::scroll_area::ScrollAreaOutput<Vec<Rect>>,
+    color: egui::Color32,
+) {
+    let band = scroll
+        .inner_rect
+        .with_max_y(scroll.inner_rect.bottom() - 1.0);
+    let before = scroll.state.offset.x;
+    let after = scroll.content_size.x - band.width() - before;
+    let width = STRIP_FADE_WIDTH.min(band.width() * 0.5);
+    if before > 0.5 {
+        let edge = Rect::from_min_size(band.left_top(), Vec2::new(width, band.height()));
+        paint_horizontal_fade(ui.painter(), edge, color, egui::Color32::TRANSPARENT);
+    }
+    if after > 0.5 {
+        let edge = Rect::from_min_max(egui::pos2(band.right() - width, band.top()), band.max);
+        paint_horizontal_fade(ui.painter(), edge, egui::Color32::TRANSPARENT, color);
+    }
+}
+
+fn paint_horizontal_fade(
+    painter: &egui::Painter,
+    rect: Rect,
+    left: egui::Color32,
+    right: egui::Color32,
+) {
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), left);
+    mesh.colored_vertex(rect.right_top(), right);
+    mesh.colored_vertex(rect.right_bottom(), right);
+    mesh.colored_vertex(rect.left_bottom(), left);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(mesh);
+}
+
+/// "+N" at the strip's right end while tabs are out of view; its menu lists
+/// those tabs and only those, and a choice opens the document, which scrolls
+/// its tab into view.
+fn hidden_documents_button(
+    ui: &mut Ui,
+    state: &mut AppState,
+    hidden: &[&WorkspaceDocument],
+    size: Vec2,
+) {
+    let t = Tokens::get(ui.ctx());
+    let active = active_document_id(state);
+    let description = match hidden.len() {
+        1 => "1 more open document".to_owned(),
+        count => format!("{count} more open documents"),
+    };
+    let filter_id = egui::Id::new("workbench.document_tabs.hidden_filter");
+    let mut chosen = None;
+    let response = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = Vec2::ZERO;
+            MenuButton::from_button(egui::Button::new("").frame(false).min_size(size))
+                .ui(ui, |ui| {
+                    ui.set_min_width(240.0);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let mut filter = String::new();
+                    if hidden.len() > HIDDEN_MENU_FILTER_THRESHOLD {
+                        filter = ui
+                            .data(|data| data.get_temp::<String>(filter_id))
+                            .unwrap_or_default();
+                        ui.add(
+                            egui::TextEdit::singleline(&mut filter)
+                                .hint_text("Filter")
+                                .desired_width(f32::INFINITY),
+                        );
+                        ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+                        ui.add_space(4.0);
+                    }
+                    let needle = filter.trim().to_lowercase();
+                    let row_height = if size.y >= 44.0 { 44.0 } else { 29.0 };
+                    for document in hidden
+                        .iter()
+                        .filter(|document| document.label.to_lowercase().contains(&needle))
+                    {
+                        let row = ui.add_sized(
+                            [ui.available_width(), row_height],
+                            egui::Button::selectable(
+                                active.as_ref() == Some(&document.id),
+                                &document.label,
+                            ),
+                        );
+                        if row.clicked() {
+                            chosen = Some(document.id.clone());
+                            ui.close();
+                        }
+                    }
+                })
+                .0
+        })
+        .inner;
+    if let Some(document) = chosen {
+        ui.data_mut(|data| data.remove::<String>(filter_id));
+        activate_document(state, &document);
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &description)
+    });
+    ui.painter().rect_filled(
+        response.rect,
+        0.0,
+        if response.hovered() {
+            t.color.bg_hover
+        } else {
+            t.color.bg_panel
+        },
+    );
+    ui.painter().vline(
+        response.rect.left(),
+        response.rect.y_range(),
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().hline(
+        response.rect.x_range(),
+        response.rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        response.rect.center(),
+        egui::Align2::CENTER_CENTER,
+        format!("+{}", hidden.len()),
+        theme::sans(tokens::FS_1, FontWeight::Medium),
+        if response.hovered() {
+            t.color.text
+        } else {
+            t.color.text_dim
+        },
+    );
+    theme::paint_focus_ring(ui, &response, response.rect);
+    response.on_hover_text(description);
 }
 
 pub(in crate::workbench) fn is_visible(app: &RSpiceApp) -> bool {
@@ -89,6 +324,17 @@ struct WorkspaceDocument {
     label: String,
     icon: WorkbenchIcon,
     dirty: bool,
+}
+
+impl WorkspaceDocument {
+    /// What the tab shows when it is too narrow for its label: a cell view's
+    /// cell alone, since the tab's icon already names the view.
+    fn short_label(&self) -> Option<&str> {
+        match &self.id {
+            WorkspaceDocumentId::CellView(reference) => Some(reference.cell.as_str()),
+            _ => None,
+        }
+    }
 }
 
 /// Read-only document metadata used by shell-owned document/session managers.
@@ -592,17 +838,21 @@ fn document_strip_visible(workspace: Workspace, document_count: usize) -> bool {
         || (matches!(workspace, Workspace::Design | Workspace::Models) && document_count == 1)
 }
 
+/// Draw every tab, at most `cap` wide when the strip has asked them to
+/// share it, and return where each one went, in document order.
 fn document_tabs(
     ui: &mut egui::Ui,
     state: &mut AppState,
     documents: &[WorkspaceDocument],
     height: f32,
-) {
+    cap: Option<f32>,
+) -> Vec<Rect> {
     let active = authoritative_active_document(state, documents);
     let mut open = None;
     let mut close = None;
     let mut focus_index = None;
     let mut tab_ids = Vec::with_capacity(documents.len());
+    let mut tab_rects = Vec::with_capacity(documents.len());
 
     for (index, document) in documents.iter().enumerate() {
         let selected = active.as_ref() == Some(&document.id);
@@ -613,15 +863,18 @@ fn document_tabs(
                     DocumentTabPresentation {
                         icon: document.icon,
                         label: &document.label,
+                        short_label: document.short_label(),
                         selected,
                         dirty: document.dirty,
                         closable: document_is_closable(state, &document.id),
                         height,
+                        max_width: cap.map_or(TAB_MAX_WIDTH, |cap| cap.min(TAB_MAX_WIDTH)),
                     },
                 )
             })
             .inner;
         tab_ids.push(tab.response.id);
+        tab_rects.push(tab.response.rect);
         if selected {
             reveal_newly_active_tab(ui, &tab.response);
         }
@@ -682,6 +935,7 @@ fn document_tabs(
             ui.memory_mut(|memory| memory.request_focus(tab_ids[focus_after_close]));
         }
     }
+    tab_rects
 }
 
 /// Scroll the active tab into view when it becomes active, whether by a
@@ -695,9 +949,16 @@ fn reveal_newly_active_tab(ui: &Ui, tab: &egui::Response) {
     }
     tab.scroll_to_me(None);
     let viewport = ui.clip_rect();
-    if viewport.expand(0.5).contains_rect(tab.rect) || tab.rect.width() >= viewport.width() {
+    if in_view(viewport, tab.rect) || tab.rect.width() >= viewport.width() {
         ui.ctx().data_mut(|data| data.insert_temp(revealed, tab.id));
     }
+}
+
+/// Whether all of `tab` is inside the strip's `viewport` across. Only the
+/// horizontal extent counts: the strip scrolls one way, and its viewport can
+/// be a fraction of a point shorter than the tabs it holds.
+fn in_view(viewport: Rect, tab: Rect) -> bool {
+    tab.left() >= viewport.left() - 0.5 && tab.right() <= viewport.right() + 0.5
 }
 
 fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bool {
@@ -891,10 +1152,42 @@ struct DocumentTabResponse {
 struct DocumentTabPresentation<'a> {
     icon: WorkbenchIcon,
     label: &'a str,
+    short_label: Option<&'a str>,
     selected: bool,
     dirty: bool,
     closable: bool,
     height: f32,
+    max_width: f32,
+}
+
+/// The text a tab paints at `width`: its label while the label fits, else the
+/// short form when it has one. A squeezed tab drops what its icon already
+/// says before it cuts the name.
+fn tab_caption<'a>(label: &'a str, short: Option<&'a str>, natural: f32, width: f32) -> &'a str {
+    match short {
+        Some(short) if natural > width + 0.5 => short,
+        _ => label,
+    }
+}
+
+/// The width a tab takes when nothing asks it to share: its whole name, up
+/// to [`TAB_MAX_WIDTH`].
+fn natural_tab_width(painter: &egui::Painter, label: &str, dirty: bool, closable: bool) -> f32 {
+    let label_width = painter
+        .layout_no_wrap(
+            label.to_owned(),
+            theme::sans(tokens::FS_1, FontWeight::Regular),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x;
+    (TAB_PADDING_X
+        + TAB_ICON_SIZE
+        + TAB_CONTENT_GAP
+        + label_width
+        + suffix_width(dirty, closable)
+        + TAB_PADDING_X)
+        .min(TAB_MAX_WIDTH)
 }
 
 fn document_tab(
@@ -904,26 +1197,19 @@ fn document_tab(
     let DocumentTabPresentation {
         icon,
         label,
+        short_label,
         selected,
         dirty,
         closable,
         height,
+        max_width,
     } = presentation;
     let t = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
-    let intrinsic_label_width = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), font.clone(), t.color.text)
-        .size()
-        .x;
     let suffix_width = suffix_width(dirty, closable);
-    let width = (TAB_PADDING_X
-        + TAB_ICON_SIZE
-        + TAB_CONTENT_GAP
-        + intrinsic_label_width
-        + suffix_width
-        + TAB_PADDING_X)
-        .min(TAB_MAX_WIDTH);
+    let natural = natural_tab_width(ui.painter(), label, dirty, closable);
+    let width = natural.min(max_width);
+    let shown = tab_caption(label, short_label, natural, width);
     let mut sense = Sense::click();
     if !selected {
         sense = sense.difference(Sense::focusable_noninteractive());
@@ -988,7 +1274,8 @@ fn document_tab(
         egui::pos2(suffix_left.max(label_x), rect.bottom()),
     );
     let painted_label =
-        ellipsize_document_label(ui.painter(), label, &font, (suffix_left - label_x).max(0.0));
+        ellipsize_document_label(ui.painter(), shown, &font, (suffix_left - label_x).max(0.0));
+    let shortened = painted_label != label;
     let galley = ui
         .painter()
         .layout_no_wrap(painted_label, font, t.color.text);
@@ -1045,6 +1332,11 @@ fn document_tab(
         close_clicked = close_response.clicked();
     }
     theme::paint_focus_ring(ui, &response, rect);
+    let response = if shortened {
+        response.on_hover_text(label)
+    } else {
+        response
+    };
     DocumentTabResponse {
         response,
         close_clicked,
@@ -1635,28 +1927,273 @@ mod tests {
         ctx.enable_accesskit();
         let mut app = design_session(14);
 
-        let mut output = strip_frame(&ctx, &mut app, Vec::new());
+        let nodes = settled_strip(&ctx, &mut app);
+        let active = nodes
+            .iter()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Tab && node.is_selected() == Some(true)
+            })
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("the active tab is in the tree");
+        let button = hidden_button(&nodes)
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("tabs are out of view, so the strip lists them");
+        assert!(
+            active.x0 >= 0.0 && active.x1 <= button.x0 + 0.5,
+            "the active tab spans {}..{}, outside the tabs' track 0..{}",
+            active.x0,
+            active.x1,
+            button.x0
+        );
+    }
+
+    /// Frame the strip until its scroll has settled, and return what the last
+    /// frame named for a screen reader.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn settled_strip(ctx: &egui::Context, app: &mut RSpiceApp) -> Vec<egui::accesskit::Node> {
+        let mut output = strip_frame(ctx, app, Vec::new());
         // The scroll animates; give it the frames it takes.
         for _ in 0..60 {
-            output = strip_frame(&ctx, &mut app, Vec::new());
+            output = strip_frame(ctx, app, Vec::new());
         }
-        let nodes = output
+        output
             .platform_output
             .accesskit_update
             .expect("accessibility tree")
-            .nodes;
-        let active = nodes
-            .iter()
-            .find(|(_, node)| {
-                node.role() == egui::accesskit::Role::Tab && node.is_selected() == Some(true)
+            .nodes
+            .into_iter()
+            .map(|(_, node)| node)
+            .collect()
+    }
+
+    /// What a screen reader calls `node`: a label, or a plain label's text.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn name(node: &egui::accesskit::Node) -> Option<&str> {
+        node.label().or_else(|| node.value())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn hidden_button(nodes: &[egui::accesskit::Node]) -> Option<&egui::accesskit::Node> {
+        nodes.iter().find(|node| {
+            name(node).is_some_and(|label| {
+                label.ends_with(" more open documents") || label == "1 more open document"
             })
-            .and_then(|(_, node)| node.bounds())
-            .expect("the active tab is in the tree");
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn tab_nodes(nodes: &[egui::accesskit::Node]) -> Vec<&egui::accesskit::Node> {
+        nodes
+            .iter()
+            .filter(|node| node.role() == egui::accesskit::Role::Tab)
+            .collect()
+    }
+
+    #[test]
+    fn a_squeezed_cell_view_tab_shows_its_cell_before_cutting_the_name() {
+        let label = "stage_10 · schematic";
+        assert_eq!(tab_caption(label, Some("stage_10"), 170.0, 170.0), label);
+        assert_eq!(
+            tab_caption(label, Some("stage_10"), 170.0, 140.0),
+            "stage_10"
+        );
+        assert_eq!(
+            tab_caption("Generated netlist", None, 170.0, 140.0),
+            "Generated netlist",
+            "a document with no short form is cut as it is"
+        );
+
+        let document = WorkspaceDocument {
+            id: WorkspaceDocumentId::CellView(crate::state::CellViewRef::new(
+                "lib",
+                "stage_10",
+                "schematic",
+            )),
+            label: label.to_owned(),
+            icon: WorkbenchIcon::Design,
+            dirty: false,
+        };
+        assert_eq!(document.short_label(), Some("stage_10"));
+    }
+
+    #[test]
+    fn tabs_that_fit_keep_their_own_widths() {
+        assert_eq!(shared_width_cap(&[100.0, 120.0], 400.0), None);
+        assert_eq!(
+            StripFit::resolve(&[100.0, 120.0], 400.0, 40.0).tabs_width,
+            400.0
+        );
+    }
+
+    #[test]
+    fn tabs_that_do_not_fit_share_the_strip_and_the_narrow_keep_theirs() {
+        assert_eq!(shared_width_cap(&[190.0, 190.0, 190.0], 450.0), Some(150.0));
+        // The narrow tab keeps its 60; the other two split what is left.
+        assert_eq!(shared_width_cap(&[60.0, 190.0, 190.0], 360.0), Some(150.0));
+    }
+
+    #[test]
+    fn tabs_never_shrink_past_the_floor_and_the_strip_scrolls_instead() {
+        let natural = [190.0; 10];
+        assert_eq!(shared_width_cap(&natural, 600.0), Some(TAB_MIN_WIDTH));
+        let fit = StripFit::resolve(&natural, 1000.0, 40.0);
+        assert!(fit.overflowing);
+        assert_eq!(
+            fit.tabs_width, 960.0,
+            "the hidden-tabs button takes its room"
+        );
+        assert_eq!(fit.cap, Some(TAB_MIN_WIDTH));
+
+        let fit = StripFit::resolve(&natural[..6], 1000.0, 40.0);
+        assert!(!fit.overflowing, "six tabs fit at 166 pt each");
+        assert_eq!(fit.tabs_width, 1000.0, "no button, so no room given up");
+    }
+
+    /// Ten tabs too wide for the window together shrink until they fit, so
+    /// every one stays in view and nothing is offered as hidden.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn tabs_shrink_to_stay_in_view_before_the_strip_scrolls() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = design_session(8);
+
+        let nodes = settled_strip(&ctx, &mut app);
+        let tabs = tab_nodes(&nodes);
+        assert_eq!(tabs.len(), 10);
+        let widest = tabs
+            .iter()
+            .filter_map(|tab| tab.bounds())
+            .map(|bounds| bounds.x1 - bounds.x0)
+            .fold(0.0, f64::max);
         assert!(
-            active.x0 >= 0.0 && active.x1 <= 1440.5,
-            "the active tab spans {}..{}, outside the 1440 pt strip",
-            active.x0,
-            active.x1
+            widest < f64::from(TAB_MAX_WIDTH) - 1.0,
+            "the tabs shrank: the widest is {widest} pt"
+        );
+        for tab in &tabs {
+            let bounds = tab.bounds().expect("a tab has bounds");
+            assert!(
+                bounds.x0 >= 0.0 && bounds.x1 <= 1440.5,
+                "{:?} spans {}..{}",
+                tab.label(),
+                bounds.x0,
+                bounds.x1
+            );
+        }
+        assert!(hidden_button(&nodes).is_none(), "nothing is hidden");
+    }
+
+    /// Renders for review, cropped to the chrome above the document: a strip
+    /// whose tabs fit, one whose tabs shrank to fit, and one that overflows,
+    /// all between the docks of a 1440 x 900 window.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_the_document_strip_for_review() {
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        for (stem, extra) in [
+            ("document-strip-fits", 0),
+            ("document-strip-shrunk", 3),
+            ("document-strip-overflowing", 14),
+        ] {
+            let mut app = design_session(extra);
+            let canvas = crate::ui::raster::render(egui::vec2(1440.0, 900.0), |ui, _| {
+                crate::workbench::frame::show(ui, &mut app);
+            });
+            std::fs::write(directory.join(format!("{stem}.png")), canvas.png(140))
+                .expect("write the render");
+        }
+    }
+
+    /// Past the floor, the strip scrolls and "+N" counts exactly the tabs out
+    /// of view; choosing one from its menu opens that document.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_hidden_tabs_button_lists_the_tabs_out_of_view_and_opens_one() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = design_session(14);
+        let top = app.state.workspace.content.open_views[0].reference.clone();
+
+        let nodes = settled_strip(&ctx, &mut app);
+        let button = hidden_button(&nodes).expect("sixteen tabs overflow 1440 pt");
+        let track_end = button.bounds().expect("the button has bounds").x0;
+        let out_of_view = tab_nodes(&nodes)
+            .into_iter()
+            .filter(|tab| {
+                let bounds = tab.bounds().expect("a tab has bounds");
+                bounds.x0 < -0.5 || bounds.x1 > track_end + 0.5
+            })
+            .count();
+        assert!(out_of_view > 0);
+        assert_eq!(
+            name(button),
+            Some(format!("{out_of_view} more open documents").as_str())
+        );
+
+        let press = |ctx: &egui::Context, app: &mut RSpiceApp, at: egui::Pos2| {
+            strip_frame(
+                ctx,
+                app,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton {
+                        pos: at,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            strip_frame(
+                ctx,
+                app,
+                vec![egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            )
+        };
+        let bounds = button.bounds().expect("the button has bounds");
+        let at = egui::pos2(
+            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        );
+        press(&ctx, &mut app, at);
+        let row = strip_frame(&ctx, &mut app, Vec::new())
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree")
+            .nodes
+            .into_iter()
+            .map(|(_, node)| node)
+            .find(|node| {
+                node.role() != egui::accesskit::Role::Tab && name(node) == Some("top · schematic")
+            })
+            .expect("the scrolled-out first tab is in the menu");
+        let bounds = row.bounds().expect("the menu row has bounds");
+        let at = egui::pos2(
+            ((bounds.x0 + bounds.x1) * 0.5) as f32,
+            ((bounds.y0 + bounds.y1) * 0.5) as f32,
+        );
+        press(&ctx, &mut app, at);
+        assert_eq!(app.state.workspace.content.active_view, top);
+
+        let nodes = settled_strip(&ctx, &mut app);
+        let first = tab_nodes(&nodes)
+            .into_iter()
+            .find(|tab| name(tab) == Some("top · schematic"))
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("the opened document has a tab");
+        assert!(
+            first.x0 >= -0.5,
+            "the opened document's tab scrolled into view"
         );
     }
 
