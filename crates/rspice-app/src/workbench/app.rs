@@ -1496,6 +1496,9 @@ mod veriloga_placement_tests;
 mod veriloga_flow_tests;
 
 #[cfg(test)]
+mod veriloga_panel_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::product::ProcessCorner;

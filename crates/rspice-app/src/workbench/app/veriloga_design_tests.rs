@@ -487,13 +487,17 @@ fn render_the_veriloga_design_document_for_review() {
         .active_view
         .clone();
 
+    // A module that includes a standard header and one of its own, with a
+    // build profile beside it and an instance placed in the top schematic:
+    // every section of the navigator has something to show.
     let reviewed = |coarse: bool, compiled: bool| {
         let mut app = open_project_app();
-        let (reference, _) = add_veriloga_cell(
+        let (reference, ..) = super::veriloga_panel_tests::placed_veriloga_cell(
             &mut app.state,
             "gain_cell",
             "models/gain_cell.va",
-            "gain_cell",
+            "// Behavioral conductance.\n`include \"disciplines.vams\"\n`include \"gain_cell_defaults.vams\"\nmodule gain_cell(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real g = `G_DEFAULT from (0:inf);\n  real drive;\n  analog begin\n    drive = g * V(p, n);\n    I(p, n) <+ drive;\n  end\nendmodule\n",
+            &[("models/gain_cell_defaults.vams", "`define G_DEFAULT 1m\n")],
         );
         open_in_design(&mut app.state, &reference);
         app.state.workbench.coarse_pointer = coarse;
@@ -516,11 +520,27 @@ fn render_the_veriloga_design_document_for_review() {
         writeln!(report, "{}", path.display()).ok();
     };
 
-    for (name, size, coarse) in [
-        ("veriloga-design-1440x900", DESKTOP, false),
-        ("veriloga-design-390x844", egui::vec2(390.0, 844.0), true),
+    // A phone shows the navigator as a drawer over the document, so it is
+    // reviewed once with the drawer open.
+    for (name, size, coarse, navigator) in [
+        ("veriloga-design-1440x900", DESKTOP, false, false),
+        (
+            "veriloga-design-390x844",
+            egui::vec2(390.0, 844.0),
+            true,
+            false,
+        ),
+        (
+            "veriloga-design-navigator-390x844",
+            egui::vec2(390.0, 844.0),
+            true,
+            true,
+        ),
     ] {
         let mut app = reviewed(coarse, true);
+        if navigator {
+            app.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
+        }
         let canvas = crate::ui::raster::render(size, |ui, _| app.render_frame_chrome(ui));
         write(name, &canvas, size.y as usize);
     }
