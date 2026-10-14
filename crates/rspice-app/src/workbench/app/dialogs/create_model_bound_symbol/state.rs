@@ -11,7 +11,9 @@ use crate::state::{
 pub(super) const TITLE: &str = "Create model-bound symbol";
 pub(super) const PRIMARY: &str = "Create symbol revision";
 pub(super) const DESCRIPTION: &str = "Create one governed symbol definition from an explicit source contract, ordered electrical terminals, and versioned generated views.";
-pub(super) const INITIAL_HEIGHT: f32 = 526.0;
+/// Held in every state: only a refusal paints a strip, and a surface sized to
+/// its content would jump under the pointer as the draft became valid.
+pub(super) const SURFACE_HEIGHT: f32 = 526.0;
 pub(super) const SPLIT_BREAKPOINT: f32 = 640.0;
 pub(super) const SECTION_HEADER_HEIGHT: f32 = 31.0;
 pub(super) const PIN_HEADER_HEIGHT: f32 = 27.0;

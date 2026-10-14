@@ -34,7 +34,7 @@ impl RSpiceApp {
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
-            .initial_height(INITIAL_HEIGHT)
+            .fixed_height(SURFACE_HEIGHT)
             .ghost(if discard_confirm {
                 "Discard changes"
             } else {
@@ -55,12 +55,6 @@ impl RSpiceApp {
                 DialogTransactionTone::Error,
                 "Symbol revision cannot be created",
                 error,
-            );
-        } else {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Complete,
-                "Symbol definition ready",
-                "The source, ordered pin contract, generated views, and atomic target are valid.",
             );
         }
 

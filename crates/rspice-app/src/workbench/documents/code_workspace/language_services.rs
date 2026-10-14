@@ -165,7 +165,6 @@ pub(crate) struct CodeLanguageToolsState {
     pub replacement: String,
     pub view: LanguageToolView,
     pub confirm_rename: bool,
-    pub status: Option<String>,
     pub error: Option<String>,
 }
 
@@ -221,7 +220,6 @@ pub(crate) fn open_language_tools_in_bundle(
         replacement: String::new(),
         view: LanguageToolView::DocumentSymbols,
         confirm_rename: false,
-        status: None,
         error: None,
     });
     Ok(())
@@ -284,7 +282,6 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         replacement: String::new(),
         view: LanguageToolView::References,
         confirm_rename: false,
-        status: Some(message.clone()),
         error: None,
     });
     app.state
@@ -1787,7 +1784,6 @@ mod tests {
             replacement: "renamed".to_owned(),
             view: LanguageToolView::References,
             confirm_rename: true,
-            status: None,
             error: None,
         });
 

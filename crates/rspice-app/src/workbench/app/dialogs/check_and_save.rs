@@ -37,6 +37,7 @@ const DESCRIPTION: &str =
     "Run connectivity, parameter, hierarchy, model, pin, and naming checks before explicit save.";
 const SAVING_TITLE: &str = "Validated revision save in progress";
 const SAVING_DETAIL: &str = "The browser owns the canonical save request. Keep this dialog open until publication completes.";
+const NEWER_CHANGES_HINT: &str = "Edits made after validation are still unsaved.";
 const CHECK_AND_SAVE_BODY_HEIGHT: f32 = 291.0;
 const CHECK_AND_SAVE_SURFACE_HEIGHT: f32 = SURFACE_HEIGHT + 61.0;
 
@@ -142,20 +143,15 @@ impl RSpiceApp {
             .flatten();
         let discard_confirm = self.state.dialogs.check_and_save.discard_confirm;
         let pending = self.state.dialogs.check_and_save.is_pending();
-        let save_receipt = self.state.dialogs.check_and_save.save_receipt.clone();
+        let saved = self.state.dialogs.check_and_save.saved;
+        let saved_with_newer_changes = self.state.dialogs.check_and_save.saved_with_newer_changes;
         let validation_error = self.state.dialogs.check_and_save.validation_error.clone();
         let has_transaction = discard_confirm
             || pending
-            || save_receipt.is_some()
             || validation_error.is_some()
             || !report.blockers().is_empty();
-        let primary_label = if save_receipt.is_some() {
-            "Close"
-        } else {
-            PRIMARY
-        };
-        let primary_enabled =
-            save_receipt.is_some() || (!pending && report.can_save() && note_error.is_none());
+        let primary_label = if saved { "Close" } else { PRIMARY };
+        let primary_enabled = saved || (!pending && report.can_save() && note_error.is_none());
         let source_current = report.source_is_current(&self.state);
         let authority_resolved = report.authority_is_resolved();
         let dependencies_enumerated = report.dependencies_are_enumerated();
@@ -163,7 +159,7 @@ impl RSpiceApp {
             project: &project,
             revision: &revision,
             source_current,
-            saved_snapshot: save_receipt.is_some(),
+            saved_snapshot: saved,
             authority_resolved,
             dependencies_enumerated,
         };
@@ -182,7 +178,7 @@ impl RSpiceApp {
             .ghost_enabled(!pending)
             .primary_enabled(primary_enabled)
             .initial_focus(DialogInitialFocus::BodyControl);
-        if save_receipt.is_none() {
+        if !saved {
             dialog = dialog.ghost(if discard_confirm {
                 "Discard changes"
             } else {
@@ -201,12 +197,12 @@ impl RSpiceApp {
                 SAVING_TITLE,
                 SAVING_DETAIL,
             );
-        } else if let Some(receipt) = save_receipt.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Complete,
-                "Validated revision saved",
-                receipt,
-            );
+        } else if saved {
+            // The body already says the snapshot was saved and the console
+            // names the revision. Only edits the snapshot missed need a word.
+            if saved_with_newer_changes {
+                dialog = dialog.hint(NEWER_CHANGES_HINT);
+            }
         } else if let Some(error) = validation_error.as_deref() {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
@@ -228,7 +224,7 @@ impl RSpiceApp {
         let repair_instance = report
             .stale_interface_instances()
             .first()
-            .filter(|_| !pending && save_receipt.is_none())
+            .filter(|_| !pending && !saved)
             .cloned();
         let mut note_changed = false;
         let mut repair_requested = false;
@@ -238,7 +234,7 @@ impl RSpiceApp {
                 &report,
                 &mut self.state.dialogs.check_and_save.revision_note,
                 displayed_note_error.as_deref(),
-                pending || save_receipt.is_some(),
+                pending || saved,
                 preconditions,
                 StaleInterfaceRepair {
                     instance: repair_instance.as_deref(),
@@ -255,7 +251,7 @@ impl RSpiceApp {
             self.repair_stale_instance_interface(&instance);
         }
         match response.choice {
-            DialogChoice::Primary if save_receipt.is_some() => {
+            DialogChoice::Primary if saved => {
                 self.state.dialogs.check_and_save.close();
             }
             DialogChoice::Primary => self.commit_check_and_save(),
@@ -550,18 +546,8 @@ fn complete_validated_save(
     newer_changes: bool,
 ) {
     clear_pending_save_state(state);
+    state.dialogs.check_and_save.saved = true;
     state.dialogs.check_and_save.saved_with_newer_changes = newer_changes;
-    state.dialogs.check_and_save.save_receipt = Some(if newer_changes {
-        format!(
-            "Revision {} was saved from the validated snapshot. Newer working changes remain unsaved.",
-            revision_id.as_uuid()
-        )
-    } else {
-        format!(
-            "Revision {} was saved with its validation receipt and restorable design snapshot.",
-            revision_id.as_uuid()
-        )
-    });
     state.dialogs.check_and_save.validation_error = None;
     state.dialogs.check_and_save.dirty = false;
     state.dialogs.check_and_save.discard_confirm = false;

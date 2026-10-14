@@ -839,15 +839,9 @@ fn code_pane(
             interaction.cursor_char_index,
         ) {
             Ok(()) => {
-                let formatting_message = app
-                    .state
-                    .ui
-                    .messages()
-                    .text(MessageId::CodeFormattingParseGated);
                 if let Some(tools) = app.state.ui.code_workspace.language_tools.as_mut() {
                     tools.view =
                         crate::workbench::documents::code_workspace::LanguageToolView::CodeActions;
-                    tools.status = Some(formatting_message);
                 }
             }
             Err(error) => app

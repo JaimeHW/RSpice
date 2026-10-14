@@ -155,7 +155,7 @@ def validated_save_clock(browser, review_intervals):
     started_ms = time.time_ns() // 1_000_000
     try:
         browser.click("Save validated revision", "button")
-        wait_for(lambda: any(control["value"] == "Validated revision saved"
+        wait_for(lambda: any(control["label"] == "Saved snapshot"
                             for control in controls(browser.snapshot())), "the canonical validated save")
     finally:
         browser.script("window.showSaveFilePicker = window.__rspiceOriginalSavePicker; delete window.__rspiceOriginalSavePicker;")

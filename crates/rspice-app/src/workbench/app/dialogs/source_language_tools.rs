@@ -180,12 +180,6 @@ impl RSpiceApp {
                 messages.text(MessageId::CodeToolsIndexBehind),
                 messages.text(MessageId::CodeToolsStaleIndex),
             );
-        } else if let Some(status) = tools.status.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Complete,
-                messages.text(MessageId::CodeToolsApplied),
-                status,
-            );
         }
 
         let mut action = ToolAction::None;
@@ -208,7 +202,6 @@ impl RSpiceApp {
             ToolAction::Select(view) => {
                 if let Some(tools) = self.state.ui.code_workspace.language_tools.as_mut() {
                     tools.view = view;
-                    tools.status = None;
                     tools.error = None;
                 }
                 return;
@@ -217,7 +210,6 @@ impl RSpiceApp {
                 if let Some(tools) = self.state.ui.code_workspace.language_tools.as_mut() {
                     tools.query = query;
                     tools.confirm_rename = false;
-                    tools.status = None;
                     tools.error = None;
                 }
                 return;
@@ -256,13 +248,9 @@ impl RSpiceApp {
             }
             return;
         };
-        match outcome {
-            Ok(message) => {
-                tools.status = Some(message);
-                tools.error = None;
-            }
-            Err(error) => tools.error = Some(error),
-        }
+        // A completed action is already in the console and on the page; only
+        // a refusal is the dialog's to state.
+        tools.error = outcome.err();
     }
 }
 

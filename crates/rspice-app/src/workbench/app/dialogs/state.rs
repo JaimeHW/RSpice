@@ -1231,7 +1231,10 @@ pub(crate) struct CheckAndSaveDialogState {
         crate::workbench::app::dialogs::check_and_save_validation::CheckAndSaveValidationReport,
     >,
     pub(crate) validation_error: Option<String>,
-    pub(crate) save_receipt: Option<String>,
+    /// The validated revision was published; the dialog now only reviews it.
+    pub(crate) saved: bool,
+    /// Edits arrived while the browser save was in flight, so the saved
+    /// snapshot does not hold them.
     pub(crate) saved_with_newer_changes: bool,
     pub(crate) dirty: bool,
     pub(crate) discard_confirm: bool,
@@ -1264,7 +1267,7 @@ impl CheckAndSaveDialogState {
     }
 
     pub(crate) fn mark_edited(&mut self) {
-        if self.save_receipt.is_some() || self.is_pending() {
+        if self.saved || self.is_pending() {
             return;
         }
         self.dirty = !self.revision_note.is_empty();
@@ -1281,7 +1284,7 @@ impl CheckAndSaveDialogState {
         if self.is_pending() {
             return false;
         }
-        if self.save_receipt.is_some() {
+        if self.saved {
             self.close();
             return true;
         }
