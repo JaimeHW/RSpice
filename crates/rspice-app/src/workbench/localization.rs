@@ -522,6 +522,7 @@ define_messages! {
     CodeSourceDelete => "Delete…",
     CodeSourceRevisionHistory => "Revision history…",
     CodeSourceImportDependency => "Import dependency…",
+    CodeSourceReplaceFromFile => "Replace from file…",
     CodeSourceRootDeleteBlocked => "The bundle root cannot be deleted; rename or replace it instead.",
     CodeSourceEnvironmentLockMutationBlocked => "The managed Automation environment lock is read-only. Reassign its role above, or duplicate it, before changing the source graph.",
     CodeSourceCreateWorkspace => "Create source workspace…",

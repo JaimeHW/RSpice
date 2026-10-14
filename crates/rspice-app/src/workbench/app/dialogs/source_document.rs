@@ -412,6 +412,9 @@ enum LifecycleAction {
     Restore,
     CloseHistory,
     Import,
+    /// Replace this Verilog-A file's content from a picked file, through the
+    /// import transaction's own confirmation. File > Import never does it.
+    ReplaceFromFile,
     AssignRole(Option<crate::state::ProjectSourceRole>),
 }
 
@@ -595,6 +598,16 @@ impl RSpiceApp {
                 code_workspace::request_automation_source_import(self, &facts.logical_path),
                 Report::Console,
             ),
+            LifecycleAction::ReplaceFromFile => {
+                let outcome =
+                    code_workspace::request_veriloga_source_replacement(self, &facts.logical_path);
+                if outcome.is_ok() {
+                    // The picker and then the replacement's own confirmation
+                    // take over; this dialog would only sit behind them.
+                    self.state.ui.code_workspace.source_document_dialog = false;
+                }
+                (outcome, Report::Console)
+            }
             LifecycleAction::AssignRole(role) => (
                 code_workspace::assign_automation_source_role(self, &facts.logical_path, role)
                     .map(|_| ()),
@@ -1661,6 +1674,18 @@ fn operations(
                             .show(ui);
                     if response.clicked() {
                         *action = LifecycleAction::Import;
+                    }
+                    if let Some(reason) = facts.block_reason {
+                        response.on_disabled_hover_text(reason);
+                    }
+                }
+                if facts.language == ProjectSourceLanguage::VerilogA {
+                    let response =
+                        Button::new(&messages.text(MessageId::CodeSourceReplaceFromFile))
+                            .enabled(facts.editable)
+                            .show(ui);
+                    if response.clicked() {
+                        *action = LifecycleAction::ReplaceFromFile;
                     }
                     if let Some(reason) = facts.block_reason {
                         response.on_disabled_hover_text(reason);

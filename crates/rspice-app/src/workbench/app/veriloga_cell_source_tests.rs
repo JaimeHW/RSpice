@@ -805,21 +805,24 @@ fn a_file_dropped_on_the_veriloga_editor_opens_the_import_form() {
 
 const REPLACEMENT: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n) / 2k;\nendmodule\n";
 
-/// The Editor menu's "Replace source from file…" for `bundle_id`'s
+/// "Replace from file…" in the Manage source document dialog for the open
 /// `model.va`, through the picker, to the confirmation it opens.
-fn pick_replacement(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    bundle_id: crate::state::ProjectSourceId,
-) {
-    crate::workbench::documents::text_editor_commands::queue_replace_source_request(
-        ctx,
-        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va"),
-    );
-    frame(ctx, app, DESKTOP);
+fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
+    crate::workbench::commands::vocabulary::Command::ManageSourceDocument.execute(app);
+    let mut output = frame(ctx, app, DESKTOP);
+    for _ in 0..12 {
+        output = frame(ctx, app, DESKTOP);
+    }
+    let replace = node_center(&output, "Replace from file…")
+        .expect("Manage source document offers Replace from file");
+    click(ctx, app, replace);
     assert!(
         app.state.ui.code_workspace.veriloga.import_requested,
-        "the menu item asks for a file"
+        "Replace from file asks for a file"
+    );
+    assert!(
+        !app.state.ui.code_workspace.source_document_dialog,
+        "the picker and the confirmation take over from the dialog"
     );
     code_workspace::complete_veriloga_file_pick(app, "replacement.va", REPLACEMENT);
     assert!(app.state.ui.code_workspace.veriloga.import_form.is_none());
@@ -846,7 +849,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     frame(&ctx, &mut app, DESKTOP);
     let original = root_text(&app, &reference);
 
-    pick_replacement(&ctx, &mut app, bundle_id);
+    pick_replacement(&ctx, &mut app);
     assert_eq!(
         root_text(&app, &reference),
         original,
@@ -891,7 +894,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
         "Cancel replaced nothing"
     );
 
-    pick_replacement(&ctx, &mut app, bundle_id);
+    pick_replacement(&ctx, &mut app);
     let bundle = |app: &RSpiceApp| {
         app.state
             .workspace
