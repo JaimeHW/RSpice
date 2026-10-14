@@ -146,6 +146,11 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "generated_simulation_parameters",
         "the solver-controlled `$simparam` environment",
     ),
+    (
+        "ground_census",
+        "the build's note of which counted Verilog-A instance connects node 0, \
+         a reference decision rather than a device",
+    ),
 ];
 
 /// Every `CircuitData` field, as `(name, type)`.
