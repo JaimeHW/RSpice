@@ -116,6 +116,99 @@ fn the_analysis_header_states_kind_and_lifecycle_short_of_its_action() {
     }
 }
 
+/// An option field states its value and nothing beside its caption.
+///
+/// Every option field once carried a tag on its caption row, and every tag
+/// read `default` — including the fields holding the plan's own value, where
+/// it said nothing the value did not. An empty well the engine resolves now
+/// reads `default` inside itself, below its caption, and a well holding a value
+/// shows only the value.
+#[test]
+fn an_option_field_states_default_only_inside_an_empty_well() {
+    use crate::simulation::plan::NumericOverrideOption as O;
+
+    let lines = analyses_form_lines(AnalysisKind::Transient, 900.0)
+        .expect("the default plan holds a transient");
+    let caption = |label: &str| {
+        lines
+            .iter()
+            .find(|line| line.text == label)
+            .unwrap_or_else(|| panic!("the transient form draws {label:?}"))
+            .clone()
+    };
+    // The plan states a truncation bound, so its well holds a number; the
+    // plan states no LTE bound, so that well is empty.
+    let valued = caption(O::Trtol.label());
+    let empty = caption(O::LteReltol.label());
+    let on_row = |row: &PaintedLine| {
+        lines
+            .iter()
+            .filter(|line| (line.top - row.top).abs() < 0.5)
+            .map(|line| line.text.clone())
+            .collect::<Vec<_>>()
+    };
+    for row in [&valued, &empty] {
+        let beside = on_row(row);
+        assert!(
+            beside
+                .iter()
+                .all(|text| !matches!(text.as_str(), "default" | "override" | "study default")),
+            "{:?} carries a tag on its caption row: {beside:?}",
+            row.text
+        );
+    }
+    let placeholder = lines.iter().find(|line| {
+        line.text == "default"
+            && line.top > empty.top
+            && line.top < empty.top + 40.0
+            && line.left >= empty.left
+    });
+    assert!(
+        placeholder.is_some(),
+        "the empty LTE well reads `default` inside itself"
+    );
+    assert!(
+        !lines.iter().any(|line| line.text == "default"
+            && line.top > valued.top
+            && line.top < valued.top + 40.0
+            && (line.left - valued.left).abs() < 20.0),
+        "a well holding the plan's value shows only the value"
+    );
+}
+
+/// The contract block states what varies and spells the directive the way a
+/// designer writes it.
+///
+/// It said `Availability: Production` on every production analysis and
+/// `Run-set points: 1 · no global axis is enabled` on every plan without an
+/// axis — two defaults restated — and spelled the directive with `f64`'s own
+/// digits, `.tran 0.000001 0.001`.
+#[test]
+fn the_contract_block_states_no_defaults_and_spells_the_directive_in_engineering_notation() {
+    let lines = analyses_form_lines(AnalysisKind::Transient, 900.0)
+        .expect("the default plan holds a transient");
+    for gone in [
+        "Availability",
+        "Production",
+        "Run-set points",
+        "1 · no global axis is enabled",
+    ] {
+        assert!(
+            !lines.iter().any(|line| line.text == gone),
+            "the contract block still states {gone:?}"
+        );
+    }
+    let statement = lines
+        .iter()
+        .find(|line| line.text.starts_with(".tran "))
+        .unwrap_or_else(|| panic!("the contract block states the directive"));
+    assert!(
+        !statement.text.contains("0.0"),
+        "the directive is spelled with raw digits: {:?}",
+        statement.text
+    );
+}
+
 /// The Analyses route with one analysis of `kind` selected, at `width`.
 ///
 /// The kind is inserted where the default plan does not hold one. `None` where
@@ -156,12 +249,20 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
 
 /// Every word a field may state in the helper slot beside its caption.
 ///
-/// A closed set, because the field constructors are its only writers: a field
-/// whose emptiness selects the default says `default`, an option this
-/// analysis or its study states says so, and a temperature names its unit.
-/// Asserted to be *found* below, so a slot renamed out from under this cannot
-/// leave the gate matching nothing.
-const FIELD_HELPERS: [&str; 4] = ["Celsius", "default", "override", "study default"];
+/// A sample of the rules default forms state there: a temperature names its
+/// unit, and a field whose label cannot carry its rule states the rule. Option
+/// fields state nothing beside their caption; an empty one says `default`
+/// inside its well. Each is asserted to be *found* below, so a slot renamed out
+/// from under this cannot leave the gate matching nothing.
+const FIELD_HELPERS: [&str; 7] = [
+    "Celsius",
+    "products up to this order",
+    "odd, empty is automatic",
+    "quoted multiple",
+    "empty keeps all",
+    "at most the first step",
+    "solver trace to the Console",
+];
 
 /// No field caption runs under the helper beside it, on any analysis form.
 ///
@@ -186,7 +287,7 @@ fn no_field_caption_overlaps_the_helper_beside_it() {
     const TOLERANCE: f32 = 0.5;
 
     let mut collisions = Vec::new();
-    let mut helpers = 0usize;
+    let mut found = std::collections::BTreeSet::new();
     let mut forms = 0usize;
     for kind in AnalysisKind::ALL {
         let Some(lines) = analyses_form_lines(kind, NARROWEST_TWO_COLUMN_SURFACE) else {
@@ -207,7 +308,7 @@ fn no_field_caption_overlaps_the_helper_beside_it() {
                 if !FIELD_HELPERS.contains(&helper.text.as_str()) {
                     continue;
                 }
-                helpers += 1;
+                found.insert(helper.text.clone());
                 for (other, line) in row.iter().enumerate() {
                     if other == index
                         || line.right <= helper.left + TOLERANCE
@@ -233,9 +334,13 @@ fn no_field_caption_overlaps_the_helper_beside_it() {
     // A sweep that opened no form, or found no helper on the ones it opened,
     // would pass forever.
     let kinds = AnalysisKind::ALL.len();
+    let missing: Vec<_> = FIELD_HELPERS
+        .iter()
+        .filter(|helper| !found.contains(**helper))
+        .collect();
     assert!(
-        forms >= kinds - 4 && helpers > forms,
-        "the sweep opened {forms} of {kinds} forms and found {helpers} helpers"
+        forms >= kinds - 4 && missing.is_empty(),
+        "the sweep opened {forms} of {kinds} forms and never found the helpers {missing:?}"
     );
 }
 

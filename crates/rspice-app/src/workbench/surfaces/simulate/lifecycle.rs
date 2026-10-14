@@ -148,6 +148,14 @@ pub(super) fn selected_analysis(
         name: instance.display_name().to_owned(),
         draft: instance.draft().clone(),
         dependencies: instance.dependencies().to_vec(),
+        dependency_names: instance
+            .dependencies()
+            .iter()
+            .filter_map(|dependency| {
+                plan.instance(dependency.target())
+                    .map(|target| (target.id(), target.display_name().to_owned()))
+            })
+            .collect(),
         prerequisite_roles,
         prerequisite_candidates,
         lifecycle: instance.lifecycle(),

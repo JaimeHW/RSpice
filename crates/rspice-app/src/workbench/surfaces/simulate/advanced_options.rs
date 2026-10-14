@@ -265,7 +265,7 @@ fn row(
 ///
 /// Only the two-state and chooser controls need one. A well returns to the
 /// plan by being emptied, so a bound the plan does not state opens empty and
-/// says `engine default` in its hint slot. A switch has no empty position: if
+/// reads `default`. A switch has no empty position: if
 /// it could not show the setting the run actually uses, it would sit at `off`
 /// over a solve that enforces device convergence, and flipping it to the value
 /// already in force would author an override instead of clearing one.
@@ -547,31 +547,13 @@ const fn form_owns_the_homotopy(kind: AnalysisKind) -> bool {
     matches!(kind, AnalysisKind::OperatingPoint)
 }
 
-/// The word the field's hint slot states about where its value came from.
-///
-/// Three words, because three is how many origins an option can have once the
-/// refused rows are gone: the plan's own block, this analysis's record, or the
-/// engine's dialect default where the plan states nothing at all.
-pub(super) fn origin_hint(row: &AdvancedOptionRow) -> &'static str {
-    if row.origin == STUDY_DEFAULT_ORIGIN {
-        return "study default";
-    }
-    if row.authored.is_some() {
-        return "override";
-    }
-    if row.origin == ENGINE_ORIGIN {
-        return ENGINE_ORIGIN;
-    }
-    PLAN_ORIGIN
-}
-
 /// What a well opens on, which is nothing where there is no value to open on.
 ///
 /// A bound the plan does not state resolves to the engine's own dialect
 /// default, and the catalogue has no number for it — `plan_preset_value` says
-/// the words instead. The hint slot already states `engine default`, and those
-/// two words inside a numeric well read as a value a reader could edit in
-/// place, which is precisely what they are not.
+/// the words instead. The empty well reads `default` as faint placeholder text;
+/// the words themselves inside a numeric well would read as a value a reader
+/// could edit in place, which is precisely what they are not.
 pub(super) fn well_value(row: &AdvancedOptionRow) -> &str {
     if row.authored.is_none() && row.origin == ENGINE_ORIGIN {
         return "";
@@ -601,9 +583,8 @@ pub(super) fn well_edit(row: &AdvancedOptionRow, text: &str) -> Option<OptionEdi
 /// A two-state control has no empty state to clear through, so the plan's own
 /// value is the clear: choosing what the plan already resolves to returns the
 /// option to the plan rather than authoring an override that departs from
-/// nothing. That is what keeps the hint slot honest — a field reading `override`
-/// is a field whose value actually differs — and what keeps a reader who
-/// flipped a switch from being unable to put it back.
+/// nothing. That keeps an override meaning a value that actually differs, and
+/// keeps a reader who flipped a switch from being unable to put it back.
 pub(super) fn setting_edit(row: &AdvancedOptionRow, chosen: &str) -> Option<OptionEdit> {
     if chosen.eq_ignore_ascii_case(&row.preset) {
         return row

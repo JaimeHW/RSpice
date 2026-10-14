@@ -7,9 +7,9 @@
 //! now read the same way, in the same two-column grid, with the same label over
 //! the same well.
 //!
-//! The field's hint slot is where the table's Origin column went: an option
-//! says `default` there, or `override` once this analysis states a value,
-//! which is the one fact a table of identical numbers existed to carry.
+//! A field shows the value the solve will use and nothing beside it. A well
+//! the plan states nothing for is empty and reads `default`, faint, inside
+//! itself; emptying a well is how an override returns to that value.
 //!
 //! Which options appear is [`super::super::advanced_options::form_rows`]: the
 //! ones this analysis owns, never the plan's global policy. What a field edit
@@ -22,7 +22,7 @@ use egui::Ui;
 use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisDraft, OverrideValueKind};
 use crate::ui::tokens::Tokens;
-use crate::ui::widgets::{mono_input, select};
+use crate::ui::widgets::select;
 use crate::workbench::RSpiceApp;
 
 use super::super::advanced_options::{self, AdvancedOptionRow, AdvancedOptionSection, OptionEdit};
@@ -123,18 +123,11 @@ fn grouped(sections: &[AdvancedOptionSection]) -> Vec<(&'static str, Vec<&Advanc
     groups
 }
 
-/// One option as a field: its label, its origin, and the control its value kind
-/// asks for.
+/// One option as a field: its label and the control its value kind asks for.
 fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
     let label = row.option.label();
-    // An inherited value, from the plan or from the engine, is the default;
-    // only a value this analysis or its study states is named for its source.
-    let origin = match advanced_options::origin_hint(row) {
-        advanced_options::PLAN_ORIGIN | advanced_options::ENGINE_ORIGIN => "default",
-        own => own,
-    };
     match row.option.value_kind() {
-        OverrideValueKind::Flag => option_field(ui, label, origin, |ui| {
+        OverrideValueKind::Flag => option_field(ui, label, |ui| {
             let mut setting = row.effective.trim().eq_ignore_ascii_case("on");
             let row_size = egui::vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h);
             let changed = ui
@@ -163,7 +156,7 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
             // author — the automatic matrix backend is the one — and stating it
             // is more use than replacing it with a placeholder.
             let current = row.effective.clone();
-            option_field(ui, label, origin, |ui| {
+            option_field(ui, label, |ui| {
                 let salt = format!("analysis-option-{}", row.option.key());
                 select(ui, &salt, label, &current, &choices, ui.available_width())
                     .and_then(|index| choices.get(index).cloned())
@@ -172,18 +165,20 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
         }
         _ => {
             let mut text = well_text(ui, row);
-            let response = option_field(ui, label, origin, |ui| {
-                // The hint slot states the origin, so the shape a value has to
-                // take is the hover — and with it the engine field the option
-                // lands on and the site that reads it, which is what tells a
-                // reader the bound they are typing reaches a solve at all.
-                mono_input(ui, label, &mut text, ui.available_width()).on_hover_text(format!(
-                    "{}\n\n{} resolves onto {}, read at {}.",
-                    row.option.value_hint(),
-                    row.option.key(),
-                    row.option.config_field(),
-                    row.option.consumer()
-                ))
+            let response = option_field(ui, label, |ui| {
+                // The shape a value has to take is the hover — and with it the
+                // engine field the option lands on and the site that reads it,
+                // which is what tells a reader the bound they are typing
+                // reaches a solve at all.
+                super::defaulted_input(ui, label, &mut text, ui.available_width()).on_hover_text(
+                    format!(
+                        "{}\n\n{} resolves onto {}, read at {}.",
+                        row.option.value_hint(),
+                        row.option.key(),
+                        row.option.config_field(),
+                        row.option.consumer()
+                    ),
+                )
             });
             retain_well_text(ui, row, &text, &response);
             // Committed when the well is let go of, not per keystroke: one
@@ -197,23 +192,16 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
     }
 }
 
-/// One option's field: its label, its origin in the hint slot, and its control.
+/// One option's field: its label over its control.
 ///
 /// Two columns where the form has room for them, and a full-width field where
-/// it does not — the hint slot is the whole of the Origin column the table gave
-/// up, so a narrow form keeps it rather than falling back to a row that has
-/// nowhere to put it.
-fn option_field<R>(
-    ui: &mut Ui,
-    label: &str,
-    origin: &str,
-    add_control: impl FnOnce(&mut Ui) -> R,
-) -> R {
+/// it does not, so a narrow form keeps the caption over the well.
+fn option_field<R>(ui: &mut Ui, label: &str, add_control: impl FnOnce(&mut Ui) -> R) -> R {
     if super::uses_two_column_fields(ui) {
-        return super::field_cell(ui, label, Some(origin), add_control);
+        return super::field_cell(ui, label, None, add_control);
     }
     let height = Tokens::get(ui.ctx()).metrics.ctl_h;
-    super::full_width_field(ui, label, Some(origin), height, add_control)
+    super::full_width_field(ui, label, None, height, add_control)
 }
 
 /// The settings a chooser offers for one option, in the enum's own order.

@@ -727,6 +727,17 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
     assert_eq!(candidates.len(), 2);
     assert_eq!(candidates[0].id, first_op);
     assert_eq!(candidates[1].id, second_op);
+    // A bound prerequisite is named by what it is called, never its id.
+    let first_name = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the plan is stable")
+        .instance(first_op)
+        .expect("the first OP is in the plan")
+        .display_name()
+        .to_owned();
+    assert_eq!(selected.dependency_names, vec![(first_op, first_name)]);
 }
 
 #[test]

@@ -89,6 +89,57 @@ fn a_displayed_statement_is_a_directive_the_engine_accepts() {
     );
 }
 
+/// The page spells a directive's numbers in engineering notation, and the
+/// spelling is still the deck the engine parses.
+///
+/// The card writer prints `f64`'s own digits; the row shows `10n`, not
+/// `0.00000001`. Respelling a number is only honest if the engine reads the
+/// respelled card to the same deck, so every statement the sweep reaches is
+/// parsed again in the form the page shows.
+#[test]
+fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts() {
+    assert_eq!(
+        super::engineering_statement(".tran 0.00000001 0.001"),
+        ".tran 10n 1m"
+    );
+    assert_eq!(
+        super::engineering_statement(".ac dec 10 1 1000000000"),
+        ".ac dec 10 1 1G"
+    );
+    assert_eq!(
+        super::engineering_statement(".options reltol=0.001 V(out) 1000"),
+        ".options reltol=1m V(out) 1000",
+        "a keyword value is respelled; a name and a count are not"
+    );
+    assert_eq!(
+        super::engineering_statement(".tran 0.0000000012345678901 1"),
+        ".tran 0.0000000012345678901 1",
+        "a number engineering notation would round keeps its digits"
+    );
+
+    let mut app = RSpiceApp::test_instance();
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    app.state.sync_active_schematic_to_workspace();
+    const DECK: &str = "* statement fixture\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n";
+    let mut checked = 0_usize;
+    for kind in AnalysisKind::ALL {
+        let draft = AnalysisDraft::for_kind(kind);
+        let Ok(statement) =
+            super::plan_statement_for(&mut app.state, &app.simulation_controller, &draft)
+        else {
+            continue;
+        };
+        checked += 1;
+        let shown = super::engineering_statement(&statement);
+        assert!(
+            rspice_core::netlist::parse_netlist(&format!("{DECK}{shown}\n.end\n")).is_ok(),
+            "{} shows `{shown}` for `{statement}`, which the engine refuses",
+            kind.label()
+        );
+    }
+    assert!(checked > 0, "the sweep must reach some statements");
+}
+
 #[test]
 fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
     let mut app = RSpiceApp::test_instance();

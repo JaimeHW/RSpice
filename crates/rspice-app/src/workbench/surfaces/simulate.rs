@@ -130,6 +130,9 @@ struct SelectedAnalysis {
     name: String,
     draft: AnalysisDraft,
     dependencies: Vec<AnalysisDependency>,
+    /// What each bound prerequisite is called, so a row names the analysis it
+    /// is bound to rather than its instance id.
+    dependency_names: Vec<(AnalysisInstanceId, String)>,
     prerequisite_roles: Vec<AnalysisKind>,
     prerequisite_candidates: Vec<(AnalysisKind, Vec<DependencyCandidate>)>,
     lifecycle: AnalysisLifecycleState,
@@ -2063,6 +2066,49 @@ fn plan_statement_for(
     statement
 }
 
+/// How far a re-parsed engineering spelling may sit from the number it was
+/// made from before the statement keeps the number as written. The same
+/// relative tolerance the netlist value hover and the models manager use.
+const STATEMENT_ROUND_TRIP_TOLERANCE: f64 = 1e-12;
+
+/// A directive in the notation a designer writes it in: `.tran 10n 1m`, not
+/// `.tran 0.00000001 0.001`.
+///
+/// The card writer spells every number with `f64`'s own `Display`, so this
+/// respells each numeric token — bare or after `KEY=` — with the deck spelling
+/// [`crate::quantity::format_engineering_value`] gives (`Meg`, `u`), which is
+/// what a SPICE parser reads back. A spelling that does not re-parse to the
+/// same number keeps the digits as written. Integers below a million stay as
+/// written too: those are counts (`.ac dec 10`, `.mc 1000`) as often as
+/// quantities, and a count respelled `1k` reads as a quantity.
+fn engineering_statement(statement: &str) -> String {
+    statement
+        .split(' ')
+        .map(|token| match token.split_once('=') {
+            Some((key, value)) => format!("{key}={}", engineering_token(value)),
+            None => engineering_token(token),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn engineering_token(token: &str) -> String {
+    let Ok(value) = token.parse::<f64>() else {
+        return token.to_owned();
+    };
+    if !value.is_finite() || (value.fract() == 0.0 && value.abs() < 1e6) {
+        return token.to_owned();
+    }
+    let spelled = crate::quantity::format_engineering_value(value);
+    let round_trips = crate::quantity::parse_engineering_value(&spelled)
+        .is_ok_and(|parsed| (parsed - value).abs() <= value.abs() * STATEMENT_ROUND_TRIP_TOLERANCE);
+    if round_trips {
+        spelled
+    } else {
+        token.to_owned()
+    }
+}
+
 fn analysis_contract(
     ui: &mut Ui,
     selected: &SelectedAnalysis,
@@ -2095,14 +2141,14 @@ fn analysis_contract(
                 if let Some(asked) = participation::participation_row(ui, resolved, selected.id) {
                     *participation_action = Some(asked);
                 }
-                property_row(ui, "Availability", availability_label(selected.kind));
                 // What this instance actually contributes to the deck. Every
                 // other row here describes the analysis; this one is the
                 // analysis, in the dialect the engine reads.
                 match plan_statement {
-                    Ok(statement) => property_row(ui, "Plan statement", statement).on_hover_text(
-                        "The exact directive this instance contributes to the executable deck.",
-                    ),
+                    Ok(statement) => {
+                        property_row(ui, "Plan statement", &engineering_statement(statement))
+                            .on_hover_text("The directive this instance contributes to the deck.")
+                    }
                     Err(error) => {
                         property_row_problem(ui, "Plan statement", error, Some(Problem::Warning))
                             .on_hover_text(

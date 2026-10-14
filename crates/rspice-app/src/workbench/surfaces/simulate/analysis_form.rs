@@ -495,14 +495,45 @@ fn periodic_carrier_row(ui: &mut Ui, value: &mut usize) -> bool {
 /// A tolerance well whose emptiness selects the plan's own policy.
 ///
 /// A blank well here is not an omission, it is the selection "whatever the
-/// Solver options channel states deck-wide", and the hint slot says `default`.
+/// Solver options channel states deck-wide", and the empty well says `default`.
 /// A written value is this analysis's own and needs no word beside it.
 fn plan_policy_tolerance_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
-    if value.trim().is_empty() {
-        hinted_input_row(ui, label, value, "default")
-    } else {
-        engineering_input_row(ui, label, value)
+    if !uses_two_column_fields(ui) {
+        return inspector_input_row(ui, label, value);
     }
+    field_cell(ui, label, None, |ui| {
+        defaulted_input(ui, label, value, ui.available_width())
+    })
+}
+
+/// What an empty well that takes a resolved value says, faint, inside itself.
+const EMPTY_WELL_PLACEHOLDER: &str = "default";
+
+/// A mono well that reads [`EMPTY_WELL_PLACEHOLDER`] while it is empty.
+///
+/// Emptiness is a setting on these wells: the value the plan or the engine
+/// resolves applies. So the empty well names that setting, and a well holding
+/// a value shows only the value, with no tag beside it.
+pub(super) fn defaulted_input(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    width: f32,
+) -> Response {
+    let t = Tokens::get(ui.ctx());
+    let response = ui.add_sized(
+        vec2(width, t.metrics.ctl_h),
+        egui::TextEdit::singleline(value)
+            .font(egui::TextStyle::Monospace)
+            .margin(egui::Margin::symmetric(8, 4))
+            .hint_text(
+                egui::RichText::new(EMPTY_WELL_PLACEHOLDER)
+                    .text_style(egui::TextStyle::Monospace)
+                    .color(t.color.text_faint),
+            ),
+    );
+    crate::ui::widgets::name_control(ui, &response, label);
+    response
 }
 
 fn enabled_choice_row(ui: &mut Ui, label: &str, enabled: &mut bool) -> bool {
@@ -1190,7 +1221,13 @@ pub(super) fn prerequisite_rows(
                     "unbound · required when enabled".to_owned()
                 }
             },
-            |dependency| dependency.target().to_string(),
+            |dependency| {
+                selected
+                    .dependency_names
+                    .iter()
+                    .find(|(id, _)| *id == dependency.target())
+                    .map_or_else(|| "missing analysis".to_owned(), |(_, name)| name.clone())
+            },
         );
         let label = format!("{} prerequisite", prerequisite.stable_id().to_uppercase());
         let candidates = selected

@@ -659,21 +659,16 @@ pub(super) enum ParticipationAction {
 /// differently, and a copy per form is thirty-odd places for the three options
 /// to drift apart.
 ///
-/// The control is only offered where it means something. With no run-set axis
+/// The row is only drawn where it means something. With no run-set axis
 /// enabled every analysis runs exactly once, and a three-way choice about which
 /// of one point to run at would be a control whose every setting is the same
-/// run.
+/// run, so the block says nothing about run-set points at all.
 pub(super) fn participation_row(
     ui: &mut Ui,
     resolved: &PlanParticipation,
     id: AnalysisInstanceId,
 ) -> Option<ParticipationAction> {
     if !resolved.has_axes {
-        crate::workbench::design_system::property_row(
-            ui,
-            "Run-set points",
-            "1 · no global axis is enabled",
-        );
         return None;
     }
     let matrix = resolved.point_keys.len();

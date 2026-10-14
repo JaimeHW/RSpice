@@ -1,8 +1,9 @@
-//! Which options a form offers, what their hints say, and what an edit does.
+//! Which options a form offers, where each value comes from, and what an edit
+//! does.
 //!
 //! The sibling file judges the rows themselves — what one analysis resolves
 //! every option to. This judges the partition and the commit: which of those
-//! rows become fields on which kind's form, what the hint slot says about each,
+//! rows become fields on which kind's form, which origin each resolves from,
 //! and what a field edit asks the plan for.
 //!
 //! The partition is the part worth pinning hardest. A global solver bound is
@@ -115,7 +116,7 @@ fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
     assert!(super::super::page_solver::write_numeric_record(&mut app, id, O::Itl4, "91").is_err());
     super::super::page_solver::write_numeric_record(&mut app, id, O::Reltol, "1e-5").unwrap();
     assert_eq!(row_of(&app, id, O::Reltol).origin, STUDY_DEFAULT_ORIGIN);
-    assert!(offered(&app, id).contains(&(O::Reltol, "study default")));
+    assert!(offered(&app, id).contains(&(O::Reltol, STUDY_DEFAULT_ORIGIN)));
     let rows = super::super::page_solver::analysis_overrides(&app);
     let row = rows
         .iter()
@@ -261,7 +262,7 @@ fn studio(kind: AnalysisKind) -> (RSpiceApp, AnalysisInstanceId) {
     (app, instance)
 }
 
-/// Every option field one analysis's form offers, as `(option, origin hint)`.
+/// Every option field one analysis's form offers, as `(option, origin)`.
 fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static str)> {
     let plan = app
         .state
@@ -280,7 +281,7 @@ fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static st
     )
     .into_iter()
     .flat_map(|section| section.rows)
-    .map(|row| (row.option, origin_hint(&row)))
+    .map(|row| (row.option, row.origin))
     .collect()
 }
 
@@ -473,8 +474,8 @@ fn an_untouched_form_states_the_plan_as_every_origin() {
     // at all for the two packages the engine reads straight off the deck: an
     // output schedule and a transient Newton bound belong to one analysis, not
     // to the whole deck, so there is no plan field for them to depart from.
-    // Those rows resolve to the engine's own default and the hint says so
-    // rather than naming a policy the plan does not hold.
+    // Those rows resolve to the engine's own default rather than to a policy
+    // the plan does not hold.
     const ENGINE_DEFAULTED: [O; 12] = [
         O::LteReltol,
         O::LteAbstol,
@@ -489,27 +490,27 @@ fn an_untouched_form_states_the_plan_as_every_origin() {
         O::OutputTimePoints,
         O::RetainEverySignal,
     ];
-    for (option, hint) in offered(&app, transient) {
+    for (option, origin) in offered(&app, transient) {
         let expected = if ENGINE_DEFAULTED.contains(&option) {
             ENGINE_ORIGIN
         } else {
             PLAN_ORIGIN
         };
-        assert_eq!(hint, expected, "{}", option.key());
+        assert_eq!(origin, expected, "{}", option.key());
     }
 }
 
 /// A bound the plan does not state opens on an empty well.
 ///
 /// Its effective value is a pair of words rather than a number — the engine's
-/// own dialect default stands — and the hint slot is where that belongs. Inside
-/// a numeric well the same words read as a value a reader could edit, which is
-/// exactly what they are not.
+/// own dialect default stands — so the empty well reads `default` as faint
+/// placeholder text. Inside a numeric well the words themselves would read as a
+/// value a reader could edit, which is exactly what they are not.
 #[test]
 fn a_bound_the_plan_does_not_state_opens_on_an_empty_well() {
     let (mut app, transient) = studio(AnalysisKind::Transient);
     let inherited = row_of(&app, transient, O::LteReltol);
-    assert_eq!(origin_hint(&inherited), ENGINE_ORIGIN);
+    assert_eq!(inherited.origin, ENGINE_ORIGIN);
     assert_eq!(
         inherited.effective, ENGINE_ORIGIN,
         "the row states the words"
@@ -529,23 +530,23 @@ fn a_bound_the_plan_does_not_state_opens_on_an_empty_well() {
         &[OptionEdit::Set(O::LteReltol, "2e-3".to_owned())],
     );
     let authored = row_of(&app, transient, O::LteReltol);
-    assert_eq!(origin_hint(&authored), "override");
+    assert_eq!(authored.origin, OVERRIDE_ORIGIN);
     assert_eq!(well_value(&authored), authored.effective);
     assert!(!well_value(&authored).is_empty());
 }
 
 /// A well let go of with a new value authors an override; emptied, it clears.
 ///
-/// Both halves of one rule, and the hint is what a reader sees of it: the field
-/// reads `override` for exactly as long as the analysis states a value, and
-/// `plan policy` again the moment it stops.
+/// Both halves of one rule: the field is an override for exactly as long as the
+/// analysis states a value, and resolves from the plan again the moment it
+/// stops.
 #[test]
 fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
     let (mut app, transient) = studio(AnalysisKind::Transient);
     let before = revision(&app);
 
     let inherited = row_of(&app, transient, O::Trtol);
-    assert_eq!(origin_hint(&inherited), PLAN_ORIGIN);
+    assert_eq!(inherited.origin, PLAN_ORIGIN);
     let edit = well_edit(&inherited, " 4 ").expect("a new value asks to be authored");
     assert_eq!(edit, OptionEdit::Set(O::Trtol, "4".to_owned()));
     commit(&mut app, transient, &[edit]);
@@ -557,7 +558,7 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
         "a committed override advances the plan, which is what invalidates preflight"
     );
     let overridden = row_of(&app, transient, O::Trtol);
-    assert_eq!(origin_hint(&overridden), "override");
+    assert_eq!(overridden.origin, OVERRIDE_ORIGIN);
     assert_eq!(overridden.effective, "4");
 
     // Let go of unchanged, a well asks for nothing: tabbing through a form must
@@ -569,7 +570,7 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
     commit(&mut app, transient, &[cleared]);
     assert_eq!(authored(&app, transient, O::Trtol), None);
     let inherited = row_of(&app, transient, O::Trtol);
-    assert_eq!(origin_hint(&inherited), PLAN_ORIGIN);
+    assert_eq!(inherited.origin, PLAN_ORIGIN);
     assert_eq!(
         inherited.effective,
         super::super::page_solver::plan_preset_value(O::Trtol, &app.state.sim_setup.options),
@@ -640,7 +641,7 @@ fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
 fn a_setting_returned_to_the_plan_clears_its_override() {
     let (mut app, operating_point) = studio(AnalysisKind::OperatingPoint);
     let inherited = row_of(&app, operating_point, O::GminStepping);
-    assert_eq!(origin_hint(&inherited), PLAN_ORIGIN);
+    assert_eq!(inherited.origin, PLAN_ORIGIN);
     let departed = if inherited.preset.eq_ignore_ascii_case("on") {
         "off"
     } else {
@@ -656,7 +657,7 @@ fn a_setting_returned_to_the_plan_clears_its_override() {
     assert_eq!(edit, OptionEdit::Set(O::GminStepping, departed.to_owned()));
     commit(&mut app, operating_point, &[edit]);
     let overridden = row_of(&app, operating_point, O::GminStepping);
-    assert_eq!(origin_hint(&overridden), "override");
+    assert_eq!(overridden.origin, OVERRIDE_ORIGIN);
 
     let back = setting_edit(&overridden, &preset)
         .expect("the plan's own setting is how a switch returns to it");
@@ -664,7 +665,7 @@ fn a_setting_returned_to_the_plan_clears_its_override() {
     commit(&mut app, operating_point, &[back]);
     assert_eq!(authored(&app, operating_point, O::GminStepping), None);
     assert_eq!(
-        origin_hint(&row_of(&app, operating_point, O::GminStepping)),
+        row_of(&app, operating_point, O::GminStepping).origin,
         PLAN_ORIGIN
     );
 }
@@ -705,9 +706,9 @@ fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
         offered(&app, transient)
             .into_iter()
             .find(|(option, _)| *option == O::Reltol)
-            .map(|(_, hint)| hint),
-        Some("override"),
-        "a stated global bound is a field, and its hint says who stated it"
+            .map(|(_, origin)| origin),
+        Some(OVERRIDE_ORIGIN),
+        "a stated global bound is a field, resolved from the analysis that states it"
     );
 
     commit(&mut app, transient, &[OptionEdit::Clear(O::Reltol)]);
