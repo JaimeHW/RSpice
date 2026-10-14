@@ -842,4 +842,91 @@ mod tests {
             found.join("\n  ")
         );
     }
+
+    /// Whether `line` reads `receiver.role` as a whole field access: not part
+    /// of a longer name on either side, and not a method call such as `.ok()`.
+    fn reads_palette_role(line: &str, receiver: &str, role: &str) -> bool {
+        let needle = format!("{receiver}.{role}");
+        line.match_indices(&needle).any(|(at, _)| {
+            let before = line[..at].chars().next_back();
+            let after = line[at + needle.len()..].chars().next();
+            !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+                && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_' || ch == '(')
+        })
+    }
+
+    /// The window chrome, the console, the floating tools, Help and the code
+    /// editors paint no status in colour. Their text is neutral, a problem the
+    /// reader must notice is a `Problem` mark, success is never styled, and a
+    /// dot is kept for live state alone. The scan reads each file named here
+    /// with its test-only items blanked and fails on the old shortcuts:
+    /// `colored_label`, `status_dot(`, `StatusMark::Success`,
+    /// `StatusMark::Neutral`, and a read of the `ok` or `info` palette role.
+    /// Nothing is allowed: every colour these files keep is data, a verdict, a
+    /// field error or the accent of the active item, none of which reads those
+    /// roles.
+    #[test]
+    fn chrome_console_tools_and_help_paint_no_status_in_colour() {
+        const FILES: [&str; 25] = [
+            "workbench/app/dialogs/help.rs",
+            "workbench/chrome.rs",
+            "workbench/chrome/activity_rail.rs",
+            "workbench/chrome/document_bar.rs",
+            "workbench/chrome/phone_navigation.rs",
+            "workbench/chrome/presence.rs",
+            "workbench/chrome/sheet_strip.rs",
+            "workbench/chrome/status_bar.rs",
+            "workbench/chrome/title_bar.rs",
+            "workbench/chrome/toolbar.rs",
+            "workbench/chrome/toolbar/run_config_chip.rs",
+            "workbench/docks/console.rs",
+            "workbench/docks/console/log_anchor.rs",
+            "workbench/documents/code_workspace/editor.rs",
+            "workbench/documents/netlist_document/editor.rs",
+            "workbench/documents/virtual_text_editor.rs",
+            "workbench/tools/calculator_tool.rs",
+            "workbench/tools/calculator_tool/panel.rs",
+            "workbench/tools/expression_diagnostics.rs",
+            "workbench/tools/jobs_manager.rs",
+            "workbench/tools/notification_center.rs",
+            "workbench/tools/project_launcher.rs",
+            "workbench/tools/project_launcher/recovery.rs",
+            "workbench/tools/specialist_tool_browser.rs",
+            "workbench/tools/specialist_tool_browser/workspace_rows.rs",
+        ];
+        const BANNED_CALLS: [&str; 4] = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+        ];
+        // The names these files read the palette through.
+        const PALETTE_RECEIVERS: [&str; 4] = ["color", "colors", "c", "palette"];
+        const BANNED_ROLES: [&str; 2] = ["ok", "info"];
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut found = Vec::new();
+        for file in FILES {
+            let path = root.join(file);
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            for (index, line) in without_test_items(&source).lines().enumerate() {
+                let code = line.split("//").next().unwrap_or_default();
+                let banned_call = BANNED_CALLS.iter().any(|call| code.contains(call));
+                let banned_role = PALETTE_RECEIVERS.iter().any(|receiver| {
+                    BANNED_ROLES
+                        .iter()
+                        .any(|role| reads_palette_role(code, receiver, role))
+                });
+                if banned_call || banned_role {
+                    found.push(format!("{file}:{}: {}", index + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "status painted in colour; use neutral text, a Problem mark, or nothing:\n  {}",
+            found.join("\n  ")
+        );
+    }
 }
