@@ -142,7 +142,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::RescanModelLibraries,
         Command::CompileVerilogA,
         Command::AutomationConsole,
-        Command::VisualizationStudio,
         Command::ReportAuthoring,
     ] {
         assert!(

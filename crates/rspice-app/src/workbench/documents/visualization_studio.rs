@@ -60,8 +60,7 @@ use crate::ui::tokens::Tokens;
 use crate::workbench::{AppState, RSpiceApp};
 
 use crate::workbench::{
-    ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference, SurfaceId,
-    SurfaceRoute,
+    ChoicePreference, ResultViewer, RouteTransitionSource, ScalarPreference,
     state::{Workspace, WorkspaceDocumentId},
 };
 
@@ -508,41 +507,8 @@ fn active_project_pane_and_trace(
     Ok((pane_id, trace.id))
 }
 
-pub(crate) fn open(app: &mut RSpiceApp) {
-    if let Err(error) = navigate_to_visualization_studio(app) {
-        app.state.push_user_message(ConsoleMessage::warning(error));
-    }
-}
-
-fn navigate_to_visualization_studio(app: &mut RSpiceApp) -> Result<(), String> {
-    let route = SurfaceRoute::surface(SurfaceId::VisualizationStudio);
-    app.state
-        .workbench
-        .navigate(route, RouteTransitionSource::User)
-        .map_err(|error| error.to_string())?;
-    app.state.workbench.workspace = Workspace::Results;
-    app.state.workbench.visualization_studio.normalize();
-    app.state
-        .workbench
-        .specialist_tool_browser
-        .record_recent(SurfaceId::VisualizationStudio);
-    Ok(())
-}
-
-pub(crate) fn open_add_pane(app: &mut RSpiceApp) {
-    open_dock(app, VisualizationDock::AddPane);
-}
-
 pub(crate) fn open_trace_manager(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::TraceManager);
-}
-
-pub(crate) fn open_cursor_manager(app: &mut RSpiceApp) {
-    open_dock(app, VisualizationDock::CursorManager);
-}
-
-pub(crate) fn open_annotation_editor(app: &mut RSpiceApp) {
-    open_dock(app, VisualizationDock::Annotation);
 }
 
 fn retained_document_analysis(

@@ -942,3 +942,75 @@ fn quick_view_properties_are_the_reader_s_own() {
             .is_empty()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Review renders
+// ---------------------------------------------------------------------------
+
+/// Write one review render of what `pass` paints at `size`, with its measured
+/// geometry beside it.
+fn review(stem: &str, size: egui::Vec2, mut pass: impl FnMut(&mut egui::Ui)) {
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    crate::ui::raster::write_panel_review(
+        &directory,
+        stem,
+        crate::ui::Theme::default(),
+        size,
+        0.0,
+        |ui, _| pass(ui),
+    );
+}
+
+/// The result viewer's document forms and a two-pane linked document, as
+/// PNGs with their measured geometry. Run with `--ignored`; the renders go
+/// to `RSPICE_RASTER_DIR` (default: the system temp directory).
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_result_document_forms_for_review() {
+    let form = egui::vec2(760.0, 560.0);
+
+    let (mut app, document_id) = document_fixture("single-pane");
+    show_document(&mut app, document_id);
+    measurement_preview(&mut app, "rms(V(out))");
+    review("measurement", form, |ui| show(ui.ctx(), &mut app));
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+    app.state.workbench.workspace = Workspace::Results;
+    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    open_family(&mut app.state);
+    review("family", form, |ui| show(ui.ctx(), &mut app));
+
+    let (mut app, document_id) = document_fixture("single-pane");
+    app.state.workbench.workspace = Workspace::Results;
+    show_document(&mut app, document_id);
+    open_properties(&mut app.state);
+    review("properties", form, |ui| show(ui.ctx(), &mut app));
+
+    let (mut app, document_id) = document_fixture("single-pane");
+    app.state.simulation.retained.runs.push(baseline_run(2));
+    show_document(&mut app, document_id);
+    app.state.workbench.workspace = Workspace::Results;
+    open_compare(&mut app.state);
+    review("compare", form, |ui| show(ui.ctx(), &mut app));
+    run_comparison(&mut app);
+    review("compare-outcome", form, |ui| show(ui.ctx(), &mut app));
+
+    let (mut app, document_id) = document_fixture("two-linked-panes");
+    app.state.workbench.workspace = Workspace::Results;
+    show_document(&mut app, document_id);
+    links::set_cursor_links(&mut app.state, document_id, true).expect("the cursors link");
+    let pane = ordered_panes(&app, document_id)[0].id;
+    let edits =
+        links::cursor_pair_edits(retained(&app, document_id), pane, (Some(0.25), Some(0.75)))
+            .expect("the pane keeps cursors");
+    transact(&mut app.state, document_id, edits).expect("the cursors are kept");
+    review("two-pane-linked", egui::vec2(1100.0, 640.0), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            super::super::show_persistent_document(ui, &mut app, document_id);
+        });
+    });
+}

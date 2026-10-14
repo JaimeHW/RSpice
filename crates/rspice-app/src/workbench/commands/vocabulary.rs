@@ -272,7 +272,6 @@ pub enum Command {
     WaveformCalculator,
     ExpressionDiagnostics,
     CompareResultDatasets,
-    ReviewNotes,
     MeasurementLibrary,
     FamilySlicing,
     ResultViewer(crate::workbench::ResultViewer),
@@ -307,16 +306,12 @@ pub enum Command {
     AccountOrganization,
     License,
     SpecialistToolBrowser,
-    VisualizationStudio,
     ReportAuthoring,
     SaveReportDocument,
     AddReportPage,
     ReportPageProperties,
     AddVisualizationPane,
-    VisualizationTraceManager,
-    VisualizationCursorManager,
     VisualizationDocumentProperties,
-    ExportVisualizationDocument,
     HelpCenter,
     ReleaseNotes,
     MigrationGuide,
@@ -356,11 +351,10 @@ impl Command {
         if id == "export-waveforms" {
             return Some(Self::ExportWaveformsCsv);
         }
-        if id == "visualization-trace-manager" {
-            return Some(Self::VisualizationTraceManager);
-        }
-        if id == "visualization-cursor-manager" {
-            return Some(Self::VisualizationCursorManager);
+        // The cursor manager's slots became the linked-cursors toggle, so a
+        // shortcut bound to it keeps doing what the slots now do.
+        if id == "cursor-manager" || id == "visualization-cursor-manager" {
+            return Some(Self::ToggleLinkedCursors);
         }
         if id == "visualization-document-properties" {
             return Some(Self::VisualizationDocumentProperties);
@@ -800,7 +794,6 @@ impl Command {
             Self::CompareResultDatasets => {
                 spec("compare-datasets", "Add result comparison…", "Results")
             }
-            Self::ReviewNotes => spec("annotation-manager", "Review notes…", "Results"),
             Self::MeasurementLibrary => {
                 spec("measurement-library", "Measurement library…", "Results")
             }
@@ -1056,11 +1049,6 @@ impl Command {
                 "Specialist tool browser…",
                 "Navigate",
             ),
-            Self::VisualizationStudio => spec(
-                "visualization-studio",
-                "Open Visualization Studio",
-                "Navigate",
-            ),
             Self::ReportAuthoring => spec(
                 "report-page-editor",
                 "Report page and datasheet editor\u{2026}",
@@ -1074,20 +1062,9 @@ impl Command {
                 spec("report-page-properties", "Page properties", "Results")
             }
             Self::AddVisualizationPane => spec("visualization-add-pane", "Add pane…", "Results"),
-            Self::VisualizationTraceManager => {
-                spec("trace-manager", "Trace and family manager…", "Results")
-            }
-            Self::VisualizationCursorManager => {
-                spec("cursor-manager", "Cursor groups and links…", "Results")
-            }
             Self::VisualizationDocumentProperties => {
                 spec("plot-properties", "Plot document properties…", "Results")
             }
-            Self::ExportVisualizationDocument => spec(
-                "visualization-export-document",
-                "Export document",
-                "Results",
-            ),
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
             Self::ReleaseNotes => spec(
                 "release-notes",
@@ -1354,7 +1331,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::WaveformCalculator,
     Command::ExpressionDiagnostics,
     Command::CompareResultDatasets,
-    Command::ReviewNotes,
     Command::MeasurementLibrary,
     Command::FamilySlicing,
     Command::ResultViewer(crate::workbench::ResultViewer::Bode),
@@ -1410,13 +1386,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AccountOrganization,
     Command::License,
     Command::SpecialistToolBrowser,
-    Command::VisualizationStudio,
     Command::ReportAuthoring,
     Command::AddVisualizationPane,
-    Command::VisualizationTraceManager,
-    Command::VisualizationCursorManager,
     Command::VisualizationDocumentProperties,
-    Command::ExportVisualizationDocument,
     Command::HelpCenter,
     Command::ReleaseNotes,
     Command::MigrationGuide,

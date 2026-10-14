@@ -749,7 +749,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
-    ("commands", "documents/visualization_studio", 12),
     ("commands", "menu_bar", 5),
     ("commands", "surfaces", 8),
     ("commands", "account_organization", 1),
@@ -801,7 +800,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("shortcuts/library_persistence", "shortcuts/artifacts", 1),
     ("documents/code_workspace", "workflows/export_workflow", 1),
     // Presentation reaching sideways into a peer surface.
-    ("docks", "documents/visualization_studio", 5),
     ("documents/result_document", "chrome", 1),
     ("surfaces", "documents/visualization_studio", 1),
     // A route describing its own catalog and availability.

@@ -5560,8 +5560,7 @@ fn result_artifact_context_menu(
         if add.clicked() {
             if select_result_artifact(app, &artifact.identity) {
                 app.state.ui.results.session.viewer = artifact.viewer;
-                crate::workbench::documents::visualization_studio::open(app);
-                crate::workbench::documents::visualization_studio::open_add_pane(app);
+                crate::workbench::documents::result_document::add_selected_result_as_pane(app);
             }
             ui.close();
         }
@@ -5702,8 +5701,7 @@ fn result_signal_context_menu(
         }
         if add.clicked() {
             if select_result_signal_by_key(app, &key) {
-                crate::workbench::documents::visualization_studio::open(app);
-                crate::workbench::documents::visualization_studio::open_add_pane(app);
+                crate::workbench::documents::result_document::add_selected_result_as_pane(app);
             }
             ui.close();
         }

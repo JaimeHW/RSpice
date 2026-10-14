@@ -593,7 +593,6 @@ impl Command {
                 | Self::CreateResultDocument
                 | Self::WaveformCalculator
                 | Self::CompareResultDatasets
-                | Self::ReviewNotes
                 | Self::MeasurementLibrary
                 | Self::FamilySlicing
                 | Self::ResultViewer(_)
@@ -620,7 +619,6 @@ impl Command {
                 | Self::CompileVerilogA
                 | Self::VerilogABuildSettings
                 | Self::AutomationConsole
-                | Self::VisualizationStudio
                 | Self::ReportAuthoring
                 | Self::SaveReportDocument
                 | Self::AddReportPage
@@ -628,10 +626,7 @@ impl Command {
                 | Self::DescendHierarchyDirect
                 | Self::ShowInNetlist
                 | Self::AddVisualizationPane
-                | Self::VisualizationTraceManager
-                | Self::VisualizationCursorManager
                 | Self::VisualizationDocumentProperties
-                | Self::ExportVisualizationDocument
         )
     }
 
@@ -797,15 +792,11 @@ impl Command {
             | Self::WaveformCalculator
             | Self::ExpressionDiagnostics
             | Self::CompareResultDatasets
-            | Self::ReviewNotes
             | Self::MeasurementLibrary
             | Self::FamilySlicing
             | Self::ResultViewer(_)
             | Self::AddVisualizationPane
-            | Self::VisualizationTraceManager
-            | Self::VisualizationCursorManager
-            | Self::VisualizationDocumentProperties
-            | Self::ExportVisualizationDocument => ShortcutContext::ResultsWorkspace,
+            | Self::VisualizationDocumentProperties => ShortcutContext::ResultsWorkspace,
             Self::SaveReportDocument | Self::AddReportPage | Self::ReportPageProperties => {
                 ShortcutContext::ResultsWorkspace
             }
@@ -1322,25 +1313,16 @@ impl Command {
             {
                 "the result holds no sweep, corner or Monte Carlo family"
             }
-            Self::ReviewNotes
-            | Self::MeasurementLibrary
+            Self::MeasurementLibrary
             | Self::FamilySlicing
-            | Self::VisualizationTraceManager
-            | Self::VisualizationCursorManager
             | Self::VisualizationDocumentProperties
-                if !matches!(
-                    app.state.workbench.current_route().surface_id(),
-                    crate::workbench::SurfaceId::Results
-                        | crate::workbench::SurfaceId::VisualizationStudio
-                ) =>
+                if app.state.workbench.current_route().surface_id()
+                    != crate::workbench::SurfaceId::Results =>
             {
-                "open an active result document"
+                "open a result in Results"
             }
-            Self::ReviewNotes
-            | Self::MeasurementLibrary
+            Self::MeasurementLibrary
             | Self::FamilySlicing
-            | Self::VisualizationTraceManager
-            | Self::VisualizationCursorManager
             | Self::VisualizationDocumentProperties => "no retained result dataset is available",
             Self::ToggleResultsSplit if !app.state.workbench.supports_results_split() => {
                 "open Design, Netlist, or Simulation setup"

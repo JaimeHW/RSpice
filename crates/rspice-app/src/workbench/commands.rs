@@ -1012,7 +1012,6 @@ impl Command {
                                 .is_none()
                     })
             }
-            Self::VisualizationStudio => state.project_lifecycle.is_open(),
             Self::ReportAuthoring => super::surfaces::report_authoring::can_open(state),
             Self::SaveReportDocument => {
                 super::surfaces::report_authoring::can_save_document(state)
@@ -1025,12 +1024,6 @@ impl Command {
                 state.workbench.current_route().surface_id() == super::SurfaceId::Results
                     && crate::workbench::documents::result_document::add_pane_available(state)
             }
-            Self::ExportVisualizationDocument => {
-                state.workbench.current_route().surface_id()
-                    == super::SurfaceId::VisualizationStudio
-                    && state.project_lifecycle.is_open()
-                    && state.simulation.retained.has_results()
-            }
             // Add measurement draws over the result viewer, and over a quick
             // view it evaluates without keeping, so it needs only a result.
             Self::MeasurementLibrary => {
@@ -1040,15 +1033,6 @@ impl Command {
             Self::FamilySlicing => {
                 state.workbench.current_route().surface_id() == super::SurfaceId::Results
                     && crate::workbench::documents::result_document::family_available(state)
-            }
-            Self::VisualizationTraceManager
-            | Self::VisualizationCursorManager
-            | Self::ReviewNotes => {
-                matches!(
-                    state.workbench.current_route().surface_id(),
-                    super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
-                ) && state.project_lifecycle.is_open()
-                    && state.simulation.retained.has_results()
             }
             Self::VisualizationDocumentProperties => {
                 state.workbench.current_route().surface_id() == super::SurfaceId::Results
@@ -2253,9 +2237,6 @@ impl Command {
             Self::DesignSpecialistWorkspaces | Self::SpecialistToolBrowser => {
                 crate::workbench::tools::specialist_tool_browser::open(app);
             }
-            Self::VisualizationStudio => {
-                crate::workbench::documents::visualization_studio::open(app)
-            }
             Self::ReportAuthoring => super::surfaces::report_authoring::open(app),
             Self::SaveReportDocument => super::surfaces::report_authoring::save_document(app),
             Self::AddReportPage => super::surfaces::report_authoring::open_add_page(app),
@@ -2264,18 +2245,6 @@ impl Command {
             }
             Self::AddVisualizationPane => {
                 crate::workbench::documents::result_document::open_add_pane(&mut app.state);
-            }
-            Self::VisualizationTraceManager => {
-                open_studio_tool(app, "Trace and family manager");
-                crate::workbench::documents::visualization_studio::open_trace_manager(app);
-            }
-            Self::VisualizationCursorManager => {
-                open_studio_tool(app, "Cursor groups and links");
-                crate::workbench::documents::visualization_studio::open_cursor_manager(app);
-            }
-            Self::ReviewNotes => {
-                open_studio_tool(app, "Review notes");
-                crate::workbench::documents::visualization_studio::open_annotation_editor(app);
             }
             Self::MeasurementLibrary => {
                 crate::workbench::documents::result_document::open_measurement(&mut app.state);
@@ -2340,9 +2309,6 @@ impl Command {
             },
             Self::VisualizationDocumentProperties => {
                 crate::workbench::documents::result_document::open_properties(&mut app.state);
-            }
-            Self::ExportVisualizationDocument => {
-                crate::workbench::documents::visualization_studio::export_document(app);
             }
             Self::HelpCenter => {
                 open_help_center(&mut app.state, crate::workbench::app::HelpCenterPage::Help)

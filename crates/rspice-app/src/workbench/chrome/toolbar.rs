@@ -461,13 +461,6 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
         no_project_tools(ui, app, layout);
         return;
     }
-    if app.state.workbench.current_route().surface_id()
-        == super::super::SurfaceId::VisualizationStudio
-    {
-        visualization_tools(ui, app, layout);
-        workspace_focus_tool(ui, app, layout);
-        return;
-    }
     if app.state.workbench.current_route().surface_id() == super::super::SurfaceId::ReportAuthoring
     {
         report_authoring_tools(ui, app, layout);
@@ -953,14 +946,7 @@ fn results_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_icon_command(
         ui,
         app,
-        Command::VisualizationTraceManager,
-        WorkbenchIcon::Results,
-        layout,
-    );
-    toolbar_icon_command(
-        ui,
-        app,
-        Command::VisualizationCursorManager,
+        Command::ToggleLinkedCursors,
         WorkbenchIcon::Target,
         layout,
     );
@@ -1191,49 +1177,6 @@ fn results_document_is_historical(app: &RSpiceApp) -> bool {
         }
         _ => false,
     }
-}
-
-fn visualization_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    toolbar_text_command(
-        ui,
-        app,
-        Command::AddVisualizationPane,
-        WorkbenchIcon::Add,
-        "Add visualization pane",
-        layout,
-    );
-    toolbar_text_command(
-        ui,
-        app,
-        Command::VisualizationTraceManager,
-        WorkbenchIcon::Sliders,
-        "Trace manager",
-        layout,
-    );
-    toolbar_text_command(
-        ui,
-        app,
-        Command::VisualizationCursorManager,
-        WorkbenchIcon::Target,
-        "Cursor manager",
-        layout,
-    );
-    toolbar_text_command(
-        ui,
-        app,
-        Command::VisualizationDocumentProperties,
-        WorkbenchIcon::Settings,
-        "Document properties",
-        layout,
-    );
-    toolbar_text_command(
-        ui,
-        app,
-        Command::ExportVisualizationDocument,
-        WorkbenchIcon::Export,
-        "Export document",
-        layout,
-    );
 }
 
 fn report_authoring_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {

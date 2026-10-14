@@ -1328,7 +1328,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::CreateHierarchy | Command::DesignManagement => WorkbenchIcon::Folder,
         Command::ConnectivityManager => WorkbenchIcon::Bus,
         Command::SelectionBulkEdit => WorkbenchIcon::Sliders,
-        Command::ReviewComments | Command::ReviewNotes => WorkbenchIcon::Info,
+        Command::ReviewComments => WorkbenchIcon::Info,
         Command::RevisionHistory => WorkbenchIcon::History,
         Command::AscendHierarchy => WorkbenchIcon::ArrowLeft,
         Command::DescendHierarchy | Command::DescendHierarchyDirect => WorkbenchIcon::Folder,
@@ -1349,12 +1349,9 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::LegalPrivacy => WorkbenchIcon::Check,
         Command::ModelCompareRelease => WorkbenchIcon::Compare,
         Command::DesignSpecialistWorkspaces | Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
-        Command::VisualizationStudio => WorkbenchIcon::Results,
         Command::AddVisualizationPane => WorkbenchIcon::Add,
-        Command::VisualizationTraceManager => WorkbenchIcon::Sliders,
-        Command::VisualizationCursorManager => WorkbenchIcon::Target,
+        Command::ToggleLinkedCursors => WorkbenchIcon::Target,
         Command::VisualizationDocumentProperties => WorkbenchIcon::Settings,
-        Command::ExportVisualizationDocument => WorkbenchIcon::Export,
         Command::About => WorkbenchIcon::Info,
         Command::PreviousDocument | Command::PreviousWorkspace => WorkbenchIcon::ArrowLeft,
         Command::NextDocument | Command::NextWorkspace => WorkbenchIcon::ArrowRight,
@@ -1696,9 +1693,7 @@ fn results_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::CompareResultDatasets);
     command_item(ui, app, Command::ReportAuthoring);
     menu_separator(ui);
-    command_item(ui, app, Command::VisualizationTraceManager);
-    command_item(ui, app, Command::VisualizationCursorManager);
-    command_item(ui, app, Command::ReviewNotes);
+    command_item(ui, app, Command::ToggleLinkedCursors);
     command_item(ui, app, Command::WaveformCalculator);
     command_item(ui, app, Command::ExpressionDiagnostics);
     command_item(ui, app, Command::MeasurementLibrary);

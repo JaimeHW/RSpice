@@ -89,9 +89,7 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
         (Command::DatasetManifestBrowser, "dataset-browser"),
         (Command::CreateResultDocument, "create-result-document"),
         (Command::CompareResultDatasets, "compare-datasets"),
-        (Command::VisualizationTraceManager, "trace-manager"),
-        (Command::VisualizationCursorManager, "cursor-manager"),
-        (Command::ReviewNotes, "annotation-manager"),
+        (Command::ToggleLinkedCursors, "toggle-linked-cursors"),
         (Command::WaveformCalculator, "calculator"),
         (Command::MeasurementLibrary, "measurement-library"),
         (Command::FamilySlicing, "family-slicing"),
@@ -112,6 +110,42 @@ fn truthful_results_menu_routes_keep_their_stable_dispatch_identities() {
         Command::ReportPageProperties,
     ] {
         assert!(!command_catalog().any(|candidate| candidate == unavailable));
+    }
+}
+
+/// The Studio's commands went with it. The cursor manager's slots became
+/// the linked-cursors toggle, so a shortcut saved against its id keeps
+/// working; the others resolve to nothing, and a profile keeps their
+/// bindings as unknown rather than refusing to load.
+#[test]
+fn the_studio_commands_resolve_to_their_result_viewer_successors() {
+    for id in ["cursor-manager", "visualization-cursor-manager"] {
+        assert_eq!(
+            Command::from_stable_id(id),
+            Some(Command::ToggleLinkedCursors)
+        );
+    }
+    for id in [
+        "visualization-studio",
+        "trace-manager",
+        "visualization-trace-manager",
+        "annotation-manager",
+        "visualization-export-document",
+    ] {
+        assert_eq!(Command::from_stable_id(id), None, "{id}");
+    }
+    for (id, command) in [
+        ("visualization-add-pane", Command::AddVisualizationPane),
+        ("measurement-library", Command::MeasurementLibrary),
+        ("family-slicing", Command::FamilySlicing),
+        ("plot-properties", Command::VisualizationDocumentProperties),
+        (
+            "visualization-document-properties",
+            Command::VisualizationDocumentProperties,
+        ),
+        ("compare-datasets", Command::CompareResultDatasets),
+    ] {
+        assert_eq!(Command::from_stable_id(id), Some(command), "{id}");
     }
 }
 

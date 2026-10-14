@@ -59,28 +59,6 @@ pub(super) const fn workspace_available(project_open: bool, workspace: Workspace
     project_open || matches!(workspace, Workspace::Project)
 }
 
-/// Open a Visualization Studio tool, and say so when that means leaving the
-/// result view behind.
-///
-/// These tools operate across visualization documents, so the Studio is
-/// genuinely their home — but a menu item that silently swaps the surface
-/// under the reader is a surprise. Announcing the move in the console leaves
-/// a record of what happened and why the plot went away.
-pub(super) fn open_studio_tool(app: &mut RSpiceApp, tool: &str) {
-    if app.state.workbench.current_route().surface_id() != super::super::SurfaceId::Results {
-        return;
-    }
-    crate::workbench::documents::visualization_studio::open(app);
-    if app.state.workbench.current_route().surface_id()
-        == super::super::SurfaceId::VisualizationStudio
-    {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::info(format!(
-                "{tool} opened in Visualization Studio, which owns tools that span visualization documents. The result view is one Back away."
-            )));
-    }
-}
-
 pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
     matches!(
         app.state.workbench.workspace,
@@ -314,10 +292,6 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
                 app.state.ui.results.session.hidden_strips.clear();
                 app.state.ui.results.session.maximized_strip = None;
             }
-            app.state
-                .workbench
-                .visualization_studio
-                .reset_transient_view();
         }
         Workspace::Verify => {
             app.state.workbench.selected_specification = None;

@@ -222,6 +222,16 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
     create_document::open(app);
 }
 
+/// Add the selected result as a pane: to the open result document after its
+/// selected pane, or, over a quick view, to a new result document.
+pub(crate) fn add_selected_result_as_pane(app: &mut RSpiceApp) {
+    if add_pane_available(&app.state) {
+        open_add_pane(&mut app.state);
+    } else {
+        create_document::open(app);
+    }
+}
+
 pub(crate) use document_edit::{
     add_pane_available, compare_available, family_available, open_add_pane, open_compare,
     open_family, open_measurement, open_properties, set_family_filter, toggle_linked_cursors,
