@@ -7,11 +7,15 @@
 //! datasets every frame.
 
 pub mod add_pane;
+pub mod compare;
 
 /// The one result-document form open at a time.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResultDocumentDialog {
     AddPane(add_pane::AddPaneDraft),
+    /// Compare datasets also opens over a quick view, where its outcome is
+    /// shown and not kept.
+    Compare(compare::CompareDraft),
 }
 
 /// Option labels for a select row, and the label of the selected entry.

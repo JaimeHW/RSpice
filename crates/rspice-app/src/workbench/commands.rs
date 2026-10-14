@@ -834,9 +834,7 @@ impl Command {
                 state.project_lifecycle.is_open() && state.simulation.retained.has_results()
             }
             Self::CompareResultDatasets => {
-                crate::workbench::documents::visualization_studio::results_comparison_available(
-                    state,
-                )
+                crate::workbench::documents::result_document::compare_available(state)
             }
             Self::ModelCreateProjectCopy => selected_model_for_project_copy(app).is_ok(),
             Self::ModelEditor | Self::ModelCorrelation => {
@@ -1930,7 +1928,7 @@ impl Command {
                 app.state.dialogs.expression_diagnostics_dialog = true;
             }
             Self::CompareResultDatasets => {
-                crate::workbench::documents::visualization_studio::open_results_comparison(app);
+                crate::workbench::documents::result_document::open_compare(&mut app.state);
             }
             Self::ResultViewer(viewer) => {
                 if viewer == crate::workbench::ResultViewer::Waves

@@ -1118,7 +1118,10 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
     Ok(())
 }
 
-fn resolve_binding(state: &AppState, binding: PaneDataBinding) -> Result<(usize, usize), String> {
+pub(super) fn resolve_binding(
+    state: &AppState,
+    binding: PaneDataBinding,
+) -> Result<(usize, usize), String> {
     let run_index = state
         .simulation
         .retained

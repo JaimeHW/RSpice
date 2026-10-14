@@ -323,3 +323,158 @@ fn the_last_pane_on_a_page_is_not_removable() {
     remove_pane(&mut app.state, document_id, pane);
     assert_eq!(ordered_panes(&app, document_id).len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// Compare datasets
+// ---------------------------------------------------------------------------
+
+/// A second transient on the fixture's axis whose V(out) peaks 0.2 V higher.
+fn baseline_run(id: u64) -> SimulationRun {
+    let mut run = SimulationRun::new(id);
+    run.lifecycle = SimulationRunLifecycle::Completed;
+    run.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new("V(out)", vec![0.0, 0.5, 1.0], vec![0.0, 1.2, 0.0], "#fff"),
+            WaveformData::new("V(in)", vec![0.0, 0.5, 1.0], vec![1.0, 0.0, 1.0], "#0ff"),
+        ]),
+    );
+    run
+}
+
+/// Open Compare datasets, compare by X value within 100 mV, and run it.
+fn run_comparison(
+    app: &mut RSpiceApp,
+) -> rspice_results_ui::document_dialogs::compare::CompareOutcome {
+    app.state.workbench.workspace = Workspace::Results;
+    assert!(compare_available(&app.state));
+    open_compare(&mut app.state);
+    let Some(ResultDocumentDialog::Compare(mut draft)) =
+        app.state.workbench.result_document_dialog.clone()
+    else {
+        panic!("Compare datasets opens its form");
+    };
+    draft.alignment = rspice_results::waveform_comparison::ComparisonAlignmentDraft::AbsoluteXAxis;
+    draft.absolute_tolerance = "100m".to_owned();
+    let choices = compare::choices(&app.state, &mut draft);
+    assert_eq!(choices.refusal, None);
+    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
+    commit_open_dialog(&mut app.state);
+    let Some(ResultDocumentDialog::Compare(draft)) =
+        app.state.workbench.result_document_dialog.clone()
+    else {
+        panic!("the form stays open on its outcome");
+    };
+    draft.outcome.expect("the comparison ran")
+}
+
+fn verdict_of(
+    outcome: &rspice_results_ui::document_dialogs::compare::CompareOutcome,
+    name: &str,
+) -> rspice_results_ui::document_dialogs::compare::Verdict {
+    outcome
+        .signals
+        .iter()
+        .find(|signal| signal.name == name)
+        .unwrap_or_else(|| panic!("the outcome names {name}"))
+        .verdict
+}
+
+/// Compare datasets over a document records the receipt with it and
+/// attaches the baseline, and both survive a save. The Studio kept this;
+/// the result viewer could not compare at all.
+#[test]
+fn a_comparison_over_a_document_is_kept_with_it() {
+    use rspice_results_ui::document_dialogs::compare::Verdict;
+    let (mut app, document_id) = document_fixture("single-pane");
+    let baseline = baseline_run(2);
+    let baseline_id = baseline.dataset_id;
+    app.state.simulation.retained.runs.push(baseline);
+    show_document(&mut app, document_id);
+
+    let outcome = run_comparison(&mut app);
+    assert_eq!(outcome.rows_compared, 3);
+    assert_eq!(verdict_of(&outcome, "V(out)"), Verdict::Fail);
+    assert_eq!(verdict_of(&outcome, "V(in)"), Verdict::Pass);
+
+    reload(&mut app, document_id);
+    let document = retained(&app, document_id);
+    assert_eq!(document.comparisons().len(), 1);
+    assert_eq!(document.comparisons()[0].baseline.dataset_id, baseline_id);
+    assert!(
+        document
+            .datasets()
+            .iter()
+            .any(|dataset| dataset.binding().dataset_id == baseline_id),
+        "the baseline is attached with the receipt"
+    );
+    show_document(&mut app, document_id);
+
+    // Done closes the outcome.
+    commit_open_dialog(&mut app.state);
+    assert!(app.state.workbench.result_document_dialog.is_none());
+}
+
+/// Over a quick view the outcome shows and nothing is kept: no document
+/// appears and neither dataset changes.
+#[test]
+fn a_comparison_over_a_quick_view_keeps_nothing() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![transient_run(1), baseline_run(2)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+    let digests = app
+        .state
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .map(SimulationRun::dataset_content_digest)
+        .collect::<Vec<_>>();
+
+    let outcome = run_comparison(&mut app);
+    assert_eq!(outcome.signals.len(), 2);
+    assert!(
+        app.state
+            .workspace
+            .content
+            .visualization_documents
+            .is_empty()
+    );
+    assert_eq!(
+        app.state
+            .simulation
+            .retained
+            .runs
+            .iter()
+            .map(SimulationRun::dataset_content_digest)
+            .collect::<Vec<_>>(),
+        digests
+    );
+}
+
+/// With no retained run that holds the same analysis on the same axis,
+/// Compare datasets is unavailable and opens nothing.
+#[test]
+fn compare_is_refused_without_a_compatible_baseline() {
+    let mut app = RSpiceApp::test_instance();
+    let mut incompatible = SimulationRun::new(2);
+    incompatible.lifecycle = SimulationRunLifecycle::Completed;
+    incompatible.add_analysis(
+        AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
+            WaveformData::new(
+                "V(other)",
+                vec![0.0, 0.25, 1.0],
+                vec![0.0, 1.0, 0.0],
+                "#fff",
+            ),
+        ]),
+    );
+    app.state.simulation.retained.runs = vec![transient_run(1), incompatible].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+    app.state.workbench.workspace = Workspace::Results;
+
+    assert!(!compare_available(&app.state));
+    open_compare(&mut app.state);
+    assert!(app.state.workbench.result_document_dialog.is_none());
+}

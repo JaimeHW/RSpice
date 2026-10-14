@@ -77,6 +77,12 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
             let choice = add_pane::show(ctx, &mut draft, &choices);
             (ResultDocumentDialog::AddPane(draft), choice)
         }
+        ResultDocumentDialog::Compare(mut draft) => {
+            let choices = compare::choices(&app.state, &mut draft);
+            let choice =
+                rspice_results_ui::document_dialogs::compare::show(ctx, &mut draft, &choices);
+            (ResultDocumentDialog::Compare(draft), choice)
+        }
     };
     app.state.workbench.result_document_dialog = Some(dialog);
     match choice {
@@ -88,14 +94,16 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     }
 }
 
-/// Commit the open form's draft, closing the form when it lands.
+/// Commit the open form's draft. The form closes when its edit lands, or
+/// moves on to what it shows next.
 fn commit_open_dialog(state: &mut AppState) {
     let result = match state.workbench.result_document_dialog.clone() {
-        Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft),
+        Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft).map(|()| None),
+        Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
         None => return,
     };
     match result {
-        Ok(()) => state.workbench.result_document_dialog = None,
+        Ok(next) => state.workbench.result_document_dialog = next,
         Err(error) => state.push_user_message(ConsoleMessage::error(error)),
     }
 }
@@ -464,7 +472,10 @@ fn remove_pane_edits(
     Ok(edits)
 }
 
+mod compare;
 pub(super) mod links;
+
+pub(crate) use compare::{compare_available, open_compare};
 
 #[cfg(test)]
 mod tests;

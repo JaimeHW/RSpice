@@ -222,7 +222,9 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
     create_document::open(app);
 }
 
-pub(crate) use document_edit::{add_pane_available, open_add_pane, toggle_linked_cursors};
+pub(crate) use document_edit::{
+    add_pane_available, compare_available, open_add_pane, open_compare, toggle_linked_cursors,
+};
 
 pub(crate) fn visualization_source_dataset(
     run: &crate::state::SimulationRun,
@@ -1483,6 +1485,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     show_with_chrome(ui, app, ResultChrome::Full);
     waves::marker_dialog::show(ui.ctx(), &mut app.state);
     create_document::show(ui.ctx(), app);
+    document_edit::show(ui.ctx(), app);
 }
 
 /// The workspace's own single-key gestures, as the mockup's results keymap
