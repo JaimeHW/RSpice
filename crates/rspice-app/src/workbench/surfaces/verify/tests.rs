@@ -2152,9 +2152,12 @@ fn optimization_iterations_put_the_cost_first_and_name_the_best() {
 /// every right-aligned column ending on one edge and nothing past the insets.
 #[test]
 fn seeded_verify_pages_follow_the_table_grammar() {
-    use super::raster::{PAGE_WIDTH, corner_app, optimization_app, page_geometry, soa_app};
+    use super::raster::{
+        PAGE_WIDTH, corner_app, monte_carlo_app, optimization_app, page_geometry, soa_app,
+    };
 
     for (page, app) in [
+        (VerificationPage::Yield, monte_carlo_app()),
         (VerificationPage::Corners, corner_app()),
         (VerificationPage::DeviceSafety, soa_app()),
         (VerificationPage::Optimization, optimization_app()),
@@ -2203,6 +2206,7 @@ fn seeded_verify_pages_follow_the_table_grammar() {
 #[test]
 fn empty_verify_pages_are_one_line_under_the_toolbar() {
     for page in [
+        VerificationPage::Yield,
         VerificationPage::Corners,
         VerificationPage::DeviceSafety,
         VerificationPage::Optimization,
@@ -2215,4 +2219,165 @@ fn empty_verify_pages_are_one_line_under_the_toolbar() {
         assert!(geometry.one("table.head").is_none(), "{page:?}");
         assert!(geometry.one("toolbar.summary").is_none(), "{page:?}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Monte Carlo yield and its histogram
+// ---------------------------------------------------------------------------
+
+fn fixture_yield_results(app: &RSpiceApp) -> Vec<rspice_results::yield_analysis::YieldResult> {
+    verification_yield_results(app).to_vec()
+}
+
+/// The statistics come from the exact retained samples. The fixture's
+/// summary block is all zeros, which is what the old histogram header printed
+/// as "mean 0.000 dB" over data spanning 38.9 to 43.2.
+#[test]
+fn yield_rows_compute_their_statistics_from_the_samples() {
+    let app = super::raster::monte_carlo_app();
+    let results = fixture_yield_results(&app);
+    assert_eq!(
+        results[0].stats.mean, 0.0,
+        "the fixture's own summary is empty"
+    );
+    let row = YieldRow::from_result(&results[0]);
+    let samples = &results[0].samples;
+    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+    let stats = row.stats.expect("forty samples have statistics");
+    assert!((stats.mean - mean).abs() < 1.0e-12);
+    assert_eq!(stats.min, 38.9);
+    assert_eq!(
+        stats.max,
+        samples.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+    );
+    assert!((stats.max - 43.2).abs() < 1.0e-9);
+    assert!(stats.std_dev > 0.5 && stats.std_dev < 2.0);
+    let cpk = stats.cpk.expect("a lower limit has a one-sided Cpk");
+    assert!((cpk - (stats.mean - 40.0) / (3.0 * stats.std_dev)).abs() < 1.0e-9);
+    assert_eq!((row.passing, row.total), (37, 40));
+    assert_eq!(row.yield_percent(), Some(92.5));
+    assert_eq!(row.verdict(), CellVerdict::Fail);
+    assert_eq!(row.limit.limit_text(), "≥ 40 dB");
+    assert_eq!(
+        yield_summary(&results),
+        Some(super::toolbar::Summary::failing("yield 92.5 % (37 / 40)"))
+    );
+}
+
+#[test]
+fn the_shown_histogram_is_the_readers_pick_or_the_lowest_yield() {
+    let row = |output: &str, passing: usize| YieldRow {
+        output: output.to_owned(),
+        limit: SpecEntry {
+            measurement: output.to_owned(),
+            expression: String::new(),
+            min: Some(0.0),
+            max: None,
+            unit: String::new(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        },
+        stats: None,
+        passing,
+        total: 10,
+    };
+    let rows = [row("gain", 9), row("bw", 7), row("pm", 10)];
+    assert_eq!(shown_yield_row(&rows, None), Some(1));
+    assert_eq!(shown_yield_row(&rows, Some("pm")), Some(2));
+    assert_eq!(shown_yield_row(&rows, Some("gone")), Some(1));
+    assert_eq!(shown_yield_row(&[], None), None);
+}
+
+/// The bins are laid so the limit is a bin edge: every sample in a failing
+/// bar breaks the limit and every sample in a neutral bar meets it.
+#[test]
+fn histogram_bins_put_the_limit_on_an_edge_and_keep_every_sample() {
+    let app = super::raster::monte_carlo_app();
+    let results = fixture_yield_results(&app);
+    let model = super::histogram::histogram_model(&results[0].samples, Some(40.0), None)
+        .expect("forty samples bin");
+    assert_eq!(model.counts.iter().sum::<usize>(), 40);
+    assert!(
+        model.edges.iter().any(|edge| (edge - 40.0).abs() < 1.0e-9),
+        "the limit is an edge: {:?}",
+        model.edges
+    );
+    let failing = model
+        .counts
+        .iter()
+        .zip(&model.failing)
+        .filter(|(_, failing)| **failing)
+        .map(|(count, _)| count)
+        .sum::<usize>();
+    assert_eq!(failing, 3, "exactly the three samples under 40 dB");
+    assert_eq!(model.limits, [40.0]);
+    assert!(model.axis.0 <= model.mean - 3.0 * model.std_dev);
+    assert!(model.axis.1 >= model.mean + 3.0 * model.std_dev);
+    assert!((8..=48).contains(&model.counts.len()));
+    assert!(model.ticks.len() >= 4);
+    assert!(model.ticks.windows(2).all(|pair| pair[1] > pair[0]));
+    assert_eq!(super::histogram::tick_text(39.5, 0.5, "dB"), "39.5 dB");
+    assert!(super::histogram::histogram_model(&[f64::NAN], Some(1.0), None).is_none());
+}
+
+/// Bars are neutral and failing bars a muted error tone; nothing in the
+/// histogram is painted in the accent.
+#[test]
+fn histogram_bars_are_neutral_and_failing_bars_muted_error() {
+    let app = super::raster::monte_carlo_app();
+    let results = fixture_yield_results(&app);
+    let model = super::histogram::histogram_model(&results[0].samples, Some(40.0), None)
+        .expect("forty samples bin");
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut fills = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 320.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    super::histogram::paint_histogram(ui, "gain", "dB", &model, 300.0);
+                });
+            },
+        );
+        fills = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) => Some(rect.fill),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+    }
+    let t = Tokens::get(&ctx);
+    assert!(!fills.contains(&t.color.accent));
+    assert!(fills.contains(&t.color.err.gamma_multiply(0.45)));
+    assert!(fills.contains(&t.color.text_dim.gamma_multiply(0.38)));
+}
+
+/// The selected row's histogram sits in the pane under the table, not stacked
+/// above it, and the table keeps the page's grammar.
+#[test]
+fn the_yield_page_draws_the_selected_histogram_under_the_table() {
+    let geometry =
+        super::raster::page_geometry(super::raster::monte_carlo_app(), VerificationPage::Yield);
+    let rows = geometry.all("table.row");
+    assert_eq!(rows.len(), 1);
+    let split = geometry
+        .one("split")
+        .expect("the detail pane is split off the table");
+    assert_eq!(split.top(), rows[0].bottom());
+    let histogram = geometry
+        .one("histogram")
+        .expect("the selected row's histogram");
+    assert_eq!(histogram.top(), split.bottom());
+    assert!(
+        (220.0..=340.0).contains(&histogram.height()),
+        "{histogram:?}"
+    );
 }

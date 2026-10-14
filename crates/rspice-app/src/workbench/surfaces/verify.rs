@@ -7,6 +7,7 @@
 //! one line saying what produces data, with the action that produces it.
 
 mod corners;
+mod histogram;
 mod optimization;
 mod regression_contract;
 mod regression_panel;
@@ -14,6 +15,7 @@ mod safety;
 mod table;
 mod toolbar;
 mod tuning;
+mod yield_page;
 
 use egui::{ScrollArea, Ui};
 use sha2::{Digest as _, Sha256};
@@ -37,6 +39,7 @@ use optimization::*;
 use regression_contract::*;
 use regression_panel::*;
 use safety::*;
+use yield_page::*;
 
 const VERIFY_RESPONSIVE_BREAKPOINT: f32 = 820.0;
 const VERIFY_KPI_BREAKPOINT: f32 = 1_260.0;
@@ -73,12 +76,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
         match page {
+            VerificationPage::Yield => yield_page(ui, app),
             VerificationPage::Corners => corners(ui, app),
             VerificationPage::Optimization => optimization(ui, app),
             VerificationPage::DeviceSafety => device_safety(ui, app),
-            VerificationPage::Yield | VerificationPage::Tuning | VerificationPage::Regression => {
-                legacy_page(ui, app);
-            }
+            VerificationPage::Tuning | VerificationPage::Regression => legacy_page(ui, app),
         }
     });
     regression_baseline_picker(&ctx, app);
