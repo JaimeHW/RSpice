@@ -260,8 +260,14 @@ fn module_outline(module: &Module, text: &SourceText<'_>, rows: &mut Vec<SourceO
                     .find_map(|net| net.discipline.clone())
             });
         words.extend(discipline.map(|discipline| discipline.to_string()));
-        if let Some(range) = declaration.and_then(|declaration| declaration.range.as_ref()) {
-            words.push(text.slice(range.span).to_owned());
+        if let Some(written) = declaration
+            .and_then(|declaration| declaration.range.as_ref())
+            .map(|range| text.slice(range.span))
+            // `time` implies its [63:0], which the parser spans over the whole
+            // declaration; only a range the file writes is shown.
+            .filter(|written| written.starts_with('['))
+        {
+            words.push(written.to_owned());
         }
         let span = declaration.map_or(port.span, |declaration| declaration.span);
         push(SourceOutlineGroup::Ports, &port.name, words.join(" "), span);
@@ -478,6 +484,7 @@ const fn port_net_type(net_type: rspice_veriloga::ast::PortNetType) -> &'static 
         PortNetType::Wire => "wire",
         PortNetType::Reg => "reg",
         PortNetType::Integer => "integer",
+        PortNetType::Time => "time",
         PortNetType::Wreal(resolution) => {
             rspice_veriloga::ast::DigitalNetKind::Wreal(resolution).keyword()
         }

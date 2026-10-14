@@ -92,6 +92,19 @@ fn a_port_is_one_row_stating_its_direction_and_discipline() {
     assert_eq!(groups, ordered, "rows come grouped, in the groups' order");
 }
 
+/// A variable port states the type and range written on it, and no range
+/// the type only implies.
+#[test]
+fn a_variable_port_states_its_type() {
+    let source = "module stamp(t, q, r);\n  output time t;\n  output integer q;\n  output reg [3:0] r;\nendmodule\n";
+    let bundle = bundle("models/stamp.va", source, &[]);
+    let outline = navigation(&bundle, "models/stamp.va").outline;
+
+    assert_eq!(row(&outline, "t").detail, "output time");
+    assert_eq!(row(&outline, "q").detail, "output integer");
+    assert_eq!(row(&outline, "r").detail, "output reg [3:0]");
+}
+
 /// The parser reads the file unexpanded, so a macro is quoted as written and
 /// a directive inside the module, or a definition continued over lines,
 /// moves no row off its line.
