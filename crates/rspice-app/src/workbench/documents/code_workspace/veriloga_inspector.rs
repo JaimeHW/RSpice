@@ -16,9 +16,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::design_system::{
-    Problem, StatusMark, WorkbenchIcon, code_inspector_section, panel_bleed, panel_inset,
-    property_row, property_row_control_columns, property_row_height, property_row_status,
-    property_row_toned,
+    Problem, WorkbenchIcon, code_inspector_section, panel_bleed, panel_inset, problem_line,
+    property_row, property_row_control_columns, property_row_height, property_row_problem,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -30,7 +29,7 @@ use super::veriloga_interface::{
 };
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource,
-    TargetQualification, VerilogACompileReceipt,
+    VerilogACompileReceipt,
 };
 
 /// The compile receipt for exactly this source, if the last compile was of it.
@@ -131,8 +130,9 @@ pub(crate) enum VerilogAInspectorAction {
     UpdateSymbol,
 }
 
-/// The inspector body: module identity, build targets, diagnostics, and the
-/// ABI contract the module exposes to a netlist.
+/// The inspector body: the module and where its ports stand, what the
+/// compiler found in it, and the parameters an instance of it takes. Where
+/// the source stands with the compiler is the editor strip's to say.
 pub(crate) fn show_veriloga_inspector(
     ui: &mut Ui,
     state: &VerilogAWorkbenchState,
@@ -143,22 +143,22 @@ pub(crate) fn show_veriloga_inspector(
     let t = Tokens::get(ui.ctx());
     ui.set_width(ui.available_width());
     let receipt = veriloga_receipt(state, project_id, selected);
-    let action = module_section(ui, state, project_id, selected, receipt, messages, &t);
-    build_targets_section(ui, receipt, messages, &t);
+    let action = module_section(ui, state, selected, receipt, messages);
     // Diagnostics exist only for a source the compiler has read. With neither
-    // a receipt nor a refusal for this exact revision, an empty list is not a
-    // clean bill: nothing has looked yet.
+    // a receipt nor a refusal for this exact revision there is nothing to
+    // list, and the strip already says the source needs a compile.
     let compiled = receipt.is_some()
         || state
             .last_failure_token
             .is_some_and(|token| selected.matches_token(project_id, token));
-    diagnostics_section(
-        ui,
-        compiled.then(|| veriloga_diagnostics(state, project_id, selected)),
-        messages,
-    );
+    if compiled {
+        diagnostics_section(
+            ui,
+            &veriloga_diagnostics(state, project_id, selected),
+            messages,
+        );
+    }
     parameters_section(ui, receipt, messages, &t);
-    abi_section(ui, receipt, messages);
     action
 }
 
@@ -178,6 +178,13 @@ fn parameters_section(
     t: &Tokens,
 ) {
     let parameters = receipt.map(|receipt| compiled_parameters(&receipt.compilation.report().abi));
+    // A module that takes no parameters has no section to show it.
+    if parameters
+        .as_deref()
+        .is_some_and(<[CellParameter]>::is_empty)
+    {
+        return;
+    }
     let required = messages.text(MessageId::VerilogACompileRequired);
     let count = parameters
         .as_ref()
@@ -191,7 +198,6 @@ fn parameters_section(
         None,
         |ui| match parameters.as_deref() {
             None => muted_row(ui, &messages.text(MessageId::VerilogAParametersNotCompiled)),
-            Some([]) => muted_row(ui, &messages.text(MessageId::VerilogANoParameters)),
             Some(parameters) => parameter_table(ui, parameters, messages, t),
         },
     );
@@ -298,7 +304,7 @@ fn parameter_table(
         MessageId::VerilogAParameterRange,
         MessageId::VerilogAParameterUnits,
     ]
-    .map(|id| messages.text(id).to_uppercase());
+    .map(|id| messages.text(id));
     // Units are painted in the sans face: the mono face has no `Ω`.
     let font_of = |column: usize| if column == 4 { &sans } else { &mono };
     let measure = |text: &str, font: &egui::FontId| {
@@ -409,11 +415,9 @@ fn parameter_table(
 fn module_section(
     ui: &mut Ui,
     state: &VerilogAWorkbenchState,
-    project_id: ProjectId,
     selected: &SelectedVerilogASource,
     receipt: Option<&VerilogACompileReceipt>,
     messages: MessageCatalog,
-    t: &Tokens,
 ) -> Option<VerilogAInspectorAction> {
     let mut action = None;
     // The module a compile actually elaborated outranks the one the bundle
@@ -422,38 +426,26 @@ fn module_section(
     let module = receipt
         .map(|receipt| receipt.compilation.report().abi.module_name.to_string())
         .or_else(|| selected.selected_module().map(str::to_owned))
-        .unwrap_or_else(|| messages.text(MessageId::VerilogAAutomaticModule));
-    let (status, tone) = veriloga_compile_status(state, project_id, selected, messages, t);
+        .unwrap_or_else(|| messages.text(MessageId::VerilogAModuleAuto));
     code_inspector_section(
         ui,
         &messages.text(MessageId::VerilogAModuleSection),
         None,
         None,
         |ui| {
-            property_row(ui, &messages.text(MessageId::VerilogAEntryModule), &module);
-            if let crate::state::ProjectSourceOwner::CellView { reference } =
-                selected.bundle().owner()
-            {
-                property_row(
+            property_row(ui, &messages.text(MessageId::VerilogAModuleRow), &module);
+            // A compile that produced no bytecode leaves nothing a run can
+            // execute; every other build target is the engine's concern.
+            if receipt.is_some_and(|receipt| !receipt.bytecode_available) {
+                problem_line(
                     ui,
-                    &messages.text(MessageId::VerilogACellView),
-                    &reference.display_path(),
+                    Problem::Failure,
+                    &messages.text(MessageId::VerilogANoBytecode),
                 );
             }
-            property_row(
-                ui,
-                &messages.text(MessageId::VerilogARootSource),
-                selected.document().logical_path(),
-            );
-            property_row_toned(
-                ui,
-                &messages.text(MessageId::VerilogACompileStatus),
-                &status,
-                tone,
-            );
             if let crate::state::ProjectSourceOwner::CellView { reference } =
                 selected.bundle().owner()
-                && interface_rows(ui, state, receipt, reference, messages, t)
+                && interface_rows(ui, state, receipt, reference, messages)
             {
                 action = Some(VerilogAInspectorAction::UpdateSymbol);
             }
@@ -462,19 +454,17 @@ fn module_section(
     action
 }
 
-/// Which view defines the cell's ports, and where its symbol stands against
-/// them. Returns whether Update symbol was pressed.
+/// Where the module's ports stand against the cell's: a row only when they
+/// disagree with the schematic that defines them, or when a hand-edited
+/// symbol has fallen behind them. Returns whether Update symbol was pressed.
 fn interface_rows(
     ui: &mut Ui,
     state: &VerilogAWorkbenchState,
     receipt: Option<&VerilogACompileReceipt>,
     reference: &crate::state::CellViewRef,
     messages: MessageCatalog,
-    t: &Tokens,
 ) -> bool {
-    let symbol = messages.text(MessageId::VerilogASymbolRow);
     match state.symbol_standing.of(reference) {
-        None => false,
         Some(VerilogACellSymbol::SchematicDefined) => {
             let differs = receipt.is_some_and(|receipt| {
                 matches!(
@@ -482,44 +472,28 @@ fn interface_rows(
                     Some(VerilogAInterfaceOutcome::SchematicMismatch { .. })
                 )
             });
-            let (value, tone) = if differs {
-                (MessageId::VerilogAPortsDifferFromSchematic, t.color.err)
-            } else {
-                (MessageId::VerilogAPortsFromSchematic, t.color.text)
-            };
-            property_row_toned(
-                ui,
-                &messages.text(MessageId::VerilogAPortsRow),
-                &messages.text(value),
-                tone,
-            );
-            false
-        }
-        Some(VerilogACellSymbol::None) => {
-            property_row(ui, &symbol, &messages.text(MessageId::VerilogASymbolNone));
-            false
-        }
-        Some(VerilogACellSymbol::Generated) => {
-            property_row(
-                ui,
-                &symbol,
-                &messages.text(MessageId::VerilogASymbolGenerated),
-            );
-            false
-        }
-        Some(VerilogACellSymbol::InStep) => {
-            property_row(ui, &symbol, &messages.text(MessageId::VerilogASymbolInStep));
+            if differs {
+                property_row_problem(
+                    ui,
+                    &messages.text(MessageId::VerilogAPortsRow),
+                    &messages.text(MessageId::VerilogAPortsDifferFromSchematic),
+                    Some(Problem::Failure),
+                );
+            }
             false
         }
         Some(VerilogACellSymbol::Drifted(drift)) => {
-            property_row_toned(
+            property_row(
                 ui,
-                &symbol,
+                &messages.text(MessageId::VerilogASymbolRow),
                 &symbol_drift_text(drift, messages),
-                t.color.warn,
             );
             value_column_button(ui, &messages.text(MessageId::VerilogAUpdateSymbol))
         }
+        None
+        | Some(
+            VerilogACellSymbol::None | VerilogACellSymbol::Generated | VerilogACellSymbol::InStep,
+        ) => false,
     }
 }
 
@@ -562,99 +536,18 @@ fn value_column_button(ui: &mut Ui, label: &str) -> bool {
     .inner
 }
 
-fn build_targets_section(
-    ui: &mut Ui,
-    receipt: Option<&VerilogACompileReceipt>,
-    messages: MessageCatalog,
-    t: &Tokens,
-) {
-    code_inspector_section(
-        ui,
-        &messages.text(MessageId::VerilogABuildTargets),
-        None,
-        None,
-        |ui| {
-            let Some(receipt) = receipt else {
-                let required = messages.text(MessageId::VerilogACompileRequired);
-                for label in [
-                    MessageId::VerilogASemanticIr,
-                    MessageId::VerilogABytecodeVm,
-                    MessageId::VerilogANativeJit,
-                    MessageId::VerilogAWasmInterpreter,
-                    MessageId::VerilogAGeneratedRust,
-                ] {
-                    property_row(ui, &messages.text(label), &required);
-                }
-                return;
-            };
-            property_row_status(
-                ui,
-                &messages.text(MessageId::VerilogASemanticIr),
-                &messages.text(MessageId::VerilogACanonical),
-                t.color.ok,
-                StatusMark::Success,
-            );
-            if receipt.bytecode_available {
-                property_row_status(
-                    ui,
-                    &messages.text(MessageId::VerilogABytecodeVm),
-                    &messages.text(MessageId::VerilogAAvailable),
-                    t.color.ok,
-                    StatusMark::Success,
-                );
-            } else {
-                property_row_status(
-                    ui,
-                    &messages.text(MessageId::VerilogABytecodeVm),
-                    &messages.text(MessageId::VerilogAUnavailable),
-                    t.color.err,
-                    StatusMark::Failure,
-                );
-            }
-            target_row(
-                ui,
-                &messages.text(MessageId::VerilogANativeJit),
-                &receipt.native_jit,
-                messages,
-            );
-            target_row(
-                ui,
-                &messages.text(MessageId::VerilogAWasmInterpreter),
-                &receipt.wasm_interpreter,
-                messages,
-            );
-            target_row(
-                ui,
-                &messages.text(MessageId::VerilogAGeneratedRust),
-                &receipt.generated_rust,
-                messages,
-            );
-        },
-    );
-}
-
+/// What the last compile of this source found. A clean compile has nothing to
+/// list, so it has no section.
 fn diagnostics_section(
     ui: &mut Ui,
-    diagnostics: Option<Arc<CodeDiagnosticCollection>>,
+    diagnostics: &CodeDiagnosticCollection,
     messages: MessageCatalog,
 ) {
     const INSPECTOR_DIAGNOSTIC_PREVIEW: usize = 50;
 
-    let Some(diagnostics) = diagnostics else {
-        code_inspector_section(
-            ui,
-            &messages.text(MessageId::VerilogADiagnostics),
-            Some(&messages.text(MessageId::VerilogACompileRequired)),
-            None,
-            |ui| {
-                muted_row(
-                    ui,
-                    &messages.text(MessageId::VerilogADiagnosticsNotCompiled),
-                )
-            },
-        );
+    if diagnostics.is_empty() {
         return;
-    };
+    }
     let summary = diagnostics.summary();
     let error_count = summary.errors;
     let advisory_count = summary.total().saturating_sub(error_count);
@@ -671,7 +564,7 @@ fn diagnostics_section(
             ),
             Some(Problem::Failure),
         )
-    } else if advisory_count > 0 {
+    } else {
         let count = advisory_count.to_string();
         (
             messages.format(
@@ -684,8 +577,6 @@ fn diagnostics_section(
             ),
             Some(Problem::Warning),
         )
-    } else {
-        (messages.text(MessageId::VerilogAClean), None)
     };
     code_inspector_section(
         ui,
@@ -693,10 +584,6 @@ fn diagnostics_section(
         Some(&status),
         problem,
         |ui| {
-            if diagnostics.is_empty() {
-                muted_row(ui, &messages.text(MessageId::VerilogANoDiagnostics));
-                return;
-            }
             for diagnostic in diagnostics.iter().take(INSPECTOR_DIAGNOSTIC_PREVIEW) {
                 diagnostic_row(ui, diagnostic);
             }
@@ -711,76 +598,6 @@ fn diagnostics_section(
     );
 }
 
-fn abi_section(ui: &mut Ui, receipt: Option<&VerilogACompileReceipt>, messages: MessageCatalog) {
-    code_inspector_section(
-        ui,
-        &messages.text(MessageId::VerilogAAbiContract),
-        None,
-        None,
-        |ui| {
-            // Counts exist only for a module that compiled. Before that a
-            // dash, not a zero: an uncompiled module has no contract yet,
-            // which is different from a contract with nothing in it.
-            // The parameters have a section of their own above.
-            let counts = receipt.map(|receipt| {
-                [
-                    receipt.analog_ports,
-                    receipt.noise_sources,
-                    receipt.state_variables,
-                ]
-            });
-            for (index, label) in [
-                MessageId::VerilogAAnalogPorts,
-                MessageId::VerilogANoiseSources,
-                MessageId::VerilogAStateVariables,
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let value = counts
-                    .map_or_else(|| "\u{2014}".to_owned(), |counts| counts[index].to_string());
-                property_row(ui, &messages.text(label), &value);
-            }
-        },
-    );
-}
-
-fn target_row(ui: &mut Ui, label: &str, target: &TargetQualification, messages: MessageCatalog) {
-    let t = Tokens::get(ui.ctx());
-    let (value, tone, mark) = match target {
-        TargetQualification::Available => (
-            messages.text(MessageId::VerilogAAvailable),
-            t.color.ok,
-            Some(StatusMark::Success),
-        ),
-        TargetQualification::Preview => (
-            messages.text(MessageId::VerilogAPreview),
-            t.color.warn,
-            Some(StatusMark::Warning),
-        ),
-        TargetQualification::QualificationOnly => (
-            messages.text(MessageId::VerilogAQualificationOnly),
-            t.color.text,
-            None,
-        ),
-        TargetQualification::Unsupported(reason) => (
-            messages.format(MessageId::VerilogAUnsupported, &[("reason", reason)]),
-            t.color.err,
-            Some(StatusMark::Failure),
-        ),
-        TargetQualification::Failed(reason) => (
-            messages.format(MessageId::VerilogAFailed, &[("reason", reason)]),
-            t.color.err,
-            Some(StatusMark::Failure),
-        ),
-    };
-    if let Some(mark) = mark {
-        property_row_status(ui, label, &value, tone, mark);
-    } else {
-        property_row_toned(ui, label, &value, tone);
-    }
-}
-
 fn muted_row(ui: &mut Ui, text: &str) {
     crate::workbench::design_system::inspector::muted_inspector_copy(ui, text);
 }
@@ -791,7 +608,7 @@ const DIAGNOSTIC_PAD_Y: i8 = 8;
 fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
     let t = Tokens::get(ui.ctx());
     let tone = match diagnostic.severity {
-        CodeEditorSeverity::Hint | CodeEditorSeverity::Info => t.color.info,
+        CodeEditorSeverity::Hint | CodeEditorSeverity::Info => t.color.text_faint,
         CodeEditorSeverity::Warning => t.color.warn,
         CodeEditorSeverity::Error => t.color.err,
     };

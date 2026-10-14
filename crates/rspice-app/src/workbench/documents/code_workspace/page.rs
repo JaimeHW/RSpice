@@ -139,13 +139,7 @@ pub use rspice_simulation::project_veriloga::compile_service::VerilogACompileOut
 #[derive(Debug, Clone)]
 pub struct VerilogACompileReceipt {
     pub compilation: rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt,
-    pub analog_ports: usize,
-    pub noise_sources: usize,
-    pub state_variables: usize,
     pub bytecode_available: bool,
-    pub native_jit: TargetQualification,
-    pub wasm_interpreter: TargetQualification,
-    pub generated_rust: TargetQualification,
     pub diagnostics: Arc<super::CodeDiagnosticCollection>,
     /// What this compile did to its cell's interface. `None` for a compile
     /// that was not a cell view's published result.
@@ -165,15 +159,6 @@ pub struct VerilogAPlacementHandoff {
     /// The schematic to place it in. `None` when the form was opened from
     /// anything else; the design's top schematic is offered then.
     pub schematic: Option<crate::state::CellViewRef>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TargetQualification {
-    Available,
-    Preview,
-    QualificationOnly,
-    Unsupported(String),
-    Failed(String),
 }
 
 #[derive(Debug, Clone, Default)]

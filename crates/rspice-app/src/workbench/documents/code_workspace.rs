@@ -47,7 +47,7 @@ pub use page::{
     AutomationRuntimeLaunchMode, AutomationValidationReceipt, AutomationWatch,
     CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceImportState,
     CodeSourceSearchScope, CodeSourceSearchState, CodeSourceWorkspaceDialogState,
-    CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken, TargetQualification,
+    CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
     VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState,
     VerilogAPlacementHandoff, VerilogAReplaceReview, VerilogAReplaceTarget,
 };

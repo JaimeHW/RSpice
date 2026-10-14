@@ -3,8 +3,8 @@
 use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{
-    RuntimeCompileReport, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetQualification,
-    RuntimeTargetReadiness, VirtualRuntimeCompilation,
+    RuntimeCompileReport, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetReadiness,
+    VirtualRuntimeCompilation,
 };
 use sha2::Digest as _;
 
@@ -19,8 +19,8 @@ use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
-    TargetQualification, VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection,
-    VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
+    VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState,
+    VerilogAReplaceReview, VerilogAReplaceTarget,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -1339,13 +1339,7 @@ fn receipt_projection(
         .collect();
     let diagnostics = Arc::new(CodeDiagnosticCollection::try_new(diagnostics)?);
     Ok(VerilogACompileReceipt {
-        analog_ports: report.abi.analog_port_count(),
-        noise_sources: report.abi.noise_source_count,
-        state_variables: report.abi.state_variable_count,
         bytecode_available: report.targets.is_available(RuntimeTarget::BytecodeVm),
-        native_jit: target_qualification(report.targets.get(RuntimeTarget::NativeJit)),
-        wasm_interpreter: target_qualification(report.targets.get(RuntimeTarget::WasmInterpreter)),
-        generated_rust: target_qualification(report.targets.get(RuntimeTarget::GeneratedRust)),
         diagnostics,
         compilation,
         interface: None,
@@ -1374,24 +1368,6 @@ fn diagnostic_capacity_failure(
         token.revision,
         token.closure_digest.to_string(),
     )
-}
-
-fn target_qualification(target: &RuntimeTargetQualification) -> TargetQualification {
-    match (target.readiness, target.maturity) {
-        (RuntimeTargetReadiness::Available, RuntimeTargetMaturity::Production) => {
-            TargetQualification::Available
-        }
-        (RuntimeTargetReadiness::Available, RuntimeTargetMaturity::Preview) => {
-            TargetQualification::Preview
-        }
-        (RuntimeTargetReadiness::Available, RuntimeTargetMaturity::QualificationOnly) => {
-            TargetQualification::QualificationOnly
-        }
-        (RuntimeTargetReadiness::Unavailable, _) => {
-            TargetQualification::Unsupported(target.detail.clone())
-        }
-        (RuntimeTargetReadiness::Rejected, _) => TargetQualification::Failed(target.detail.clone()),
-    }
 }
 
 #[cfg(test)]
