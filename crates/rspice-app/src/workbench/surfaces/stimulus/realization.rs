@@ -115,10 +115,7 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
 fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
     let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
-    let (text, color) = match &stage.card {
-        Ok(card) => (card.clone(), palette.text),
-        Err(errors) => (errors.join("; "), palette.err),
-    };
+    let card = stage.card.clone().map_err(|errors| errors.join("; "));
     let mut trailing = Vec::new();
     super::split_row(
         ui,
@@ -126,11 +123,11 @@ fn definition_line(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
         DEFINITION_TRAIL_WIDTH,
         |ui| {
             ui.add_space(INSET);
-            card_well(ui, &text, color, INSET);
+            card_well(ui, card.as_deref().map_err(String::as_str), INSET);
         },
         |ui| {
             ui.add_space(8.0);
-            if stage.card.is_ok()
+            if let Ok(text) = &card
                 && icon_button(
                     ui,
                     WorkbenchIcon::Copy,
@@ -192,10 +189,6 @@ fn adopter_line(
 ) {
     let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
-    let (text, color) = match &adopter.source.card {
-        Ok(card) => (card.clone(), palette.text_dim),
-        Err(error) => (error.clone(), palette.err),
-    };
     let mut trailing = Vec::new();
     let mut note_width = ADOPTER_TRAIL_WIDTH - TRAIL_INSET - TRAIL_GAP;
     super::split_row(
@@ -204,7 +197,11 @@ fn adopter_line(
         ADOPTER_TRAIL_WIDTH,
         |ui| {
             ui.add_space(INSET);
-            card_well(ui, &text, color, INSET);
+            card_well(
+                ui,
+                adopter.source.card.as_deref().map_err(String::as_str),
+                INSET,
+            );
         },
         |ui| {
             ui.add_space(8.0);

@@ -1861,26 +1861,55 @@ fn property_row_with_tone(
 /// Shared because the Stimulus Library's realization band and its inspector
 /// show the same instance's card side by side: two wells with two paddings read
 /// as two different kinds of text.
-pub fn card_well(ui: &mut Ui, text: &str, color: Color32, trailing_inset: f32) -> Response {
+///
+/// `Ok` is the card. `Err` is why there is none, behind a failure mark; its
+/// words are as neutral as a card's, because the mark already says what they
+/// are.
+pub fn card_well(ui: &mut Ui, card: Result<&str, &str>, trailing_inset: f32) -> Response {
     const PAD: f32 = 6.0;
     let palette = Tokens::get(ui.ctx()).color;
+    let (text, problem) = match card {
+        Ok(text) => (text, None),
+        Err(text) => (text, Some(Problem::Failure)),
+    };
+    let mark_room = if problem.is_some() {
+        crate::widgets::PROBLEM_MARK_ADVANCE
+    } else {
+        0.0
+    };
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let room = (ui.available_width() - 2.0 * PAD - trailing_inset).max(0.0);
+    let room = (ui.available_width() - 2.0 * PAD - mark_room - trailing_inset).max(0.0);
     let shown = elide_text(ui, text, &font, room);
     let elided = shown != text;
-    let galley = ui.painter().layout_no_wrap(shown, font, color);
+    let galley = ui.painter().layout_no_wrap(shown, font, palette.text);
     let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(galley.size().x + 2.0 * PAD, CARD_WELL_HEIGHT),
+        Vec2::new(galley.size().x + 2.0 * PAD + mark_room, CARD_WELL_HEIGHT),
         Sense::hover(),
     );
     ui.painter().rect_filled(rect, 2.0, palette.bg_inset);
+    if let Some(problem) = problem {
+        let side = crate::widgets::PROBLEM_MARK_SIDE;
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                Pos2::new(rect.left() + PAD + side * 0.5, rect.center().y),
+                Vec2::splat(side),
+            ),
+            problem,
+        );
+    }
     ui.painter().galley(
-        Pos2::new(rect.left() + PAD, rect.center().y - galley.size().y * 0.5),
+        Pos2::new(
+            rect.left() + PAD + mark_room,
+            rect.center().y - galley.size().y * 0.5,
+        ),
         galley,
-        color,
+        palette.text,
     );
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    let announced = problem.map_or_else(|| text.to_owned(), |problem| problem.announce(text));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
+    });
     if elided {
         return response.on_hover_text(text);
     }

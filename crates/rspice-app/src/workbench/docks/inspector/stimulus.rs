@@ -188,11 +188,11 @@ fn adopter_card(
                 theme::mono(tokens::FS_MICRO, FontWeight::Regular),
                 chip_tone,
             );
-            let (card, tone) = match &adopter.source.card {
-                Ok(card) => (card.as_str(), palette.text_dim),
-                Err(refusal) => (refusal.as_str(), palette.err),
-            };
-            card_well(ui, card, tone, 0.0);
+            card_well(
+                ui,
+                adopter.source.card.as_deref().map_err(String::as_str),
+                0.0,
+            );
             // Every verb but the first addresses the instance by a component
             // id, which means something only inside the buffer on screen. An
             // adopter drawn elsewhere is therefore offered the one verb that
@@ -374,17 +374,15 @@ fn contract_section(ui: &mut Ui, state: &AppState, definition: &StimulusDefiniti
     // rather than a template restated here, so it cannot describe a card the
     // deck would not carry.
     if let Some(record) = empty.as_ref() {
-        let (text, tone) = match crate::simulation::stimulus_realize::definition_card_text(
+        let card = crate::simulation::stimulus_realize::definition_card_text(
             record,
             crate::simulation::stimulus_realize::DETACHED_NETS,
-        ) {
-            Ok(card) => (card, palette.text_dim),
-            Err(errors) => (errors.join("; "), palette.err),
-        };
+        )
+        .map_err(|errors| errors.join("; "));
         caption(ui, &messages.text(MessageId::StimulusContractCard));
         ui.horizontal(|ui| {
             ui.add_space(SECTION_PAD);
-            card_well(ui, &text, tone, SECTION_PAD);
+            card_well(ui, card.as_deref().map_err(String::as_str), SECTION_PAD);
         });
         ui.add_space(6.0);
     }
