@@ -3,6 +3,7 @@
 
 use egui::{Rect, Response, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
+use super::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem};
 use crate::theme::{self, FontWeight, mix};
 use crate::tokens::{self, Tokens};
 
@@ -15,13 +16,13 @@ pub struct TreeRowResult {
 }
 
 /// A full-width interactive row with optional twist (expand) arrow, leading
-/// color dot or switch, and right-aligned mono metadata.
+/// switch, right-aligned mono metadata, and a trailing problem mark.
 pub struct TreeRow<'a> {
     label: &'a str,
     meta: Option<&'a str>,
     /// `Some(expanded)` shows a twist arrow.
     twist: Option<bool>,
-    chip_dot: Option<egui::Color32>,
+    problem: Option<Problem>,
     switch: Option<&'a mut bool>,
     indent: u8,
     selected: bool,
@@ -36,7 +37,7 @@ impl<'a> TreeRow<'a> {
             label,
             meta: None,
             twist: None,
-            chip_dot: None,
+            problem: None,
             switch: None,
             indent: 0,
             selected: false,
@@ -58,9 +59,11 @@ impl<'a> TreeRow<'a> {
         self
     }
 
-    /// Leading 8 × 8 color dot (trace color, run status).
-    pub fn chip_dot(mut self, color: egui::Color32) -> Self {
-        self.chip_dot = Some(color);
+    /// A problem mark at the row's trailing edge, painted only when there is
+    /// a problem. The row's metadata says what the problem is; the mark says
+    /// that it is one.
+    pub fn problem(mut self, problem: Option<Problem>) -> Self {
+        self.problem = problem;
         self
     }
 
@@ -125,10 +128,13 @@ impl<'a> TreeRow<'a> {
             }
             switch_value_after = Some(*value);
         }
-        let accessible_label = self.meta.map_or_else(
+        let mut accessible_label = self.meta.map_or_else(
             || self.label.to_owned(),
             |meta| format!("{}, {}", self.label, meta),
         );
+        if let Some(problem) = self.problem {
+            accessible_label = format!("{accessible_label}, {}", problem.announcement());
+        }
         response.widget_info(|| {
             if let Some(value) = switch_value_after.filter(|_| has_switch) {
                 // `Checkbox` is the role a two-state control publishes, and it
@@ -223,10 +229,15 @@ impl<'a> TreeRow<'a> {
             x += super::SWITCH_WIDTH + 6.0;
         }
 
-        if let Some(dot) = self.chip_dot {
-            let dot_rect = Rect::from_center_size(egui::pos2(x + 4.0, cy), vec2(8.0, 8.0));
-            painter.rect_filled(dot_rect, 2.0, dot);
-            x += 8.0 + 6.0;
+        // The mark takes the trailing edge, and the metadata sits before it.
+        let mut trailing = rect.right() - 6.0;
+        if let Some(problem) = self.problem {
+            let mark_rect = Rect::from_center_size(
+                egui::pos2(trailing - PROBLEM_MARK_SIDE * 0.5, cy),
+                vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE),
+            );
+            super::paint_problem_mark(painter, mark_rect, problem);
+            trailing = mark_rect.left() - (PROBLEM_MARK_ADVANCE - PROBLEM_MARK_SIDE);
         }
 
         let label_font = if self.mono_label {
@@ -257,9 +268,8 @@ impl<'a> TreeRow<'a> {
                 label_font,
                 egui::Color32::PLACEHOLDER,
             );
-            job.wrap = egui::text::TextWrapping::truncate_at_width(
-                (rect.right() - 6.0 - meta_w - x).max(8.0),
-            );
+            job.wrap =
+                egui::text::TextWrapping::truncate_at_width((trailing - meta_w - x).max(8.0));
             f.layout_job(job)
         });
         let label_elided = label_galley.elided;
@@ -271,10 +281,7 @@ impl<'a> TreeRow<'a> {
 
         if let Some(galley) = meta_galley {
             painter.galley(
-                egui::pos2(
-                    rect.right() - 6.0 - galley.size().x,
-                    cy - galley.size().y * 0.5,
-                ),
+                egui::pos2(trailing - galley.size().x, cy - galley.size().y * 0.5),
                 galley,
                 c.text_faint,
             );
@@ -406,6 +413,66 @@ mod tests {
         assert!(
             !press(false),
             "a disabled one must not, self-painted or otherwise"
+        );
+    }
+
+    /// A row marks a problem at its trailing edge, after its metadata, and
+    /// says so to a screen reader; a row without one paints no mark at all.
+    #[test]
+    fn a_tree_row_marks_only_a_problem_at_its_trailing_edge() {
+        fn paint(problem: Option<Problem>) -> Vec<egui::epaint::ClippedShape> {
+            let ctx = egui::Context::default();
+            crate::Theme::default().apply(&ctx);
+            ctx.run_ui(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    TreeRow::new("1. IN")
+                        .meta("unplaced")
+                        .problem(problem)
+                        .show(ui);
+                });
+            })
+            .shapes
+        }
+        let segments = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes
+                .iter()
+                .filter(|clipped| matches!(clipped.shape, egui::Shape::LineSegment { .. }))
+                .map(|clipped| clipped.shape.visual_bounding_rect())
+                .collect::<Vec<_>>()
+        };
+        let meta = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "unplaced" => {
+                        Some(Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+                .expect("meta painted")
+        };
+        let clear = paint(None);
+        assert!(segments(&clear).is_empty(), "a clear row paints a mark");
+        let marked = paint(Some(Problem::Failure));
+        let cross = segments(&marked);
+        assert_eq!(cross.len(), 2, "{cross:?}");
+        assert!(
+            cross
+                .iter()
+                .all(|segment| segment.left() > meta(&marked).right())
+        );
+        assert!(meta(&marked).right() < meta(&clear).right());
+
+        let nodes = accesskit_nodes(|ui| {
+            TreeRow::new("1. IN")
+                .meta("unplaced")
+                .problem(Some(Problem::Warning))
+                .show(ui);
+        });
+        assert!(
+            nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("1. IN, unplaced, Warning"))
         );
     }
 

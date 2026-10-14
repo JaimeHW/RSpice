@@ -15,7 +15,7 @@ use rspice_design_model::{
 use rspice_ui_kit::accessibility::plural_suffix;
 use rspice_ui_kit::panels::inspector::{muted_inspector_copy, section_header};
 use rspice_ui_kit::panels::{
-    StatusMark, WorkbenchIcon, labeled_icon_button, property_row, property_row_combo,
+    Problem, StatusMark, WorkbenchIcon, labeled_icon_button, property_row, property_row_combo,
     property_row_input, property_row_status,
 };
 use rspice_ui_kit::theme::{self, FontWeight};
@@ -903,7 +903,7 @@ fn contract_section(
             .mono()
             .indent(1)
             .meta(&meta)
-            .chip_dot(if placed { t.color.ok } else { t.color.err })
+            .problem((!placed).then_some(Problem::Warning))
             .selected(edit.selection.pins.contains(&port.name))
             .show(ui);
         if row.response.clicked() && pin.is_some() {

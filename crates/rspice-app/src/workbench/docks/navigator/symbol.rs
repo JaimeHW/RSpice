@@ -16,7 +16,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::TreeRow;
 use crate::workbench::RSpiceApp;
 
-use super::super::super::design_system::{WorkbenchIcon, property_row, section_header};
+use super::super::super::design_system::{Problem, WorkbenchIcon, property_row, section_header};
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let reference = app.state.workspace.content.active_view.clone();
@@ -167,16 +167,11 @@ fn pins_section(
             (true, true) => pin.direction.keyword().to_owned(),
         };
         let label = format!("{}. {}", index + 1, pin.name);
-        let t = Tokens::get(ui.ctx());
         let row = TreeRow::new(&label)
             .mono()
             .indent(1)
             .meta(&meta)
-            .chip_dot(if placed && declared && pin.terminal_on_grid() {
-                t.color.ok
-            } else {
-                t.color.err
-            })
+            .problem((!(placed && declared && pin.terminal_on_grid())).then_some(Problem::Warning))
             .selected(
                 app.state
                     .ui
