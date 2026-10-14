@@ -2125,6 +2125,16 @@ impl Engine {
                             "mixed Verilog-AMS instance '{instance}' small-signal analysis setup failed: {err}"
                         ))
                     })?;
+                // The host's own solver inputs hold the time of its last
+                // trial; the linearization reads the circuit's point time,
+                // as the runtime devices do.
+                cloned
+                    .try_set_time(circuit.veriloga_point_time)
+                    .map_err(|err| {
+                        SimulationError::Circuit(format!(
+                            "mixed Verilog-AMS instance '{instance}' small-signal time setup failed: {err}"
+                        ))
+                    })?;
                 cloned
                     .try_stamp_small_signal_complex(
                         op_voltages,
@@ -2150,7 +2160,7 @@ impl Engine {
             let num_nodes = circuit.num_nodes();
             let simparams = circuit.generated_simulation_parameters;
             generated.set_timepoint(
-                0.0,
+                circuit.veriloga_point_time,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
             );

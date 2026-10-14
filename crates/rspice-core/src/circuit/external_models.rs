@@ -4355,6 +4355,10 @@ impl CircuitData {
         // Both arguments remain part of the lifecycle contract even in a
         // feature-minimal build where neither Verilog-A backend is compiled.
         let _ = (phase, initial_step, final_step);
+        // A frozen-time point evaluates at the circuit's point time: zero at
+        // the operating point, the state's time around a transient state.
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        let time = self.veriloga_point_time;
         #[cfg(feature = "veriloga")]
         for device in self.veriloga_devices.iter_mut() {
             let instance = device.name.clone();
@@ -4364,7 +4368,7 @@ impl CircuitData {
             device.try_set_analysis_phase(phase).map_err(|error| {
                 format!("Verilog-A device '{instance}' analysis phase setup failed: {error}")
             })?;
-            device.try_set_time(0.0).map_err(|error| {
+            device.try_set_time(time).map_err(|error| {
                 format!("Verilog-A device '{instance}' equilibrium time setup failed: {error}")
             })?;
             device.try_set_timestep(0.0).map_err(|error| {
@@ -4383,7 +4387,7 @@ impl CircuitData {
         {
             self.generated_veriloga_devices.set_analysis_phase(phase);
             self.generated_veriloga_devices.set_timepoint(
-                0.0,
+                time,
                 0.0,
                 crate::device::veriloga_builtins::GeneratedDdtCoefficients::inactive(),
             );

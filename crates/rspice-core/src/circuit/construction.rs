@@ -116,6 +116,8 @@ impl CircuitData {
             #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
             generated_simulation_parameters:
                 rspice_veriloga_runtime::GeneratedSimulationParameters::default(),
+            #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+            veriloga_point_time: 0.0,
         }
     }
 

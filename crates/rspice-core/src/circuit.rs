@@ -746,6 +746,14 @@ pub struct CircuitData {
     #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
     pub(crate) generated_simulation_parameters:
         rspice_veriloga_runtime::GeneratedSimulationParameters,
+    /// The time Verilog-A's `$abstime` reads while the circuit is evaluated
+    /// as a frozen-time point (an equilibrium solve, or a small-signal
+    /// frequency point around it): zero at the operating point, and the
+    /// state's time when a small-signal analysis linearizes around an
+    /// accepted transient state, which is the circuit as it is at that time
+    /// (Spectre's `actimes`).
+    #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+    pub(crate) veriloga_point_time: Value,
 }
 
 /// Stable probe metadata for inductor-backed branch measurements.

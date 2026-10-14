@@ -5,8 +5,9 @@
 //! `ACTIMES=t1[,t2,…]` (Spectre's `actimes`) the card linearizes around the
 //! accepted state of the deck's own `.TRAN` run at each requested time, as a
 //! frozen-time operating point: every accepted analog state at `T` — charges,
-//! operator states, `idt` values — the source values at `T`, and the accepted
-//! discrete state, frozen (S2). Pending activations are not run.
+//! operator states, `idt` values — the source values at `T`, Verilog-A's
+//! `$abstime` reading `T`, and the accepted discrete state, frozen (S2).
+//! Pending activations are not run.
 //!
 //! The state is captured live (`transient::state_capture`): a clone of the
 //! circuit at the accepted point, so no device has to know how to serialize
@@ -310,7 +311,13 @@ impl Engine {
                 analysis.label(),
             );
         }
-        #[cfg(not(feature = "veriloga"))]
+        // `$abstime` reads the state's time: the analysis linearizes the
+        // circuit as it is at that time, not as it was at the operating point.
+        #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
+        {
+            adopted.veriloga_point_time = state_time;
+        }
+        #[cfg(not(any(feature = "veriloga", feature = "veriloga-builtins-base")))]
         let _ = state_time;
         adopted
             .finish_veriloga_equilibrium_operating_point(physical)

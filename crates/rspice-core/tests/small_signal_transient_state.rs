@@ -600,3 +600,81 @@ mod trim {
         );
     }
 }
+
+/// Verilog-A's `$abstime` reads the state's time while the circuit is
+/// linearized around it, as Spectre's `actimes` linearizes the circuit as it
+/// is at that time, and zero at the operating point.
+#[cfg(feature = "veriloga")]
+mod abstime {
+    use super::trim::SourceFile;
+    use super::*;
+
+    /// A conductance that grows with time, `g0 (1 + $abstime / tau)`; as a
+    /// mixed module when it also holds a register.
+    fn aging_conductance(mixed: bool) -> String {
+        format!(
+            "`include \"disciplines.vams\"\n\
+             module aging(p, n);\n\
+               inout p, n; electrical p, n;\n\
+               parameter real g0 = 1m;\n\
+               parameter real tau = 5u;\n\
+               {}\
+               analog I(p, n) <+ V(p, n) * g0 * (1.0 + $abstime / tau);\n\
+             endmodule\n",
+            if mixed { "reg q; initial q = 0;\n" } else { "" }
+        )
+    }
+
+    fn linearizes_at_the_state_time(mixed: bool) {
+        let module = SourceFile::new("va", &aging_conductance(mixed));
+        let netlist = parse(&format!(
+            "* a conductance that ages\n\
+             vin in 0 dc 1 ac 1\n\
+             r1 in out 1k\n\
+             xg out 0 aging\n\
+             .va \"{}\" aging\n\
+             .tran 0.1u 10u\n\
+             .ac lin 2 1k 2k actimes=5u,10u\n\
+             .end\n",
+            module.path()
+        ));
+        let index = card_index(&netlist, |card| matches!(card, AnalysisCommand::Ac { .. }));
+        let engine = Engine::default();
+        // v(out) = 1 / (1 + R g(T)) with R g0 = 1: 1 / (2 + T / tau).
+        let divider = |time: f64| Complex64::new(1.0 / (2.0 + time / 5.0e-6), 0.0);
+        for result in run_at_state_times(&engine, &netlist, index) {
+            for point in ac_points(&result) {
+                assert_phasor_close(
+                    &format!(
+                        "v(out) around t={:e} s at {} Hz",
+                        result.state_time, point.frequency
+                    ),
+                    ac_voltage(point, "out"),
+                    divider(result.state_time),
+                    1.0e-9,
+                );
+            }
+        }
+        for point in engine
+            .run_ac(&netlist, &[1.0e3, 2.0e3])
+            .expect("the operating-point .ac")
+        {
+            assert_phasor_close(
+                &format!("v(out) at the operating point at {} Hz", point.frequency),
+                ac_voltage(&point, "out"),
+                divider(0.0),
+                1.0e-9,
+            );
+        }
+    }
+
+    #[test]
+    fn abstime_reads_the_state_time_in_a_runtime_device() {
+        linearizes_at_the_state_time(false);
+    }
+
+    #[test]
+    fn abstime_reads_the_state_time_in_a_mixed_host() {
+        linearizes_at_the_state_time(true);
+    }
+}
