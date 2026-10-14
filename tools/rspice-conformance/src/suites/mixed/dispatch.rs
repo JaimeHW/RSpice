@@ -47,7 +47,7 @@ use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 
 use super::Route;
 use super::case::{CaseResult, ErrorRecord, Observation, canonical_signal};
-use super::design::{Design, analysis_kind, deck_cards};
+use super::design::{Design, analysis_kind, at_transient_state, deck_cards};
 use super::measure::parse_expression;
 use crate::suites::deadline::DeadlineAbort;
 
@@ -116,7 +116,9 @@ fn compose(request: &CaseRequest<'_>) -> Result<(PathBuf, String), String> {
     if !request.o5 {
         return Ok((deck_path, deck));
     }
-    let o5_path = request.design.o5_path(request.variant);
+    let o5_path = request
+        .design
+        .o5_path_for(request.variant, request.analysis);
     let o5 = std::fs::read_to_string(&o5_path)
         .map_err(|error| format!("{}: {error}", o5_path.display()))?;
     let mut lines: Vec<String> = o5.lines().map(str::to_owned).collect();
@@ -126,8 +128,15 @@ fn compose(request: &CaseRequest<'_>) -> Result<(PathBuf, String), String> {
     {
         lines.pop();
     }
-    for (_, card) in deck_cards(&deck) {
-        lines.push(card);
+    // A card around a transient state has a held twin at the operating
+    // point: the twin runs the card alone, without its state.
+    let at_state = at_transient_state(request.analysis);
+    for (word, card) in deck_cards(&deck) {
+        if !at_state {
+            lines.push(card);
+        } else if word != ".tran" {
+            lines.push(split_state(&card).map_or(card, |(card, _)| card));
+        }
     }
     lines.push(".end".to_owned());
     let o5_path = std::path::absolute(&o5_path).map_err(|error| error.to_string())?;
@@ -536,7 +545,21 @@ fn headless_tasks(
         .lines()
         .filter(|line| !line.trim().eq_ignore_ascii_case(".end"))
         .collect();
-    let deck = format!("{}\n{}\n.end\n", body.join("\n"), cards.join("\n"));
+    // A card around a transient state lowers without its state (a typed
+    // request carries none) and runs as authored, bound to the deck's
+    // transient, as a study states it.
+    let mut state_card = None;
+    let lowered: Vec<String> = cards
+        .iter()
+        .map(|card| match split_state(card) {
+            Some((plain, _)) => {
+                state_card = Some(card.clone());
+                plain
+            }
+            None => card.clone(),
+        })
+        .collect();
+    let deck = format!("{}\n{}\n.end\n", body.join("\n"), lowered.join("\n"));
     let queue = rspice_simulation::manual_deck::build_manual_deck_queue_with_runtimes(
         27.0, &deck, runtimes,
     )
@@ -612,7 +635,42 @@ fn headless_tasks(
             task.dependencies = vec![producer];
         }
     }
+    if let Some(card) = state_card {
+        let mut states = tasks.iter_mut().filter(|task| {
+            matches!(
+                task.analysis.spec,
+                AnalysisSpec::Ac { .. } | AnalysisSpec::Noise { .. }
+            )
+        });
+        let (Some(task), None, [parent]) = (states.next(), states.next(), transient.as_slice())
+        else {
+            return Err(Box::new(harness_error(
+                "a deck around a transient state carries one .tran card and one .ac or .noise card",
+            )));
+        };
+        task.analysis.analysis_line = card;
+        task.dependencies = vec![*parent];
+    }
     Ok(tasks)
+}
+
+/// A card without its transient-state keyword, and the keyword: corpus decks
+/// spell `ACTIMES=` and `CHECKPOINT=` as one token, `actimes=550u`.
+pub fn split_state(card: &str) -> Option<(String, String)> {
+    let words: Vec<&str> = card.split_whitespace().collect();
+    let position = words.iter().position(|word| {
+        let lower = word.to_ascii_lowercase();
+        lower.starts_with("actimes=") || lower.starts_with("checkpoint=")
+    })?;
+    let keyword = words[position].to_owned();
+    let plain = words
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != position)
+        .map(|(_, word)| *word)
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some((plain, keyword))
 }
 
 /// The card a study document carries for `spec` (`rspice study`'s lowering).
@@ -1456,6 +1514,22 @@ mod tests {
             strip_cards(deck),
             ".tran is the title\nR1 a 0 1k\nC1 a 0 1p\n.end\n"
         );
+    }
+
+    #[test]
+    fn a_state_keyword_splits_from_its_card() {
+        assert_eq!(
+            split_state(".ac dec 10 10 100meg ACTIMES=550u"),
+            Some((".ac dec 10 10 100meg".into(), "ACTIMES=550u".into()))
+        );
+        assert_eq!(
+            split_state(".noise v(out) v1 dec 3 1k 1meg checkpoint=\"s.chk\""),
+            Some((
+                ".noise v(out) v1 dec 3 1k 1meg".into(),
+                "checkpoint=\"s.chk\"".into()
+            ))
+        );
+        assert_eq!(split_state(".ac dec 10 10 100meg"), None);
     }
 
     #[test]

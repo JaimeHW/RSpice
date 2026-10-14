@@ -69,7 +69,8 @@ pub fn required_oracles(id: &str) -> Option<&'static [&'static str]> {
 }
 
 /// The kind an analysis id names: the id itself, or the known kind it
-/// prefixes with a `-tag` (`dc-line` is a `dc`; `mc-tran` is its own kind).
+/// prefixes with a `-tag` (`dc-line` is a `dc`; `mc-tran` is its own kind)
+/// or an `@state` (`ac@trim` is an `ac` around a transient state).
 /// `step-tran` is the probe-only `.step` of a transient.
 pub fn analysis_kind(id: &str) -> Option<&'static str> {
     if id == "step-tran" {
@@ -81,10 +82,17 @@ pub fn analysis_kind(id: &str) -> Option<&'static str> {
             id == **kind
                 || id
                     .strip_prefix(**kind)
-                    .is_some_and(|rest| rest.starts_with('-'))
+                    .is_some_and(|rest| rest.starts_with(['-', '@']))
         })
         .max_by_key(|kind| kind.len())
         .copied()
+}
+
+/// Whether an analysis id names a small-signal card around a transient
+/// state (`ac@trim`): its deck carries the `.TRAN` card whose state the
+/// card's `ACTIMES=` names, and it compares with its held twin only.
+pub fn at_transient_state(id: &str) -> bool {
+    id.contains('@')
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -122,6 +130,10 @@ pub struct AnalysisEntry {
     pub extended: bool,
     #[serde(default)]
     pub checkpoint_at: Vec<f64>,
+    /// The held-digital circuit this analysis's O5 twin runs when it is not
+    /// the variant's own: `o5-c15` is `oracle/<variant>.o5-c15.cir`.
+    #[serde(default)]
+    pub o5: Option<String>,
     pub phase: String,
 }
 
@@ -397,6 +409,21 @@ impl Design {
         self.dir.join("oracle").join(format!("{variant}.o5.cir"))
     }
 
+    /// The held-digital circuit `analysis`'s O5 twin runs: the variant's
+    /// own, or the one the analysis names.
+    pub fn o5_path_for(&self, variant: &str, analysis: &str) -> PathBuf {
+        match self
+            .analysis(analysis)
+            .and_then(|entry| entry.o5.as_deref())
+        {
+            Some(circuit) => self
+                .dir
+                .join("oracle")
+                .join(format!("{variant}.{circuit}.cir")),
+            None => self.o5_path(variant),
+        }
+    }
+
     /// The directory of a variant's O3 testbench template, `tb.v`.
     pub fn o3_dir(&self, variant: &str) -> PathBuf {
         self.dir.join("oracle").join(format!("{variant}.o3"))
@@ -574,7 +601,11 @@ pub fn integrity(design: &Design) -> Vec<Finding> {
                 analysis.id
             ));
         }
-        if let Some(required) = required_oracles(&file.id) {
+        // A card around a transient state compares with its held twin: no
+        // captured oracle linearizes around a transient's state.
+        if let Some(required) = required_oracles(&file.id)
+            && !at_transient_state(&analysis.id)
+        {
             for oracle in required {
                 if !analysis.oracles.iter().any(|listed| listed == oracle) {
                     findings.push(format!(
@@ -639,7 +670,10 @@ fn check_deck(
         .into_iter()
         .map(|(word, _)| word)
         .collect();
-    let expected = expected_cards(kind);
+    let mut expected = expected_cards(kind);
+    if at_transient_state(&analysis.id) {
+        expected.insert(0, ".tran");
+    }
     let mut sorted_cards = cards.clone();
     sorted_cards.sort();
     let mut sorted_expected: Vec<String> = expected.iter().map(|card| (*card).to_owned()).collect();
@@ -717,9 +751,11 @@ fn check_quantity(design: &Design, quantity: &Quantity, findings: &mut Vec<Findi
     }
     if quantity.oracle == "O5" {
         for variant in &quantity.variants {
-            if !design.o5_path(variant).is_file() {
+            let path = design.o5_path_for(variant, &analysis.id);
+            if !path.is_file() {
                 findings.push(format!(
-                    "{slug}: quantity {id}: missing oracle/{variant}.o5.cir"
+                    "{slug}: quantity {id}: missing oracle/{}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
                 ));
             }
         }
@@ -827,6 +863,8 @@ mod tests {
         assert_eq!(analysis_kind("dc-load"), Some("dc"));
         assert_eq!(analysis_kind("trnoise"), Some("trnoise"));
         assert_eq!(analysis_kind("step-tran"), Some("step-tran"));
+        assert_eq!(analysis_kind("ac@trim"), Some("ac"));
+        assert!(at_transient_state("ac@lock") && !at_transient_state("dc-line"));
         assert_eq!(analysis_kind("tranx"), None);
         assert_eq!(analysis_kind("bogus"), None);
     }
