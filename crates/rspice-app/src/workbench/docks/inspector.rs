@@ -1709,6 +1709,24 @@ fn finite_trace_statistics(values: &[f64]) -> Option<TraceStatistics> {
     })
 }
 
+/// `value` in engineering notation with its unit, to the reader's chosen
+/// number of significant digits, without the zeros that only pad it out:
+/// `900 mV` and `4.1 V`, not `900.0000 mV` and `4.100000 V`.
+fn engineering_readout(value: f64, unit: &str, significant_digits: usize) -> String {
+    let text = rspice_results_ui::waves::fmt_in_unit(value, unit, significant_digits);
+    let (number, rest) = text.split_once(' ').unwrap_or((text.as_str(), ""));
+    let number = if number.contains('.') && !number.contains(['e', 'E']) {
+        number.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        number
+    };
+    if rest.is_empty() {
+        number.to_owned()
+    } else {
+        format!("{number} {rest}")
+    }
+}
+
 /// The trace's colour as one more property row: its name in the label column,
 /// and in the value column the swatch that opens the picker beside the hex
 /// value it holds. Returns whether the reader picked a different colour.

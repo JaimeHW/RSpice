@@ -1017,7 +1017,7 @@ pub(super) fn operating_point_rows(
     entry: &rspice_core::circuit::DeviceOpEntry,
     significant_digits: usize,
 ) -> Vec<(String, String)> {
-    use rspice_results::number_format::fmt_si_significant;
+    use super::super::engineering_readout;
 
     let value = |key: &str| {
         entry
@@ -1036,7 +1036,7 @@ pub(super) fn operating_point_rows(
                 if let Some(value) = value(key) {
                     rows.push((
                         (*label).to_owned(),
-                        fmt_si_significant(value, unit, significant_digits),
+                        engineering_readout(value, unit, significant_digits),
                     ));
                 }
             }
@@ -1056,7 +1056,7 @@ pub(super) fn operating_point_rows(
                 if let Some(first) = label.get_mut(..1) {
                     first.make_ascii_uppercase();
                 }
-                rows.push((label, fmt_si_significant(*value, unit, significant_digits)));
+                rows.push((label, engineering_readout(*value, unit, significant_digits)));
             }
         }
     }

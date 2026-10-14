@@ -1114,11 +1114,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         property_row(
             ui,
             "Node voltage",
-            &rspice_results::number_format::fmt_si_significant(
-                annotation.voltage,
-                &annotation.unit,
-                digits,
-            ),
+            &super::super::engineering_readout(annotation.voltage, &annotation.unit, digits),
         );
     }
 

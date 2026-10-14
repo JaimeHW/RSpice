@@ -563,16 +563,22 @@ fn terminals_head_only_open_pins_and_vanish_without_terminals() {
     assert!(painted.lines().any(|line| line == "1 open"), "{painted}");
 }
 
+/// The Checks header is "not run" before any check, "stale" once the drawing
+/// changes under one, and says nothing for a current, clean check.
 #[test]
-fn checks_are_stale_until_they_run_against_the_current_topology() {
+fn checks_header_speaks_only_when_the_check_is_not_current_and_clean() {
     let mut state = AppState::default();
     assert!(!checks_current(&state));
-    assert_eq!(checks_status(&state), "stale");
+    assert_eq!(checks_status(&state).as_deref(), Some("not run"));
 
     state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
+    state.dialogs.drc_checked_version = state.schematic.topology_version().wrapping_add(1);
+    assert!(!checks_current(&state));
+    assert_eq!(checks_status(&state).as_deref(), Some("stale"));
+
     state.dialogs.drc_checked_version = state.schematic.topology_version();
     assert!(checks_current(&state));
-    assert_eq!(checks_status(&state), "0 errors");
+    assert_eq!(checks_status(&state), None);
 }
 
 #[test]
@@ -1361,12 +1367,12 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
         [
             ("Region", "saturation"),
             ("Id", "96.86 µA"),
-            ("Vgs", "900.0 mV"),
-            ("Vds", "850.0 mV"),
-            ("Vth", "450.0 mV"),
-            ("Vdsat", "450.0 mV"),
+            ("Vgs", "900 mV"),
+            ("Vds", "850 mV"),
+            ("Vth", "450 mV"),
+            ("Vdsat", "450 mV"),
             ("gm", "430.5 µS"),
-            ("gds", "4.600 µS"),
+            ("gds", "4.6 µS"),
             ("Temperature", "85 °C"),
         ]
     );
@@ -1526,7 +1532,7 @@ fn the_sheet_panel_holds_only_page_setup_and_checks() {
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app));
     assert_eq!(
         painted,
-        "Drawing sheet\nPage setup…\nChecks\nstale\nRun schematic checks\n"
+        "Drawing sheet\nPage setup…\nChecks\nnot run\nRun schematic checks\n"
     );
 }
 

@@ -16,8 +16,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::design_system::{
-    Problem, WorkbenchIcon, code_inspector_section, panel_bleed, panel_inset, problem_line,
-    property_row, property_row_control_columns, property_row_height, property_row_problem,
+    Problem, WorkbenchIcon, code_inspector_section, paint_problem_mark, panel_bleed, panel_inset,
+    problem_line, property_row, property_row_control_columns, property_row_height,
+    property_row_problem,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -606,12 +607,11 @@ fn muted_row(ui: &mut Ui, text: &str) {
 const DIAGNOSTIC_PAD_Y: i8 = 8;
 
 fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
+    /// The side of the kit's problem mark, so a row's mark matches the one in
+    /// the section header above it.
+    const MARK_SIDE: f32 = 11.0;
+
     let t = Tokens::get(ui.ctx());
-    let tone = match diagnostic.severity {
-        CodeEditorSeverity::Hint | CodeEditorSeverity::Info => t.color.text_faint,
-        CodeEditorSeverity::Warning => t.color.warn,
-        CodeEditorSeverity::Error => t.color.err,
-    };
     // On the panel inset: the body has set it already, so the row adds none.
     let inset = panel_inset(ui) as i8;
     let shown = egui::Frame::new()
@@ -620,7 +620,18 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;
                 let (icon, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-                WorkbenchIcon::Warning.paint(ui.painter(), icon, tone);
+                let mark = egui::Rect::from_center_size(icon.center(), Vec2::splat(MARK_SIDE));
+                match diagnostic.severity {
+                    CodeEditorSeverity::Error => {
+                        paint_problem_mark(ui.painter(), mark, Problem::Failure);
+                    }
+                    CodeEditorSeverity::Warning => {
+                        paint_problem_mark(ui.painter(), mark, Problem::Warning);
+                    }
+                    CodeEditorSeverity::Hint | CodeEditorSeverity::Info => {
+                        WorkbenchIcon::Warning.paint(ui.painter(), icon, t.color.text_faint);
+                    }
+                }
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 3.0;
                     ui.add(

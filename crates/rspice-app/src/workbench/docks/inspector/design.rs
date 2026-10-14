@@ -680,15 +680,19 @@ fn checks_current(state: &AppState) -> bool {
         && state.dialogs.drc_checked_version == state.schematic.topology_version()
 }
 
-fn checks_status(state: &AppState) -> String {
+/// What the Checks header says, only when the check is not current and clean:
+/// "not run" before any check, "stale" once the drawing has changed under
+/// one, and the error count of a current check that found errors.
+fn checks_status(state: &AppState) -> Option<String> {
+    let Some(result) = state.dialogs.drc_results.as_ref() else {
+        return Some("not run".to_owned());
+    };
     if !checks_current(state) {
-        return "stale".to_owned();
+        return Some("stale".to_owned());
     }
-    let blocking = state.dialogs.drc_results.as_ref().map_or(0, |result| {
-        let summary = result.summary();
-        summary.critical + summary.errors
-    });
-    format!("{blocking} errors")
+    let summary = result.summary();
+    let blocking = summary.critical + summary.errors;
+    (blocking > 0).then(|| count_label(blocking, "error"))
 }
 
 // =============================================================================
@@ -708,7 +712,7 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp) {
 
     // The header says whether the check is current and how many errors it
     // found; a row appears only for a finding to act on.
-    section_header(ui, "Checks", Some(&checks_status(&app.state)));
+    section_header(ui, "Checks", checks_status(&app.state).as_deref());
     let open_pins = current_findings(&app.state, |violation| {
         violation.violation_type == rspice_design::drc::DrcViolationType::UnconnectedPin
     });
@@ -907,12 +911,7 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     let mut reduce: Option<u64> = None;
     for (id, name, value) in &selected {
-        let row = TreeRow::new(name)
-            .mono()
-            .indent(1)
-            .meta(value)
-            .selected(true)
-            .show(ui);
+        let row = TreeRow::new(name).mono().indent(1).meta(value).show(ui);
         if row.response.clicked() {
             reduce = Some(*id);
         }
