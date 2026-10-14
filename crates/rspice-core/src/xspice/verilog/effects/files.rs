@@ -80,7 +80,7 @@ impl HdlFileTarget {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FileOp {
     /// Create the file, emptying it under `truncate` (`"w"`, `"w+"`, a
-    /// multichannel `$fopen`).
+    /// multichannel `$fopen`, a dump file).
     Create { path: PathBuf, truncate: bool },
     /// Write at an offset (positioned handles).
     Write {

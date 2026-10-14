@@ -266,6 +266,15 @@ impl HdlEffects {
             Kind::Readmemb | Kind::Readmemh => {
                 self.readmem(plan, site, args, clock, store)?;
             }
+            Kind::Dumpfile
+            | Kind::Dumpvars
+            | Kind::Dumpon
+            | Kind::Dumpoff
+            | Kind::Dumpall
+            | Kind::Dumplimit
+            | Kind::Dumpflush => {
+                self.dump_task(plan, site, args, clock, store)?;
+            }
             other => {
                 return Err(DigitalEvalError::SystemCallUnavailable {
                     site: site.id,

@@ -1,4 +1,5 @@
-//! File I/O, string I/O and `$readmem*` end to end (design P2 section 4.3).
+//! File I/O, string I/O, `$readmem*` and the value change dump end to end
+//! (design P2 section 4.3).
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
 //! (`iverilog -g2005`, `vvp -n`, probes `scratchpad/p2l5/probe/p4.v` and
@@ -339,6 +340,101 @@ endmodule
     assert_eq!(
         written(&report, "work/m3.log"),
         "@0 b = 0\nstrobe 0\n@1 b = 1\n@2 b = 2\n@3 b = 3\n@4 b = 4\n@5 b = 5\n"
+    );
+}
+
+/// Section 18.1: the dump reads back through RSpice's VCD reader with the
+/// selected variables, their values at each step that changed them, `x`
+/// while dumping is off, and the current values at `$dumpon`.
+#[test]
+fn a_dump_reads_back_as_vcd() {
+    use crate::io::vcd::{VcdBit, VcdValue};
+    let directory = run_directory("dump");
+    let report = bench_in(
+        &directory,
+        r#"`timescale 1ns/1ns
+module tb;
+  reg clk;
+  reg [3:0] count;
+  real level;
+  reg [7:0] mem [0:1];
+  initial begin
+    $dumpfile("work/waves.vcd");
+    $dumpvars(0, tb);
+    clk = 0; count = 0; level = 0.5;
+    #5 clk = 1; count = 1;
+    #5 clk = 0; level = 1.5;
+    #5 $dumpoff;
+    #5 count = 3;
+    #5 $dumpon;
+    #5 $finish;
+  end
+endmodule
+"#,
+        false,
+    );
+    let text = written(&report, "work/waves.vcd");
+    let document = crate::io::vcd::parse_vcd_bytes_with_limits(
+        text.as_bytes(),
+        crate::resource::ResourceLimits::default(),
+    )
+    .unwrap_or_else(|error| panic!("{error}:\n{text}"));
+    assert_eq!(document.timescale.seconds(), 1e-9);
+    let signal = |name: &str| {
+        document
+            .signals
+            .iter()
+            .find(|signal| signal.variables[0].name.starts_with(name))
+            .unwrap_or_else(|| panic!("no `{name}` in\n{text}"))
+    };
+    assert_eq!(signal("clk").variables[0].scope, ["tb"]);
+    assert!(
+        document
+            .signals
+            .iter()
+            .all(|signal| !signal.variables[0].name.starts_with("mem")),
+        "memories are not dumped: {text}"
+    );
+    let ticks = |name: &str| -> Vec<u64> { signal(name).changes.iter().map(|c| c.tick).collect() };
+    assert_eq!(ticks("clk"), [0, 5, 10, 15, 25]);
+    assert_eq!(ticks("count"), [0, 5, 15, 25]);
+    let count: Vec<_> = signal("count")
+        .changes
+        .iter()
+        .map(|change| change.value.clone())
+        .collect();
+    let bits = |spelling: &str| {
+        VcdValue::Logic(
+            spelling
+                .chars()
+                .map(|bit| match bit {
+                    '0' => VcdBit::Zero,
+                    '1' => VcdBit::One,
+                    _ => VcdBit::Unknown,
+                })
+                .collect(),
+        )
+    };
+    assert_eq!(
+        count,
+        [bits("0000"), bits("0001"), bits("xxxx"), bits("0011")]
+    );
+    let level: Vec<_> = signal("level")
+        .changes
+        .iter()
+        .map(|change| (change.tick, change.value.clone()))
+        .collect();
+    assert_eq!(
+        level,
+        [
+            (0, VcdValue::Real(0.5)),
+            (10, VcdValue::Real(1.5)),
+            (25, VcdValue::Real(1.5))
+        ]
+    );
+    assert!(
+        text.contains("$dumpoff\n") && text.contains("$dumpon\n"),
+        "{text}"
     );
 }
 

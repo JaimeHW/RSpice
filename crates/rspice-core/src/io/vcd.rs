@@ -1202,8 +1202,9 @@ fn write_changes(
 /// The identifier code the writer gives the signal at `index`.
 ///
 /// A bijection onto the non-empty strings over printable ASCII 33..=126, so no
-/// two signals collide however many there are.
-fn canonical_identifier(mut index: usize) -> String {
+/// two signals collide however many there are. The HDL `$dumpvars` stream
+/// writer numbers its variables the same way.
+pub(crate) fn canonical_identifier(mut index: usize) -> String {
     const ALPHABET: usize = 94;
     let mut identifier = String::new();
     loop {

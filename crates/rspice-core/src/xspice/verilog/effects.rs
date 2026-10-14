@@ -24,10 +24,11 @@
 //!
 //! # Files
 //!
-//! File and string I/O is [`files`]: it writes through the same journal,
-//! released at the same commit.
+//! File and string I/O is [`files`], and the value change dump [`dump`]:
+//! both write through the same journal, released at the same commit.
 
 pub(crate) mod checkpoint;
+pub(crate) mod dump;
 pub(crate) mod files;
 pub(crate) mod format;
 pub(crate) mod plusargs;
@@ -152,6 +153,7 @@ pub(crate) struct HdlEffects {
     next_monitor_serial: u32,
     /// The monitor-region task whose argument function is running.
     evaluating: Option<MonitorTask>,
+    dump: dump::Dump,
 }
 
 impl HdlEffects {
@@ -177,6 +179,7 @@ impl HdlEffects {
             file_monitors: Vec::new(),
             next_monitor_serial: 0,
             evaluating: None,
+            dump: dump::Dump::default(),
         }
     }
 
@@ -286,10 +289,11 @@ impl HdlEffects {
     pub(crate) fn observes_changes(&self) -> bool {
         self.monitor.as_ref().is_some_and(|monitor| monitor.enabled)
             || !self.file_monitors.is_empty()
+            || self.dump.watching()
     }
 
     /// A signal changed: a `$monitor` or `$fmonitor` reading it prints at the
-    /// end of the step (sections 17.1.3 and 17.2.2).
+    /// end of the step (sections 17.1.3 and 17.2.2), and a dump records it.
     pub(crate) fn note_change(&mut self, plan: &CanonicalDigitalPlan, signal: DigitalSignalId) {
         let reads = |observer: u32| {
             plan.observers
@@ -306,6 +310,9 @@ impl HdlEffects {
                 monitor.queued = true;
                 self.queue.push(MonitorTask::FileMonitor(monitor.serial));
             }
+        }
+        if self.dump.watching() {
+            self.dump.note_change(signal);
         }
     }
 
@@ -366,6 +373,35 @@ impl HdlEffects {
             text,
             origin: Self::origin(plan, site),
         });
+    }
+
+    /// A record no call site wrote: the dump's own output at the end of a
+    /// step.
+    fn record_unsited(&mut self, clock: Option<DigitalClock>, stream: HdlStream, text: String) {
+        let (tick, seconds) = clock.map_or((0, 0.0), |clock| (clock.tick, clock.absolute_seconds));
+        self.journal.push(HdlOutputRecord {
+            point: HdlPoint::Transient { time: seconds },
+            tick,
+            seconds,
+            stream,
+            text,
+            origin: HdlOrigin {
+                scope: String::new(),
+                file: String::new(),
+                line: 0,
+            },
+        });
+    }
+
+    fn warn_unsited(&mut self, clock: Option<DigitalClock>, message: &str) {
+        self.severities.warnings += 1;
+        self.record_unsited(
+            clock,
+            HdlStream::Diagnostic {
+                severity: HdlSeverity::Warning,
+            },
+            message.to_owned(),
+        );
     }
 
     /// Format a display-family call's arguments, starting at `first`.
@@ -441,33 +477,8 @@ impl HdlEffects {
         ))
     }
 
-    /// Refuse a kind whose host behaviour has not landed (the value change
-    /// dump). The text names the feature, never the lane.
-    fn refuse_unlanded(site: &DigitalSystemCall) -> Result<(), DigitalEvalError> {
-        use DigitalSystemCallKind as Kind;
-        if matches!(
-            site.kind,
-            Kind::Dumpfile
-                | Kind::Dumpvars
-                | Kind::Dumpon
-                | Kind::Dumpoff
-                | Kind::Dumpall
-                | Kind::Dumplimit
-                | Kind::Dumpflush
-        ) {
-            return Err(DigitalEvalError::SystemCallUnavailable {
-                site: site.id,
-                detail: format!(
-                    "HDL file and waveform I/O (`{}`) is not supported yet",
-                    site.kind.name()
-                ),
-            });
-        }
-        Ok(())
-    }
-
     /// Perform a system task enable. `store` is the design's signals, which
-    /// `$readmem*` and `$fread` load.
+    /// `$readmem*` and `$fread` load and the dump reads.
     pub(crate) fn system_task(
         &mut self,
         plan: &CanonicalDigitalPlan,
@@ -484,7 +495,6 @@ impl HdlEffects {
                     site,
                     detail: "the plan declares no such site".into(),
                 })?;
-        Self::refuse_unlanded(site)?;
         if site.kind.lane() == DigitalSystemLane::Files && !site.kind.is_function() {
             return self.file_task(plan, site, args, clock, origin, store);
         }
@@ -711,7 +721,6 @@ impl HdlEffects {
                     site,
                     detail: "the plan declares no such site".into(),
                 })?;
-        Self::refuse_unlanded(site)?;
         self.function(plan, site, args, process, clock, store)
     }
 

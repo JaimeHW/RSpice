@@ -1720,29 +1720,10 @@ fn a_free_running_testbench_ends_at_the_tick_ceiling() {
     assert_eq!(report.end_tick, 10);
 }
 
-/// The value change dump compiles and is refused at run time as not supported
-/// yet; so are the options whose behaviour has not landed. The text names the
-/// feature, never a plan lane.
+/// Options whose behaviour has not landed are refused at run time as not
+/// supported yet. The text names the feature, never a plan lane.
 #[test]
-fn unlanded_tasks_and_options_are_refused_as_not_supported_yet() {
-    let error = run_digital_testbench(
-        &[(
-            "f.v".into(),
-            "module f; initial $dumpvars; endmodule\n".into(),
-        )],
-        &HdlTestbenchOptions::default(),
-    )
-    .expect_err("the value change dump is not supported yet");
-    let DigitalRunError::Unsupported(refusal) = &error else {
-        panic!("expected a typed capability refusal, got {error:?}");
-    };
-    assert_eq!(refusal.capability, "hdl.system_task.file_io");
-    let text = error.to_string();
-    assert!(
-        text.contains("HDL file and waveform I/O (`$dumpvars`) is not supported yet"),
-        "{text}"
-    );
-    assert!(!text.contains("lane"), "{text}");
+fn unlanded_options_are_refused_as_not_supported_yet() {
     let error = run_digital_testbench(
         &[(
             "f.v".into(),

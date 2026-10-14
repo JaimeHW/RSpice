@@ -32,8 +32,16 @@ impl EffectsImage {
         if !effects.journal.is_empty() || !effects.queue.is_empty() {
             return Err("HDL output or the monitor region is not drained".into());
         }
-        if !effects.files.is_idle() || !effects.file_monitors.is_empty() {
-            return Err("a checkpoint does not save open HDL files or `$fmonitor`s yet".into());
+        if !effects.files.is_idle()
+            || !effects.file_monitors.is_empty()
+            || effects.dump.phase != super::dump::DumpPhase::Idle
+            || effects.dump.name.is_some()
+        {
+            return Err(
+                "a checkpoint does not save open HDL files, `$fmonitor`s or a value change \
+                 dump yet"
+                    .into(),
+            );
         }
         Ok(Self {
             random_seed: effects.random_seed,

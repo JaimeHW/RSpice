@@ -242,25 +242,8 @@ pub enum DigitalRunError {
     Unsupported(Box<crate::UnsupportedCapabilityError>),
 }
 
-/// A process or observer evaluation failure, as the host reports it. A system
-/// call whose host behaviour has not landed (file and waveform I/O, P2 lane
-/// L5) is a typed capability refusal rather than a failure; its text names
-/// the feature, never the lane.
-fn evaluation_error(
-    plan: &CanonicalDigitalPlan,
-    process: String,
-    error: DigitalEvalError,
-) -> DigitalRunError {
-    if let DigitalEvalError::SystemCallUnavailable { site, detail } = &error
-        && plan.system_calls.get(site.index()).is_some_and(|call| {
-            call.kind.lane() == rspice_veriloga::canonical_ir::digital::DigitalSystemLane::Files
-        })
-    {
-        return DigitalRunError::Unsupported(Box::new(crate::UnsupportedCapabilityError::new(
-            "hdl.system_task.file_io",
-            detail.clone(),
-        )));
-    }
+/// A process or observer evaluation failure, as the host reports it.
+fn evaluation_error(process: String, error: DigitalEvalError) -> DigitalRunError {
     DigitalRunError::Evaluation { process, error }
 }
 
@@ -1283,6 +1266,11 @@ impl DigitalHost {
                     })?;
                     self.resume_analog_waiters(tick)?;
                 } else if !self.promote_region(tick)? {
+                    // Every region of the step has drained: the value change
+                    // dump records what the step left (IEEE 1364-2005 section
+                    // 18.1).
+                    let clock = self.store.read_clock();
+                    self.effects.end_of_step(&self.plan, &self.store, clock);
                     return Ok(());
                 }
             }
@@ -1373,7 +1361,7 @@ impl DigitalHost {
                 &mut environment,
                 &mut self.scratch,
             )
-            .map_err(|error| evaluation_error(&self.plan, "the monitor region".into(), error))?;
+            .map_err(|error| evaluation_error("the monitor region".into(), error))?;
         }
         Ok(())
     }
@@ -1429,7 +1417,6 @@ impl DigitalHost {
             rounds += 1;
             if rounds > DEFAULT_PROCESS_STEP_LIMIT {
                 return Err(evaluation_error(
-                    &self.plan,
                     self.describe(index),
                     DigitalEvalError::StepLimitExceeded(DEFAULT_PROCESS_STEP_LIMIT),
                 ));
@@ -1481,8 +1468,7 @@ impl DigitalHost {
                 DEFAULT_PROCESS_STEP_LIMIT,
             ),
         };
-        let outcome =
-            outcome.map_err(|error| evaluation_error(&self.plan, self.describe(index), error))?;
+        let outcome = outcome.map_err(|error| evaluation_error(self.describe(index), error))?;
 
         self.store
             .current_sequence()
@@ -1680,9 +1666,9 @@ impl DigitalHost {
             }
             let observed = self.effects.observes_changes();
             for transition in drained.iter() {
-                // IEEE 1364-2005 sections 17.1.3 and 17.2.2: a change of a
-                // `$monitor`'s or `$fmonitor`'s operand prints it at the end
-                // of the step.
+                // IEEE 1364-2005 sections 17.1.3, 17.2.2 and 18.1: a change of
+                // a `$monitor`'s or `$fmonitor`'s operand prints it at the end
+                // of the step, and a dumped variable's is recorded.
                 if observed {
                     self.effects.note_change(&self.plan, transition.signal);
                 }
