@@ -409,6 +409,7 @@ mod parameter_defaults;
 pub(crate) mod parameter_given;
 mod retained_inputs;
 pub(crate) mod source_references;
+mod string_parameters;
 mod switch_branches;
 mod symbols;
 
@@ -1081,6 +1082,8 @@ impl SemanticAnalyzer {
         module: &Module,
         default_transition: f64,
     ) -> CompileResult<AnalyzedModule> {
+        let substituted = string_parameters::substituted(module)?;
+        let module = substituted.as_ref().unwrap_or(module);
         let original_source = module;
         let (expanded, mut physical_nodes) = node_vectors::declarations(module, &self.disciplines)?;
         for (name, reference) in &module.foreign_physical {

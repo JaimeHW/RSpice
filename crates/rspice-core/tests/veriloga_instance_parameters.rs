@@ -339,3 +339,96 @@ fn one_offset_spelled_twice_with_two_values_is_refused() {
         "the refusal must name both spellings: {message}"
     );
 }
+
+/// A string parameter selecting the law: `half` halves the resistance.
+const VMODE: &str = r#"
+`include "disciplines.vams"
+module vmode(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter string mode = "full";
+    parameter real r = 1000.0 from (0:inf);
+    analog begin
+        if (mode == "half")
+            I(p, n) <+ V(p, n) / (r / 2.0);
+        else
+            I(p, n) <+ V(p, n) / r;
+    end
+endmodule
+module vmode_top(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter string inner = "full";
+    vmode #(.mode(inner)) u1(p, n);
+endmodule
+module vmode_fixed(p, n);
+    inout p, n;
+    electrical p, n;
+    vmode #(.mode("half")) u1(p, n);
+endmodule
+"#;
+
+/// A string override on the card reaches a string parameter, and a source
+/// instance's string override reaches its child, each specializing the
+/// source (the hierarchy keys a closed override by its value, `str:`).
+#[test]
+fn a_string_parameter_takes_its_override_from_the_card_and_from_the_source() {
+    let model = ModelFile::new("string_mode", VMODE);
+    let out = |card: &str| {
+        node_voltage(
+            &format!(
+                "* a string parameter\nv1 in 0 dc 1.0\nr1 in out 1k\n{card}\n\
+                 .va \"{}\" module=vmode\n.va \"{}\" module=vmode_top\n\
+                 .va \"{}\" module=vmode_fixed\n.op\n.end\n",
+                model.deck_path(),
+                model.deck_path(),
+                model.deck_path()
+            ),
+            "out",
+        )
+    };
+    let full = 0.5;
+    let half = 500.0 / 1500.0;
+    assert_close("default", out("x1 out 0 vmode"), full);
+    assert_close("card half", out("x1 out 0 vmode mode=\"half\""), half);
+    assert_close("card full", out("x1 out 0 vmode mode=\"full\""), full);
+    assert_close("source half", out("x1 out 0 vmode_fixed"), half);
+    assert_close(
+        "through the hierarchy",
+        out("x1 out 0 vmode_top inner=\"half\""),
+        half,
+    );
+    assert_close("hierarchy default", out("x1 out 0 vmode_top"), full);
+    // Two cards, two strings, two specializations of one master.
+    let netlist = Netlist::parse(&format!(
+        "* two strings\nv1 in 0 dc 1.0\nr1 in a 1k\nr2 in b 1k\n\
+         x1 a 0 vmode mode=\"half\"\nx2 b 0 vmode mode=\"full\"\n\
+         .va \"{}\" module=vmode\n.op\n.end\n",
+        model.deck_path()
+    ))
+    .unwrap();
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .unwrap();
+    assert_close("x1", result.try_voltage_named("a").unwrap(), half);
+    assert_close("x2", result.try_voltage_named("b").unwrap(), full);
+    // A string is not a number, and a number is not a string.
+    let message = refusal(&format!(
+        "* a number for a string\nv1 in 0 dc 1.0\nr1 in out 1k\nx1 out 0 vmode mode=2\n\
+         .va \"{}\" module=vmode\n.op\n.end\n",
+        model.deck_path()
+    ));
+    assert!(
+        message.contains("mode") && message.contains("string"),
+        "{message}"
+    );
+    let message = refusal(&format!(
+        "* a string for a number\nv1 in 0 dc 1.0\nr1 in out 1k\nx1 out 0 vmode r=\"big\"\n\
+         .va \"{}\" module=vmode\n.op\n.end\n",
+        model.deck_path()
+    ));
+    assert!(
+        message.contains("'r'") && message.contains("string"),
+        "{message}"
+    );
+}

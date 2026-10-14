@@ -2249,7 +2249,11 @@ fn validate_canonical_parameters_for_model(model: &CompiledModel, mir: &MirModel
                 "canonical parameter '{}' array storage metadata does not match compiled parameter metadata", canonical.name
             ).into() });
         }
-        if !compiled.is_array && compiled.default_program.is_none() {
+        // A string parameter has no numeric value on either side.
+        if canonical.value_type != crate::canonical_ir::CanonicalValueType::String
+            && !compiled.is_array
+            && compiled.default_program.is_none()
+        {
             let matches_default = canonical
                 .default
                 .is_some_and(|default| default.to_bits() == compiled.default.to_bits());

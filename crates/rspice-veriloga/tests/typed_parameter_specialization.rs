@@ -985,7 +985,7 @@ fn interleaved_parameter_defaults_reject_forward_self_and_excessive_expansion() 
         ("localparam A=A+1;", "references itself"),
         (
             "localparam string S=65; parameter P=S;",
-            "default depends on string localparam 'S'",
+            "string parameter 'S': a string parameter takes a string literal",
         ),
         (
             r#"localparam string S="A"; localparam T=S; parameter P=T;"#,
@@ -1768,4 +1768,73 @@ endmodule
     assert!(device.try_set_parameter("INPUT", 8.0).unwrap());
     device.try_resolve_parameter_defaults().unwrap();
     assert_eq!(current(&supplied, &mut device), 52.0);
+}
+
+/// A string parameter is closed when the module is elaborated: a read is its
+/// value, a comparison of two strings is a constant, and a parameter naming
+/// another string parameter follows it. Only a string specializes it, and a
+/// string specializes nothing else.
+#[test]
+fn a_string_parameter_is_closed_at_elaboration_and_specialized_by_a_string() {
+    let compiler = compiler();
+    let original = compiler
+        .compile_runtime(
+            r#"
+module smode(p);
+ inout p; electrical p;
+ parameter string mode = "full";
+ parameter string follows = mode;
+ parameter real k = (follows != "half") ? 2.0 : 1.0;
+ analog begin
+  if (mode == "half") I(p) <+ k * V(p) / 2.0;
+  else I(p) <+ k * V(p);
+ end
+endmodule
+"#,
+            None,
+        )
+        .unwrap();
+    let k = |report: &rspice_veriloga::RuntimeCompileReport| {
+        let index = report.model.parameter_index("k").unwrap();
+        report.model.parameters[index].default
+    };
+    assert_eq!(k(&original), 2.0);
+    assert!(original.canonical_ir.parameter_source.is_some());
+    let half = compiler
+        .specialize_mixed_runtime_typed(
+            &original.canonical_ir,
+            &[("mode", ScalarParameterValue::String("half".into()))],
+            &NoPipelineControl,
+        )
+        .unwrap();
+    half.validate_integrity().unwrap();
+    assert_eq!(k(&half), 1.0);
+    assert_ne!(
+        half.canonical_ir.source_specialization_identity,
+        original.canonical_ir.source_specialization_identity
+    );
+    let refusal = |name: &str, value: ScalarParameterValue| {
+        compiler
+            .specialize_mixed_runtime_typed(
+                &original.canonical_ir,
+                &[(name, value)],
+                &NoPipelineControl,
+            )
+            .unwrap_err()
+            .to_string()
+    };
+    let message = refusal("mode", ScalarParameterValue::Real(2.0));
+    assert!(message.contains("requires a string value"), "{message}");
+    let message = refusal("k", ScalarParameterValue::String("big".into()));
+    assert!(message.contains("cannot take a string value"), "{message}");
+    // A string parameter takes a literal or another string parameter.
+    let message = compiler
+        .compile_runtime(
+            "module bad(p);\n inout p; electrical p;\n parameter real r = 1.0;\n \
+             parameter string s = r;\n analog I(p) <+ V(p);\nendmodule\n",
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(message.contains("string parameter 's'"), "{message}");
 }

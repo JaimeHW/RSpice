@@ -1,6 +1,6 @@
 //! Typed scalar values supplied to source specialization.
 
-use crate::ast::{Expression, FourStateLit, NumberLit, ParamType, ParameterDecl};
+use crate::ast::{Expression, FourStateLit, NumberLit, ParamType, ParameterDecl, StringLit};
 use crate::canonical_ir::digital_value::FourStateValue;
 use crate::error::{CompileError, CompileResult};
 use crate::semantic::DigitalConstants;
@@ -9,8 +9,9 @@ use crate::source::Span;
 /// An exact scalar override for a Verilog-AMS module parameter.
 ///
 /// Integral values retain their width, signedness and X/Z bits until the
-/// declaration's assignment conversion. A real is supplied as binary64.
-/// Arrays and strings are not represented by this scalar API.
+/// declaration's assignment conversion. A real is supplied as binary64. A
+/// string reaches only a `string` parameter. Arrays are not represented by
+/// this scalar API.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ScalarParameterValue {
     /// A signed decimal integer with at least 32 bits.
@@ -19,6 +20,8 @@ pub enum ScalarParameterValue {
     Bits { value: FourStateValue, signed: bool },
     /// A finite binary64 real, including either sign of zero.
     Real(f64),
+    /// The value of a `string` parameter, without quotes or escapes.
+    String(smol_str::SmolStr),
 }
 
 impl ScalarParameterValue {
@@ -27,6 +30,12 @@ impl ScalarParameterValue {
             CompileError::ModuleSelection(format!("parameter override `{name}` {detail}"))
         };
         let (value, signed) = match self {
+            Self::String(value) => {
+                return Ok(Expression::StringLit(StringLit {
+                    value: value.clone(),
+                    span,
+                }));
+            }
             Self::Integer(value) => (
                 FourStateValue::from_integer(
                     crate::numeric_literal::unsized_integer_width(*value),
@@ -72,13 +81,29 @@ impl ScalarParameterValue {
         parameter: &ParameterDecl,
         time_scale: crate::time_scale::ModuleTimeScale,
     ) -> CompileResult<Expression> {
-        if parameter.param_type == ParamType::String || !parameter.dimensions.is_empty() {
+        if !parameter.dimensions.is_empty() {
             return Err(CompileError::ModuleSelection(format!(
-                "parameter `{}` requires an array or string override",
+                "parameter `{}` requires an array override",
                 parameter.name
             )));
         }
+        // A string is not a number, and a number is not a string.
+        let is_string = matches!(self, Self::String(_));
+        if (parameter.param_type == ParamType::String) != is_string {
+            return Err(CompileError::ModuleSelection(format!(
+                "parameter `{}` {}",
+                parameter.name,
+                if is_string {
+                    "is not a string parameter and cannot take a string value"
+                } else {
+                    "is a string parameter and requires a string value"
+                }
+            )));
+        }
         let expression = self.expression(&parameter.name, parameter.span)?;
+        if is_string {
+            return Ok(expression);
+        }
         if parameter.packed_range.is_some() || parameter.signedness.is_some() {
             // Bounds may name another simultaneously overridden parameter.
             // Convert after the complete effective source scope is installed.
@@ -125,6 +150,11 @@ pub(crate) fn specialization_identity(
                 hash.update(&[2, u8::from(*signed)]);
                 hash.update(&value.width().to_le_bytes());
                 hash.update(value.spelling().as_bytes());
+            }
+            ScalarParameterValue::String(value) => {
+                hash.update(&[3]);
+                hash.update(&(value.len() as u64).to_le_bytes());
+                hash.update(value.as_bytes());
             }
         }
     }

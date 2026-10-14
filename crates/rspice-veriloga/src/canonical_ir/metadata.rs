@@ -14,6 +14,9 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 166 lets a source specialization assign a `string` parameter
+/// (`ScalarParameterValue::String`). Earlier artifacts refused every string
+/// parameter at code generation and cannot carry the assignment.
 /// Version 164 lowers digital tasks and functions: the plan's routine table,
 /// calls, task enables, routine outputs and automatic frame slots. Earlier
 /// artifacts have none of these and refused every routine.
@@ -172,7 +175,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 164;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 166;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

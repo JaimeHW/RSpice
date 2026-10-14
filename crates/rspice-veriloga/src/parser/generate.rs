@@ -338,6 +338,7 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
         constants,
         time_scale: module.time_scale,
         bindings: HashMap::new(),
+        strings: HashMap::new(),
         scoped_names: HashMap::new(),
         scope_prefix: String::new(),
         next_process_id,
@@ -360,6 +361,34 @@ pub(super) fn expand(module: &mut Module, next_process_id: &mut u32) -> Result<(
     module.hierarchical_scopes = unroller.hierarchy.scopes;
     scope::sort_analog_items(module);
     Ok(())
+}
+
+/// Fold every comparison of two strings to the integer it denotes.
+///
+/// A string parameter has no run-time slot: its value is fixed when the module
+/// is elaborated, so `mode == "half"` is `1` or `0` once `values` gives each
+/// string parameter's value. The same exhaustive substitution that binds a
+/// genvar reaches every expression of the module, and a local declaration of
+/// the same name hides the parameter as it hides a genvar.
+pub(super) fn substitute_string_parameters(module: &mut Module, values: HashMap<SmolStr, SmolStr>) {
+    let mut hierarchy = hierarchy::Bindings::new(module);
+    // The parser bound the authored hierarchical names already.
+    hierarchy.authored.clear();
+    let mut next_process_id = 0;
+    let mut unroller = Unroller {
+        genvars: Vec::new(),
+        genvar_names: HashMap::new(),
+        constants: module_constants(module),
+        time_scale: module.time_scale,
+        bindings: HashMap::new(),
+        strings: values,
+        scoped_names: HashMap::new(),
+        scope_prefix: String::new(),
+        next_process_id: &mut next_process_id,
+        hierarchy,
+        scope_path: Vec::new(),
+    };
+    unroller.rewrite_items(module);
 }
 
 fn module_constants(module: &Module) -> crate::semantic::DigitalConstants {
@@ -404,6 +433,8 @@ struct Unroller<'a> {
     time_scale: crate::time_scale::ModuleTimeScale,
     /// The genvars currently bound, innermost loop last.
     bindings: HashMap<SmolStr, i64>,
+    /// String parameters and their values, for folding comparisons.
+    strings: HashMap<SmolStr, SmolStr>,
     /// Concrete names of declarations in enclosing generate scopes.
     scoped_names: HashMap<SmolStr, SmolStr>,
     scope_prefix: String,
@@ -850,6 +881,18 @@ impl Unroller<'_> {
         }
     }
 
+    /// The string a comparison operand denotes: a literal, or a string
+    /// parameter no local declaration hides.
+    fn string_value<'e>(&'e self, expression: &'e Expression) -> Option<&'e str> {
+        match expression {
+            Expression::StringLit(literal) => Some(literal.value.as_str()),
+            Expression::Identifier(identifier) => {
+                self.strings.get(&identifier.name).map(SmolStr::as_str)
+            }
+            _ => None,
+        }
+    }
+
     /// Bind scoped net names and replace bound genvars with their values.
     fn substitute(&self, expression: &mut Expression) {
         match expression {
@@ -866,6 +909,21 @@ impl Unroller<'_> {
             Expression::Binary(binary) => {
                 self.substitute(&mut binary.left);
                 self.substitute(&mut binary.right);
+                let folded = match binary.op {
+                    op @ (BinaryOp::Eq | BinaryOp::Ne) => self
+                        .string_value(&binary.left)
+                        .zip(self.string_value(&binary.right))
+                        .map(|(left, right)| u8::from((left == right) == (op == BinaryOp::Eq))),
+                    _ => None,
+                };
+                if let Some(value) = folded {
+                    let span = binary.span;
+                    *expression = Expression::Number(NumberLit {
+                        value: f64::from(value),
+                        raw: value.to_string().into(),
+                        span,
+                    });
+                }
             }
             Expression::Unary(unary) => self.substitute(&mut unary.operand),
             Expression::Conditional(conditional) => {

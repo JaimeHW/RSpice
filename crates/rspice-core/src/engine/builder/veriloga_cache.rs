@@ -426,7 +426,12 @@ use super::*;
 // compiled beside other files saw their macros, `timescale` and modules; the
 // record carries the identity of that ordered set of files, and a record
 // without the field cannot say which unit it came from.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 149;
+//
+// Version 151 follows the canonical IR's schema to 166, whose source
+// specialization can assign a `string` parameter. A version-149 record refused
+// every module that declared one, so none holds a string parameter; rebuilding
+// keeps the record and the schema in step.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 151;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -143,10 +143,24 @@ fn validate_parameters(model: &CompiledModel, mir: &MirModel) -> Result<(), Stri
                 canonical.name
             ));
         }
+        // A string parameter has no numeric value on either side: semantic
+        // analysis folded every comparison that reads it to a constant.
+        let is_string = canonical.value_type == crate::canonical_ir::CanonicalValueType::String;
+        if is_string
+            && (compiled.default_program.is_some()
+                || compiled.default.to_bits() != 0.0f64.to_bits()
+                || canonical.default.is_some())
+        {
+            return Err(format!(
+                "canonical string parameter '{}' has a numeric default",
+                canonical.name
+            ));
+        }
         // A constant compiled default has to have a canonical default that is
         // bit-equal to it. Both halves of the negation are reportable: the
         // canonical side may carry no default at all, or carry a different one.
-        if !compiled.is_array
+        if !is_string
+            && !compiled.is_array
             && compiled.default_program.is_none()
             && canonical
                 .default

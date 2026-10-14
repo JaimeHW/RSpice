@@ -17,9 +17,17 @@ use crate::{ElaborationErrorKind, SimulationError};
 /// Base artifacts stay alive in the build's model table, so their addresses
 /// identify immutable source artifacts for this cache's lifetime.
 pub(super) type InstanceSpecializations = std::collections::HashMap<
-    (usize, usize, Vec<(String, u64)>),
+    (usize, usize, Vec<(String, SpecializedValue)>),
     (Arc<CompiledModel>, Arc<CanonicalIrArtifact>),
 >;
+
+/// One override in a specialization key: a number by its bits, a string by
+/// its text.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) enum SpecializedValue {
+    Number(u64),
+    String(String),
+}
 
 pub(super) struct PreparedInstance<'a> {
     pub model: Arc<CompiledModel>,
@@ -32,6 +40,8 @@ pub(super) struct PreparedInstance<'a> {
 struct PublicParameter<'a> {
     name: &'a str,
     needs_source: bool,
+    /// A `string` parameter: its value is closed by source specialization.
+    is_string: bool,
 }
 
 /// Public numeric and exact declarations share the external namespace. The
@@ -41,10 +51,19 @@ struct PublicParameter<'a> {
 fn public_parameter<'a>(entry: &'a CachedVerilogAModel, name: &str) -> Option<PublicParameter<'a>> {
     if let Some(index) = entry.model.parameter_index(name) {
         let parameter = &entry.model.parameters[index];
+        let is_string = entry.canonical_ir.as_deref().is_some_and(|artifact| {
+            artifact.hir.parameters.iter().any(|declared| {
+                declared.name == parameter.name
+                    && declared.value_type
+                        == rspice_veriloga::canonical_ir::CanonicalValueType::String
+            })
+        });
         return Some(PublicParameter {
             name: parameter.name.as_str(),
-            needs_source: parameter.elaboration_value.is_some()
+            needs_source: is_string
+                || parameter.elaboration_value.is_some()
                 || parameter.elaboration_given.is_some(),
+            is_string,
         });
     }
     let parameters = &entry
@@ -65,6 +84,7 @@ fn public_parameter<'a>(entry: &'a CachedVerilogAModel, name: &str) -> Option<Pu
         .map(|parameter| PublicParameter {
             name: parameter.name.as_str(),
             needs_source: true,
+            is_string: false,
         })
 }
 
@@ -95,6 +115,7 @@ pub(super) fn prepare<'a>(
     )?;
     context.retarget(temperature);
     let mut overrides = Vec::with_capacity(params.len());
+    let mut strings = Vec::new();
     let mut multiplicity = None;
     let mut specializes = entry
         .canonical_ir
@@ -102,6 +123,19 @@ pub(super) fn prepare<'a>(
         .is_some_and(|artifact| artifact.digital.has_executable_content());
     for (name, value) in params {
         if super::veriloga_instance_temperature_key(name, &declares).is_some() {
+            continue;
+        }
+        if let Some(parameter) = public_parameter(entry, name).filter(|found| found.is_string) {
+            let crate::netlist::ParametricValue::String(text) = value else {
+                return Err(refuse(
+                    &element.name,
+                    subckt_name,
+                    ElaborationErrorKind::ParameterValue,
+                    format!("parameter '{name}' is a string parameter and requires a string value"),
+                ));
+            };
+            specializes = true;
+            strings.push((parameter.name, text.as_str()));
             continue;
         }
         let value = super::veriloga_instance_numeric_value(
@@ -137,7 +171,7 @@ pub(super) fn prepare<'a>(
         overrides.push((parameter.name, value));
     }
 
-    let (model, canonical_ir) = if specializes && !overrides.is_empty() {
+    let (model, canonical_ir) = if specializes && !(overrides.is_empty() && strings.is_empty()) {
         let artifact = entry.canonical_ir.as_deref().ok_or_else(|| {
             refuse(
                 &element.name,
@@ -149,12 +183,16 @@ pub(super) fn prepare<'a>(
         // Canonical names and order let equivalent cards share immutable
         // compilation results. Device state remains private to each instance.
         overrides.sort_by(|left, right| left.0.cmp(right.0));
+        strings.sort_by(|left, right| left.0.cmp(right.0));
         let key = (
             Arc::as_ptr(&entry.model) as usize,
             artifact as *const _ as usize,
             overrides
                 .iter()
-                .map(|(name, value)| (name.to_string(), value.to_bits()))
+                .map(|(name, value)| (name.to_string(), SpecializedValue::Number(value.to_bits())))
+                .chain(strings.iter().map(|(name, text)| {
+                    (name.to_string(), SpecializedValue::String(text.to_string()))
+                }))
                 .collect(),
         );
         let specialized = if let Some(specialized) = specializations.get(&key) {
@@ -165,8 +203,18 @@ pub(super) fn prepare<'a>(
                     enable_ams: true,
                     ..Default::default()
                 });
+            let typed: Vec<_> = overrides
+                .iter()
+                .map(|&(name, value)| (name, rspice_veriloga::ScalarParameterValue::Real(value)))
+                .chain(strings.iter().map(|&(name, text)| {
+                    (
+                        name,
+                        rspice_veriloga::ScalarParameterValue::String(text.into()),
+                    )
+                }))
+                .collect();
             let runtime = compiler
-                .specialize_mixed_runtime(artifact, &overrides, &VerilogACompileControl { abort })
+                .specialize_mixed_runtime_typed(artifact, &typed, &VerilogACompileControl { abort })
                 .map_err(|error| {
                     if abort.is_aborted() {
                         SimulationError::Aborted

@@ -102,6 +102,11 @@ pub(super) fn close_override(
     parent: &DigitalConstants,
     time_scale: crate::time_scale::ModuleTimeScale,
 ) -> Result<Expression, String> {
+    if declaration.param_type == ParamType::String && declaration.dimensions.is_empty() {
+        let span = expression.span();
+        return super::string_parameters::close(&expression, &parent.definitions)
+            .map(|value| Expression::StringLit(StringLit { value, span }));
+    }
     let mut declaration = declaration.clone();
     declaration.default = Some(expression);
     if declaration.packed_range.is_some() || declaration.signedness.is_some() {
@@ -123,6 +128,10 @@ pub(super) fn override_identity(expression: &Expression) -> Result<String, Strin
         match expression {
             Expression::Number(number) => {
                 write!(key, "real:{:016x};", number.value.to_bits()).unwrap();
+            }
+            // Debug-escaped and quoted, so no value can spell another key.
+            Expression::StringLit(string) => {
+                write!(key, "str:{:?};", string.value.as_str()).unwrap();
             }
             Expression::Digital(DigitalExpr::FourState(literal)) => {
                 write!(

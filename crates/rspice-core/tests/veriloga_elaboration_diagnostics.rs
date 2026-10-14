@@ -275,12 +275,8 @@ fn a_value_outside_its_domain_is_parameter_value_on_both_routes() {
 }
 
 /// A string where the master declares a number is a parameter-value refusal,
-/// not a parse failure and not a silent zero.
-///
-/// A Verilog-A `parameter string` is a declaration this engine's runtime
-/// cannot execute — no compiled module can read one, because a string literal
-/// in an expression has no lowering — so every instance parameter is numeric
-/// and a quoted value on the card is a value the master will not take.
+/// not a parse failure and not a silent zero. A quoted value reaches only a
+/// `parameter string` (`veriloga_instance_parameters.rs`).
 #[test]
 fn a_string_value_for_a_numeric_parameter_is_parameter_value_on_both_routes() {
     let analog = ModelFile::new("analog_string_value", ANALOG_RESISTOR);

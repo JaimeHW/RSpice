@@ -30,7 +30,11 @@ pub(super) fn specialization_modules(
                 .parameters
                 .iter()
                 .chain(&source.localparams)
-                .any(|parameter| !parameter.type_is_explicit)
+                .any(|parameter| {
+                    // A string value reaches its reads only by specialization.
+                    !parameter.type_is_explicit
+                        || parameter.param_type == crate::ast::ParamType::String
+                })
         {
             pending.push(source.name.clone());
         }

@@ -1599,10 +1599,9 @@ endmodule
         assert_eq!(parameter(&report.abi, "forbidden").range, None);
     }
 
-    /// The bytecode generator cannot lower a string literal ("String literals
-    /// in expressions"), and a string parameter's default is one, so a module
-    /// that declares one never reaches a runtime report yet. The ABI is
-    /// derived from the canonical artifact, where the default survives.
+    /// A string parameter has no numeric slot value: the comparisons that
+    /// read it are folded before lowering. The ABI is derived from the
+    /// canonical artifact, where the string default survives.
     #[test]
     fn abi_types_a_string_default_from_the_canonical_artifact() {
         let artifact = crate::VerilogACompiler::default()

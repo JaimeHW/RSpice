@@ -4671,6 +4671,14 @@ mod tests {
     }
 }
 
+/// Fold every comparison of two strings, given each string parameter's value.
+pub(crate) fn substitute_string_parameters(
+    module: &mut Module,
+    values: std::collections::HashMap<SmolStr, SmolStr>,
+) {
+    generate::substitute_string_parameters(module, values);
+}
+
 /// Rebuild generated items from authored structure after parameter specialization.
 pub(crate) fn expand_specialized_generates(module: &mut Module) -> crate::error::CompileResult<()> {
     let Some(template) = &module.generate_template else {

@@ -257,8 +257,8 @@ path. Resizing a public parameter array requires an explicit replacement array v
 External scalar specialization also enforces that rule, including alias overrides;
 private local arrays may derive new shapes from effective public parameters.
 HIR 157 / cache record 139 invalidate artifacts predating these array contracts.
-Foreign digital storage, multiple HDL roots/cross-model hierarchy, string parameter
-binding, aggregate expressions that depend on other arrays, hierarchy-dependent
+Foreign digital storage, multiple HDL roots/cross-model hierarchy,
+aggregate expressions that depend on other arrays, hierarchy-dependent
 generate decisions, and scope indices that themselves depend on hierarchical
 constants remain open. References requiring complete post-insertion discovery or
 prior coercion of an implicit net's discipline also need further elaboration work.
@@ -828,8 +828,13 @@ Changing an elaboration value requires source specialization.
 
 Direct analog uses, unresolved numeric parameter dependencies and range
 constraints involving these packed values receive an explicit diagnostic until
-their typed conversion/evaluation is implemented. String/array override APIs
-and typed SPICE-deck/UI parameter transport remain open. This is a compiler
+their typed conversion/evaluation is implemented. Schema 166 adds
+`ScalarParameterValue::String`: a `string` parameter is closed at elaboration
+and every comparison of two strings folds to a constant, so it takes a value
+only by source specialization (a SPICE card's quoted value or an instance
+override, keyed `str:`). Other reads of a string parameter keep their
+diagnostics. Array override APIs remain
+open. This is a compiler
 API and exact elaboration increment, not completion of the full typed external
 ABI. Wasm helper ABI remains 20.
 

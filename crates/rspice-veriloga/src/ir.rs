@@ -754,8 +754,11 @@ impl DeviceIR {
         // previously declared parameters and are evaluated per instance,
         // in declaration order, for parameters not explicitly given.
         for (idx, param) in module.parameters.iter().enumerate() {
+            // A string parameter has no numeric value: semantic analysis has
+            // folded every comparison that reads it to a constant.
             if param.dimensions.is_empty()
                 && param.default.is_none()
+                && param.param_type != crate::ast::ParamType::String
                 && let Some(default_expr) = &param.default_expr
             {
                 let converted = converter.convert(&mut ir.exprs, default_expr)?;
