@@ -42,25 +42,27 @@ pub(super) fn recovery_page(
         .auto_shrink([false, false])
         .show(&mut body_ui, |ui| {
                     ui.set_min_width(ui.available_width());
+                    // The notice is neutral text in an untinted box. A
+                    // warning is the one notice that earns a mark.
                     if let Some(notice) =
                         app.state.workbench.project_launcher_recovery.notice.clone()
                     {
-                        let color = match notice.tone {
-                            RecoveryNoticeTone::Info => t.color.ok,
-                            RecoveryNoticeTone::Warning => t.color.warn,
-                        };
                         Frame::new()
-                            .fill(color.gamma_multiply(0.10))
-                            .stroke(Stroke::new(1.0, color.gamma_multiply(0.65)))
+                            .stroke(Stroke::new(1.0, t.color.border))
                             .corner_radius(t.radius)
                             .inner_margin(Margin::symmetric(12, 9))
                             .outer_margin(Margin::symmetric(16, 10))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(notice.message)
-                                        .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                                        .color(t.color.text),
-                                );
+                            .show(ui, |ui| match notice.tone {
+                                RecoveryNoticeTone::Warning => {
+                                    problem_line(ui, Problem::Warning, &notice.message);
+                                }
+                                RecoveryNoticeTone::Info => {
+                                    ui.label(
+                                        egui::RichText::new(notice.message)
+                                            .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                                            .color(t.color.text),
+                                    );
+                                }
                             });
                     }
 
@@ -266,21 +268,34 @@ pub(super) fn recovery_row(
                         ),
                     );
                 }
-                ui.add_sized(
-                    [if layout.compact { 64.0 } else { 70.0 }, 54.0],
-                    egui::Label::new(
-                        egui::RichText::new(if candidate.integrity.is_recoverable() {
-                            "review"
-                        } else {
-                            "blocked"
-                        })
-                        .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                        .color(if candidate.integrity.is_recoverable() {
-                            t.color.warn
-                        } else {
-                            t.color.err
-                        }),
-                    ),
+                // "review" is the ordinary state of a checkpoint and is
+                // neutral; a blocked one earns a failure mark.
+                let (state, problem) = candidate_state(candidate.integrity.is_recoverable());
+                let (cell, _) = ui.allocate_exact_size(
+                    vec2(if layout.compact { 64.0 } else { 70.0 }, 54.0),
+                    Sense::hover(),
+                );
+                let galley = ui.painter().layout_no_wrap(
+                    state.to_owned(),
+                    theme::sans(tokens::FS_2, FontWeight::Regular),
+                    t.color.text_dim,
+                );
+                let mark_advance = if problem.is_some() { 17.0 } else { 0.0 };
+                let left = cell.center().x - (mark_advance + galley.size().x) * 0.5;
+                if let Some(problem) = problem {
+                    paint_problem_mark(
+                        ui.painter(),
+                        egui::Rect::from_center_size(
+                            egui::pos2(left + 5.5, cell.center().y),
+                            Vec2::splat(11.0),
+                        ),
+                        problem,
+                    );
+                }
+                ui.painter().galley(
+                    egui::pos2(left + mark_advance, cell.center().y - galley.size().y * 0.5),
+                    galley,
+                    t.color.text_dim,
                 );
             });
         })
@@ -299,6 +314,16 @@ pub(super) fn recovery_row(
     });
     theme::paint_focus_ring(ui, &response, response.rect);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A recovery checkpoint's state word and the mark it earns: one that can be
+/// reviewed is the ordinary case, one that is blocked is a failure.
+fn candidate_state(recoverable: bool) -> (&'static str, Option<Problem>) {
+    if recoverable {
+        ("review", None)
+    } else {
+        ("blocked", Some(Problem::Failure))
+    }
 }
 
 pub(super) fn recovery_summary(candidate: &RecoveryCandidate) -> String {

@@ -13,14 +13,17 @@ use std::path::Path;
 
 use egui::{
     Align, Align2, Color32, Context, Frame, Id, Margin, Modifiers, Order, Popup, Rect, Response,
-    Sense, Stroke, Ui, UiKind, Vec2, WidgetInfo, WidgetType, vec2,
+    Sense, Stroke, Ui, UiKind, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, IconButton, select};
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogSize, IconButton, Problem, paint_problem_mark,
+    problem_line, select,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{RecentFile, RecentKind};
 
@@ -896,25 +899,28 @@ fn paint_brand_logo(painter: &egui::Painter, rect: Rect) {
 }
 
 /// Safe mode changes how this launch behaves on every page, so the header
-/// states it for as long as it is active. Painted in place: a `Frame` in this
-/// centred row would inherit the row's layout and grow to the track height.
+/// states it for as long as it is active. It is a mode, not a fault, so the
+/// tag is neutral. Painted in place: a `Frame` in this centred row would
+/// inherit the row's layout and grow to the track height.
 fn safe_mode_tag(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let galley = ui.painter().layout_no_wrap(
         "Safe mode".to_owned(),
         theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.warn,
+        t.color.text_dim,
     );
     let (rect, response) = ui.allocate_exact_size(galley.size() + vec2(12.0, 4.0), Sense::hover());
-    ui.painter().rect(
+    ui.painter().rect_stroke(
         rect,
         t.radius,
-        t.color.warn.gamma_multiply(0.10),
-        Stroke::new(1.0, t.color.warn.gamma_multiply(0.65)),
+        Stroke::new(1.0, t.color.border_strong),
         egui::StrokeKind::Inside,
     );
-    ui.painter()
-        .galley(rect.center() - galley.size() * 0.5, galley, t.color.warn);
+    ui.painter().galley(
+        rect.center() - galley.size() * 0.5,
+        galley,
+        t.color.text_dim,
+    );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, "Safe mode"));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
@@ -1458,18 +1464,15 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
     row.spacing_mut().item_spacing.x = 9.0;
     let (icon_column, _) = row.allocate_exact_size(vec2(31.0, 37.0), Sense::hover());
     let icon_rect = Rect::from_center_size(icon_column.center(), Vec2::splat(27.0));
-    let unavailable_color = if cfg!(target_arch = "wasm32") {
-        t.color.warn
-    } else {
-        t.color.err
-    };
+    // A project that cannot be opened from here is faint, not red: the state
+    // column says why, with a mark when the file is missing.
     row.painter().rect_filled(
         icon_rect,
         0.0,
         if entry.available {
             t.color.accent_dim
         } else {
-            unavailable_color.gamma_multiply(0.12)
+            t.color.bg_inset
         },
     );
     WorkbenchIcon::Project.paint(
@@ -1478,7 +1481,7 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
         if entry.available {
             t.color.accent
         } else {
-            unavailable_color
+            t.color.text_faint
         },
     );
     let trailing_width = if layout.compact { 62.0 } else { 213.0 };
@@ -1524,30 +1527,35 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
             },
         );
     }
-    let (state, color) = if !entry.available && cfg!(target_arch = "wasm32") {
-        ("browse", t.color.warn)
-    } else if !entry.available {
-        ("missing", t.color.err)
-    } else if entry.current {
-        ("ready", t.color.ok)
-    } else if entry.shared {
-        ("shared", t.color.ok)
-    } else {
-        ("local", t.color.text_dim)
-    };
-    row.allocate_ui_with_layout(
+    let state = recent_project_state(entry.available, entry.shared, cfg!(target_arch = "wasm32"));
+    let (state_cell, _) = row.allocate_exact_size(
         vec2(if layout.compact { 62.0 } else { 70.0 }, 37.0),
-        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-        |ui| {
-            painted_label(
-                ui,
-                egui::RichText::new(state)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(color),
-                egui::TextWrapMode::Extend,
-            )
-        },
+        Sense::hover(),
     );
+    if let Some((text, problem)) = state {
+        let galley = row.painter().layout_no_wrap(
+            text.to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+        let mark_advance = if problem.is_some() { 17.0 } else { 0.0 };
+        let left = state_cell.center().x - (mark_advance + galley.size().x) * 0.5;
+        if let Some(problem) = problem {
+            paint_problem_mark(
+                row.painter(),
+                Rect::from_center_size(pos2(left + 5.5, state_cell.center().y), Vec2::splat(11.0)),
+                problem,
+            );
+        }
+        row.painter().galley(
+            pos2(
+                left + mark_advance,
+                state_cell.center().y - galley.size().y * 0.5,
+            ),
+            galley,
+            t.color.text_dim,
+        );
+    }
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -1556,7 +1564,13 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
         )
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(format!("{}; {state}", entry.path_text));
+        node.set_description(match state {
+            Some((text, Some(problem))) => {
+                format!("{}; {}", entry.path_text, problem.announce(text))
+            }
+            Some((text, None)) => format!("{}; {text}", entry.path_text),
+            None => entry.path_text.clone(),
+        });
     });
     ui.painter().hline(
         rect.x_range(),
@@ -1572,6 +1586,25 @@ fn project_row(ui: &mut Ui, entry: &ProjectEntry, layout: LauncherLayout) -> egu
         } else {
             "This project file is no longer available at its recorded path"
         })
+    }
+}
+
+/// What a recent project's state column says, if anything, and the mark it
+/// earns. A local project that opens is the ordinary row and says nothing,
+/// and the current project already wears the accent bar.
+fn recent_project_state(
+    available: bool,
+    shared: bool,
+    browser: bool,
+) -> Option<(&'static str, Option<Problem>)> {
+    if !available && browser {
+        Some(("browse", None))
+    } else if !available {
+        Some(("missing", Some(Problem::Warning)))
+    } else if shared {
+        Some(("shared", None))
+    } else {
+        None
     }
 }
 
@@ -1846,6 +1879,26 @@ fn project_path_available(_path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The state column speaks only when a row is out of the ordinary. It
+    /// used to read "ready" in green on the current row and "local" on every
+    /// other, and "missing" in red.
+    #[test]
+    fn a_recent_project_states_only_what_is_out_of_the_ordinary() {
+        assert_eq!(recent_project_state(true, false, false), None);
+        assert_eq!(
+            recent_project_state(true, true, false),
+            Some(("shared", None))
+        );
+        assert_eq!(
+            recent_project_state(false, false, false),
+            Some(("missing", Some(Problem::Warning)))
+        );
+        assert_eq!(
+            recent_project_state(false, true, true),
+            Some(("browse", None))
+        );
+    }
 
     #[test]
     fn launcher_dismissal_returns_through_canonical_history() {
