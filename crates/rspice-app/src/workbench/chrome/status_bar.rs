@@ -112,22 +112,48 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             }),
                         ];
                         let widths = fit_status_widths(desired, groups.left);
+                        // Rules go between items, so the last item on the left
+                        // draws none: a rule there would face empty bar.
+                        let last = if sheet_position.is_some() {
+                            3
+                        } else if visibility.selection {
+                            2
+                        } else if visibility.coordinates {
+                            1
+                        } else {
+                            0
+                        };
                         if let Some(check) = check.as_deref()
-                            && status_item_sized(ui, check, check_mark, true, widths[0]).clicked()
+                            && status_item_sized(ui, check, check_mark, true, last != 0, widths[0])
+                                .clicked()
                         {
                             Command::OpenProblems.execute(app);
                         }
                         if visibility.coordinates {
-                            status_item_sized(ui, &engineering, StatusMark::None, false, widths[1]);
+                            status_item_sized(
+                                ui,
+                                &engineering,
+                                StatusMark::None,
+                                false,
+                                last != 1,
+                                widths[1],
+                            );
                         }
                         if visibility.selection {
-                            status_item_sized(ui, &selection, StatusMark::None, false, widths[2]);
+                            status_item_sized(
+                                ui,
+                                &selection,
+                                StatusMark::None,
+                                false,
+                                last != 2,
+                                widths[2],
+                            );
                         }
                         // The page a multi-sheet drawing is open at reads
                         // beside where the cursor is, because both answer
                         // where the reader is rather than what is selected.
                         if let Some((text, detail)) = sheet_position.as_ref() {
-                            status_item_sized(ui, text, StatusMark::None, false, widths[3])
+                            status_item_sized(ui, text, StatusMark::None, false, false, widths[3])
                                 .on_hover_text(detail);
                         }
                     },
@@ -154,11 +180,15 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                             ],
                             groups.right,
                         );
+                        // The right group lays out from the window edge, so
+                        // each item's rule falls between it and the one to its
+                        // right; the rightmost would draw on the edge itself.
                         if status_item_sized(
                             ui,
                             &zoom,
                             zoom_mark,
                             zoom_command.is_enabled(app),
+                            false,
                             widths[0],
                         )
                         .on_hover_text(if app.state.workbench.workspace == Workspace::Results {
@@ -190,7 +220,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 if !can_open && !can_retry {
                                     ui.disable();
                                 }
-                                status_item_sized(ui, engine, engine_mark, true, widths[1])
+                                status_item_sized(ui, engine, engine_mark, true, true, widths[1])
                             })
                             .inner;
                         if can_retry {
@@ -224,7 +254,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         }
                         }
                         if visibility.platform {
-                            status_item_sized(ui, &platform, platform_mark, false, widths[2]);
+                            status_item_sized(ui, &platform, platform_mark, false, true, widths[2]);
                         }
                     },
                 );
@@ -718,6 +748,7 @@ fn status_item_sized(
     text: &str,
     mark: StatusMark,
     interactive: bool,
+    rule_after: bool,
     width: f32,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -761,11 +792,13 @@ fn status_item_sized(
     if interactive && response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    ui.painter().vline(
-        rect.right(),
-        rect.y_range(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
+    if rule_after {
+        ui.painter().vline(
+            rect.right(),
+            rect.y_range(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
 
     let mut text_x = rect.left() + padding_x;
     if !matches!(mark, StatusMark::None) {
@@ -896,6 +929,48 @@ fn platform_label() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A rule separates two items. The last item on the left used to draw
+    /// one anyway, so a rule stood alone in front of the empty middle of the
+    /// bar. Every rule now has an item's ink within a gutter on both sides.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn every_status_rule_stands_between_two_items() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.authority.open_session();
+        app.state.workbench.activate(Workspace::Design);
+        let size = egui::vec2(1440.0, 900.0);
+        let canvas = crate::ui::raster::render(size, |ui, _| crate::workbench::show(ui, &mut app));
+        let themed = egui::Context::default();
+        crate::ui::Theme::default().apply(&themed);
+        let border = Tokens::get(&themed).color.border;
+        let y = size.y - 11.0;
+        let row = (0..size.x as usize)
+            .map(|x| {
+                let rect = egui::Rect::from_min_size(egui::pos2(x as f32, y), egui::vec2(1.0, 1.0));
+                canvas.pixels_in(rect).next().expect("pixel on the canvas")
+            })
+            .collect::<Vec<_>>();
+        let fill = *row
+            .iter()
+            .max_by_key(|colour| row.iter().filter(|other| other == colour).count())
+            .expect("a status row");
+        let ink = |range: std::ops::Range<usize>| {
+            row[range]
+                .iter()
+                .any(|colour| *colour != fill && *colour != border)
+        };
+        let rules = (1..row.len() - 1)
+            .filter(|&x| row[x] == border)
+            .collect::<Vec<_>>();
+        assert!(!rules.is_empty(), "the bar draws its rules");
+        for x in rules {
+            assert!(
+                ink(x.saturating_sub(14)..x) && ink(x + 1..(x + 15).min(row.len())),
+                "the rule at x = {x} faces empty bar"
+            );
+        }
+    }
 
     #[test]
     fn netlist_status_projects_canonical_diagnostics_and_never_schematic_drc() {
