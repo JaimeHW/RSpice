@@ -940,7 +940,10 @@ mod tests {
         app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Design);
         let size = egui::vec2(1440.0, 900.0);
-        let canvas = crate::ui::raster::render(size, |ui, _| crate::workbench::show(ui, &mut app));
+        let canvas = crate::ui::raster::render(size, |ui, _| {
+            let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
+            show(ui, &mut app, layout);
+        });
         let themed = egui::Context::default();
         crate::ui::Theme::default().apply(&themed);
         let border = Tokens::get(&themed).color.border;
