@@ -15,10 +15,12 @@
 //!   a system task outside IEEE 1364-2005 clauses 15, 17 and 18, or
 //!   `$sdf_annotate`.
 //!
-//! One rule goes past the design's, and applies only to a test those rules
+//! Two rules go past the design's, and apply only to a test those rules
 //! keep: a synthesis-list `CE` is excluded as `synthesis-error`, because its
 //! error is Icarus's synthesizer's and a synthesis test runs here as
-//! simulation, where the design is legal.
+//! simulation, where the design is legal; and a JSON-list test that passes
+//! Icarus's runtime an option of its own (`vvp-args`, such as `-q`) is
+//! excluded as `vvp-flag<option>`, because it checks that runtime mode.
 //!
 //! The source scan reads code only: comments and string literals are removed
 //! first, in one pass, so a `//` inside a string does not hide the rest of a
@@ -184,7 +186,9 @@ pub fn candidates(root: &Path) -> Result<Vec<Candidate>, String> {
         } else if class.is_none() {
             Some(format!("type-{}", entry.kind))
         } else {
-            excluded_flag(&entry.args).map(|flag| format!("flag{flag}"))
+            excluded_flag(&entry.args)
+                .map(|flag| format!("flag{flag}"))
+                .or_else(|| runtime_option(&entry).map(|flag| format!("vvp-flag{flag}")))
         };
         let mut lane = Lane::L1;
         let mut gap = None;
@@ -259,6 +263,16 @@ fn tests_macro(code: &str, name: &str) -> bool {
             identifier_end(bytes, at).is_some_and(|end| &code[at..end] == name)
         }
     })
+}
+
+/// Past the design's own rules: the first option a JSON-list test passes to
+/// Icarus's runtime itself (`vvp-args`, before the compiled design), such as
+/// `-q`, which sends `$display` to the log alone. Those are runtime modes of
+/// Icarus's own, with no RSpice run option, and the test checks the mode.
+/// The extended arguments after the design (`-vcd`, `-dumpfile=`) stay in,
+/// as plusargs do: they are arguments to the design's system tasks.
+fn runtime_option(entry: &Entry) -> Option<&str> {
+    entry.runtime_flags.0.first().map(String::as_str)
 }
 
 /// The first compiler flag that takes a test out of the selection: an
@@ -1191,6 +1205,23 @@ mod tests {
         assert_eq!(excluded_flag(&args(&["-Wall"])), Some("-Wall"));
         assert_eq!(excluded_flag(&args(&["-Iivltests"])), Some("-Iivltests"));
         assert_eq!(excluded_flag(&args(&["-gspecify", "-Tmax", "+plus"])), None);
+        // A runtime option of Icarus's own goes; an extended argument stays.
+        let entry = |before: &[&str], after: &[&str]| Entry {
+            name: "t".to_owned(),
+            list: SourceList::Vvp,
+            kind: "normal".to_owned(),
+            args: Vec::new(),
+            plusargs: Vec::new(),
+            runtime_flags: (args(before), args(after)),
+            source: std::path::PathBuf::from("ivltests/t.v"),
+            module: None,
+            check: Check::PassedLine { strict: false },
+        };
+        assert_eq!(runtime_option(&entry(&["-ql-"], &[])), Some("-ql-"));
+        assert_eq!(
+            runtime_option(&entry(&[], &["-vcd", "-dumpfile=foo"])),
+            None
+        );
     }
 
     #[test]
