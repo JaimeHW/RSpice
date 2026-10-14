@@ -205,6 +205,8 @@ pub enum PaneHeaderAction {
     MoveEarlier,
     /// Move this pane one place later in its page's order.
     MoveLater,
+    /// Share this pane's X range with the rest of its page, or stop sharing it.
+    ToggleLinkX,
     /// Take this pane out of the document.
     Remove,
 }
@@ -216,6 +218,9 @@ pub struct PaneMenu {
     pub earlier: bool,
     /// The pane has a successor on its page to change places with.
     pub later: bool,
+    /// Whether the pane's X axis is linked, or `None` when no other pane on
+    /// its page has an X axis it could share.
+    pub x_link: Option<bool>,
     /// A page keeps at least one pane, so its last one cannot be removed.
     pub removable: bool,
 }
@@ -298,6 +303,17 @@ pub fn pane_header(
             menu.later,
             "Move pane later",
             PaneHeaderAction::MoveLater,
+        );
+        ui.separator();
+        item(
+            ui,
+            menu.x_link.is_some(),
+            if menu.x_link == Some(true) {
+                "Unlink X axis"
+            } else {
+                "Link X axis"
+            },
+            PaneHeaderAction::ToggleLinkX,
         );
         ui.separator();
         item(ui, menu.removable, "Remove pane", PaneHeaderAction::Remove);

@@ -14,6 +14,10 @@ fn digest(byte: u8) -> ContentDigest {
 }
 
 fn persistent_transient_fixture() -> (RSpiceApp, ResultDocumentId) {
+    transient_fixture_with_layout("single-pane")
+}
+
+fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
     let mut app = RSpiceApp::test_instance();
     let mut run = SimulationRun::new(1);
     run.lifecycle = SimulationRunLifecycle::Completed;
@@ -38,7 +42,7 @@ fn persistent_transient_fixture() -> (RSpiceApp, ResultDocumentId) {
         dataset_id: Some(dataset_id),
         family_id: "waveform-worksheet".to_owned(),
         viewer_id: "viewer-waveform".to_owned(),
-        layout_id: "single-pane".to_owned(),
+        layout_id: layout_id.to_owned(),
         validation_error: None,
     };
     let document_id =
@@ -1017,6 +1021,163 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
             .y,
         Some((-1.0, 1.0)),
         "the retained pane's own window comes back from the document"
+    );
+}
+
+// -----------------------------------------------------------------
+// Links across panes
+// -----------------------------------------------------------------
+
+/// Save the document and load it back, as a project round trip does.
+fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
+    let documents = &mut app.state.workspace.content.visualization_documents;
+    let index = documents
+        .iter()
+        .position(|document| document.id() == document_id)
+        .expect("the project retains the document");
+    let saved = serde_json::to_string(&documents[index]).expect("the document saves");
+    documents[index] = serde_json::from_str(&saved).expect("the document loads");
+}
+
+/// Draw `pane` as a frame does, from the snapshot it was projected in, with
+/// `edit` standing in for what the reader does in its viewer.
+fn draw_pane(app: &mut RSpiceApp, pane: &PaneProjection, edit: impl FnOnce(&mut AppState)) {
+    select_pane_binding(&mut app.state, pane).expect("pane binding");
+    project_pane_presentation(&mut app.state, pane, ResultViewer::Waves)
+        .expect("presentation projects");
+    edit(&mut app.state);
+    capture_pane_presentation(&mut app.state, pane, ResultViewer::Waves);
+}
+
+fn saved_x_range(
+    app: &RSpiceApp,
+    document_id: ResultDocumentId,
+    pane_id: PaneId,
+) -> Option<AxisRange> {
+    app.state
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("the project retains the document")
+        .axes()
+        .iter()
+        .find(|axis| axis.pane_id == pane_id && axis.orientation == AxisOrientation::Horizontal)
+        .and_then(|axis| axis.range)
+}
+
+fn saved_cursor_a(app: &RSpiceApp, document_id: ResultDocumentId, pane_id: PaneId) -> Option<f64> {
+    app.state
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("the project retains the document")
+        .cursors()
+        .iter()
+        .find(|cursor| cursor.pane_id == pane_id && cursor.label == "A")
+        .and_then(|cursor| match cursor.position {
+            TypedValue::Real(position) => Some(position),
+            _ => None,
+        })
+}
+
+/// A saved X link makes its panes one X range: zooming one zooms the other.
+/// The viewer wrote only the zoomed pane's own axis, so the link did nothing.
+#[test]
+fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
+    let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
+    reload(&mut app, document_id);
+    drive_frame(|ui| show(ui, &mut app, document_id));
+    let page = projection(&app.state, document_id)
+        .expect("document projection")
+        .pages
+        .remove(0);
+    let (first, second) = (&page.panes[0], &page.panes[1]);
+    let analysis = super::super::AnalysisPresentationKey::new(
+        app.state.simulation.retained.runs[0].dataset_id,
+        &app.state.simulation.retained.runs[0].analyses[0],
+    );
+
+    draw_pane(&mut app, first, |state| {
+        state
+            .ui
+            .results
+            .session
+            .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis, 0)
+            .x = Some((0.2, 0.8));
+    });
+    let zoomed = Some(AxisRange::new(0.2, 0.8).expect("a valid range"));
+    assert_eq!(saved_x_range(&app, document_id, first.id), zoomed);
+    assert_eq!(
+        saved_x_range(&app, document_id, second.id),
+        zoomed,
+        "the linked pane follows the zoom"
+    );
+
+    // The second pane draws later in the same frame, from the frame's
+    // snapshot. Holding that stale range must not undo the link.
+    draw_pane(&mut app, second, |_| {});
+    assert_eq!(saved_x_range(&app, document_id, first.id), zoomed);
+    assert_eq!(saved_x_range(&app, document_id, second.id), zoomed);
+}
+
+/// Linked cursors over a document are the document's: they survive a save,
+/// and moving the A cursor in one pane moves it in the other.
+#[test]
+fn linked_cursors_are_kept_by_the_document_and_move_together() {
+    let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
+    drive_frame(|ui| show(ui, &mut app, document_id));
+    let page = projection(&app.state, document_id)
+        .expect("document projection")
+        .pages
+        .remove(0);
+    let (first, second) = (page.panes[0].clone(), page.panes[1].clone());
+    draw_pane(&mut app, &first, |state| {
+        state.ui.results.session.cursors.a = Some(0.25)
+    });
+    draw_pane(&mut app, &second, |state| {
+        state.ui.results.session.cursors.a = Some(0.75)
+    });
+    let linked_before = app.state.ui.results.session.linked_cursors;
+
+    super::super::toggle_linked_cursors(&mut app.state);
+    assert_eq!(
+        app.state.ui.results.session.linked_cursors, linked_before,
+        "a document's cursor links are not the quick view's toggle"
+    );
+    let reference = saved_cursor_a(&app, document_id, first.id);
+    assert_eq!(saved_cursor_a(&app, document_id, second.id), reference);
+
+    reload(&mut app, document_id);
+    drive_frame(|ui| show(ui, &mut app, document_id));
+    let page = projection(&app.state, document_id)
+        .expect("document projection")
+        .pages
+        .remove(0);
+    draw_pane(&mut app, &page.panes[0], |state| {
+        state.ui.results.session.cursors.a = Some(0.5);
+    });
+    draw_pane(&mut app, &page.panes[1], |_| {});
+    assert_eq!(saved_cursor_a(&app, document_id, first.id), Some(0.5));
+    assert_eq!(
+        saved_cursor_a(&app, document_id, second.id),
+        Some(0.5),
+        "the linked cursor follows"
+    );
+
+    super::super::toggle_linked_cursors(&mut app.state);
+    let document = app
+        .state
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .expect("the project retains the document");
+    assert!(
+        !document
+            .link_groups()
+            .iter()
+            .any(|group| group.kind
+                == crate::results::visualization_document::LinkKind::CursorPosition),
+        "the second toggle takes the links away"
     );
 }
 

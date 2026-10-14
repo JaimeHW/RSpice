@@ -312,8 +312,33 @@ pub(super) fn pane_menu(
     PaneMenu {
         earlier: position > 0,
         later: position + 1 < page_panes.len(),
+        x_link: links::x_link_state(document, pane_id),
         removable: page_panes.len() > 1,
     }
+}
+
+/// Link or unlink one pane's X axis with the rest of its page.
+pub(super) fn toggle_pane_x_link(
+    state: &mut AppState,
+    document_id: ResultDocumentId,
+    pane_id: PaneId,
+) {
+    let result = links::toggle_x_link(state, document_id, pane_id);
+    report(state, result);
+}
+
+/// Link or unlink A/B cursors. Over a project result document the document
+/// keeps the links, so they hold across panes and through a save; over a
+/// quick view the session's toggle links the viewer's own cursor rows.
+pub(crate) fn toggle_linked_cursors(state: &mut AppState) {
+    let Some(document_id) = active_document_id(state) else {
+        state.ui.results.session.toggle_linked_cursors();
+        return;
+    };
+    let result = project_document(state, document_id)
+        .map(links::cursors_linked)
+        .and_then(|linked| links::set_cursor_links(state, document_id, !linked));
+    report(state, result);
 }
 
 /// The pane's place in its page's reading order, with that order.
@@ -438,6 +463,8 @@ fn remove_pane_edits(
     edits.push(DocumentEdit::Remove(EntityRef::Pane(pane_id)));
     Ok(edits)
 }
+
+pub(super) mod links;
 
 #[cfg(test)]
 mod tests;

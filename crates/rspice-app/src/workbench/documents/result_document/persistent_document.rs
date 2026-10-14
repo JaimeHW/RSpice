@@ -15,9 +15,8 @@ use crate::product::{
 };
 use crate::results::viewer_catalog::{ViewerReleaseClass, viewer_document};
 use crate::results::visualization_document::{
-    Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, EntityRef, Marker,
-    Measurement, Page, PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace,
-    TypedValue,
+    Annotation, Axis, AxisOrientation, AxisRange, Cursor, DocumentEdit, Marker, Measurement, Page,
+    PageId, PageLayout, Pane, PaneDataBinding, PaneId, PanePlacement, Trace, TypedValue,
 };
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::workbench::{AppState, RSpiceApp};
@@ -781,6 +780,10 @@ fn pane_header(
             super::document_edit::move_pane(&mut app.state, pane.document_id, pane.id, direction);
             None
         }
+        persistent::PaneHeaderAction::ToggleLinkX => {
+            super::document_edit::toggle_pane_x_link(&mut app.state, pane.document_id, pane.id);
+            None
+        }
         persistent::PaneHeaderAction::Remove => {
             super::document_edit::remove_pane(&mut app.state, pane.document_id, pane.id);
             None
@@ -969,6 +972,12 @@ fn project_pane_presentation(
 /// projected one pane and captured another could delete the second pane's
 /// markers, and it forced the document's full-width entity serials through a
 /// quick-view `u32` to make the two lists comparable at all.
+///
+/// Only what the reader changed in this pane is written: the pane was
+/// projected from the frame's snapshot, and a linked pane drawn earlier in
+/// the frame may already have moved this pane's X range or cursors. Writing
+/// the stale snapshot back would undo that link. An X range or cursor the
+/// reader did change carries every axis or cursor linked with it along.
 fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer: ResultViewer) {
     let view = state.ui.results.session.persistent_plot_view(viewer);
     let cursors = state.ui.results.session.cursors;
@@ -994,41 +1003,53 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
         };
         let requested =
             requested.and_then(|(minimum, maximum)| AxisRange::new(minimum, maximum).ok());
-        if axis.range != requested {
+        let projected = pane
+            .axes
+            .iter()
+            .find(|candidate| candidate.id == axis.id)
+            .and_then(|candidate| candidate.range);
+        if requested == projected {
+            continue;
+        }
+        if orientation == AxisOrientation::Horizontal {
+            edits.extend(super::document_edit::links::x_range_edits(
+                document, axis.id, requested,
+            ));
+        } else if axis.range != requested {
             edits.push(DocumentEdit::SetAxisRange {
                 axis_id: axis.id,
                 range: requested,
             });
         }
     }
-    let Some(horizontal_axis) = document
-        .axes()
-        .iter()
-        .find(|axis| axis.pane_id == pane.id && axis.orientation == AxisOrientation::Horizontal)
-    else {
-        return;
-    };
-    for (label, requested) in [("A", cursors.a), ("B", cursors.b)] {
-        let retained = document
-            .cursors()
+    let position = |cursors: &[Cursor], label: &str| {
+        cursors
             .iter()
-            .find(|cursor| cursor.pane_id == pane.id && cursor.label == label);
-        match (retained, requested) {
-            (Some(cursor), Some(position)) if cursor.position != TypedValue::Real(position) => {
-                edits.push(DocumentEdit::MoveCursor {
-                    cursor_id: cursor.id,
-                    position: TypedValue::Real(position),
-                });
-            }
-            (None, Some(position)) => edits.push(DocumentEdit::AddCursor {
-                pane_id: pane.id,
-                axis_id: horizontal_axis.id,
-                position: TypedValue::Real(position),
-                label: label.to_owned(),
-            }),
-            (Some(cursor), None) => edits.push(DocumentEdit::Remove(EntityRef::Cursor(cursor.id))),
-            (Some(_), Some(_)) | (None, None) => {}
+            .find(|cursor| cursor.pane_id == pane.id && cursor.label == label)
+            .and_then(|cursor| match cursor.position {
+                TypedValue::Real(position) => Some(position),
+                _ => None,
+            })
+    };
+    let desired = |label: &str, requested: Option<f64>| {
+        if requested == position(&pane.cursors, label) {
+            position(document.cursors(), label)
+        } else {
+            requested
         }
+    };
+    let desired = (desired("A", cursors.a), desired("B", cursors.b));
+    // A pane without an X axis has nowhere to keep a cursor; its cursors stay
+    // the session's, as they always have.
+    if desired
+        != (
+            position(document.cursors(), "A"),
+            position(document.cursors(), "B"),
+        )
+        && let Ok(cursor_edits) =
+            super::document_edit::links::cursor_pair_edits(document, pane.id, desired)
+    {
+        edits.extend(cursor_edits);
     }
     if edits.is_empty() {
         return;

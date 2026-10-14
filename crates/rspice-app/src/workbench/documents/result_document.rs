@@ -222,7 +222,7 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
     create_document::open(app);
 }
 
-pub(crate) use document_edit::{add_pane_available, open_add_pane};
+pub(crate) use document_edit::{add_pane_available, open_add_pane, toggle_linked_cursors};
 
 pub(crate) fn visualization_source_dataset(
     run: &crate::state::SimulationRun,

@@ -326,10 +326,9 @@ impl RSpiceApp {
             ShortcutCommand::NextWorkspace => {
                 self.state.workbench.cycle_workspace(false);
             }
-            ShortcutCommand::ZoomIn | ShortcutCommand::ZoomOut => command.execute(self),
-            ShortcutCommand::ToggleLinkedCursors => {
-                self.state.ui.results.session.toggle_linked_cursors();
-            }
+            ShortcutCommand::ZoomIn
+            | ShortcutCommand::ZoomOut
+            | ShortcutCommand::ToggleLinkedCursors => command.execute(self),
             ShortcutCommand::ZoomFit
             | ShortcutCommand::FitSchematicContent
             | ShortcutCommand::DrawingSheetLayers => command.execute(self),

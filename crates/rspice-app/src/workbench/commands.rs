@@ -1916,7 +1916,9 @@ impl Command {
                     app.state.clear_simulation_results();
                 }
             }
-            Self::ToggleLinkedCursors => app.state.ui.results.session.toggle_linked_cursors(),
+            Self::ToggleLinkedCursors => {
+                crate::workbench::documents::result_document::toggle_linked_cursors(&mut app.state);
+            }
             Self::DatasetManifestBrowser => {
                 crate::workbench::documents::result_document::open_dataset_browser(app);
             }
