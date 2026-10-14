@@ -9,8 +9,8 @@
 //!   transaction, manager, wide workflow, or capability review. Purpose controls exact
 //!   geometry, fill, corner radius, viewport gutter, and narrow behavior; no
 //!   retired generic small/medium/large shell remains.
-//! - **Header / footer** — mono uppercase kicker + semibold title + close
-//!   on top (a prompt carries its title alone); footer is
+//! - **Header / footer** — the semibold title alone + close on top, as a
+//!   native dialog has it; footer is
 //!   `[ghost] [secondary] [primary]`, or `[secondary] … [ghost] [primary]`
 //!   when the secondary is set apart, with the primary always rightmost,
 //!   always exactly one, accent-filled (or `err` when destructive), plus an
@@ -368,16 +368,12 @@ impl DialogSize {
     }
 }
 
-const WORKFLOW_HEADER_MIN_HEIGHT: f32 = 57.0;
-/// A prompt's header: its title alone, centred in the row.
-const PROMPT_HEADER_MIN_HEIGHT: f32 = 48.0;
+/// The header: the title alone, centred in a row as tall as the footer, so
+/// the surface opens and closes on the same measure at every size.
+const HEADER_MIN_HEIGHT: f32 = 48.0;
 /// The narrowest surface on which a footer with its secondary set apart
 /// stays split; narrower surfaces stack their verbs full-width.
 const SPLIT_FOOTER_MIN_WIDTH: f32 = 440.0;
-const WORKFLOW_HEADER_TEXT_MIN_HEIGHT: f32 = 33.0;
-/// The single measure of lead a title-first header uses above the title,
-/// between the two lines, and below the subtitle.
-const TITLE_FIRST_HEADER_LEAD: f32 = 9.0;
 /// The header shares the body's and the footer's side inset, so a title, the
 /// rows under it and the footer's verbs start on one left edge and the close
 /// target ends on the right edge the primary ends on. At 15 the title sat
@@ -765,7 +761,6 @@ struct DialogTransactionState {
 
 /// Declarative description of one modal frame.
 pub struct Dialog<'a> {
-    kicker: Option<String>,
     title: String,
     description: Option<String>,
     size: DialogSize,
@@ -794,15 +789,10 @@ pub struct Dialog<'a> {
 }
 
 impl<'a> Dialog<'a> {
-    /// A dialog with the given header kicker (domain, e.g. "Simulate"),
-    /// title, and primary-action label.
-    pub fn new(
-        kicker: impl Into<String>,
-        title: impl Into<String>,
-        primary: impl Into<String>,
-    ) -> Self {
+    /// A dialog with the given title and primary-action label. The header
+    /// carries the title alone.
+    pub fn new(title: impl Into<String>, primary: impl Into<String>) -> Self {
         Self {
-            kicker: Some(kicker.into()),
             title: title.into(),
             description: None,
             size: DialogSize::Transaction,
@@ -828,16 +818,6 @@ impl<'a> Dialog<'a> {
             initial_focus: DialogInitialFocus::Container,
             initial_height: None,
             fixed_height: None,
-        }
-    }
-
-    /// A prompt: a short standard question, such as whether to save changes,
-    /// whose title already says what a kicker would, so the header carries
-    /// the title alone.
-    pub fn prompt(title: impl Into<String>, primary: impl Into<String>) -> Self {
-        Self {
-            kicker: None,
-            ..Self::new("", title, primary)
         }
     }
 
@@ -1465,36 +1445,17 @@ impl<'a> Dialog<'a> {
         let c = t.color;
         let mut closed = false;
         let mut close_id = None;
-        // Title-first headers set the operation above its identity subtitle and
-        // give the block one measure of lead on all three sides — above the
-        // title, between the lines, and below the subtitle — instead of
-        // centring a fixed text stack in a taller strip.
-        let title_first = self.size == DialogSize::SchematicPageSetup;
         Frame::NONE
             .fill(if self.size == DialogSize::AnalysisCatalog {
                 c.bg_elevated
             } else {
                 c.bg_panel
             })
-            .inner_margin(Margin::symmetric(
-                WORKFLOW_HEADER_HORIZONTAL_MARGIN,
-                if title_first {
-                    TITLE_FIRST_HEADER_LEAD as i8
-                } else {
-                    0
-                },
-            ))
+            .inner_margin(Margin::symmetric(WORKFLOW_HEADER_HORIZONTAL_MARGIN, 0))
             .show(ui, |ui| {
                 let header_width = ui.available_width();
-                let row_min_height = if title_first {
-                    0.0
-                } else if self.kicker.is_some() {
-                    WORKFLOW_HEADER_MIN_HEIGHT
-                } else {
-                    PROMPT_HEADER_MIN_HEIGHT
-                };
                 ui.allocate_ui_with_layout(
-                    vec2(header_width, row_min_height),
+                    vec2(header_width, HEADER_MIN_HEIGHT),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         // State the row's floor as a floor.
@@ -1507,7 +1468,7 @@ impl<'a> Dialog<'a> {
                         // invisible, and with every centre cross-alignment
                         // rewritten to `Align::Min` so widgets report the least
                         // they can live in — and under those rules this row
-                        // collapses onto its two lines of text, 22 points short.
+                        // collapses onto its title.
                         // The surface measured from it is short by the same
                         // amount, and it is that measurement the first *visible*
                         // frame is laid out against, so every dialog opened with
@@ -1515,7 +1476,7 @@ impl<'a> Dialog<'a> {
                         // already see it. A floor stated as a floor holds in both
                         // passes, and the sizing pass measures what the visible
                         // pass will draw.
-                        ui.set_min_height(row_min_height);
+                        ui.set_min_height(HEADER_MIN_HEIGHT);
                         ui.spacing_mut().item_spacing.x = 10.0;
                         let close_size = if large_targets {
                             vec2(TOUCH_TARGET_SIDE, TOUCH_TARGET_SIDE)
@@ -1523,25 +1484,6 @@ impl<'a> Dialog<'a> {
                             vec2(DIALOG_CLOSE_TARGET_WIDTH, DIALOG_CLOSE_TARGET_HEIGHT)
                         };
                         let text_width = (ui.available_width() - close_size.x - 10.0).max(1.0);
-                        let eyebrow = self.kicker.as_deref().map(|kicker| {
-                            let mut eyebrow = egui::text::LayoutJob::default();
-                            eyebrow.append(
-                                &kicker.to_uppercase(),
-                                0.0,
-                                egui::TextFormat {
-                                    font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-                                    color: c.text_faint,
-                                    extra_letter_spacing: 0.09 * tokens::FS_0,
-                                    // Line box hugging the glyphs. With the font's
-                                    // own leading, three geometrically equal gaps
-                                    // still read as a larger one at the top,
-                                    // because part of it sits inside the line box.
-                                    line_height: title_first.then_some(tokens::FS_0),
-                                    ..Default::default()
-                                },
-                            );
-                            eyebrow
-                        });
                         let mut title_job = egui::text::LayoutJob::default();
                         title_job.append(
                             self.title.as_str(),
@@ -1549,49 +1491,26 @@ impl<'a> Dialog<'a> {
                             egui::TextFormat {
                                 font_id: theme::sans(tokens::FS_3, FontWeight::SemiBold),
                                 color: c.text,
-                                line_height: title_first.then_some(tokens::FS_3),
                                 ..Default::default()
                             },
                         );
-                        let text_min_height = if title_first {
-                            0.0
-                        } else if eyebrow.is_some() {
-                            WORKFLOW_HEADER_TEXT_MIN_HEIGHT
-                        } else {
-                            // A title alone is centred by its own laid-out
-                            // height, wrapped or not.
-                            let mut measured = title_job.clone();
-                            measured.wrap.max_width = text_width;
-                            ui.fonts_mut(|fonts| fonts.layout_job(measured)).size().y
-                        };
+                        // The title is centred by its own laid-out height,
+                        // wrapped or not.
+                        let mut measured = title_job.clone();
+                        measured.wrap.max_width = text_width;
+                        let title_height =
+                            ui.fonts_mut(|fonts| fonts.layout_job(measured)).size().y;
                         ui.allocate_ui_with_layout(
                             // A zero-height child is aligned by its empty
                             // rectangle and then grows downward, which pushed
-                            // every two-line header below the mockup center and
-                            // enlarged the surface. Give the authored text
-                            // stack its real minimum height; wrapped narrow
-                            // titles may still grow it when necessary. A
-                            // title-first header sizes to its own lead instead.
-                            vec2(text_width, text_min_height),
+                            // the title below the row's centre and enlarged the
+                            // surface. Give the title its real height; a
+                            // wrapped narrow title grows it.
+                            vec2(text_width, title_height),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 ui.set_width(text_width);
-                                ui.spacing_mut().item_spacing.y = if title_first {
-                                    TITLE_FIRST_HEADER_LEAD
-                                } else {
-                                    3.0
-                                };
-                                if title_first {
-                                    ui.add(egui::Label::new(title_job).wrap());
-                                    if let Some(eyebrow) = eyebrow {
-                                        ui.add(egui::Label::new(eyebrow).wrap());
-                                    }
-                                } else {
-                                    if let Some(eyebrow) = eyebrow {
-                                        ui.add(egui::Label::new(eyebrow).wrap());
-                                    }
-                                    ui.add(egui::Label::new(title_job).wrap());
-                                }
+                                ui.add(egui::Label::new(title_job).wrap());
                             },
                         );
                         let close_response =

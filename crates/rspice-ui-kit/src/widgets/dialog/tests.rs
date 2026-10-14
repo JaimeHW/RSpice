@@ -67,7 +67,7 @@ fn run_dialog(
                     .desired_width(240.0),
             );
         });
-        choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+        choice = Dialog::new(TEST_TITLE, "Accept")
             .description(TEST_DESCRIPTION)
             .primary_on_enter(primary_on_enter)
             .show(ctx, |ui| body(ui));
@@ -101,7 +101,7 @@ fn capability_review_phone_layout_is_full_viewport() {
 
 #[test]
 fn authored_initial_height_avoids_the_content_dialog_first_frame_jump() {
-    let dialog = Dialog::new("Test", TEST_TITLE, "Accept").initial_height(370.0);
+    let dialog = Dialog::new(TEST_TITLE, "Accept").initial_height(370.0);
     assert_eq!(dialog.initial_height, Some(370.0));
 
     let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 720.0));
@@ -112,7 +112,7 @@ fn authored_initial_height_avoids_the_content_dialog_first_frame_jump() {
 
 #[test]
 fn authored_fixed_height_is_stable_and_rejects_invalid_values() {
-    let fixed = Dialog::new("Test", TEST_TITLE, "Accept").fixed_height(612.0);
+    let fixed = Dialog::new(TEST_TITLE, "Accept").fixed_height(612.0);
     assert_eq!(fixed.fixed_height, Some(612.0));
 
     let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_280.0, 900.0));
@@ -121,9 +121,9 @@ fn authored_fixed_height_is_stable_and_rejects_invalid_values() {
     assert_eq!(layout.surface_rect.center(), screen.center());
     assert!(layout.fills_surface_height(fixed.fixed_height));
 
-    let clamped = Dialog::new("Test", TEST_TITLE, "Accept").fixed_height(0.0);
+    let clamped = Dialog::new(TEST_TITLE, "Accept").fixed_height(0.0);
     assert_eq!(clamped.fixed_height, Some(1.0));
-    let ignored = Dialog::new("Test", TEST_TITLE, "Accept").fixed_height(f32::NAN);
+    let ignored = Dialog::new(TEST_TITLE, "Accept").fixed_height(f32::NAN);
     assert_eq!(ignored.fixed_height, None);
 }
 
@@ -342,15 +342,15 @@ fn specialist_browser_uses_desktop_cap_and_full_tablet_phone_viewport() {
 
 #[test]
 fn flush_body_is_opt_in() {
-    let padded = Dialog::new("Test", TEST_TITLE, "Accept");
+    let padded = Dialog::new(TEST_TITLE, "Accept");
     assert!(!padded.flush_body);
-    let flush = Dialog::new("Test", TEST_TITLE, "Accept").flush_body();
+    let flush = Dialog::new(TEST_TITLE, "Accept").flush_body();
     assert!(flush.flush_body);
 }
 
 #[test]
 fn catalog_body_and_note_footer_are_explicit_opt_ins() {
-    let dialog = Dialog::new("Test", TEST_TITLE, "Close")
+    let dialog = Dialog::new(TEST_TITLE, "Close")
         .manual_body_scroll()
         .note_only_footer()
         .hint("Catalog classification note");
@@ -376,7 +376,7 @@ fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace
                     .desired_width(240.0),
             );
         });
-        choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+        choice = Dialog::new(TEST_TITLE, "Accept")
             .description(TEST_DESCRIPTION)
             .ghost("Discard changes")
             .show(ctx, |ui| {
@@ -394,7 +394,7 @@ fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace
                         .desired_width(240.0),
                 );
             });
-            let mut response = Dialog::new("TEST", TEST_TITLE, "Accept")
+            let mut response = Dialog::new(TEST_TITLE, "Accept")
                 .description(TEST_DESCRIPTION)
                 .ghost("Discard changes")
                 .show_transaction(ctx, |ui| {
@@ -432,7 +432,7 @@ fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace
                         .desired_width(240.0),
                 );
             });
-            choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+            choice = Dialog::new(TEST_TITLE, "Accept")
                 .description(TEST_DESCRIPTION)
                 .ghost("Discard changes")
                 .show(ctx, |ui| {
@@ -446,7 +446,7 @@ fn retained_cancel_focus_moves_escape_to_discard_then_confirm_restores_workspace
 
 #[test]
 fn long_footer_actions_stack_inside_a_phone_surface() {
-    let dialog = Dialog::new("Test", TEST_TITLE, "Apply governed configuration changes")
+    let dialog = Dialog::new(TEST_TITLE, "Apply governed configuration changes")
         .secondary("Review compatibility report")
         .ghost("Discard pending changes")
         .hint("3 validated records");
@@ -487,14 +487,14 @@ fn action_footer_is_clamped_to_the_phone_surface() {
 
 #[test]
 fn transaction_state_is_absent_when_idle_and_exposes_an_assertive_strip_on_error() {
-    let idle = Dialog::new("Test", TEST_TITLE, "Accept");
+    let idle = Dialog::new(TEST_TITLE, "Accept");
     assert!(idle.transaction_state.is_none());
 
     let ctx = Context::default();
     crate::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-        let _ = Dialog::new("Test", TEST_TITLE, "Accept")
+        let _ = Dialog::new(TEST_TITLE, "Accept")
             .transaction_state(
                 DialogTransactionTone::Error,
                 "Unsaved dialog changes",
@@ -518,7 +518,7 @@ fn transaction_state_is_absent_when_idle_and_exposes_an_assertive_strip_on_error
 
 #[test]
 fn close_only_workflow_hides_redundant_footer() {
-    let dialog = Dialog::new("Test", TEST_TITLE, "Close").size(DialogSize::CapabilityReview);
+    let dialog = Dialog::new(TEST_TITLE, "Close").size(DialogSize::CapabilityReview);
 
     assert_eq!(dialog.footer_height(true, false, 1_040.0), 0.0);
     assert!(dialog.hides_close_only_footer(true));
@@ -535,17 +535,13 @@ fn capability_review_phone_footer_stays_horizontal_and_compact() {
     };
 
     let output = ctx.run_ui(input, |ctx| {
-        let _ = Dialog::new(
-            "A deliberately long governed workflow",
-            TEST_TITLE,
-            "Accept",
-        )
-        .size(DialogSize::CapabilityReview)
-        .ghost("Cancel")
-        .secondary("Later")
-        .show(ctx, |ui| {
-            ui.label("Dialog body");
-        });
+        let _ = Dialog::new(TEST_TITLE, "Accept")
+            .size(DialogSize::CapabilityReview)
+            .ghost("Cancel")
+            .secondary("Later")
+            .show(ctx, |ui| {
+                ui.label("Dialog body");
+            });
     });
     let nodes = output
         .platform_output
@@ -593,7 +589,7 @@ fn capability_review_desktop_close_control_uses_mockup_icon_button_target() {
     };
 
     let output = ctx.run_ui(input, |ctx| {
-        let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+        let _ = Dialog::new(TEST_TITLE, "Accept")
             .size(DialogSize::CapabilityReview)
             .show(ctx, |ui| {
                 ui.label("Dialog body");
@@ -614,6 +610,114 @@ fn capability_review_desktop_close_control_uses_mockup_icon_button_target() {
 
     assert_eq!(bounds.x1 - bounds.x0, DIALOG_CLOSE_TARGET_WIDTH as f64);
     assert_eq!(bounds.y1 - bounds.y0, DIALOG_CLOSE_TARGET_HEIGHT as f64);
+}
+
+/// Every text shape a pass painted, nested shapes included.
+fn painted_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::TextShape> {
+    fn visit(shape: &egui::Shape, texts: &mut Vec<egui::epaint::TextShape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    visit(shape, texts);
+                }
+            }
+            egui::Shape::Text(text) => texts.push(text.clone()),
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for clipped in shapes {
+        visit(&clipped.shape, &mut texts);
+    }
+    texts
+}
+
+/// The header is the title alone, as a native dialog's is: no tracked
+/// uppercase line sits above it, and the title is centred on the row the
+/// close control is centred on, with as much air above it as below.
+#[test]
+fn the_header_paints_the_title_alone_centred_on_the_close_control() {
+    let ctx = Context::default();
+    crate::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut output = None;
+    for _ in 0..3 {
+        output = Some(ctx.run_ui(raw_input(Vec::new()), |ctx| {
+            let _ = Dialog::new(TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .show(ctx, |ui| {
+                    ui.label("Dialog body");
+                });
+        }));
+    }
+    let output = output.expect("three passes ran");
+    let texts = painted_texts(&output.shapes);
+    let rect_of = |text: &egui::epaint::TextShape| text.galley.rect.translate(text.pos.to_vec2());
+    let body = texts
+        .iter()
+        .find(|text| text.galley.job.text == "Dialog body")
+        .map(rect_of)
+        .expect("the body painted");
+    let header: Vec<_> = texts
+        .iter()
+        .filter(|text| rect_of(text).bottom() <= body.top())
+        .collect();
+    assert_eq!(
+        header
+            .iter()
+            .map(|text| text.galley.job.text.as_str())
+            .collect::<Vec<_>>(),
+        vec![TEST_TITLE],
+        "the header paints something besides its title"
+    );
+    for text in &texts {
+        assert!(
+            text.galley
+                .job
+                .sections
+                .iter()
+                .all(|section| section.format.extra_letter_spacing == 0.0),
+            "{:?} is tracked",
+            text.galley.job.text
+        );
+    }
+
+    let nodes = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit tree update")
+        .nodes;
+    let bounds = |role: egui::accesskit::Role, label: &str| {
+        nodes
+            .iter()
+            .find(|(_, node)| node.role() == role && node.label() == Some(label))
+            .and_then(|(_, node)| node.bounds())
+            .unwrap_or_else(|| panic!("no {role:?} {label:?}"))
+    };
+    let measured =
+        ctx.data(|data| data.get_temp::<f32>(dialog_id().with(("measured-surface-height", false))));
+    let surface = DialogLayout::resolve(
+        DialogSize::Transaction,
+        Rect::from_min_size(egui::Pos2::ZERO, vec2(1_000.0, 800.0)),
+        measured,
+    )
+    .surface_rect;
+    let close = bounds(egui::accesskit::Role::Button, "Close (Esc)");
+    let title = rect_of(header[0]);
+    let header_top = surface.top() + SURFACE_BORDER_WIDTH;
+    let header_bottom = header_top + HEADER_MIN_HEIGHT;
+    let above = title.top() - header_top;
+    let below = header_bottom - title.bottom();
+    assert!(
+        (above - below).abs() <= 1.0,
+        "the title sits {above} below the surface edge and {below} above the rule"
+    );
+    let close_centre = (close.y0 + close.y1) as f32 * 0.5;
+    assert!(
+        (title.center().y - close_centre).abs() <= 1.0,
+        "title centre {} against close centre {close_centre}",
+        title.center().y
+    );
 }
 
 #[test]
@@ -647,7 +751,7 @@ fn requested_body_control_receives_initial_focus_once() {
     let mut preferred_id = None;
 
     let _output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-        let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+        let _ = Dialog::new(TEST_TITLE, "Accept")
             .initial_focus(DialogInitialFocus::BodyControl)
             .show_with_initial_body_focus(ctx, |ui| {
                 let response = ui.button("Preferred body control");
@@ -670,7 +774,7 @@ fn known_body_control_processes_opening_input_and_preserves_later_focus() {
     let mut second_text = String::new();
     let mut render = |ui: &mut Ui| {
         let ctx = ui.ctx();
-        Dialog::new("TEST", TEST_TITLE, "Accept")
+        Dialog::new(TEST_TITLE, "Accept")
             .initial_focus(DialogInitialFocus::Control(first))
             .show_with_initial_body_focus(ctx, |ui| {
                 let response = ui.add(egui::TextEdit::singleline(&mut first_text).id(first));
@@ -706,7 +810,7 @@ fn unavailable_known_body_control_falls_back_without_editing_another_field() {
         let _ = ctx.run_ui(
             raw_input(vec![egui::Event::Paste("wrong owner".to_owned())]),
             |ctx| {
-                Dialog::new("TEST", TEST_TITLE, "Accept")
+                Dialog::new(TEST_TITLE, "Accept")
                     .interaction_enabled(enabled)
                     .initial_focus(DialogInitialFocus::Control(declared))
                     .show_with_initial_body_focus(ctx, |ui| {
@@ -742,7 +846,7 @@ fn escape_keeps_preceding_edits_and_routes_later_input_once_to_restored_focus() 
     let mut render = |ui: &mut Ui| {
         ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id()));
         if open {
-            let choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+            let choice = Dialog::new(TEST_TITLE, "Accept")
                 .initial_focus(DialogInitialFocus::Control(first))
                 .show_with_initial_body_focus(ui.ctx(), |ui| {
                     let response = ui.add(egui::TextEdit::singleline(&mut first_text).id(first));
@@ -784,7 +888,7 @@ fn enter_before_escape_submits_before_the_later_cancellation() {
     let field = Id::new("ordered-submit-field");
     let mut choice = DialogChoice::None;
     let mut render = |ui: &mut Ui| {
-        choice = Dialog::new("TEST", TEST_TITLE, "Accept")
+        choice = Dialog::new(TEST_TITLE, "Accept")
             .initial_focus(DialogInitialFocus::Control(field))
             .show_with_initial_body_focus(ui.ctx(), |ui| {
                 Some(ui.add(egui::TextEdit::singleline(&mut text).id(field)).id)
@@ -844,7 +948,7 @@ fn escape_edits_only_the_top_dialog_and_returns_following_text_to_the_parent() {
             Vec::new()
         };
         let _ = ctx.run_ui(raw_input(events), |ui| {
-            parent_choice = Dialog::new("TEST", "Parent", "Accept")
+            parent_choice = Dialog::new("Parent", "Accept")
                 .initial_focus(DialogInitialFocus::BodyControl)
                 .show_with_initial_body_focus(ui.ctx(), |ui| {
                     Some(
@@ -853,7 +957,7 @@ fn escape_edits_only_the_top_dialog_and_returns_following_text_to_the_parent() {
                     )
                 });
             if child_open {
-                child_choice = Dialog::new("TEST", "Child", "Accept")
+                child_choice = Dialog::new("Child", "Accept")
                     .initial_focus(DialogInitialFocus::Control(child))
                     .show_with_initial_body_focus(ui.ctx(), |ui| {
                         Some(
@@ -953,7 +1057,7 @@ fn unavailable_initial_focus_target_falls_back_to_modal_container() {
     crate::Theme::default().apply(&ctx);
 
     let _output = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-        let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+        let _ = Dialog::new(TEST_TITLE, "Accept")
             .primary_enabled(false)
             .initial_focus(DialogInitialFocus::Primary)
             .show(ctx, |ui| {
@@ -1145,7 +1249,7 @@ fn settled_flush_body_geometry(size: DialogSize, rows: usize) -> (Rect, Rect, f3
         ..Default::default()
     };
     let dialog = || {
-        Dialog::new("TEST", TEST_TITLE, "Accept")
+        Dialog::new(TEST_TITLE, "Accept")
             .description(TEST_DESCRIPTION)
             .size(size)
             .flush_body()
@@ -1255,7 +1359,7 @@ fn a_content_height_dialog_settles_in_one_pass_and_stops_moving() {
     fn pass(ctx: &Context, rows: usize) -> (Rect, f32) {
         let mut body = Rect::ZERO;
         let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+            let _ = Dialog::new(TEST_TITLE, "Accept")
                 .description(TEST_DESCRIPTION)
                 .size(DialogSize::WideWorkflow)
                 .show(ctx, |ui| {
@@ -1383,7 +1487,7 @@ fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
         crate::Theme::default().apply(&ctx);
         for _ in 0..3 {
             let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-                let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+                let _ = Dialog::new(TEST_TITLE, "Accept")
                     .description(TEST_DESCRIPTION)
                     .show(ctx, |ui| {
                         paint_rows(ui);
@@ -1401,7 +1505,7 @@ fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
     let mut first_row = Rect::NOTHING;
     let mut final_row = Rect::NOTHING;
     let canvas = crate::raster::render(vec2(1_000.0, 800.0), |ui, _| {
-        let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+        let _ = Dialog::new(TEST_TITLE, "Accept")
             .description(TEST_DESCRIPTION)
             .initial_height(settled - ROW_HEIGHT)
             .show(ui, |ui| {
@@ -1454,7 +1558,7 @@ fn a_dialog_seeded_a_row_short_of_its_content_paints_its_final_row() {
 fn the_opening_sizing_pass_measures_the_surface_the_first_visible_pass_draws() {
     fn pass(ctx: &Context) -> f32 {
         let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-            let _ = Dialog::new("TEST", TEST_TITLE, "Accept")
+            let _ = Dialog::new(TEST_TITLE, "Accept")
                 .description(TEST_DESCRIPTION)
                 .size(DialogSize::WideWorkflow)
                 .show(ctx, |ui| {

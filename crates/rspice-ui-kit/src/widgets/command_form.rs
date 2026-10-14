@@ -515,7 +515,7 @@ impl<'a> CommandForm<'a> {
         // Cancel is the only word any form in this family has for leaving, and
         // Enter is the only key any of them commits on: a form with a
         // multiline body will add the opt-out when it arrives.
-        let mut dialog = Dialog::prompt(self.title, self.primary)
+        let mut dialog = Dialog::new(self.title, self.primary)
             .size(DialogSize::CommandForm)
             .overlay_scrollbar()
             .ghost("Cancel")
