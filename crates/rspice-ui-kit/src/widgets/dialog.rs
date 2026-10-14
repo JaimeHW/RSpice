@@ -32,6 +32,7 @@ use egui::{
 
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
+use crate::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
 
 mod keyboard;
 
@@ -637,10 +638,11 @@ struct DialogFooterOutput {
     ghost_id: Option<Id>,
 }
 
-/// What a footer hint is saying, for the reader who cannot use its colour.
+/// What a footer hint is saying.
 ///
-/// The mark is painted rather than typeset: the bundled Plex faces carry no
-/// warning or error glyph, so a character here would rasterize as a tofu box.
+/// A hint the reader has to notice carries a [`Problem`] mark in front of
+/// neutral text, the grammar of a compiler's problem list: the mark holds the
+/// severity and its colour, and the sentence is never coloured.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DialogHintTone {
     /// Metadata: a count, a shortcut, a reminder. No mark.
@@ -654,11 +656,21 @@ pub enum DialogHintTone {
 }
 
 impl DialogHintTone {
-    const fn color(self, c: &crate::palette::Palette) -> Color32 {
+    /// The problem a marked hint states; a neutral hint states none.
+    const fn problem(self) -> Option<Problem> {
+        match self {
+            Self::Neutral => None,
+            Self::Warn => Some(Problem::Warning),
+            Self::Error => Some(Problem::Failure),
+        }
+    }
+
+    /// The sentence's ink: faint metadata, or dim beside a mark that carries
+    /// the severity.
+    const fn text_color(self, c: &crate::palette::Palette) -> Color32 {
         match self {
             Self::Neutral => c.text_faint,
-            Self::Warn => c.warn,
-            Self::Error => c.err,
+            Self::Warn | Self::Error => c.text_dim,
         }
     }
 
@@ -666,53 +678,13 @@ impl DialogHintTone {
     ///
     /// A neutral hint has no mark, because there is nothing about it to
     /// notice: the sentence is the whole of it.
-    fn mark(self, ui: &mut Ui, color: Color32) {
-        if self == Self::Neutral {
+    fn mark(self, ui: &mut Ui) {
+        let Some(problem) = self.problem() else {
             return;
-        }
-        let (rect, response) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
-        let center = rect.center();
-        let painter = ui.painter();
-        match self {
-            // A triangle for a consequence, a circle for a refusal: the two
-            // shapes the rest of the product already separates these by.
-            Self::Warn => {
-                let half = 5.5;
-                painter.add(egui::Shape::convex_polygon(
-                    vec![
-                        egui::pos2(center.x, center.y - half),
-                        egui::pos2(center.x + half, center.y + half * 0.8),
-                        egui::pos2(center.x - half, center.y + half * 0.8),
-                    ],
-                    Color32::TRANSPARENT,
-                    Stroke::new(1.2, color),
-                ));
-                painter.line_segment(
-                    [
-                        egui::pos2(center.x, center.y - 1.6),
-                        egui::pos2(center.x, center.y + 2.4),
-                    ],
-                    Stroke::new(1.2, color),
-                );
-            }
-            _ => {
-                painter.circle_stroke(center, 5.2, Stroke::new(1.2, color));
-                painter.line_segment(
-                    [
-                        egui::pos2(center.x - 2.4, center.y - 2.4),
-                        egui::pos2(center.x + 2.4, center.y + 2.4),
-                    ],
-                    Stroke::new(1.2, color),
-                );
-                painter.line_segment(
-                    [
-                        egui::pos2(center.x + 2.4, center.y - 2.4),
-                        egui::pos2(center.x - 2.4, center.y + 2.4),
-                    ],
-                    Stroke::new(1.2, color),
-                );
-            }
-        }
+        };
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(PROBLEM_MARK_SIDE, PROBLEM_MARK_SIDE), Sense::hover());
+        paint_problem_mark(ui.painter(), rect, problem);
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_label(match self {
                 Self::Warn => "Consequence",
@@ -723,12 +695,13 @@ impl DialogHintTone {
 
     /// The mark and its sentence, left to right in whatever track is left.
     ///
-    /// Eight points between the two, inside this track only: they are one
-    /// statement, and the actions beside them keep the footer's own rhythm.
+    /// The mark sits the problem line's advance from the sentence, inside this
+    /// track only: they are one statement, and the actions beside them keep
+    /// the footer's own rhythm.
     fn hint(self, ui: &mut Ui, hint: &str, color: Color32) {
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = HINT_MARK_GAP;
-            self.mark(ui, color);
+            self.mark(ui);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(hint)
@@ -741,14 +714,24 @@ impl DialogHintTone {
     }
 }
 
-/// Air between a footer hint's mark and its sentence.
-const HINT_MARK_GAP: f32 = 8.0;
+/// Air between a footer hint's mark and its sentence: the problem line's, so
+/// a marked hint and a marked row read as the same mark.
+const HINT_MARK_GAP: f32 = PROBLEM_MARK_ADVANCE - PROBLEM_MARK_SIDE;
 
 /// Mockup transaction strip rendered between a workflow body and its footer.
+///
+/// The strip's words are neutral. Only an error carries a mark — the
+/// [`Problem::Failure`] cross in front of its title — and only an error is
+/// announced as an alert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DialogTransactionTone {
+    /// A transaction in flight. No mark: the busy primary is the live
+    /// indicator.
     Progress,
+    /// What a finished transaction changed, when the dialog stays open and
+    /// nothing else on it says so. No mark: the title says it.
     Complete,
+    /// Why the transaction stopped.
     Error,
 }
 
@@ -921,14 +904,13 @@ impl<'a> Dialog<'a> {
         self
     }
 
-    /// Colour the footer hint and mark it.
+    /// Mark the footer hint.
     ///
     /// A hint is metadata by default — a count, a shortcut — and stays in the
     /// faint register. A hint that states what the primary is about to *do*,
     /// or why it refused, is not metadata: it is the last thing a reader sees
-    /// before committing, so it takes the tone of what it says and a mark that
-    /// carries the same meaning without colour, for a reader who cannot use
-    /// the colour.
+    /// before committing, so it takes the warning or failure mark in front of
+    /// it and steps up to dim text. The mark alone is coloured.
     pub fn hint_tone(mut self, tone: DialogHintTone) -> Self {
         self.hint_tone = tone;
         self
@@ -1603,11 +1585,7 @@ impl<'a> Dialog<'a> {
         let Some(transaction) = self.transaction_state.as_ref() else {
             return;
         };
-        let color = match transaction.tone {
-            DialogTransactionTone::Progress => t.color.accent,
-            DialogTransactionTone::Complete => t.color.ok,
-            DialogTransactionTone::Error => t.color.err,
-        };
+        let error = transaction.tone == DialogTransactionTone::Error;
         // A preceding split-pane body may leave `available_width()` at its
         // first column's retained minimum. The transaction state is a dialog-
         // level strip, so resolve its rectangle from the surface instead of
@@ -1632,31 +1610,44 @@ impl<'a> Dialog<'a> {
                 .max_rect(content_rect)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        strip_ui.spacing_mut().item_spacing.x = 8.0;
-        let (indicator, _) = strip_ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
-        strip_ui
-            .painter()
-            .circle_stroke(indicator.center(), 4.0, Stroke::new(1.0, color));
-        if transaction.tone == DialogTransactionTone::Complete {
-            strip_ui
-                .painter()
-                .circle_filled(indicator.center(), 2.0, color);
+        // The words start on the body's left edge. An error steps them in by
+        // the problem line's advance and sets the failure cross on the title's
+        // line, as a problem line does; nothing else on the strip is coloured.
+        strip_ui.spacing_mut().item_spacing.x = 0.0;
+        if error {
+            strip_ui.add_space(PROBLEM_MARK_ADVANCE);
         }
-        strip_ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
-            ui.label(
-                egui::RichText::new(transaction.title.as_str())
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text),
+        let title_rect = strip_ui
+            .vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                let title = ui.label(
+                    egui::RichText::new(transaction.title.as_str())
+                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                        .color(t.color.text),
+                );
+                ui.label(
+                    egui::RichText::new(transaction.detail.as_str())
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
+                title.rect
+            })
+            .inner;
+        if error {
+            paint_problem_mark(
+                strip_ui.painter(),
+                Rect::from_center_size(
+                    egui::pos2(
+                        content_rect.left() + PROBLEM_MARK_SIDE * 0.5,
+                        title_rect.center().y,
+                    ),
+                    egui::Vec2::splat(PROBLEM_MARK_SIDE),
+                ),
+                Problem::Failure,
             );
-            ui.label(
-                egui::RichText::new(transaction.detail.as_str())
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
-        });
+        }
         ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_role(if transaction.tone == DialogTransactionTone::Error {
+            node.set_role(if error {
                 egui::accesskit::Role::Alert
             } else {
                 egui::accesskit::Role::Status
@@ -1761,9 +1752,10 @@ impl<'a> Dialog<'a> {
                     ui.spacing_mut().item_spacing.y = 6.0;
                     if let Some(hint) = self.hint.as_deref() {
                         let tone = self.hint_tone;
-                        let color = tone.color(&c);
+                        let color = tone.text_color(&c);
                         ui.horizontal(|ui| {
-                            tone.mark(ui, color);
+                            ui.spacing_mut().item_spacing.x = HINT_MARK_GAP;
+                            tone.mark(ui);
                             ui.add(
                                 egui::Label::new(
                                     egui::RichText::new(hint)
@@ -1832,20 +1824,33 @@ impl<'a> Dialog<'a> {
                             choice = DialogChoice::Secondary;
                         }
                     }
-                    // The component editor's hint is its unapplied-changes
-                    // notice: warn-toned, unmarked, and on the track it has
-                    // always had.
+                    // The component editor's hint keeps the track it has always
+                    // had, left of its three actions: the unapplied-changes
+                    // notice in dim text, or a session error behind the
+                    // failure mark. It starts at the footer's left edge, as
+                    // every other dialog's hint does.
                     if component_editor && let Some(hint) = self.hint.as_deref() {
-                        let label = egui::Label::new(
-                            egui::RichText::new(hint)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(c.warn),
+                        let track = (ui.available_width() - 190.0).max(40.0);
+                        ui.allocate_ui_with_layout(
+                            vec2(track, 18.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                // The child advances its parent by what it
+                                // holds, not by the track it was offered.
+                                ui.set_min_width(track);
+                                ui.spacing_mut().item_spacing.x = HINT_MARK_GAP;
+                                self.hint_tone.mark(ui);
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(hint)
+                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                            .color(c.text_dim),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(hint);
+                            },
                         );
-                        ui.add_sized(
-                            [(ui.available_width() - 190.0).max(40.0), 18.0],
-                            label.truncate(),
-                        )
-                        .on_hover_text(hint);
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let primary = crate::widgets::Button::new(&self.primary)
@@ -1881,7 +1886,7 @@ impl<'a> Dialog<'a> {
                                 choice = DialogChoice::Ghost;
                             }
                         }
-                        // Every other dialog's hint takes the tone it declared
+                        // Every other dialog's hint takes the mark it declared
                         // and the track the actions left, measured rather than
                         // guessed: laid out after them, it is exactly as wide
                         // as what remains, so a long consequence sentence
@@ -1890,7 +1895,7 @@ impl<'a> Dialog<'a> {
                         // starts at the footer's left edge behind its mark
                         // instead of floating in the middle.
                         if !component_editor && let Some(hint) = self.hint.as_deref() {
-                            self.hint_tone.hint(ui, hint, self.hint_tone.color(&c));
+                            self.hint_tone.hint(ui, hint, self.hint_tone.text_color(&c));
                         }
                     });
                 });

@@ -612,24 +612,56 @@ fn capability_review_desktop_close_control_uses_mockup_icon_button_target() {
     assert_eq!(bounds.y1 - bounds.y0, DIALOG_CLOSE_TARGET_HEIGHT as f64);
 }
 
-/// Every text shape a pass painted, nested shapes included.
-fn painted_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::TextShape> {
-    fn visit(shape: &egui::Shape, texts: &mut Vec<egui::epaint::TextShape>) {
+/// Every shape a pass painted, nested shapes flattened.
+fn painted_shapes(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::Shape> {
+    fn visit(shape: &egui::Shape, flat: &mut Vec<egui::Shape>) {
         match shape {
             egui::Shape::Vec(shapes) => {
                 for shape in shapes {
-                    visit(shape, texts);
+                    visit(shape, flat);
                 }
             }
-            egui::Shape::Text(text) => texts.push(text.clone()),
-            _ => {}
+            shape => flat.push(shape.clone()),
         }
     }
-    let mut texts = Vec::new();
+    let mut flat = Vec::new();
     for clipped in shapes {
-        visit(&clipped.shape, &mut texts);
+        visit(&clipped.shape, &mut flat);
     }
-    texts
+    flat
+}
+
+/// Every text shape a pass painted, nested shapes included.
+fn painted_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::TextShape> {
+    painted_shapes(shapes)
+        .into_iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Text(text) => Some(text),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Run `dialog` until its fade-in has finished, so every colour it paints is
+/// the colour it authored, and return the settled pass.
+fn settled_pass(mut dialog: impl FnMut(&Context)) -> egui::FullOutput {
+    let ctx = Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut output = None;
+    for _ in 0..30 {
+        output = Some(ctx.run_ui(raw_input(Vec::new()), |ctx| dialog(ctx)));
+    }
+    output.expect("thirty passes ran")
+}
+
+/// The ink a text shape was laid out in.
+fn text_ink(text: &egui::epaint::TextShape) -> Vec<egui::Color32> {
+    text.galley
+        .job
+        .sections
+        .iter()
+        .map(|section| section.format.color)
+        .collect()
 }
 
 /// The header is the title alone, as a native dialog's is: no tracked
@@ -718,6 +750,184 @@ fn the_header_paints_the_title_alone_centred_on_the_close_control() {
         "title centre {} against close centre {close_centre}",
         title.center().y
     );
+}
+
+/// The stroke colour of a painted line or outline, if the shape is one.
+fn stroke_color(shape: &egui::Shape) -> Option<egui::Color32> {
+    match shape {
+        egui::Shape::LineSegment { stroke, .. } => Some(stroke.color),
+        egui::Shape::Path(path) => match path.stroke.color {
+            egui::epaint::ColorMode::Solid(color) => Some(color),
+            _ => None,
+        },
+        egui::Shape::Circle(circle) => Some(circle.stroke.color),
+        _ => None,
+    }
+}
+
+/// An error strip states its problem as a problem line does: the failure
+/// cross on the line of a neutral title, and no ring. A transaction in flight
+/// or finished paints no mark at all.
+#[test]
+fn an_error_strip_paints_the_failure_cross_and_no_ring() {
+    let palette = Tokens::default().color;
+    for tone in [
+        DialogTransactionTone::Error,
+        DialogTransactionTone::Progress,
+        DialogTransactionTone::Complete,
+    ] {
+        let output = settled_pass(|ctx| {
+            let _ = Dialog::new(TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .transaction_state(tone, "Rename refused", "A cell with this name exists.")
+                .show(ctx, |ui| {
+                    ui.label("Dialog body");
+                });
+        });
+        let shapes = painted_shapes(&output.shapes);
+        let title = painted_texts(&output.shapes)
+            .into_iter()
+            .find(|text| text.galley.job.text == "Rename refused")
+            .expect("the strip paints its title");
+        assert_eq!(text_ink(&title), vec![palette.text], "{tone:?} title ink");
+        let title = title.galley.rect.translate(title.pos.to_vec2());
+        // The strip's band, short of the footer's actions below it.
+        let strip = Rect::from_min_max(
+            egui::pos2(0.0, title.top() - 8.0),
+            egui::pos2(1_000.0, title.bottom() + 14.0),
+        );
+        let in_strip = |shape: &&egui::Shape| strip.intersects(shape.visual_bounding_rect());
+        assert!(
+            !shapes
+                .iter()
+                .filter(in_strip)
+                .any(|shape| matches!(shape, egui::Shape::Circle(_))),
+            "{tone:?} painted a ring"
+        );
+        let marks: Vec<Rect> = shapes
+            .iter()
+            .filter(in_strip)
+            .filter(|shape| {
+                stroke_color(shape)
+                    .is_some_and(|color| [palette.err, palette.ok, palette.accent].contains(&color))
+            })
+            .map(egui::Shape::visual_bounding_rect)
+            .collect();
+        if tone == DialogTransactionTone::Error {
+            assert_eq!(
+                shapes
+                    .iter()
+                    .filter(in_strip)
+                    .filter(|shape| matches!(
+                        shape,
+                        egui::Shape::LineSegment { stroke, .. } if stroke.color == palette.err
+                    ))
+                    .count(),
+                2,
+                "an error strip paints the two strokes of the failure cross"
+            );
+            assert_eq!(
+                marks.len(),
+                2,
+                "an error strip paints its cross and nothing else"
+            );
+            let mark = marks
+                .iter()
+                .fold(Rect::NOTHING, |all, rect| all.union(*rect));
+            assert!(
+                (mark.width() - mark.height()).abs() <= 0.5,
+                "the cross is square: {mark:?}"
+            );
+            assert!(
+                (mark.center().y - title.center().y).abs() <= 1.0,
+                "the cross {mark:?} is not on the title's line {title:?}"
+            );
+            assert!(mark.right() < title.left(), "the cross overlaps the title");
+        } else {
+            assert!(marks.is_empty(), "{tone:?} painted a mark: {marks:?}");
+        }
+    }
+}
+
+/// A marked hint's sentence is dim and neutral; only its mark carries the
+/// warning or error colour. A neutral hint stays faint, and the component
+/// editor's unapplied-changes notice is dim, not warn.
+#[test]
+fn a_marked_hint_reads_in_dim_text_behind_its_coloured_mark() {
+    let palette = Tokens::default().color;
+    let hint = "Re-places 3 instances";
+    for (size, tone, ink, mark) in [
+        (
+            DialogSize::Transaction,
+            DialogHintTone::Neutral,
+            palette.text_faint,
+            None,
+        ),
+        (
+            DialogSize::Transaction,
+            DialogHintTone::Warn,
+            palette.text_dim,
+            Some(palette.warn),
+        ),
+        (
+            DialogSize::Transaction,
+            DialogHintTone::Error,
+            palette.text_dim,
+            Some(palette.err),
+        ),
+        (
+            DialogSize::ComponentEditor,
+            DialogHintTone::Neutral,
+            palette.text_dim,
+            None,
+        ),
+        (
+            DialogSize::ComponentEditor,
+            DialogHintTone::Error,
+            palette.text_dim,
+            Some(palette.err),
+        ),
+    ] {
+        let output = settled_pass(|ctx| {
+            let _ = Dialog::new(TEST_TITLE, "Accept")
+                .description(TEST_DESCRIPTION)
+                .size(size)
+                .ghost("Cancel")
+                .hint(hint)
+                .hint_tone(tone)
+                .show(ctx, |ui| {
+                    ui.label("Dialog body");
+                });
+        });
+        let text = painted_texts(&output.shapes)
+            .into_iter()
+            .find(|text| text.galley.job.text == hint)
+            .unwrap_or_else(|| panic!("{size:?} {tone:?} painted no hint"));
+        assert_eq!(text_ink(&text), vec![ink], "{size:?} {tone:?} hint ink");
+        let text = text.galley.rect.translate(text.pos.to_vec2());
+        let lead = Rect::from_min_max(
+            egui::pos2(0.0, text.top() - 4.0),
+            egui::pos2(text.left(), text.bottom() + 4.0),
+        );
+        let lead_colors: Vec<egui::Color32> = painted_shapes(&output.shapes)
+            .iter()
+            .filter(|shape| lead.intersects(shape.visual_bounding_rect()))
+            .filter_map(stroke_color)
+            .collect();
+        match mark {
+            None => assert!(
+                lead_colors.is_empty(),
+                "{size:?} {tone:?} marked a neutral hint: {lead_colors:?}"
+            ),
+            Some(color) => {
+                assert!(!lead_colors.is_empty(), "{size:?} {tone:?} painted no mark");
+                assert!(
+                    lead_colors.iter().all(|painted| *painted == color),
+                    "{size:?} {tone:?} mark {lead_colors:?}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
