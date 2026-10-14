@@ -44,7 +44,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::judge::{self, Expectation, Outcome, RunEnd};
-use super::list::Check;
+use super::list::{Check, SourceList};
 use super::manifest::Row;
 use super::select::{Candidate, Class};
 
@@ -96,6 +96,10 @@ pub struct CaseSpec {
     /// tests, which Icarus never executes).
     pub compile_only: bool,
     pub schedule: Schedule,
+    /// Whether the gold log holds standard error with standard output, as
+    /// the text lists' runner writes it; the JSON runner's gold is standard
+    /// output alone.
+    pub stderr_in_log: bool,
 }
 
 impl CaseSpec {
@@ -115,6 +119,7 @@ impl CaseSpec {
             delay_select,
             compile_only: !candidate.class.is_some_and(Class::runs),
             schedule,
+            stderr_in_log: entry.list != SourceList::Vvp,
         }
     }
 }
@@ -233,6 +238,8 @@ fn execute_end(spec: &CaseSpec) -> RunEnd {
             for record in &report.records {
                 match &record.stream {
                     HdlStream::Stdout => stdout.push_str(&record.text),
+                    HdlStream::Stderr if spec.stderr_in_log => stdout.push_str(&record.text),
+                    HdlStream::Stderr => {}
                     HdlStream::File { path, .. } => {
                         match files.iter_mut().find(|file| file.path == *path) {
                             Some(file) => file.text.push_str(&record.text),
@@ -809,6 +816,7 @@ mod tests {
             delay_select: None,
             compile_only: true,
             schedule: Schedule::Source,
+            stderr_in_log: true,
         };
         let line = serde_json::to_string(&spec).expect("serializes");
         let input = format!("{line}\n\n{line}\n");

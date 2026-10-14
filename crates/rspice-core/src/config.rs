@@ -181,6 +181,9 @@ impl HdlSeverity {
 pub enum HdlStream {
     /// `$display`, `$write`, `$strobe`, `$monitor` and their kin.
     Stdout,
+    /// A write to the standard-error descriptor (`$fdisplay(32'h8000_0002,
+    /// ...)`, IEEE 1364-2005 section 17.2.1); rendered on standard error.
+    Stderr,
     /// A file a design opened (`$fdisplay`); written at commit.
     File { handle: u32, path: String },
     /// A severity task's message.

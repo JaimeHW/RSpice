@@ -426,3 +426,43 @@ fn hdl_files_resolve_against_the_run_directory_and_stay_inside_it() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("escape=1\n"));
     assert!(root.join("escape.txt").exists());
 }
+
+/// A write to the standard-error descriptor (IEEE 1364-2005 section 17.2.1)
+/// reaches stderr and the transcript, never stdout; the standard-output
+/// descriptor's write stays on stdout.
+#[test]
+fn hdl_writes_to_the_stderr_descriptor_reach_stderr() {
+    let directory = common::test_dir("hdl_stderr");
+    std::fs::write(
+        directory.join("teller.va"),
+        "`timescale 1ns/1ns\n\
+         module teller(p, n);\n\
+         \x20 inout p, n;\n\
+         \x20 electrical p, n;\n\
+         \x20 initial begin\n\
+         \x20   $fdisplay(32'h8000_0001, \"to stdout\");\n\
+         \x20   $fdisplay(32'h8000_0002, \"to stderr %0d\", 7);\n\
+         \x20   $fwrite(32'h8000_0002, \"no newline\");\n\
+         \x20 end\n\
+         \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.join("teller.cir"),
+        "* HDL stderr\nx1 p 0 teller\nrp p 0 1k\n.va \"teller.va\" teller\n.tran 1n 5n\n.end\n",
+    )
+    .unwrap();
+    let output = rspice_in(
+        &directory,
+        &["run", "teller.cir", "-f", "csv", "-o", "out.csv"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("to stdout\n"), "{stdout}");
+    assert!(!stdout.contains("to stderr"), "{stdout}");
+    assert!(stderr.contains("to stderr 7\nno newline"), "{stderr}");
+    let transcript = std::fs::read_to_string(directory.join("out.hdl.log")).unwrap();
+    assert_eq!(transcript, "to stdout\nto stderr 7\nno newline");
+}

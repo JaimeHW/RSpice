@@ -125,7 +125,9 @@ impl HdlOutputSink for HdlConsole {
                 record.text.clone(),
                 self.stdout_is_payload.load(Ordering::Relaxed),
             ),
-            // File writes land in their files (P2 lane L5), not the console.
+            // A design's writes to standard error stay there.
+            HdlStream::Stderr => (record.text.clone(), true),
+            // File writes land in their files, not the console.
             HdlStream::File { .. } => return,
             HdlStream::Diagnostic { severity } => {
                 match severity {

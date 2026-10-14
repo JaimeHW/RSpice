@@ -491,10 +491,11 @@ impl HdlEffects {
         let bytes = text_bytes(text);
         for target in targets {
             match target {
-                // Standard error has no stream of its own in the records; it
-                // reaches the transcript beside standard output.
-                WriteTarget::Stdout | WriteTarget::Stderr => {
+                WriteTarget::Stdout => {
                     self.record(plan, site, clock, HdlStream::Stdout, text.to_owned());
+                }
+                WriteTarget::Stderr => {
+                    self.record(plan, site, clock, HdlStream::Stderr, text.to_owned());
                 }
                 WriteTarget::Descriptor(_) | WriteTarget::Channel(_) => {
                     let Some(file) = self.files.target_file(target) else {

@@ -528,3 +528,26 @@ endmodule
         "{warned:?}"
     );
 }
+
+/// A write to the standard-error descriptor is a `Stderr` record, never
+/// standard output; the standard-output descriptor's is `Stdout`.
+#[test]
+fn writes_to_the_stderr_descriptor_are_stderr_records() {
+    let report = testbench(
+        &[(
+            "tb.v",
+            "module tb;\n  initial begin\n    $fdisplay(32'h8000_0001, \"out\");\n    \
+             $fwrite(32'h8000_0002, \"err %0d\\n\", 2);\n    $fstrobe(32'h8000_0002, \"late\");\n  \
+             end\nendmodule\n",
+        )],
+        &HdlTestbenchOptions::default(),
+    );
+    assert_eq!(stdout(&report), "out\n");
+    let errors: Vec<&str> = report
+        .records
+        .iter()
+        .filter(|record| record.stream == HdlStream::Stderr)
+        .map(|record| record.text.as_str())
+        .collect();
+    assert_eq!(errors, ["err 2\n", "late\n"]);
+}
