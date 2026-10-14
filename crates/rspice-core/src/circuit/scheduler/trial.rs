@@ -562,17 +562,24 @@ impl Trial<'_> {
     }
 
     /// Evaluate every instance against the settled candidate without stamping
-    /// it anywhere, and report whether any analog half newly raised
-    /// `$discontinuity`.
+    /// it anywhere, and report what the candidate did to the analog equations:
+    /// whether any instance stepped them (`candidate_discontinuity`), and
+    /// whether every such step is a sampled-and-held input's new sample.
     pub(in crate::circuit) fn evaluate(
         &mut self,
         solution: &[Value],
-    ) -> Result<bool, SimulationError> {
-        let mut discontinuity = false;
+    ) -> Result<super::ModelDiscontinuity, SimulationError> {
+        let mut discontinuity = super::ModelDiscontinuity::None;
         for host in self.hosts.iter_mut() {
             let stamped = host.stamp(solution, |_, _, _| {}, |_, _| {});
             named(host, stamped)?;
-            discontinuity |= host.candidate_discontinuity();
+            if host.candidate_discontinuity() {
+                discontinuity = discontinuity.max(if host.candidate_steps_only_sampled_holds() {
+                    super::ModelDiscontinuity::SampledHold
+                } else {
+                    super::ModelDiscontinuity::Step
+                });
+            }
         }
         Ok(discontinuity)
     }

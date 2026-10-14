@@ -3,6 +3,7 @@
 //! parent stepper. Reversible external resources join through registered undo images.
 
 use super::*;
+use crate::circuit::ModelDiscontinuity;
 
 impl From<crate::circuit::ThermalUpdateError> for SimulationError {
     fn from(error: crate::circuit::ThermalUpdateError) -> Self {
@@ -56,6 +57,7 @@ impl Engine {
             final_step,
             None,
         )
+        .map(|(discontinuity, history)| (discontinuity.restarts_integration(), history))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -74,7 +76,7 @@ impl Engine {
         initial_step: bool,
         final_step: bool,
         mut native: Option<NativeHistoryAcceptance<'_, '_>>,
-    ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
+    ) -> Result<(ModelDiscontinuity, Option<Vec<Value>>), SimulationError> {
         if let Some(error) = circuit.take_xspice_evaluation_error() {
             return Err(SimulationError::Circuit(error));
         }
@@ -267,9 +269,14 @@ impl Engine {
                         &mut projected,
                         finish,
                     )?;
-                return Ok((discontinuity || mixed_discontinuity, history));
+                return Ok((
+                    mixed_discontinuity.max(ModelDiscontinuity::step_if(discontinuity)),
+                    history,
+                ));
             }
-            finish(circuit, solution, &projected, None)
+            finish(circuit, solution, &projected, None).map(|(discontinuity, history)| {
+                (ModelDiscontinuity::step_if(discontinuity), history)
+            })
         })();
         match (result, rollback) {
             (Ok(value), rollback) => {
@@ -1112,7 +1119,7 @@ mod tests {
         solution: &mut [Value],
         bjt: &mut BjtTransientHistory,
         time: Value,
-    ) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
+    ) -> Result<(ModelDiscontinuity, Option<Vec<Value>>), SimulationError> {
         let dt = time;
         let coefficients = CompanionCoefficients::backward_euler();
         circuit

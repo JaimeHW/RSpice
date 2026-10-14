@@ -4387,6 +4387,111 @@ endmodule
     );
 }
 
+/// A real a process copies off a V-to-real sample, read by a contribution, is
+/// a zero-order hold of the analog solution, and the run converges on the
+/// continuous limit as the step shrinks.
+///
+/// `x` holds `V(input)` as sampled at each accepted point, and
+/// `I(p) <+ (V(p) - x) / 1000.0` ties `p` through 1k to it, beside R1's 1k to
+/// `input`. As the step goes to zero `x` follows `V(input)`, so `p` sees 500
+/// ohms to a 1 V 50 MHz sine and 1 pF: tau = 0.5 ns, and from rest
+/// `p(t) = (sin(wt) - w tau cos(wt) + w tau e^(-t/tau)) / (1 + (w tau)^2)`.
+///
+/// The hold lags `V(input)` by at most a step `h`, so it is off by at most
+/// `w h` (1 V amplitude), and `p`, which follows the mean of the two sources,
+/// by at most half that: the error is of the order of the step, and halving
+/// the maximum step halves it. Each new sample restarts integration from its
+/// point, but it is no edge: the step after it is the truncation error's. As
+/// an edge, every sample asked for a completion a picosecond later, where the
+/// next sample was taken, and the run stopped at 4.991 ns on the delta-cycle
+/// limit with the step under a picosecond.
+#[test]
+fn a_sampled_real_a_contribution_reads_is_held_between_samples() {
+    let model = ModelFile::new(
+        "sampled_real_contribution",
+        r#"
+`timescale 1ns/1ps
+`include "disciplines.vams"
+module zoh(r, p);
+ input r; wreal r;
+ inout p; electrical p;
+ real x;
+ initial x = 0.0;
+ always @(r) x = r;
+ analog begin
+  I(p) <+ (V(p) - x) / 1000.0;
+ end
+endmodule
+"#,
+    );
+    let deck = format!(
+        "* a sampled real a contribution reads\n\
+         Vin input 0 sin(0 1 50meg)\n\
+         Aobs input r obs\n\
+         R1 input p 1k\n\
+         C1 p 0 1p\n\
+         X1 r p zoh\n\
+         .model obs v_to_real\n\
+         .va \"{}\" zoh\n\
+         .end\n",
+        model.deck_path()
+    );
+    let tstop = 100.0e-9;
+    let omega = 2.0 * std::f64::consts::PI * 50.0e6;
+    let tau = 0.5e-9;
+    let closed_form = |t: f64| {
+        let wt = omega * tau;
+        ((omega * t).sin() - wt * (omega * t).cos() + wt * (-t / tau).exp()) / (1.0 + wt * wt)
+    };
+    let worst_error = |max_step: f64| {
+        let netlist = Netlist::parse(&deck).expect("the deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let result = engine
+            .run_tran(&netlist, tstop, max_step)
+            .expect("a held sample must not stall the run");
+        let iterations = engine.convergence_quality().total_iterations;
+        let points = result.time.len();
+        assert_eq!(result.time.last().copied(), Some(tstop));
+        let steps = result.time.windows(2).map(|pair| pair[1] - pair[0]);
+        let shortest = steps.fold(f64::INFINITY, f64::min);
+        let p = waveform(&result, "p");
+        let worst = result
+            .time
+            .iter()
+            .zip(&p)
+            .map(|(time, value)| (value - closed_form(*time)).abs())
+            .fold(0.0, f64::max);
+        println!(
+            "max step {max_step:e}: {points} points, {iterations} Newton iterations, \
+             shortest step {shortest:e}, worst error {worst:e}"
+        );
+        // The step leaving a sample is the controller's, not a cut a tenth of
+        // the approach deep: nothing shorter than the run's first step.
+        assert!(
+            shortest >= max_step / 200.0,
+            "the steps collapsed to {shortest:e} s at {max_step:e}"
+        );
+        let budget = 4.0 * tstop / max_step;
+        assert!(
+            (points as f64) < budget && (iterations as f64) < 3.0 * budget,
+            "{points} points and {iterations} Newton iterations at {max_step:e}"
+        );
+        assert!(
+            worst <= omega * max_step,
+            "a hold one step stale is off by at most w*h = {:e}, got {worst:e}",
+            omega * max_step
+        );
+        worst
+    };
+    let coarse = worst_error(1.0e-9);
+    let fine = worst_error(0.5e-9);
+    let ratio = coarse / fine;
+    assert!(
+        (1.6..=2.4).contains(&ratio),
+        "halving the maximum step must halve the error: {coarse:e} -> {fine:e} ({ratio})"
+    );
+}
+
 #[test]
 fn typed_event_boundaries_convert_loaded_real_ports_through_physical_voltage() {
     let model = ModelFile::new(

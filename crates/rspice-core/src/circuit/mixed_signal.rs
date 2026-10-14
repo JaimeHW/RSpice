@@ -299,8 +299,9 @@ impl CircuitData {
                 }
             };
             let sampled = self.analog_sampled_real_nodes();
+            let solution_samples = self.solution_sampled_real_nodes();
             for host in &mut self.mixed_signal_hosts {
-                host.declare_analog_sampled_reals(&sampled);
+                host.declare_analog_sampled_reals(&sampled, &solution_samples);
             }
             for (node, real) in coordinator.event_domains() {
                 self.net_kinds.register(
@@ -334,6 +335,41 @@ impl CircuitData {
             }
         }
         nodes
+    }
+
+    /// The real event nets only a sample of the analog solution moves: every
+    /// code model driving one reads a node voltage and no event input, so it
+    /// publishes only when it is evaluated at an accepted point, and no mixed
+    /// module drives it. A sampler with a clock or an enable input is left
+    /// out, because what moves its output is then that input's event.
+    fn solution_sampled_real_nodes(&self) -> std::collections::BTreeSet<usize> {
+        let mut sampled = std::collections::BTreeSet::new();
+        let mut otherwise = std::collections::BTreeSet::new();
+        for instance in &self.xspice_instances {
+            let mut reads_analog = false;
+            instance.for_each_analog_input_net(|_| reads_analog = true);
+            let mut reads_events = false;
+            instance.for_each_event_input_net(|_, _| reads_events = true);
+            let drivers = if reads_analog && !reads_events {
+                &mut sampled
+            } else {
+                &mut otherwise
+            };
+            instance.for_each_real_output_driver(|target| {
+                drivers.insert(target.node_id);
+            });
+        }
+        for host in &self.mixed_signal_hosts {
+            for (port, _) in host.direct_event_ports() {
+                if port.direction
+                    != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input
+                {
+                    otherwise.insert(port.node);
+                }
+            }
+        }
+        sampled.retain(|node| !otherwise.contains(node));
+        sampled
     }
 
     /// Check the existing electrical-boundary adapter against the complete
@@ -847,7 +883,7 @@ impl CircuitData {
             &[(usize, Value)],
             Option<&[Value]>,
         ) -> Result<T, SimulationError>,
-    ) -> Result<(bool, T), SimulationError> {
+    ) -> Result<(super::ModelDiscontinuity, T), SimulationError> {
         if self.scheduler.mixed_xspice_bindings.is_some() && resources.is_none() {
             return Err(SimulationError::Circuit(
                 "shared acceptance requires its resource transaction".into(),
@@ -952,7 +988,7 @@ impl CircuitData {
                 None,
             )?;
             trial.settle(&crate::abort_signal::NoAbort, voltages)?;
-            discontinuity |= trial.evaluate(voltages)?;
+            discontinuity |= trial.evaluate(voltages)?.restarts_integration();
             trial.prepare()?.commit();
         }
         self.veriloga_devices.apply_validated_timestep_acceptance();

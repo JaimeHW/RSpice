@@ -577,6 +577,7 @@ impl MixedSignalHost {
         restored.state.accepted_time = time;
         restored.state.accepted_tick = tick;
         restored.state.started = true;
+        restored.state.accepted_steps_sampled_holds = false;
         restored.state.initial_digital = None;
         restored.digital_started = true;
         restored.scratch = TrialScratch::default();

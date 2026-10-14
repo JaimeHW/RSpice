@@ -5277,7 +5277,12 @@ impl Engine {
         // exactly the path it always took.
         #[cfg(feature = "veriloga")]
         if circuit.has_mixed_signal_hosts() {
-            Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
+            Self::collect_xspice_runtime_breakpoints(
+                &mut circuit,
+                &mut breakpoints,
+                tstop,
+                resume.is_none(),
+            )?;
         }
         // A checkpoint taken on a zero-duration edge holds the completion the
         // edge's model asked for there; no model is evaluated at this first
@@ -5731,7 +5736,12 @@ impl Engine {
                         origin_model_finish.is_some(),
                     )?;
                 }
-                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
+                Self::collect_xspice_runtime_breakpoints(
+                    &mut circuit,
+                    &mut breakpoints,
+                    tstop,
+                    true,
+                )?;
                 (pending_veriloga_event_time, pending_analog_model_event) =
                     accepted_veriloga_event_time(
                         &circuit,
@@ -11229,7 +11239,7 @@ impl Engine {
                     let accepted_phase_context = outgoing_event
                         .as_ref()
                         .map_or(trial_phase_context, |event| event.phase_context());
-                    let (veriloga_discontinuity, static_history) = self.accept_transient_models(
+                    let (model_discontinuity, static_history) = self.accept_transient_models(
                         abort,
                         &mut circuit,
                         &mut matrix,
@@ -11296,18 +11306,25 @@ impl Engine {
                             &mut circuit,
                             &mut breakpoints,
                             tstop,
+                            true,
                         )?;
                     }
-                    let model_restart_dt = (veriloga_discontinuity && !hit_breakpoint).then(|| {
-                        // Same rule as the breakpoint restarts below: a
-                        // discontinuity announced on a step an event had
-                        // already cut restarts from the step it interrupted,
-                        // not from the width of that cut.
-                        let interrupted =
-                            veriloga_refinement_approach_step.map_or(dt, |step| step.max(dt));
-                        breakpoints.mark_external_breakpoint_solved(t, interrupted)
-                    });
-                    hit_breakpoint |= veriloga_discontinuity;
+                    // A sampled-and-held input's new sample restarts the
+                    // integration order and nothing else: the step after it
+                    // stays the controller's (`ModelDiscontinuity::SampledHold`).
+                    let model_restart_dt = (model_discontinuity
+                        == crate::circuit::ModelDiscontinuity::Step
+                        && !hit_breakpoint)
+                        .then(|| {
+                            // Same rule as the breakpoint restarts below: a
+                            // discontinuity announced on a step an event had
+                            // already cut restarts from the step it interrupted,
+                            // not from the width of that cut.
+                            let interrupted =
+                                veriloga_refinement_approach_step.map_or(dt, |step| step.max(dt));
+                            breakpoints.mark_external_breakpoint_solved(t, interrupted)
+                        });
+                    hit_breakpoint |= model_discontinuity.restarts_integration();
                     (pending_veriloga_event_time, pending_analog_model_event) =
                         accepted_veriloga_event_time(
                             &circuit,
@@ -11855,7 +11872,7 @@ impl Engine {
             let accepted_phase_context = outgoing_event
                 .as_ref()
                 .map_or(trial_phase_context, |event| event.phase_context());
-            let (veriloga_discontinuity, static_history) = self.accept_transient_models(
+            let (model_discontinuity, static_history) = self.accept_transient_models(
                 abort,
                 &mut circuit,
                 &mut matrix,
@@ -11919,7 +11936,12 @@ impl Engine {
                 xyce_static_history_candidate = Some(history);
             }
             if has_external_models {
-                Self::collect_xspice_runtime_breakpoints(&mut circuit, &mut breakpoints, tstop)?;
+                Self::collect_xspice_runtime_breakpoints(
+                    &mut circuit,
+                    &mut breakpoints,
+                    tstop,
+                    true,
+                )?;
             }
             (pending_veriloga_event_time, pending_analog_model_event) =
                 accepted_veriloga_event_time(
@@ -11942,7 +11964,14 @@ impl Engine {
             // `$discontinuity` is an accepted boundary event. Fold it into
             // the same restart contract as source and operator breakpoints so
             // Trap/Gear and LTE history are reset, not merely the next `dt`.
-            hit_breakpoint |= veriloga_discontinuity;
+            // A sampled-and-held input's new sample resets them too, but the
+            // step leaving the point is the controller's: the hold changes at
+            // every accepted point, by an amount of the order of the step, and
+            // no instant of its own is there to be resolved
+            // (`ModelDiscontinuity::SampledHold`).
+            let restarts_step =
+                hit_breakpoint || model_discontinuity == crate::circuit::ModelDiscontinuity::Step;
+            hit_breakpoint |= model_discontinuity.restarts_integration();
 
             if fixed_method.is_none() {
                 if hit_breakpoint {
@@ -12136,13 +12165,15 @@ impl Engine {
             // realization, and the step after it resumes the restart the
             // edge's landing proposed (`BreakpointManager::replace_edge_completions`).
             let mut edge_completion_resume = None;
-            if hit_breakpoint {
+            if restarts_step {
                 edge_completion_resume = breakpoints.edge_completion_resume(t);
                 let approach = veriloga_refinement_approach_step;
                 if let Some(step) = approach {
                     breakpoints.restore_approach_step(step);
                 }
-                let restart_dt = if landed_device_event || veriloga_discontinuity {
+                let restart_dt = if landed_device_event
+                    || model_discontinuity == crate::circuit::ModelDiscontinuity::Step
+                {
                     breakpoints.mark_external_breakpoint_solved(
                         t,
                         approach.map_or(dt, |step| step.max(dt)),
@@ -12170,10 +12201,12 @@ impl Engine {
                     .reduce(Value::max)
                     .map_or(timestep.dt(), |step| step.max(timestep.dt()));
                 timestep.force_step(restart_dt.min(controller_dt).min(restarted_max_step));
-                if !lte_estimator.uses_accepted_solution_reference() && !circuit.vdmoses.is_empty()
-                {
-                    lte_warmup_skips = lte_warmup_skips.max(2);
-                }
+            }
+            if hit_breakpoint
+                && !lte_estimator.uses_accepted_solution_reference()
+                && !circuit.vdmoses.is_empty()
+            {
+                lte_warmup_skips = lte_warmup_skips.max(2);
             }
             if !landed_device_event {
                 // A step that is not one of the chase's own landings ends it,

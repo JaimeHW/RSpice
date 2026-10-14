@@ -37,6 +37,39 @@ fn activation_at(seconds: Value) -> Option<Instant> {
     Instant::from_seconds(seconds)
 }
 
+/// What an accepted point's models did to the equations the analog solver
+/// integrates, loosest first, so the larger of two is what a point that saw
+/// both did.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ModelDiscontinuity {
+    /// Nothing stepped: integration continues through the point.
+    #[default]
+    None,
+    /// Only sampled-and-held inputs took new samples there, a discrete value
+    /// copied off the analog solution at the point
+    /// (`MixedSignalHost::candidate_steps_only_sampled_holds`). Integration
+    /// restarts from the point at order one, and the step leaving it is the
+    /// one the truncation error asks for.
+    #[cfg(feature = "veriloga")]
+    SampledHold,
+    /// A model stepped the equations — a `$discontinuity`, a D/A drive, a
+    /// discrete value an edge or a timer moved — and integration restarts
+    /// from the point as from a breakpoint.
+    Step,
+}
+
+impl ModelDiscontinuity {
+    /// [`Self::Step`] where `stepped`, otherwise [`Self::None`].
+    pub(crate) fn step_if(stepped: bool) -> Self {
+        if stepped { Self::Step } else { Self::None }
+    }
+
+    /// Whether integration restarts from the point.
+    pub(crate) fn restarts_integration(self) -> bool {
+        self != Self::None
+    }
+}
+
 /// One queued activation, with the owner a diagnostic names.
 ///
 /// Borrowed, not rendered, for the reason [`ScheduleOwner`] gives: this is

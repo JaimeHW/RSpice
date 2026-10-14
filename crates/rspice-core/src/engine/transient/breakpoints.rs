@@ -311,10 +311,18 @@ impl Engine {
     /// XSPICE event target: this manager's coalescing tolerance must not move
     /// an activation or consume a nearby, distinct timer.
     /// A circuit with no mixed module contributes no additional HDL events.
+    ///
+    /// `read_step_completions` asks each mixed module for the completion of a
+    /// step a value its analog block reads took at the accepted point. A
+    /// resumed run passes `false`: its checkpoint holds the completions the
+    /// interrupted run asked for there, and a module rebuilt from it cannot
+    /// tell a sampled-and-held input's new sample, which asks for none, from
+    /// an edge.
     pub(super) fn collect_xspice_runtime_breakpoints(
         circuit: &mut crate::circuit::CircuitData,
         breakpoints: &mut BreakpointManager,
         tstop: Value,
+        read_step_completions: bool,
     ) -> Result<(), crate::engine::SimulationError> {
         let mut runtime_breakpoints = Vec::new();
         // Each lane's own next activation, not the earliest of the two: this
@@ -350,12 +358,16 @@ impl Engine {
         // A discrete value a mixed module's analog block read at its left
         // limit completes its step as a D/A edge does.
         #[cfg(feature = "veriloga")]
-        for time in circuit.mixed_read_step_completions() {
-            if time.is_finite() && time >= 0.0 && time <= tstop {
-                runtime_breakpoints.push(time);
-                edge_completions.push(time);
+        if read_step_completions {
+            for time in circuit.mixed_read_step_completions() {
+                if time.is_finite() && time >= 0.0 && time <= tstop {
+                    runtime_breakpoints.push(time);
+                    edge_completions.push(time);
+                }
             }
         }
+        #[cfg(not(feature = "veriloga"))]
+        let _ = read_step_completions;
         breakpoints.replace_runtime_breakpoints(runtime_breakpoints);
         breakpoints.replace_edge_completions(edge_completions);
         Ok(())

@@ -63,7 +63,7 @@ pub(crate) use mixed_signal::ThresholdFinding;
 pub(crate) use mixed_signal::ThresholdFindingKind;
 mod net_kind;
 mod scheduler;
-pub(crate) use scheduler::{Activation, ActivationLanes};
+pub(crate) use scheduler::{Activation, ActivationLanes, ModelDiscontinuity};
 mod xspice_dispatch;
 pub(crate) use net_kind::{NetKind, NetKinds};
 mod nonlinear;

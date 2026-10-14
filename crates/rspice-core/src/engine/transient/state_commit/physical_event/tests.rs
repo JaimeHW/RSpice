@@ -102,7 +102,7 @@ fn accept(
     history: &mut BjtTransientHistory,
     point: &PreparedPhysicalEvent,
     solution: &mut [Value],
-) -> Result<(bool, Option<Vec<Value>>), SimulationError> {
+) -> Result<(crate::circuit::ModelDiscontinuity, Option<Vec<Value>>), SimulationError> {
     let coefficients = CompanionCoefficients::backward_euler();
     engine.accept_transient_models(
         &NoAbort,
@@ -194,7 +194,8 @@ fn physical_event_acceptance_keeps_finite_rlc_currents_separate_from_impulse() {
         &mut solution,
     )
     .unwrap();
-    assert!(discontinuity && static_history.is_some());
+    assert_eq!(discontinuity, crate::circuit::ModelDiscontinuity::Step);
+    assert!(static_history.is_some());
     close(circuit.capacitors.v_prev[0], 2.0, 1e-12);
     close(circuit.capacitors.i_prev[0], 6e-6, 1e-16);
     assert!((circuit.capacitors.i_prev[0] - 6e-6 / point.dt).abs() > 1e-3);
@@ -336,7 +337,7 @@ fn physical_event_acceptance_keeps_native_gp_charge_rates_and_total_lead_current
                 &mut solution,
             )
             .unwrap();
-            assert!(discontinuity);
+            assert_eq!(discontinuity, crate::circuit::ModelDiscontinuity::Step);
             assert_eq!(history.charge_q_prev[0], expected_charges);
             assert_eq!(history.charge_cq_prev[0], expected_currents);
             let terminal = history.accepted_terminal_currents[0].unwrap();
@@ -534,7 +535,7 @@ fn physical_event_acceptance_preserves_per_device_orders_and_ordinary_samples() 
             );
         }
         let mut solution = point.state.solution.clone();
-        assert!(
+        assert_eq!(
             accept(
                 &engine,
                 &mut circuit,
@@ -544,7 +545,8 @@ fn physical_event_acceptance_preserves_per_device_orders_and_ordinary_samples() 
                 &mut solution
             )
             .unwrap()
-            .0
+            .0,
+            crate::circuit::ModelDiscontinuity::Step
         );
         for (index, expected) in orders[..4].iter().copied().enumerate() {
             let phase = history.phase[index].as_ref().unwrap();

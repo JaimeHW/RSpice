@@ -927,6 +927,13 @@ pub(crate) struct EventPort {
     /// Existing unidirectional trace/bus label, independent of the private
     /// converter endpoint. Qualified event traces remain available as well.
     trace_node: Option<usize>,
+    /// Whether this is a real input whose event net only a sample of the
+    /// analog solution moves: every driver of the net is a code model that
+    /// reads an analog input and no event input, a V-to-real converter, so
+    /// the net changes only when the hybrid is evaluated at an accepted
+    /// point. Set by [`MixedSignalHost::declare_analog_sampled_reals`]. See
+    /// [`MixedSignalHost::candidate_steps_only_sampled_holds`].
+    solution_sample: bool,
 }
 
 /// One instance's half of a held-equilibrium image; see
@@ -1197,6 +1204,14 @@ struct MixedState {
     accepted_tick: u64,
     accepted_time: f64,
     started: bool,
+    /// Whether every step the accepted point took in a value the analog
+    /// equations read was a sampled-and-held input's new sample
+    /// ([`MixedSignalHost::candidate_steps_only_sampled_holds`]), which asks
+    /// for no edge completion ([`MixedSignalHost::read_step_completion`]).
+    ///
+    /// Not in a checkpoint: a resumed run takes the completions its
+    /// checkpoint recorded rather than asking again.
+    accepted_steps_sampled_holds: bool,
 }
 
 #[derive(Clone)]
@@ -1882,6 +1897,7 @@ impl MixedSignalHost {
                 accepted_tick: 0,
                 accepted_time: 0.0,
                 started: false,
+                accepted_steps_sampled_holds: false,
             },
             scratch: TrialScratch::default(),
             digital_started: false,
@@ -1944,6 +1960,7 @@ impl MixedSignalHost {
         self.state.accepted_tick = 0;
         self.state.accepted_time = 0.0;
         self.state.started = false;
+        self.state.accepted_steps_sampled_holds = false;
         self.digital_started = false;
         self.scratch.ledger.clear();
         Ok(())
@@ -2106,9 +2123,12 @@ impl MixedSignalHost {
                     && read_discrete_input(&self.state, input).map(f64::to_bits)
                         != was.map(f64::to_bits)
             });
-        if read_moved {
-            return true;
-        }
+        read_moved || self.dac_level_moved(trial)
+    }
+
+    /// Whether some D/A bridge drives a different level than when `trial`
+    /// opened.
+    fn dac_level_moved(&self, trial: &ActiveTrial) -> bool {
         self.state.bridges.dac.iter().any(|bridge| {
             let level = |digital: &MixedDigital| {
                 bridge.driven_level(
@@ -2121,27 +2141,108 @@ impl MixedSignalHost {
         })
     }
 
+    /// Whether every step [`Self::candidate_discontinuity`] reports for the
+    /// open trial is a sampled-and-held input's new sample.
+    ///
+    /// A process that copies a V-to-real sample, `always @(r) x = r`, holds
+    /// the analog solution sampled at each accepted point; a contribution that
+    /// reads `x` sees it as a zero-order hold. Each new sample steps the value
+    /// the equations read, by an amount of the order of the step that led to
+    /// it, so integration restarts from the point at order one. But the step
+    /// has no instant of its own to resolve: it is not a source corner, a
+    /// digital edge or the end of a delay, and the hold changes at every
+    /// accepted point. Treated as an edge, with a completion a picosecond
+    /// later and a tenth of the approach after it, each completion took a new
+    /// sample and the steps shrank below the tick. So the step leaving the
+    /// point is the one the truncation error asks for, and no completion is
+    /// requested ([`Self::read_step_completion`]).
+    ///
+    /// The case is told by its origin. With nothing scheduled at this tick
+    /// when the trial opened ([`ActiveTrial::scheduled_activation`]), no A/D
+    /// or D/A bridge or converted port moved, and no `$discontinuity`, the
+    /// discrete half ran only because an event input of this module moved. If
+    /// every input that moved is one only the analog solution's sample moves
+    /// ([`EventPort::solution_sample`]), the chain began with that sampling
+    /// call at the accepted point, and every value it stepped is a sample
+    /// held.
+    pub(crate) fn candidate_steps_only_sampled_holds(&self) -> bool {
+        self.trial
+            .as_ref()
+            .is_some_and(|trial| self.steps_only_sampled_holds(trial))
+    }
+
+    /// [`Self::candidate_steps_only_sampled_holds`] for `trial`, open or just
+    /// taken out for acceptance.
+    fn steps_only_sampled_holds(&self, trial: &ActiveTrial) -> bool {
+        if trial.scheduled_activation
+            || self.analog.discontinuity_rising()
+            || self.converted_output_changed()
+            || trial.vectors.adc_moved.iter().any(|moved| *moved)
+            || self.dac_level_moved(trial)
+        {
+            return false;
+        }
+        let mut sampled = false;
+        for port in &self.event_ports {
+            if port.direction
+                == rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
+            {
+                continue;
+            }
+            let moved = match port.bit {
+                Some(bit) => {
+                    let read = |digital: &MixedDigital| {
+                        digital
+                            .read(port.signal)
+                            .map_or(FourStateBit::HighImpedance, |value| value.bit(bit))
+                    };
+                    read(&trial.rollback) != read(&self.state.digital)
+                }
+                None => {
+                    trial.rollback.read_real(port.signal).map(f64::to_bits)
+                        != self.state.digital.read_real(port.signal).map(f64::to_bits)
+                }
+            };
+            if !moved {
+                continue;
+            }
+            if !port.solution_sample {
+                return false;
+            }
+            sampled = true;
+        }
+        sampled
+    }
+
     /// Mark the real-valued ports whose event net a code model drives from the
     /// analog solution — `nodes` is every such net in the circuit — so their
     /// per-point samples are not reported as steps of the analog equations.
     /// See [`Self::candidate_discontinuity`].
+    ///
+    /// `solution_samples` is the subset only such a sample moves (see
+    /// [`EventPort::solution_sample`]): a net whose every driver reads no
+    /// event input, so nothing scheduled can move it.
     pub(crate) fn declare_analog_sampled_reals(
         &mut self,
         nodes: &std::collections::BTreeSet<usize>,
+        solution_samples: &std::collections::BTreeSet<usize>,
     ) {
+        let real_input = |port: &EventPort| {
+            port.bit.is_none()
+                && port.direction
+                    != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
+        };
         let sampled: Vec<DigitalSignalId> = self
             .event_ports
             .iter()
-            .filter(|port| {
-                port.bit.is_none()
-                    && port.direction
-                        != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Output
-                    && nodes.contains(&port.node)
-            })
+            .filter(|port| real_input(port) && nodes.contains(&port.node))
             .map(|port| port.signal)
             .collect();
         for input in &mut self.discrete_inputs {
             input.analog_sample = input.real && sampled.contains(&input.signal);
+        }
+        for port in &mut self.event_ports {
+            port.solution_sample = real_input(port) && solution_samples.contains(&port.node);
         }
     }
 
@@ -2574,6 +2675,7 @@ impl MixedSignalHost {
                 && direction
                     != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Inout)
                 .then_some(node),
+            solution_sample: false,
         });
         Ok(())
     }
@@ -4166,6 +4268,10 @@ impl MixedSignalHost {
     /// Called only with the candidate returned by prepare_trial_acceptance,
     /// while a reservation excludes any mutation of this host.
     fn apply_prepared_acceptance(&mut self, mut trial: ActiveTrial) {
+        // Read before anything below commits: it compares the settled store
+        // with the trial's rollback image and asks the analog half whether it
+        // raised `$discontinuity` at this candidate.
+        let sampled_holds = self.steps_only_sampled_holds(&trial);
         if let Some(standalone) = &mut self.standalone {
             standalone.commit();
         }
@@ -4177,6 +4283,7 @@ impl MixedSignalHost {
         self.state.accepted_tick = trial.tick;
         self.state.accepted_time = trial.time_seconds;
         self.state.started = true;
+        self.state.accepted_steps_sampled_holds = sampled_holds;
         self.state.initial_digital = None;
         std::mem::swap(
             &mut self.state.accepted_adc_transition_times,
@@ -4912,9 +5019,16 @@ impl MixedSignalHost {
     /// realization and restarts once. Asked again after every acceptance; a
     /// point accepted inside the realization already reports the new value,
     /// and the step out of it is an ordinary one.
+    ///
+    /// A sampled-and-held input's new sample is no edge and asks for none
+    /// ([`Self::candidate_steps_only_sampled_holds`]): the hold changes at
+    /// every accepted point, and a completion a picosecond after each one
+    /// took the next sample there.
     pub(crate) fn read_step_completion(&self) -> Option<f64> {
-        (self.state.started && self.accepted_point_stepped_a_read())
-            .then_some(self.state.accepted_time + OFFICIAL_BRIDGE_TIMING_MIN)
+        (self.state.started
+            && !self.state.accepted_steps_sampled_holds
+            && self.accepted_point_stepped_a_read())
+        .then_some(self.state.accepted_time + OFFICIAL_BRIDGE_TIMING_MIN)
     }
 
     /// Whether a discrete value the analog equations read at its left limit
