@@ -2233,34 +2233,6 @@ impl Command {
             Self::ExportVisualizationDocument => {
                 crate::workbench::documents::visualization_studio::export_document(app);
             }
-            Self::FeatureAvailability => {
-                let route = super::SurfaceRoute::surface(super::SurfaceId::FeatureAvailability);
-                if let Err(error) = app
-                    .state
-                    .workbench
-                    .navigate(route, super::RouteTransitionSource::User)
-                {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                            error.to_string(),
-                        ));
-                }
-            }
-            Self::InteroperabilityMatrix => {
-                let route = super::SurfaceRoute::capability_workflow(
-                    super::CapabilityWorkflowId::InteroperabilityMatrix,
-                );
-                if let Err(error) = app
-                    .state
-                    .workbench
-                    .navigate(route, super::RouteTransitionSource::User)
-                {
-                    app.state
-                        .push_user_message(crate::diagnostics::ConsoleMessage::warning(
-                            error.to_string(),
-                        ));
-                }
-            }
             Self::HelpCenter => {
                 open_help_center(&mut app.state, crate::workbench::app::HelpCenterPage::Help)
             }

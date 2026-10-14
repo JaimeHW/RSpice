@@ -103,22 +103,10 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "console-maximize"
     );
     assert_eq!(Command::ClearConsole.spec().id, "console-clear");
-    assert_eq!(
-        Command::FeatureAvailability.spec(),
-        CommandSpec {
-            id: "feature-availability",
-            label: "Product capability and platform matrix…",
-            group: "Help",
-        }
-    );
-    assert_eq!(
-        Command::InteroperabilityMatrix.spec(),
-        CommandSpec {
-            id: "interoperability-matrix",
-            label: "Interoperability and format matrix…",
-            group: "Help",
-        }
-    );
+    // The capability and interoperability matrices were deleted. A shortcut
+    // profile that still names them keeps the entry but resolves nothing.
+    assert_eq!(Command::from_stable_id("feature-availability"), None);
+    assert_eq!(Command::from_stable_id("interoperability-matrix"), None);
     assert_eq!(
         Command::OpenWorkspace(Workspace::Results).spec().id,
         "results"

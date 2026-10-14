@@ -26,12 +26,10 @@ use crate::workbench::app_state::session::shortcut_library::{
 };
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
-pub(in crate::workbench) const ENGINEERING_PROFILE_HELP: &str = "Sets the discipline context reported by capability discovery and the availability matrix. Deep links and project documents remain available.";
-pub(in crate::workbench) const CAPABILITY_MATRIX_HELP: &str = "See installed, licensed, preview and profile-hidden capabilities without duplicating their settings.";
+pub(in crate::workbench) const ENGINEERING_PROFILE_HELP: &str = "Sets the discipline context used by specialist tool discovery. Deep links and project documents remain available.";
 
 #[derive(Debug, Default)]
 pub(in crate::workbench) struct PreferencePageActions {
-    pub(in crate::workbench) open_capability_matrix: bool,
     pub(in crate::workbench) open_resolved_preference_policy: bool,
     pub(in crate::workbench) open_workspace_layout_manager: bool,
     pub(in crate::workbench) open_shortcut_editor: bool,
@@ -51,10 +49,7 @@ impl RSpiceApp {
         let current_surface = self.state.workbench.current_route().surface_id();
         let route_owned = current_surface == SurfaceId::Preferences;
         let retained_under_child_manager = self.state.dialogs.preferences_open
-            && matches!(
-                current_surface,
-                SurfaceId::FeatureAvailability | SurfaceId::AccountOrganization
-            );
+            && current_surface == SurfaceId::AccountOrganization;
         let standalone_layout_manager = self.state.dialogs.workspace_layout_manager.open
             && !self.state.dialogs.preferences_open;
         if standalone_layout_manager {
@@ -150,11 +145,6 @@ impl RSpiceApp {
     }
 
     fn execute_preference_page_actions(&mut self, ctx: &Context, actions: PreferencePageActions) {
-        if actions.open_capability_matrix {
-            crate::workbench::commands::vocabulary::Command::FeatureAvailability.execute(self);
-            self.state.dialogs.preferences_open =
-                self.state.workbench.current_route().surface_id() == SurfaceId::FeatureAvailability;
-        }
         if actions.open_shortcut_editor {
             let profile = self.state.ui.preferences.shortcuts().clone();
             self.state.dialogs.shortcut_editor.open(&profile);
@@ -794,24 +784,6 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn every_exposed_preferences_action_routes_to_a_real_executor() {
-        let mut app = test_app();
-        app.state
-            .workbench
-            .navigate(preferences_route(), RouteTransitionSource::BrowserPop)
-            .unwrap();
-        app.execute_preference_page_actions(
-            &Context::default(),
-            PreferencePageActions {
-                open_capability_matrix: true,
-                ..PreferencePageActions::default()
-            },
-        );
-        assert_eq!(
-            app.state.workbench.current_route().surface_id(),
-            SurfaceId::FeatureAvailability
-        );
-        assert!(app.state.dialogs.preferences_open);
-
         let mut layout_app = test_app();
         layout_app.execute_preference_page_actions(
             &Context::default(),

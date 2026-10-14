@@ -318,15 +318,6 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
             );
         },
     );
-    if action_row(
-        ui,
-        "Feature ownership and availability",
-        super::CAPABILITY_MATRIX_HELP,
-        "feature-availability",
-        "Review matrix…",
-    ) {
-        actions.open_capability_matrix = true;
-    }
     page_heading(
         ui,
         "Workspace layout",
@@ -1148,7 +1139,6 @@ mod tests {
         for row in [
             "Product scope",
             "Engineering profile",
-            "Feature ownership and availability",
             "Workspace layout",
             "Dock composition",
             "Workspace preset",
@@ -1174,6 +1164,7 @@ mod tests {
             "Per-monitor placement",
             "Phone window model",
             "Document tabs and session",
+            "Feature ownership and availability",
         ] {
             assert!(
                 !workspace.contains(missing_backend),

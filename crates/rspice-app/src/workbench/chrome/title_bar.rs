@@ -1344,7 +1344,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::MigrationGuide => WorkbenchIcon::Compare,
         Command::SystemDiagnostics | Command::SupportBundle => WorkbenchIcon::Terminal,
         Command::LegalPrivacy => WorkbenchIcon::Check,
-        Command::InteroperabilityMatrix | Command::ModelCompareRelease => WorkbenchIcon::Compare,
+        Command::ModelCompareRelease => WorkbenchIcon::Compare,
         Command::DesignSpecialistWorkspaces | Command::SpecialistToolBrowser => WorkbenchIcon::Grid,
         Command::VisualizationStudio => WorkbenchIcon::Results,
         Command::AddVisualizationPane => WorkbenchIcon::Add,
@@ -1352,7 +1352,7 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::VisualizationCursorManager => WorkbenchIcon::Target,
         Command::VisualizationDocumentProperties => WorkbenchIcon::Settings,
         Command::ExportVisualizationDocument => WorkbenchIcon::Export,
-        Command::FeatureAvailability | Command::About => WorkbenchIcon::Info,
+        Command::About => WorkbenchIcon::Info,
         Command::PreviousDocument | Command::PreviousWorkspace => WorkbenchIcon::ArrowLeft,
         Command::NextDocument | Command::NextWorkspace => WorkbenchIcon::ArrowRight,
         Command::CloseOtherDocuments | Command::CloseAllDocuments => WorkbenchIcon::File,
@@ -1761,8 +1761,6 @@ fn window_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     command_item(ui, app, Command::HelpCenter);
     command_item(ui, app, Command::KeyboardShortcuts);
-    command_item(ui, app, Command::FeatureAvailability);
-    command_item(ui, app, Command::InteroperabilityMatrix);
     command_item(ui, app, Command::ReleaseNotes);
     command_item(ui, app, Command::MigrationGuide);
     command_item(ui, app, Command::SystemDiagnostics);

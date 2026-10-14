@@ -916,7 +916,7 @@ fn canonical_menu_icons_do_not_fall_back_to_generic_file_glyphs() {
         (Command::CompileVerilogA, WorkbenchIcon::Code),
         (Command::AutomationConsole, WorkbenchIcon::Terminal),
         (Command::KeyboardShortcuts, WorkbenchIcon::Search),
-        (Command::InteroperabilityMatrix, WorkbenchIcon::Compare),
+        (Command::ModelCompareRelease, WorkbenchIcon::Compare),
     ] {
         assert_eq!(command_icon(command), icon, "{}", command.spec().id);
     }
