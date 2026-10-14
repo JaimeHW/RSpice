@@ -244,7 +244,8 @@ pub(crate) fn show_virtual_text_editor(
                 if response.clicked() {
                     response.request_focus();
                 }
-                crate::ui::theme::paint_focus_ring(ui, &response, content_rect);
+                // No focus ring: the editor takes focus on every press, and
+                // its caret already says where typing goes.
 
                 let origin = content_rect.min;
                 let first_row = ((viewport.top() - style.top_padding).max(0.0) / style.line_height)
@@ -1993,6 +1994,61 @@ mod tests {
             .breakpoint_toggled;
         });
         assert_eq!(toggled, Some(1));
+    }
+
+    /// The editor takes focus on every press, so a focus ring would frame the
+    /// source for as long as anyone worked in it.
+    #[test]
+    fn a_focused_editor_draws_no_focus_ring() {
+        let context = egui::Context::default();
+        crate::ui::Theme::default().apply(&context);
+        let accent = crate::ui::tokens::Tokens::get(&context).color.accent;
+        let mut source = "print('ready')\n".to_owned();
+        let edited = std::collections::HashSet::new();
+        let style = test_style(&edited);
+        let editor_id = egui::Id::new("focus-ring-editor-test");
+        let raw_input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(900.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let mut focused = false;
+        let mut output = None;
+        for _ in 0..2 {
+            output = Some(context.run_ui(raw_input(), |ui| {
+                let shown = show_virtual_text_editor(
+                    ui,
+                    editor_id,
+                    &mut source,
+                    1,
+                    true,
+                    EditorSyntax::Python,
+                    None,
+                    &style,
+                    |ui, text, _line, font| {
+                        ui.fonts_mut(|fonts| {
+                            fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
+                        })
+                    },
+                    |_| None,
+                    |_| None,
+                );
+                focused = shown.response.has_focus();
+                shown.response.request_focus();
+            }));
+        }
+        assert!(focused, "the editor held focus while it was drawn");
+        let ring = output
+            .expect("a frame")
+            .shapes
+            .iter()
+            .any(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) => rect.stroke.width >= 2.0 && rect.stroke.color == accent,
+                _ => false,
+            });
+        assert!(!ring, "no focus ring around the source");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
