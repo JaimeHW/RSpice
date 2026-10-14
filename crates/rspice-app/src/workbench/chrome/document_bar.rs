@@ -1,7 +1,6 @@
 //! Workspace-scoped document tabs. Stable project identities drive every tab;
 //! the shell never fabricates datasets, source files, or verification records.
 
-use egui::containers::menu::MenuButton;
 use egui::{Frame, Layout, Panel, Sense, Ui, Vec2};
 
 use crate::state::ViewType;
@@ -21,7 +20,6 @@ const TAB_CONTENT_GAP: f32 = 7.0;
 const TAB_CLOSE_SIZE: f32 = 16.0;
 const TAB_DIRTY_SIZE: f32 = 6.0;
 const TAB_ACTIVE_EDGE: f32 = 2.0;
-const OVERFLOW_WIDTH: f32 = 31.0;
 
 pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let ctx = root.ctx().clone();
@@ -33,27 +31,24 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
 
     let t = Tokens::get(ctx);
+    // The strip is window chrome and wears the toolbar's tone. The active tab
+    // wears the page's and covers the hairline, so it opens onto the document
+    // beneath it; painted in the page's tone, the strip ran into the page.
     Panel::top("workbench.document_bar")
         .exact_size(layout.document_bar_height)
-        .frame(Frame::new().fill(t.color.bg_app))
+        .frame(Frame::new().fill(t.color.bg_panel))
         .show_separator_line(false)
         .show(root, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             let rect = ui.max_rect();
-            let overflow_width = if t.metrics.ctl_h >= 44.0 {
-                44.0
-            } else {
-                OVERFLOW_WIDTH
-            };
             ui.painter().hline(
                 rect.x_range(),
                 (rect.bottom() - 0.5).max(rect.top()),
                 egui::Stroke::new(1.0, t.color.border),
             );
             ui.horizontal(|ui| {
-                let tabs_width = (ui.available_width() - overflow_width).max(1.0);
                 ui.allocate_ui_with_layout(
-                    Vec2::new(tabs_width, layout.document_bar_height),
+                    Vec2::new(ui.available_width().max(1.0), layout.document_bar_height),
                     Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         egui::ScrollArea::horizontal()
@@ -76,13 +71,6 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                                 });
                             });
                     },
-                );
-                document_overflow(
-                    ui,
-                    &mut app.state,
-                    &documents,
-                    layout.document_bar_height,
-                    overflow_width,
                 );
             });
         });
@@ -634,14 +622,16 @@ fn document_tabs(
             })
             .inner;
         tab_ids.push(tab.response.id);
+        if selected {
+            reveal_newly_active_tab(ui, &tab.response);
+        }
 
+        // A pointer press activates a tab without taking keyboard focus, so
+        // the focus ring appears only for a reader who is using the keys.
         if tab.close_clicked {
-            close = Some((index, document.id.clone()));
-        } else if tab.response.clicked() {
-            focus_index = Some(index);
-            if !selected {
-                open = Some(document.id.clone());
-            }
+            close = Some((index, document.id.clone(), tab.response.has_focus()));
+        } else if tab.response.clicked() && !selected {
+            open = Some(document.id.clone());
         }
 
         if tab.response.has_focus() {
@@ -668,7 +658,7 @@ fn document_tabs(
                 Some(TabKey::First) => focus_index = Some(0),
                 Some(TabKey::Last) => focus_index = Some(documents.len() - 1),
                 Some(TabKey::Close) if document_is_closable(state, &document.id) => {
-                    close = Some((index, document.id.clone()))
+                    close = Some((index, document.id.clone(), true))
                 }
                 Some(TabKey::Close) | None => {}
             }
@@ -682,15 +672,31 @@ fn document_tabs(
     if let Some(document) = open {
         activate_document(state, &document);
     }
-    if let Some((closed_index, document)) = close {
+    if let Some((closed_index, document, had_focus)) = close {
         let focus_after_close = if closed_index + 1 < documents.len() {
             closed_index + 1
         } else {
             closed_index.saturating_sub(1)
         };
-        if close_document(state, &document, documents) {
+        if close_document(state, &document, documents) && had_focus {
             ui.memory_mut(|memory| memory.request_focus(tab_ids[focus_after_close]));
         }
+    }
+}
+
+/// Scroll the active tab into view when it becomes active, whether by a
+/// press, Ctrl+Tab or the navigator. Only until it is in view: revealing it
+/// every frame would undo every turn of the wheel over the strip, and
+/// revealing it once can stop short while the scroll is still animating.
+fn reveal_newly_active_tab(ui: &Ui, tab: &egui::Response) {
+    let revealed = egui::Id::new("workbench.document_tabs.revealed");
+    if ui.ctx().data(|data| data.get_temp::<egui::Id>(revealed)) == Some(tab.id) {
+        return;
+    }
+    tab.scroll_to_me(None);
+    let viewport = ui.clip_rect();
+    if viewport.expand(0.5).contains_rect(tab.rect) || tab.rect.width() >= viewport.width() {
+        ui.ctx().data_mut(|data| data.insert_temp(revealed, tab.id));
     }
 }
 
@@ -944,7 +950,7 @@ fn document_tab(
     });
 
     if selected {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
+        ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
         ui.painter().rect_filled(
             egui::Rect::from_min_max(
                 rect.left_top(),
@@ -1106,82 +1112,6 @@ fn suffix_width(dirty: bool, closable: bool) -> f32 {
         (false, true) => TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
         (true, true) => TAB_CONTENT_GAP + TAB_DIRTY_SIZE + TAB_CONTENT_GAP + 2.0 + TAB_CLOSE_SIZE,
     }
-}
-
-fn document_overflow(
-    ui: &mut egui::Ui,
-    state: &mut AppState,
-    documents: &[WorkspaceDocument],
-    height: f32,
-    width: f32,
-) {
-    let t = Tokens::get(ui.ctx());
-    let active = authoritative_active_document(state, documents);
-    let mut selected = None;
-    let (response, _) = ui
-        .scope(|ui| {
-            ui.spacing_mut().button_padding = Vec2::ZERO;
-            MenuButton::from_button(
-                egui::Button::new("")
-                    .frame(false)
-                    .min_size(Vec2::new(width, height.max(t.metrics.ctl_h))),
-            )
-            .ui(ui, |ui| {
-                ui.set_min_width(220.0);
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for document in documents {
-                    if ui
-                        .add_sized(
-                            [220.0, if height >= 44.0 { 44.0 } else { 29.0 }],
-                            egui::Button::selectable(
-                                active.as_ref() == Some(&document.id),
-                                &document.label,
-                            ),
-                        )
-                        .clicked()
-                    {
-                        selected = Some(document.id.clone());
-                        ui.close();
-                    }
-                }
-            })
-        })
-        .inner;
-    if let Some(document) = selected {
-        activate_document(state, &document);
-    }
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            "Manage open documents",
-        )
-    });
-    ui.painter().rect_filled(
-        response.rect,
-        0.0,
-        if response.hovered() {
-            t.color.bg_hover
-        } else {
-            t.color.bg_app
-        },
-    );
-    ui.painter().vline(
-        response.rect.left(),
-        response.rect.y_range(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    WorkbenchIcon::ChevronDown.paint(
-        ui.painter(),
-        egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0)),
-        if response.hovered() {
-            t.color.text
-        } else {
-            t.color.text_dim
-        },
-    );
-    theme::paint_focus_ring(ui, &response, response.rect);
-    response.on_hover_text("Manage open documents");
 }
 
 const fn icon_for_view(view_type: ViewType) -> WorkbenchIcon {
@@ -1524,7 +1454,6 @@ mod tests {
         assert_eq!(TAB_CONTENT_GAP, 7.0);
         assert_eq!(TAB_CLOSE_SIZE, 16.0);
         assert_eq!(TAB_DIRTY_SIZE, 6.0);
-        assert_eq!(OVERFLOW_WIDTH, 31.0);
         assert_eq!(tokens::FS_1, 12.0);
     }
 
@@ -1604,6 +1533,130 @@ mod tests {
         assert!(
             !document_strip_visible(Workspace::Simulate, documents.len()),
             "one document paints no strip"
+        );
+    }
+
+    /// A Design session with the top schematic and `extra` further schematics
+    /// open, then a Verilog-A module, which is the active document.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn design_session(extra: usize) -> RSpiceApp {
+        use crate::state::CellViewRef;
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.authority.open_session();
+        app.state.workbench.activate(Workspace::Design);
+        let library = app.state.workspace.content.project.root_library.clone();
+        for index in 0..extra {
+            app.state.workspace.open_view(
+                CellViewRef::new(&library, format!("stage_{index}"), "schematic"),
+                ViewType::Schematic,
+            );
+        }
+        app.state.workspace.open_view(
+            CellViewRef::new(&library, "testdev", "veriloga"),
+            ViewType::VerilogA,
+        );
+        app
+    }
+
+    /// Draw the strip alone across a 1440 pt window, as `frame::show` does.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn strip_frame(
+        ctx: &egui::Context,
+        app: &mut RSpiceApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let size = egui::vec2(1440.0, 900.0);
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
+                show(ui, app, layout);
+            },
+        )
+    }
+
+    /// A press on a tab opens its document and leaves keyboard focus where it
+    /// was. Taking focus on a press painted the keyboard focus ring around
+    /// every tab the pointer chose.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_pressed_tab_activates_without_taking_keyboard_focus() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = design_session(0);
+        let top = app.state.workspace.content.open_views[0].reference.clone();
+        assert_ne!(app.state.workspace.content.active_view, top);
+        strip_frame(&ctx, &mut app, Vec::new());
+
+        // The top schematic is the first tab, at the strip's left edge.
+        let at = egui::pos2(40.0, 15.0);
+        strip_frame(
+            &ctx,
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        strip_frame(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        strip_frame(&ctx, &mut app, Vec::new());
+
+        assert_eq!(app.state.workspace.content.active_view, top);
+        assert_eq!(ctx.memory(|memory| memory.focused()), None);
+    }
+
+    /// The active tab is scrolled into view when the strip holds more tabs
+    /// than it can show. With the overflow menu gone, a document activated
+    /// off the strip's edge would otherwise have no visible tab.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn an_active_tab_past_the_strips_edge_is_scrolled_into_view() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = design_session(14);
+
+        let mut output = strip_frame(&ctx, &mut app, Vec::new());
+        // The scroll animates; give it the frames it takes.
+        for _ in 0..60 {
+            output = strip_frame(&ctx, &mut app, Vec::new());
+        }
+        let nodes = output
+            .platform_output
+            .accesskit_update
+            .expect("accessibility tree")
+            .nodes;
+        let active = nodes
+            .iter()
+            .find(|(_, node)| {
+                node.role() == egui::accesskit::Role::Tab && node.is_selected() == Some(true)
+            })
+            .and_then(|(_, node)| node.bounds())
+            .expect("the active tab is in the tree");
+        assert!(
+            active.x0 >= 0.0 && active.x1 <= 1440.5,
+            "the active tab spans {}..{}, outside the 1440 pt strip",
+            active.x0,
+            active.x1
         );
     }
 
