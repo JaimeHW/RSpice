@@ -120,6 +120,35 @@ class TestRunFailureHandling:
         assert report.skipped == []
 
 
+class TestTransientStateCards:
+    """A small-signal card that names a transient state is refused, never
+    run at the operating point instead."""
+
+    CIRCUIT = """* Transient-state card
+V1 in 0 PULSE(0 1 0 1n 1n 10u 20u) AC 1
+R1 in out 1k
+C1 out 0 1n
+.tran 10n 5u
+"""
+
+    @pytest.mark.parametrize(
+        ("card", "keyword"),
+        [
+            (".ac dec 2 1k 10k actimes=2u", "ACTIMES="),
+            (".tf v(out) v1 checkpoint=state.chk", "CHECKPOINT="),
+        ],
+    )
+    @pytest.mark.parametrize("continue_on_error", [True, False])
+    def test_the_deck_is_refused_before_any_solve(
+        self, engine, card, keyword, continue_on_error
+    ):
+        deck = rspice.Netlist.parse(f"{self.CIRCUIT}{card}\n.end\n")
+        with pytest.raises(rspice.RSpiceNotImplementedError, match=keyword) as excinfo:
+            engine.run(deck, continue_on_error=continue_on_error)
+        assert isinstance(excinfo.value, NotImplementedError)
+        assert "rspice run" in str(excinfo.value)
+
+
 class TestRepeatedDirectives:
     """A deck may carry more than one directive of the same kind."""
 

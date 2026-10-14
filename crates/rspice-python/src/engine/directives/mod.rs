@@ -300,6 +300,9 @@ pub(super) fn run(
         )
         .map_err(deck_plan_simulation_error)
     })?;
+    if let Some(refusal) = transient_state_refusal(&plan, net) {
+        return Err(crate::errors::not_implemented_error(refusal));
+    }
     let mut measurements = if plan.axes().is_empty() {
         run_directives(
             py_engine,
@@ -324,6 +327,35 @@ pub(super) fn run(
 
     measurements.shrink_to_fit();
     Ok(into_report(out, measurements))
+}
+
+/// Why the deck cannot run here, when an authored small-signal card names a
+/// transient state to linearize around (`ACTIMES=` or `CHECKPOINT=`).
+///
+/// Every runner on this surface solves a small-signal card at the operating
+/// point, so running such a card would report an answer around the wrong
+/// state. The deck is refused before any solve, even under
+/// `continue_on_error`: skipping the card would report a run of a deck
+/// without it.
+fn transient_state_refusal(
+    plan: &rspice_core::execution::DeckPlan,
+    net: &rspice_core::Netlist,
+) -> Option<String> {
+    plan.authored_analyses(net)
+        .enumerate()
+        .find_map(|(index, (command, id))| {
+            let keyword = match net.small_signal_state(index)? {
+                rspice_core::netlist::SmallSignalStateSource::TransientTimes(_) => "ACTIMES=",
+                rspice_core::netlist::SmallSignalStateSource::CheckpointFile(_) => "CHECKPOINT=",
+            };
+            let instance = id.map(|id| format!(" ({id})")).unwrap_or_default();
+            Some(format!(
+                "authored card {}{instance} carries {keyword}, which linearizes it around a \
+                 transient state, and Engine.run cannot run that yet. Run the deck with \
+                 `rspice run`, or remove {keyword} to linearize at the operating point.",
+                describe_analysis(command),
+            ))
+        })
 }
 
 /// Execute exactly one analysis through the path `Engine.run` uses.
@@ -606,5 +638,63 @@ fn into_report(out: DirectiveOutcomes, measurements: Vec<PyMeasurement>) -> PyRu
         all_sensitivity,
         all_sensitivity_ac,
         all_dcmatch,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transient_state_refusal;
+
+    fn refusal(card: &str) -> Option<String> {
+        let netlist = rspice_core::Netlist::parse(&format!(
+            "transient-state deck\n\
+             V1 in 0 PULSE(0 1 0 1n 1n 10u 20u) AC 1\n\
+             R1 in out 1k\n\
+             C1 out 0 1n\n\
+             .tran 10n 5u\n\
+             {card}\n.end\n"
+        ))
+        .expect("the deck parses");
+        let plan = rspice_core::execution::DeckPlan::from_netlist_with_abort(
+            &netlist,
+            &rspice_core::ResourceLimits::default(),
+            &rspice_core::NoAbort,
+        )
+        .expect("the deck plans");
+        transient_state_refusal(&plan, &netlist)
+    }
+
+    /// A small-signal card that names a transient state is refused by name,
+    /// with a route that runs it; the same card without the keyword runs.
+    #[test]
+    fn a_card_at_a_transient_state_is_refused_by_name() {
+        for (card, keyword, instance) in [
+            (".ac dec 2 1k 10k actimes=2u", "ACTIMES=", "(ac-001)"),
+            (
+                ".noise v(out) v1 dec 2 1k 10k actimes=1u,3u",
+                "ACTIMES=",
+                "(noise-001)",
+            ),
+            (
+                ".tf v(out) v1 checkpoint=state.chk",
+                "CHECKPOINT=",
+                "(tf-001)",
+            ),
+        ] {
+            let message = refusal(card).unwrap_or_else(|| panic!("{card} must be refused"));
+            assert!(
+                message.contains(keyword)
+                    && message.contains(instance)
+                    && message.contains("rspice run"),
+                "the refusal names the card, its keyword and a route that runs it: {message}"
+            );
+        }
+        for card in [
+            ".ac dec 2 1k 10k",
+            ".noise v(out) v1 dec 2 1k 10k",
+            ".tf v(out) v1",
+        ] {
+            assert_eq!(refusal(card), None, "{card} runs at the operating point");
+        }
     }
 }

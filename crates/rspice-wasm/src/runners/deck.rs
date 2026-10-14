@@ -37,7 +37,7 @@ use rspice_core::execution::{
 };
 use rspice_core::netlist::{
     AnalysisCommand, DcSweepSpec, FftFormat, FreqVariation, MonteCarloDistribution,
-    PeriodicSourceSelector, PeriodicSweep,
+    PeriodicSourceSelector, PeriodicSweep, SmallSignalStateSource,
 };
 use rspice_core::{AbortSignal, Engine, Netlist, NoAbort, ResourceKind, ResourceLimits, Value};
 
@@ -92,6 +92,7 @@ pub fn run_authored_deck_document_with_options_and_abort_detailed(
             )));
         }
     }
+    refuse_transient_states(&plan, &netlist)?;
 
     let planning_engine = engine_with_resource_limits(resource_limits)?;
     // `.ALTER` and every unknown axis kind are refused by the core
@@ -1059,6 +1060,35 @@ fn card_spelling(command: &AnalysisCommand) -> &'static str {
     }
 }
 
+/// Refuse, before any solve starts, an authored small-signal card that names a
+/// transient state to linearize around (`ACTIMES=` or `CHECKPOINT=`).
+///
+/// This surface solves every small-signal card at the operating point, so
+/// running such a card would publish an answer around the wrong state.
+fn refuse_transient_states(plan: &DeckPlan, netlist: &Netlist) -> DetailedWasmResult<()> {
+    for (index, (command, id)) in plan.authored_analyses(netlist).enumerate() {
+        let Some(state) = netlist.small_signal_state(index) else {
+            continue;
+        };
+        let keyword = match state {
+            SmallSignalStateSource::TransientTimes(_) => "ACTIMES=",
+            SmallSignalStateSource::CheckpointFile(_) => "CHECKPOINT=",
+        };
+        let instance = id.map(|id| format!(" ({id})")).unwrap_or_default();
+        return Err(Box::new(WasmError::new(
+            format!(
+                "authored {} card{instance} carries {keyword}, which linearizes it around a \
+                 transient state, and the browser API cannot run that yet. Run the deck with \
+                 `rspice run`, or remove {keyword} to linearize at the operating point.",
+                card_spelling(command),
+            ),
+            "unsupported_small_signal_state",
+            "unsupported_feature",
+        )));
+    }
+    Ok(())
+}
+
 fn upstream_or_refuse(
     upstream: Option<AnalysisInstanceId>,
     card: &'static str,
@@ -1937,6 +1967,46 @@ R2 out 0 1k\n\
             "the refusal names ALTER: {}",
             error.message
         );
+    }
+
+    /// A small-signal card that names a transient state is refused by name
+    /// before any solve, on the declarative and the control-script routes; it
+    /// is never run at the operating point instead.
+    #[test]
+    fn a_card_at_a_transient_state_is_refused_before_any_solve() {
+        let circuit = "browser transient-state deck\n\
+V1 in 0 PULSE(0 1 0 1n 1n 10u 20u) AC 1\n\
+R1 in out 1k\n\
+C1 out 0 1n\n\
+.TRAN 10n 5u\n";
+        for (card, keyword, instance) in [
+            (".AC DEC 2 1k 10k ACTIMES=2u", "ACTIMES=", "ac-001"),
+            (
+                ".NOISE V(out) V1 DEC 2 1k 10k ACTIMES=1u,3u",
+                "ACTIMES=",
+                "noise-001",
+            ),
+            (
+                ".TF V(out) V1 CHECKPOINT=state.chk",
+                "CHECKPOINT=",
+                "tf-001",
+            ),
+        ] {
+            for control in ["", ".control\nrun\n.endc\n"] {
+                let deck = format!("{circuit}{card}\n{control}.END\n");
+                let error = *run_authored_deck_document_detailed(&deck)
+                    .expect_err("a card at a transient state must be refused");
+                assert_eq!(error.code, "unsupported_small_signal_state", "{deck}");
+                assert_eq!(error.category, "unsupported_feature", "{deck}");
+                assert!(
+                    error.message.contains(keyword)
+                        && error.message.contains(&format!("({instance})"))
+                        && error.message.contains("rspice run"),
+                    "the refusal names the card, its keyword and a route that runs it: {}",
+                    error.message
+                );
+            }
+        }
     }
 
     /// A pre-set abort source cancels the deck route before it publishes.

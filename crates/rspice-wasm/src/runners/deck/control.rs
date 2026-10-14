@@ -32,6 +32,8 @@ pub(super) fn run(
             "control-script execution with declarative run axes, Fourier/FFT, restart or compression is not yet implemented".into(),
         ));
     }
+    // `run` executes the declarative cards, each at the operating point.
+    refuse_transient_states(&initial_plan, &netlist)?;
     let script = netlist
         .control_script
         .clone()
