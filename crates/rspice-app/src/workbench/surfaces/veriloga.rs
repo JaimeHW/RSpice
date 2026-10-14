@@ -14,7 +14,6 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
-use super::super::design_system::workspace_title_row;
 use crate::workbench::documents::code_workspace::{
     CodeDiagnosticCollection, CodeEditorLanguage, show_code_document_interaction_versioned,
 };
@@ -34,22 +33,8 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         ui.spacing_mut().item_spacing = Vec2::ZERO;
-        let default_file_name = app
-            .state
-            .ui
-            .messages()
-            .text(MessageId::VerilogASourceDefault);
-        let file_name = selected
-            .as_ref()
-            .map_or(default_file_name.as_str(), |source| {
-                source.document().file_name()
-            });
-        let module = selected
-            .as_ref()
-            .ok()
-            .and_then(|source| source.selected_module().map(str::to_owned))
-            .unwrap_or_else(|| app.state.workspace.content.active_view.cell.clone());
-        title_row(ui, app, file_name, &module);
+        // No heading above the editor: the tab names the module, the file row
+        // names its source, and the toolbar holds Compile at every width.
         let selected = match selected {
             Ok(selected) => selected,
             Err(error) => {
@@ -445,117 +430,6 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
 }
 
-/// The row above the editor: the module the tab holds, in two short lines.
-///
-/// The toolbar owns Compile and the cross-link to the generated deck. Where it
-/// keeps only its first tools, on a phone, the row carries those two itself,
-/// under the heading.
-fn title_row(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, module: &str) {
-    let eyebrow = app
-        .state
-        .ui
-        .messages()
-        .text(MessageId::VerilogAModuleEyebrow);
-    let viewport = ui.ctx().content_rect();
-    let carries_actions =
-        super::super::layout::toolbar_tool_limit(viewport.width(), viewport.height()).is_some();
-    workspace_title_row(ui, |ui| {
-        module_heading(ui, &eyebrow, module);
-        if !carries_actions {
-            return;
-        }
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
-            generated_netlist_button(ui, app, width);
-            compile_button(ui, app, file_name, width);
-        });
-    });
-}
-
-/// The kicker and the module name: all a Design tab's heading has to say.
-fn module_heading(ui: &mut Ui, eyebrow: &str, module: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(eyebrow.to_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .extra_letter_spacing(0.09 * tokens::FS_0)
-            .color(t.color.text_faint),
-    );
-    ui.add_space(3.0);
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(module)
-                .font(theme::mono(15.0, FontWeight::SemiBold))
-                .color(t.color.text),
-        )
-        .truncate(),
-    );
-}
-
-fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
-    let label = app
-        .state
-        .ui
-        .messages()
-        .text(MessageId::CodeGeneratedNetlist);
-    if Button::new(&label)
-        .min_width(width)
-        .max_width(width)
-        .show(ui)
-        .clicked()
-    {
-        crate::workbench::documents::netlist_document::show_generated_deck(&mut app.state);
-    }
-}
-
-fn compile_button(ui: &mut Ui, app: &mut RSpiceApp, file_name: &str, width: f32) {
-    use crate::workbench::commands::vocabulary::Command;
-
-    let messages = app.state.ui.messages();
-    let accessible_label = compile_button_label(app, file_name);
-    let label = if app.state.ui.code_workspace.veriloga.pending.is_some() {
-        messages.text(MessageId::VerilogACompiling)
-    } else {
-        messages.text(MessageId::VerilogACompileModel)
-    };
-    let compile_enabled = Command::CompileVerilogA.is_enabled(app);
-    let unavailable = messages.text(MessageId::VerilogACompileUnavailable);
-    let button = Button::new(&label)
-        .enabled(compile_enabled)
-        .accessible_label(&accessible_label)
-        .min_width(width)
-        .max_width(width);
-    let button = if compile_enabled {
-        button.accent()
-    } else {
-        button
-    };
-    let response = button.show(ui);
-    let response = if compile_enabled {
-        response
-    } else {
-        response.on_disabled_hover_text(unavailable)
-    };
-    if response.clicked() {
-        Command::CompileVerilogA.execute(app);
-    }
-}
-
-fn compile_button_label(app: &RSpiceApp, file_name: &str) -> String {
-    let messages = app.state.ui.messages();
-    let pending = app.state.ui.code_workspace.veriloga.pending.is_some();
-    if pending {
-        messages.format(
-            MessageId::VerilogACompilingFile,
-            &[("file_name", file_name)],
-        )
-    } else {
-        messages.format(MessageId::VerilogACompileFile, &[("file_name", file_name)])
-    }
-}
-
 fn source_editor(
     ui: &mut Ui,
     app: &mut RSpiceApp,
@@ -580,7 +454,9 @@ fn source_editor(
         ),
         Sense::hover(),
     );
-    ui.painter().rect_filled(toolbar, 0.0, t.color.bg_panel);
+    // The page's tone, which the active document tab above wears too: the
+    // tab opens onto this row.
+    ui.painter().rect_filled(toolbar, 0.0, t.color.bg_app);
     ui.painter().hline(
         toolbar.x_range(),
         toolbar.bottom(),
@@ -866,7 +742,7 @@ fn interface_strip(
     );
     // The strip shares the toolbar's fill, so the rule above it is what keeps
     // a finding from reading as a second row of tools.
-    ui.painter().rect_filled(strip, 0.0, t.color.bg_panel);
+    ui.painter().rect_filled(strip, 0.0, t.color.bg_app);
     for y in [strip.top() + 0.5, strip.bottom()] {
         ui.painter()
             .hline(strip.x_range(), y, Stroke::new(1.0, t.color.border));

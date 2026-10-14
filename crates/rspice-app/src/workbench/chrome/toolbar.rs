@@ -766,24 +766,22 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 /// Toolbar of an open Verilog-A cell view.
 ///
 /// Compile and the cross-link to the generated deck, then the source tools,
-/// Format first. The toolbar owns those two actions; the editor's heading only
-/// names the module. Where the toolbar keeps only its first tools, on a phone,
-/// the heading carries Compile and the cross-link instead, and the toolbar's
-/// slots go to the source tools so nothing is offered twice. A schematic's
-/// placement and transform tools have nothing to act on here.
+/// Format first. The toolbar is the only place those two actions live, so they
+/// come first: where it keeps only its first tools, on a phone, they are what
+/// it keeps. Format is in the editor's own menu as well, and every source tool
+/// is in the command palette. A schematic's placement and transform tools have
+/// nothing to act on here.
 fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    if layout.toolbar_tool_limit.is_none() {
-        toolbar_text_command(
-            ui,
-            app,
-            Command::CompileVerilogA,
-            WorkbenchIcon::Run,
-            "Compile Verilog-A module",
-            layout,
-        );
-        generated_netlist_tool(ui, app, layout);
-        context_separator(ui, layout);
-    }
+    toolbar_text_command(
+        ui,
+        app,
+        Command::CompileVerilogA,
+        WorkbenchIcon::Run,
+        "Compile Verilog-A module",
+        layout,
+    );
+    generated_netlist_tool(ui, app, layout);
+    context_separator(ui, layout);
     veriloga_format_tool(ui, app, layout);
     toolbar_icon_command(
         ui,
