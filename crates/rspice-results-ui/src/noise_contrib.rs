@@ -39,7 +39,6 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>, cache: &mut D
     let (summary, label) = match evidence {
         ContributorEvidence::Retained { summary, label } => (summary, label),
         absent => {
-            ui.add_space(8.0);
             section_header(ui, "Contributors", Some("not retained"));
             let reason = match absent {
                 ContributorEvidence::NotRetained => {
@@ -54,7 +53,6 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>, cache: &mut D
         }
     };
 
-    ui.add_space(8.0);
     section_header(ui, "Contributor evidence", None);
     let band = format!(
         "{} – {}",
@@ -191,7 +189,6 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>, cache: &mut D
         figure::show(ui, figure, cache);
     }
 
-    ui.add_space(8.0);
     section_header(
         ui,
         "Ranked contributors",

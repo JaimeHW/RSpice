@@ -353,7 +353,6 @@ pub fn right_panel(
         .collect();
     crate::presentation::stat_table(ui, &summary_refs);
 
-    ui.add_space(8.0);
     section_header(ui, "Retained roots", None);
     let mut rows: Vec<(String, String, bool)> = Vec::new();
     let mut pole_index = 0usize;

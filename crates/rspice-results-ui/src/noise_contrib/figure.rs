@@ -15,7 +15,6 @@ struct FigureRange {
 }
 
 pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, cache: &mut DecimationCache) {
-    ui.add_space(8.0);
     section_header(ui, "Noise figure", Some("SSB · dB"));
     measurement_table(
         ui,

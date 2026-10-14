@@ -825,7 +825,6 @@ pub fn right_panel<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
     );
 
     if let Some((row, _)) = worst {
-        ui.add_space(8.0);
         section_header(ui, "Worst violation", None);
         let value_s = value_text(row);
         let margin_s = margin_text(row);

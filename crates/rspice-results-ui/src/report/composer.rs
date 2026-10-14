@@ -613,118 +613,111 @@ fn page_settings(
         .map(|index| page_marker(index, page.title()))
         .unwrap_or("+");
     let section_title = format!("Page settings · {page_marker}");
+    // The section body insets the form and spaces it under the header.
     code_inspector_section(ui, &section_title, None, None, |ui| {
-        egui::Frame::new()
-            .inner_margin(egui::Margin {
-                left: 10,
-                right: 10,
-                top: 8,
-                bottom: 10,
-            })
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width().max(1.0));
-                report_form_label(ui, "Page title");
-                let title_response = ui.add_sized(
-                    Vec2::new(ui.available_width(), t.metrics.ctl_h),
-                    egui::TextEdit::singleline(host.title_draft())
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+        ui.scope(|ui| {
+            ui.set_width(ui.available_width().max(1.0));
+            report_form_label(ui, "Page title");
+            let title_response = ui.add_sized(
+                Vec2::new(ui.available_width(), t.metrics.ctl_h),
+                egui::TextEdit::singleline(host.title_draft())
+                    .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+            );
+            if title_response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape))
+            {
+                *host.title_draft() = page.title().to_owned();
+                title_response.surrender_focus();
+            } else if title_response.lost_focus() {
+                let title = host.title_draft().trim().to_owned();
+                *host.title_draft() = title.clone();
+                host.commit_page_setting(page_id, PageSettingEdit::Title(title));
+            }
+
+            ui.add_space(8.0);
+            report_form_label(ui, "Include in artifact");
+            const INCLUSION_OPTIONS: [(ReportPageInclusion, &str); 3] = [
+                (ReportPageInclusion::Included, "Included"),
+                (
+                    ReportPageInclusion::ExcludedFromDraft,
+                    "Excluded from draft",
+                ),
+                (ReportPageInclusion::AppendixOnly, "Appendix only"),
+            ];
+            let inclusion_labels = INCLUSION_OPTIONS
+                .iter()
+                .map(|(_, label)| (*label).to_owned())
+                .collect::<Vec<_>>();
+            let inclusion_current = report_page_inclusion_label(page.inclusion());
+            if let Some(index) = select(
+                ui,
+                "report-page-inclusion",
+                "Include report page in artifact",
+                inclusion_current,
+                &inclusion_labels,
+                ui.available_width(),
+            ) && let Some((inclusion, _)) = INCLUSION_OPTIONS.get(index)
+            {
+                host.commit_page_setting(page_id, PageSettingEdit::Inclusion(*inclusion));
+            }
+
+            ui.add_space(8.0);
+            report_form_label(ui, "Evidence binding");
+            let evidence_options = host.evidence_options(page.evidence_binding());
+            let evidence_labels = evidence_options
+                .iter()
+                .map(|(label, _)| label.clone())
+                .collect::<Vec<_>>();
+            let evidence_current = host.evidence_label(page.evidence_binding());
+            if let Some(index) = select(
+                ui,
+                "report-page-evidence-binding",
+                "Report page evidence binding",
+                &evidence_current,
+                &evidence_labels,
+                ui.available_width(),
+            ) && let Some((_, evidence_binding)) = evidence_options.get(index)
+            {
+                host.commit_page_setting(
+                    page_id,
+                    PageSettingEdit::EvidenceBinding(*evidence_binding),
                 );
-                if title_response.has_focus()
-                    && ui.input(|input| input.key_pressed(egui::Key::Escape))
-                {
-                    *host.title_draft() = page.title().to_owned();
-                    title_response.surrender_focus();
-                } else if title_response.lost_focus() {
-                    let title = host.title_draft().trim().to_owned();
-                    *host.title_draft() = title.clone();
-                    host.commit_page_setting(page_id, PageSettingEdit::Title(title));
-                }
+            }
 
+            ui.add_space(8.0);
+            report_form_label(ui, "Blocked-gate text");
+            const GATE_TEXT_OPTIONS: [(ReportBlockedGateTextPolicy, &str); 2] = [
+                (
+                    ReportBlockedGateTextPolicy::VerbatimFromSource,
+                    "State verbatim from source",
+                ),
+                (
+                    ReportBlockedGateTextPolicy::SummarizeWithLink,
+                    "Summarize with link",
+                ),
+            ];
+            let gate_text_labels = GATE_TEXT_OPTIONS
+                .iter()
+                .map(|(_, label)| (*label).to_owned())
+                .collect::<Vec<_>>();
+            let gate_text_current =
+                report_blocked_gate_text_policy_label(page.blocked_gate_text_policy());
+            if let Some(index) = select(
+                ui,
+                "report-page-gate-text",
+                "Blocked-gate text policy",
+                gate_text_current,
+                &gate_text_labels,
+                ui.available_width(),
+            ) && let Some((policy, _)) = GATE_TEXT_OPTIONS.get(index)
+            {
+                host.commit_page_setting(page_id, PageSettingEdit::BlockedGateText(*policy));
+            }
+
+            if let Some(error) = host.transaction_error() {
                 ui.add_space(8.0);
-                report_form_label(ui, "Include in artifact");
-                const INCLUSION_OPTIONS: [(ReportPageInclusion, &str); 3] = [
-                    (ReportPageInclusion::Included, "Included"),
-                    (
-                        ReportPageInclusion::ExcludedFromDraft,
-                        "Excluded from draft",
-                    ),
-                    (ReportPageInclusion::AppendixOnly, "Appendix only"),
-                ];
-                let inclusion_labels = INCLUSION_OPTIONS
-                    .iter()
-                    .map(|(_, label)| (*label).to_owned())
-                    .collect::<Vec<_>>();
-                let inclusion_current = report_page_inclusion_label(page.inclusion());
-                if let Some(index) = select(
-                    ui,
-                    "report-page-inclusion",
-                    "Include report page in artifact",
-                    inclusion_current,
-                    &inclusion_labels,
-                    ui.available_width(),
-                ) && let Some((inclusion, _)) = INCLUSION_OPTIONS.get(index)
-                {
-                    host.commit_page_setting(page_id, PageSettingEdit::Inclusion(*inclusion));
-                }
-
-                ui.add_space(8.0);
-                report_form_label(ui, "Evidence binding");
-                let evidence_options = host.evidence_options(page.evidence_binding());
-                let evidence_labels = evidence_options
-                    .iter()
-                    .map(|(label, _)| label.clone())
-                    .collect::<Vec<_>>();
-                let evidence_current = host.evidence_label(page.evidence_binding());
-                if let Some(index) = select(
-                    ui,
-                    "report-page-evidence-binding",
-                    "Report page evidence binding",
-                    &evidence_current,
-                    &evidence_labels,
-                    ui.available_width(),
-                ) && let Some((_, evidence_binding)) = evidence_options.get(index)
-                {
-                    host.commit_page_setting(
-                        page_id,
-                        PageSettingEdit::EvidenceBinding(*evidence_binding),
-                    );
-                }
-
-                ui.add_space(8.0);
-                report_form_label(ui, "Blocked-gate text");
-                const GATE_TEXT_OPTIONS: [(ReportBlockedGateTextPolicy, &str); 2] = [
-                    (
-                        ReportBlockedGateTextPolicy::VerbatimFromSource,
-                        "State verbatim from source",
-                    ),
-                    (
-                        ReportBlockedGateTextPolicy::SummarizeWithLink,
-                        "Summarize with link",
-                    ),
-                ];
-                let gate_text_labels = GATE_TEXT_OPTIONS
-                    .iter()
-                    .map(|(_, label)| (*label).to_owned())
-                    .collect::<Vec<_>>();
-                let gate_text_current =
-                    report_blocked_gate_text_policy_label(page.blocked_gate_text_policy());
-                if let Some(index) = select(
-                    ui,
-                    "report-page-gate-text",
-                    "Blocked-gate text policy",
-                    gate_text_current,
-                    &gate_text_labels,
-                    ui.available_width(),
-                ) && let Some((policy, _)) = GATE_TEXT_OPTIONS.get(index)
-                {
-                    host.commit_page_setting(page_id, PageSettingEdit::BlockedGateText(*policy));
-                }
-
-                if let Some(error) = host.transaction_error() {
-                    ui.add_space(8.0);
-                    problem_line(ui, Problem::Failure, error);
-                }
-            });
+                problem_line(ui, Problem::Failure, error);
+            }
+        });
     });
 }
 

@@ -2,7 +2,7 @@
 
 use egui::{Ui, WidgetInfo, WidgetType};
 use rspice_ui_kit::panels::inspector::toned_inspector_copy;
-use rspice_ui_kit::panels::panel_inset;
+use rspice_ui_kit::panels::{PANEL_ROW_H, panel_inset};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 
@@ -210,7 +210,7 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
             c.text,
             value_width,
         );
-        let row_height = 25.0_f32.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
+        let row_height = PANEL_ROW_H.max(name_galley.size().y.max(value_galley.size().y) + 8.0);
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, row_height), egui::Sense::hover());
         if !ui.is_rect_visible(rect) {
             continue;

@@ -1231,7 +1231,6 @@ pub fn right_panel(ui: &mut Ui, evidence: &OpEvidence, device_in_scope: usize, c
     );
 
     if let Some(facts) = &evidence.facts {
-        ui.add_space(8.0);
         section_header(ui, "Retained solve facts", None);
         let temperature = format!("{:.3} °C", facts.temperature_celsius);
         let point = format!(
@@ -1255,7 +1254,6 @@ pub fn right_panel(ui: &mut Ui, evidence: &OpEvidence, device_in_scope: usize, c
         );
     }
 
-    ui.add_space(8.0);
     section_header(ui, "Schematic association", None);
     measurement_table(
         ui,
