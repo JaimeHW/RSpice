@@ -1,0 +1,10 @@
+* C5 LDO with a serially loaded trim DAC, variant mx, ac around the state at 550 us (code 15 latched at 405 us)
+.include ../net/models-bsim4.cir
+.include ../net/ldo_body.inc
+.include ../net/ldo.cir
+.include ../net/esd.cir
+.include ../net/spi.cir
+.hdl "../net/spi_trim.v"
+.tran 0.1u 550u 0 0.5u
+.ac dec 10 10 100meg actimes=550u
+.end

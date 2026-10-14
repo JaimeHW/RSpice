@@ -189,6 +189,18 @@ abs_db = 0.2
 abs_deg = 2.0
 why = "Xyce BSIM4 version differs"
 
+[[q]]
+id = "psrr"
+analysis = "ac@trim"
+variants = ["mx"]
+kind = "ac"
+signal = "v(vout)"
+points = [10.0, 1e3, 1e5, 1e7]
+oracle = "O5"
+abs_db = 8.7e-4
+abs_deg = 5.7e-3
+why = "the state 145 us after the code-15 latch settles to rel 1e-4 of the held code-15 operating point: 20·log10(1 + 1e-4) dB and 1e-4 rad"
+
 # ---- stb -----------------------------------------------------------------
 
 [[q]]

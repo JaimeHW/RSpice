@@ -144,6 +144,19 @@ why = "MOS off-state Cdb ~40 fF ⇒ ≤ 0.1% at 10 MHz"
 
 [[q]]
 id = "zlf"
+analysis = "ac@lock"
+variants = ["mx"]
+kind = "ac"
+signal = "v(cont)"
+points = [1e3, 1e4, 1e5, 1e6, 1e7]
+oracle = "O6"
+expect = "c02::zlf"
+abs_db = 0.05
+abs_deg = 0.5
+why = "at 25 us the loop is locked and 90 ns past a reference edge, so both pump switches are off between PFD pulses; MOS off-state Cdb ~40 fF ⇒ ≤ 0.1% at 10 MHz"
+
+[[q]]
+id = "zlf"
 analysis = "ac"
 variants = ["xs"]
 kind = "ac"

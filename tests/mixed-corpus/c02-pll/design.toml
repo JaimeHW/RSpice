@@ -36,6 +36,15 @@ oracles = ["O1", "O2", "O6", "O5"]
 timeout_s = 300
 phase = "P1"
 
+# The ac card around the locked state at 25 us, with the divider and PFD
+# held where the lock left them, against the loop filter's Z(jω).
+[[analysis]]
+id = "ac@lock"
+variants = ["mx"]
+oracles = ["O6"]
+timeout_s = 1800
+phase = "P1"
+
 [[analysis]]
 id = "mc-tran"
 variants = ["xs", "mx"]

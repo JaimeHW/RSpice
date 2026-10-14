@@ -11,6 +11,8 @@ xs	ac	interp	pass	zlf (O1) [0] Δ=-2.228e-11 dB, 2.203e-11° allowed 1e-2 dB, 1e
 xs	ac	native	pass	zlf (O1) [0] Δ=-2.228e-11 dB, 2.203e-11° allowed 1e-2 dB, 1e-1°
 mx	ac	interp	pass	zlf (O6) [0] Δ=-5.005e-4 dB, 8.051e-2° allowed 5e-2 dB, 5e-1°
 mx	ac	native	pass	zlf (O6) [0] Δ=-5.005e-4 dB, 8.051e-2° allowed 5e-2 dB, 5e-1°
+mx	ac@lock	interp	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB, 5e-1°
+mx	ac@lock	native	pass	zlf (O6) [4] Δ=-1.352e-4 dB, -6.828e-2° allowed 5e-2 dB, 5e-1°
 xs	mc-tran	interp	pass	fdiv (O6) trial 3: [0] |a−e|=2.356e-12 allowed 5.000e-11 (a=1.000024e-7, e=1.000000e-7)
 xs	mc-tran	native	pass	fdiv (O6) trial 3: [0] |a−e|=2.356e-12 allowed 5.000e-11 (a=1.000024e-7, e=1.000000e-7)
 mx	mc-tran	interp	pass	fdiv (O6) trial 6: [0] |a−e|=7.369e-13 allowed 5.000e-11 (a=9.999926e-8, e=1.000000e-7)

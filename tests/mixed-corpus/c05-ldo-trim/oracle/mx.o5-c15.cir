@@ -1,0 +1,17 @@
+* C5 LDO held-digital O5 circuit at trim code 15 (corpus O5 rules): the trim
+* register's D-A state after the serial load (code 15) held at vcc = 1.8 V
+* behind the built-in converters' 20 ohm; the SPI sources (A/D inputs only)
+* and the register are removed. The runner appends the deck's analysis card.
+.include ../net/models-bsim4.cir
+.include ../net/ldo_body.inc
+.include ../net/ldo.cir
+.include ../net/esd.cir
+vtr3 tr3_h 0 1.8
+rtr3 tr3_h tr3 20
+vtr2 tr2_h 0 1.8
+rtr2 tr2_h tr2 20
+vtr1 tr1_h 0 1.8
+rtr1 tr1_h tr1 20
+vtr0 tr0_h 0 1.8
+rtr0 tr0_h tr0 20
+.end

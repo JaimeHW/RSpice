@@ -7,6 +7,8 @@ mx	dc-load	interp	pass	load (O5-O4) [40] |a−e|=3.179e-5 allowed 6.357e-3 (a=1.
 mx	dc-load	native	pass	load (O5-O4) [40] |a−e|=3.179e-5 allowed 6.357e-3 (a=1.119019e0, e=1.119050e0)
 mx	ac	interp	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
 mx	ac	native	pass	psrr (O5-O4) [2] Δ=-4.463e-2 dB, -4.410e-1° allowed 2e-1 dB, 2e0°
+mx	ac@trim	interp	pass	psrr (O5) [0] Δ=4.104e-8 dB, -1.637e-12° allowed 8.7e-4 dB, 5.7e-3°
+mx	ac@trim	native	pass	psrr (O5) [0] Δ=4.104e-8 dB, -1.637e-12° allowed 8.7e-4 dB, 5.7e-3°
 mx	stb	interp	pass	margins.gm (O5-O1) [0] |a−e|=6.488e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
 mx	stb	native	pass	margins.gm (O5-O1) [0] |a−e|=6.488e-7 allowed 5.000e-1 (a=8.475355e1, e=8.475355e1)
 mx	noise	interp	pass	vn (O5-O1) [0] |a−e|=1.859e-15 allowed 4.351e-14 (a=8.683464e-13, e=8.702050e-13)
