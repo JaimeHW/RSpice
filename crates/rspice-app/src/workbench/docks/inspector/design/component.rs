@@ -658,7 +658,7 @@ pub(super) fn parameters_section(
                     &parameter.label,
                     value,
                     UNDECLARED_PARAMETER_NOTE,
-                    Tokens::get(ui.ctx()).color.warn,
+                    Some(Problem::Warning),
                     REMOVE_UNDECLARED_PARAMETER,
                 ) {
                     removed = Some(parameter.key);

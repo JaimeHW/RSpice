@@ -37,10 +37,10 @@ use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
-    PropertyRowCaption, StatusMark, WorkbenchIcon, property_row_captioned, property_row_combo,
-    property_row_flagged, property_row_input_action, property_row_input_captioned,
-    property_row_input_with_hint, schematic_property_row as property_row,
-    schematic_property_row_status as property_row_status,
+    Problem, PropertyRowCaption, StatusMark, WorkbenchIcon, property_row_captioned,
+    property_row_combo, property_row_flagged, property_row_input_action,
+    property_row_input_captioned, property_row_input_with_hint,
+    schematic_property_row as property_row, schematic_property_row_status as property_row_status,
 };
 use crate::workbench::state::{InlineEditField, ModelsPage, VerificationPage, Workspace};
 use crate::workbench::{AppState, RSpiceApp};

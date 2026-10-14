@@ -12,6 +12,7 @@ use std::sync::Arc;
 use super::{PROPERTY_ROW_PAD, elide_text, property_row_columns, property_row_height};
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
+use crate::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
 
 /// What a property row says about its value beyond the value.
 #[derive(Debug, Clone, Copy, Default)]
@@ -235,15 +236,18 @@ pub fn property_row_captioned(
     response
 }
 
-/// A property row for a value the reader is told to deal with: the value in
-/// `tone` with `note` after it, and one text action at the trailing edge.
-/// Returns whether the action was pressed.
+/// A property row for a value the reader is told to deal with: the value with
+/// `note` after it, and one text action at the trailing edge. Returns whether
+/// the action was pressed.
+///
+/// The value and the note are neutral; a `problem` paints its mark in front of
+/// the value and is the only colour on the row.
 pub fn property_row_flagged(
     ui: &mut Ui,
     label: &str,
     value: &str,
     note: &str,
-    tone: Color32,
+    problem: Option<Problem>,
     action: &str,
 ) -> bool {
     let t = Tokens::get(ui.ctx());
@@ -280,27 +284,46 @@ pub fn property_row_flagged(
     let note_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let note_galley = ui
         .painter()
-        .layout_no_wrap(note.to_owned(), note_font, tone);
+        .layout_no_wrap(note.to_owned(), note_font, t.color.text_dim);
     let note_room = note_galley.size().x + UNIT_GAP;
+    let mark_room = if problem.is_some() {
+        PROBLEM_MARK_ADVANCE
+    } else {
+        0.0
+    };
     let shown = elide_text(
         ui,
         value,
         &value_font,
-        (value_column.min(value_rect.width()) - note_room).max(1.0),
+        (value_column.min(value_rect.width()) - note_room - mark_room).max(1.0),
     );
-    let value_galley = ui.painter().layout_no_wrap(shown, value_font, tone);
+    let value_galley = ui.painter().layout_no_wrap(shown, value_font, t.color.text);
     let value_width = value_galley.size().x;
     let value_top = value_rect.center().y - value_galley.size().y * 0.5;
     let baseline = value_top + first_baseline(&value_galley);
     let painter = ui.painter().with_clip_rect(value_rect);
-    painter.galley(Pos2::new(value_rect.left(), value_top), value_galley, tone);
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            &painter,
+            Rect::from_center_size(
+                Pos2::new(
+                    value_rect.left() + PROBLEM_MARK_SIDE * 0.5,
+                    value_rect.center().y,
+                ),
+                Vec2::splat(PROBLEM_MARK_SIDE),
+            ),
+            problem,
+        );
+    }
+    let value_left = value_rect.left() + mark_room;
+    painter.galley(Pos2::new(value_left, value_top), value_galley, t.color.text);
     painter.galley(
         Pos2::new(
-            value_rect.left() + value_width + UNIT_GAP,
+            value_left + value_width + UNIT_GAP,
             baseline - first_baseline(&note_galley),
         ),
         note_galley,
-        tone,
+        t.color.text_dim,
     );
 
     let response = ui.interact(
