@@ -619,10 +619,7 @@ mod tests {
     fn route_history_supports_exact_back_forward_and_source_return() {
         let mut navigation = SurfaceNavigation::default();
         navigation.navigate(route(SurfaceId::Results), RouteTransitionSource::User);
-        navigation.navigate(
-            route(SurfaceId::FeatureAvailability),
-            RouteTransitionSource::User,
-        );
+        navigation.navigate(route(SurfaceId::JobsManager), RouteTransitionSource::User);
 
         let back = navigation
             .go_back(RouteTransitionSource::User)
@@ -633,7 +630,7 @@ mod tests {
         let forward = navigation
             .go_forward_steps(1, RouteTransitionSource::User)
             .expect("manager route exists");
-        assert_eq!(forward.current, route(SurfaceId::FeatureAvailability));
+        assert_eq!(forward.current, route(SurfaceId::JobsManager));
     }
 
     #[test]
@@ -655,24 +652,18 @@ mod tests {
             let mut navigation = SurfaceNavigation::default();
             navigation.navigate(route(SurfaceId::Project), RouteTransitionSource::User);
             navigation.navigate(route(SurfaceId::Results), RouteTransitionSource::User);
-            navigation.navigate(
-                route(SurfaceId::FeatureAvailability),
-                RouteTransitionSource::User,
-            );
+            navigation.navigate(route(SurfaceId::JobsManager), RouteTransitionSource::User);
             navigation.clear_browser_effects();
 
             let transition = navigation
                 .go_back_steps(2, source)
                 .expect("two back entries exist");
-            assert_eq!(transition.previous, route(SurfaceId::FeatureAvailability));
+            assert_eq!(transition.previous, route(SurfaceId::JobsManager));
             assert_eq!(transition.current, route(SurfaceId::Project));
             assert_eq!(navigation.back_entries(), &[route(SurfaceId::Design)]);
             assert_eq!(
                 navigation.forward_entries(),
-                &[
-                    route(SurfaceId::FeatureAvailability),
-                    route(SurfaceId::Results)
-                ]
+                &[route(SurfaceId::JobsManager), route(SurfaceId::Results)]
             );
             assert_eq!(navigation.take_browser_effect(), expected_effect);
         }
@@ -745,10 +736,7 @@ mod tests {
         let mut navigation = SurfaceNavigation::default();
         navigation.navigate(route(SurfaceId::Project), RouteTransitionSource::User);
         navigation.navigate(route(SurfaceId::Results), RouteTransitionSource::User);
-        navigation.navigate(
-            route(SurfaceId::FeatureAvailability),
-            RouteTransitionSource::User,
-        );
+        navigation.navigate(route(SurfaceId::JobsManager), RouteTransitionSource::User);
 
         let back =
             navigation.navigate(route(SurfaceId::Project), RouteTransitionSource::BrowserPop);
@@ -756,18 +744,15 @@ mod tests {
         assert_eq!(navigation.back_entries(), &[route(SurfaceId::Design)]);
         assert_eq!(
             navigation.forward_entries(),
-            &[
-                route(SurfaceId::FeatureAvailability),
-                route(SurfaceId::Results)
-            ]
+            &[route(SurfaceId::JobsManager), route(SurfaceId::Results)]
         );
         assert_eq!(navigation.take_browser_effect(), None);
 
         let forward = navigation.navigate(
-            route(SurfaceId::FeatureAvailability),
+            route(SurfaceId::JobsManager),
             RouteTransitionSource::BrowserPop,
         );
-        assert_eq!(forward.current, route(SurfaceId::FeatureAvailability));
+        assert_eq!(forward.current, route(SurfaceId::JobsManager));
         assert_eq!(
             navigation.back_entries(),
             &[
@@ -784,10 +769,7 @@ mod tests {
     fn serialized_navigation_retains_stable_object_aware_history() {
         let mut navigation = SurfaceNavigation::default();
         navigation.navigate(route(SurfaceId::Results), RouteTransitionSource::User);
-        navigation.navigate(
-            route(SurfaceId::FeatureAvailability),
-            RouteTransitionSource::User,
-        );
+        navigation.navigate(route(SurfaceId::JobsManager), RouteTransitionSource::User);
         let json = serde_json::to_string(&navigation).expect("navigation serializes");
         let restored: SurfaceNavigation = serde_json::from_str(&json).expect("navigation restores");
         assert_eq!(restored.current(), navigation.current());
@@ -835,20 +817,14 @@ mod tests {
     fn fresh_browser_session_discards_persisted_traversal_authority() {
         let mut navigation = SurfaceNavigation::default();
         navigation.navigate(route(SurfaceId::Results), RouteTransitionSource::User);
-        navigation.navigate(
-            route(SurfaceId::FeatureAvailability),
-            RouteTransitionSource::User,
-        );
+        navigation.navigate(route(SurfaceId::JobsManager), RouteTransitionSource::User);
 
         navigation.reset_history();
 
-        assert_eq!(navigation.current(), route(SurfaceId::FeatureAvailability));
+        assert_eq!(navigation.current(), route(SurfaceId::JobsManager));
         assert!(navigation.back_entries().is_empty());
         assert!(navigation.forward_entries().is_empty());
-        assert_eq!(
-            navigation.recent_entries(),
-            [route(SurfaceId::FeatureAvailability)]
-        );
+        assert_eq!(navigation.recent_entries(), [route(SurfaceId::JobsManager)]);
         assert_eq!(navigation.take_browser_effect(), None);
     }
 
@@ -864,6 +840,28 @@ mod tests {
             serde_json::from_str(json).expect("invalid route is recoverable");
         assert_eq!(restored.current(), route(SurfaceId::Design));
         assert_eq!(restored.back_entries(), &[route(SurfaceId::Results)]);
+        assert!(restored.recovered_invalid_routes());
+    }
+
+    /// Sessions saved before the capability matrix was deleted can name it,
+    /// or one of its nested pages, anywhere in the history. They still load:
+    /// the dead entries are dropped and everything else is kept.
+    #[test]
+    fn saved_history_naming_the_deleted_capability_matrix_still_restores() {
+        let json = r#"{
+            "current":"?surface=feature-availability",
+            "back":["?view=results","?surface=interoperability-matrix","?view=simulate"],
+            "forward":["?surface=touch-edit-guide","?view=models"],
+            "recent":["?surface=feature-availability","?view=results"]
+        }"#;
+        let restored: SurfaceNavigation =
+            serde_json::from_str(json).expect("a session naming a deleted surface restores");
+        assert_eq!(restored.current(), route(SurfaceId::Design));
+        assert_eq!(
+            restored.back_entries(),
+            &[route(SurfaceId::Results), route(SurfaceId::Simulate)]
+        );
+        assert_eq!(restored.forward_entries(), &[route(SurfaceId::Models)]);
         assert!(restored.recovered_invalid_routes());
     }
 

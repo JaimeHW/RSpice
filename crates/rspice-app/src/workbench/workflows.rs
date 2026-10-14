@@ -7,7 +7,6 @@
 //! injectable IO backend so the tests can run them without touching a disk or
 //! a file picker.
 
-pub(crate) mod capability_workflow;
 pub(crate) mod export_workflow;
 pub(crate) mod file_actions;
 pub(crate) mod file_workflow;

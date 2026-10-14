@@ -135,7 +135,7 @@ macro_rules! define_surface_catalog {
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
             #[cfg(test)]
-            pub const ALL: [Self; 65] = [$(Self::$variant),+];
+            pub const ALL: [Self; 64] = [$(Self::$variant),+];
 
             #[must_use]
             pub const fn metadata(self) -> SurfaceMetadata {
@@ -311,7 +311,6 @@ define_surface_catalog! {
     WorkflowDialog => { id: "workflow-dialog", label: "Transactional workflow dialog", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=workflow-dialog" },
     NotificationCenter => { id: "notification-center", label: "Notifications", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=notification-center" },
     HelpCenter => { id: "help-center", label: "Help center", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=help-center" },
-    FeatureAvailability => { id: "feature-availability", label: "Capability and platform matrix", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=feature-availability" },
     ProductReadinessCenter => { id: "product-readiness-center", label: "Product readiness contracts", archetype: Internal, tier: Internal, status: InternalOnly, deep_link: "?surface=product-readiness-center" },
     SpecialistToolBrowser => { id: "specialist-tool-browser", label: "Specialist tool browser", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=specialist-tool-browser" },
     MobileNavigation => { id: "mobile-navigation", label: "Compact task navigation", archetype: Overlay, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-navigation" },
@@ -381,7 +380,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_count_and_unique_contract_values() {
-        assert_eq!(SurfaceId::ALL.len(), 65);
+        assert_eq!(SurfaceId::ALL.len(), 64);
 
         let ids = SurfaceId::ALL
             .iter()
@@ -396,9 +395,9 @@ mod tests {
             .map(|surface| surface.deep_link())
             .collect::<HashSet<_>>();
 
-        assert_eq!(ids.len(), 65);
-        assert_eq!(labels.len(), 65);
-        assert_eq!(deep_links.len(), 65);
+        assert_eq!(ids.len(), 64);
+        assert_eq!(labels.len(), 64);
+        assert_eq!(deep_links.len(), 64);
     }
 
     #[test]
@@ -409,7 +408,7 @@ mod tests {
                 .filter(|surface| surface.release_status() == status)
                 .count()
         };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 22);
+        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 21);
         assert_eq!(count_status(ReleaseStatus::Preview), 35);
         assert_eq!(count_status(ReleaseStatus::ExternalFirst), 6);
         assert_eq!(count_status(ReleaseStatus::InternalOnly), 2);
@@ -422,7 +421,7 @@ mod tests {
         };
         assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 8);
         assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 41);
-        assert_eq!(count_archetype(SurfaceArchetype::Manager), 10);
+        assert_eq!(count_archetype(SurfaceArchetype::Manager), 9);
         assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
         assert_eq!(count_archetype(SurfaceArchetype::Overlay), 3);
         assert_eq!(count_archetype(SurfaceArchetype::Internal), 1);

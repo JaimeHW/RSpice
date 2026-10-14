@@ -25,9 +25,12 @@ use crate::workbench::{AppState, RSpiceApp};
 use crate::workbench::{
     RouteTransitionSource, SurfaceExecutionAvailability, SurfaceId, SurfaceRoute,
     design_system::WorkbenchIcon,
-    feature_availability_data::{SPECIALIST_WORKSPACE_ROWS, SpecialistWorkspaceRow},
     state::{EngineeringProfile, SpecialistToolBrowserState, SpecialistToolFilter, Workspace},
 };
+
+mod workspace_rows;
+
+use workspace_rows::{SPECIALIST_WORKSPACE_ROWS, SpecialistWorkspaceRow};
 
 const DESCRIPTION: &str = "Find every canonical specialist engineering owner without duplicating its document or overstating runtime availability.";
 const PURPOSE_COPY: &str = "Every specialist workspace remains discoverable on tablet and phone. Opening a tool preserves its canonical owner and composes dense work into focused steps, drawers, exact-entry panels, and structured alternatives without disabling supported mutations.";

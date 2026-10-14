@@ -45,8 +45,6 @@ pub(crate) mod documents;
 // application builds schematics from projects and from the library.
 #[cfg(test)]
 pub(crate) mod examples;
-mod feature_availability;
-pub(crate) mod feature_availability_data;
 pub(crate) mod frame;
 pub(crate) mod hardcopy_adapters;
 mod layout;
@@ -90,7 +88,7 @@ pub use preferences::{
     UserPreferences, WorkspacePreferences, WorkspacePreset,
 };
 pub use routing::availability::{
-    SurfaceExecutionAvailability, SurfaceRouteUnavailable, route_availability, surface_availability,
+    SurfaceExecutionAvailability, SurfaceRouteUnavailable, surface_availability,
 };
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use routing::navigation::BrowserHistoryEffect;
@@ -105,7 +103,6 @@ pub use shortcuts::{
     shortcut_context_precedence_rank,
 };
 pub use state::{EngineeringProfile, WorkbenchState};
-pub use workflows::capability_workflow::CapabilityWorkflowId;
 
 pub use app::RSpiceApp;
 pub use app_state::AppState;

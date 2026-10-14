@@ -1092,7 +1092,8 @@ fn synchronize_browser_surface_navigation(state: &mut AppState) {
         match event {
             Ok(event) => {
                 let route = event.route();
-                let availability = crate::workbench::route_availability(route);
+                let availability =
+                    crate::workbench::routing::availability::route_availability(route);
                 let pending_effects = state.workbench.has_pending_browser_history_effects();
                 let external_race = !event.initiated_by_app() && pending_effects;
                 let applied = if !availability.can_open() {

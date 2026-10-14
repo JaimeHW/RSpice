@@ -375,18 +375,6 @@ impl EngineeringProfile {
         Self::All,
     ];
 
-    #[cfg(test)]
-    pub const fn id(self) -> &'static str {
-        match self {
-            Self::AnalogIc => "analog-ic",
-            Self::RfMicrowave => "rf-microwave",
-            Self::SiPi => "si-pi",
-            Self::Power => "power",
-            Self::Emerging => "emerging",
-            Self::All => "all",
-        }
-    }
-
     pub const fn label(self) -> &'static str {
         match self {
             Self::AnalogIc => "Analog & mixed-signal IC",
@@ -1409,11 +1397,6 @@ pub struct WorkbenchState {
     /// because "unread" crosses the Jobs/System split instead of joining it.
     #[serde(skip)]
     pub notification_unread_only: bool,
-    /// Review filters plus transient presentation state for the canonical
-    /// application-session-owned capability matrix. Individual fields define
-    /// their own persistence boundary.
-    #[serde(default)]
-    pub capability_matrix: CapabilityMatrixState,
 }
 
 const fn default_true() -> bool {
@@ -1537,7 +1520,6 @@ impl Default for WorkbenchState {
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             notification_unread_only: false,
-            capability_matrix: CapabilityMatrixState::default(),
         }
     }
 }
@@ -1593,7 +1575,6 @@ impl WorkbenchState {
                     | SurfaceId::JobsManager
                     | SurfaceId::SpecialistToolBrowser
                     | SurfaceId::NotificationCenter
-                    | SurfaceId::FeatureAvailability
             )
     }
 
@@ -1689,7 +1670,6 @@ impl WorkbenchState {
         let previous = self.navigation.current();
         self.reconcile_workspace_layout(previous, route);
         let transition = self.navigation.navigate(route, source);
-        self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = route.surface_id().owner_workspace() {
             self.workspace = workspace;
@@ -1710,7 +1690,6 @@ impl WorkbenchState {
         let previous = self.navigation.current();
         self.reconcile_workspace_layout(previous, route);
         self.navigation.replace(route, source);
-        self.reconcile_capability_matrix_route(previous, route);
         self.reconcile_specialist_tool_browser_route(previous, route);
         if let Some(workspace) = route.surface_id().owner_workspace() {
             self.workspace = workspace;
@@ -1951,9 +1930,10 @@ impl WorkbenchState {
         self.navigation.back_entries().last().copied()
     }
 
-    /// Number of known in-application predecessors. Surfaces may use this to
-    /// choose a fail-safe close strategy without gaining mutable stack access.
+    /// Number of known in-application predecessors. Only the browser build
+    /// reads this: a Back that would leave the in-app task stack is refused.
     #[must_use]
+    #[cfg(target_arch = "wasm32")]
     pub fn back_route_count(&self) -> usize {
         self.navigation.back_entries().len()
     }
@@ -1970,7 +1950,6 @@ impl WorkbenchState {
         let destination = self.navigation.back_entries().last().copied()?;
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back(source)?;
-        self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
@@ -1996,18 +1975,12 @@ impl WorkbenchState {
         )?;
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back_steps(count, source)?;
-        self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.close_drawer();
         Some(transition)
-    }
-
-    #[cfg(test)]
-    pub fn navigate_forward(&mut self, source: RouteTransitionSource) -> Option<RouteTransition> {
-        self.navigate_forward_steps(1, source)
     }
 
     /// Atomically advance across up to `count` known routes, reconciling the
@@ -2028,35 +2001,12 @@ impl WorkbenchState {
         )?;
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_forward_steps(count, source)?;
-        self.reconcile_capability_matrix_route(transition.previous, transition.current);
         self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.close_drawer();
         Some(transition)
-    }
-
-    fn reconcile_capability_matrix_route(&mut self, previous: SurfaceRoute, current: SurfaceRoute) {
-        let manager = SurfaceId::FeatureAvailability;
-        if previous.surface_id() == current.surface_id()
-            || (previous.surface_id() != manager && current.surface_id() != manager)
-        {
-            return;
-        }
-
-        // The section picker and scroll position are local presentation state
-        // for a single open document. Closing or entering the manager creates
-        // a fresh Platforms-first reading position and dismisses drilldowns.
-        self.capability_matrix.section = CapabilityMatrixSection::Platforms;
-        self.capability_matrix.scroll_offset = 0.0;
-        self.capability_matrix.last_document_compact = None;
-        self.capability_matrix.drilldown = None;
-        self.capability_matrix.drilldown_scroll_offset = 0.0;
-        self.capability_matrix.interoperability_section = InteroperabilitySection::default();
-        self.capability_matrix.interoperability_domain = InteroperabilityDomain::default();
-        self.capability_matrix.interoperability_support_level =
-            InteroperabilitySupportLevel::default();
     }
 
     fn reconcile_specialist_tool_browser_route(

@@ -14,7 +14,6 @@ use uuid::Uuid;
 use crate::product::{ObjectRef, ProductObjectKind};
 
 use super::surface_catalog::{SurfaceId, SurfaceIdParseError};
-use crate::workbench::workflows::capability_workflow::CapabilityWorkflowId;
 
 /// Stable route to one canonical GUI surface and, when applicable, one exact
 /// product object. Selection, scroll, and other presentation state do not
@@ -23,7 +22,6 @@ use crate::workbench::workflows::capability_workflow::CapabilityWorkflowId;
 pub struct SurfaceRoute {
     surface_id: SurfaceId,
     object_ref: Option<ObjectRef>,
-    capability_workflow_id: Option<CapabilityWorkflowId>,
 }
 
 impl SurfaceRoute {
@@ -32,7 +30,6 @@ impl SurfaceRoute {
         Self {
             surface_id,
             object_ref,
-            capability_workflow_id: None,
         }
     }
 
@@ -46,53 +43,21 @@ impl SurfaceRoute {
         Self::new(surface_id, Some(object_ref))
     }
 
-    /// Construct the canonical deep link for a nested Feature Availability
-    /// workflow. Workflow routes never carry a product-object reference.
-    #[must_use]
-    pub const fn capability_workflow(capability_workflow_id: CapabilityWorkflowId) -> Self {
-        Self {
-            surface_id: capability_workflow_id.owner_surface(),
-            object_ref: None,
-            capability_workflow_id: Some(capability_workflow_id),
-        }
-    }
-
-    /// Canonical owning surface. Route identity is immutable after
-    /// construction so a nested workflow can never be detached from its
-    /// registered owner.
+    /// Canonical surface. Route identity is immutable after construction.
     #[must_use]
     pub const fn surface_id(self) -> SurfaceId {
         self.surface_id
     }
 
     /// Exact product-object identity, when this is an object-aware route.
-    /// Nested workflow routes cannot carry an object reference.
     #[must_use]
     pub const fn object_ref(self) -> Option<ObjectRef> {
         self.object_ref
-    }
-
-    /// Nested workflow identity, when this route addresses one.
-    #[must_use]
-    pub const fn capability_workflow_id(self) -> Option<CapabilityWorkflowId> {
-        self.capability_workflow_id
     }
 }
 
 impl fmt::Display for SurfaceRoute {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(capability_workflow_id) = self.capability_workflow_id {
-            debug_assert_eq!(
-                self.surface_id,
-                capability_workflow_id.owner_surface(),
-                "capability workflow must retain its canonical owner"
-            );
-            debug_assert!(
-                self.object_ref.is_none(),
-                "capability workflow routes cannot carry object references"
-            );
-            return formatter.write_str(capability_workflow_id.deep_link());
-        }
         formatter.write_str(self.surface_id.deep_link())?;
         if let Some(object_ref) = self.object_ref {
             write!(
@@ -123,28 +88,9 @@ impl FromStr for SurfaceRoute {
         if selector != "view" && selector != "surface" {
             return Err(SurfaceRouteParseError::UnknownSelector(selector.to_owned()));
         }
-        let surface_result = stable_id.parse::<SurfaceId>();
-        if let Ok(capability_workflow_id) = stable_id.parse::<CapabilityWorkflowId>() {
-            if value.split_once('&').map_or(value, |(base, _)| base)
-                != capability_workflow_id.deep_link()
-            {
-                return Err(SurfaceRouteParseError::NonCanonicalSelector {
-                    received: format!("?{selector}={stable_id}"),
-                    expected: capability_workflow_id.deep_link(),
-                });
-            }
-            if parameters.len() != 1 {
-                return Err(
-                    SurfaceRouteParseError::CapabilityWorkflowParametersUnsupported {
-                        workflow: capability_workflow_id,
-                        received: parameters.len() - 1,
-                    },
-                );
-            }
-            return Ok(Self::capability_workflow(capability_workflow_id));
-        }
-
-        let surface_id = surface_result.map_err(SurfaceRouteParseError::UnknownSurface)?;
+        let surface_id = stable_id
+            .parse::<SurfaceId>()
+            .map_err(SurfaceRouteParseError::UnknownSurface)?;
         if value.split_once('&').map_or(value, |(base, _)| base) != surface_id.deep_link() {
             return Err(SurfaceRouteParseError::NonCanonicalSelector {
                 received: format!("?{selector}={stable_id}"),
@@ -251,13 +197,6 @@ pub enum SurfaceRouteParseError {
         received: String,
         expected: &'static str,
     },
-    #[error(
-        "Feature Availability workflow `{workflow}` does not accept route parameters; received {received}"
-    )]
-    CapabilityWorkflowParametersUnsupported {
-        workflow: CapabilityWorkflowId,
-        received: usize,
-    },
     #[error("unexpected route parameter `{received}`; expected `{expected}`")]
     UnexpectedParameter {
         received: String,
@@ -320,56 +259,26 @@ mod tests {
         }
     }
 
+    /// The capability matrix and its nested pages were deleted. Their old
+    /// deep links are unknown surfaces now, so a saved session or a bookmark
+    /// naming one is quarantined by the navigation restore instead of opening.
     #[test]
-    fn every_capability_workflow_route_is_canonical_owned_and_roundtrips() {
-        for workflow in CapabilityWorkflowId::ALL {
-            let route = SurfaceRoute::capability_workflow(workflow);
-            assert_eq!(route.surface_id(), SurfaceId::FeatureAvailability);
-            assert_eq!(route.object_ref(), None);
-            assert_eq!(route.capability_workflow_id(), Some(workflow));
-            assert_eq!(route.to_string(), workflow.deep_link());
-            assert_eq!(route.to_string().parse::<SurfaceRoute>(), Ok(route));
-
-            let encoded = serde_json::to_string(&route).expect("workflow route serializes");
-            assert_eq!(encoded, format!("\"{}\"", workflow.deep_link()));
-            assert_eq!(
-                serde_json::from_str::<SurfaceRoute>(&encoded)
-                    .expect("workflow route deserializes"),
-                route
+    fn deleted_capability_matrix_routes_no_longer_parse() {
+        for stable_id in [
+            "feature-availability",
+            "interoperability-matrix",
+            "touch-edit-guide",
+            "platform-lifecycle",
+            "source-load-pull-analysis",
+        ] {
+            let value = format!("?surface={stable_id}");
+            assert!(
+                matches!(
+                    value.parse::<SurfaceRoute>(),
+                    Err(SurfaceRouteParseError::UnknownSurface(_))
+                ),
+                "deleted route `{value}` still parses"
             );
-        }
-    }
-
-    #[test]
-    fn capability_workflow_routes_reject_aliases_and_all_extra_parameters() {
-        for workflow in CapabilityWorkflowId::ALL {
-            let object_route = format!(
-                "?surface={workflow}&object-kind=project&object-id=123e4567-e89b-12d3-a456-426614174000"
-            );
-            assert_eq!(
-                object_route.parse::<SurfaceRoute>(),
-                Err(
-                    SurfaceRouteParseError::CapabilityWorkflowParametersUnsupported {
-                        workflow,
-                        received: 2,
-                    }
-                )
-            );
-
-            for value in [
-                format!("?view={workflow}"),
-                object_route,
-                format!("?surface={workflow}&extra=value"),
-            ] {
-                assert!(
-                    value.parse::<SurfaceRoute>().is_err(),
-                    "accepted invalid workflow route `{value}`"
-                );
-                assert!(
-                    serde_json::from_str::<SurfaceRoute>(&format!("\"{value}\"")).is_err(),
-                    "deserialized invalid workflow route `{value}`"
-                );
-            }
         }
     }
 

@@ -568,7 +568,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "routing/surface_catalog",
     "routing/availability",
     "routing/navigation",
-    "workflows/capability_workflow",
     "logging",
     "layout",
     // The command vocabulary: what commands exist, their portable identity,
@@ -578,8 +577,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "commands/vocabulary",
     "shortcuts",
     "preferences",
-    "feature_availability",
-    "feature_availability_data",
     "design_system",
     // Document engines and the interaction session they hang off.
     "lifecycle/session",
@@ -741,7 +738,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/code_workspace", "app", 5),
     ("documents/model_editor", "app", 1),
     ("documents/result_document", "app", 3),
-    ("feature_availability", "app", 1),
     ("browser/file_import", "app", 1),
     ("lifecycle/recovery", "app", 1),
     // What still names the dispatcher rather than the vocabulary it routes.
@@ -813,10 +809,8 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
         2,
     ),
     ("surfaces", "documents/visualization_studio", 1),
-    ("feature_availability", "design_system", 1),
     // A route describing its own catalog and availability.
     ("routing/surface_route", "routing/surface_catalog", 1),
-    ("routing/surface_route", "workflows/capability_workflow", 1),
 ];
 
 fn workbench_dir() -> PathBuf {
@@ -1690,9 +1684,7 @@ fn every_production_dialog_callsite_supplies_a_description() {
             .expect("source beneath crate root")
             .to_string_lossy()
             .replace('\\', "/");
-        // The primitive contains deliberately partial construction tests;
-        // feature-availability descriptions have their own route-specific
-        // source contract because their purpose text depends on the route.
+        // The primitive contains deliberately partial construction tests.
         // The command form forwards its own caller's purpose text, so the
         // audit belongs at those callers. Extracted test modules are also
         // non-production sources and may intentionally exercise incomplete
@@ -1701,9 +1693,7 @@ fn every_production_dialog_callsite_supplies_a_description() {
             || relative.contains("/tests/")
             || matches!(
                 relative.as_str(),
-                "rspice-ui-kit/src/widgets/dialog.rs"
-                    | "rspice-ui-kit/src/widgets/command_form.rs"
-                    | "rspice-app/src/workbench/feature_availability.rs"
+                "rspice-ui-kit/src/widgets/dialog.rs" | "rspice-ui-kit/src/widgets/command_form.rs"
             )
         {
             continue;

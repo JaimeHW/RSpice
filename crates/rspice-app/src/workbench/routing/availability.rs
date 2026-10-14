@@ -5,7 +5,7 @@
 //! or sign-off path exists. This module is the single runtime gate between a
 //! canonical [`SurfaceId`] and application navigation.
 
-use crate::workbench::{CapabilityWorkflowId, SurfaceId, SurfaceRoute};
+use crate::workbench::{SurfaceId, SurfaceRoute};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceExecutionAvailability {
@@ -44,44 +44,7 @@ pub const fn route_availability(route: SurfaceRoute) -> SurfaceExecutionAvailabi
             reason: "Object-aware routes remain unavailable until a runtime object resolver and consuming surface executor are registered.",
         };
     }
-    if let Some(workflow) = route.capability_workflow_id() {
-        return capability_workflow_availability(workflow);
-    }
     surface_availability(route.surface_id())
-}
-
-/// Nested workflow availability is intentionally exhaustive. A newly added
-/// workflow identity must choose an executor boundary here before navigation
-/// can expose it; ownership by an available parent surface is never enough.
-const fn capability_workflow_availability(
-    workflow: CapabilityWorkflowId,
-) -> SurfaceExecutionAvailability {
-    match workflow {
-        CapabilityWorkflowId::GenericMultidimensionalRunsetController
-        | CapabilityWorkflowId::SourceLoadPullAnalysis
-        | CapabilityWorkflowId::XParameterGeneration
-        | CapabilityWorkflowId::ModulatedSignalCharacterization
-        | CapabilityWorkflowId::CalibrationDeembeddingPlan
-        | CapabilityWorkflowId::StatisticalDistributionAuthoring
-        | CapabilityWorkflowId::ErcPerc
-        | CapabilityWorkflowId::AntennaChecks
-        | CapabilityWorkflowId::DensityFillDfm
-        | CapabilityWorkflowId::GdsOasisStreamOut
-        | CapabilityWorkflowId::TapeoutAssemblyHandoff => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui governed planned-workflow specification viewer",
-            evidence_boundary: "Read-only design inspection is executable; the described engineering capability and operational menu entry remain unavailable.",
-        },
-        CapabilityWorkflowId::InteroperabilityMatrix | CapabilityWorkflowId::PlatformLifecycle => {
-            SurfaceExecutionAvailability::Available {
-                executor: "rspice-ui governed capability-contract inspection document",
-                evidence_boundary: "Read-only contract inspection and local filtering are executable; displayed format, connector, browser, operating-system, and engine qualification records remain governed reference data rather than runtime availability claims.",
-            }
-        }
-        CapabilityWorkflowId::TouchEditGuide => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui governed touch-editing guidance document",
-            evidence_boundary: "Read-only gesture and precision guidance is executable; the document does not mutate a design or assert device-specific platform qualification.",
-        },
-    }
 }
 
 #[must_use]
@@ -149,10 +112,6 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
         SurfaceId::NotificationCenter => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui session notification panel",
             evidence_boundary: "Filtering by domain and read state, marking read, dismissing one notice, clearing read notices, retention disclosure, and each notice's one offer (its run in Results, or the Console) operate on the real in-memory activity stream of this application session; nothing is persisted, and no external approval or remote background service is inferred.",
-        },
-        SurfaceId::FeatureAvailability => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui capability and platform matrix manager",
-            evidence_boundary: "Read-only disclosure executor present; bundled design fixtures are not product readiness evidence.",
         },
         SurfaceId::CommandPalette => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui route-owned command palette overlay",
@@ -246,7 +205,6 @@ mod tests {
                 SurfaceId::JobsManager,
                 SurfaceId::NotificationCenter,
                 SurfaceId::HelpCenter,
-                SurfaceId::FeatureAvailability,
                 SurfaceId::SpecialistToolBrowser,
             ]
         );
@@ -388,14 +346,6 @@ mod tests {
                     .is_some_and(|reason| reason.contains("runtime object resolver")),
                 "{surface} did not report the resolver boundary"
             );
-        }
-    }
-
-    #[test]
-    fn every_capability_inspection_route_has_an_explicit_read_only_executor() {
-        for workflow in CapabilityWorkflowId::ALL {
-            let availability = route_availability(SurfaceRoute::capability_workflow(workflow));
-            assert!(availability.can_open(), "{workflow} should be inspectable");
         }
     }
 }

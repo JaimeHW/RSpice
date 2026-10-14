@@ -5,7 +5,6 @@
 //! through the serialized session unchanged.
 
 use super::*;
-use crate::workbench::CapabilityWorkflowId;
 
 #[test]
 fn canonical_workspace_order_is_stable() {
@@ -507,38 +506,31 @@ fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
         .expect("Results is available");
     state
         .navigate(
-            SurfaceRoute::surface(SurfaceId::FeatureAvailability),
+            SurfaceRoute::surface(SurfaceId::JobsManager),
             RouteTransitionSource::User,
         )
-        .expect("capability matrix is available");
+        .expect("jobs manager is available");
     state
         .navigate(
-            SurfaceRoute::capability_workflow(CapabilityWorkflowId::SourceLoadPullAnalysis),
+            SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser),
             RouteTransitionSource::User,
         )
-        .expect("planned workflow inspection is available");
-    state.capability_matrix.section = CapabilityMatrixSection::PlannedDesigns;
-    state.capability_matrix.scroll_offset = 240.0;
+        .expect("specialist tool browser is available");
     state.clear_browser_history_effects();
 
     let transition = state
         .navigate_back_steps(2, RouteTransitionSource::User)
-        .expect("matrix and source routes exist");
+        .expect("manager and source routes exist");
 
     assert_eq!(
         transition.previous,
-        SurfaceRoute::capability_workflow(CapabilityWorkflowId::SourceLoadPullAnalysis)
+        SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser)
     );
     assert_eq!(
         transition.current,
         SurfaceRoute::surface(SurfaceId::Results)
     );
     assert_eq!(state.workspace, Workspace::Results);
-    assert_eq!(
-        state.capability_matrix.section,
-        CapabilityMatrixSection::Platforms
-    );
-    assert_eq!(state.capability_matrix.scroll_offset, 0.0);
     assert_eq!(
         state.take_browser_history_effect(),
         Some(BrowserHistoryEffect::Traverse {
@@ -549,47 +541,30 @@ fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
 }
 
 #[test]
-fn touch_guide_history_roundtrips_through_its_platform_lifecycle_source() {
+fn manager_history_roundtrips_back_and_forward_to_its_source() {
     let mut state = WorkbenchState::default();
-    let matrix = SurfaceRoute::surface(SurfaceId::FeatureAvailability);
-    let lifecycle = SurfaceRoute::capability_workflow(CapabilityWorkflowId::PlatformLifecycle);
-    let touch_guide = SurfaceRoute::capability_workflow(CapabilityWorkflowId::TouchEditGuide);
-
-    for route in [matrix, lifecycle, touch_guide] {
+    let jobs = SurfaceRoute::surface(SurfaceId::JobsManager);
+    let tools = SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser);
+    for route in [jobs, tools] {
         state
             .navigate(route, RouteTransitionSource::User)
-            .expect("the informational route has an explicit executor");
+            .expect("the manager route has an executor");
     }
 
-    assert_eq!(state.current_route(), touch_guide);
-    assert_eq!(state.previous_route(), Some(lifecycle));
+    assert_eq!(state.previous_route(), Some(jobs));
     assert_eq!(
         state
             .navigate_back(RouteTransitionSource::User)
-            .expect("touch guide retains its lifecycle source")
+            .expect("the tool browser retains its jobs source")
             .current,
-        lifecycle
+        jobs
     );
     assert_eq!(
         state
-            .navigate_back(RouteTransitionSource::User)
-            .expect("lifecycle retains the capability matrix source")
+            .navigate_forward_steps(1, RouteTransitionSource::User)
+            .expect("forward restores the tool browser")
             .current,
-        matrix
-    );
-    assert_eq!(
-        state
-            .navigate_forward(RouteTransitionSource::User)
-            .expect("forward restores lifecycle")
-            .current,
-        lifecycle
-    );
-    assert_eq!(
-        state
-            .navigate_forward(RouteTransitionSource::User)
-            .expect("forward restores touch guidance")
-            .current,
-        touch_guide
+        tools
     );
 }
 
@@ -782,126 +757,51 @@ fn application_modals_own_global_input_exclusively() {
     assert!(state.application_modal_open());
     state
         .navigate(
-            SurfaceRoute::surface(SurfaceId::FeatureAvailability),
+            SurfaceRoute::surface(SurfaceId::JobsManager),
             RouteTransitionSource::User,
         )
-        .expect("capability manager has a registered executor");
+        .expect("jobs manager has a registered executor");
     assert!(state.application_modal_open());
 }
 
+/// A session saved while the capability matrix existed carries its
+/// `capability_matrix` block and may have the matrix open or in its history.
+/// It must still load: the stale block is ignored, the dead routes are
+/// dropped with one diagnostic, and the rest of the session survives.
 #[test]
-fn capability_matrix_persists_profile_but_not_local_presentation() {
+fn session_saved_with_the_deleted_capability_matrix_still_restores() {
     let mut state = WorkbenchState::default();
     state.engineering_profile = EngineeringProfile::RfMicrowave;
-    state.capability_matrix = CapabilityMatrixState {
-        section: CapabilityMatrixSection::Workspaces,
-        scroll_offset: 318.5,
-        last_document_compact: Some(false),
-        drilldown: Some(CapabilityMatrixDrilldown::PlannedWorkflow(
-            "transient-noise".to_owned(),
-        )),
-        drilldown_scroll_offset: 91.0,
-        interoperability_section: InteroperabilitySection::Qualification,
-        interoperability_domain: InteroperabilityDomain::MechanicalExchange,
-        interoperability_support_level: InteroperabilitySupportLevel::Planned,
-    };
+    state.activate(Workspace::Results);
+    let mut saved = serde_json::to_value(&state).expect("workbench serializes");
+    saved["capability_matrix"] = serde_json::json!({ "section": "workspaces" });
+    saved["navigation"] = serde_json::json!({
+        "current": "?surface=feature-availability",
+        "back": ["?view=results", "?surface=touch-edit-guide"],
+        "forward": [],
+        "recent": ["?surface=interoperability-matrix"]
+    });
 
-    let json = serde_json::to_string(&state).expect("workbench serializes");
-    let restored: WorkbenchState =
-        serde_json::from_str(&json).expect("workbench review context restores");
+    let mut restored: WorkbenchState =
+        serde_json::from_value(saved).expect("an old session restores");
+    restored.reconcile_restored_navigation();
+
     assert_eq!(
         restored.engineering_profile,
         EngineeringProfile::RfMicrowave
     );
     assert_eq!(
-        restored.capability_matrix.section,
-        CapabilityMatrixSection::Platforms
-    );
-    assert_eq!(restored.capability_matrix.scroll_offset, 0.0);
-    assert_eq!(restored.capability_matrix.last_document_compact, None);
-    assert_eq!(restored.capability_matrix.drilldown, None);
-    assert_eq!(restored.capability_matrix.drilldown_scroll_offset, 0.0);
-    assert_eq!(
-        restored.capability_matrix.interoperability_section,
-        InteroperabilitySection::FormatMatrix
+        restored.current_route(),
+        SurfaceRoute::surface(SurfaceId::Design)
     );
     assert_eq!(
-        restored.capability_matrix.interoperability_domain,
-        InteroperabilityDomain::All
+        restored.previous_route(),
+        Some(SurfaceRoute::surface(SurfaceId::Results))
     );
-    assert_eq!(
-        restored.capability_matrix.interoperability_support_level,
-        InteroperabilitySupportLevel::All
-    );
-}
-
-#[test]
-fn capability_matrix_reopens_at_platforms_and_dismisses_drilldowns() {
-    let mut state = WorkbenchState::default();
-    state.capability_matrix.section = CapabilityMatrixSection::Analyses;
-    state.capability_matrix.scroll_offset = 200.0;
-    state.capability_matrix.last_document_compact = Some(false);
-    state.capability_matrix.drilldown = Some(CapabilityMatrixDrilldown::PlannedWorkflow(
-        "transient-noise".to_owned(),
-    ));
-    state.capability_matrix.interoperability_section = InteroperabilitySection::Qualification;
-    state.capability_matrix.interoperability_domain = InteroperabilityDomain::MechanicalExchange;
-    state.capability_matrix.interoperability_support_level =
-        InteroperabilitySupportLevel::ConnectorDependent;
-
-    state
-        .navigate(
-            SurfaceRoute::surface(SurfaceId::FeatureAvailability),
-            RouteTransitionSource::User,
-        )
-        .expect("capability manager has an executor");
-    assert_eq!(
-        state.capability_matrix.section,
-        CapabilityMatrixSection::Platforms
-    );
-    assert_eq!(state.capability_matrix.scroll_offset, 0.0);
-    assert_eq!(state.capability_matrix.last_document_compact, None);
-    assert_eq!(state.capability_matrix.drilldown, None);
-    assert_eq!(
-        state.capability_matrix.interoperability_section,
-        InteroperabilitySection::FormatMatrix
-    );
-    assert_eq!(
-        state.capability_matrix.interoperability_domain,
-        InteroperabilityDomain::All
-    );
-    assert_eq!(
-        state.capability_matrix.interoperability_support_level,
-        InteroperabilitySupportLevel::All
-    );
-
-    state.capability_matrix.section = CapabilityMatrixSection::Workspaces;
-    state.capability_matrix.scroll_offset = 42.0;
-    state.capability_matrix.drilldown = Some(CapabilityMatrixDrilldown::PlannedWorkflow(
-        "transient-noise".to_owned(),
-    ));
-    state.capability_matrix.interoperability_section = InteroperabilitySection::RoundTripContract;
-    state.capability_matrix.interoperability_domain = InteroperabilityDomain::IcDesignAndLayout;
-    state.capability_matrix.interoperability_support_level =
-        InteroperabilitySupportLevel::Qualified;
-    state.activate(Workspace::Design);
-    assert_eq!(
-        state.capability_matrix.section,
-        CapabilityMatrixSection::Platforms
-    );
-    assert_eq!(state.capability_matrix.scroll_offset, 0.0);
-    assert_eq!(state.capability_matrix.drilldown, None);
-    assert_eq!(
-        state.capability_matrix.interoperability_section,
-        InteroperabilitySection::FormatMatrix
-    );
-    assert_eq!(
-        state.capability_matrix.interoperability_domain,
-        InteroperabilityDomain::All
-    );
-    assert_eq!(
-        state.capability_matrix.interoperability_support_level,
-        InteroperabilitySupportLevel::All
+    assert!(
+        restored
+            .take_route_diagnostic()
+            .is_some_and(|message| message.contains("Malformed routes"))
     );
 }
 

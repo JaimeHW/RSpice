@@ -436,7 +436,6 @@ pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
     tools::jobs_manager::show(ctx, app);
     tools::specialist_tool_browser::show(ctx, app);
     surfaces::show_simulation_workflow_dialogs(ctx, app);
-    feature_availability::show(ctx, app);
 }
 
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {

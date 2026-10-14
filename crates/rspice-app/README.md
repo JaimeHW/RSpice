@@ -569,21 +569,7 @@ build revision, so a harness correction can recheck unchanged release bytes.
 It does not qualify physical tablet input, accessibility, or the full engineering
 workflow; the instrumented workbench and device qualification remain separate.
 
-The default test suite is self-contained. Parity checks against the separately
-governed `rspice-workbench-host` mockup sources are `#[ignore]`d, because that
-tree is a different repository and is not part of this checkout. Fixture example
-names are checked for internal consistency; shipping capability labels and
-implemented result formats are owned by the in-tree catalog and its tests. Run them
-explicitly, optionally pointing `RSPICE_MOCKUP_ROOT` at the checkout:
-
-```bash
-RSPICE_MOCKUP_ROOT=/path/to/rspice-workbench-host \
-  cargo test -p rspice-app --lib workbench::feature_availability_data::tests:: -- --ignored
-```
-
-Capability-resolver security tests do not depend on that external tree. Their
-closed-contract design fixture is tracked as Rust test data beside the
-resolver so clean checkouts exercise the fail-closed policy on every CI run.
+The default test suite is self-contained.
 
 There are no runtime asset files to install: `build.rs` embeds the
 component-symbol SVGs and exports the git hash at compile time; fonts and

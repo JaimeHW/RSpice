@@ -1170,7 +1170,6 @@ mod tests {
 
     use super::*;
     use crate::workbench::routing::surface_catalog::SurfaceId;
-    use crate::workbench::workflows::capability_workflow::CapabilityWorkflowId;
 
     fn object_route(surface_id: SurfaceId) -> SurfaceRoute {
         let object_ref = ObjectRef::new(
@@ -1211,27 +1210,6 @@ mod tests {
             route_from_search(&search).expect("Design Management route parses"),
             Some(route)
         );
-    }
-
-    #[test]
-    fn every_capability_workflow_route_preserves_host_parameters() {
-        let original = "?locale=en-US&view=design&campaign=qualification";
-
-        for workflow in CapabilityWorkflowId::ALL {
-            let route = SurfaceRoute::capability_workflow(workflow);
-            let search = search_with_route(original, route).expect("workflow route rewrites");
-            assert_eq!(
-                search,
-                format!(
-                    "{}&locale=en-US&campaign=qualification",
-                    workflow.deep_link()
-                )
-            );
-            assert_eq!(
-                route_from_search(&search).expect("workflow route parses"),
-                Some(route)
-            );
-        }
     }
 
     #[test]
@@ -1277,9 +1255,9 @@ mod tests {
 
     #[test]
     fn object_routes_allow_unrelated_interleaving_but_serialize_canonically() {
-        let route = object_route(SurfaceId::FeatureAvailability);
+        let route = object_route(SurfaceId::JobsManager);
         let search = concat!(
-            "?locale=en-US&surface=feature-availability&campaign=qa&",
+            "?locale=en-US&surface=jobs-manager&campaign=qa&",
             "object-kind=project&tag=one&",
             "object-id=123e4567-e89b-12d3-a456-426614174000"
         );
@@ -1288,7 +1266,7 @@ mod tests {
         assert_eq!(
             parsed.to_string(),
             concat!(
-                "?surface=feature-availability&object-kind=project&",
+                "?surface=jobs-manager&object-kind=project&",
                 "object-id=123e4567-e89b-12d3-a456-426614174000&",
                 "locale=en-US&campaign=qa&tag=one"
             )
@@ -1298,7 +1276,7 @@ mod tests {
     #[test]
     fn route_removal_drops_all_route_owned_parameters_only() {
         let search = concat!(
-            "?locale=en-US&surface=feature-availability&",
+            "?locale=en-US&surface=jobs-manager&",
             "object-kind=project&object-id=123e4567-e89b-12d3-a456-426614174000&",
             "campaign=a%2Fb"
         );
@@ -1312,10 +1290,10 @@ mod tests {
     fn duplicate_conflicting_and_encoded_route_keys_fail_closed() {
         let invalid = [
             "?view=design&view=results",
-            "?surface=feature-availability&surface=preferences",
-            "?view=design&surface=feature-availability",
+            "?surface=jobs-manager&surface=preferences",
+            "?view=design&surface=jobs-manager",
             "?%76iew=design",
-            "?s%75rface=feature-availability",
+            "?s%75rface=jobs-manager",
             "?object%2Dkind=project",
             "?object-id=123e4567-e89b-12d3-a456-426614174000&object-id=123e4567-e89b-12d3-a456-426614174001",
         ];
@@ -1333,11 +1311,12 @@ mod tests {
             "?view=unknown",
             "?surface=unknown",
             "?view=Project",
-            "?surface=Feature-Availability",
+            "?surface=Jobs-Manager",
             "?surface=project",
-            "?view=feature-availability",
+            "?view=jobs-manager",
             "?view=%64esign",
-            "?surface=feature%2Davailability",
+            "?surface=jobs%2Dmanager",
+            "?surface=feature-availability",
         ] {
             assert!(
                 LocationSearch::parse(search).is_err(),
