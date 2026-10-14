@@ -69,7 +69,6 @@ const SWITCH_LABEL_GAP: f32 = 7.0;
 const SWITCH_PADDING_X: f32 = 6.0;
 
 const GROUP_HEIGHT: f32 = 27.0;
-const GROUP_TRACKING: f32 = 0.6;
 const ROW_PADDING_LEFT: f32 = 14.0;
 const ROW_PADDING_RIGHT: f32 = 12.0;
 const ROW_PADDING_TOP: f32 = 9.0;
@@ -411,7 +410,6 @@ fn head(ui: &mut Ui, unread: usize, large: bool, intents: &mut Vec<Intent>) {
         rect.left() + BAND_PADDING_LEFT,
         rect.center().y - title.size().y * 0.5,
     );
-    let pill_left = title_pos.x + title.size().x + 8.0;
     ui.painter().galley(title_pos, title, t.color.text);
 
     let action = quiet_action(
@@ -422,28 +420,10 @@ fn head(ui: &mut Ui, unread: usize, large: bool, intents: &mut Vec<Intent>) {
         unread > 0,
         large,
     );
+    // No unread count beside the title: the bell's badge and the rows' rails
+    // already say how much is unread.
     if action.clicked() {
         intents.push(Intent::MarkAllRead);
-    }
-
-    if unread > 0 {
-        let label = ui.painter().layout_no_wrap(
-            format!("{unread} unread"),
-            theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
-            t.color.accent,
-        );
-        let pill = Rect::from_min_size(
-            pos2(pill_left, rect.center().y - (label.size().y + 4.0) * 0.5),
-            label.size() + vec2(12.0, 4.0),
-        );
-        // Dropped rather than squeezed when a narrow sheet has no room for
-        // it: the bell's badge and the rows' rails already say the same.
-        if pill.right() + 8.0 <= action.rect.left() {
-            ui.painter()
-                .rect_filled(pill, 9.0, t.color.accent.gamma_multiply(0.14));
-            ui.painter()
-                .galley(pill.min + vec2(6.0, 2.0), label, t.color.accent);
-        }
     }
 }
 
@@ -864,15 +844,13 @@ fn group_heading(ui: &mut Ui, label: &str, pinned: Option<Rect>) {
             Stroke::new(1.0, t.color.border.gamma_multiply(0.65)),
         );
     }
-    let galley = ui.painter().layout_job(LayoutJob::single_section(
-        label.to_uppercase(),
-        TextFormat {
-            font_id: theme::sans(tokens::FS_MICRO, FontWeight::SemiBold),
-            extra_letter_spacing: GROUP_TRACKING,
-            color: t.color.text_faint,
-            ..Default::default()
-        },
-    ));
+    // Painted as written, in sentence case and without tracking, like every
+    // kit header.
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        theme::sans(tokens::FS_MICRO, FontWeight::SemiBold),
+        t.color.text_faint,
+    );
     ui.painter().galley(
         pos2(
             rect.left() + ROW_PADDING_LEFT,

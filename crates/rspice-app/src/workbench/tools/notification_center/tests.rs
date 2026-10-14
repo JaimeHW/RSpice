@@ -254,14 +254,13 @@ fn the_panel_states_the_session_in_one_grammar() {
     let panel = Panel::seeded(DESKTOP);
     for owed in [
         "Notifications",
-        "4 unread",
         "Mark all read",
         "All",
         "Jobs",
         "System",
         "Unread only",
-        "RECENT",
-        "EARLIER THIS SESSION",
+        "Recent",
+        "Earlier this session",
         "Run 41 complete",
         "Run 40 failed",
         "Warning",
@@ -280,6 +279,13 @@ fn the_panel_states_the_session_in_one_grammar() {
             panel.painted()
         );
     }
+    // The unread count is the bell's badge and the rows' rails; the head
+    // does not repeat it beside the title.
+    assert!(
+        !panel.painted().iter().any(|text| text.ends_with(" unread")),
+        "the head repeats the unread count: {:#?}",
+        panel.painted()
+    );
     // The counts ride beside the filters they belong to.
     for (segment, count) in [("All", 4), ("Jobs", 3), ("System", 1)] {
         assert!(
@@ -341,7 +347,6 @@ fn pressing_a_row_marks_that_row_read_and_no_other() {
     panel.click(|label| label.contains("unread: Run 40 failed"));
 
     assert_eq!(panel.toasts().unread_count(), 3);
-    assert!(panel.paints("3 unread"));
     assert!(
         panel.announces(|label| label.starts_with("Job Error: Run 40 failed")),
         "a read row stops announcing itself as unread, and stays where it was"
@@ -358,7 +363,6 @@ fn mark_all_read_empties_the_unread_view_and_then_has_nothing_to_do() {
     panel.click(|label| label == "Mark all read");
     assert_eq!(panel.toasts().unread_count(), 0);
     assert!(panel.paints("Nothing unread"));
-    assert!(!panel.paints("4 unread"));
 
     // Spent: a second press changes nothing because it reaches nothing.
     let at = panel.control(|label| label == "Mark all read").center();
@@ -470,7 +474,7 @@ fn the_filter_takes_a_finger_without_growing_taller() {
                 .center()
                 .y
         };
-        of("RECENT") - of("All")
+        of("Recent") - of("All")
     };
     let desktop = Panel::seeded(DESKTOP);
     let authored = drop_to_list(&desktop);
@@ -485,7 +489,7 @@ fn the_filter_takes_a_finger_without_growing_taller() {
         let heading = panel
             .texts
             .iter()
-            .find(|(text, _)| text == "RECENT")
+            .find(|(text, _)| text == "Recent")
             .expect("group heading")
             .1;
         for segment in ["All, 4", "Jobs, 3", "System, 1"] {

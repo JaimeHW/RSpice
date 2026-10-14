@@ -15,6 +15,7 @@ use egui::{Context, RichText, Ui};
 use crate::state::AnalysisResult;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Problem, paint_problem_mark, problem_line};
 use crate::workbench::RSpiceApp;
 use crate::workbench::documents::result_document::{
     AnalysisPresentationKey, analysis_default_unit, browser_signal_unit,
@@ -91,16 +92,18 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
 
+    // A count, and a failure mark only while something blocks. Expressions
+    // that evaluate are the ordinary case and say nothing more.
     let blocking = rows.iter().filter(|row| row.error.is_some()).count();
-    ui.label(
-        RichText::new(if blocking == 0 {
-            format!("{} expression(s) · all evaluate", rows.len())
-        } else {
-            format!("{} expression(s) · {blocking} blocking", rows.len())
-        })
-        .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-        .color(if blocking == 0 { c.ok } else { c.err }),
-    );
+    if let Some(summary) = blocking_summary(rows.len(), blocking) {
+        problem_line(ui, Problem::Failure, &summary);
+    } else {
+        ui.label(
+            RichText::new(format!("{} expression(s)", rows.len()))
+                .font(theme::sans(tokens::FS_1, FontWeight::Medium))
+                .color(c.text_dim),
+        );
+    }
     ui.add_space(8.0);
 
     egui::ScrollArea::vertical()
@@ -143,19 +146,25 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
                         );
                         match (&row.error, row.evaluated) {
                             (Some(error), _) => {
-                                ui.label(
-                                    RichText::new(error)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                        .color(c.err),
-                                )
-                                .on_hover_text(error);
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    let (mark, _) = ui.allocate_exact_size(
+                                        egui::vec2(11.0, 11.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    paint_problem_mark(ui.painter(), mark, Problem::Failure);
+                                    ui.label(
+                                        RichText::new(error)
+                                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                            .color(c.text),
+                                    )
+                                    .on_hover_text(Problem::Failure.announce(error));
+                                });
                             }
+                            // An expression that evaluates leaves its status
+                            // blank: success is the absence of a problem.
                             (None, true) => {
-                                ui.label(
-                                    RichText::new("valid")
-                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                        .color(c.ok),
-                                );
+                                ui.label("");
                             }
                             (None, false) => {
                                 ui.label(
@@ -212,6 +221,12 @@ fn collect_rows(app: &RSpiceApp) -> Vec<ExpressionRow> {
     rows
 }
 
+/// The line a blocked set of expressions states beside its failure mark, or
+/// nothing while every expression evaluates.
+fn blocking_summary(expressions: usize, blocking: usize) -> Option<String> {
+    (blocking > 0).then(|| format!("{expressions} expression(s) · {blocking} blocking"))
+}
+
 fn domain_label(analysis: &AnalysisResult) -> &'static str {
     use crate::state::AnalysisType;
     match analysis.analysis_type {
@@ -230,8 +245,19 @@ fn domain_label(analysis: &AnalysisResult) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::domain_label;
+    use super::{blocking_summary, domain_label};
     use crate::state::{AnalysisResult, AnalysisType};
+
+    /// Only a blocked set earns the failure line. It used to read "all
+    /// evaluate" in green when nothing was wrong.
+    #[test]
+    fn only_a_blocking_expression_earns_the_failure_line() {
+        assert_eq!(blocking_summary(3, 0), None);
+        assert_eq!(
+            blocking_summary(3, 1).as_deref(),
+            Some("3 expression(s) · 1 blocking")
+        );
+    }
 
     /// The diagnostics row states the same quantity the rest of the product
     /// does: a `.PNOISE` spectrum stands on an offset from its carrier, and a

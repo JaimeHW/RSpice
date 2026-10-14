@@ -312,14 +312,15 @@ impl CalculatorPanel {
         }
         self.handle_history_keys(ui, &response);
 
-        // Inline outcome row — result in ok, error in err, hint otherwise.
-        // The readout is rounded to eight significant digits, so a result
-        // is click-to-copy: the clipboard gets the exact f64 behind it.
+        // Inline outcome row — the result is a value in plain text, an
+        // error is the expression input's own rejection in err, and the hint
+        // is faint. The readout is rounded to eight significant digits, so a
+        // result is click-to-copy: the clipboard gets the exact f64 behind it.
         ui.add_space(4.0);
         let mut copy: Option<String> = None;
         ui.horizontal(|ui| {
             let (text, color) = match &self.outcome {
-                Some(Ok(result)) => (result.readout.as_str(), c.ok),
+                Some(Ok(result)) => (result.readout.as_str(), c.text),
                 Some(Err(error)) => (error.as_str(), c.err),
                 None => ("evaluate to see the result here", c.text_faint),
             };
@@ -597,20 +598,14 @@ impl CalculatorPanel {
 // rows (the spec's .it vocabulary; pane chrome lives in ui/widgets/pane.rs)
 // ---------------------------------------------------------------------------
 
+/// A field caption, painted as written: sentence case, no tracking.
 fn caption(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &text.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-            color: t.color.text_faint,
-            extra_letter_spacing: 0.12 * tokens::FS_0,
-            ..Default::default()
-        },
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .color(t.color.text_faint),
     );
-    ui.label(job);
     ui.add_space(3.0);
 }
 

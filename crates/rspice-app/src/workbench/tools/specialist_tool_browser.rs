@@ -183,7 +183,7 @@ fn purpose_banner(ui: &mut Ui) {
                 WorkbenchIcon::Info.paint(
                     ui.painter(),
                     Rect::from_center_size(icon_rect.center(), Vec2::splat(13.0)),
-                    t.color.info,
+                    t.color.text_faint,
                 );
                 ui.add(
                     egui::Label::new(
@@ -298,10 +298,6 @@ fn search_field(ui: &mut Ui, query: &mut String, width: f32, request_focus: bool
 fn count_label(ui: &mut Ui, visible: usize) {
     let t = Tokens::get(ui.ctx());
     let response = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 5.0;
-        let (dot, _) = ui.allocate_exact_size(Vec2::splat(6.0), Sense::hover());
-        ui.painter()
-            .circle_filled(dot.center(), 2.5, t.color.text_faint);
         ui.label(
             RichText::new(format!(
                 "{visible} of {} tools",
@@ -616,7 +612,7 @@ fn tool_card_layout(rect: Rect, action_side: f32, status_text_width: f32) -> Too
     let content_right = (rect.right() - actions_width).max(icon.right() + CARD_TEXT_GAP);
     let text_left = (icon.right() + CARD_TEXT_GAP).min(content_right);
     let available_copy_width = (content_right - text_left).max(0.0);
-    let desired_status_width = (status_text_width + 11.0).max(CARD_STATUS_MIN_WIDTH);
+    let desired_status_width = status_text_width.max(CARD_STATUS_MIN_WIDTH);
     let inline_status = available_copy_width
         >= CARD_INLINE_TITLE_MIN_WIDTH + CARD_STATUS_GAP + CARD_STATUS_MIN_WIDTH;
 
@@ -708,7 +704,7 @@ fn tool_card(
     owner_icon(row.owner).paint(
         ui.painter(),
         Rect::from_center_size(icon_rect.center(), Vec2::splat(18.0)),
-        t.color.accent,
+        t.color.text_dim,
     );
     let text_rect = layout.text;
     let painter = ui.painter().with_clip_rect(text_rect);
@@ -739,28 +735,18 @@ fn tool_card(
         detail_font,
         t.color.text_dim,
     );
-    let status_tone = if !available {
-        t.color.warn
-    } else if row.shown_in_profile(profile) {
-        t.color.ok
-    } else {
-        t.color.text_faint
-    };
+    // The status words already say whether the tool is shown, hidden or
+    // unavailable, so they carry no dot.
     if let Some(status_rect) = layout.status {
         let status_painter = ui.painter().with_clip_rect(status_rect);
-        status_painter.circle_filled(
-            pos2(status_rect.left() + 2.5, status_rect.center().y),
-            2.5,
-            status_tone,
-        );
         let status = elide_to_width(
             &status_painter,
             profile_copy,
             &status_font,
-            (status_rect.width() - 11.0).max(1.0),
+            status_rect.width().max(1.0),
         );
         status_painter.text(
-            pos2(status_rect.left() + 11.0, status_rect.center().y),
+            status_rect.left_center(),
             Align2::LEFT_CENTER,
             status,
             status_font.clone(),
@@ -772,19 +758,14 @@ fn tool_card(
             text_rect.right_bottom(),
         );
         let status_painter = ui.painter().with_clip_rect(status_line);
-        status_painter.circle_filled(
-            pos2(status_line.left() + 2.5, status_line.center().y),
-            2.5,
-            status_tone,
-        );
         let status = elide_to_width(
             &status_painter,
             profile_copy,
             &status_font,
-            (status_line.width() - 11.0).max(1.0),
+            status_line.width().max(1.0),
         );
         status_painter.text(
-            pos2(status_line.left() + 11.0, status_line.center().y),
+            status_line.left_center(),
             Align2::LEFT_CENTER,
             status,
             status_font,
