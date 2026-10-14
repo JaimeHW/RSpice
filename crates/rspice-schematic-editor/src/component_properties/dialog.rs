@@ -37,7 +37,6 @@ pub trait ComponentPropertyServices {
 }
 
 const DIALOG_SIZE: DialogSize = DialogSize::ComponentEditor;
-const EYEBROW: &str = "EDIT · TYPED PARAMETERS";
 const DESCRIPTION: &str = "Edit identity, model, parameters, orientation, connectivity, display, constraints, and review metadata.";
 
 /// Render one active component dialog and return a typed host action.
@@ -67,7 +66,7 @@ pub fn render_component_property_dialog(
         .clone()
         .or_else(|| dirty.then(|| "Unapplied changes".to_owned()));
 
-    let mut dialog = Dialog::new(EYEBROW, "Edit instance properties", "OK")
+    let mut dialog = Dialog::new("Edit instance properties", "OK")
         .description(DESCRIPTION)
         .size(DIALOG_SIZE)
         .fixed_height(680.0)

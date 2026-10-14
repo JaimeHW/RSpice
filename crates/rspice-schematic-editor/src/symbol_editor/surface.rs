@@ -393,7 +393,6 @@ pub fn show_save_symbol_dialog(
     let note_valid = !revision_note.trim().is_empty();
     let blocking_title = format!("{blocking} blocking contract issue(s)");
     let mut dialog = Dialog::new(
-        "SYMBOL EDITOR \u{00b7} MODEL-BOUND CONTRACT",
         "Validate and save symbol",
         "Save symbol revision",
     )
