@@ -2127,4 +2127,6 @@ fn active_dataset_measurement(
 }
 
 #[cfg(test)]
+mod raster;
+#[cfg(test)]
 mod tests;

@@ -143,3 +143,6 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         },
     );
 }
+
+#[cfg(test)]
+mod tests;
