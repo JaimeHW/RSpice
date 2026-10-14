@@ -104,18 +104,16 @@ pub(super) fn render(ctx: &Context, state: &mut AppState) {
     }
 
     let mut draft = state.dialogs.workspace_layout_manager.clone();
-    let choice = Dialog::new(
-        "WINDOW \u{00b7} DOCKS \u{00b7} DOCUMENTS \u{00b7} DEVICE LOCAL",
-        "Workspace layout manager",
-        "Apply selected layout",
-    )
-    .description("Apply a device-local dock and console composition without changing project data.")
-    .size(DialogSize::Manager)
-    .show(ctx, |ui| {
-        render_templates(ui, &mut draft);
-        render_workspace_table(ui, state);
-        render_scope(ui, &mut draft);
-    });
+    let choice = Dialog::new("Workspace layout manager", "Apply selected layout")
+        .description(
+            "Apply a device-local dock and console composition without changing project data.",
+        )
+        .size(DialogSize::Manager)
+        .show(ctx, |ui| {
+            render_templates(ui, &mut draft);
+            render_workspace_table(ui, state);
+            render_scope(ui, &mut draft);
+        });
 
     match choice {
         DialogChoice::Primary => {

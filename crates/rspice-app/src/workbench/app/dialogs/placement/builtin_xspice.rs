@@ -9,7 +9,6 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 
-const EYEBROW: &str = "SCHEMATIC · BUILT-IN XSPICE";
 const PRIMARY: &str = "Arm placement";
 const DESCRIPTION: &str = "Choose the exact logical width of every vector port. The resulting pin order and executable connection contract are frozen with each placed instance.";
 const DISCARD_TITLE: &str = "Unsaved interface changes";
@@ -27,7 +26,7 @@ impl RSpiceApp {
             "Configure {}",
             self.state.dialogs.builtin_xspice_placement.display_name
         );
-        let mut dialog = Dialog::new(EYEBROW, &title, PRIMARY)
+        let mut dialog = Dialog::new(&title, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .ghost(if discard_confirm {

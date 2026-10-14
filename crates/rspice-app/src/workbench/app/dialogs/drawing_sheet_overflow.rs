@@ -19,7 +19,6 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, Dialo
 use crate::workbench::app::{HardcopyWorkflow, RSpiceApp};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "DRAWING SHEET \u{00b7} ADVISORY \u{00b7} NO BLOCKING EFFECT";
 const TITLE: &str = "Content outside the drawing sheet";
 const DESCRIPTION: &str = "Every object that falls outside the authored drawing area of this sheet, with its sheet coordinates and a way to reach it.";
 
@@ -64,7 +63,7 @@ impl RSpiceApp {
             )
         };
         let mut action = OverflowReviewAction::None;
-        let choice = Dialog::new(EYEBROW, TITLE, "Close")
+        let choice = Dialog::new(TITLE, "Close")
             .description(DESCRIPTION)
             .size(DialogSize::DrawingSheetWorkflow)
             .initial_height(610.0)

@@ -35,7 +35,6 @@ use crate::workbench::app_state::design_history::{
     HierarchyExtractionHistoryEntry, validate_hierarchy_target_unreferenced,
 };
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} CELL / VIEW CONTRACT";
 const TITLE: &str = "Create hierarchical cell";
 const PRIMARY: &str = "Create and descend";
 const DESCRIPTION: &str = "Create a stable cell/view from the selected schematic instances and infer an explicit electrical interface.";
@@ -117,7 +116,7 @@ impl RSpiceApp {
         let validation = validate_draft(&self.state);
         let discard_confirm = self.state.dialogs.create_hierarchy.discard_confirm;
         let table_rows = self.state.dialogs.create_hierarchy.ports.len().max(1) as f32;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .size(DialogSize::Transaction)
             .flush_body()
             .initial_height(
@@ -957,7 +956,6 @@ mod tests {
 
     #[test]
     fn restored_mockup_contract_is_exact() {
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} CELL / VIEW CONTRACT");
         assert_eq!(TITLE, "Create hierarchical cell");
         assert_eq!(PRIMARY, "Create and descend");
         assert_eq!(DEFAULT_CELL, "sensor_frontend");

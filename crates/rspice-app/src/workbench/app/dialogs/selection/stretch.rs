@@ -18,7 +18,6 @@ use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} GEOMETRY EDIT";
 const TITLE: &str = "Stretch selection";
 const PRIMARY: &str = "Arm stretch tool";
 const DESCRIPTION: &str = "Stretch wires, buses, shapes, and parameterized geometry while keeping unaffected anchors fixed.";
@@ -85,7 +84,7 @@ impl RSpiceApp {
         let selection = target_summary(&self.state);
         let snap = snap_label(self.state.schematic.document().document_policy.grid_pitch);
         let discard_confirm = self.state.dialogs.stretch_selection.discard_confirm;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .ghost(if discard_confirm {

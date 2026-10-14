@@ -52,7 +52,7 @@ impl RSpiceApp {
         let version_count = self.state.dialogs.unpublish_web.version_count;
 
         let dialog_state = &mut self.state.dialogs.unpublish_web;
-        let choice = Dialog::new("Publication", &title, "Unpublish")
+        let choice = Dialog::new(&title, "Unpublish")
             .description(
                 "Take the published page down for everyone and keep its history privately on \
                  this account.",

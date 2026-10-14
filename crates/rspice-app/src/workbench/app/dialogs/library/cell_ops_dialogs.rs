@@ -150,7 +150,7 @@ impl RSpiceApp {
             "{} / {}",
             dialogs.copy_cell_source_library, dialogs.copy_cell_source_cell
         );
-        let choice = Dialog::new("Library", "Copy cell", "Copy")
+        let choice = Dialog::new("Copy cell", "Copy")
             .description(
                 "Copy every view and its content from the selected cell into a writable library under a new name.",
             )
@@ -257,7 +257,7 @@ impl RSpiceApp {
             "{} / {}",
             dialogs.rename_cell_library, dialogs.rename_cell_current
         );
-        let choice = Dialog::new("Library", "Rename cell", "Rename")
+        let choice = Dialog::new("Rename cell", "Rename")
             .description(
                 "Rename the selected cell and remap open buffers, tabs, and instance bindings that reference it.",
             )

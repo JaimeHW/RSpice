@@ -882,7 +882,6 @@ pub(crate) enum DrawingSheetSupportRequest {
 pub(crate) struct DrawingSheetSetupState {
     pub(crate) open: bool,
     pub(crate) section: DrawingSheetSection,
-    pub(crate) eyebrow: String,
     pub(crate) document_name: String,
     pub(crate) sheet_name: String,
     pub(crate) sheet_count: usize,
@@ -916,7 +915,6 @@ impl Default for DrawingSheetSetupState {
         Self {
             open: false,
             section: DrawingSheetSection::Format,
-            eyebrow: "DRAWING SHEET".to_owned(),
             document_name: "Active document".to_owned(),
             sheet_name: "Active sheet".to_owned(),
             sheet_count: 1,

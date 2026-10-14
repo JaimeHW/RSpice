@@ -1693,13 +1693,16 @@ fn every_production_dialog_callsite_supplies_a_description() {
         // The primitive contains deliberately partial construction tests;
         // feature-availability descriptions have their own route-specific
         // source contract because their purpose text depends on the route.
-        // Extracted test modules are also non-production sources and may
-        // intentionally exercise incomplete builder chains.
+        // The command form forwards its own caller's purpose text, so the
+        // audit belongs at those callers. Extracted test modules are also
+        // non-production sources and may intentionally exercise incomplete
+        // builder chains.
         if relative.ends_with("/tests.rs")
             || relative.contains("/tests/")
             || matches!(
                 relative.as_str(),
                 "rspice-ui-kit/src/widgets/dialog.rs"
+                    | "rspice-ui-kit/src/widgets/command_form.rs"
                     | "rspice-app/src/workbench/feature_availability.rs"
             )
         {

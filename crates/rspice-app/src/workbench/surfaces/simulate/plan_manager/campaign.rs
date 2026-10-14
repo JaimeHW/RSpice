@@ -165,39 +165,35 @@ pub(super) fn dialog(
     let scope = campaign_scope(&draft.campaign.member_ids, records);
     let refusal = declared_refusal(&draft.campaign.name, &draft.campaign.member_ids);
     let mut action = None;
-    let choice = Dialog::new(
-        "SIMULATION · CAMPAIGN · ONE AUTHENTICATED RUN PER PLAN",
-        "Queue simulation campaign",
-        "Queue reviewed campaign",
-    )
-    .description(CAMPAIGN_PURPOSE)
-    // The one rule a reader cannot deduce from the surface — that the row is the
-    // control, and that adding puts a plan last — plus the membership bounds the
-    // controller enforces, which are a property of the transaction rather than of
-    // this draft and so cost the surface nothing here.
-    .hint(format!(
-        "Click a plan to add or remove it · a plan added last dispatches last · \
+    let choice = Dialog::new("Queue simulation campaign", "Queue reviewed campaign")
+        .description(CAMPAIGN_PURPOSE)
+        // The one rule a reader cannot deduce from the surface — that the row is the
+        // control, and that adding puts a plan last — plus the membership bounds the
+        // controller enforces, which are a property of the transaction rather than of
+        // this draft and so cost the surface nothing here.
+        .hint(format!(
+            "Click a plan to add or remove it · a plan added last dispatches last · \
          {MIN_CAMPAIGN_MEMBERS} to {MAX_CAMPAIGN_MEMBERS} members, each preparable"
-    ))
-    .size(DialogSize::WideWorkflow)
-    .ghost("Cancel")
-    .primary_enabled(refusal.is_none())
-    .show(ctx, |ui| {
-        purpose_line(ui, CAMPAIGN_PURPOSE);
-        ui.add_space(8.0);
-        // The members first, as the authored surface has them: the reader picks
-        // here, and everything below is what the picking added up to. The scope
-        // sat above the table because the table is the one part of this surface
-        // whose height the catalog decides — `BODY_BOTTOM_INSET` is what keeps a
-        // larger catalog from pushing the sum off the bottom.
-        member_table(ui, &mut draft.campaign.member_ids, &eligible, has_archived);
-        ui.add_space(8.0);
-        campaign_notes(ui, &scope, refusal.as_deref());
-        ui.add_space(8.0);
-        campaign_name_row(ui, &mut draft.campaign.name);
-        workflow_validation_message(ui, draft.validation_error.as_deref());
-        ui.add_space(BODY_BOTTOM_INSET);
-    });
+        ))
+        .size(DialogSize::WideWorkflow)
+        .ghost("Cancel")
+        .primary_enabled(refusal.is_none())
+        .show(ctx, |ui| {
+            purpose_line(ui, CAMPAIGN_PURPOSE);
+            ui.add_space(8.0);
+            // The members first, as the authored surface has them: the reader picks
+            // here, and everything below is what the picking added up to. The scope
+            // sat above the table because the table is the one part of this surface
+            // whose height the catalog decides — `BODY_BOTTOM_INSET` is what keeps a
+            // larger catalog from pushing the sum off the bottom.
+            member_table(ui, &mut draft.campaign.member_ids, &eligible, has_archived);
+            ui.add_space(8.0);
+            campaign_notes(ui, &scope, refusal.as_deref());
+            ui.add_space(8.0);
+            campaign_name_row(ui, &mut draft.campaign.name);
+            workflow_validation_message(ui, draft.validation_error.as_deref());
+            ui.add_space(BODY_BOTTOM_INSET);
+        });
     match choice {
         DialogChoice::Primary => action = Some(PlanManagerAction::ApplyCampaign),
         DialogChoice::Ghost | DialogChoice::Cancelled => {

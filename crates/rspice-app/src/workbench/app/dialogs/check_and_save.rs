@@ -31,7 +31,6 @@ use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} TRANSACTIONAL VALIDATION";
 const TITLE: &str = "Check and save schematic";
 const PRIMARY: &str = "Save validated revision";
 const DESCRIPTION: &str =
@@ -168,7 +167,7 @@ impl RSpiceApp {
             authority_resolved,
             dependencies_enumerated,
         };
-        let mut dialog = Dialog::new(EYEBROW, TITLE, primary_label)
+        let mut dialog = Dialog::new(TITLE, primary_label)
             .description(DESCRIPTION)
             .size(DialogSize::SimulationWorkflow)
             .initial_height(
@@ -1185,7 +1184,6 @@ mod tests {
     #[test]
     fn mockup_contract_strings_are_exact() {
         assert_eq!(TITLE, "Check and save schematic");
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} TRANSACTIONAL VALIDATION");
         assert_eq!(PRIMARY, "Save validated revision");
         assert_eq!(
             DESCRIPTION,

@@ -13,7 +13,6 @@ use rspice_schematic_editor::{
     session::bus::PendingBusTapPlacement,
 };
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY";
 const TITLE: &str = "Place bus tap";
 const PRIMARY: &str = "Arm bus-tap tool";
 const BODY: &str = "Create a typed scalar or slice connection from a declared bus with direction and naming validation.";
@@ -34,7 +33,7 @@ impl RSpiceApp {
         let can_commit = validation.can_commit();
 
         let discard_confirm = self.state.dialogs.bus_tap.discard_confirm;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(BODY)
             .size(DIALOG_SIZE)
             .ghost(if discard_confirm {

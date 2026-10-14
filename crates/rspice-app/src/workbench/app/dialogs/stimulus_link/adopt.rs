@@ -258,7 +258,6 @@ pub(super) fn render(
     let body_height = body_height(picked.is_some(), after_card.as_deref(), &session.card);
 
     let dialog = Dialog::new(
-        "STIMULUS LIBRARY",
         title.clone(),
         if replaces {
             "Re-place and adopt"

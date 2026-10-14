@@ -96,10 +96,6 @@ impl RSpiceApp {
 
         let messages = self.state.ui.messages();
         let mut dialog = Dialog::new(
-            messages.format(
-                MessageId::CodeSearchEyebrow,
-                &[("language", &search.language.label().to_uppercase())],
-            ),
             messages.text(MessageId::CodeSearchTitle),
             messages.text(MessageId::CommonClose),
         )

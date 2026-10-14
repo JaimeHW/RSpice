@@ -515,11 +515,7 @@ pub(super) fn design_variable_import_dialog(
     let total = draft.rows.len();
     let accepted = draft.accepted_count();
 
-    let choice = Dialog::new(
-        "SIMULATION \u{00b7} DESIGN VARIABLES",
-        "Import spec sheet",
-        "Adopt selected rows",
-    )
+    let choice = Dialog::new("Import spec sheet", "Adopt selected rows")
     .description(
         "Bind the sheet's columns to the fields they supply, review what each row would become, \
          and adopt the rows you keep. Every selected row is added as one transaction: if any of \

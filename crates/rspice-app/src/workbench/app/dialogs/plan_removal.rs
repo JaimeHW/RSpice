@@ -100,7 +100,7 @@ impl RSpiceApp {
         let label = review.label.clone();
         let consequences = review.consequences.clone();
 
-        let choice = Dialog::new("Simulate", target.title(), "Remove")
+        let choice = Dialog::new(target.title(), "Remove")
             .description(target.description())
             .size(DialogSize::Transaction)
             .ghost("Cancel")
@@ -185,7 +185,7 @@ impl RSpiceApp {
             return;
         }
 
-        let choice = Dialog::new("Simulate", "Cannot remove analysis", REVEAL_BLOCKER)
+        let choice = Dialog::new("Cannot remove analysis", REVEAL_BLOCKER)
             .description(
                 "This analysis is a prerequisite of another one. Removing it is refused by the \
                  plan, so nothing has been staged and nothing has changed.",

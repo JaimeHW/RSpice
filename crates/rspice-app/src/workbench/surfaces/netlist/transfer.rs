@@ -53,7 +53,6 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
         }
     };
     let choice = Dialog::new(
-        messages.text(MessageId::NetlistExternalEyebrow),
         messages.text(MessageId::NetlistExternalTitle),
         messages.text(MessageId::NetlistExternalApply),
     )
@@ -226,102 +225,99 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
     };
     let footer_hint =
         dependency_status_label(messages, dependency_count, dependencies_sealed, false);
-    let choice = Dialog::new(
-        messages.text(MessageId::NetlistExportEyebrow),
-        messages.text(MessageId::NetlistExportTitle),
-        primary,
-    )
-    .description(messages.text(MessageId::NetlistExportDescription))
-    .size(DialogSize::Transaction)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .primary_enabled(current && bundle_ready)
-    .ghost(messages.text(MessageId::CommonCancel))
-    .hint(&footer_hint)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let t = Tokens::get(ctx);
-        egui::Frame::new()
-            .fill(t.color.bg_inset)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(t.radius)
-            .inner_margin(10)
-            .show(ui, |ui| {
-                ui.label(messages.text(MessageId::NetlistExportSnapshotNotice));
-            });
-        ui.add_space(8.0);
-        ui.label(messages.text(MessageId::NetlistDialect));
-        let dialect = egui::ComboBox::from_id_salt("rspice.code.export-dialect")
-            .selected_text(match dialog.format {
-                crate::io::NetlistFormat::Spice => "SPICE",
-                crate::io::NetlistFormat::Spectre => "Spectre",
-                crate::io::NetlistFormat::Hspice => "HSPICE",
-                crate::io::NetlistFormat::Xyce => "Xyce",
-            })
-            .width(ui.available_width().max(1.0))
-            .show_ui(ui, |ui| {
-                for (format, label) in [
-                    (crate::io::NetlistFormat::Spice, "SPICE"),
-                    (crate::io::NetlistFormat::Spectre, "Spectre"),
-                    (crate::io::NetlistFormat::Hspice, "HSPICE"),
-                    (crate::io::NetlistFormat::Xyce, "Xyce"),
-                ] {
-                    ui.selectable_value(&mut dialog.format, format, label);
-                }
-            });
-        ui.add_space(6.0);
-        let bundle_response = ui.add_enabled(
-            !requires_bundle,
-            egui::Checkbox::new(
-                &mut dialog.bundle_dependencies,
-                messages.text(MessageId::NetlistExportDependencyBundle),
-            ),
-        );
-        if requires_bundle {
-            bundle_response
-                .clone()
-                .on_disabled_hover_text(messages.text(MessageId::NetlistExportBundleRequired));
-        }
-        if bundle_response.changed() && !dialog.bundle_dependencies {
-            dialog.include_source_map = false;
-        }
-        let source_map_supported = dialog.format == crate::io::NetlistFormat::Spice;
-        let source_map_response = ui.add_enabled(
-            source_map_supported,
-            egui::Checkbox::new(
-                &mut dialog.include_source_map,
-                messages.text(MessageId::NetlistExportSourceMap),
-            ),
-        );
-        if source_map_response.changed() && dialog.include_source_map {
-            dialog.bundle_dependencies = true;
-        }
-        if !source_map_supported {
-            dialog.include_source_map = false;
-            source_map_response
-                .on_disabled_hover_text(messages.text(MessageId::NetlistExportSourceMapSpiceOnly));
-        }
-        egui::Frame::new()
-            .fill(t.color.bg_inset)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(t.radius)
-            .inner_margin(10)
-            .show(ui, |ui| {
-                ui.label(dependency_status_label(
-                    messages,
-                    dependency_count,
-                    dependencies_sealed,
-                    true,
-                ));
-                ui.label(if dialog.bundle_dependencies {
-                    messages.text(MessageId::NetlistExportBundleBehavior)
-                } else {
-                    messages.text(MessageId::NetlistExportDeckBehavior)
+    let choice = Dialog::new(messages.text(MessageId::NetlistExportTitle), primary)
+        .description(messages.text(MessageId::NetlistExportDescription))
+        .size(DialogSize::Transaction)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .primary_enabled(current && bundle_ready)
+        .ghost(messages.text(MessageId::CommonCancel))
+        .hint(&footer_hint)
+        .show_with_initial_body_focus(ctx, |ui| {
+            let t = Tokens::get(ctx);
+            egui::Frame::new()
+                .fill(t.color.bg_inset)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .corner_radius(t.radius)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.label(messages.text(MessageId::NetlistExportSnapshotNotice));
                 });
-            });
-        if let Some(error) = &dialog.error {
-            ui.colored_label(t.color.err, error);
-        }
-        Some(dialect.response.id)
-    });
+            ui.add_space(8.0);
+            ui.label(messages.text(MessageId::NetlistDialect));
+            let dialect = egui::ComboBox::from_id_salt("rspice.code.export-dialect")
+                .selected_text(match dialog.format {
+                    crate::io::NetlistFormat::Spice => "SPICE",
+                    crate::io::NetlistFormat::Spectre => "Spectre",
+                    crate::io::NetlistFormat::Hspice => "HSPICE",
+                    crate::io::NetlistFormat::Xyce => "Xyce",
+                })
+                .width(ui.available_width().max(1.0))
+                .show_ui(ui, |ui| {
+                    for (format, label) in [
+                        (crate::io::NetlistFormat::Spice, "SPICE"),
+                        (crate::io::NetlistFormat::Spectre, "Spectre"),
+                        (crate::io::NetlistFormat::Hspice, "HSPICE"),
+                        (crate::io::NetlistFormat::Xyce, "Xyce"),
+                    ] {
+                        ui.selectable_value(&mut dialog.format, format, label);
+                    }
+                });
+            ui.add_space(6.0);
+            let bundle_response = ui.add_enabled(
+                !requires_bundle,
+                egui::Checkbox::new(
+                    &mut dialog.bundle_dependencies,
+                    messages.text(MessageId::NetlistExportDependencyBundle),
+                ),
+            );
+            if requires_bundle {
+                bundle_response
+                    .clone()
+                    .on_disabled_hover_text(messages.text(MessageId::NetlistExportBundleRequired));
+            }
+            if bundle_response.changed() && !dialog.bundle_dependencies {
+                dialog.include_source_map = false;
+            }
+            let source_map_supported = dialog.format == crate::io::NetlistFormat::Spice;
+            let source_map_response = ui.add_enabled(
+                source_map_supported,
+                egui::Checkbox::new(
+                    &mut dialog.include_source_map,
+                    messages.text(MessageId::NetlistExportSourceMap),
+                ),
+            );
+            if source_map_response.changed() && dialog.include_source_map {
+                dialog.bundle_dependencies = true;
+            }
+            if !source_map_supported {
+                dialog.include_source_map = false;
+                source_map_response.on_disabled_hover_text(
+                    messages.text(MessageId::NetlistExportSourceMapSpiceOnly),
+                );
+            }
+            egui::Frame::new()
+                .fill(t.color.bg_inset)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .corner_radius(t.radius)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.label(dependency_status_label(
+                        messages,
+                        dependency_count,
+                        dependencies_sealed,
+                        true,
+                    ));
+                    ui.label(if dialog.bundle_dependencies {
+                        messages.text(MessageId::NetlistExportBundleBehavior)
+                    } else {
+                        messages.text(MessageId::NetlistExportDeckBehavior)
+                    });
+                });
+            if let Some(error) = &dialog.error {
+                ui.colored_label(t.color.err, error);
+            }
+            Some(dialect.response.id)
+        });
     match choice {
         DialogChoice::Primary => {
             if crate::workbench::menu_bar::action_export_generated_netlist_with_options(
@@ -409,196 +405,197 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
         messages.text(MessageId::NetlistImportReady)
     };
     let (title, primary) = import_operation_text(messages, review.operation);
-    let choice = Dialog::new(
-        messages.text(MessageId::NetlistImportEyebrow),
-        title,
-        primary,
-    )
-    .description(messages.text(MessageId::NetlistImportDescription))
-    .size(DialogSize::Transaction)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .primary_enabled(primary_enabled)
-    .ghost(messages.text(MessageId::CommonCancel))
-    .hint(&hint)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let t = Tokens::get(ctx);
-        egui::Frame::new()
-            .fill(t.color.bg_inset)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(t.radius)
-            .inner_margin(10)
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(&review.display_name)
-                        .font(theme::mono(tokens::FS_1, FontWeight::Medium)),
-                );
-                let source_kind =
-                    if review.operation == NetlistImportOperation::RequalifyOwnedSource {
-                        messages.text(MessageId::NetlistImportProjectSourceSnapshot)
-                    } else if review.archive_import {
-                        let count = review.dependencies.len().to_string();
-                        messages.format(
-                            if review.dependencies.len() == 1 {
-                                MessageId::NetlistImportBundleSourceSingular
-                            } else {
-                                MessageId::NetlistImportBundleSource
-                            },
-                            &[("count", &count)],
-                        )
-                    } else {
-                        messages.text(MessageId::NetlistImportLosslessSource)
-                    };
-                ui.label(source_kind);
-                let byte_count = review.original_byte_count.to_string();
-                ui.monospace(messages.format(
-                    MessageId::NetlistImportSourceSummary,
-                    &[
-                        ("count", &byte_count),
-                        ("digest", &digest),
-                        ("encoding", review.encoding.label()),
-                        ("line_ending", review.line_ending.label()),
-                    ],
-                ));
-                let fallback_path = messages.text(MessageId::NetlistImportBrowserSnapshot);
-                let invalid_path = messages.text(MessageId::NetlistImportInvalidUnicodePath);
-                ui.weak(
-                    review
-                        .selected_file_path
-                        .as_deref()
-                        .map_or(fallback_path.as_str(), |path| {
-                            path.to_str().unwrap_or(invalid_path.as_str())
-                        }),
-                );
-            });
-
-        ui.add_space(8.0);
-        ui.label(messages.text(MessageId::NetlistSourceDialect));
-        let dialect = egui::ComboBox::from_id_salt("rspice.netlist.import-dialect")
-            .selected_text(review.selected_dialect.label())
-            .width(ui.available_width().max(1.0))
-            .show_ui(ui, |ui| {
-                for dialect in crate::state::NetlistSourceDialect::ALL {
-                    ui.selectable_value(&mut review.selected_dialect, dialect, dialect.label());
-                }
-            });
-        ui.weak(messages.format(
-            if review.detection_evidence.is_empty() {
-                MessageId::NetlistImportDetectedNoMarker
-            } else {
-                MessageId::NetlistImportDetectedEvidence
-            },
-            &[("dialect", review.detected_dialect.label())],
-        ));
-        for evidence in &review.detection_evidence {
-            ui.monospace(evidence);
-        }
-        if let Some(error) = dialect_qualification_error.as_deref() {
-            ui.add_space(6.0);
-            ui.colored_label(t.color.err, error);
-        }
-
-        ui.add_space(6.0);
-        egui::Frame::new()
-            .fill(t.color.bg_inset)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(t.radius)
-            .inner_margin(8)
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new(messages.text(MessageId::NetlistImportExecutionProfile))
-                        .strong(),
-                );
-                if let Some(profile) = qualified_execution_profile {
-                    ui.monospace(messages.format(
-                        MessageId::NetlistImportExecutionProfileReceipt,
-                        &[("profile", profile.id())],
-                    ));
-                } else {
-                    ui.colored_label(
-                        t.color.err,
-                        messages.text(MessageId::NetlistImportNoExecutionProfile),
+    let choice = Dialog::new(title, primary)
+        .description(messages.text(MessageId::NetlistImportDescription))
+        .size(DialogSize::Transaction)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .primary_enabled(primary_enabled)
+        .ghost(messages.text(MessageId::CommonCancel))
+        .hint(&hint)
+        .show_with_initial_body_focus(ctx, |ui| {
+            let t = Tokens::get(ctx);
+            egui::Frame::new()
+                .fill(t.color.bg_inset)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .corner_radius(t.radius)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(&review.display_name)
+                            .font(theme::mono(tokens::FS_1, FontWeight::Medium)),
                     );
-                }
-            });
+                    let source_kind =
+                        if review.operation == NetlistImportOperation::RequalifyOwnedSource {
+                            messages.text(MessageId::NetlistImportProjectSourceSnapshot)
+                        } else if review.archive_import {
+                            let count = review.dependencies.len().to_string();
+                            messages.format(
+                                if review.dependencies.len() == 1 {
+                                    MessageId::NetlistImportBundleSourceSingular
+                                } else {
+                                    MessageId::NetlistImportBundleSource
+                                },
+                                &[("count", &count)],
+                            )
+                        } else {
+                            messages.text(MessageId::NetlistImportLosslessSource)
+                        };
+                    ui.label(source_kind);
+                    let byte_count = review.original_byte_count.to_string();
+                    ui.monospace(messages.format(
+                        MessageId::NetlistImportSourceSummary,
+                        &[
+                            ("count", &byte_count),
+                            ("digest", &digest),
+                            ("encoding", review.encoding.label()),
+                            ("line_ending", review.line_ending.label()),
+                        ],
+                    ));
+                    let fallback_path = messages.text(MessageId::NetlistImportBrowserSnapshot);
+                    let invalid_path = messages.text(MessageId::NetlistImportInvalidUnicodePath);
+                    ui.weak(
+                        review
+                            .selected_file_path
+                            .as_deref()
+                            .map_or(fallback_path.as_str(), |path| {
+                                path.to_str().unwrap_or(invalid_path.as_str())
+                            }),
+                    );
+                });
 
-        if review.selected_dialect.requires_compatibility_review()
-            && let Some(profile) = qualified_execution_profile
-        {
-            ui.add_space(6.0);
-            ui.checkbox(
-                &mut review.compatibility_accepted,
-                messages.format(
-                    MessageId::NetlistImportAcceptProfile,
-                    &[
-                        ("dialect", review.selected_dialect.label()),
-                        ("profile", profile.id()),
-                    ],
-                ),
-            )
-            .on_hover_text(messages.text(MessageId::NetlistImportAcceptanceNotice));
-        } else {
-            review.compatibility_accepted = false;
-        }
-
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(messages.text(MessageId::NetlistImportTransformations)).strong(),
-        );
-        for transformation in &review.transformations {
-            ui.label(format!("- {transformation}"));
-        }
-
-        ui.add_space(8.0);
-        ui.label(egui::RichText::new(messages.text(MessageId::NetlistImportValidation)).strong());
-        if review.issues.is_empty() {
-            ui.colored_label(
-                t.color.ok,
-                messages.text(MessageId::NetlistImportValidationPassed),
-            );
-        } else {
-            for issue in &review.issues {
-                let (prefix, color) = match issue.severity {
-                    NetlistImportIssueSeverity::Advisory => (
-                        messages.text(MessageId::NetlistImportAdvisory),
-                        t.color.warn,
-                    ),
-                    NetlistImportIssueSeverity::Blocking => {
-                        (messages.text(MessageId::NetlistImportBlocked), t.color.err)
+            ui.add_space(8.0);
+            ui.label(messages.text(MessageId::NetlistSourceDialect));
+            let dialect = egui::ComboBox::from_id_salt("rspice.netlist.import-dialect")
+                .selected_text(review.selected_dialect.label())
+                .width(ui.available_width().max(1.0))
+                .show_ui(ui, |ui| {
+                    for dialect in crate::state::NetlistSourceDialect::ALL {
+                        ui.selectable_value(&mut review.selected_dialect, dialect, dialect.label());
                     }
-                };
-                ui.colored_label(color, format!("{prefix}: {}", issue.message));
+                });
+            ui.weak(messages.format(
+                if review.detection_evidence.is_empty() {
+                    MessageId::NetlistImportDetectedNoMarker
+                } else {
+                    MessageId::NetlistImportDetectedEvidence
+                },
+                &[("dialect", review.detected_dialect.label())],
+            ));
+            for evidence in &review.detection_evidence {
+                ui.monospace(evidence);
             }
-        }
+            if let Some(error) = dialect_qualification_error.as_deref() {
+                ui.add_space(6.0);
+                ui.colored_label(t.color.err, error);
+            }
 
-        ui.add_space(8.0);
-        ui.label(
-            egui::RichText::new(messages.text(MessageId::NetlistImportSourcePreview)).strong(),
-        );
-        egui::Frame::new()
-            .fill(t.color.bg_inset)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(t.radius)
-            .inner_margin(8)
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("rspice.netlist.import-preview")
-                    .max_height(160.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for (line, text) in review.source.lines().take(200).enumerate() {
-                            ui.monospace(format!("{:>5}  {text}", line + 1));
-                        }
-                        if review.source.lines().nth(200).is_some() {
-                            ui.weak(messages.text(MessageId::NetlistImportPreviewLimited));
-                        }
-                    });
-            });
-        if let Some(error) = &review.error {
             ui.add_space(6.0);
-            ui.colored_label(t.color.err, error);
-        }
-        Some(dialect.response.id)
-    });
+            egui::Frame::new()
+                .fill(t.color.bg_inset)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .corner_radius(t.radius)
+                .inner_margin(8)
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(
+                            messages.text(MessageId::NetlistImportExecutionProfile),
+                        )
+                        .strong(),
+                    );
+                    if let Some(profile) = qualified_execution_profile {
+                        ui.monospace(messages.format(
+                            MessageId::NetlistImportExecutionProfileReceipt,
+                            &[("profile", profile.id())],
+                        ));
+                    } else {
+                        ui.colored_label(
+                            t.color.err,
+                            messages.text(MessageId::NetlistImportNoExecutionProfile),
+                        );
+                    }
+                });
+
+            if review.selected_dialect.requires_compatibility_review()
+                && let Some(profile) = qualified_execution_profile
+            {
+                ui.add_space(6.0);
+                ui.checkbox(
+                    &mut review.compatibility_accepted,
+                    messages.format(
+                        MessageId::NetlistImportAcceptProfile,
+                        &[
+                            ("dialect", review.selected_dialect.label()),
+                            ("profile", profile.id()),
+                        ],
+                    ),
+                )
+                .on_hover_text(messages.text(MessageId::NetlistImportAcceptanceNotice));
+            } else {
+                review.compatibility_accepted = false;
+            }
+
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(messages.text(MessageId::NetlistImportTransformations))
+                    .strong(),
+            );
+            for transformation in &review.transformations {
+                ui.label(format!("- {transformation}"));
+            }
+
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(messages.text(MessageId::NetlistImportValidation)).strong(),
+            );
+            if review.issues.is_empty() {
+                ui.colored_label(
+                    t.color.ok,
+                    messages.text(MessageId::NetlistImportValidationPassed),
+                );
+            } else {
+                for issue in &review.issues {
+                    let (prefix, color) = match issue.severity {
+                        NetlistImportIssueSeverity::Advisory => (
+                            messages.text(MessageId::NetlistImportAdvisory),
+                            t.color.warn,
+                        ),
+                        NetlistImportIssueSeverity::Blocking => {
+                            (messages.text(MessageId::NetlistImportBlocked), t.color.err)
+                        }
+                    };
+                    ui.colored_label(color, format!("{prefix}: {}", issue.message));
+                }
+            }
+
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(messages.text(MessageId::NetlistImportSourcePreview)).strong(),
+            );
+            egui::Frame::new()
+                .fill(t.color.bg_inset)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .corner_radius(t.radius)
+                .inner_margin(8)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("rspice.netlist.import-preview")
+                        .max_height(160.0)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            for (line, text) in review.source.lines().take(200).enumerate() {
+                                ui.monospace(format!("{:>5}  {text}", line + 1));
+                            }
+                            if review.source.lines().nth(200).is_some() {
+                                ui.weak(messages.text(MessageId::NetlistImportPreviewLimited));
+                            }
+                        });
+                });
+            if let Some(error) = &review.error {
+                ui.add_space(6.0);
+                ui.colored_label(t.color.err, error);
+            }
+            Some(dialect.response.id)
+        });
 
     // Persist review choices before a commit attempt revalidates the exact
     // lifecycle transaction and candidate snapshot.

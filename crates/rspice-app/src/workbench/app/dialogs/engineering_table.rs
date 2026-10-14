@@ -20,8 +20,6 @@ use crate::workbench::app::{
 };
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "VIEW \u{00b7} UNIVERSAL DATA-GRID CONTRACT";
-
 #[derive(Debug, Clone)]
 enum BodyAction {
     Copy,
@@ -119,7 +117,7 @@ impl RSpiceApp {
             }
         };
         let mut action = None;
-        let choice = Dialog::new(EYEBROW, title, primary)
+        let choice = Dialog::new(title, primary)
             .description("Manage exact table columns, sort, typed filters, rendering policy, named views, clipboard data, and exported artifacts.")
             .size(DialogSize::WideWorkflow)
             .ghost(if page == EngineeringTableDialogPage::Manager {

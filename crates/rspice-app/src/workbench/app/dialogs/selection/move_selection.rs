@@ -18,7 +18,6 @@ use crate::ui::widgets::{
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY PRESERVING";
 const TITLE: &str = "Move selection";
 const PRIMARY: &str = "Arm move tool";
 const DESCRIPTION: &str = "Move selected objects with connected wires following and preview any resulting geometry or hierarchy violations.";
@@ -82,7 +81,7 @@ impl RSpiceApp {
         let summary = selection_summary(&self.state);
         let snap = snap_label(self.state.schematic.document().document_policy.grid_pitch);
         let discard_confirm = self.state.dialogs.move_selection.discard_confirm;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .ghost(if discard_confirm {

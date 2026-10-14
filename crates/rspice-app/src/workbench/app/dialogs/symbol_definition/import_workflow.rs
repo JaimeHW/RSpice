@@ -15,7 +15,6 @@ use super::state::SymbolImportBindingChoice;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::publish_symbol_definition_candidate;
 
-const IMPORT_EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} VALIDATED INTERCHANGE";
 const IMPORT_TITLE: &str = "Import symbol definition";
 const DISCARD_TITLE: &str = "Discard unsaved symbol changes?";
 const DISCARD_DETAIL: &str =
@@ -55,7 +54,7 @@ impl RSpiceApp {
                     .flatten()
             });
         let primary_enabled = preview.is_ok();
-        let mut dialog = Dialog::new(IMPORT_EYEBROW, IMPORT_TITLE, "Import into project library")
+        let mut dialog = Dialog::new(IMPORT_TITLE, "Import into project library")
             .description("Import validated RSpice JSON, SVG, EDIF, or LTspice symbol geometry with an explicit electrical contract or as a review-only graphic.")
             .size(DialogSize::SimulationWorkflow)
             .initial_height(468.0)

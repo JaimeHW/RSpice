@@ -31,7 +31,6 @@ use crate::workbench::{SelectionBulkFilter, SelectionBulkHierarchyScope, Selecti
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} FILTERED SELECTION \u{00b7} EXACT DIFFERENCE";
 const TITLE: &str = "Selection and bulk property editing";
 const PRIMARY: &str = "Commit bulk edit";
 
@@ -332,7 +331,7 @@ impl RSpiceApp {
             .or(stale.as_deref())
             .or(impact.error.as_deref())
             .map(str::to_owned);
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(
                 "Filter authored schematic objects, review the exact impact, and commit one governed bulk-edit transaction.",
             )

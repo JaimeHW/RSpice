@@ -35,7 +35,6 @@ use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 
 use super::drawing_sheet_preview::{drawing_sheet_preview, sheet_desk_color};
 
-const EYEBROW: &str = "NEW PROJECTS \u{00b7} NEW SHEETS \u{00b7} INHERITANCE";
 const TITLE: &str = "Drawing-sheet defaults";
 const DESCRIPTION: &str = "Choose what future projects and sheets start with. A default seeds new work; changing one never rewrites an authored sheet.";
 
@@ -157,7 +156,7 @@ impl RSpiceApp {
         let enabled = valid && project_authority.is_none() && (project_changed || personal_changed);
 
         let mut open_presets = false;
-        let choice = Dialog::new(EYEBROW, TITLE, "Save sheet defaults")
+        let choice = Dialog::new(TITLE, "Save sheet defaults")
             .description(DESCRIPTION)
             .size(DialogSize::DrawingSheetWorkflow)
             // The body is one bordered shell whose regions meet on their own

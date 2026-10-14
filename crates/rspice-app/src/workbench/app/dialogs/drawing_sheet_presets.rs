@@ -48,7 +48,6 @@ use model::{
 };
 use render::{EditorBodyAction, LibraryBodyAction, PresetKey, TransferBodyAction};
 
-const LIBRARY_EYEBROW: &str = "DRAWING SHEET \u{00b7} PROJECT AND PERSONAL PRESETS";
 const LIBRARY_TITLE: &str = "Custom sheet sizes";
 const LIBRARY_DESCRIPTION: &str = "Named custom sheet sizes available to this project, where they came from, and which sheets depend on them.";
 
@@ -156,7 +155,7 @@ impl RSpiceApp {
         ));
 
         let mut action = None;
-        let choice = Dialog::new(LIBRARY_EYEBROW, LIBRARY_TITLE, "Close")
+        let choice = Dialog::new(LIBRARY_TITLE, "Close")
             .description(LIBRARY_DESCRIPTION)
             .size(DialogSize::DrawingSheetWorkflow)
             // The body owns its section surfaces and they butt on their own
@@ -333,7 +332,6 @@ impl RSpiceApp {
         };
         let mut action = None;
         let choice = Dialog::new(
-            "DRAWING SHEET \u{00b7} NAMED PHYSICAL FORMAT",
             title,
             primary,
         )
@@ -481,22 +479,18 @@ impl RSpiceApp {
                 if used_by == 1 { "" } else { "s" }
             )
         };
-        let choice = Dialog::new(
-            "DRAWING SHEET \u{00b7} DESTRUCTIVE CHANGE",
-            &title,
-            "Delete preset",
-        )
-        .description(&detail)
-        .size(DialogSize::Transaction)
-        .destructive()
-        .ghost("Cancel")
-        .primary_enabled(preset.is_some() && used_by == 0)
-        .show(ctx, |ui| {
-            render::delete_body(ui, preset.as_ref(), used_by);
-            if let Some(error) = self.state.dialogs.drawing_sheet_presets.error.as_deref() {
-                render::error_notice(ui, error);
-            }
-        });
+        let choice = Dialog::new(&title, "Delete preset")
+            .description(&detail)
+            .size(DialogSize::Transaction)
+            .destructive()
+            .ghost("Cancel")
+            .primary_enabled(preset.is_some() && used_by == 0)
+            .show(ctx, |ui| {
+                render::delete_body(ui, preset.as_ref(), used_by);
+                if let Some(error) = self.state.dialogs.drawing_sheet_presets.error.as_deref() {
+                    render::error_notice(ui, error);
+                }
+            });
         match choice {
             DialogChoice::Primary => match self.delete_preset(&key) {
                 Ok(message) => {
@@ -632,15 +626,7 @@ impl RSpiceApp {
             !transfer.export_ids.is_empty()
         };
         let mut action = None;
-        let choice = Dialog::new(
-            if is_import {
-                "DRAWING SHEET \u{00b7} REVIEWED IMPORT"
-            } else {
-                "DRAWING SHEET \u{00b7} PORTABLE PRESET PACKAGE"
-            },
-            title,
-            primary,
-        )
+        let choice = Dialog::new(title, primary)
         .description(if is_import {
             "Review identities, physical dimensions, template dependencies, and conflicts before adding presets to this project."
         } else {

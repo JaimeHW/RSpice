@@ -623,7 +623,6 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
         messages.text(MessageId::NetlistFindGeneratedImmutableHint)
     };
     let choice = Dialog::new(
-        messages.text(MessageId::NetlistFindEyebrow),
         messages.text(MessageId::NetlistFindTitle),
         messages.text(MessageId::NetlistFindNext),
     )

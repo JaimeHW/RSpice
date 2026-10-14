@@ -59,7 +59,6 @@ pub(super) fn render(ctx: &Context, state: &mut AppState, category: PreferenceCa
     }
     let rows = resolved_policy_rows(category, state);
     let choice = Dialog::new(
-        "PREFERENCES \u{00b7} RESOLVED POLICY \u{00b7} AUDITABLE",
         "Resolved preference policy",
         "Close",
     )

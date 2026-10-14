@@ -117,7 +117,7 @@ impl RSpiceApp {
             && is_creatable_view_type(dialogs.new_view_type)
             && catalog_current;
 
-        let choice = Dialog::new("Library", "New view", "Create")
+        let choice = Dialog::new("New view", "Create")
             .description("Create a named view of the selected type in this library cell.")
             .size(DialogSize::Transaction)
             .ghost("Cancel")

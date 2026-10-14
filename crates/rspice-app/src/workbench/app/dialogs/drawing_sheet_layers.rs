@@ -13,7 +13,6 @@ use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogInitialFocus, Dialo
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "VIEW \u{00b7} PERMANENT PAPER \u{00b7} OPTIONAL CONSTRUCTION DETAIL";
 const TITLE: &str = "Drawing-sheet layers";
 const DESCRIPTION: &str = "Choose which supporting drawing-sheet details appear while editing. The physical paper boundary is permanent and cannot be hidden.";
 
@@ -34,7 +33,7 @@ impl RSpiceApp {
             return;
         }
 
-        let choice = Dialog::new(EYEBROW, TITLE, "Close")
+        let choice = Dialog::new(TITLE, "Close")
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .initial_focus(DialogInitialFocus::Primary)

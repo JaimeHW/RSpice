@@ -110,7 +110,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
         .or_else(|| source_blocker.clone())
         .or_else(|| action_blocker.clone());
 
-    let mut shell = Dialog::new("MODELS · CORRELATION", title, primary)
+    let mut shell = Dialog::new(title, primary)
         .description(description)
         .size(DialogSize::Transaction)
         .ghost("Cancel")

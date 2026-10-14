@@ -53,7 +53,7 @@ impl RSpiceApp {
         };
         let error = self.state.dialogs.design_management.error.clone();
         let mut body_scroll_offset = self.state.dialogs.design_management.body_scroll_offset;
-        let mut dialog = Dialog::new(page.eyebrow(), page.title(), page.primary())
+        let mut dialog = Dialog::new(page.title(), page.primary())
             .description(description)
             .size(size)
             .initial_height(initial_height)

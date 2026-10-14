@@ -23,7 +23,6 @@ use crate::workbench::design_system::section_header;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "PROJECT \u{00b7} SEMANTIC HISTORY \u{00b7} TRACEABILITY";
 const TITLE: &str = "Project revision and audit history";
 const NOT_RETAINED: &str = "not retained";
 
@@ -254,7 +253,7 @@ impl RSpiceApp {
             .dialogs
             .project_revision_history
             .body_scroll_offset;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, "Close")
+        let mut dialog = Dialog::new(TITLE, "Close")
             .description(
                 "Inspect retained project revisions, semantic changes, and immutable audit evidence across schematic, simulation, model, and governed records.",
             )

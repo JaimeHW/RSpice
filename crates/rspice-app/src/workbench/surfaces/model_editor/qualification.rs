@@ -41,11 +41,7 @@ pub(super) fn qualification_plan_dialog(
         || plan.edit_open
         || plan.delete_target != QualificationDeleteTarget::None
         || plan.disposition_open;
-    let choice = Dialog::new(
-        "MODEL · GOLDEN VECTORS · PLATFORM PARITY",
-        "Qualification plan",
-        "Close",
-    )
+    let choice = Dialog::new("Qualification plan", "Close")
     .description(
         "Inspect exact persisted suite, vector, source, tolerance, and runtime evidence bindings.",
     )
@@ -702,11 +698,7 @@ fn qualification_vector_edit_dialog(
             .qualification_execution
             .is_none()
         && !plan.edit_name.trim().is_empty();
-    let choice = Dialog::new(
-        "MODEL · QUALIFICATION VECTOR · ATOMIC REVISION",
-        "Edit qualification vector",
-        "Replace vector",
-    )
+    let choice = Dialog::new("Edit qualification vector", "Replace vector")
     .description("Replace the editable vector as one suite-revision transaction. Exact source, executable input, analysis, outputs, and tolerances remain retained unless authored through a new contract.")
     .size(DialogSize::Transaction)
     .fixed_height(330.0)
@@ -769,11 +761,7 @@ fn qualification_delete_dialog(
     } else {
         "Delete qualification vector"
     };
-    let choice = Dialog::new(
-        "MODEL · QUALIFICATION PLAN · ORDERED RETIREMENT",
-        title,
-        "Delete",
-    )
+    let choice = Dialog::new(title, "Delete")
     .description(if deleting_suite {
         "Delete this editable suite and its uncommitted runtime runs. Evidence and release lineage are never cascaded or rewritten."
     } else {
@@ -918,11 +906,7 @@ fn qualification_disposition_dialog(
                         || parity_passed))
         },
     );
-    let choice = Dialog::new(
-        "MODEL · FAILED OR STALE VECTOR · NON-WAIVING REVIEW",
-        "Qualification disposition",
-        primary,
-    )
+    let choice = Dialog::new("Qualification disposition", primary)
     .description("A disposition preserves failure or staleness and its required corrective action. It never converts a failed observation into passing evidence.")
     .size(DialogSize::Transaction)
     .fixed_height(510.0)
@@ -1317,11 +1301,7 @@ fn qualification_authoring_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
     let write_allowed = !app.state.workbench.safe_mode.project_read_only();
-    let choice = Dialog::new(
-        "MODEL · EXECUTABLE QUALIFICATION CONTRACT",
-        "New qualification suite",
-        "Add suite",
-    )
+    let choice = Dialog::new("New qualification suite", "Add suite")
     .description("Author one source-bound suite and exact executable vector. The candidate changes only after the complete contract validates.")
     .size(DialogSize::Transaction)
     .fixed_height(740.0)

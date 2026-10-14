@@ -33,7 +33,7 @@ pub(super) fn analysis_catalog_window(
     let mut chosen = None;
     let mut request_close = false;
     let mut scroll_to_active = setup.session.palette_scroll_to_active;
-    let choice = Dialog::new("Simulation Studio", "Add analysis or workflow", "Close")
+    let choice = Dialog::new("Add analysis or workflow", "Close")
         .description(
             "Search and add an explicitly classified solver, run-set controller, measurement, check, or optimization workflow.",
         )

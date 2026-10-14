@@ -226,7 +226,6 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let primary_enabled =
         !draft.busy && lifecycle_error.is_none() && field_error.is_none() && !stale;
     let choice = Dialog::new(
-        "PROJECT \u{00b7} LIBRARY GOVERNANCE",
         "Publish project library",
         if draft.busy {
             "Publishing\u{2026}"
@@ -386,11 +385,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let field_error = draft.field_error();
     let primary_enabled = !draft.busy && lifecycle_error.is_none() && field_error.is_none();
     let mut choose_artifact = false;
-    let choice = Dialog::new(
-        "PROJECT \u{00b7} LIBRARY GOVERNANCE",
-        "Rollback library publication",
-        "Restore exact publication",
-    )
+    let choice = Dialog::new("Rollback library publication", "Restore exact publication")
     .description(
         "Restore one exact retained full-project artifact. Digest, size, project identity, revisions, publication lineage, technology binding, locks, and audit authority are revalidated before replacement.",
     )

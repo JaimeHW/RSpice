@@ -504,10 +504,6 @@ impl RSpiceApp {
         };
 
         let mut dialog = Dialog::new(
-            messages.format(
-                MessageId::CodeSourceLifecycleEyebrow,
-                &[("document", &facts.leaf.to_uppercase())],
-            ),
             messages.text(MessageId::CodeSourceLifecycleTitle),
             messages.text(MessageId::CommonClose),
         )
@@ -639,10 +635,6 @@ impl RSpiceApp {
             return;
         };
         let mut dialog = Dialog::new(
-            messages.format(
-                MessageId::CodeSourceLifecycleEyebrow,
-                &[("document", &facts.logical_path.to_uppercase())],
-            ),
             messages.text(MessageId::CodeSourceLifecycleTitle),
             messages.text(MessageId::CommonClose),
         )
@@ -815,10 +807,6 @@ impl RSpiceApp {
         let language = ProjectSourceLanguage::RSpiceAutomation.label();
         let messages = self.state.ui.messages();
         let mut dialog = Dialog::new(
-            messages.format(
-                MessageId::CodeSourceWorkspaceEyebrow,
-                &[("language", &language.to_uppercase())],
-            ),
             messages.text(MessageId::CodeSourceWorkspaceTitle),
             messages.text(MessageId::CodeSourceWorkspacePrimary),
         )

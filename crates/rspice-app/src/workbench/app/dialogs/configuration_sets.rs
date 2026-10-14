@@ -22,17 +22,13 @@ use crate::workbench::app::dialogs::review_primitives::{
 use crate::workbench::app_state::AppState;
 
 const MANAGER_TITLE: &str = "Testbench configuration sets";
-const MANAGER_EYEBROW: &str = "DESIGN · HIERARCHY · VIEW BINDING";
 const MANAGER_DESCRIPTION: &str = "Own exact testbench roots, DUT paths, ordered executable views, model profiles, and scoped hierarchy overrides.";
 const MANAGER_PRIMARY: &str = "Save configuration set";
 const NEW_TITLE: &str = "Create configuration set";
-const NEW_EYEBROW: &str = "DESIGN · HIERARCHY BINDING";
 const NEW_DESCRIPTION: &str = "Create a stable configuration for cell/view resolution, model sections, environment, and netlisting.";
 const CLONE_TITLE: &str = "Clone configuration set";
-const CLONE_EYEBROW: &str = "DESIGN · CONFIGURATION LINEAGE";
 const CLONE_DESCRIPTION: &str = "Clone view-search, stop-view, model, environment, and netlisting policy with explicit lineage.";
 const BINDING_TITLE: &str = "Hierarchy binding table";
-const BINDING_EYEBROW: &str = "DESIGN · CONFIGURATION RESOLUTION";
 const BINDING_DESCRIPTION: &str = "Edit ordered view search, explicit materialized stop boundaries, model sections, and platform eligibility by hierarchy pattern.";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -249,27 +245,15 @@ impl RSpiceApp {
             .dialogs
             .configuration_sets
             .dirty(&self.state.workspace.content.configuration_sets);
-        let (eyebrow, title, primary, description) = match page {
-            ConfigurationDialogPage::Manager => (
-                MANAGER_EYEBROW,
-                MANAGER_TITLE,
-                MANAGER_PRIMARY,
-                MANAGER_DESCRIPTION,
-            ),
-            ConfigurationDialogPage::New => (
-                NEW_EYEBROW,
-                NEW_TITLE,
-                "Create configuration",
-                NEW_DESCRIPTION,
-            ),
-            ConfigurationDialogPage::Clone => (
-                CLONE_EYEBROW,
-                CLONE_TITLE,
-                "Create configuration",
-                CLONE_DESCRIPTION,
-            ),
+        let (title, primary, description) = match page {
+            ConfigurationDialogPage::Manager => {
+                (MANAGER_TITLE, MANAGER_PRIMARY, MANAGER_DESCRIPTION)
+            }
+            ConfigurationDialogPage::New => (NEW_TITLE, "Create configuration", NEW_DESCRIPTION),
+            ConfigurationDialogPage::Clone => {
+                (CLONE_TITLE, "Create configuration", CLONE_DESCRIPTION)
+            }
             ConfigurationDialogPage::Binding => (
-                BINDING_EYEBROW,
                 BINDING_TITLE,
                 "Apply reviewed bindings",
                 BINDING_DESCRIPTION,
@@ -349,7 +333,7 @@ impl RSpiceApp {
             && self.state.dialogs.configuration_sets.discard_confirmation;
         let discard_baseline = discard.then(|| self.state.dialogs.configuration_sets.draft.clone());
         let transaction_error = self.state.dialogs.configuration_sets.error.clone();
-        let mut dialog = Dialog::new(eyebrow, title, primary)
+        let mut dialog = Dialog::new(title, primary)
             .description(description)
             .size(DialogSize::WideWorkflow)
             .initial_height(620.0)

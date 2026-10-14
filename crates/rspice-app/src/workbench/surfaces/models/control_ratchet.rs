@@ -196,12 +196,12 @@ fn push_label(labels: &mut Vec<String>, label: &str) {
 
 /// Every primary-action label a modal's `Dialog::new` call authors.
 ///
-/// That constructor takes a kicker, a title and the primary's label, in that
-/// order, and only the third is a control. Being positional rather than named,
-/// it cannot be found by a pattern that ends on a quote: the kicker and the
-/// title are prose that would be swept up with it, and either may be an
-/// expression rather than a literal. This walks the call's own parentheses
-/// instead, takes its third argument, and reads every literal inside it — one
+/// That constructor takes a title and the primary's label, in that order, and
+/// only the second is a control. Being positional rather than named, it cannot
+/// be found by a pattern that ends on a quote: the title is prose that would be
+/// swept up with it, and may be an expression rather than a literal. This walks
+/// the call's own parentheses instead, takes its second argument, and reads
+/// every literal inside it — one
 /// label for a plain call, and two for the dialogs whose primary reads
 /// `if duplicate { … } else { … }`, both of which really are authored controls.
 fn dialog_primary_labels(source: &str) -> Vec<String> {
@@ -232,7 +232,7 @@ fn dialog_primary_labels(source: &str) -> Vec<String> {
                     }
                     '"' => {
                         in_string = false;
-                        if argument == 2 {
+                        if argument == 1 {
                             push_label(&mut labels, &literal);
                         }
                         literal.clear();

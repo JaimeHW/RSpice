@@ -183,11 +183,7 @@ pub(super) fn dialog(
         _ => None,
     };
     let mut action = None;
-    let choice = Dialog::new(
-        "SIMULATION · SEMANTIC PLAN DIFF · READ ONLY",
-        "Compare simulation plans",
-        "Close comparison",
-    )
+    let choice = Dialog::new("Compare simulation plans", "Close comparison")
     .description(
         "Both sides are chosen. Each domain states what the compared plan declares that the base plan does not, and nothing here is committed to either plan.",
     )

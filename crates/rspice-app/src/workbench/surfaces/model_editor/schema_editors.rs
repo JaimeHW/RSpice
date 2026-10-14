@@ -17,11 +17,7 @@ pub(super) fn parameter_schema_dialog(
         return;
     }
     let writable = !app.state.workbench.safe_mode.project_read_only();
-    let choice = Dialog::new(
-        "MODEL · TYPED PARAMETER SCHEMA",
-        "Parameter schema",
-        "Close",
-    )
+    let choice = Dialog::new("Parameter schema", "Close")
     .description("Edit typed declarations and exact process-section overrides. Changes remain transactional until Save model revision succeeds.")
     .size(DialogSize::Transaction)
     .fixed_height(680.0)
@@ -395,11 +391,7 @@ pub(super) fn new_section_dialog(
     }
     let writable = !app.state.workbench.safe_mode.project_read_only();
     let primary_enabled = writable && !app.state.workbench.model_editor.new_section_name.is_empty();
-    let choice = Dialog::new(
-        "MODEL · PROCESS SECTION",
-        "New process section",
-        "Add section",
-    )
+    let choice = Dialog::new("New process section", "Add section")
     .description(
         "Create one validated inheritance node. The section remains part of the candidate until Save model revision commits it atomically.",
     )
@@ -555,11 +547,7 @@ pub(super) fn correlation_matrix_dialog(
         return;
     }
     let writable = !app.state.workbench.safe_mode.project_read_only();
-    let choice = Dialog::new(
-        "MODEL · STATISTICAL CORRELATION",
-        "Correlation matrix",
-        "Apply matrix",
-    )
+    let choice = Dialog::new("Correlation matrix", "Apply matrix")
     .description("Edit the candidate's ordered correlation coefficients. Symmetric entries are kept synchronized and the complete positive-semidefinite matrix is validated atomically.")
     .size(DialogSize::Transaction)
     .fixed_height(680.0)
@@ -701,11 +689,7 @@ pub(super) fn temperature_preview_dialog(
     if !app.state.workbench.model_editor.temperature_preview_open {
         return;
     }
-    let choice = Dialog::new(
-        "MODEL · TEMPERATURE LAW",
-        "Temperature-law plot",
-        "Close",
-    )
+    let choice = Dialog::new("Temperature-law plot", "Close")
     .description(
         "Evaluate the candidate's declared equation or lookup table over its complete valid range using typed model parameters.",
     )

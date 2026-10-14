@@ -578,7 +578,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         app.cloud_account.availability(),
     );
     let mut requested_action = None;
-    let choice = Dialog::prompt(ACCOUNT_TITLE, "Close")
+    let choice = Dialog::new(ACCOUNT_TITLE, "Close")
         .description(ACCOUNT_DESCRIPTION)
         .size(DialogSize::AccountManager)
         .secondary(AccountAction::PersonalPreferences.label())

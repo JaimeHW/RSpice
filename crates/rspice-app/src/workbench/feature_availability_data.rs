@@ -384,7 +384,6 @@ pub struct PlannedWorkflowFrame {
     pub outputs_section_title: &'static str,
     pub implementation_boundary: &'static str,
     pub dialog_title_suffix: &'static str,
-    pub dialog_eyebrow_status: &'static str,
     pub primary_action: &'static str,
 }
 
@@ -410,7 +409,6 @@ pub const PLANNED_WORKFLOW_FRAME: PlannedWorkflowFrame = PlannedWorkflowFrame {
     outputs_section_title: "Outputs and provenance",
     implementation_boundary: "Implementation, numerical behavior, producer integration, and release qualification remain separate gates. When opened from the capability matrix, the primary action returns to that matrix without losing the review path.",
     dialog_title_suffix: " \u{00b7} GUI specification",
-    dialog_eyebrow_status: "DESIGN COMPLETE",
     primary_action: "Close",
 };
 
@@ -1189,8 +1187,6 @@ impl ContractTone {
 }
 
 pub const INTEROPERABILITY_DIALOG_TITLE: &str = "Interoperability and format matrix";
-pub const INTEROPERABILITY_DIALOG_EYEBROW: &str =
-    "IMPORT · EXPORT · ROUND-TRIP · VERSIONED CONTRACT";
 pub const INTEROPERABILITY_TABLIST_LABEL: &str = "Interoperability sections";
 
 /// One exact row from the mockup's versioned format matrix, plus explicit
@@ -1474,7 +1470,6 @@ pub const INTEROPERABILITY_QUALIFICATION_ROWS: [InteroperabilityQualificationRow
 pub const INTEROPERABILITY_QUALIFICATION_BOUNDARY: &str = "“Supported” is never a single boolean. Direction, version, feature subset, connector/license, target platform, qualification corpus, known loss, and sign-off eligibility are versioned independently.";
 
 pub const TOUCH_EDIT_GUIDE_DIALOG_TITLE: &str = "Touch schematic editing";
-pub const TOUCH_EDIT_GUIDE_DIALOG_EYEBROW: &str = "SCHEMATIC · TOUCH · PRECISION INPUT";
 pub const TOUCH_EDIT_GUIDE_ACTION_LABEL: &str = "Open touch guide";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1510,7 +1505,6 @@ pub const TOUCH_EDIT_GUIDE_STEPS: [TouchEditGuideStep; 4] = [
 pub const TOUCH_EDIT_GUIDE_CONCEPT: &str = "Tablet layouts preserve the complete supported task by presenting precise steps and adaptive tools. Desktop layouts expose more tools simultaneously; capability, validation, undo, and stored precision remain the same.";
 
 pub const PLATFORM_LIFECYCLE_DIALOG_TITLE: &str = "Browser and tablet lifecycle contract";
-pub const PLATFORM_LIFECYCLE_DIALOG_EYEBROW: &str = "PLATFORM · SUSPENSION · STORAGE · RECOVERY";
 pub const PLATFORM_LIFECYCLE_WARNING: &str = "A backgrounded browser or tablet operating system may suspend or terminate execution without warning. RSpice never labels an interrupted run complete and never promotes partial results.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

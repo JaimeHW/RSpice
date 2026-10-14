@@ -26,10 +26,8 @@ use crate::workbench::shortcuts::artifacts::{
 use super::preferences_shell::{preference_switch, right_aligned};
 
 pub(crate) const IMPORT_TITLE: &str = "Import keyboard shortcut map";
-pub(crate) const IMPORT_EYEBROW: &str = "PREFERENCES \u{00b7} VERSIONED COMMAND BINDINGS";
 pub(crate) const IMPORT_PRIMARY: &str = "Import compatible bindings";
 pub(crate) const EXPORT_TITLE: &str = "Export keyboard shortcut map";
-pub(crate) const EXPORT_EYEBROW: &str = "PREFERENCES \u{00b7} PORTABLE COMMAND BINDINGS";
 pub(crate) const EXPORT_PRIMARY: &str = "Export shortcut profile";
 
 const IMPORT_CLASSES: [ImportBindingClass; 4] = [
@@ -571,7 +569,7 @@ fn render_import_dialog(
         ImportPending::Source | ImportPending::Commit => !state.cancel_requested,
         ImportPending::Rollback => false,
     };
-    let mut dialog = Dialog::new(IMPORT_EYEBROW, IMPORT_TITLE, IMPORT_PRIMARY)
+    let mut dialog = Dialog::new(IMPORT_TITLE, IMPORT_PRIMARY)
         .description(
             "Import a versioned shortcut profile after reviewing compatibility, conflicts, and protected bindings.",
         )
@@ -1089,7 +1087,7 @@ fn render_export_dialog(
         "Cancel"
     };
     let transaction_error = state.error.clone();
-    let mut dialog = Dialog::new(EXPORT_EYEBROW, EXPORT_TITLE, EXPORT_PRIMARY)
+    let mut dialog = Dialog::new(EXPORT_TITLE, EXPORT_PRIMARY)
         .description(
             "Export a portable shortcut profile with explicit scope, format, platform mappings, and privacy boundaries.",
         )
@@ -1511,16 +1509,8 @@ mod tests {
     #[test]
     fn exact_mockup_contract_strings_and_option_order_are_stable() {
         assert_eq!(IMPORT_TITLE, "Import keyboard shortcut map");
-        assert_eq!(
-            IMPORT_EYEBROW,
-            "PREFERENCES \u{00b7} VERSIONED COMMAND BINDINGS"
-        );
         assert_eq!(IMPORT_PRIMARY, "Import compatible bindings");
         assert_eq!(EXPORT_TITLE, "Export keyboard shortcut map");
-        assert_eq!(
-            EXPORT_EYEBROW,
-            "PREFERENCES \u{00b7} PORTABLE COMMAND BINDINGS"
-        );
         assert_eq!(EXPORT_PRIMARY, "Export shortcut profile");
         assert_eq!(
             MERGE_POLICIES.map(ShortcutMergePolicy::label),

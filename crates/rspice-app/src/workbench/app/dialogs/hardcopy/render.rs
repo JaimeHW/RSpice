@@ -176,39 +176,19 @@ impl RSpiceApp {
         }
         ensure_preview(ctx, &mut self.state.dialogs.hardcopy);
         let page = self.state.dialogs.hardcopy.page;
-        let main_eyebrow = format!(
-            "FILE · {} · OUTPUT CONTRACT",
-            self.state
-                .dialogs
-                .hardcopy
-                .source
-                .as_ref()
-                .map_or("ENGINEERING DOCUMENT", |source| {
-                    document_kind_label(source.document_kind())
-                })
-                .to_uppercase()
-        );
-        let (eyebrow, title, primary, secondary): (&str, &str, &str, Option<&str>) = match page {
+        let (title, primary, secondary): (&str, &str, Option<&str>) = match page {
             HardcopyDialogPage::Main => (
-                main_eyebrow.as_str(),
                 self.state.dialogs.hardcopy.workflow.title(),
                 self.state.dialogs.hardcopy.workflow.primary_label(),
                 None,
             ),
-            HardcopyDialogPage::PrinterProperties => (
-                "HARDCOPY · DEVICE CAPABILITIES · DRIVER BOUNDARY",
-                "Printer properties",
-                "Apply printer properties",
-                None,
-            ),
-            HardcopyDialogPage::CustomPaperMargins => (
-                "HARDCOPY · PHYSICAL PAGE · SAFE PRINTABLE AREA",
-                "Custom paper and margins",
-                "Use custom page",
-                None,
-            ),
+            HardcopyDialogPage::PrinterProperties => {
+                ("Printer properties", "Apply printer properties", None)
+            }
+            HardcopyDialogPage::CustomPaperMargins => {
+                ("Custom paper and margins", "Use custom page", None)
+            }
             HardcopyDialogPage::PrintMapping => (
-                "HARDCOPY · SEMANTIC STYLE · ACCESSIBLE REDUNDANCY",
                 "Layer, trace, and marker print mapping",
                 "Save print mapping",
                 None,
@@ -240,7 +220,7 @@ impl RSpiceApp {
         // and the command row with them. Showing one section at a time fits by
         // construction, so the dialog never scrolls no matter how many
         // controls a hardcopy grows.
-        let mut dialog = Dialog::new(eyebrow, title, primary)
+        let mut dialog = Dialog::new(title, primary)
             .description(description)
             .size(match page {
                 HardcopyDialogPage::Main => DialogSize::SchematicPageSetup,

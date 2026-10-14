@@ -348,7 +348,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     } else {
         Command::RunSimulation.is_enabled(app)
     };
-    let dialog = Dialog::new("EXECUTION", "Jobs, targets & run history", run_label)
+    let dialog = Dialog::new("Jobs, targets & run history", run_label)
         .description(DESCRIPTION)
         .size(DialogSize::JobsManager)
         .primary_enabled(run_enabled)

@@ -20,7 +20,6 @@ pub(super) fn rename_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             })
     };
     let choice = Dialog::new(
-        messages.text(MessageId::NetlistRenameEyebrow),
         messages.text(MessageId::NetlistRenameTitle),
         messages.text(MessageId::NetlistRename),
     )

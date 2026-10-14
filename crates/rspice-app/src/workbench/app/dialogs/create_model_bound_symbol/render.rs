@@ -31,7 +31,7 @@ impl RSpiceApp {
             pin_count,
             if pin_count == 1 { "" } else { "s" }
         );
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .initial_height(INITIAL_HEIGHT)

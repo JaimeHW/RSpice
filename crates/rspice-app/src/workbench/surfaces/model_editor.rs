@@ -2117,11 +2117,7 @@ fn release_comparison_dialog(
         || Err("No project-owned model candidate is open".to_owned()),
         |draft| draft.compare_release(&selected_release),
     );
-    let choice = Dialog::new(
-        "MODELS · SEMANTIC AND NUMERICAL DELTA",
-        "Compare model with approved release",
-        "Close",
-    )
+    let choice = Dialog::new("Compare model with approved release", "Close")
     .description("Compare the open candidate with an immutable release using retained source bytes and exact qualification evidence.")
     .size(DialogSize::Transaction)
     .fixed_height(680.0)

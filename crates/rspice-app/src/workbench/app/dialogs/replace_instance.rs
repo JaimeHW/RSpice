@@ -32,7 +32,6 @@ use crate::workbench::app::schematic::instance_catalog::{
 use crate::workbench::app::{RSpiceApp, ReplaceInstanceOpen, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} MODEL/SYMBOL COMPATIBILITY";
 const TITLE: &str = "Replace selected instance";
 const PRIMARY: &str = "Replace instance";
 const DESCRIPTION: &str = "Replace with pin, parameter, model, and netlist compatibility review; preserve mapping where valid.";
@@ -261,7 +260,7 @@ impl RSpiceApp {
         let discard_confirm = self.state.dialogs.replace_instance.discard_confirm;
         let validation_error = validation.error().map(str::to_owned);
         let has_transaction = discard_confirm || validation_error.is_some();
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::SimulationWorkflow)
             .initial_height(
@@ -1015,7 +1014,6 @@ mod tests {
     #[test]
     fn restored_mockup_contract_is_exact() {
         assert_eq!(TITLE, "Replace selected instance");
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} MODEL/SYMBOL COMPATIBILITY");
         assert_eq!(PRIMARY, "Replace instance");
         assert_eq!(SURFACE_HEIGHT, 406.0);
     }

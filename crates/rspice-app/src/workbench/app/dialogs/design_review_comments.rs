@@ -19,7 +19,6 @@ use crate::workbench::design_system::section_header;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "COLLABORATION \u{00b7} ANCHORED REVIEW \u{00b7} RESOLUTION";
 const TITLE: &str = "Design review comments";
 const PRIMARY: &str = "Publish review update";
 const CURRENT_ACTOR: &str = "Local project editor";
@@ -205,7 +204,7 @@ impl RSpiceApp {
                 .trim()
                 .is_empty();
         let mut body_scroll_offset = self.state.dialogs.design_review_comments.body_scroll_offset;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(
                 "Review durable comments anchored to the active schematic, its validated revisions, and retained result evidence.",
             )

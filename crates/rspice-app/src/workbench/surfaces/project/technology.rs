@@ -395,11 +395,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
     );
 
     let mut create_migration_copy = false;
-    let choice = Dialog::new(
-        "PROJECT · TECHNOLOGY CONTRACT",
-        TECHNOLOGY_DIALOG_TITLE,
-        primary.label,
-    )
+    let choice = Dialog::new(TECHNOLOGY_DIALOG_TITLE, primary.label)
     .description(
         "Choose an authenticated model library and one trusted signed PDK revision. Commit verifies both exact identities, writes and read-back verifies a whole-project checkpoint, then records one immutable project-owned binding revision.",
     )

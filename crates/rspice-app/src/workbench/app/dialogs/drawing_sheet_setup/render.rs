@@ -94,7 +94,6 @@ impl RSpiceApp {
             .is_some_and(|authority| authority.governed.is_none());
         let primary_enabled =
             page_setup_primary_enabled(read_only, problems.is_empty(), dirty, bootstrap_required);
-        let eyebrow = self.state.dialogs.drawing_sheet_setup.eyebrow.clone();
         let prospective_format = geometry_preview_format(
             &self.state.dialogs.drawing_sheet_setup.draft,
             &self.state.dialogs.drawing_sheet_setup.last_valid_format,
@@ -103,7 +102,7 @@ impl RSpiceApp {
             prospective_overflow_count(&self.state, prospective_format.clone());
         let preview_content = DrawingSheetPreviewContent::from_state(&self.state);
 
-        let mut dialog = Dialog::new(&eyebrow, TITLE, if read_only { "Close" } else { PRIMARY })
+        let mut dialog = Dialog::new(TITLE, if read_only { "Close" } else { PRIMARY })
             .description(DESCRIPTION)
             .size(DialogSize::SchematicPageSetup)
             .fixed_height(760.0)

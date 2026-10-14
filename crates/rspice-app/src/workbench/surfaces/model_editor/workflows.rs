@@ -61,11 +61,7 @@ pub(super) fn save_revision_workflow(
         .draft
         .as_ref()
         .is_some_and(|draft| draft.is_dirty());
-    let choice = Dialog::new(
-        "MODELS · VERSIONED DEFINITION",
-        "Save model revision",
-        "Save reviewed revision",
-    )
+    let choice = Dialog::new("Save model revision", "Save reviewed revision")
     .description("Review the exact candidate delta and source binding before publishing one guarded project/model revision.")
     .size(DialogSize::Transaction)
     .fixed_height(430.0)
@@ -182,7 +178,6 @@ pub(super) fn validation_review_workflow(
 ) {
     let prepared = request.prepared;
     let choice = Dialog::new(
-        "MODELS · SCHEMA · PHYSICS · PLATFORM",
         "Validate model candidate",
         if prepared { "Close report" } else { "Run validation" },
     )
@@ -352,11 +347,7 @@ pub(super) fn qualification_run_workflow(
     request: &super::super::super::commands::ModelEditorWorkflowRequest,
 ) {
     let runnable = Command::ModelRunQualificationTests.is_enabled(app);
-    let choice = Dialog::new(
-        "MODELS · TEST VECTORS · PLATFORM PARITY",
-        "Run model qualification tests",
-        "Queue qualification tests",
-    )
+    let choice = Dialog::new("Run model qualification tests", "Queue qualification tests")
     .description("Confirm the exact clean source, executable suites, current runtime target, and evidence-retention contract before dispatch.")
     .size(DialogSize::Transaction)
     .fixed_height(430.0)

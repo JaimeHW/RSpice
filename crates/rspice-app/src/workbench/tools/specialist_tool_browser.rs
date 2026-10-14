@@ -78,26 +78,22 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 
     let profile = app.state.workbench.engineering_profile;
     let mut requested_action = None;
-    let choice = Dialog::new(
-        "WORKSPACES · DISCIPLINE TOOLS · DEVICE TASK MODE",
-        "Specialist tool browser",
-        "Close",
-    )
-    .description(DESCRIPTION)
-    .size(DialogSize::SpecialistToolBrowser)
-    .flush_body()
-    .primary_on_enter(false)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let browser = &mut app.state.workbench.specialist_tool_browser;
-        purpose_banner(ui);
-        let search_id = toolbar(ui, browser, profile);
-        filter_bar(ui, browser);
-        let rows = visible_rows(browser, profile);
-        tool_grid(ui, browser, profile, &rows, &mut requested_action);
-        ownership_banner(ui);
-        Some(search_id)
-    });
+    let choice = Dialog::new("Specialist tool browser", "Close")
+        .description(DESCRIPTION)
+        .size(DialogSize::SpecialistToolBrowser)
+        .flush_body()
+        .primary_on_enter(false)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .show_with_initial_body_focus(ctx, |ui| {
+            let browser = &mut app.state.workbench.specialist_tool_browser;
+            purpose_banner(ui);
+            let search_id = toolbar(ui, browser, profile);
+            filter_bar(ui, browser);
+            let rows = visible_rows(browser, profile);
+            tool_grid(ui, browser, profile, &rows, &mut requested_action);
+            ownership_banner(ui);
+            Some(search_id)
+        });
 
     if let Some(action) = requested_action {
         execute_action(app, action);

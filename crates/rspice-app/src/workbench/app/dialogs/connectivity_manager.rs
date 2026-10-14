@@ -33,7 +33,6 @@ use rspice_design::hierarchy::HierarchySource;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} ELECTRICAL INTENT \u{00b7} CROSS-SHEET RESOLUTION";
 const TITLE: &str = "Connectivity, buses and global nets";
 const DESCRIPTION: &str = "Inspect extracted nets, typed vector connectivity, global aliases, and reviewed corrective actions without changing electrical intent implicitly.";
 const PRIMARY: &str = "Apply reviewed connectivity repairs";
@@ -972,7 +971,7 @@ impl RSpiceApp {
             .or(bus_error.as_deref())
             .map(str::to_owned);
         let mut body_scroll_offset = self.state.dialogs.connectivity_manager.body_scroll_offset;
-        let mut dialog = Dialog::new(EYEBROW, title, primary)
+        let mut dialog = Dialog::new(title, primary)
             .description(description)
             .size(DialogSize::SimulationWorkflow)
             .initial_height(600.0)

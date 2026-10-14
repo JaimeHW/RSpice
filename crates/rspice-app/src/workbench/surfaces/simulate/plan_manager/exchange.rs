@@ -236,11 +236,7 @@ fn export(
         .find(|record| record.id == draft.selected_plan_id);
     let mut action = None;
     let mut refusal = None;
-    let choice = Dialog::new(
-        "SIMULATION · EXPORT PLAN · PORTABLE PACKAGE",
-        "Export simulation plan",
-        "Save package…",
-    )
+    let choice = Dialog::new("Export simulation plan", "Save package…")
     .description(
         "The selected plan's document and its plan-owned payload, written as one portable package. Exporting reads the catalog and changes nothing.",
     )
@@ -346,11 +342,7 @@ fn import(
     };
     let mut action = None;
     let mut chooser = false;
-    let choice = Dialog::new(
-        "SIMULATION · IMPORT PLAN · NEW LOCAL IDENTITY",
-        "Import simulation plan",
-        "Import plan",
-    )
+    let choice = Dialog::new("Import simulation plan", "Import plan")
     .description(
         "An imported plan is created under a new local identity and activated. Its source lineage is retained; no result reference is copied.",
     )

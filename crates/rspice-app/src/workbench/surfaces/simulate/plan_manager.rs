@@ -49,7 +49,6 @@ use crate::workbench::state::SimulationPlanScope;
 /// that way; what inflates them is a reconstruction without the header, which
 /// measures 57 points that are not there and so reports a fit while the last row
 /// of the aside sits under the footer.
-const PLAN_DIALOG_EYEBROW: &str = "SIMULATION · VERSIONED PLAN LIFECYCLE · SINGLE ACTIVE OWNER";
 const PLAN_DIALOG_TITLE: &str = "Simulation plans";
 const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";
 
@@ -295,7 +294,7 @@ fn browse_dialog(
         .find(|record| record.id == draft.selected_plan_id)
         .is_some_and(|record| !record.archived);
     let mut action = None;
-    let choice = Dialog::new(PLAN_DIALOG_EYEBROW, PLAN_DIALOG_TITLE, PLAN_DIALOG_PRIMARY)
+    let choice = Dialog::new(PLAN_DIALOG_TITLE, PLAN_DIALOG_PRIMARY)
         .description(PLAN_DIALOG_DESCRIPTION)
         .size(DialogSize::CapabilityReview)
         .flush_body()

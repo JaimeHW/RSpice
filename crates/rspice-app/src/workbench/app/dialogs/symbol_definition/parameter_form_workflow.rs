@@ -21,7 +21,6 @@ use super::import_workflow::{setting_row, table_header};
 use super::state::ParameterFormPhase;
 use crate::workbench::app_state::publish_symbol_definition_candidate;
 
-const FORM_EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} TYPED PARAMETER FORM";
 const FORM_REVIEW_TITLE: &str = "Open component form designer";
 const FORM_DESIGNER_TITLE: &str = "Component form designer";
 const DISCARD_TITLE: &str = "Discard unsaved symbol changes?";
@@ -69,7 +68,7 @@ impl RSpiceApp {
                 720.0,
             ),
         };
-        let mut dialog = Dialog::new(FORM_EYEBROW, title, primary)
+        let mut dialog = Dialog::new(title, primary)
             .description("Edit typed engineering parameters, defaults, constraints, inheritance, visibility and device help as one versioned symbol contract.")
             .size(size)
             .initial_height(height)

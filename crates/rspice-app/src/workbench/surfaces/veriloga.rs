@@ -100,7 +100,6 @@ fn compile_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     };
     let messages = app.state.ui.messages();
     let choice = Dialog::new(
-        messages.text(MessageId::VerilogACompileReviewEyebrow),
         messages.text(MessageId::VerilogACompileReviewTitle),
         messages.text(MessageId::VerilogACompileReviewPrimary),
     )

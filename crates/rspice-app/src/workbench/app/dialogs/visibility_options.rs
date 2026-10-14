@@ -23,7 +23,6 @@ use crate::ui::widgets::{
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "VIEW \u{00b7} DISPLAY ONLY";
 const TITLE: &str = "Hierarchy and annotation visibility";
 const PRIMARY: &str = "Apply visibility";
 const BODY: &str = "Control hierarchy context, operating-point annotations, net names, probes, comments, and physical markers without changing design data.";
@@ -47,7 +46,7 @@ impl RSpiceApp {
 
         let dirty = self.state.dialogs.schematic_visibility.dirty();
         let recovery_available = visibility_recovery_available(&self.state);
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(BODY)
             .size(DialogSize::Transaction)
             .ghost(if dirty { "Discard changes" } else { "Cancel" })

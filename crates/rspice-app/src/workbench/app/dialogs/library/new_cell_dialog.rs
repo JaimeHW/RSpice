@@ -36,7 +36,7 @@ impl RSpiceApp {
         }
 
         let dialogs = &mut self.state.dialogs;
-        let choice = Dialog::new("Library", "New cell", "Create")
+        let choice = Dialog::new("New cell", "Create")
             .description(
                 "Create a named cell in a writable library with the selected initial views.",
             )

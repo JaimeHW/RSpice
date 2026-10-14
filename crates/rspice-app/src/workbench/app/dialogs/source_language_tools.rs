@@ -160,13 +160,6 @@ impl RSpiceApp {
 
         let messages = self.state.ui.messages();
         let mut dialog = Dialog::new(
-            messages.format(
-                MessageId::CodeToolsEyebrow,
-                &[
-                    ("language", &tools.index.language.label().to_uppercase()),
-                    ("path", &tools.active_path.to_uppercase()),
-                ],
-            ),
             messages.text(MessageId::CodeToolsTitle),
             messages.text(MessageId::CommonClose),
         )

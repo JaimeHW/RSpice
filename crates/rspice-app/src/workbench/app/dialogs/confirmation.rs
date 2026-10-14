@@ -38,7 +38,6 @@ impl RSpiceApp {
         };
 
         let choice = Dialog::new(
-            "FILE · BROWSER",
             "Browser file operation",
             "Cancel operation",
         )
@@ -82,7 +81,7 @@ impl RSpiceApp {
                 "Your changes will be lost if you don't save them.",
             ),
         };
-        let choice = Dialog::prompt(&title, "Save")
+        let choice = Dialog::new(&title, "Save")
             .description(consequence)
             .size(DialogSize::Confirmation)
             .secondary("Don't save")
@@ -109,7 +108,6 @@ impl RSpiceApp {
             ProjectReviewRequest::RevertActive(token) => {
                 let document = token.document_label();
                 let choice = Dialog::new(
-                    "PROJECT · WORKING CHANGE",
                     "Revert active document",
                     "Revert document",
                 )
@@ -211,7 +209,7 @@ impl RSpiceApp {
             (false, 1) => "1 document has unsaved changes.".to_owned(),
             (false, count) => format!("{count} documents have unsaved changes."),
         };
-        let choice = Dialog::prompt(
+        let choice = Dialog::new(
             &title,
             if unsaved.len() > 1 {
                 "Save all"
@@ -255,7 +253,7 @@ impl RSpiceApp {
         } else {
             "Cancel"
         };
-        let mut dialog = Dialog::prompt("Stop the simulation to close this project", primary)
+        let mut dialog = Dialog::new("Stop the simulation to close this project", primary)
             .description("A local simulation has to stop before the project can close.")
             .size(DialogSize::Confirmation)
             .primary_enabled(!stopping);

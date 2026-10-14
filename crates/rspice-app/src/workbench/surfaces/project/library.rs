@@ -943,7 +943,7 @@ fn show_library_usage_report(ctx: &Context) {
         "Loaded schematic consumers of {}. This report is derived from current live buffers.",
         report.reference.display_path()
     );
-    let choice = Dialog::new("PROJECT \u{00b7} LIBRARY", "Where used", "Close")
+    let choice = Dialog::new("Where used", "Close")
         .description(&description)
         .size(DialogSize::Transaction)
         .show(ctx, |ui| {
@@ -990,7 +990,7 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
         publications.len(),
         if publications.len() == 1 { "" } else { "s" }
     );
-    let choice = Dialog::new("PROJECT \u{00b7} LIBRARY", "Audit history", "Close")
+    let choice = Dialog::new("Audit history", "Close")
         .description(&description)
         .size(DialogSize::Manager)
         .show(ctx, |ui| {
@@ -1135,7 +1135,7 @@ fn show_library_edit_locks(ctx: &Context, state: &AppState) {
             "This device-local project has no connected collaboration lock authority.".to_owned()
         }
     };
-    let choice = Dialog::new("PROJECT \u{00b7} LIBRARY", "Edit locks", "Close")
+    let choice = Dialog::new("Edit locks", "Close")
         .description(&description)
         .size(DialogSize::Manager)
         .show(ctx, |ui| {

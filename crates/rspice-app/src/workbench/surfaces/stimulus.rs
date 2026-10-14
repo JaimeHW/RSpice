@@ -213,7 +213,7 @@ fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
     };
     let consequence = crate::workbench::app::actions::stimulus::delete_needs_confirmation(state)
         .unwrap_or_default();
-    let choice = Dialog::prompt(format!("Delete \u{201c}{name}\u{201d}?"), "Delete")
+    let choice = Dialog::new(format!("Delete \u{201c}{name}\u{201d}?"), "Delete")
         .description(consequence.clone())
         .size(DialogSize::Confirmation)
         .ghost("Cancel")

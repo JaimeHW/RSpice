@@ -85,7 +85,7 @@ impl RSpiceApp {
             "{} / {} / {}",
             dialogs.rename_view_library, dialogs.rename_view_cell, dialogs.rename_view_current
         );
-        let choice = Dialog::new("Library", "Rename view", "Rename")
+        let choice = Dialog::new("Rename view", "Rename")
             .description(
                 "Rename the selected view and remap its buffer, open tabs, owned source, and every instance bound to exactly this view.",
             )

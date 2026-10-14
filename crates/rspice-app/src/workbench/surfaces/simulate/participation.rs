@@ -431,48 +431,45 @@ pub(super) fn analysis_run_points_dialog(
     let chosen = draft.selected.len();
     let selection_note = point_selection_note(chosen, points.len(), task_rate);
 
-    let choice = Dialog::new(
-        "SIMULATION PLAN · INSTANCE PARTICIPATION",
-        "Run points",
-        "Apply point selection",
-    )
-    .description("Choose which resolved run-set points this analysis instance is executed at.")
-    .size(DialogSize::SimulationWorkflow)
-    .flush_body()
-    .ghost("Cancel")
-    .primary_enabled(enabled)
-    .primary_on_enter(false)
-    .show(ctx, |ui| {
-        super::workflows::workflow_setting_row(
-            ui,
-            "Instance",
-            "Restricting an instance never removes a run-set point.",
-            |ui| {
-                ui.label(
-                    egui::RichText::new(&name).font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                );
-            },
-        );
-        super::workflows::workflow_section_heading(
-            ui,
-            &format!("Resolved run-set points · {}", points.len()),
-        );
-        if over_limit {
-            picker_note(
+    let choice = Dialog::new("Run points", "Apply point selection")
+        .description("Choose which resolved run-set points this analysis instance is executed at.")
+        .size(DialogSize::SimulationWorkflow)
+        .flush_body()
+        .ghost("Cancel")
+        .primary_enabled(enabled)
+        .primary_on_enter(false)
+        .show(ctx, |ui| {
+            super::workflows::workflow_setting_row(
                 ui,
-                &format!(
-                    "This run set resolves {} points. Point-by-point scoping is offered up to \
+                "Instance",
+                "Restricting an instance never removes a run-set point.",
+                |ui| {
+                    ui.label(
+                        egui::RichText::new(&name)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                    );
+                },
+            );
+            super::workflows::workflow_section_heading(
+                ui,
+                &format!("Resolved run-set points · {}", points.len()),
+            );
+            if over_limit {
+                picker_note(
+                    ui,
+                    &format!(
+                        "This run set resolves {} points. Point-by-point scoping is offered up to \
                      {POINT_PICKER_LIMIT}; above that, disable a run-set axis or scope this \
                      instance to the nominal point instead. No point is hidden and no selection \
                      was changed.",
-                    points.len()
-                ),
-            );
-        }
-        point_grid(ui, &points, &labels, &mut draft.selected, !over_limit);
-        picker_note(ui, &selection_note);
-        super::workflows::workflow_validation_message(ui, draft.validation_error.as_deref());
-    });
+                        points.len()
+                    ),
+                );
+            }
+            point_grid(ui, &points, &labels, &mut draft.selected, !over_limit);
+            picker_note(ui, &selection_note);
+            super::workflows::workflow_validation_message(ui, draft.validation_error.as_deref());
+        });
     super::workflows::finish_workflow_choice(ctx, app, choice, draft, commit_point_selection);
 }
 

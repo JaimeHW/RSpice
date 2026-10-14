@@ -21,7 +21,6 @@ use crate::ui::widgets::{
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} CONNECTIVITY";
 const TITLE: &str = "Place net label";
 const PRIMARY: &str = "Place label";
 const DESCRIPTION: &str =
@@ -131,7 +130,6 @@ impl RSpiceApp {
             .is_some();
         let mut edited = false;
         let mut dialog = Dialog::new(
-            EYEBROW,
             if off_sheet { CONNECTOR_TITLE } else { TITLE },
             if off_sheet {
                 CONNECTOR_PRIMARY

@@ -21,7 +21,6 @@ use crate::workbench::app_state::AppState;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod transaction_tests;
 
-const EYEBROW: &str = "EDIT \u{00b7} STABLE IDENTITY";
 const TITLE: &str = "Rename selected object";
 const PRIMARY: &str = "Rename object";
 const BODY: &str = "Change a user-facing name while preserving stable identity and previewing netlist, requirement, and review references.";
@@ -169,7 +168,7 @@ impl RSpiceApp {
             .map(str::to_owned);
 
         let mut edited = false;
-        let choice = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let choice = Dialog::new(TITLE, PRIMARY)
             .description(BODY)
             .size(DIALOG_SIZE)
             .ghost("Cancel")
@@ -644,7 +643,6 @@ mod tests {
 
     #[test]
     fn mockup_contract_is_exact() {
-        assert_eq!(EYEBROW, "EDIT \u{00b7} STABLE IDENTITY");
         assert_eq!(TITLE, "Rename selected object");
         assert_eq!(PRIMARY, "Rename object");
         assert_eq!(

@@ -1154,11 +1154,7 @@ fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
     else {
         return;
     };
-    let choice = Dialog::new(
-        "Recovery",
-        "Discard recovery checkpoint?",
-        "Discard checkpoint",
-    )
+    let choice = Dialog::new("Discard recovery checkpoint?", "Discard checkpoint")
     .description(
         "Confirm permanent deletion of the selected autosave checkpoint without modifying its saved source.",
     )

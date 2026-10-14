@@ -64,11 +64,7 @@ impl RSpiceApp {
         let mut disclosure_reviewed = self.state.dialogs.help_center.disclosure_reviewed;
         let mut action = None;
 
-        let mut dialog = Dialog::new(
-            "HELP \u{00b7} VERSIONED \u{00b7} PLATFORM AWARE",
-            page.label(),
-            "Close",
-        )
+        let mut dialog = Dialog::new(page.label(), "Close")
         .description(
             "Browse product guidance, compatibility changes, migration requirements, diagnostics, support disclosure, and notices.",
         )
@@ -156,7 +152,7 @@ impl RSpiceApp {
         };
 
         let license_for_body = license_line.clone();
-        let choice = Dialog::new("RSpice", "About", "Close")
+        let choice = Dialog::new("About", "Close")
             .description(
                 "Review the RSpice version, engine, matrix package, and local license status, or copy diagnostics.",
             )
@@ -238,7 +234,7 @@ impl RSpiceApp {
         let hint = format!("{shown} of {total} commands");
 
         let filter_text = &mut self.state.dialogs.shortcuts_filter;
-        let choice = Dialog::new("Help", "Command reference", "Close")
+        let choice = Dialog::new("Command reference", "Close")
             .description(
                 "Search every discoverable command by name, stable identity, category, or shortcut.",
             )

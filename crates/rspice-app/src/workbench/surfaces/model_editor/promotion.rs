@@ -92,11 +92,7 @@ pub(super) fn promotion_review_dialog(
     } else {
         "Close"
     };
-    let choice = Dialog::new(
-        "MODELS · FAIL-CLOSED QUALIFICATION GATE",
-        "Model promotion review",
-        primary,
-    )
+    let choice = Dialog::new("Model promotion review", primary)
     .description("Review the exact source-bound checklist and create one immutable release plus its audit record only when every gate passes.")
     .size(DialogSize::Transaction)
     .fixed_height(740.0)
@@ -237,11 +233,7 @@ fn promotion_unavailable_dialog(
     let rows = promotion_gate_rows(app, records);
     let mut open_plan = false;
     let mut review_disposition = false;
-    let choice = Dialog::new(
-        "MODELS · FAIL-CLOSED QUALIFICATION GATE",
-        "Model promotion unavailable",
-        "Close",
-    )
+    let choice = Dialog::new("Model promotion unavailable", "Close")
     .description("Promotion is disabled because the exact current model source does not yet have complete passing qualification evidence. Opening this review never converts a failed or missing vector into a pass.")
     .size(DialogSize::Transaction)
     .fixed_height(560.0)

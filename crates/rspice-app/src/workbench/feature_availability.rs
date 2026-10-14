@@ -105,14 +105,8 @@ pub fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     let workflow_from_matrix = current_route.capability_workflow_id().is_some()
         && app.state.workbench.previous_route() == Some(matrix_route);
     let planned_from_matrix = planned_content.is_some() && workflow_from_matrix;
-    let (kicker, title, primary) = match (drilldown.as_ref(), planned_content) {
+    let (title, primary) = match (drilldown.as_ref(), planned_content) {
         (_, Some((row, _))) => (
-            format!(
-                "{} · {} · {}",
-                row.group.to_uppercase(),
-                data::PLANNED_WORKFLOW_FRAME.dialog_eyebrow_status,
-                row.status.as_str().to_uppercase()
-            ),
             format!(
                 "{}{}",
                 row.label,
@@ -124,31 +118,19 @@ pub fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                 "Close"
             },
         ),
-        (Some(CapabilityMatrixDrilldown::Interoperability), None) => (
-            data::INTEROPERABILITY_DIALOG_EYEBROW.to_owned(),
-            data::INTEROPERABILITY_DIALOG_TITLE.to_owned(),
-            "Close",
-        ),
-        (Some(CapabilityMatrixDrilldown::PlatformLifecycle), None) => (
-            data::PLATFORM_LIFECYCLE_DIALOG_EYEBROW.to_owned(),
-            data::PLATFORM_LIFECYCLE_DIALOG_TITLE.to_owned(),
-            "Close",
-        ),
-        (Some(CapabilityMatrixDrilldown::TouchEditGuide), None) => (
-            data::TOUCH_EDIT_GUIDE_DIALOG_EYEBROW.to_owned(),
-            data::TOUCH_EDIT_GUIDE_DIALOG_TITLE.to_owned(),
-            "Close",
-        ),
-        (None, None) => (
-            "HELP · VERSIONED PRODUCT CONTRACT".to_owned(),
-            "Product capability and platform matrix".to_owned(),
-            "Close",
-        ),
-        (Some(CapabilityMatrixDrilldown::PlannedWorkflow(_)), None) => (
-            "HELP · VERSIONED PRODUCT CONTRACT".to_owned(),
-            "Product capability and platform matrix".to_owned(),
-            "Close",
-        ),
+        (Some(CapabilityMatrixDrilldown::Interoperability), None) => {
+            (data::INTEROPERABILITY_DIALOG_TITLE.to_owned(), "Close")
+        }
+        (Some(CapabilityMatrixDrilldown::PlatformLifecycle), None) => {
+            (data::PLATFORM_LIFECYCLE_DIALOG_TITLE.to_owned(), "Close")
+        }
+        (Some(CapabilityMatrixDrilldown::TouchEditGuide), None) => {
+            (data::TOUCH_EDIT_GUIDE_DIALOG_TITLE.to_owned(), "Close")
+        }
+        (None, None) => ("Product capability and platform matrix".to_owned(), "Close"),
+        (Some(CapabilityMatrixDrilldown::PlannedWorkflow(_)), None) => {
+            ("Product capability and platform matrix".to_owned(), "Close")
+        }
     };
     let mut body_scroll_offset = if drilldown.is_some() {
         matrix.drilldown_scroll_offset
@@ -163,7 +145,7 @@ pub fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         _ => DialogInitialFocus::Close,
     };
     let description = workflow_description(drilldown.as_ref());
-    let dialog = Dialog::new(&kicker, &title, primary)
+    let dialog = Dialog::new(&title, primary)
         .description(description)
         .initial_focus(initial_focus)
         .size(DialogSize::CapabilityReview)

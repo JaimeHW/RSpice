@@ -82,11 +82,7 @@ pub(super) fn rename_analysis_dialog(
         (Some(reason), _) => reason,
         (None, None) => "This analysis is no longer in the plan.".to_owned(),
     };
-    let choice = Dialog::new(
-        "SIMULATION · ANALYSIS IDENTITY",
-        "Name analysis",
-        "Apply name",
-    )
+    let choice = Dialog::new("Name analysis", "Apply name")
     .description(
         "Name this analysis instance so every receipt, job and result that reports it says which analysis it was, rather than repeating the kind of analysis it is.",
     )
@@ -219,11 +215,7 @@ pub(super) fn clone_plan_dialog(
             || format!("missing plan {}", draft.source_plan_id),
             |(name, revision, _, _)| format!("{name} · revision {}", revision.get()),
         );
-    let choice = Dialog::new(
-        "SIMULATION · EXPLICIT PLAN LINEAGE",
-        "Clone simulation plan",
-        "Create cloned plan",
-    )
+    let choice = Dialog::new("Clone simulation plan", "Create cloned plan")
     .description(
         "Create a separately owned simulation plan while preserving source lineage and immutable result manifests.",
     )
@@ -326,11 +318,7 @@ pub(super) fn design_variable_dialog(
     } else {
         "none"
     };
-    let choice = Dialog::new(
-        "SIMULATION PLAN · TYPED PARAMETER · DEPENDENCY PREVIEW",
-        "Create design variable",
-        "Create variable",
-    )
+    let choice = Dialog::new("Create design variable", "Create variable")
     .description(
         "Create a typed, scoped simulation parameter with explicit constraints and deterministic netlist ownership.",
     )
@@ -433,11 +421,7 @@ pub(super) fn saved_output_dialog(
             )
         },
     );
-    let choice = Dialog::new(
-        "SIMULATION PLAN · DATA CONTRACT · STORAGE IMPACT",
-        "Add saved output or derived expression",
-        "Add output",
-    )
+    let choice = Dialog::new("Add saved output or derived expression", "Add output")
     .description(
         "Add a validated output contract with explicit analysis compatibility, retention, precision, and streaming behavior.",
     )
@@ -625,7 +609,6 @@ pub(super) fn capture_group_dialog(
         .map(|streaming| streaming.label())
         .collect::<Vec<_>>();
     let choice = Dialog::new(
-        "SIMULATION PLAN · CAPTURE POLICY · MEMBERSHIP",
         if editing {
             "Edit capture group"
         } else {

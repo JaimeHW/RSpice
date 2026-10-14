@@ -31,7 +31,6 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 
-const MANAGER_EYEBROW: &str = "SCHEMATIC \u{00b7} DESIGN IDENTITY \u{00b7} TRANSACTIONAL AUTHORING";
 const MANAGER_TITLE: &str = "Sheets, variants, annotation and hierarchy";
 const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
 const MANAGER_DESCRIPTION: &str = "Manage stable sheet identity, governed assembly variants, reference-designator ownership, and exact hierarchy resolution.";
@@ -96,20 +95,6 @@ impl DesignManagementPage {
             Self::RenumberPreview => "Preview reference-designator renumbering",
             Self::AnnotationPolicy => "Edit annotation policy",
             Self::HierarchyAudit => "Audit hierarchy and view resolution",
-        }
-    }
-
-    const fn eyebrow(self) -> &'static str {
-        match self {
-            Self::Manager => MANAGER_EYEBROW,
-            Self::NewSheet => "SCHEMATIC \u{00b7} STABLE SHEET IDENTITY",
-            Self::MoveSelection => "SCHEMATIC \u{00b7} CONNECTIVITY-PRESERVING MOVE",
-            Self::NewVariant => "SCHEMATIC \u{00b7} VERSIONED ASSEMBLY INTENT",
-            Self::CompareVariants => "SCHEMATIC \u{00b7} SEMANTIC VARIANT DELTA",
-            Self::VariantMatrix => "SCHEMATIC \u{00b7} CONFIGURATION CONTROL",
-            Self::RenumberPreview => "SCHEMATIC \u{00b7} STABLE-ID MAPPING",
-            Self::AnnotationPolicy => "SCHEMATIC \u{00b7} REFERENCE OWNERSHIP",
-            Self::HierarchyAudit => "SCHEMATIC \u{00b7} CONFIGURATION PREFLIGHT",
         }
     }
 

@@ -49,7 +49,7 @@ pub(super) fn render(
 ) {
     let refusal = extract_refusal(state, component, &session.name);
     let title = format!("Save {} as a definition", session.reference);
-    let dialog = Dialog::new("STIMULUS LIBRARY", title.clone(), "Save definition")
+    let dialog = Dialog::new(title.clone(), "Save definition")
         .description(PURPOSE)
         .size(DialogSize::Transaction)
         .without_header()

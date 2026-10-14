@@ -101,25 +101,21 @@ impl RSpiceApp {
         let entry_valid = self.state.dialogs.new_project.params().validate().is_ok();
 
         let dialog = &mut self.state.dialogs.new_project;
-        let choice = Dialog::new(
-            "Project lifecycle \u{b7} Transactional \u{b7} Portable",
-            "Create RSpice project",
-            "Create project",
-        )
-        .description(
-            "Name the new project, its editable design library, and its top cell before it \
+        let choice = Dialog::new("Create RSpice project", "Create project")
+            .description(
+                "Name the new project, its editable design library, and its top cell before it \
              replaces the current session.",
-        )
-        .size(DialogSize::Transaction)
-        .ghost("Cancel")
-        .hint("nothing is written to disk until Save")
-        .primary_enabled(entry_valid)
-        .show(ctx, |ui| {
-            ui.columns(2, |columns| {
-                render_identity(&mut columns[0], dialog);
-                render_contract(&mut columns[1], dialog);
+            )
+            .size(DialogSize::Transaction)
+            .ghost("Cancel")
+            .hint("nothing is written to disk until Save")
+            .primary_enabled(entry_valid)
+            .show(ctx, |ui| {
+                ui.columns(2, |columns| {
+                    render_identity(&mut columns[0], dialog);
+                    render_contract(&mut columns[1], dialog);
+                });
             });
-        });
 
         match choice {
             DialogChoice::Primary => {

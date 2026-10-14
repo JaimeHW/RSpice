@@ -26,7 +26,6 @@ use rspice_schematic_editor::object_properties::{
     TAP_SLICE_FIELD, TAP_SOURCE_FIELD,
 };
 
-const EYEBROW: &str = "EDIT \u{00b7} TYPED PARAMETERS";
 const TITLE: &str = "Object properties";
 const PRIMARY: &str = "Apply object properties";
 const BODY: &str = "Edit identity, model, parameters, orientation, connectivity, display, constraints, and review metadata.";
@@ -207,7 +206,7 @@ impl RSpiceApp {
             && validation.can_commit();
         let primary_on_enter = !matches!(draft, ObjectPropertiesDraft::DesignNote(_));
 
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(BODY)
             .size(DIALOG_SIZE)
             .ghost(if discard_confirm {

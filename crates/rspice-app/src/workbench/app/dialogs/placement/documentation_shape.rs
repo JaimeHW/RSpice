@@ -11,7 +11,6 @@ use crate::ui::widgets::{
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} GRAPHICS";
 const TITLE: &str = "Draw documentation shape";
 const PRIMARY: &str = "Arm shape tool";
 const DESCRIPTION: &str =
@@ -28,7 +27,7 @@ impl RSpiceApp {
         let validation = validate_draft(&self.state);
         let validation_message = validation.as_ref().err().cloned();
         let discard_confirm = self.state.dialogs.documentation_shape.discard_confirm;
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DIALOG_SIZE)
             .ghost(if discard_confirm {

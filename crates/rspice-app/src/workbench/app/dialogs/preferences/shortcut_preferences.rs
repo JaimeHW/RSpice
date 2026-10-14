@@ -686,7 +686,6 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
             })
         };
         let mut dialog = Dialog::new(
-            "PREFERENCES \u{00b7} COMMAND BINDINGS \u{00b7} CONFLICT SAFE",
             "Keyboard shortcut editor",
             "Save shortcut profile",
         )

@@ -167,7 +167,7 @@ impl RSpiceApp {
             self.state.dialogs.new_library_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
         let dialogs = &mut self.state.dialogs;
-        let choice = Dialog::new("Library", "New library", "Create")
+        let choice = Dialog::new("New library", "Create")
             .description(
                 "Create an empty writable library in this project. Cells and views are added to it afterwards.",
             )
@@ -226,7 +226,7 @@ impl RSpiceApp {
         }
         let dialogs = &mut self.state.dialogs;
         let current = dialogs.rename_library_current.clone();
-        let choice = Dialog::new("Library", "Rename library", "Rename")
+        let choice = Dialog::new("Rename library", "Rename")
             .description(
                 "Rename the selected library and remap open buffers, tabs, instance bindings, owned sources, and the project root.",
             )
@@ -302,7 +302,7 @@ impl RSpiceApp {
         let roots = impact.configuration_roots.to_string();
         let project_root = if impact.project_root { "yes" } else { "no" };
 
-        let choice = Dialog::new("Library", "Delete library", "Delete")
+        let choice = Dialog::new("Delete library", "Delete")
             .description(
                 "Permanently remove the exact library, every cell and view it owns, and every loaded workspace buffer beneath it.",
             )

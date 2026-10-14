@@ -90,7 +90,7 @@ impl RSpiceApp {
         let age = checkpoint_age(&checkpoint);
         let can_discard = candidate.can_discard();
 
-        let choice = Dialog::new("File", "Restore autosave?", "Restore")
+        let choice = Dialog::new("Restore autosave?", "Restore")
             .description(
                 "Review an interrupted autosave checkpoint and choose whether to restore it, keep it, or discard it when safe.",
             )

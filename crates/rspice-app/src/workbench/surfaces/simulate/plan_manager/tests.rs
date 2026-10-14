@@ -36,7 +36,7 @@ fn measured_dialog_body_size(screen: Vec2) -> Vec2 {
                 ..Default::default()
             },
             |root| {
-                Dialog::new(PLAN_DIALOG_EYEBROW, PLAN_DIALOG_TITLE, PLAN_DIALOG_PRIMARY)
+                Dialog::new(PLAN_DIALOG_TITLE, PLAN_DIALOG_PRIMARY)
                     .description(PLAN_DIALOG_DESCRIPTION)
                     .size(DialogSize::CapabilityReview)
                     .flush_body()

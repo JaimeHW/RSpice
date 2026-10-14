@@ -47,7 +47,6 @@ use crate::workbench::app::concept_banner;
 use crate::workbench::state::NewSimulationPlanDraft;
 use rspice_simulation_contract::run_set::ReferencePoint;
 
-const CREATE_EYEBROW: &str = "SIMULATION · NEW PLAN · FRESH ROOT IDENTITY";
 const CREATE_TITLE: &str = "New simulation plan";
 const CREATE_PRIMARY: &str = "Create plan";
 
@@ -136,7 +135,7 @@ pub(super) fn dialog(
         .find(|record| record.active)
         .map(|record| record.model_bindings);
     let mut action = None;
-    let choice = Dialog::new(CREATE_EYEBROW, CREATE_TITLE, CREATE_PRIMARY)
+    let choice = Dialog::new(CREATE_TITLE, CREATE_PRIMARY)
         .description(CREATE_DESCRIPTION)
         .size(DialogSize::SimulationWorkflow)
         .ghost("Cancel")
@@ -965,7 +964,7 @@ mod tests {
     /// nothing here may be long enough to need it — which makes the absence of an
     /// ellipsis in the paint the exact statement of that.
     ///
-    /// Every string this checks is this route's own: its eyebrow, title,
+    /// Every string this checks is this route's own: its title,
     /// description and button labels, its setting rows, its controls and its two
     /// statement groups. There is no list of expected labels, deliberately —
     /// rewording a row is covered without editing this test.

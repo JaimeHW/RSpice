@@ -732,12 +732,8 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         report.blockers.len(),
         report.advisories.len()
     );
-    let kicker = format!(
-        "SIMULATION · DESIGN REVISION {} · ORDERED CORRECTIVE ACTION",
-        report.project_revision
-    );
     let mut requested_fix = None;
-    let choice = Dialog::new(&kicker, "Simulation preflight", primary)
+    let choice = Dialog::new("Simulation preflight", primary)
         .description(
             "Review ordered blockers, advisories, and frozen run inputs before closing or queuing this validated set of simulation inputs.",
         )

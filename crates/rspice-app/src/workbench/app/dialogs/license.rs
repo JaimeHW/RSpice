@@ -73,7 +73,7 @@ impl RSpiceApp {
         let ctrl_enter = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
 
         let state = &mut self.state;
-        let mut dialog = Dialog::new("License", "Enter license key", primary)
+        let mut dialog = Dialog::new("Enter license key", primary)
             .description("Paste, verify, and activate a license key locally on this machine.")
             .size(DialogSize::Transaction)
             .ghost("Cancel")

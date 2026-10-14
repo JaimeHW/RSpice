@@ -223,7 +223,7 @@ impl RSpiceApp {
             "immutable snapshot · earlier versions keep their URLs".to_owned()
         };
 
-        let mut dialog = Dialog::new("Publication", "Publish to web", &primary)
+        let mut dialog = Dialog::new("Publish to web", &primary)
             .description(
                 "Review the exact snapshot that leaves this machine, then publish it as an \
                  immutable page version.",

@@ -200,7 +200,6 @@ pub fn render_model_browser(
     };
 
     let mut dialog = Dialog::new(
-        "Library",
         "Model browser",
         if state.browse_only { "Close" } else { "Apply" },
     )

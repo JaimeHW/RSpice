@@ -81,7 +81,7 @@ pub fn render_pdk_settings_dialog(
     let mut should_close = false;
     let mut should_rescan = false;
 
-    let choice = Dialog::new("Models", "Model library paths", "Close")
+    let choice = Dialog::new("Model library paths", "Close")
         .description(
             "Manage model-library search paths and environment overrides, rescan sources, and inspect loaded models.",
         )

@@ -104,71 +104,60 @@ impl RSpiceApp {
         let pending_run_requests = self.live_session.pending_run_requests();
 
         // Resolve the dialog chrome for the current lifecycle state.
-        let (eyebrow, title, primary, primary_enabled, secondary): (
-            &str,
-            String,
-            String,
-            bool,
-            Option<&str>,
-        ) = match &session {
-            None | Some(LiveSessionState::Failed { .. }) => (
-                "LIVE SESSION · HOSTED RELAY · EXPLICIT SWITCH",
-                "Start a live session".to_owned(),
-                "Go live".to_owned(),
-                project_open,
-                None,
-            ),
-            Some(LiveSessionState::Starting) => (
-                "LIVE SESSION · HOSTED RELAY · EXPLICIT SWITCH",
-                "Start a live session".to_owned(),
-                "Creating…".to_owned(),
-                false,
-                None,
-            ),
-            Some(LiveSessionState::Joining) => (
-                "LIVE SESSION · HOSTED RELAY",
-                "Join a live session".to_owned(),
-                "Joining…".to_owned(),
-                false,
-                None,
-            ),
-            Some(LiveSessionState::AwaitingApproval(_)) => (
-                "LIVE SESSION · HOSTED RELAY",
-                "Join a live session".to_owned(),
-                "Waiting for the host…".to_owned(),
-                false,
-                Some("Leave"),
-            ),
-            Some(LiveSessionState::Hosting(summary)) => {
-                let draft = self
-                    .state
-                    .dialogs
-                    .live_session
-                    .policy_draft
-                    .unwrap_or(summary.policy);
-                (
-                    "LIVE SESSION · HOST CONTROLS · STREAMED, NOT STORED",
-                    match &summary.join_code {
-                        Some(code) => format!("Live session {code}"),
-                        None => "Live session".to_owned(),
+        let (title, primary, primary_enabled, secondary): (String, String, bool, Option<&str>) =
+            match &session {
+                None | Some(LiveSessionState::Failed { .. }) => (
+                    "Start a live session".to_owned(),
+                    "Go live".to_owned(),
+                    project_open,
+                    None,
+                ),
+                Some(LiveSessionState::Starting) => (
+                    "Start a live session".to_owned(),
+                    "Creating…".to_owned(),
+                    false,
+                    None,
+                ),
+                Some(LiveSessionState::Joining) => (
+                    "Join a live session".to_owned(),
+                    "Joining…".to_owned(),
+                    false,
+                    None,
+                ),
+                Some(LiveSessionState::AwaitingApproval(_)) => (
+                    "Join a live session".to_owned(),
+                    "Waiting for the host…".to_owned(),
+                    false,
+                    Some("Leave"),
+                ),
+                Some(LiveSessionState::Hosting(summary)) => {
+                    let draft = self
+                        .state
+                        .dialogs
+                        .live_session
+                        .policy_draft
+                        .unwrap_or(summary.policy);
+                    (
+                        match &summary.join_code {
+                            Some(code) => format!("Live session {code}"),
+                            None => "Live session".to_owned(),
+                        },
+                        "Apply session policy".to_owned(),
+                        draft != summary.policy,
+                        Some("End session"),
+                    )
+                }
+                Some(LiveSessionState::Participating(_)) => (
+                    "Live session".to_owned(),
+                    if mirroring {
+                        "Close".to_owned()
+                    } else {
+                        "Open the host's project".to_owned()
                     },
-                    "Apply session policy".to_owned(),
-                    draft != summary.policy,
-                    Some("End session"),
-                )
-            }
-            Some(LiveSessionState::Participating(_)) => (
-                "LIVE SESSION · MIRRORED FROM THE HOST",
-                "Live session".to_owned(),
-                if mirroring {
-                    "Close".to_owned()
-                } else {
-                    "Open the host's project".to_owned()
-                },
-                true,
-                Some("Leave session"),
-            ),
-        };
+                    true,
+                    Some("Leave session"),
+                ),
+            };
 
         let description = match &session {
             None | Some(LiveSessionState::Failed { .. }) => {
@@ -185,7 +174,7 @@ impl RSpiceApp {
             }
             _ => "The session is being established.",
         };
-        let mut dialog = Dialog::new(eyebrow, &title, &primary)
+        let mut dialog = Dialog::new(&title, &primary)
             .description(description)
             .size(DialogSize::Transaction)
             .ghost("Close")

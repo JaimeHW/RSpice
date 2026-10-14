@@ -360,7 +360,6 @@ fn interoperability_document_preserves_governed_structure_and_unchanged_copy() {
         "if (action === \"legal-privacy-center\")",
     );
     assert!(source.contains(&format!("title: \"{INTEROPERABILITY_DIALOG_TITLE}\"")));
-    assert!(source.contains(&format!("eyebrow: \"{INTEROPERABILITY_DIALOG_EYEBROW}\"")));
     assert!(source.contains(&format!(
         "localWorkflowTabsMarkup(\"{INTEROPERABILITY_TABLIST_LABEL}\""
     )));
@@ -433,7 +432,6 @@ fn touch_edit_guide_document_and_responsive_contract_match_the_mockup_exactly() 
         "if (action === \"platform-lifecycle\")",
     );
     assert!(source.contains(&format!("title: \"{TOUCH_EDIT_GUIDE_DIALOG_TITLE}\"")));
-    assert!(source.contains(&format!("eyebrow: \"{TOUCH_EDIT_GUIDE_DIALOG_EYEBROW}\"")));
     assert!(source.contains("primary: \"Close\""));
     for step in TOUCH_EDIT_GUIDE_STEPS {
         assert!(source.contains(&format!(
@@ -487,7 +485,6 @@ fn platform_lifecycle_document_copy_matches_the_mockup_exactly() {
         "if (action === \"design-bulk-tools\")",
     );
     assert!(source.contains(&format!("title: \"{PLATFORM_LIFECYCLE_DIALOG_TITLE}\"")));
-    assert!(source.contains(&format!("eyebrow: \"{PLATFORM_LIFECYCLE_DIALOG_EYEBROW}\"")));
     assert!(source.contains(PLATFORM_LIFECYCLE_WARNING));
     for row in PLATFORM_LIFECYCLE_ROWS {
         for text in [
@@ -689,10 +686,6 @@ fn planned_workflow_shared_frame_matches_the_mockup_exactly() {
     assert!(app_source().contains(&format!(
         "${{meta.label}}{}",
         PLANNED_WORKFLOW_FRAME.dialog_title_suffix
-    )));
-    assert!(app_source().contains(&format!(
-        "${{meta.group.toUpperCase()}} \u{00b7} {} \u{00b7} ${{meta.status.toUpperCase()}}",
-        PLANNED_WORKFLOW_FRAME.dialog_eyebrow_status
     )));
     assert!(app_source().contains(&format!(
         "primary: {:?}",

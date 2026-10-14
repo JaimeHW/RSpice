@@ -27,7 +27,6 @@ use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_
 use crate::workbench::app::{ArraySelectionDialogState, RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} REPEATED STRUCTURE";
 const TITLE: &str = "Create object array";
 const PRIMARY: &str = "Create array";
 const DESCRIPTION: &str =
@@ -194,7 +193,7 @@ impl RSpiceApp {
         self.state.dialogs.array_selection.validation_field_mask = validation_field_mask;
         let discard_confirm = self.state.dialogs.array_selection.discard_confirm;
         let has_transaction = discard_confirm || validation_title.is_some();
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .initial_height(
@@ -534,7 +533,6 @@ mod tests {
 
     #[test]
     fn restored_mockup_shell_contract_is_exact() {
-        assert_eq!(EYEBROW, "SCHEMATIC \u{00b7} REPEATED STRUCTURE");
         assert_eq!(TITLE, "Create object array");
         assert_eq!(PRIMARY, "Create array");
         assert_eq!(DEFAULT_COUNT, "8 \u{00d7} 1");

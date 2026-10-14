@@ -348,17 +348,7 @@ impl RSpiceApp {
             .iter()
             .any(|row| row.selected);
         let enabled = authority_error.is_none() && selected;
-        let eyebrow = format!(
-            "DRAWING SHEETS \u{00b7} {}",
-            self.state
-                .dialogs
-                .drawing_sheet_support
-                .manager
-                .owner_key
-                .to_uppercase()
-        );
         let choice = Dialog::new(
-            &eyebrow,
             "Sheet formats",
             "Apply to selected sheets",
         )
@@ -415,17 +405,7 @@ impl RSpiceApp {
         };
         let required_field_error =
             required_title_field_error(&self.state.dialogs.drawing_sheet_support.title_fields);
-        let eyebrow = format!(
-            "DRAWING SHEET \u{00b7} {} \u{00b7} FIELD OWNERSHIP",
-            self.state
-                .dialogs
-                .drawing_sheet_support
-                .title_fields
-                .sheet_name
-                .to_uppercase()
-        );
         let choice = Dialog::new(
-            &eyebrow,
             "Title-block fields",
             "Save title-block fields",
         )

@@ -25,7 +25,7 @@ use crate::workbench::state::ModelsAttemptedOperation;
 pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubCatalog) {
     // Reference material, not a transaction: the footer states what is being
     // read rather than offering an action whose only effect is to close.
-    let choice = Dialog::new("Model packs", "The held catalog", "Close")
+    let choice = Dialog::new("The held catalog", "Close")
         .description(
             "Who signed the catalog snapshot this client holds, the contract it is accepted \
              under, and the last hub operation this session attempted.",

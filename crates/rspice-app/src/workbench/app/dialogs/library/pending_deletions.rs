@@ -180,7 +180,7 @@ impl RSpiceApp {
         } else {
             "Delete"
         };
-        let mut dialog = Dialog::new("Library", title, keep_label)
+        let mut dialog = Dialog::new(title, keep_label)
             .description(description)
             .size(DialogSize::Transaction)
             .ghost("Cancel")

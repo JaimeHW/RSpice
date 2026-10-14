@@ -21,7 +21,6 @@ use crate::workbench::app::{
 };
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} EDIT BEHAVIOUR";
 const TITLE: &str = "Grid, snap and wire routing";
 const PRIMARY: &str = "Apply canvas settings";
 const DESCRIPTION: &str = "Grid display is what you see; snap pitch and snap targets are what the cursor commits to. They are set separately because a coarse grid with fine snapping is a normal way to work.";
@@ -69,7 +68,7 @@ impl RSpiceApp {
             .grid_snap_routing
             .validation_error
             .clone();
-        let mut dialog = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .ghost(if dirty { "Discard changes" } else { "Cancel" })

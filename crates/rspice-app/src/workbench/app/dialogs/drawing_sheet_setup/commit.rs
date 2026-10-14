@@ -93,32 +93,26 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
         .design_management
         .sheet_catalog(&cell_view_key)
         .and_then(|catalog| catalog.active().map(|sheet| (catalog, sheet)));
-    let (governed, format, sheet_name, sheet_count, sheet_number) =
-        if let Some((catalog, sheet)) = governed {
-            let sheet_number = catalog
-                .page_number_and_count(sheet.id())
-                .map_or(1, |(page, _)| page);
-            (
-                Some(GovernedDrawingSheetAuthority {
-                    cell_view_key: cell_view_key.clone(),
-                    catalog_revision: catalog.revision(),
-                    sheet_id: sheet.id(),
-                    sheet_revision: sheet.revision(),
-                }),
-                resolved_active.format,
-                sheet.name().to_owned(),
-                catalog.sheets().len(),
-                sheet_number,
-            )
-        } else {
-            (
-                None,
-                resolved_active.format,
-                state.workspace.content.active_view.cell.clone(),
-                1,
-                1,
-            )
-        };
+    let (governed, format, sheet_name, sheet_count) = if let Some((catalog, sheet)) = governed {
+        (
+            Some(GovernedDrawingSheetAuthority {
+                cell_view_key: cell_view_key.clone(),
+                catalog_revision: catalog.revision(),
+                sheet_id: sheet.id(),
+                sheet_revision: sheet.revision(),
+            }),
+            resolved_active.format,
+            sheet.name().to_owned(),
+            catalog.sheets().len(),
+        )
+    } else {
+        (
+            None,
+            resolved_active.format,
+            state.workspace.content.active_view.cell.clone(),
+            1,
+        )
+    };
     let mut draft = DrawingSheetDraft::from_format(&format);
     let sheet_title = draft
         .title_fields
@@ -141,7 +135,6 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
             .drawing_sheet_personal_preferences()
             .presets,
     );
-    let document = state.workspace.content.active_display_path().to_uppercase();
     let managed_sheet_names = state
         .workspace
         .content
@@ -159,10 +152,6 @@ pub(crate) fn open_drawing_sheet_setup_for_state(state: &mut AppState) -> bool {
     let writable_sheet_count = sheet_count.saturating_sub(managed_sheet_names.len());
     state.dialogs.drawing_sheet_setup = DrawingSheetSetupState {
         open: true,
-        eyebrow: format!(
-            "DRAWING SHEET · {document} · {} · SHEET {sheet_number} OF {sheet_count}",
-            sheet_name.to_uppercase()
-        ),
         document_name: state.workspace.content.active_display_path().to_owned(),
         sheet_name,
         sheet_count,

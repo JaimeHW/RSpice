@@ -8,7 +8,6 @@ use crate::state::{
     CellViewRef, PortDirection, PortSpec, PropertyType, SymbolElectricalType, SymbolPinSide,
 };
 
-pub(super) const EYEBROW: &str = "SYMBOL LIBRARY \u{00b7} PIN CONTRACT \u{00b7} GRAPHIC VIEW";
 pub(super) const TITLE: &str = "Create model-bound symbol";
 pub(super) const PRIMARY: &str = "Create symbol revision";
 pub(super) const DESCRIPTION: &str = "Create one governed symbol definition from an explicit source contract, ordered electrical terminals, and versioned generated views.";

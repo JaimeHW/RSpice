@@ -98,7 +98,6 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
                     || snapshot.dependencies != current.dependencies()
             });
     let mut transaction = Dialog::new(
-        messages.text(MessageId::NetlistComparisonEyebrow),
         if owned {
             messages.text(MessageId::NetlistComparisonOwnedTitle)
         } else {
@@ -255,7 +254,6 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
         messages.text(MessageId::NetlistAlreadyPublished)
     };
     let choice = Dialog::new(
-        messages.text(MessageId::NetlistSaveEyebrow),
         if browser_copy {
             messages.text(MessageId::NetlistDownloadSourceCopy)
         } else if dialog.save_as {

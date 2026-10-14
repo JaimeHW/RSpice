@@ -28,7 +28,7 @@ pub(super) fn render_dialog(
             const NOTICE: &str = "Choose the one SPICE or Spectre source that owns this import. \
                                   Only its reachable include closure will be authenticated and \
                                   retained.";
-            let choice = Dialog::new("Model sources", "Choose model-library entry", "Import")
+            let choice = Dialog::new("Choose model-library entry", "Import")
                 .description(NOTICE)
                 .size(DialogSize::Transaction)
                 .primary_enabled(!candidates.is_empty())
@@ -80,7 +80,7 @@ pub(super) fn render_dialog(
             // A read-only source has no transaction to commit, so its footer
             // is the note strip rather than a primary that would only close
             // what Escape already closes.
-            let mut dialog = Dialog::new("Model sources", title.clone(), "Edit in Model Editor…")
+            let mut dialog = Dialog::new(title.clone(), "Edit in Model Editor…")
                 .description(format!("The retained source behind {title}."))
                 .size(DialogSize::WideWorkflow)
                 .hint(subtitle.clone())
@@ -138,7 +138,7 @@ pub(super) fn render_dialog(
             let mut chosen = right.clone();
             // A comparison commits nothing: it is a reading surface, so its
             // footer states what it read rather than offering an action.
-            let choice = Dialog::new("Model sources", "Compare model definitions", "Close")
+            let choice = Dialog::new("Compare model definitions", "Close")
                 .description(format!(
                     "Parameter-by-parameter comparison of {left_library}/{left_model} against \
                      another loaded definition."
@@ -202,7 +202,7 @@ pub(super) fn render_dialog(
                     .model_import_in_progress
                     .then(|| "Another model-source operation is still running.".to_owned()),
             };
-            let mut dialog = Dialog::new("Model packs", title, primary)
+            let mut dialog = Dialog::new(title, primary)
                 .description(format!("{title}: {pack_id}"))
                 .size(DialogSize::Transaction)
                 .primary_enabled(blocked.is_none())
@@ -244,17 +244,13 @@ pub(super) fn render_dialog(
         }
         ModelsWorkbenchDialog::ConfirmPart { pack_id, part_name } => {
             let busy = app.state.workbench.models_view.model_import_in_progress;
-            let mut dialog = Dialog::new(
-                "Model packs",
-                "Add shipped part to project",
-                "Add to project",
-            )
-            .description(format!(
-                "Retain {part_name} from {pack_id} into this project as one revision."
-            ))
-            .size(DialogSize::Transaction)
-            .primary_enabled(!busy)
-            .ghost("Cancel");
+            let mut dialog = Dialog::new("Add shipped part to project", "Add to project")
+                .description(format!(
+                    "Retain {part_name} from {pack_id} into this project as one revision."
+                ))
+                .size(DialogSize::Transaction)
+                .primary_enabled(!busy)
+                .ghost("Cancel");
             if busy {
                 dialog = dialog.hint("Another model-source operation is still running.");
             }
@@ -295,11 +291,7 @@ pub(super) fn render_dialog(
                 .filter(|library| !library.read_only)
                 .map(|library| library.name.clone())
                 .collect::<Vec<_>>();
-            let choice = Dialog::new(
-                "Symbols",
-                "Author technology-symbol variant",
-                "Author project variant",
-            )
+            let choice = Dialog::new("Author technology-symbol variant", "Author project variant")
             .description(format!(
                 "Copy the signed contract of {package_id}/{source_cell} into a writable project \
                  cell."
@@ -392,7 +384,6 @@ pub(super) fn render_dialog(
                 }
             );
             let mut dialog = Dialog::new(
-                "Model sources",
                 if has_record {
                     "Model provider decision"
                 } else {
@@ -480,7 +471,7 @@ pub(super) fn render_dialog(
         }
         ModelsWorkbenchDialog::BindingTrace { model, consumers } => {
             // A trace commits nothing; its footer states what it traced.
-            let choice = Dialog::new("Model sources", "Model binding trace", "Close")
+            let choice = Dialog::new("Model binding trace", "Close")
                 .description(format!(
                     "Every consumer the active schematic resolves to {model}."
                 ))
@@ -516,7 +507,7 @@ pub(super) fn render_dialog(
             mut temperature_c,
             mut supply_factor,
         } => {
-            let choice = Dialog::new("Corners", "Add process corner", "Add corner")
+            let choice = Dialog::new("Add process corner", "Add corner")
                 .description(format!("Retain a new authoring draft corner in {library}."))
                 .size(DialogSize::Transaction)
                 .initial_focus(DialogInitialFocus::BodyControl)
@@ -582,7 +573,6 @@ pub(super) fn render_dialog(
         } => {
             let mut name_field = None;
             let choice = Dialog::new(
-                "Corners",
                 if duplicate {
                     "Duplicate process corner"
                 } else {
@@ -708,7 +698,7 @@ pub(super) fn render_dialog(
         ModelsWorkbenchDialog::ConfirmDeleteCorner { library, corner } => {
             // The one destructive confirm in this workspace, and the one
             // primary that carries the error fill.
-            let choice = Dialog::new("Corners", "Delete process corner", "Delete corner")
+            let choice = Dialog::new("Delete process corner", "Delete corner")
                 .description(format!("Delete the corner {library} / {corner}."))
                 .size(DialogSize::Transaction)
                 .destructive()
@@ -758,7 +748,7 @@ pub(super) fn render_dialog(
                 .iter()
                 .map(|candidate| candidate.to_uppercase())
                 .collect::<Vec<_>>();
-            let mut dialog = Dialog::new("Corners", "Bind corner section", "Bind section")
+            let mut dialog = Dialog::new("Bind corner section", "Bind section")
                 .description(format!(
                     "Bind one authenticated source section to {library} / {corner}."
                 ))
@@ -846,7 +836,6 @@ pub(super) fn render_dialog(
         ModelsWorkbenchDialog::ResolveDrift { library } => {
             let blocked = drift::repin_block_reason(app, &library);
             let mut dialog = Dialog::new(
-                "Model sources",
                 format!("Resolve source drift · {library}"),
                 "Re-pin this library",
             )

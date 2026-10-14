@@ -96,7 +96,6 @@ impl RSpiceApp {
         let mut action = None;
 
         let choice = Dialog::new(
-            "WINDOW \u{00b7} SINGLE SESSION OWNER",
             "Windows, documents and session",
             "Close",
         )
@@ -197,7 +196,7 @@ impl RSpiceApp {
     }
 
     fn render_window_workflow(&mut self, ctx: &Context, workflow: WindowWorkflow) {
-        let (eyebrow, title, primary) = workflow_copy(workflow);
+        let (title, primary) = workflow_copy(workflow);
         let source_window = self.state.dialogs.window_session.source_window;
         let source_document = self.state.dialogs.window_session.source_document.clone();
         let source_label = self.state.dialogs.window_session.source_label.clone();
@@ -211,7 +210,7 @@ impl RSpiceApp {
         let mut recover_future = self.state.dialogs.window_session.recover_all_future_windows;
         let error = self.state.dialogs.window_session.error.clone();
 
-        let choice = Dialog::new(eyebrow, title, primary)
+        let choice = Dialog::new(title, primary)
             .description(workflow_description(workflow))
             .secondary("Cancel")
             .size(DialogSize::Manager)
@@ -947,38 +946,18 @@ fn document_summary(ui: &mut egui::Ui, name: &str, detail: &str) {
     });
 }
 
-const fn workflow_copy(workflow: WindowWorkflow) -> (&'static str, &'static str, &'static str) {
+const fn workflow_copy(workflow: WindowWorkflow) -> (&'static str, &'static str) {
     match workflow {
-        WindowWorkflow::NewApplicationWindow => (
-            "WINDOW \u{00b7} INDEPENDENT WORKSPACE",
-            "New application window",
-            "Create window",
-        ),
-        WindowWorkflow::DetachDocument => (
-            "WINDOW \u{00b7} DOCUMENT OWNERSHIP",
-            "Detach active document",
-            "Detach document",
-        ),
-        WindowWorkflow::MoveDocument => (
-            "WINDOW \u{00b7} DOCUMENT TRANSFER",
-            "Move document to another window",
-            "Move document",
-        ),
-        WindowWorkflow::ReattachDocument => (
-            "WINDOW \u{00b7} CONSOLIDATE",
-            "Reattach active document",
-            "Reattach document",
-        ),
-        WindowWorkflow::ConsolidateWindows => (
-            "WINDOW \u{00b7} SESSION LAYOUT",
-            "Consolidate application windows",
-            "Consolidate windows",
-        ),
-        WindowWorkflow::MonitorRecovery => (
-            "WINDOW \u{00b7} DISPLAY TOPOLOGY RECOVERY",
-            "Recover off-screen windows",
-            "Recover selected windows",
-        ),
+        WindowWorkflow::NewApplicationWindow => ("New application window", "Create window"),
+        WindowWorkflow::DetachDocument => ("Detach active document", "Detach document"),
+        WindowWorkflow::MoveDocument => ("Move document to another window", "Move document"),
+        WindowWorkflow::ReattachDocument => ("Reattach active document", "Reattach document"),
+        WindowWorkflow::ConsolidateWindows => {
+            ("Consolidate application windows", "Consolidate windows")
+        }
+        WindowWorkflow::MonitorRecovery => {
+            ("Recover off-screen windows", "Recover selected windows")
+        }
     }
 }
 

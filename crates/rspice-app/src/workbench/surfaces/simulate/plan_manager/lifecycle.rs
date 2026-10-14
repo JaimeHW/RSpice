@@ -75,23 +75,19 @@ fn rename(
         !proposed.is_empty() && proposed != record.name
     });
     let mut action = None;
-    let choice = Dialog::new(
-        "SIMULATION · RENAME PLAN · IDENTITY PRESERVED",
-        "Rename simulation plan",
-        "Rename plan",
-    )
-    .description(RENAME_DESCRIPTION)
-    .size(DialogSize::SimulationWorkflow)
-    .ghost("Cancel")
-    .primary_enabled(renames)
-    .show(ctx, |ui| {
-        if let Some(selected) = selected {
-            rename_name_group(ui, &mut draft.name, selected);
-            rename_preserved_group(ui, selected);
-        }
-        kit::note_grid(ui, RENAME_BOUNDARIES);
-        workflow_validation_message(ui, draft.validation_error.as_deref());
-    });
+    let choice = Dialog::new("Rename simulation plan", "Rename plan")
+        .description(RENAME_DESCRIPTION)
+        .size(DialogSize::SimulationWorkflow)
+        .ghost("Cancel")
+        .primary_enabled(renames)
+        .show(ctx, |ui| {
+            if let Some(selected) = selected {
+                rename_name_group(ui, &mut draft.name, selected);
+                rename_preserved_group(ui, selected);
+            }
+            kit::note_grid(ui, RENAME_BOUNDARIES);
+            workflow_validation_message(ui, draft.validation_error.as_deref());
+        });
     match choice {
         DialogChoice::Primary => action = Some(PlanManagerAction::ApplyRename),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -177,27 +173,23 @@ fn confirm_archive(
         .iter()
         .find(|record| record.id == draft.selected_plan_id);
     let mut action = None;
-    let choice = Dialog::new(
-        "SIMULATION · ARCHIVE PLAN · RECOVERABLE RETIREMENT",
-        "Archive simulation plan",
-        "Archive plan",
-    )
-    .description(ARCHIVE_DESCRIPTION)
-    .size(DialogSize::Transaction)
-    .ghost("Cancel")
-    // Two of the catalog's three refusals are knowable from the projection, so
-    // the action is not offered for a plan it would certainly reject. The
-    // catalog remains the authority: the third refusal has no field here, and
-    // every one of them is reported through the validation message below.
-    .primary_enabled(selected.is_some_and(|record| !record.active && !record.archived))
-    .show(ctx, |ui| {
-        concept_banner(ui, ARCHIVE_BANNER, true);
-        if let Some(selected) = selected {
-            archive_subject_group(ui, selected);
-            archive_retained_group(ui, selected);
-        }
-        workflow_validation_message(ui, draft.validation_error.as_deref());
-    });
+    let choice = Dialog::new("Archive simulation plan", "Archive plan")
+        .description(ARCHIVE_DESCRIPTION)
+        .size(DialogSize::Transaction)
+        .ghost("Cancel")
+        // Two of the catalog's three refusals are knowable from the projection, so
+        // the action is not offered for a plan it would certainly reject. The
+        // catalog remains the authority: the third refusal has no field here, and
+        // every one of them is reported through the validation message below.
+        .primary_enabled(selected.is_some_and(|record| !record.active && !record.archived))
+        .show(ctx, |ui| {
+            concept_banner(ui, ARCHIVE_BANNER, true);
+            if let Some(selected) = selected {
+                archive_subject_group(ui, selected);
+                archive_retained_group(ui, selected);
+            }
+            workflow_validation_message(ui, draft.validation_error.as_deref());
+        });
     match choice {
         DialogChoice::Primary => action = Some(PlanManagerAction::ConfirmArchive),
         DialogChoice::Ghost | DialogChoice::Cancelled => {

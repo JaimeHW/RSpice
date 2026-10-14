@@ -103,56 +103,52 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
     } else {
         messages.text(MessageId::NetlistOwnershipCreatePatch)
     };
-    let choice = Dialog::new(
-        messages.text(MessageId::NetlistOwnershipEyebrow),
-        title,
-        primary,
-    )
-    .description(messages.text(MessageId::NetlistOwnershipDescription))
-    .size(DialogSize::Transaction)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .ghost(messages.text(MessageId::CommonCancel))
-    .show_with_initial_body_focus(ctx, |ui| {
-        let t = Tokens::get(ctx);
-        egui::Frame::new()
-            .fill(t.color.bg_inset)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(t.radius)
-            .inner_margin(10)
-            .show(ui, |ui| {
-                ui.label(messages.text(MessageId::NetlistOwnershipNotice));
-            });
-        ui.add_space(8.0);
-        ui.label(messages.text(MessageId::NetlistArtifactName));
-        let artifact_name = ui.add(
-            egui::TextEdit::singleline(&mut dialog.artifact_name).desired_width(f32::INFINITY),
-        );
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label(messages.text(MessageId::NetlistBaseRevision));
-            ui.monospace(base_revision.to_string());
-        });
-        ui.add_space(8.0);
-        ui.label(messages.text(MessageId::NetlistEditStrategy));
-        egui::ComboBox::from_id_salt("rspice.code.ownership-strategy")
-            .selected_text(owned_strategy_label(messages, dialog.strategy))
-            .width(ui.available_width().max(1.0))
-            .show_ui(ui, |ui| {
-                for strategy in crate::state::OwnedNetlistEditStrategy::ALL {
-                    ui.selectable_value(
-                        &mut dialog.strategy,
-                        strategy,
-                        owned_strategy_label(messages, strategy),
-                    );
-                }
-            });
-        ui.label(owned_strategy_description(messages, dialog.strategy));
-        if let Some(error) = &dialog.error {
+    let choice = Dialog::new(title, primary)
+        .description(messages.text(MessageId::NetlistOwnershipDescription))
+        .size(DialogSize::Transaction)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .ghost(messages.text(MessageId::CommonCancel))
+        .show_with_initial_body_focus(ctx, |ui| {
+            let t = Tokens::get(ctx);
+            egui::Frame::new()
+                .fill(t.color.bg_inset)
+                .stroke(egui::Stroke::new(1.0, t.color.border))
+                .corner_radius(t.radius)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.label(messages.text(MessageId::NetlistOwnershipNotice));
+                });
+            ui.add_space(8.0);
+            ui.label(messages.text(MessageId::NetlistArtifactName));
+            let artifact_name = ui.add(
+                egui::TextEdit::singleline(&mut dialog.artifact_name).desired_width(f32::INFINITY),
+            );
             ui.add_space(6.0);
-            ui.colored_label(Tokens::get(ctx).color.err, error);
-        }
-        Some(artifact_name.id)
-    });
+            ui.horizontal(|ui| {
+                ui.label(messages.text(MessageId::NetlistBaseRevision));
+                ui.monospace(base_revision.to_string());
+            });
+            ui.add_space(8.0);
+            ui.label(messages.text(MessageId::NetlistEditStrategy));
+            egui::ComboBox::from_id_salt("rspice.code.ownership-strategy")
+                .selected_text(owned_strategy_label(messages, dialog.strategy))
+                .width(ui.available_width().max(1.0))
+                .show_ui(ui, |ui| {
+                    for strategy in crate::state::OwnedNetlistEditStrategy::ALL {
+                        ui.selectable_value(
+                            &mut dialog.strategy,
+                            strategy,
+                            owned_strategy_label(messages, strategy),
+                        );
+                    }
+                });
+            ui.label(owned_strategy_description(messages, dialog.strategy));
+            if let Some(error) = &dialog.error {
+                ui.add_space(6.0);
+                ui.colored_label(Tokens::get(ctx).color.err, error);
+            }
+            Some(artifact_name.id)
+        });
     match choice {
         DialogChoice::Primary => {
             match create_owned_source(&mut app.state, &dialog.artifact_name, dialog.strategy) {

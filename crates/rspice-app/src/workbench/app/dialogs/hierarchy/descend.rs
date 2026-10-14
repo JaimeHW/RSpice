@@ -19,7 +19,6 @@ use crate::workbench::app::{
 };
 use crate::workbench::app_state::AppState;
 
-const EYEBROW: &str = "SCHEMATIC \u{00b7} EDIT CONTEXT";
 const TITLE: &str = "Descend into hierarchy";
 const PRIMARY: &str = "Open edit context";
 const DESCRIPTION: &str = "Review the operation, its exact inputs, impact, validation state, and available transaction actions.";
@@ -67,7 +66,7 @@ impl RSpiceApp {
             .unwrap_or_else(|| "Selection no longer resolves".to_owned());
         let instance = self.state.dialogs.descend_hierarchy.instance_name.clone();
         let occurrence_path = descend_target_path(&self.state.workspace, &instance);
-        let choice = Dialog::new(EYEBROW, TITLE, PRIMARY)
+        let choice = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
             .ghost("Cancel")
