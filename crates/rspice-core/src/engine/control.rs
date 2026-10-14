@@ -219,6 +219,36 @@ impl ControlCircuit {
                 if !command.arguments.is_empty() {
                     return Err(command_error(line, "run does not accept arguments").into());
                 }
+                // `run` solves each small-signal card at the operating point,
+                // so a card that names a transient state would be answered
+                // around the wrong state.
+                if let Some((card, state)) =
+                    self.netlist
+                        .analyses
+                        .iter()
+                        .enumerate()
+                        .find_map(|(index, card)| {
+                            self.netlist
+                                .small_signal_state(index)
+                                .map(|state| (card, state))
+                        })
+                {
+                    let card = analysis::identity(card, line).map_or_else(
+                        |_| "a small-signal".to_owned(),
+                        |(name, _)| format!(".{name}"),
+                    );
+                    let keyword = state.keyword();
+                    return Err(command_error(
+                        line,
+                        format!(
+                            "run cannot execute the {card} card: it carries {keyword}=, which \
+                             linearizes it around a transient state, and a control script cannot \
+                             run that yet. Run the deck without its .control block, or remove \
+                             {keyword}= to linearize at the operating point."
+                        ),
+                    )
+                    .into());
+                }
                 let analyses = self
                     .netlist
                     .analyses

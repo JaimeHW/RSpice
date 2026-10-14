@@ -137,6 +137,47 @@ fn each_state_publishes_its_own_dataset_named_by_the_card_and_the_time() {
     );
 }
 
+/// A control script's `run` solves each card at the operating point, so it
+/// refuses a card that names a transient state instead of answering it there.
+#[test]
+fn a_control_script_refuses_to_run_a_card_at_a_transient_state() {
+    let directory = test_dir("small_signal_control_run");
+    let input = directory.join("control.cir");
+    std::fs::write(
+        &input,
+        deck(".ac dec 2 1k 1meg actimes=10u\n.control\nrun\n.endc\n"),
+    )
+    .expect("write deck");
+    let result = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            input.to_str().expect("UTF-8 deck path"),
+            "--output",
+            directory
+                .join("results.json")
+                .to_str()
+                .expect("UTF-8 output path"),
+            "--format",
+            "json",
+        ])
+        .output()
+        .expect("run rspice");
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        !result.status.success(),
+        "the run must be refused: {stderr}"
+    );
+    assert!(
+        stderr.contains(".ac card") && stderr.contains("ACTIMES="),
+        "the refusal names the card and its keyword: {stderr}"
+    );
+    assert!(
+        !directory.join("results.ac-001.json").exists(),
+        "no operating-point result is published for the card"
+    );
+}
+
 #[test]
 fn a_checkpoint_file_publishes_the_state_it_holds() {
     let directory = test_dir("small_signal_checkpoint");
