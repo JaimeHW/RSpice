@@ -588,7 +588,7 @@ fn same_range(port: Option<&VectorRange>, redeclared: Option<&VectorRange>) -> b
 }
 
 /// `[63:0]`, the range a `time` variable is declared over.
-fn time_range(span: Span) -> VectorRange {
+pub(super) fn time_range(span: Span) -> VectorRange {
     let number = |value: f64, raw: &str| {
         Expression::Number(NumberLit {
             value,

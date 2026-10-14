@@ -518,12 +518,7 @@ impl<'a> Parser<'a> {
 
                 if let Some(direction) = direction {
                     let (net_type, discipline) = self.parse_port_type_and_discipline(direction)?;
-                    let signedness = if net_type == Some(PortNetType::Integer) {
-                        Signedness::Signed
-                    } else {
-                        self.parse_signedness()
-                    };
-                    let range = self.parse_optional_vector_range()?;
+                    let (signedness, range) = self.parse_port_shape(net_type, span)?;
 
                     let name: SmolStr = self.expect_identifier("port name")?.into();
                     module.ports.push(Port {
@@ -1149,12 +1144,7 @@ impl<'a> Parser<'a> {
         let (net_type, discipline) = self.parse_port_type_and_discipline(direction)?;
 
         // IEEE 1364-2005 section 12.3.3: `input [signed] [range] names;`
-        let signedness = if net_type == Some(PortNetType::Integer) {
-            Signedness::Signed
-        } else {
-            self.parse_signedness()
-        };
-        let range = self.parse_optional_vector_range()?;
+        let (signedness, range) = self.parse_port_shape(net_type, start)?;
 
         // Port names
         let mut names = Vec::new();
@@ -1215,11 +1205,31 @@ impl<'a> Parser<'a> {
         if net_type.is_none() && discipline.is_some() {
             net_type = self.parse_port_storage_type();
         }
-        if net_type == Some(PortNetType::Integer) && discipline.is_some() {
+        if matches!(net_type, Some(PortNetType::Integer | PortNetType::Time))
+            && discipline.is_some()
+        {
             return Err(self.error(ParseErrorKind::InvalidPort));
         }
         self.check_integer_port(direction, net_type)?;
         Ok((net_type, discipline))
+    }
+
+    /// A port's signedness and range. `integer` and `time` fix both and take
+    /// neither (IEEE 1364-2005 section 4.8): a signed 32-bit and an unsigned
+    /// 64-bit variable.
+    fn parse_port_shape(
+        &mut self,
+        net_type: Option<PortNetType>,
+        span: Span,
+    ) -> Result<(Signedness, Option<VectorRange>), ParseError> {
+        Ok(match net_type {
+            Some(PortNetType::Integer) => (Signedness::Signed, self.parse_optional_vector_range()?),
+            Some(PortNetType::Time) => (
+                Signedness::Unsigned,
+                Some(digital_routines::time_range(span)),
+            ),
+            _ => (self.parse_signedness(), self.parse_optional_vector_range()?),
+        })
     }
 
     fn parse_port_storage_type(&mut self) -> Option<PortNetType> {
@@ -1227,6 +1237,7 @@ impl<'a> Parser<'a> {
             TokenKind::Wire => PortNetType::Wire,
             TokenKind::Reg => PortNetType::Reg,
             TokenKind::Integer => PortNetType::Integer,
+            TokenKind::AmsDigital if self.digital_keyword_is("time") => PortNetType::Time,
             TokenKind::Wreal => PortNetType::Wreal(self.wreal_resolution()),
             // Existing RSpice compatibility extension; the standard's
             // output_variable_type is integer or time, and real ports are wreal.
@@ -1237,13 +1248,15 @@ impl<'a> Parser<'a> {
         Some(result)
     }
 
-    /// The integer output-variable form has no discipline, sign or range prefix.
+    /// The integer and time output-variable forms have no discipline, sign or
+    /// range prefix, and only an output port may be a variable (IEEE
+    /// 1364-2005 section 12.3.3).
     fn check_integer_port(
         &self,
         direction: PortDirection,
         net_type: Option<PortNetType>,
     ) -> Result<(), ParseError> {
-        if net_type == Some(PortNetType::Integer)
+        if matches!(net_type, Some(PortNetType::Integer | PortNetType::Time))
             && (direction != PortDirection::Output
                 || !self.check(TokenKind::Identifier)
                 || self.peek_is(TokenKind::Identifier))
@@ -1265,7 +1278,9 @@ impl<'a> Parser<'a> {
         if direction != PortDirection::Output
             || !matches!(
                 net_type,
-                Some(PortNetType::Reg | PortNetType::Integer | PortNetType::Real)
+                Some(
+                    PortNetType::Reg | PortNetType::Integer | PortNetType::Time | PortNetType::Real
+                )
             )
         {
             return Err(self.error(ParseErrorKind::InvalidPort));
@@ -1332,13 +1347,17 @@ impl<'a> Parser<'a> {
                     .collect(),
                 span: declaration.span,
             }),
-            PortNetType::Reg => module.digital_variables.push(DigitalVariableDecl {
-                kind: DigitalVariableKind::Reg,
-                signedness: declaration.signedness,
-                range: declaration.range.clone(),
-                items,
-                span: declaration.span,
-            }),
+            // `time` is the unsigned 64-bit reg a module-level `time` declares;
+            // the port's shape already says so.
+            PortNetType::Reg | PortNetType::Time => {
+                module.digital_variables.push(DigitalVariableDecl {
+                    kind: DigitalVariableKind::Reg,
+                    signedness: declaration.signedness,
+                    range: declaration.range.clone(),
+                    items,
+                    span: declaration.span,
+                })
+            }
             // `output real vout;` stands for `output vout; real vout;` with the
             // second declaration being the discrete domain's. The range and the
             // `signed` marker ride along rather than being dropped: a real has

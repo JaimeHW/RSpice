@@ -715,7 +715,9 @@ Output-variable initializers are also retained for the existing reg and real
 port forms. Input/inout integer variables, conflicting declarations, incompatible
 ranges and nonconstant initializers are rejected. Analog-written integer output
 ports remain an explicit unsupported continuous-to-discrete port-driving case;
-variables written in both domains remain errors. Time ports, unpacked port
+variables written in both domains remain errors. `output time t` is the other
+output-variable form, an unsigned 64-bit variable in both port styles; an input
+or inout `time` port is a language error, as for `integer`. Unpacked port
 arrays and unequal-width collapsed output/inout net connections remain open.
 This uses the existing schema 86 storage and Wasm helper ABI 20.
 Source: [VAMS-2023, 6.5.2, 7.2.2 and A.2.1.2](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).

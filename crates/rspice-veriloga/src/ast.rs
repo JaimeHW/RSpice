@@ -607,6 +607,11 @@ pub enum PortNetType {
     Reg,
     /// `output integer q;` — a signed 32-bit variable (VAMS-2023 A.2.2.1).
     Integer,
+    /// `output time t;` — the other output-variable type of IEEE 1364-2005
+    /// section 12.3.3, an unsigned 64-bit variable (section 4.8). It stands
+    /// for `output [63:0] t; reg [63:0] t;`, the storage a module-level
+    /// `time` declaration already takes.
+    Time,
     /// `input wreal in;` — Verilog-AMS LRM 2.4 section 6.5.3's real-valued
     /// port, whose syntax (section 6.5.2) admits `wreal` wherever a net type
     /// may be written.

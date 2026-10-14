@@ -7576,6 +7576,25 @@ fn integer_output_ports_reject_invalid_declarations_and_keep_ownership_diagnosti
             .to_string();
         assert!(error.contains(expected), "{source}: {error}");
     }
+    // IEEE 1364-2005 A.2.1.2 and section 12.3.3: `time` is the other
+    // output-variable type, with the same form: output only, and no
+    // discipline, sign or range.
+    for source in [
+        "module invalid(input time q); endmodule",
+        "module invalid(inout time q); endmodule",
+        "module invalid(output time signed q); endmodule",
+        "module invalid(output time [63:0] q); endmodule",
+        "module invalid(output time electrical q); endmodule",
+        "module invalid(output time q); time q; endmodule",
+        "module invalid(q); output time q; time q; endmodule",
+    ] {
+        let error = VerilogACompiler::default()
+            .compile_canonical_ir(source)
+            .expect_err(source)
+            .to_string();
+        assert!(!error.contains("Internal error"), "{source}: {error}");
+        assert!(!error.contains("not yet supported"), "{source}: {error}");
+    }
     // A signed integer read in analog code must retain integer identity,
     // rather than hit the 31-bit packed-vector read restriction.
     let artifact = VerilogACompiler::default().compile_canonical_ir(
