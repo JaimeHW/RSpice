@@ -176,6 +176,7 @@ jobs:
           --test mixed_dc_sweep_state
           --test mixed_small_signal_held
           --test sensitivity_source_waveforms
+          --test small_signal_transient_state
           --test spectre_analog_statements
           --test transient_checkpoint
           --test transient_events_at_stop_time
@@ -361,6 +362,7 @@ jobs:
           --test mixed_dc_sweep_state
           --test mixed_small_signal_held
           --test sensitivity_source_waveforms
+          --test small_signal_transient_state
           --test spectre_analog_statements
           --test transient_checkpoint
           --test transient_events_at_stop_time
