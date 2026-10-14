@@ -419,4 +419,120 @@ mod tests {
         }
         assert!(module_references_ground(None, &Nothing));
     }
+
+    /// A gate whose output delay grows with the total load on its output net:
+    /// 1 ns plus 1 ns per picofarad of `TOTAL_LOAD(out)`. It drives a constant
+    /// one, so every instance posts exactly one event at its delay.
+    struct LoadDelayedGate;
+
+    impl crate::xspice::CodeModel for LoadDelayedGate {
+        fn name(&self) -> &str {
+            "load_delayed_gate"
+        }
+
+        fn ports(&self) -> &[crate::xspice::PortSpec] {
+            use crate::xspice::{PortSpec, PortType};
+            static PORTS: std::sync::OnceLock<Vec<PortSpec>> = std::sync::OnceLock::new();
+            PORTS.get_or_init(|| {
+                vec![
+                    PortSpec::input("in", PortType::Digital),
+                    PortSpec::output("out", PortType::Digital),
+                ]
+            })
+        }
+
+        fn parameters(&self) -> &[crate::xspice::ParamSpec] {
+            &[]
+        }
+
+        fn init(&self, _ctx: &mut crate::xspice::CmContext) -> crate::xspice::CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut crate::xspice::CmContext) -> crate::xspice::CmResult<()> {
+            let delay = 1.0e-9 + 1.0e3 * ctx.port_total_load("out");
+            ctx.set_output_digital("out", crate::xspice::DigitalValue::one(), delay);
+            Ok(())
+        }
+    }
+
+    /// Three buffers on nets `a`, `b`, `c`, built from a deck whose reference
+    /// is `reference`, then evaluated with [`LoadDelayedGate`] on the
+    /// connections and the load sums the build gave them.
+    ///
+    /// The loads are `a` 1 pF (`A1`'s input) and `b` 5 pF (`A2` and `A3`), so
+    /// `A1` drives `b` at 6 ns, `A2` drives `c` at 1 ns and `A3` drives `a` at
+    /// 2 ns. The reference is the deck's second net, so every event net is
+    /// numbered after it.
+    fn load_delayed_gates(reference: &str) -> Vec<(String, crate::Value)> {
+        use crate::xspice::{SharedXspiceInstance, XspiceInstance};
+        let deck = format!(
+            "* three buffers whose delay reads TOTAL_LOAD(out)\n\
+             v1 vdd {reference} 1\n\
+             r1 vdd {reference} 1k\n\
+             a1 a b g1\n\
+             .model g1 d_buffer (input_load=1p)\n\
+             a2 b c g2\n\
+             .model g2 d_buffer (input_load=2p)\n\
+             a3 b a g3\n\
+             .model g3 d_buffer (input_load=3p)\n\
+             .end\n"
+        );
+        let netlist = crate::Netlist::parse(&deck).expect("deck parses");
+        let mut circuit = crate::engine::Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+        assert_eq!(circuit.get_node_by_name(reference), Some(0));
+        for shared in &mut circuit.xspice_instances {
+            let built = shared.make_mut();
+            let swapped = XspiceInstance::new(
+                built.name.clone(),
+                std::sync::Arc::new(LoadDelayedGate),
+                built.connections().to_vec(),
+                &[],
+                &[],
+                &[],
+                &[],
+            )
+            .expect("gate constructs");
+            *shared = SharedXspiceInstance::new(swapped);
+        }
+        circuit.invalidate_xspice_event_dispatch();
+        circuit.evaluate_xspice_with_analysis(
+            0.0,
+            1.0e-9,
+            &vec![0.0; circuit.matrix_size()],
+            crate::xspice::AnalysisType::Transient,
+        );
+        assert_eq!(circuit.take_xspice_evaluation_error(), None);
+        let mut events = Vec::new();
+        circuit
+            .scheduler
+            .xspice_event_queue
+            .make_mut()
+            .run_due_events(1.0, |event| {
+                events.push((event.instance.to_ascii_uppercase(), event.time))
+            })
+            .expect("the queue drains");
+        events.sort_by(|left, right| left.0.cmp(&right.0));
+        events
+    }
+
+    /// A deck without node 0 takes its reference before any event net is
+    /// numbered, so every code model reads its own output net's total load:
+    /// the same event times as the deck that names the reference 0.
+    #[test]
+    fn a_deck_without_node_zero_reads_each_event_nets_own_total_load() {
+        let grounded = load_delayed_gates("0");
+        let expected = [("A1", 6.0e-9), ("A2", 1.0e-9), ("A3", 2.0e-9)];
+        assert_eq!(grounded.len(), expected.len(), "{grounded:?}");
+        for ((instance, time), (name, at)) in grounded.iter().zip(expected) {
+            assert_eq!(instance, name);
+            assert!(
+                (time - at).abs() <= 1.0e-21,
+                "{instance} with node 0: {time:e} s, expected {at:e} s"
+            );
+        }
+        assert_eq!(load_delayed_gates("reference"), grounded);
+    }
 }
