@@ -198,8 +198,6 @@ const TOAST_PHONE_BREAKPOINT: f32 = 560.0;
 const TOAST_GAP: f32 = 7.0;
 const TOAST_MIN_HEIGHT: f32 = 49.0;
 const TOAST_RADIUS: u8 = 8;
-/// Severity rail down the card's leading edge.
-const TOAST_RAIL_WIDTH: f32 = 3.0;
 /// The drain bar: the lifetime, drawn. It empties as the notice runs out.
 const TOAST_DRAIN_HEIGHT: f32 = 2.0;
 /// How often the drain bar is redrawn. It moves about two points a step at
@@ -613,7 +611,6 @@ impl Toasts {
                 ui.set_max_width(layout.width);
                 ui.spacing_mut().item_spacing.y = TOAST_GAP;
                 for toast in &self.queue {
-                    let tone = notice::tone_color(&t, toast.kind);
                     let remaining = ((toast.expires - now) / TOAST_LIFETIME).clamp(0.0, 1.0);
                     let card = ui
                         .scope(|ui| {
@@ -643,7 +640,9 @@ impl Toasts {
                                     }
                                 });
                             let card = frame.response.rect;
-                            paint_card_edges(ui, card, tone, animate.then_some(remaining as f32));
+                            if animate {
+                                paint_drain_bar(ui, card, remaining as f32);
+                            }
                             card
                         })
                         .inner;
@@ -685,28 +684,21 @@ impl Toasts {
     }
 }
 
-/// The severity rail and the drain bar, both cut from the card's own rounded
-/// shape so they follow its corners instead of squaring them off.
-fn paint_card_edges(ui: &Ui, card: Rect, tone: egui::Color32, remaining: Option<f32>) {
+/// The drain bar, cut from the card's own rounded shape so it follows the
+/// card's corners instead of squaring them off.
+///
+/// It is a clock, not a severity: the glyph says how serious the notice is,
+/// and the bar is drawn in the card's own border tone whatever it says.
+fn paint_drain_bar(ui: &Ui, card: Rect, remaining: f32) {
     let inner = card.shrink(1.0);
     let radius = f32::from(TOAST_RADIUS) - 1.0;
-    let rail = Rect::from_min_max(
-        inner.left_top(),
-        pos2(inner.left() + TOAST_RAIL_WIDTH, inner.bottom()),
-    );
-    ui.painter()
-        .with_clip_rect(rail.intersect(ui.clip_rect()))
-        .rect_filled(inner, radius, tone);
-    let Some(remaining) = remaining else {
-        return;
-    };
     let drain = Rect::from_min_max(
         pos2(inner.left(), inner.bottom() - TOAST_DRAIN_HEIGHT),
         pos2(inner.left() + inner.width() * remaining, inner.bottom()),
     );
     ui.painter()
         .with_clip_rect(drain.intersect(ui.clip_rect()))
-        .rect_filled(inner, radius, tone.gamma_multiply(0.55));
+        .rect_filled(inner, radius, Tokens::get(ui.ctx()).color.border_strong);
 }
 
 /// What one drawn toast reported back.

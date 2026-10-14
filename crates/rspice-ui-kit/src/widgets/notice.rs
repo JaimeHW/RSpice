@@ -5,9 +5,11 @@
 //! clause of detail and at most one offer, so the pieces are painted once here
 //! and a notice reads the same in either place.
 //!
-//! Severity is carried by the glyph's *shape* as well as its colour — a ring
-//! with a tick, a ring with an `i`, a triangle, an octagon — so it survives a
-//! colour-blind reader and a monochrome capture.
+//! Severity is carried by the glyph's *shape* — a ring with a tick, a ring
+//! with an `i`, a triangle, an octagon — so it survives a colour-blind reader
+//! and a monochrome capture. Only the two the reader has to act on, a warning
+//! and an error, are coloured as well; a success or a note is neutral, like
+//! every other piece of chrome that reports how things went.
 
 use egui::{Color32, Painter, Rect, Response, Sense, Shape, Stroke, Ui, Vec2, pos2, vec2};
 
@@ -25,11 +27,12 @@ pub const OFFER_HEIGHT: f32 = 22.0;
 const OFFER_ARROW_SIDE: f32 = 12.0;
 const OFFER_ARROW_GAP: f32 = 4.0;
 
-/// The colour a severity is drawn in.
+/// The colour a severity's glyph is drawn in: neutral for a success or a
+/// note, whose glyph shape already tells them apart, and the warning or error
+/// colour for the two a reader has to act on.
 pub fn tone_color(tokens: &Tokens, kind: ToastKind) -> Color32 {
     match kind {
-        ToastKind::Success => tokens.color.ok,
-        ToastKind::Info => tokens.color.info,
+        ToastKind::Success | ToastKind::Info => tokens.color.text_dim,
         ToastKind::Warn => tokens.color.warn,
         ToastKind::Error => tokens.color.err,
     }
@@ -231,20 +234,84 @@ mod tests {
         }
     }
 
+    /// What a glyph paints, as a comparable signature: how many strokes,
+    /// paths and filled circles of each kind, and where they fall.
+    fn glyph_signature(kind: ToastKind) -> Vec<String> {
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply(&ctx);
+        let rect = Rect::from_min_size(pos2(20.0, 20.0), Vec2::splat(GLYPH_SIDE));
+        let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("glyph-probe"));
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(layer);
+            paint_tone_glyph(&painter, rect, kind, Color32::WHITE);
+        });
+        output
+            .shapes
+            .iter()
+            .map(|clipped| match &clipped.shape {
+                Shape::Circle(circle) => format!(
+                    "circle {:.1} {:.1} r{:.1} filled={}",
+                    circle.center.x,
+                    circle.center.y,
+                    circle.radius,
+                    circle.fill != Color32::TRANSPARENT
+                ),
+                Shape::Path(path) => format!(
+                    "path {} closed={} {:?}",
+                    path.points.len(),
+                    path.closed,
+                    path.points.first()
+                ),
+                other => format!("{:?}", other.visual_bounding_rect()),
+            })
+            .collect()
+    }
+
+    /// Severity is the glyph's shape first: all four differ. Colour adds to
+    /// shape only for the two a reader has to act on, which differ from each
+    /// other and from the neutral glyphs.
     #[test]
-    fn severities_are_told_apart_by_colour_as_well_as_shape() {
-        let tokens = Tokens::default();
-        let colours = [
-            tone_color(&tokens, ToastKind::Success),
-            tone_color(&tokens, ToastKind::Info),
-            tone_color(&tokens, ToastKind::Warn),
-            tone_color(&tokens, ToastKind::Error),
+    fn severities_are_told_apart_by_shape_and_only_warnings_and_errors_by_colour() {
+        let kinds = [
+            ToastKind::Success,
+            ToastKind::Info,
+            ToastKind::Warn,
+            ToastKind::Error,
         ];
-        for (index, colour) in colours.iter().enumerate() {
+        let shapes = kinds.map(glyph_signature);
+        for (index, shape) in shapes.iter().enumerate() {
+            assert!(!shape.is_empty(), "{:?} painted nothing", kinds[index]);
             assert!(
-                !colours[index + 1..].contains(colour),
-                "two severities share {colour:?}"
+                !shapes[index + 1..].contains(shape),
+                "{:?} has the shape of a later severity: {shape:?}",
+                kinds[index]
             );
+        }
+
+        let tokens = Tokens::default();
+        let warn = tone_color(&tokens, ToastKind::Warn);
+        let error = tone_color(&tokens, ToastKind::Error);
+        let neutral = tokens.color.text_dim;
+        assert_ne!(warn, error, "a warning and an error share a colour");
+        assert_ne!(warn, neutral, "a warning is drawn neutral");
+        assert_ne!(error, neutral, "an error is drawn neutral");
+    }
+
+    /// A success or a note is not coloured: its glyph is neutral chrome, in
+    /// either theme.
+    #[test]
+    fn a_success_or_info_glyph_is_neutral() {
+        for mode in [crate::Mode::Dark, crate::Mode::Light] {
+            let tokens = Tokens::new(Default::default(), mode, Default::default());
+            for kind in [ToastKind::Success, ToastKind::Info] {
+                let colour = tone_color(&tokens, kind);
+                assert_eq!(colour, tokens.color.text_dim, "{mode:?} {kind:?}");
+                assert_ne!(
+                    colour, tokens.color.ok,
+                    "{mode:?} {kind:?} is success green"
+                );
+                assert_ne!(colour, tokens.color.info, "{mode:?} {kind:?} is info blue");
+            }
         }
     }
 }
