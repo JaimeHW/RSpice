@@ -2084,9 +2084,9 @@ mod tests {
         assert!(hidden_button(&nodes).is_none(), "nothing is hidden");
     }
 
-    /// Renders for review, cropped to the chrome above the document: a strip
+    /// Renders for review, cropped to the top of a 1440 x 900 window: a strip
     /// whose tabs fit, one whose tabs shrank to fit, and one that overflows,
-    /// all between the docks of a 1440 x 900 window.
+    /// each over the page's tone so the active tab's join to the page shows.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     #[ignore = "writes PNGs for a human to look at; run with --ignored"]
@@ -2101,7 +2101,10 @@ mod tests {
         ] {
             let mut app = design_session(extra);
             let canvas = crate::ui::raster::render(egui::vec2(1440.0, 900.0), |ui, _| {
-                crate::workbench::frame::show(ui, &mut app);
+                let page = Tokens::get(ui.ctx()).color.bg_app;
+                ui.painter().rect_filled(ui.max_rect(), 0.0, page);
+                let layout = LayoutSpec::resolve(1440.0, 900.0, &app.state.workbench);
+                show(ui, &mut app, layout);
             });
             std::fs::write(directory.join(format!("{stem}.png")), canvas.png(140))
                 .expect("write the render");
