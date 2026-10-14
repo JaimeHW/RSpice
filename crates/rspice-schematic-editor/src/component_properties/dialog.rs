@@ -12,7 +12,9 @@ use rspice_design::properties::SourceContractFinding;
 use rspice_design::schematic::document_policy::PropertyCommitPolicy;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use rspice_ui_kit::widgets::{
+    Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize,
+};
 
 /// Live host inputs for one component dialog frame.
 pub struct ComponentPropertyDialogView<'a> {
@@ -62,9 +64,13 @@ pub fn render_component_property_dialog(
     let mut result = ComponentPropertyDialogResult::None;
     draft.sync_pwl_validation_error();
     let dirty = draft.has_modifications();
-    let footer_hint = session_error
-        .clone()
-        .or_else(|| dirty.then(|| "Unapplied changes".to_owned()));
+    let (footer_hint, footer_tone) = match session_error.clone() {
+        Some(error) => (Some(error), DialogHintTone::Error),
+        None => (
+            dirty.then(|| "Unapplied changes".to_owned()),
+            DialogHintTone::Neutral,
+        ),
+    };
 
     let mut dialog = Dialog::new("Edit instance properties", "OK")
         .description(DESCRIPTION)
@@ -80,7 +86,7 @@ pub fn render_component_property_dialog(
         .interaction_enabled(!model_browser_open)
         .initial_focus(DialogInitialFocus::BodyControl);
     if let Some(hint) = footer_hint.as_deref() {
-        dialog = dialog.hint(hint);
+        dialog = dialog.hint(hint).hint_tone(footer_tone);
     }
 
     let mut side_action = ComponentPropertyDialogResult::None;
