@@ -42,3 +42,6 @@ pub mod transfer_function;
 pub mod virtual_rows;
 pub mod waveform;
 pub mod waves;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod source_guard;
