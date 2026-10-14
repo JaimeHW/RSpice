@@ -5360,6 +5360,11 @@ impl Engine {
     /// nothing in that circuit references node 0 either is it built once more,
     /// with the reference that build chose aliased to node 0 before any node
     /// exists; see [`ground_reference`].
+    ///
+    /// The elaboration hands its circuit back boxed. This frame stays on the
+    /// stack under every elaboration, a deeply nested expression's included,
+    /// and an unoptimized build gives each temporary of the circuit its own
+    /// slot in it.
     fn build_circuit_for_analysis(
         &self,
         netlist: &Netlist,
@@ -5370,7 +5375,7 @@ impl Engine {
         let (built, reference) =
             self.elaborate_circuit(netlist, default_ports, transient_stop_time, None, abort)?;
         let Some(reference) = reference else {
-            return Ok(built);
+            return Ok(*built);
         };
         drop(built);
         self.elaborate_circuit(
@@ -5380,7 +5385,7 @@ impl Engine {
             Some(&reference),
             abort,
         )
-        .map(|(built, _)| built)
+        .map(|(built, _)| *built)
     }
 
     /// One elaboration of the deck, with `reference`, when given, aliased to
@@ -5397,7 +5402,7 @@ impl Engine {
         transient_stop_time: Option<Value>,
         reference: Option<&str>,
         abort: &dyn AbortSignal,
-    ) -> Result<(BuiltRfCircuit, Option<String>), SimulationError> {
+    ) -> Result<(Box<BuiltRfCircuit>, Option<String>), SimulationError> {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
@@ -10101,11 +10106,11 @@ impl Engine {
         }
         circuit.name_metered_discrete_ports_after_their_nets();
         Ok((
-            BuiltRfCircuit {
+            Box::new(BuiltRfCircuit {
                 circuit,
                 rf_ports,
                 rf_port_origin,
-            },
+            }),
             reference,
         ))
     }
