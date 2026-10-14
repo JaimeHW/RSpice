@@ -54,7 +54,11 @@ fn separate_ground_symbols_are_one_ground_net() {
     assert_eq!(ground.class, NetClass::Ground);
     let mut wire_ids = ground.wire_ids.clone();
     wire_ids.sort_unstable();
-    assert_eq!(wire_ids, vec![10, 11], "selecting ground lights every ground wire");
+    assert_eq!(
+        wire_ids,
+        vec![10, 11],
+        "selecting ground lights every ground wire"
+    );
     let mut members: Vec<u64> = ground
         .terminals
         .iter()

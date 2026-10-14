@@ -849,7 +849,11 @@ where
         let labelled_zero: Vec<usize> = self
             .nets
             .iter()
-            .filter(|net| net.label.as_deref().is_some_and(|label| label.trim() == "0"))
+            .filter(|net| {
+                net.label
+                    .as_deref()
+                    .is_some_and(|label| label.trim() == "0")
+            })
             .map(|net| net.id)
             .collect();
         for net_id in labelled_zero {
