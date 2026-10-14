@@ -307,12 +307,15 @@ fn panel_grammar_rows(
             });
         subsection_header(ui, "WATCHES");
         ui.horizontal(|ui| {
+            // The Automation inspector's watch row: the field runs up to its
+            // button, which ends on the inset.
+            ui.spacing_mut().item_spacing.x = 6.0;
             ui.add(
                 egui::TextEdit::singleline(watch)
                     .hint_text("expression")
-                    .desired_width((ui.available_width() - 48.0).max(60.0)),
+                    .desired_width((ui.available_width() - 48.0 - 6.0).max(60.0)),
             );
-            let _ = Button::new("Add").show(ui);
+            let _ = Button::new("Add").min_width(48.0).show(ui);
         });
     });
 
@@ -326,4 +329,3 @@ fn panel_grammar_rows(
         });
     });
 }
-
