@@ -927,7 +927,7 @@ fn every_section_header_helper_paints_the_same_header() {
                         ui.allocate_ui(Vec2::new(312.0, 200.0), |ui| {
                             panel = ui.max_rect();
                             if in_body {
-                                panel_body(ui, |ui| header(ui));
+                                panel_body(ui, header);
                             } else {
                                 header(ui);
                             }
