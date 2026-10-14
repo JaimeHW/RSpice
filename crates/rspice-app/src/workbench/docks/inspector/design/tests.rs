@@ -479,6 +479,45 @@ fn open_terminal_rows_are_disabled_while_bound_rows_remain_actionable() {
     assert!(!bound.is_disabled());
 }
 
+/// The Terminals header counts only open pins, since the rows count
+/// themselves, and an instance without terminals has no section at all.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn terminals_head_only_open_pins_and_vanish_without_terminals() {
+    let mut app = RSpiceApp::test_instance();
+    let component = Component::new(42, ComponentType::Resistor, Point::origin());
+    let mut sheet = SheetConnectivity {
+        nets: std::sync::Arc::new(Vec::new()),
+        terminals: HashMap::new(),
+        unresolved: None,
+    };
+    let painted = painted_panel(|ui| terminals_section(ui, &mut app, &component, &sheet));
+    assert!(painted.is_empty(), "{painted}");
+
+    sheet.terminals.insert(
+        42,
+        vec![
+            ("1".to_owned(), Some("in".to_owned())),
+            ("2".to_owned(), Some("out".to_owned())),
+        ],
+    );
+    let painted = painted_panel(|ui| terminals_section(ui, &mut app, &component, &sheet));
+    assert!(
+        painted.starts_with("Terminals\n") && !painted.contains("bound"),
+        "{painted}"
+    );
+
+    sheet.terminals.insert(
+        42,
+        vec![
+            ("1".to_owned(), None),
+            ("2".to_owned(), Some("out".to_owned())),
+        ],
+    );
+    let painted = painted_panel(|ui| terminals_section(ui, &mut app, &component, &sheet));
+    assert!(painted.lines().any(|line| line == "1 open"), "{painted}");
+}
+
 #[test]
 fn checks_are_stale_until_they_run_against_the_current_topology() {
     let mut state = AppState::default();
@@ -799,7 +838,9 @@ fn component_identity_reports_occurrence_and_graphical_execution_views() {
         ViewType::Schematic,
     );
     assert_eq!(containing_occurrence_path(&state), "/XAFE/XBIAS");
-    assert_eq!(component_view_contract(&component), "symbol · spice");
+    assert_eq!(instance_view(&component), Some("symbol"));
+    let resistor = Component::new(10, ComponentType::Resistor, Point::origin());
+    assert_eq!(instance_view(&resistor), None, "a primitive binds no view");
 }
 
 #[test]
@@ -1674,11 +1715,13 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
     // Two providers and no decision: nothing resolves it, so the row says so
     // and there is nowhere to jump.
     let contested = super::super::component_model_evidence(&state, &component);
-    assert_eq!(contested.tone, super::super::ModelEvidenceTone::Error);
+    let (problem, text) = contested
+        .problem
+        .expect("an unresolved contest is a problem");
+    assert_eq!(problem, Problem::Failure);
     assert!(
-        contested.status.contains("ambiguous"),
-        "an unresolved contest is ambiguous: {}",
-        contested.status
+        text.starts_with("Model shared_diode ambiguous"),
+        "an unresolved contest is ambiguous: {text}"
     );
     assert_eq!(catalog_model_location(&state, &component), None);
 
@@ -1695,11 +1738,9 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
         )
         .expect("two providers accept a project-global decision");
     let resolved = super::super::component_model_evidence(&state, &component);
-    assert_eq!(resolved.tone, super::super::ModelEvidenceTone::Info);
-    assert!(
-        !resolved.status.contains("ambiguous"),
-        "a recorded decision resolves the reference: {}",
-        resolved.status
+    assert_eq!(
+        resolved.problem, None,
+        "a recorded decision resolves the reference"
     );
     assert_eq!(
         catalog_model_location(&state, &component),
@@ -2002,17 +2043,11 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
     let (mut app, component) = app_with_owned_veriloga_instance();
 
     let evidence = super::super::component_model_evidence(&app.state, &component);
-    assert_eq!(
-        (evidence.status.as_str(), evidence.model.as_str()),
-        ("Verilog-A module compiled", "amp")
-    );
-    assert_eq!(evidence.tone, super::super::ModelEvidenceTone::Info);
+    assert_eq!(evidence.model.as_deref(), Some("amp"));
+    assert_eq!(evidence.problem, None, "a current compile says nothing");
 
     let identity = painted_panel(|ui| identity_section(ui, &mut app, &component));
-    assert!(
-        identity.lines().any(|line| line == "veriloga · Verilog-A"),
-        "{identity}"
-    );
+    assert!(identity.lines().any(|line| line == "veriloga"), "{identity}");
     assert!(!identity.contains("spice"), "{identity}");
     assert!(
         identity.lines().any(|line| line == "Open Verilog-A view")
@@ -2022,8 +2057,12 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
     let parameters = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
     let labels = parameters.lines().collect::<Vec<_>>();
     assert!(
-        labels.contains(&"Module") && labels.contains(&"amp"),
-        "{parameters}"
+        !labels.contains(&"Module"),
+        "the module is the cell the Library cell row names: {parameters}"
+    );
+    assert!(
+        !labels.contains(&"editable"),
+        "a writable document is the normal state: {parameters}"
     );
     assert!(
         !labels.contains(&"Model") && !labels.contains(&"Section"),
@@ -2052,7 +2091,12 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
         )
         .expect("the edit applies");
     let evidence = super::super::component_model_evidence(&app.state, &component);
-    assert_eq!(evidence.tone, super::super::ModelEvidenceTone::Warn);
+    assert_eq!(
+        evidence.problem.as_ref().map(|(problem, _)| *problem),
+        Some(Problem::Warning)
+    );
+    let parameters = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
+    assert!(parameters.contains("Recompile needed"), "{parameters}");
 }
 
 /// A component's title says what it is: a cell instance by its cell, a

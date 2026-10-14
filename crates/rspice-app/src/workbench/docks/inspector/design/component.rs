@@ -75,32 +75,14 @@ pub(super) fn component_title_kind(component: &Component) -> String {
     )
 }
 
-pub(super) fn component_view_contract(component: &Component) -> String {
-    component.library_cell.as_ref().map_or_else(
-        || "symbol · spice".to_owned(),
-        |binding| {
-            let view = binding.view.trim();
-            if view.is_empty() {
-                "symbol · spice".to_owned()
-            } else if view.eq_ignore_ascii_case("spice") {
-                "spice".to_owned()
-            } else {
-                format!("{view} · spice")
-            }
-        },
-    )
-}
-
-/// The View row: the view an instance binds, and what it is. A Verilog-A view
-/// is a module the deck instantiates, which the Module row names; "spice"
-/// there named nothing the instance is.
-pub(super) fn instance_view_contract(state: &AppState, component: &Component) -> String {
-    match component.library_cell.as_ref() {
-        Some(binding) if crate::workbench::app::instantiates_veriloga_view(state, component) => {
-            format!("{} · Verilog-A", binding.view.trim())
-        }
-        _ => component_view_contract(component),
-    }
+/// The view a cell instance binds, by its name. A primitive binds none: its
+/// symbol is the device's own.
+pub(super) fn instance_view(component: &Component) -> Option<&str> {
+    component
+        .library_cell
+        .as_ref()
+        .map(|binding| binding.view.trim())
+        .filter(|view| !view.is_empty())
 }
 
 pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
@@ -111,29 +93,26 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     }
     properties.on_disabled_hover_text("the active document is read-only");
     let instance_rejection = edit_row(ui, app, component, InlineEditField::Instance, "Instance");
-    let value_rejection = if let Some(contract) = component
-        .library_cell
-        .as_ref()
-        .and_then(|binding| binding.builtin_xspice.as_ref())
-    {
-        property_row(ui, "Executable model", &contract.model_type);
-        None
-    } else if let Some(contract) = component
-        .library_cell
-        .as_ref()
-        .and_then(|binding| binding.generated_veriloga.as_ref())
-    {
-        property_row(ui, "Executable model", &contract.model_name);
+    // A built-in or a generated module runs the model its contract names, and
+    // the Model row under Simulation parameters states it; it has no value.
+    let runs_contract = component.library_cell.as_ref().is_some_and(|binding| {
+        binding.builtin_xspice.is_some() || binding.generated_veriloga.is_some()
+    });
+    let value_rejection = if runs_contract {
         None
     } else {
         edit_row(ui, app, component, InlineEditField::Value, "Value")
     };
-    let library_cell = component.library_cell.as_ref().map_or_else(
-        || format!("primitives/{}", component.kind.display_name()),
-        |binding| format!("{}/{}", binding.library, binding.cell),
-    );
-    property_row(ui, "Library cell", &library_cell);
-    property_row(ui, "View", &instance_view_contract(&app.state, component));
+    if let Some(binding) = component.library_cell.as_ref() {
+        property_row(
+            ui,
+            "Library cell",
+            &format!("{}/{}", binding.library, binding.cell),
+        );
+    }
+    if let Some(view) = instance_view(component) {
+        property_row(ui, "View", view);
+    }
     sheet_row(ui, &app.state, component.id);
     if editable {
         rejection_slot(
@@ -497,20 +476,31 @@ pub(super) fn parameters_section(
     section_header(
         ui,
         "Simulation parameters",
-        Some(if editable { "editable" } else { "read-only" }),
+        (!editable).then_some("read-only"),
     );
     // A Verilog-A instance runs its view's module: that is the one fact to
-    // state here. A model card and a library section are model-library
+    // state here, and only when the module is not the cell the Library cell
+    // row already names. A model card and a library section are model-library
     // ideas, and the deck gives a module neither.
     let runs_module = crate::workbench::app::instantiates_veriloga_view(&app.state, component);
-    let model_choices = bound_model_choices(&app.state, component, &evidence.model);
+    let model_choices = evidence.model.as_deref().map_or_else(Vec::new, |model| {
+        bound_model_choices(&app.state, component, model)
+    });
     let mut selected_model = component
         .library_cell
         .as_ref()
         .and_then(|binding| binding.module_name.clone())
-        .unwrap_or_else(|| evidence.model.clone());
+        .or_else(|| evidence.model.clone())
+        .unwrap_or_default();
     if runs_module {
-        property_row(ui, "Module", &evidence.model);
+        if let Some(module) = evidence.model.as_deref().filter(|module| {
+            component
+                .library_cell
+                .as_ref()
+                .is_none_or(|binding| !binding.cell.eq_ignore_ascii_case(module))
+        }) {
+            property_row(ui, "Module", module);
+        }
     } else if model_choices.len() > 1 {
         if property_row_combo(
             ui,
@@ -528,8 +518,11 @@ pub(super) fn parameters_section(
                 .toasts
                 .error_with_title(ui.ctx(), "Model binding rejected", error);
         }
-    } else {
-        property_row(ui, "Model", &evidence.model);
+    } else if let Some(model) = evidence.model.as_deref() {
+        property_row(ui, "Model", model);
+    }
+    if let Some((problem, text)) = evidence.problem.as_ref() {
+        crate::workbench::design_system::problem_line(ui, *problem, text);
     }
 
     let section_choices = if runs_module {
@@ -553,8 +546,6 @@ pub(super) fn parameters_section(
         ) {
             apply_bound_model_section(app, component.id, &selected_section);
         }
-    } else if !runs_module {
-        property_row(ui, "Section", &evidence.section);
     }
 
     // Instance temperature is the `temp` parameter. Left empty it inherits
@@ -631,12 +622,11 @@ pub(super) fn parameters_section(
                     removed = Some(parameter.key);
                 }
             } else {
-                property_row_status(
+                crate::workbench::design_system::schematic_property_row_problem(
                     ui,
                     &parameter.label,
                     &format!("{value} {UNDECLARED_PARAMETER_NOTE}"),
-                    Tokens::get(ui.ctx()).color.warn,
-                    StatusMark::Warning,
+                    Some(Problem::Warning),
                 );
             }
         } else if parameter.editable {
@@ -892,8 +882,11 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
                     egui::Stroke::new(1.25, t.color.wire),
                 );
             } else {
-                ui.painter()
-                    .circle_stroke(icon_center, 4.0, egui::Stroke::new(1.0, t.color.err));
+                ui.painter().circle_stroke(
+                    icon_center,
+                    4.0,
+                    egui::Stroke::new(1.0, t.color.text_dim),
+                );
             }
 
             let meta_galley = ui.painter().layout_no_wrap(
@@ -943,21 +936,13 @@ pub(super) fn terminals_section(
 ) {
     let empty = Vec::new();
     let bindings = sheet.terminals.get(&component.id).unwrap_or(&empty);
-    let open_pins = bindings.iter().filter(|(_, net)| net.is_none()).count();
-
-    section_header(
-        ui,
-        "Terminals",
-        Some(&if open_pins == 0 {
-            format!("{} bound", bindings.len())
-        } else {
-            format!("{open_pins} open")
-        }),
-    );
     if bindings.is_empty() {
-        muted_inspector_copy(ui, "This instance declares no terminals.");
         return;
     }
+    let open_pins = bindings.iter().filter(|(_, net)| net.is_none()).count();
+    // The rows count themselves; the header speaks only for the open ones.
+    let open = (open_pins > 0).then(|| format!("{open_pins} open"));
+    section_header(ui, "Terminals", open.as_deref());
     let mut select: Option<&str> = None;
     for (pin, net) in bindings {
         let row = terminal_row(ui, pin, net.as_deref());

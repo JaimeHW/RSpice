@@ -909,28 +909,36 @@ fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
     consumers
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ModelEvidenceTone {
-    Neutral,
-    Info,
-    Warn,
-    Error,
-    Ok,
-}
-
+/// The model an instance runs, and what is wrong with that binding when
+/// something is. A binding that resolves says nothing beyond the model's name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ComponentModelEvidence {
-    status: String,
-    model: String,
-    source: String,
-    section: String,
-    tone: ModelEvidenceTone,
+    /// The model card or module the deck gives the instance. `None` for a
+    /// device that takes no model, or whose model the netlister writes itself.
+    model: Option<String>,
+    /// The binding's problem, worded as the problem.
+    problem: Option<(Problem, String)>,
+}
+
+impl ComponentModelEvidence {
+    fn resolved(model: impl Into<String>) -> Self {
+        Self {
+            model: Some(model.into()),
+            problem: None,
+        }
+    }
+
+    fn failed(model: impl Into<String>, problem: Problem, text: String) -> Self {
+        Self {
+            model: Some(model.into()),
+            problem: Some((problem, text)),
+        }
+    }
 }
 
 /// What an instance of a project-owned Verilog-A view runs: the module its
 /// view names, and whether its source has a compile that is still current.
-/// No model catalog is involved, so none is reported as unverified, and a
-/// model-library section does not apply.
+/// No model catalog is involved, so none is reported as unverified.
 fn project_module_evidence(
     state: &AppState,
     binding: &crate::state::LibraryCellInstance,
@@ -954,21 +962,18 @@ fn project_module_evidence(
         .content
         .project_sources
         .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(reference));
-    let (status, tone) = match bundle {
-        Some(bundle) if bundle.validation_is_current() => {
-            ("Verilog-A module compiled", ModelEvidenceTone::Info)
-        }
-        Some(_) => ("module edited since its compile", ModelEvidenceTone::Warn),
-        None => ("Verilog-A view has no source", ModelEvidenceTone::Error),
-    };
-    Some(ComponentModelEvidence {
-        status: status.to_owned(),
-        model,
-        source: bundle.map_or_else(String::new, |bundle| {
-            bundle.root().logical_path().to_owned()
-        }),
-        section: "Not applicable".to_owned(),
-        tone,
+    Some(match bundle {
+        Some(bundle) if bundle.validation_is_current() => ComponentModelEvidence::resolved(model),
+        Some(_) => ComponentModelEvidence::failed(
+            model,
+            Problem::Warning,
+            "Recompile needed: the module changed since its compile".to_owned(),
+        ),
+        None => ComponentModelEvidence::failed(
+            model,
+            Problem::Failure,
+            "No Verilog-A source for this view".to_owned(),
+        ),
     })
 }
 
@@ -976,38 +981,22 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
     if let Some(binding) = component.library_cell.as_ref() {
         if binding.is_builtin_xspice() {
             return match crate::state::validate_builtin_xspice_binding(binding) {
-                Ok(descriptor) => ComponentModelEvidence {
-                    status: "compiled XSPICE contract verified".to_owned(),
-                    model: descriptor.model_type.to_owned(),
-                    source: descriptor.stable_id.to_owned(),
-                    section: "Not applicable".to_owned(),
-                    tone: ModelEvidenceTone::Info,
-                },
-                Err(error) => ComponentModelEvidence {
-                    status: "compiled XSPICE contract invalid".to_owned(),
-                    model: binding.cell.clone(),
-                    source: error,
-                    section: "Unavailable".to_owned(),
-                    tone: ModelEvidenceTone::Error,
-                },
+                Ok(descriptor) => ComponentModelEvidence::resolved(descriptor.model_type),
+                Err(error) => ComponentModelEvidence::failed(
+                    binding.cell.clone(),
+                    Problem::Failure,
+                    format!("Model invalid: {error}"),
+                ),
             };
         }
         if binding.is_generated_veriloga() {
             return match crate::state::validate_generated_veriloga_binding(binding) {
-                Ok(descriptor) => ComponentModelEvidence {
-                    status: "compiled Verilog-A contract verified".to_owned(),
-                    model: descriptor.model_name.to_owned(),
-                    source: format!("source {}", descriptor.source_digest),
-                    section: "Not applicable".to_owned(),
-                    tone: ModelEvidenceTone::Info,
-                },
-                Err(error) => ComponentModelEvidence {
-                    status: "compiled Verilog-A contract invalid".to_owned(),
-                    model: binding.cell.clone(),
-                    source: error,
-                    section: "Unavailable".to_owned(),
-                    tone: ModelEvidenceTone::Error,
-                },
+                Ok(descriptor) => ComponentModelEvidence::resolved(descriptor.model_name),
+                Err(error) => ComponentModelEvidence::failed(
+                    binding.cell.clone(),
+                    Problem::Failure,
+                    format!("Model invalid: {error}"),
+                ),
             };
         }
         if let Some(evidence) = project_module_evidence(state, binding) {
@@ -1025,29 +1014,19 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
                     .values()
                     .find(|model| model.name.eq_ignore_ascii_case(candidate))
             }) {
-                let mut evidence = catalog_model_evidence(library, model);
-                evidence.section = binding
-                    .model_section
-                    .clone()
-                    .unwrap_or_else(|| "default".to_owned());
-                return evidence;
+                return catalog_model_evidence(library, model);
             }
         }
 
-        if let Some(path) = binding.source_path.as_deref() {
-            return ComponentModelEvidence {
-                status: "source binding declared · catalog unverified".to_owned(),
-                model: binding
-                    .module_name
-                    .clone()
-                    .unwrap_or_else(|| binding.cell.clone()),
-                source: path.display().to_string(),
-                section: binding
-                    .model_section
-                    .clone()
-                    .unwrap_or_else(|| "default".to_owned()),
-                tone: ModelEvidenceTone::Warn,
-            };
+        let model = binding
+            .module_name
+            .clone()
+            .unwrap_or_else(|| binding.cell.clone());
+        if binding.source_path.is_some() {
+            // The deck includes the file the binding names; no loaded library
+            // vouches for what is in it.
+            let text = format!("Model {model} is not in a loaded library");
+            return ComponentModelEvidence::failed(model, Problem::Warning, text);
         }
 
         let project_view_exists = state
@@ -1056,27 +1035,14 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
             .and_then(|library| library.get_cell(&binding.cell))
             .and_then(|cell| cell.get_view(&binding.view))
             .is_some();
-        return ComponentModelEvidence {
-            status: if project_view_exists {
-                "project cell binding present"
-            } else {
-                "library binding unresolved · review"
-            }
-            .to_owned(),
-            model: binding
-                .module_name
-                .clone()
-                .unwrap_or_else(|| binding.cell.clone()),
-            source: format!("{}/{}/{}", binding.library, binding.cell, binding.view),
-            section: binding
-                .model_section
-                .clone()
-                .unwrap_or_else(|| "default".to_owned()),
-            tone: if project_view_exists {
-                ModelEvidenceTone::Info
-            } else {
-                ModelEvidenceTone::Error
-            },
+        return if project_view_exists {
+            ComponentModelEvidence::resolved(model)
+        } else {
+            let text = format!(
+                "Library cell {}/{} ({}) not found",
+                binding.library, binding.cell, binding.view
+            );
+            ComponentModelEvidence::failed(model, Problem::Failure, text)
         };
     }
 
@@ -1085,6 +1051,10 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
         // Counting name matches reported "ambiguous" for every contested
         // definition — including ones the project had already resolved, which
         // is what execution and the Models workspace both actually run.
+        let not_found = |model_name: String| {
+            let text = format!("Model {model_name} not found in the loaded libraries");
+            ComponentModelEvidence::failed(model_name, Problem::Failure, text)
+        };
         return match state
             .model_library_manager
             .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model_name)
@@ -1099,142 +1069,53 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
                         .find(|model| model.name == provider.definition)
                         .map(|model| catalog_model_evidence(library, model))
                 })
-                .unwrap_or_else(|| ComponentModelEvidence {
-                    status: "model reference not loaded · review".to_owned(),
-                    model: model_name,
-                    source: format!("Provider '{}' no longer holds it", provider.library),
-                    section: "Unavailable".to_owned(),
-                    tone: ModelEvidenceTone::Error,
-                }),
-            Ok(None) => ComponentModelEvidence {
-                status: "model reference not loaded · review".to_owned(),
-                model: model_name,
-                source: "No matching loaded catalog entry".to_owned(),
-                section: "Unavailable".to_owned(),
-                tone: ModelEvidenceTone::Error,
-            },
-            Err(reason) => ComponentModelEvidence {
-                status: "model reference ambiguous · review".to_owned(),
-                model: model_name,
-                source: reason,
-                section: "Unavailable".to_owned(),
-                tone: ModelEvidenceTone::Error,
-            },
+                .unwrap_or_else(|| not_found(model_name)),
+            Ok(None) => not_found(model_name),
+            Err(reason) => {
+                let text = format!("Model {model_name} ambiguous: {reason}");
+                ComponentModelEvidence::failed(model_name, Problem::Failure, text)
+            }
         };
     }
 
-    if let Some(model_name) = generated_inline_model(component) {
-        return ComponentModelEvidence {
-            status: "inline model · generated for netlist".to_owned(),
-            model: model_name,
-            source: "Netlist generator".to_owned(),
-            section: "Not applicable".to_owned(),
-            tone: ModelEvidenceTone::Info,
-        };
-    }
-
+    // A native device, or one whose model card the netlister writes from the
+    // instance itself: there is no model to name.
     ComponentModelEvidence {
-        status: "native device · no catalog model".to_owned(),
-        model: "Not applicable".to_owned(),
-        source: "Built-in device equation".to_owned(),
-        section: "Not applicable".to_owned(),
-        tone: ModelEvidenceTone::Neutral,
+        model: None,
+        problem: None,
     }
-}
-
-fn generated_inline_model(component: &Component) -> Option<String> {
-    let prefix = match component.kind {
-        ComponentType::Nmos => "nmos",
-        ComponentType::Pmos => "pmos",
-        ComponentType::NVdmos => "nvdmos",
-        ComponentType::PVdmos => "pvdmos",
-        ComponentType::NmosSoi => "nmossoi",
-        ComponentType::PmosSoi => "pmossoi",
-        ComponentType::NpnBjt | ComponentType::NpnBjt4 | ComponentType::NpnBjt5 => "npn",
-        ComponentType::PnpBjt | ComponentType::PnpBjt4 | ComponentType::PnpBjt5 => "pnp",
-        ComponentType::Njfet => "njf",
-        ComponentType::Pjfet => "pjf",
-        ComponentType::Nmesfet => "nmf",
-        ComponentType::Pmesfet => "pmf",
-        ComponentType::VSwitch => "sw",
-        ComponentType::ISwitch => "isw",
-        ComponentType::GenericSwitch => "sw",
-        ComponentType::Diode => "d",
-        ComponentType::SaturableInductor => "core",
-        ComponentType::Memristor => "mem",
-        ComponentType::CoupledTransmissionLine => "cpl",
-        ComponentType::LossyTransmissionLine => {
-            let params = crate::state::parse_params_string(&component.params);
-            let kind = if params.get("kind").is_some_and(|kind| kind == "txl") {
-                "txl"
-            } else {
-                "ltra"
-            };
-            return Some(format!("{kind}_{}", component.name));
-        }
-        kind if kind.spice_prefix() == "A" => return Some(format!("{}_model", component.name)),
-        _ => return None,
-    };
-    Some(format!("{prefix}_{}", component.name))
 }
 
 fn catalog_model_evidence(
     library: &crate::state::model_library::ModelLibrary,
     model: &crate::state::model_library::DeviceModel,
 ) -> ComponentModelEvidence {
-    let section = library
-        .selected_corner
-        .as_deref()
-        .map_or_else(|| "Not selected".to_owned(), |section| section.to_owned());
     let external = library.root_path.is_some() || model.file_path.is_some();
     if !external {
-        return ComponentModelEvidence {
-            status: "catalog metadata · in memory".to_owned(),
-            model: model.name.clone(),
-            source: format!("{} · in-memory catalog", library.name),
-            section,
-            tone: ModelEvidenceTone::Info,
-        };
+        return ComponentModelEvidence::resolved(model.name.clone());
     }
 
     let source = model.file_path.as_deref().or(library.root_path.as_deref());
-    let pin = library.root_path.as_ref().and_then(|_| {
+    let recorded = library.root_path.as_ref().and_then(|_| {
         source.and_then(|source| library.source_closure.iter().find(|pin| pin.path == source))
     });
-    match (source, pin) {
-        (Some(source), Some(pin)) => ComponentModelEvidence {
-            status: "catalog model source pinned".to_owned(),
-            model: model.name.clone(),
-            source: format!(
-                "{} · {}",
+    match (source, recorded) {
+        (Some(_), Some(_)) => ComponentModelEvidence::resolved(model.name.clone()),
+        (Some(source), None) => {
+            let text = format!(
+                "Model file {} is not one of library {}'s files",
                 source.display(),
-                short_content_digest(&pin.digest.to_string())
-            ),
-            section,
-            tone: ModelEvidenceTone::Ok,
-        },
-        (Some(source), None) => ComponentModelEvidence {
-            status: "catalog model source unpinned · review".to_owned(),
-            model: model.name.clone(),
-            source: source.display().to_string(),
-            section,
-            tone: ModelEvidenceTone::Error,
-        },
-        (None, _) => ComponentModelEvidence {
-            status: "catalog source metadata incomplete · review".to_owned(),
-            model: model.name.clone(),
-            source: "External library has no model source path".to_owned(),
-            section,
-            tone: ModelEvidenceTone::Error,
-        },
-    }
-}
-
-fn short_content_digest(digest: &str) -> String {
-    if digest.len() <= 12 {
-        digest.to_owned()
-    } else {
-        format!("{}…{}", &digest[..8], &digest[digest.len() - 4..])
+                library.name
+            );
+            ComponentModelEvidence::failed(model.name.clone(), Problem::Failure, text)
+        }
+        (None, _) => {
+            let text = format!(
+                "Library {} does not say which file holds {}",
+                library.name, model.name
+            );
+            ComponentModelEvidence::failed(model.name.clone(), Problem::Failure, text)
+        }
     }
 }
 

@@ -769,9 +769,8 @@ fn native_component_never_claims_a_resolved_catalog_model() {
 
     let evidence = component_model_evidence(&state, &component);
 
-    assert_eq!(evidence.tone, ModelEvidenceTone::Neutral);
-    assert_eq!(evidence.model, "Not applicable");
-    assert!(!evidence.status.contains("resolved"));
+    assert_eq!(evidence.model, None, "a resistor names no model");
+    assert_eq!(evidence.problem, None);
 }
 
 #[test]
@@ -782,13 +781,14 @@ fn missing_explicit_model_is_reported_as_unresolved_review_evidence() {
 
     let evidence = component_model_evidence(&state, &component);
 
-    assert_eq!(evidence.tone, ModelEvidenceTone::Error);
-    assert_eq!(evidence.model, "vendor_npn");
-    assert!(evidence.status.contains("not loaded"));
+    assert_eq!(evidence.model.as_deref(), Some("vendor_npn"));
+    let (problem, text) = evidence.problem.expect("a missing model is a problem");
+    assert_eq!(problem, Problem::Failure);
+    assert_eq!(text, "Model vendor_npn not found in the loaded libraries");
 }
 
 #[test]
-fn green_model_evidence_requires_an_exact_pinned_catalog_source() {
+fn a_model_resolves_only_from_a_file_its_library_records() {
     let mut state = AppState::default();
     let path = std::path::PathBuf::from("models/vendor.lib");
     let mut library = crate::state::model_library::ModelLibrary::new("vendor");
@@ -811,10 +811,20 @@ fn green_model_evidence_requires_an_exact_pinned_catalog_source() {
 
     let evidence = component_model_evidence(&state, &component);
 
-    assert_eq!(evidence.tone, ModelEvidenceTone::Ok);
-    assert_eq!(evidence.model, "vendor_npn");
-    assert!(evidence.status.contains("source pinned"));
-    assert!(evidence.source.contains("vendor.lib"));
+    assert_eq!(evidence.model.as_deref(), Some("vendor_npn"));
+    assert_eq!(evidence.problem, None, "a recorded file says nothing more");
+
+    let library = state
+        .model_library_manager
+        .get_library_mut("vendor")
+        .expect("the fixture library");
+    library.source_closure.clear();
+    let evidence = component_model_evidence(&state, &component);
+    let (problem, text) = evidence
+        .problem
+        .expect("a file the library does not record is a problem");
+    assert_eq!(problem, Problem::Failure);
+    assert!(text.contains("vendor.lib"), "{text}");
 }
 
 #[test]
@@ -844,8 +854,8 @@ fn bound_model_evidence_uses_the_instance_model_and_section_overrides() {
 
     let evidence = component_model_evidence(&state, &component);
 
-    assert_eq!(evidence.model, "OPA189_B");
-    assert_eq!(evidence.section, "high_accuracy");
+    assert_eq!(evidence.model.as_deref(), Some("OPA189_B"));
+    assert_eq!(evidence.problem, None);
 }
 
 #[test]
