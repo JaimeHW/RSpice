@@ -98,7 +98,7 @@ fn the_excitations_page_states_every_occurrence_the_run_drives_a_source_at() {
     assert_eq!(
         rendered
             .lines()
-            .filter(|line| line.trim() == "OCCURRENCE")
+            .filter(|line| line.trim() == "Occurrence")
             .count(),
         2,
         "both ledger heads name the column that qualifies a reference:\n{rendered}"

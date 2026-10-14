@@ -1296,7 +1296,7 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
     });
 
     assert!(
-        rendered.contains("EFFECTIVE VALUE") && rendered.contains("PRESET VALUE"),
+        rendered.contains("Effective value") && rendered.contains("Preset value"),
         "the ledger must separate what the plan states from what the run resolves to:\n{rendered}"
     );
     assert_eq!(
@@ -1992,7 +1992,7 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
         "a plan with no outputs states what its selection mode will save:\n{empty}"
     );
     assert!(
-        !empty.contains("No output matches the filter"),
+        !empty.contains("No matches"),
         "an unfiltered empty registry is not a failed match:\n{empty}"
     );
 
@@ -2001,12 +2001,12 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
         app.state.workbench.saved_output_filter = "no such signal".to_owned();
     });
     assert!(
-        narrowed.contains("No output matches the filter"),
+        narrowed.contains("No matches"),
         "a filter that matched nothing has to say so:\n{narrowed}"
     );
     assert!(
-        narrowed.contains("3 saved · clear the filter to see them"),
-        "and has to say the outputs are still there:\n{narrowed}"
+        narrowed.contains("3 saved"),
+        "and the registry's head still counts the outputs it holds:\n{narrowed}"
     );
     assert!(
         !narrowed.contains("the run stores nothing"),

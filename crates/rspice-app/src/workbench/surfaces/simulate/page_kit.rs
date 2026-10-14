@@ -16,6 +16,7 @@ use egui::{Align, Color32, Layout, Rect, Response, Sense, Stroke, Ui, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Problem, paint_problem_mark};
 
 use super::super::super::design_system::elide_text;
 
@@ -30,31 +31,72 @@ pub(super) const CARD_PAD_X: f32 = 10.0;
 /// Below this width the two columns of a card row stack.
 pub(super) const TWO_COLUMN_BREAKPOINT: f32 = 780.0;
 
-/// Tone of a card's status, or of a single ledger cell.
+/// What a card's status, or a single ledger cell, says beyond its words.
+///
+/// Text is neutral. The ink is one of the neutral ramp; a problem the reader
+/// has to notice puts its mark in front of neutral text, and the mark is the
+/// only colour. There is no success tone: success is the absence of a status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tone {
+    /// The metadata register.
     Neutral,
     /// Secondary text: a label, a caption, prose beside a control. One step
     /// above [`Self::Neutral`], which is the metadata register.
     Dim,
-    Ok,
+    /// Primary text: the name a row exists to show.
+    Text,
+    /// Something to look at before relying on the result: a warning mark in
+    /// front of neutral text.
     Warn,
+    /// Something that stops the work: a failure mark in front of neutral text.
     Error,
-    Accent,
+    /// A failing verdict in a verdict column, painted in the error colour with
+    /// no mark. Only the Specifications page's Result column is one.
+    Fail,
 }
 
+/// Side of a problem mark set in front of a status or a cell, and the advance
+/// from the mark's left edge to the text after it: the kit's own row metrics.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
+
 impl Tone {
+    /// The colour the words are painted in.
     pub(super) fn color(self, ui: &Ui) -> Color32 {
         let c = Tokens::get(ui.ctx()).color;
         match self {
             Self::Neutral => c.text_faint,
-            Self::Dim => c.text_dim,
-            Self::Ok => c.ok,
-            Self::Warn => c.warn,
-            Self::Error => c.err,
-            Self::Accent => c.accent,
+            Self::Dim | Self::Warn | Self::Error => c.text_dim,
+            Self::Text => c.text,
+            Self::Fail => c.err,
         }
     }
+
+    /// The mark in front of the words, when they state a problem.
+    pub(super) fn problem(self) -> Option<Problem> {
+        match self {
+            Self::Warn => Some(Problem::Warning),
+            Self::Error => Some(Problem::Failure),
+            Self::Neutral | Self::Dim | Self::Text | Self::Fail => None,
+        }
+    }
+}
+
+/// Paint `tone`'s mark, if it has one, vertically centred on `center_y` with
+/// its left edge at `left`, and return where the words start.
+fn paint_tone_mark(ui: &Ui, tone: Tone, left: f32, center_y: f32) -> f32 {
+    let Some(problem) = tone.problem() else {
+        return left;
+    };
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            egui::pos2(left + MARK_SIDE * 0.5, center_y),
+            vec2(MARK_SIDE, MARK_SIDE),
+        ),
+        problem,
+    );
+    left + MARK_ADVANCE
 }
 
 /// One line of studio prose, in the studio's own type.
@@ -68,16 +110,50 @@ impl Tone {
 /// find.
 ///
 /// Wrapped rather than elided: these are sentences, and half of one says less
-/// than none.
+/// than none. A problem sets its mark on the first line, in front of the words.
 pub(super) fn note_line(ui: &mut Ui, text: &str, tone: Tone) -> egui::Response {
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(text)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(tone.color(ui)),
-        )
-        .wrap(),
-    )
+    note_line_sensing(ui, text, tone, None)
+}
+
+/// [`note_line`] that takes a press: a refusal that sends the reader to what
+/// it is about.
+pub(super) fn pressable_note_line(ui: &mut Ui, text: &str, tone: Tone) -> egui::Response {
+    note_line_sensing(ui, text, tone, Some(Sense::click()))
+}
+
+fn note_line_sensing(ui: &mut Ui, text: &str, tone: Tone, sense: Option<Sense>) -> egui::Response {
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let color = tone.color(ui);
+    let mut label =
+        egui::Label::new(egui::RichText::new(text).font(font.clone()).color(color)).wrap();
+    if let Some(sense) = sense {
+        label = label.sense(sense);
+    }
+    let Some(problem) = tone.problem() else {
+        return ui.add(label);
+    };
+    let line_height = ui
+        .painter()
+        .layout_no_wrap("M".to_owned(), font, color)
+        .size()
+        .y;
+    let response = ui
+        .horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = MARK_ADVANCE - MARK_SIDE;
+            let (rect, _) = ui.allocate_exact_size(vec2(MARK_SIDE, line_height), Sense::hover());
+            paint_problem_mark(
+                ui.painter(),
+                Rect::from_center_size(rect.center(), vec2(MARK_SIDE, MARK_SIDE)),
+                problem,
+            );
+            ui.add(label)
+        })
+        .inner;
+    let announced = problem.announce(text);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
+    });
+    response
 }
 
 /// Wrap a setup page.
@@ -170,19 +246,26 @@ pub(super) fn card_head_row(
         let color = tone.color(ui);
         // Measure through the painter rather than `fonts_mut`: an exclusive
         // font lock held while the same `Ui` is read deadlocks the frame.
-        let width = ui
+        let text_width = ui
             .painter()
             .layout_no_wrap(text.to_owned(), font.clone(), color)
             .size()
             .x;
+        let mark_room = if tone.problem().is_some() {
+            MARK_ADVANCE
+        } else {
+            0.0
+        };
+        let status_left = status_right - text_width - mark_room;
+        let text_left = paint_tone_mark(ui, tone, status_left, rect.center().y);
         ui.painter().text(
-            egui::pos2(status_right, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
+            egui::pos2(text_left, rect.center().y),
+            egui::Align2::LEFT_CENTER,
             text,
             font,
-            tone.color(ui),
+            color,
         );
-        title_right = status_right - width - 10.0;
+        title_right = status_left - 10.0;
     }
     paint_text(
         ui,
@@ -312,7 +395,7 @@ pub(super) fn card_row<T>(
     });
 }
 
-/// A ledger head row: uppercase column labels over the table's own fill.
+/// A ledger head row: the column labels as written, over the table's own fill.
 pub(super) fn ledger_head(ui: &mut Ui, fractions: &[f32], labels: &[&str]) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) =
@@ -327,7 +410,7 @@ pub(super) fn ledger_head(ui: &mut Ui, fractions: &[f32], labels: &[&str]) {
         paint_text(
             ui,
             cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)),
-            &label.to_uppercase(),
+            label,
             theme::sans(tokens::FS_0, FontWeight::Medium),
             t.color.text_faint,
         );
@@ -408,9 +491,14 @@ pub(super) fn ledger_row(
         } else {
             tone.color(ui)
         };
+        let mut text_rect = cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0));
+        if !text.is_empty() {
+            text_rect.min.x = paint_tone_mark(ui, *tone, text_rect.left(), text_rect.center().y)
+                .min(text_rect.right());
+        }
         paint_text(
             ui,
-            cell.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)),
+            text_rect,
             text,
             theme::mono(tokens::FS_0, FontWeight::Regular),
             color,
@@ -435,6 +523,16 @@ pub(super) fn ledger_row(
     });
     theme::paint_focus_ring(ui, &response, rect);
     response
+}
+
+/// Paint one cell's words in `tone`: a problem's mark first, then the words in
+/// their neutral ink, elided to what is left of `rect`.
+pub(super) fn paint_toned_text(ui: &Ui, rect: Rect, text: &str, font: egui::FontId, tone: Tone) {
+    let mut rect = rect;
+    if !text.is_empty() {
+        rect.min.x = paint_tone_mark(ui, tone, rect.left(), rect.center().y).min(rect.right());
+    }
+    paint_text(ui, rect, text, font, tone.color(ui));
 }
 
 /// Reserve one ledger row and hand back its column rects, for a row that has

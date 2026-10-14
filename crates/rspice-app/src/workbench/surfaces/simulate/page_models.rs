@@ -24,7 +24,7 @@ use super::super::models::closure::{
 use super::super::models::{ModelGateFact, QualificationGate, model_gate_facts};
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
-    ledger_head, ledger_row, ledger_row_cells, paint_text, rule_row,
+    ledger_head, ledger_row, ledger_row_cells, paint_text, paint_toned_text, rule_row,
 };
 
 use crate::ui::theme::{self, FontWeight};
@@ -136,11 +136,11 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         (
             format!(
-                "{} ordered binding{}",
+                "{} binding{}",
                 bindings.len(),
                 plural_suffix(bindings.len())
             ),
-            Tone::Ok,
+            Tone::Neutral,
         )
     };
     // Resolved before the card is drawn because the control that offers these
@@ -213,12 +213,12 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     &CLOSURE_COLUMNS,
                     &[
                         ("—", Tone::Neutral),
-                        ("No model libraries bound", Tone::Neutral),
-                        ("0", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("explicit empty closure", Tone::Neutral),
-                        ("attach a library below", Tone::Warn),
-                        ("—", Tone::Neutral),
+                        ("No libraries attached.", Tone::Neutral),
+                        ("", Tone::Neutral),
+                        ("", Tone::Neutral),
+                        ("", Tone::Neutral),
+                        ("", Tone::Neutral),
+                        ("", Tone::Neutral),
                     ],
                     false,
                     RowPress::Ignored,
@@ -245,15 +245,15 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     font.clone(),
                     t.color.text_dim,
                 );
-                paint_text(
+                paint_toned_text(
                     ui,
                     cells[1].shrink2(egui::vec2(8.0, 0.0)),
                     &binding.library_name,
                     font.clone(),
                     if library.is_some() {
-                        t.color.accent
+                        Tone::Text
                     } else {
-                        t.color.err
+                        Tone::Error
                     },
                 );
                 // What this library actually offers a reference, and how much of it
@@ -274,15 +274,15 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                         plural_suffix(library.models.len())
                     ),
                 };
-                paint_text(
+                paint_toned_text(
                     ui,
                     cells[2].shrink2(egui::vec2(8.0, 0.0)),
                     &provides,
                     font.clone(),
                     if contested_here > 0 {
-                        t.color.err
+                        Tone::Error
                     } else {
-                        t.color.text_dim
+                        Tone::Dim
                     },
                 );
                 // The digest the binding pinned, and whether the bytes still hash
@@ -290,15 +290,15 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 // than recomputed: this page cannot repair it, so it must not be
                 // able to disagree about whether there is anything to repair.
                 let drift = source_drift_findings(&app.state, &binding.library_name);
-                paint_text(
+                paint_toned_text(
                     ui,
                     cells[3].shrink2(egui::vec2(8.0, 0.0)),
                     &short_digest(&binding.source_digest.to_string()),
                     font.clone(),
                     if drift.is_empty() {
-                        t.color.text_faint
+                        Tone::Neutral
                     } else {
-                        t.color.warn
+                        Tone::Warn
                     },
                 );
                 if !drift.is_empty() {
@@ -329,8 +329,8 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     .state
                     .model_library_manager
                     .validate_simulation_plan_bindings(std::slice::from_ref(binding));
-                let (source_text, source_color) = match (library, validation) {
-                    (_, Err(_)) => ("stale · review required".to_owned(), t.color.err),
+                let (source_text, source_tone) = match (library, validation) {
+                    (_, Err(_)) => ("stale".to_owned(), Tone::Error),
                     (Some(library), Ok(())) => (
                         format!(
                             "{} · {} pinned",
@@ -340,16 +340,16 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                             },
                             library.source_closure.len()
                         ),
-                        t.color.text_dim,
+                        Tone::Dim,
                     ),
-                    (None, Ok(())) => ("missing".to_owned(), t.color.err),
+                    (None, Ok(())) => ("missing".to_owned(), Tone::Error),
                 };
-                paint_text(
+                paint_toned_text(
                     ui,
                     cells[4].shrink2(egui::vec2(8.0, 0.0)),
                     &source_text,
                     font,
-                    source_color,
+                    source_tone,
                 );
                 if library.is_none() || corners.is_empty() {
                     paint_text(
@@ -609,12 +609,8 @@ impl ModelGate<'_> {
         } else if self.gate != QualificationGate::Qualified {
             // Platform parity and measurement correlation also hold the gate,
             // and neither reason is carried on the summary. Saying which one
-            // it was would be a guess, so the card says where the reason is.
-            (
-                5,
-                "held for review · the reason is recorded in Models & PDKs".to_owned(),
-                Tone::Warn,
-            )
+            // it was would be a guess; the qualification page holds it.
+            (5, "held for review".to_owned(), Tone::Warn)
         } else {
             return None;
         };
@@ -693,15 +689,15 @@ fn gate_reading<'a>(models: impl IntoIterator<Item = ModelGate<'a>>) -> GateRead
 }
 
 /// The card's status line: open dispositions, and whether any gate was
-/// unreadable at all.
-fn gate_status(reading: &GateReading) -> (String, Tone) {
+/// unreadable at all. A clear gate states nothing.
+fn gate_status(reading: &GateReading) -> Option<(String, Tone)> {
     if reading.models == 0 {
-        return ("no models to gate".to_owned(), Tone::Neutral);
+        return Some(("no models to gate".to_owned(), Tone::Neutral));
     }
     // Every model here is one the gate does not govern, so there is no verdict
     // to report — neither a clean one nor a failing one.
     if reading.engine_owned == reading.models {
-        return (
+        return Some((
             format!(
                 "{} · nothing under the release gate",
                 counted(
@@ -711,22 +707,22 @@ fn gate_status(reading: &GateReading) -> (String, Tone) {
                 )
             ),
             Tone::Neutral,
-        );
+        ));
     }
     let open = counted(reading.open_dispositions, "disposition", "dispositions");
     if reading.unreadable > 0 {
-        return (
+        return Some((
             format!(
                 "{open} open · {} unreadable",
                 counted(reading.unreadable, "gate", "gates")
             ),
             Tone::Error,
-        );
+        ));
     }
     if reading.open_dispositions > 0 {
-        return (format!("{open} open"), Tone::Warn);
+        return Some((format!("{open} open"), Tone::Warn));
     }
-    ("no open dispositions".to_owned(), Tone::Ok)
+    None
 }
 
 /// The plan's read of the model qualification gate.
@@ -747,7 +743,7 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
         .filter(|fact| bound.contains(&fact.library.to_ascii_lowercase()))
         .collect::<Vec<_>>();
     let reading = gate_reading(summaries.iter().map(ModelGate::from));
-    let (status, tone) = gate_status(&reading);
+    let status = gate_status(&reading);
     let mut open = false;
     card_with_head(
         ui,
@@ -755,7 +751,7 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
             card_head_row(
                 ui,
                 "Qualification gate",
-                Some((status.as_str(), tone)),
+                status.as_ref().map(|(text, tone)| (text.as_str(), *tone)),
                 |ui| {
                     open = Button::new("Open qualification…").show(ui).clicked();
                 },
@@ -783,45 +779,19 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
                     },
                 );
             });
-            ledger_head(ui, &GATE_COLUMNS, &["Model", "Finding", "Gate"]);
-            if reading.findings.is_empty() {
-                let (subject, finding, tone) = if reading.models == 0 {
-                    ("No models loaded", "nothing to gate", Tone::Warn)
-                } else if reading.engine_owned == reading.models {
-                    // No finding is not the same fact as a qualified gate when
-                    // no model in the closure has one.
-                    (
-                        "No source-owned models",
-                        "every model in the closure is engine-owned",
-                        Tone::Neutral,
-                    )
-                } else {
-                    (
-                        "No findings",
-                        "every gate in the closure is qualified",
-                        Tone::Ok,
-                    )
-                };
-                ledger_row(
-                    ui,
-                    &GATE_COLUMNS,
-                    &[
-                        (subject, Tone::Neutral),
-                        (finding, tone),
-                        ("—", Tone::Neutral),
-                    ],
-                    false,
-                    RowPress::Ignored,
-                );
+            // No findings is no table: the head's status already says whether
+            // there was anything to gate.
+            if !reading.findings.is_empty() {
+                ledger_head(ui, &GATE_COLUMNS, &["Model", "Finding", "Gate"]);
             }
             for finding in reading.findings.iter().take(GATE_FINDING_ROWS) {
                 ledger_row(
                     ui,
                     &GATE_COLUMNS,
                     &[
-                        (finding.model.as_str(), Tone::Accent),
+                        (finding.model.as_str(), Tone::Text),
                         (finding.finding.as_str(), finding.tone),
-                        (finding.state, finding.tone),
+                        (finding.state, Tone::Neutral),
                     ],
                     false,
                     RowPress::Ignored,
@@ -874,37 +844,32 @@ fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
         })
         .map(|library| library.subcircuits.len())
         .sum();
-    card(
-        ui,
-        "Binding policy",
-        Some(("resolved at elaboration", Tone::Ok)),
-        |ui| {
-            card_body(ui, |ui| {
-                rule_row(
-                    ui,
-                    "Libraries with a corner bound",
-                    &format!("{with_corner} of {}", bindings.len()),
-                );
-                rule_row(ui, "Addressable subcircuits", &subcircuits.to_string());
-                rule_row(
-                    ui,
-                    "Unresolved instance",
-                    "refused at preflight · the instance and the name it wanted are reported",
-                );
-                rule_row(
-                    ui,
-                    "Duplicate definition",
-                    "resolved by an explicit provider decision; otherwise preflight refuses it",
-                );
-            });
-            card_note(
+    card(ui, "Binding policy", None, |ui| {
+        card_body(ui, |ui| {
+            rule_row(
                 ui,
-                "Resolution order is the active plan's binding order above. The project model \
+                "Libraries with a corner bound",
+                &format!("{with_corner} of {}", bindings.len()),
+            );
+            rule_row(ui, "Addressable subcircuits", &subcircuits.to_string());
+            rule_row(
+                ui,
+                "Unresolved instance",
+                "refused at preflight · the instance and the name it wanted are reported",
+            );
+            rule_row(
+                ui,
+                "Duplicate definition",
+                "resolved by an explicit provider decision; otherwise preflight refuses it",
+            );
+        });
+        card_note(
+            ui,
+            "Resolution order is the active plan's binding order above. The project model \
                  workspace owns source content; this plan owns which sources participate, their \
                  precedence, and each nominal section.",
-            );
-        },
-    );
+        );
+    });
 }
 
 fn reproducibility(ui: &mut Ui, app: &RSpiceApp) {
@@ -939,14 +904,7 @@ fn reproducibility(ui: &mut Ui, app: &RSpiceApp) {
     card(
         ui,
         "Reproducibility",
-        Some((
-            if complete {
-                "every external source pinned"
-            } else {
-                "incomplete"
-            },
-            if complete { Tone::Ok } else { Tone::Error },
-        )),
+        (!complete).then_some(("incomplete", Tone::Error)),
         |ui| {
             card_body(ui, |ui| {
                 rule_row(
@@ -1127,9 +1085,9 @@ mod tests {
         )]);
 
         assert_eq!(reading.open_dispositions, 3);
-        let (status, tone) = gate_status(&reading);
+        let (status, tone) = gate_status(&reading).expect("open dispositions are stated");
         assert_eq!(status, "3 dispositions open");
-        assert_ne!(tone, Tone::Ok);
+        assert_eq!(tone, Tone::Warn);
         let finding = reading
             .findings
             .first()
@@ -1137,7 +1095,7 @@ mod tests {
         assert_eq!(finding.model, "pdk/nch");
         assert_eq!(finding.finding, "3 dispositions open");
         assert_eq!(finding.state, "review");
-        assert_ne!(finding.tone, Tone::Ok);
+        assert_eq!(finding.tone, Tone::Warn);
     }
 
     #[test]
@@ -1153,7 +1111,7 @@ mod tests {
         assert_eq!(reading.passing, 4);
         assert_eq!(reading.vectors, 10);
         assert_eq!(reading.unreadable, 1);
-        let (status, tone) = gate_status(&reading);
+        let (status, tone) = gate_status(&reading).expect("an unreadable gate is stated");
         assert_eq!(status, "0 dispositions open · 1 gate unreadable");
         assert_eq!(tone, Tone::Error);
         let finding = reading
@@ -1179,7 +1137,8 @@ mod tests {
         assert!(reading.findings.is_empty());
         assert_eq!(
             gate_status(&reading),
-            ("no open dispositions".to_owned(), Tone::Ok)
+            None,
+            "a clear gate is the normal state and states nothing"
         );
     }
 
@@ -1189,7 +1148,7 @@ mod tests {
     fn an_empty_closure_never_reads_as_a_clean_gate() {
         assert_eq!(
             gate_status(&gate_reading([])),
-            ("no models to gate".to_owned(), Tone::Neutral)
+            Some(("no models to gate".to_owned(), Tone::Neutral))
         );
     }
 
@@ -1209,23 +1168,21 @@ mod tests {
         assert_eq!(reading.engine_owned, 2);
         assert_eq!(
             gate_status(&reading),
-            (
+            Some((
                 "2 engine-owned models · nothing under the release gate".to_owned(),
                 Tone::Neutral
-            )
+            ))
         );
 
         // One source-owned model in the closure and the gate has a subject
-        // again, so the card goes back to reporting its verdict.
+        // again, so the card goes back to reporting its verdict: clear, which
+        // states nothing.
         let mixed = gate_reading([
             model_gate("res", 0, 0, 0, 0, false, QualificationGate::EngineOwned),
             model_gate("nch", 8, 8, 8, 0, false, QualificationGate::Qualified),
         ]);
         assert!(mixed.findings.is_empty());
-        assert_eq!(
-            gate_status(&mixed),
-            ("no open dispositions".to_owned(), Tone::Ok)
-        );
+        assert_eq!(gate_status(&mixed), None);
     }
 
     /// The card shows the first [`GATE_FINDING_ROWS`] findings, so they have to

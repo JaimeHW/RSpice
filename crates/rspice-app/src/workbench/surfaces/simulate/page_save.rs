@@ -298,14 +298,7 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
     card(
         ui,
         "Streaming & precision",
-        Some((
-            format!("{streamed} streamed").as_str(),
-            if streamed == 0 {
-                Tone::Neutral
-            } else {
-                Tone::Ok
-            },
-        )),
+        Some((format!("{streamed} streamed").as_str(), Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
                 let mut policy = state.sim_setup.save_policy;
@@ -547,7 +540,7 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
             if at_limit || unenforceable {
                 Tone::Warn
             } else {
-                Tone::Ok
+                Tone::Neutral
             },
         )),
         |ui| {
@@ -594,9 +587,9 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
                             (row.analyses.as_str(), Tone::Neutral),
                             (row.decks.as_str(), Tone::Neutral),
                             if row.regression_baseline {
-                                ("active regression baseline · pinned", Tone::Ok)
+                                ("active regression baseline · pinned", Tone::Dim)
                             } else if row.pinned {
-                                ("golden baseline", Tone::Ok)
+                                ("golden baseline", Tone::Dim)
                             } else {
                                 ("pruneable", Tone::Neutral)
                             },

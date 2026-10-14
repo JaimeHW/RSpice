@@ -29,17 +29,17 @@ fn registries() -> [(SimulationPage, &'static str, [&'static str; 2]); 3] {
         (
             SimulationPage::Outputs,
             "it is a plan nothing can be saved to",
-            ["CAPTURE GROUP", "EST. SIZE"],
+            ["Capture group", "Est. size"],
         ),
         (
             SimulationPage::Specifications,
             "it is a plan nothing can be authored against",
-            ["DEFINITION", "MARGIN"],
+            ["Definition", "Margin"],
         ),
         (
             SimulationPage::Save,
             "it is a plan with no retention to state",
-            ["FORECAST", "INDETERMINATE"],
+            ["Forecast", "Indeterminate"],
         ),
     ]
 }
@@ -66,7 +66,7 @@ fn a_registry_over_an_unresolvable_plan_refuses_rather_than_reading_as_empty() {
         );
         for heading in headings {
             assert!(
-                !rendered.contains(heading),
+                !rendered.lines().any(|line| line.trim() == heading),
                 "{page:?} painted the {heading:?} column over a plan it could not resolve, so \
                  the refusal sits above a table that still reads as the plan's contents:\n\
                  {rendered}"
@@ -88,7 +88,7 @@ fn an_empty_registry_over_a_resolvable_plan_still_paints_its_table() {
         );
         for heading in headings {
             assert!(
-                rendered.contains(heading),
+                rendered.lines().any(|line| line.trim() == heading),
                 "{page:?} stopped painting its {heading:?} column over a resolvable plan:\n\
                  {rendered}"
             );

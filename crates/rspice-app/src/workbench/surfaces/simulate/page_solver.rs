@@ -186,13 +186,8 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                         .color(t.color.text_dim),
                 );
                 match &pending {
-                    PendingChange::None => {
-                        ui.label(
-                            egui::RichText::new("applied · frozen into the next run manifest")
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
-                    }
+                    // Applied is the normal state, and says nothing.
+                    PendingChange::None => {}
                     PendingChange::Invalid(errors) => {
                         ui.label(
                             egui::RichText::new(errors.join(" · "))
@@ -205,7 +200,7 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui.label(
                             egui::RichText::new("unapplied edit")
                                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.warn),
+                                .color(t.color.text_dim),
                         );
                         apply = Button::new("Apply").accent().show(ui).clicked();
                         revert = Button::new("Revert").show(ui).clicked();
@@ -883,95 +878,90 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
 // -------------------------------------------------------- matrix & determinism
 
 fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
-    card(
-        ui,
-        "Matrix, pivoting & conditioning",
-        Some(("changes invalidate parity", Tone::Warn)),
-        |ui| {
-            card_body(ui, |ui| {
-                let solvers: Vec<String> = MatrixSolver::all()
-                    .iter()
-                    .map(|solver| solver.display_name().to_owned())
-                    .collect();
-                let index = app
-                    .state
-                    .sim_setup
-                    .session
-                    .options_draft
-                    .solver
-                    .min(solvers.len() - 1);
-                let selected = solvers[index].clone();
-                let mut picked = None;
-                let mut gmin_response = None;
-                field_pair(
-                    ui,
-                    ("Factorization", &mut |ui: &mut Ui, width: f32| {
-                        picked = select(
+    card(ui, "Matrix, pivoting & conditioning", None, |ui| {
+        card_body(ui, |ui| {
+            let solvers: Vec<String> = MatrixSolver::all()
+                .iter()
+                .map(|solver| solver.display_name().to_owned())
+                .collect();
+            let index = app
+                .state
+                .sim_setup
+                .session
+                .options_draft
+                .solver
+                .min(solvers.len() - 1);
+            let selected = solvers[index].clone();
+            let mut picked = None;
+            let mut gmin_response = None;
+            field_pair(
+                ui,
+                ("Factorization", &mut |ui: &mut Ui, width: f32| {
+                    picked = select(
+                        ui,
+                        "simulation.solver.matrix",
+                        "Matrix factorization",
+                        &selected,
+                        &solvers,
+                        width,
+                    );
+                }),
+                Some(("GMIN floor", &mut |ui: &mut Ui, width: f32| {
+                    gmin_response = Some(mono_input(
+                        ui,
+                        "GMIN floor",
+                        &mut app.state.sim_setup.session.options_draft.gmin,
+                        width,
+                    ));
+                })),
+            );
+            if let Some(index) = picked {
+                app.state.sim_setup.session.options_draft.solver = index;
+                commit_draft(app);
+            }
+            if let Some(response) = gmin_response {
+                commit_on_release(app, &response);
+            }
+
+            let mut pivrel_response = None;
+            let mut pivtol_response = None;
+            field_pair(
+                ui,
+                (
+                    "Relative pivot · PIVREL",
+                    &mut |ui: &mut Ui, width: f32| {
+                        pivrel_response = Some(mono_input(
                             ui,
-                            "simulation.solver.matrix",
-                            "Matrix factorization",
-                            &selected,
-                            &solvers,
-                            width,
-                        );
-                    }),
-                    Some(("GMIN floor", &mut |ui: &mut Ui, width: f32| {
-                        gmin_response = Some(mono_input(
-                            ui,
-                            "GMIN floor",
-                            &mut app.state.sim_setup.session.options_draft.gmin,
+                            "Relative pivot \u{b7} PIVREL",
+                            &mut app.state.sim_setup.session.options_draft.pivrel,
                             width,
                         ));
-                    })),
-                );
-                if let Some(index) = picked {
-                    app.state.sim_setup.session.options_draft.solver = index;
-                    commit_draft(app);
-                }
-                if let Some(response) = gmin_response {
-                    commit_on_release(app, &response);
-                }
-
-                let mut pivrel_response = None;
-                let mut pivtol_response = None;
-                field_pair(
-                    ui,
-                    (
-                        "Relative pivot · PIVREL",
-                        &mut |ui: &mut Ui, width: f32| {
-                            pivrel_response = Some(mono_input(
-                                ui,
-                                "Relative pivot \u{b7} PIVREL",
-                                &mut app.state.sim_setup.session.options_draft.pivrel,
-                                width,
-                            ));
-                        },
-                    ),
-                    Some((
-                        "Absolute pivot · PIVTOL",
-                        &mut |ui: &mut Ui, width: f32| {
-                            pivtol_response = Some(mono_input(
-                                ui,
-                                "Absolute pivot \u{b7} PIVTOL",
-                                &mut app.state.sim_setup.session.options_draft.pivtol,
-                                width,
-                            ));
-                        },
-                    )),
-                );
-                for response in [pivrel_response, pivtol_response].into_iter().flatten() {
-                    commit_on_release(app, &response);
-                }
-            });
-            card_note(
-                ui,
-                "The factorization backend and the pivot thresholds decide whether two runs of the \
+                    },
+                ),
+                Some((
+                    "Absolute pivot · PIVTOL",
+                    &mut |ui: &mut Ui, width: f32| {
+                        pivtol_response = Some(mono_input(
+                            ui,
+                            "Absolute pivot \u{b7} PIVTOL",
+                            &mut app.state.sim_setup.session.options_draft.pivtol,
+                            width,
+                        ));
+                    },
+                )),
+            );
+            for response in [pivrel_response, pivtol_response].into_iter().flatten() {
+                commit_on_release(app, &response);
+            }
+        });
+        card_note(
+            ui,
+            "The factorization backend and the pivot thresholds decide whether two runs of the \
                  same plan produce bit-identical results. A change here is recorded as a \
                  configuration change and invalidates any parity evidence taken under the previous \
                  setting.",
-            );
-        },
-    );
+        );
+    });
 }
 
 // --------------------------------------------------------- temperature reference
@@ -1030,41 +1020,36 @@ fn temperature_reference(ui: &mut Ui, setup: &mut SimSetupState) -> bool {
 // -------------------------------------------------------------- topology rules
 
 fn topology_contract(ui: &mut Ui) {
-    card(
-        ui,
-        "Topology & conditioning contract",
-        Some(("enforced at elaboration", Tone::Ok)),
-        |ui| {
-            card_body(ui, |ui| {
-                rule_row(
-                    ui,
-                    "Nodes without a DC path",
-                    "refused at preflight · offending nodes listed",
-                );
-                rule_row(
-                    ui,
-                    "Voltage-source loops",
-                    "refused · loop membership listed",
-                );
-                rule_row(
-                    ui,
-                    "Conditioning floor",
-                    "GMIN is never raised above its floor to force a solve",
-                );
-                rule_row(
-                    ui,
-                    "Node shunt",
-                    "an author-sized element · satisfies the check as a real device",
-                );
-            });
-            card_note(
+    card(ui, "Topology & conditioning contract", None, |ui| {
+        card_body(ui, |ui| {
+            rule_row(
                 ui,
-                "Topology acceptance is not configurable: a design without a DC path to every node \
+                "Nodes without a DC path",
+                "refused at preflight · offending nodes listed",
+            );
+            rule_row(
+                ui,
+                "Voltage-source loops",
+                "refused · loop membership listed",
+            );
+            rule_row(
+                ui,
+                "Conditioning floor",
+                "GMIN is never raised above its floor to force a solve",
+            );
+            rule_row(
+                ui,
+                "Node shunt",
+                "an author-sized element · satisfies the check as a real device",
+            );
+        });
+        card_note(
+            ui,
+            "Topology acceptance is not configurable: a design without a DC path to every node \
                  cannot produce a defensible operating point, so preflight refuses it rather than \
                  reporting a bias a conditioning shunt invented.",
-            );
-        },
-    );
+        );
+    });
 }
 
 // ------------------------------------------------------------ resolution ledger
@@ -1228,14 +1213,8 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
                         (row.analysis.as_str(), Tone::Neutral),
                         (row.option.as_str(), Tone::Neutral),
                         (row.preset.as_str(), Tone::Neutral),
-                        (
-                            row.effective.as_str(),
-                            if row.target.is_some() {
-                                Tone::Warn
-                            } else {
-                                Tone::Accent
-                            },
-                        ),
+                        // The Origin column says where the value came from.
+                        (row.effective.as_str(), Tone::Text),
                         (row.origin, Tone::Neutral),
                     ],
                     false,

@@ -26,7 +26,7 @@ use rspice_simulation_contract::run_set::{
 
 use super::page_kit::{
     CARD_PAD_X, ReceiptRow, Tone, card, card_body, card_head_row, card_note, card_row, field_pair,
-    ledger_head, receipts_card, rule_row,
+    ledger_head, note_line, pressable_note_line, receipts_card, rule_row,
 };
 
 mod toolbar;
@@ -174,44 +174,36 @@ impl RunSetFrame {
 /// not show. Advisories appear here rather than nowhere, because a report the
 /// page never draws is a report nobody receives.
 fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
-    let t = Tokens::get(ui.ctx());
     let errors = validation.errors.len();
     let advisories = validation.warnings.len();
-    let (title, status) = if errors > 0 {
-        (
-            format!(
-                "Run-set preview blocked · {errors} issue{}",
-                if errors == 1 { "" } else { "s" }
-            ),
-            ("invalid input retained", Tone::Error),
+    // The title says whether the preview is blocked; a status beside it said
+    // the same thing again.
+    let title = if errors > 0 {
+        format!(
+            "Run-set preview blocked · {errors} issue{}",
+            if errors == 1 { "" } else { "s" }
         )
     } else {
-        (
-            format!(
-                "Run-set advisories · {advisories} note{}",
-                if advisories == 1 { "" } else { "s" }
-            ),
-            ("preview available", Tone::Warn),
+        format!(
+            "Run-set advisories · {advisories} note{}",
+            if advisories == 1 { "" } else { "s" }
         )
     };
     let mut focus = None;
-    card(ui, &title, Some(status), |ui| {
+    card(ui, &title, None, |ui| {
         card_body(ui, |ui| {
             for error in &validation.errors {
-                let text = egui::RichText::new(format!("{} · {}", error.id, error.message))
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.err);
+                let text = format!("{} · {}", error.id, error.message);
                 // A refusal is a control only when it names a dimension to send
                 // the operator to. Composition and budget refusals name none, so
                 // they are read as statements rather than sensing a click that
                 // would resolve to nothing.
                 let Some(dimension_id) = error.dimension_id.clone() else {
-                    ui.add(egui::Label::new(text).wrap())
+                    note_line(ui, &text, Tone::Error)
                         .on_hover_text("Composition or budget refusal");
                     continue;
                 };
-                let response = ui
-                    .add(egui::Label::new(text).wrap().sense(Sense::click()))
+                let response = pressable_note_line(ui, &text, Tone::Error)
                     .on_hover_text("Select the dimension this refusal is about");
                 response.widget_info(|| {
                     egui::WidgetInfo::labeled(
@@ -226,27 +218,13 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
                 }
             }
             for warning in &validation.warnings {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(format!("{} · {}", warning.id, warning.message))
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.warn),
-                    )
-                    .wrap(),
+                note_line(
+                    ui,
+                    &format!("{} · {}", warning.id, warning.message),
+                    Tone::Warn,
                 );
             }
         });
-        card_note(
-            ui,
-            if errors > 0 {
-                "Invalid input is preserved exactly as written. No task matrix, no dispatch and no \
-                 result were created, and every prior dataset is retained unchanged."
-            } else {
-                "An advisory does not block a preview or a dispatch. It states a consequence of the \
-                 declaration that the axis strip cannot show, and nothing it names has been \
-                 discarded."
-            },
-        );
     });
     if let Some(id) = focus {
         app.state.workbench.selected_run_set_dimension = Some(id);
@@ -263,7 +241,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     let mode = app.state.sim_setup.run_set.composition.mode;
     let status = format!("{} composition", mode.as_str());
     let tone = match validation.status {
-        run_set::RunSetStatus::Ready => Tone::Ok,
+        run_set::RunSetStatus::Ready => Tone::Neutral,
         run_set::RunSetStatus::Invalid => Tone::Error,
         run_set::RunSetStatus::NotEvaluated => Tone::Neutral,
     };
@@ -689,14 +667,7 @@ fn forecast_tile(
             ui.set_width(FORECAST_TILE_W + 20.0);
             egui::Frame::new()
                 .fill(t.color.bg_panel_2)
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    if validation.is_ready() {
-                        t.color.ok
-                    } else {
-                        t.color.border
-                    },
-                ))
+                .stroke(egui::Stroke::new(1.0, t.color.border))
                 .corner_radius(t.radius)
                 .inner_margin(egui::Margin::symmetric(9, 7))
                 .show(ui, |ui| {
@@ -812,7 +783,7 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                     egui::RichText::new(if active { "active" } else { "not in run set" })
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                         .color(if active {
-                            t.color.ok
+                            t.color.text_dim
                         } else {
                             t.color.text_faint
                         }),
@@ -889,7 +860,7 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
         card(
             ui,
             "Selected dimension",
-            Some(("none declared", Tone::Warn)),
+            Some(("none declared", Tone::Neutral)),
             |ui| {
                 card_note(
                     ui,
@@ -915,12 +886,13 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
         .unwrap_or_default();
     let last = app.state.sim_setup.run_set.dimensions.len() - 1;
     let title = format!("Selected dimension · {}", dimension.name);
+    // Enabled is the normal state, and states nothing.
     let status = if dimension.kind.execution_blocker().is_some() {
-        ("unavailable", Tone::Error)
+        Some(("unavailable", Tone::Error))
     } else if dimension.enabled {
-        ("enabled", Tone::Ok)
+        None
     } else {
-        ("disabled", Tone::Neutral)
+        Some(("disabled", Tone::Neutral))
     };
     // The head and the body both raise commands, and two closures cannot each
     // hold the same `&mut` — the pending command is shared through a cell.
@@ -929,7 +901,7 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
     super::page_kit::card_with_head(
         ui,
         |ui| {
-            card_head_row(ui, &title, Some(status), |ui| {
+            card_head_row(ui, &title, status, |ui| {
                 if IconButton::new(Icon::Trash)
                     .tooltip("Remove this dimension")
                     .show(ui)
@@ -1369,14 +1341,7 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     card(
         ui,
         "Execution budgets",
-        Some((
-            if exceeded {
-                "exceeded"
-            } else {
-                "within budget"
-            },
-            if exceeded { Tone::Error } else { Tone::Ok },
-        )),
+        exceeded.then_some(("exceeded", Tone::Error)),
         |ui| {
             card_body(ui, |ui| {
                 let mut drafts = app
@@ -1503,7 +1468,7 @@ fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
             sequence: receipt.sequence.to_string(),
             action: receipt.action.to_owned(),
             tone: match receipt.status {
-                RunSetReceiptStatus::Completed => Tone::Ok,
+                RunSetReceiptStatus::Completed => Tone::Neutral,
                 RunSetReceiptStatus::Blocked => Tone::Error,
             },
             revision: format!("{} → {}", receipt.before_revision, receipt.after_revision),
@@ -1658,14 +1623,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     card(
         ui,
         "Resolved point table",
-        Some((
-            status.as_str(),
-            if validation.is_ready() {
-                Tone::Ok
-            } else {
-                Tone::Neutral
-            },
-        )),
+        Some((status.as_str(), Tone::Neutral)),
         |ui| {
             ledger_head(ui, &fractions, &header_refs);
             for (index, point, key, is_excluded) in &rows {
@@ -1949,20 +1907,19 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     // Both the checkbox and the family control own the row's height, so the
     // text is painted into reserved cells rather than laid out beside them.
     let (rect, columns) = super::page_kit::ledger_row_cells(ui, row.fractions);
-    let t = Tokens::get(ui.ctx());
     for (column, (text, tone)) in columns.iter().zip(&painted) {
         if text.is_empty() {
             continue;
         }
-        super::page_kit::paint_text(
+        super::page_kit::paint_toned_text(
             ui,
             column.shrink2(vec2(CARD_PAD_X * 0.8, 0.0)),
             text,
             theme::mono(tokens::FS_0, FontWeight::Regular),
             if *tone == Tone::Neutral {
-                t.color.text_dim
+                Tone::Dim
             } else {
-                tone.color(ui)
+                *tone
             },
         );
     }
@@ -2036,8 +1993,8 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     let t = Tokens::get(ui.ctx());
     let openable = row.family_block.is_none();
     let (text, tone) = match (openable, row.family_label) {
-        (true, Some(label)) => (label, t.color.accent),
-        (true, None) => ("open", t.color.accent),
+        (true, Some(label)) => (label, t.color.text_dim),
+        (true, None) => ("open", t.color.text_dim),
         (false, _) => ("unavailable", t.color.text_faint),
     };
     super::page_kit::paint_text(

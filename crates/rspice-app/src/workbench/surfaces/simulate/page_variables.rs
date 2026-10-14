@@ -99,7 +99,7 @@ fn registry(
             card_head_row(
                 ui,
                 "Variable registry",
-                Some((status.as_str(), Tone::Ok)),
+                Some((status.as_str(), Tone::Neutral)),
                 |ui| {
                     import = Button::new("Import…")
                         .show(ui)
@@ -174,7 +174,7 @@ fn registry(
                     ui,
                     &REGISTRY_COLUMNS,
                     &[
-                        (variable.name.as_str(), Tone::Accent),
+                        (variable.name.as_str(), Tone::Text),
                         (variable.quantity.label(), Tone::Neutral),
                         (variable.expression.as_str(), Tone::Neutral),
                         (bounds.as_str(), Tone::Neutral),
@@ -321,15 +321,10 @@ fn removal_consequences(
     Some(vec![
         PlanRemovalConsequence::stated("Analyses resolving it", readers).explained(
             PlanRemovalTone::Warn,
-            "The analyses listed above resolve this variable. Removing it leaves every expression \
-             that names it unresolved, and they will refuse to build a deck until the name is \
-             gone from them or the variable is declared again.",
+            "These analyses will not run until the name is removed or declared again.",
         ),
-        PlanRemovalConsequence::stated("Scope it is declared at", variable.scope.label()).explained(
-            PlanRemovalTone::Aside,
-            "Retained results from runs that already resolved this variable stay in the project \
-             and stay readable. What removal takes is the declaration, not the evidence.",
-        ),
+        PlanRemovalConsequence::stated("Scope it is declared at", variable.scope.label())
+            .explained(PlanRemovalTone::Aside, "Results of earlier runs are kept."),
     ])
 }
 
@@ -363,7 +358,6 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let variable = variable.clone();
     let title = format!("Selected variable · {}", variable.name);
     let variable_id = variable.id;
-    let revision = variable.revision.get();
     let mut draft = app
         .state
         .workbench
@@ -400,8 +394,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // and two closures cannot borrow the same variable mutably.
     let edit: std::cell::Cell<Option<VariableEdit>> = std::cell::Cell::new(None);
     let released = std::cell::Cell::new(false);
-    let status = format!("revision {revision}");
-    card(ui, &title, Some((status.as_str(), Tone::Ok)), |ui| {
+    card(ui, &title, None, |ui| {
         card_body(ui, |ui| {
             // The expression is the one field an engineer changes repeatedly
             // while exploring, so it is editable in place rather than only
@@ -833,7 +826,7 @@ fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) 
     card(
         ui,
         "Change impact",
-        Some(("rerun required", Tone::Warn)),
+        Some(("rerun required", Tone::Dim)),
         |ui| {
             card_body(ui, |ui| {
                 rule_row(

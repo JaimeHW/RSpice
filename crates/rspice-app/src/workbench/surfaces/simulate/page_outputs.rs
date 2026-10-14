@@ -187,7 +187,7 @@ fn registry(
             Some(Some(bytes)) => (format_bytes(*bytes), Tone::Neutral),
             // Named rather than dashed: an output whose size cannot be proven
             // before the solve is the one the budget cannot be checked against.
-            Some(None) => ("indeterminate".to_owned(), Tone::Warn),
+            Some(None) => ("indeterminate".to_owned(), Tone::Dim),
             None => ("—".to_owned(), Tone::Neutral),
         }
     };
@@ -308,17 +308,10 @@ fn registry(
                         app.state.sim_setup.save_policy.output_selection_mode,
                         enabled_schematic_probe_outputs(app),
                     ),
-                    Tone::Warn,
+                    Tone::Neutral,
                 );
             } else if shown == 0 {
-                empty_registry_row(
-                    ui,
-                    &format!(
-                        "No output matches the filter · {} saved · clear the filter to see them",
-                        outputs.len()
-                    ),
-                    Tone::Warn,
-                );
+                empty_registry_row(ui, "No matches", Tone::Neutral);
             }
             for (output, row) in outputs.iter().zip(&rows) {
                 if !row.shown {
@@ -328,7 +321,7 @@ fn registry(
                     ui,
                     &REGISTRY_COLUMNS,
                     &[
-                        (output.name.as_str(), Tone::Accent),
+                        (output.name.as_str(), Tone::Text),
                         (output.kind.label(), Tone::Neutral),
                         (output.source_expression.as_str(), Tone::Neutral),
                         (row.group.as_str(), Tone::Neutral),
@@ -503,12 +496,8 @@ fn removal_consequences(
             format!("{} · matched by rule", group.name)
         };
         consequences.push(
-            PlanRemovalConsequence::stated("Capture group holding it", held).explained(
-                PlanRemovalTone::Warn,
-                "The capture group above holds this output. Removing it drops the output from \
-                 that group and lowers what the group forecasts, and no other output takes its \
-                 place under the group's overrides.",
-            ),
+            PlanRemovalConsequence::stated("Capture group holding it", held)
+                .explained(PlanRemovalTone::Warn, "The group loses this output."),
         );
     } else {
         consequences.push(PlanRemovalConsequence::stated(
@@ -521,17 +510,12 @@ fn removal_consequences(
     } else {
         PlanRemovalConsequence::stated("Specifications reading it", specs.join(", ")).explained(
             PlanRemovalTone::Warn,
-            "The specifications above are measured from this output. Removing it leaves each of \
-             them with no source to judge, and they will report no result rather than a failure \
-             the next time the plan is run.",
+            "These specifications will report no result.",
         )
     });
     consequences.push(
-        PlanRemovalConsequence::stated("Kind", output.kind.label()).explained(
-            PlanRemovalTone::Aside,
-            "Datasets already captured under this output stay in the project and stay readable. \
-             What removal takes is the instruction to capture it again.",
-        ),
+        PlanRemovalConsequence::stated("Kind", output.kind.label())
+            .explained(PlanRemovalTone::Aside, "Results already captured are kept."),
     );
     Some(consequences)
 }
@@ -606,10 +590,10 @@ fn output_registry_summary<'a>(
     } else if runtime_bound > 0 {
         (
             format!("{expected} saved · {valid} resolve · {runtime_bound} bind at run time"),
-            Tone::Warn,
+            Tone::Neutral,
         )
     } else {
-        (format!("{expected} saved · all resolve"), Tone::Ok)
+        (format!("{expected} saved"), Tone::Neutral)
     }
 }
 
@@ -702,12 +686,13 @@ fn status_cell(
     match report
         .map(rspice_simulation::output_contract::SavedOutputPreflightReport::semantic_status)
     {
-        Some(SavedOutputSemanticStatus::Valid { .. }) => ("resolves".to_owned(), Tone::Ok),
+        // Resolving is the normal state, and says nothing.
+        Some(SavedOutputSemanticStatus::Valid { .. }) => (String::new(), Tone::Neutral),
         Some(SavedOutputSemanticStatus::RuntimeBound { .. }) => {
-            ("bound at run time".to_owned(), Tone::Warn)
+            ("bound at run time".to_owned(), Tone::Neutral)
         }
         Some(SavedOutputSemanticStatus::Invalid { reason }) => (reason.clone(), Tone::Error),
-        None => ("no preflight report".to_owned(), Tone::Error),
+        None => ("not checked".to_owned(), Tone::Neutral),
     }
 }
 
@@ -1655,7 +1640,7 @@ mod tests {
             output_registry_summary(statuses.iter(), statuses.len()),
             (
                 "2 saved · 1 resolve · 1 bind at run time".to_owned(),
-                Tone::Warn,
+                Tone::Neutral,
             ),
         );
     }

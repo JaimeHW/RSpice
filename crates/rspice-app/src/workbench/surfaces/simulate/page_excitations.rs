@@ -91,12 +91,12 @@ pub(super) fn show(
     // would dispatch, so a source only it names is one the run drives without
     // reading.
     let unread = sources.iter().filter(|source| !source.is_read()).count();
-    let (verdict, verdict_tone) = verdict(sources, ports);
+    let verdict = verdict(sources, ports);
 
     card(
         ui,
         "Placed excitations",
-        Some((verdict.as_str(), verdict_tone)),
+        verdict.as_ref().map(|(text, tone)| (text.as_str(), *tone)),
         |ui| {
             if sources.is_empty() && ports.is_empty() {
                 card_note(
@@ -160,7 +160,10 @@ pub(super) fn show(
 /// ordinary state of an RF testbench swept in the time domain rather than a
 /// finding. The one design where nothing reading the ports is the finding is
 /// the one with nothing else to read.
-fn verdict(sources: &[PlacedSource], ports: &[PlacedRfPort]) -> (String, Tone) {
+///
+/// A design whose excitations are all read says nothing: success is the
+/// absence of a status.
+fn verdict(sources: &[PlacedSource], ports: &[PlacedRfPort]) -> Option<(String, Tone)> {
     let unread = sources.iter().filter(|source| !source.is_read()).count();
     let adopted = sources
         .iter()
@@ -175,9 +178,9 @@ fn verdict(sources: &[PlacedSource], ports: &[PlacedRfPort]) -> (String, Tone) {
             )
         })
         .count();
-    let stated = |text: &str, tone| (text.to_owned(), tone);
+    let stated = |text: &str, tone| Some((text.to_owned(), tone));
     if sources.is_empty() && ports.is_empty() {
-        stated("no sources placed", Tone::Warn)
+        stated("no sources placed", Tone::Neutral)
     } else if ports.iter().any(PlacedRfPort::is_read) && !duplicate_port_numbers(ports).is_empty() {
         // Only once something indexes them. Two ports sharing a number is a
         // defect the moment a run addresses one by number, and until then it is
@@ -190,16 +193,14 @@ fn verdict(sources: &[PlacedSource], ports: &[PlacedRfPort]) -> (String, Tone) {
         // the unread finding because an unread source still drives the
         // circuit, while a source behind its definition drives it with a card
         // the project no longer describes.
-        (
+        Some((
             format!("{adopted} adopted \u{00b7} {behind} behind"),
             Tone::Warn,
-        )
+        ))
     } else if unread > 0 {
         stated("sources with no reader", Tone::Warn)
-    } else if !sources.is_empty() {
-        stated("every source is read", Tone::Ok)
-    } else if ports.iter().any(PlacedRfPort::is_read) {
-        stated("S-parameter ports drive this design", Tone::Ok)
+    } else if !sources.is_empty() || ports.iter().any(PlacedRfPort::is_read) {
+        None
     } else {
         stated("ports with no S-parameter run", Tone::Warn)
     }
@@ -280,7 +281,7 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
         &EXCITATION_COLUMNS,
         &[
             (source.reference.as_str(), Tone::Neutral),
-            (source.quantity(), Tone::Accent),
+            (source.quantity(), Tone::Text),
             (occurrence.as_str(), Tone::Neutral),
             (summary.as_str(), Tone::Neutral),
             (terminals.as_str(), Tone::Neutral),
@@ -305,20 +306,21 @@ fn excitation_row(ui: &mut Ui, state: &AppState, source: &PlacedSource) -> egui:
     ))
 }
 
-/// What the Definition cell's colour says.
+/// What the Definition cell's mark says.
 ///
-/// Only a state a reader has to act on takes a colour. `behind` and
+/// Only a state a reader has to act on takes a mark. `behind` and
 /// `definition removed` are the library having moved out from under the
 /// instance, which is a finding; `modified` is a deliberate local edit, which
-/// is worth marking but is not a defect; everything else is the ordinary state
-/// and stays in the metadata register with the cells beside it.
+/// the cell's words already state; everything else is the ordinary state and
+/// stays in the metadata register with the cells beside it.
 fn definition_tone(provenance: ProvenanceState) -> Tone {
     match provenance {
         ProvenanceState::Behind { .. }
         | ProvenanceState::ModifiedBehind { .. }
         | ProvenanceState::Removed { .. } => Tone::Warn,
-        ProvenanceState::Modified { .. } => Tone::Accent,
-        ProvenanceState::FromSchematic | ProvenanceState::Adopted { .. } => Tone::Neutral,
+        ProvenanceState::Modified { .. }
+        | ProvenanceState::FromSchematic
+        | ProvenanceState::Adopted { .. } => Tone::Neutral,
     }
 }
 
@@ -468,7 +470,7 @@ fn port_row(ui: &mut Ui, state: &AppState, port: &PlacedRfPort) -> egui::Respons
         &EXCITATION_COLUMNS,
         &[
             (port.reference.as_str(), Tone::Neutral),
-            (port.quantity(), Tone::Accent),
+            (port.quantity(), Tone::Text),
             (occurrence.as_str(), Tone::Neutral),
             (summary.as_str(), Tone::Neutral),
             (terminals.as_str(), Tone::Neutral),
@@ -680,20 +682,16 @@ mod tests {
         assert!(many.contains("They are still netlisted"), "{many}");
     }
 
-    /// The chip this lane exists for.
-    ///
     /// An S-parameter testbench places its excitations as RF ports, and this
     /// page told the reader the design places no sources at all — a warning, on
-    /// the correct setup of the flow the product is sharpest at.
+    /// the correct setup of the flow the product is sharpest at. Driven is the
+    /// normal state, so the card says nothing.
     #[test]
-    fn an_s_parameter_bench_driven_by_ports_reads_as_driven() {
+    fn an_s_parameter_bench_driven_by_ports_states_nothing() {
         let schematic =
             schematic_with(vec![rf_port(1, "P1", "port=1"), rf_port(2, "P2", "port=2")]);
         let ports = placed_rf_ports(&schematic, Some(&plan_with(AnalysisKind::SParameter, true)));
-        assert_eq!(
-            verdict(&[], &ports),
-            ("S-parameter ports drive this design".to_owned(), Tone::Ok)
-        );
+        assert_eq!(verdict(&[], &ports), None);
     }
 
     /// The note names the numbers, because they are what the reader opens next.
@@ -716,23 +714,24 @@ mod tests {
         let read = placed_rf_ports(&schematic, Some(&plan_with(AnalysisKind::SParameter, true)));
         assert_eq!(
             verdict(&[], &read),
-            ("ports share a number".to_owned(), Tone::Warn)
+            Some(("ports share a number".to_owned(), Tone::Warn))
         );
 
         let unread = placed_rf_ports(&schematic, None);
         assert_eq!(
             verdict(&[], &unread),
-            ("ports with no S-parameter run".to_owned(), Tone::Warn),
+            Some(("ports with no S-parameter run".to_owned(), Tone::Warn)),
             "with nothing indexing them the bench is unfinished, not miswired"
         );
     }
 
-    /// A design with nothing on it still says so, in the words it always used.
+    /// A design with nothing on it still says so, in the words it always used,
+    /// as a plain empty state rather than a warning.
     #[test]
     fn a_design_that_places_nothing_still_states_that_it_places_nothing() {
         assert_eq!(
             verdict(&[], &[]),
-            ("no sources placed".to_owned(), Tone::Warn)
+            Some(("no sources placed".to_owned(), Tone::Neutral))
         );
     }
 
@@ -750,7 +749,7 @@ mod tests {
             let ports = placed_rf_ports(&schematic, plan.as_ref());
             assert_eq!(
                 verdict(&[], &ports),
-                ("ports with no S-parameter run".to_owned(), Tone::Warn),
+                Some(("ports with no S-parameter run".to_owned(), Tone::Warn)),
                 "{plan:?}"
             );
         }
@@ -771,7 +770,8 @@ mod tests {
         let ports = placed_rf_ports(&schematic, Some(&transient));
         assert_eq!(
             verdict(&sources, &ports),
-            ("every source is read".to_owned(), Tone::Ok)
+            None,
+            "every source read is the normal state, and states nothing"
         );
 
         let ac_only = plan_with(AnalysisKind::Ac, true);
@@ -779,7 +779,7 @@ mod tests {
         let ports = placed_rf_ports(&schematic, Some(&ac_only));
         assert_eq!(
             verdict(&sources, &ports),
-            ("sources with no reader".to_owned(), Tone::Warn),
+            Some(("sources with no reader".to_owned(), Tone::Warn)),
             "a PULSE carries no AC magnitude, so an AC-only plan reads it not at all"
         );
     }
@@ -896,14 +896,14 @@ mod tests {
         let sources = placed_sources(&schematic, &library, None);
         assert_eq!(
             verdict(&sources, &[]),
-            ("1 adopted · 1 behind".to_owned(), Tone::Warn)
+            Some(("1 adopted · 1 behind".to_owned(), Tone::Warn))
         );
 
         let (schematic, library) = adopted_design(1);
         let sources = placed_sources(&schematic, &library, None);
         assert_eq!(
             verdict(&sources, &[]),
-            ("sources with no reader".to_owned(), Tone::Warn),
+            Some(("sources with no reader".to_owned(), Tone::Warn)),
             "with nothing behind, the page states the finding it always stated"
         );
     }

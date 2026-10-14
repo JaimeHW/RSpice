@@ -642,11 +642,7 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
         "Retained runs holding its results",
         retained_runs.to_string(),
     )
-    .explained(
-        PlanRemovalTone::Aside,
-        "Retained results stay in the project and stay readable. What they lose is the \
-         configuration they can be traced back to.",
-    );
+    .explained(PlanRemovalTone::Aside, "Results of earlier runs are kept.");
     // Always "none" — a dependent sends the request to the refusal above and
     // never reaches this review. It is still stated, because a reader deciding
     // what retained results cost needs to know that nothing else is at stake.

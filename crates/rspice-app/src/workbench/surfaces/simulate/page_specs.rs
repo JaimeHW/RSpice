@@ -276,12 +276,12 @@ impl Evidence {
                 member,
             } if *points > 1 => (
                 format!(
-                    "{} {} · worst of {points} retained{}",
+                    "{} {} · worst of {points}{}",
                     super::output_evidence::quantity(*value),
                     spec.unit,
                     worst_member_suffix(member.as_ref())
                 ),
-                Tone::Warn,
+                Tone::Dim,
             ),
             Self::Fail {
                 value,
@@ -289,20 +289,20 @@ impl Evidence {
                 member,
             } if *points > 1 => (
                 format!(
-                    "{} {} · worst of {points} retained{}",
+                    "{} {} · worst of {points}{}",
                     super::output_evidence::quantity(*value),
                     spec.unit,
                     worst_member_suffix(member.as_ref())
                 ),
-                Tone::Error,
+                Tone::Fail,
             ),
             Self::Pass { value, .. } => (
                 format!("{} {}", super::output_evidence::quantity(*value), spec.unit),
-                Tone::Ok,
+                Tone::Dim,
             ),
             Self::Fail { value, .. } => (
                 format!("{} {}", super::output_evidence::quantity(*value), spec.unit),
-                Tone::Error,
+                Tone::Fail,
             ),
             // The population, then the gate it was judged against, then the
             // worst trial that route back to it. A yield verdict that showed
@@ -322,10 +322,10 @@ impl Evidence {
                     spec.unit,
                     worst_member_suffix(member.as_ref())
                 ),
-                if *clears { Tone::Ok } else { Tone::Error },
+                if *clears { Tone::Dim } else { Tone::Fail },
             ),
             Self::MeasurementFailed => ("measurement failed".to_owned(), Tone::Error),
-            Self::None => ("no evidence".to_owned(), Tone::Warn),
+            Self::None => ("no evidence".to_owned(), Tone::Neutral),
         }
     }
 }
@@ -532,11 +532,12 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
             };
             // Leads the cell rather than trailing it. A verdict read without
             // its coverage is the false sign-off this page exists to prevent,
-            // and a cell that elides puts the trailing half out of sight.
+            // and a cell that elides puts the trailing half out of sight. The
+            // advisory marks the cell; it never recolours a failing verdict.
             if let Some(advisory) = coverage_advisory(&resolved, spec, governed) {
                 short_coverage += 1;
                 result = format!("{advisory} · {result}");
-                if tone == Tone::Ok || tone == Tone::Neutral {
+                if tone == Tone::Dim || tone == Tone::Neutral {
                     tone = Tone::Warn;
                 }
             }
@@ -612,7 +613,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     } else if unmapped > 0 || partial > 0 || unreachable_scope > 0 || short_coverage > 0 {
         Tone::Warn
     } else {
-        Tone::Ok
+        Tone::Neutral
     };
     let selected = app.state.workbench.selected_specification.clone();
     let classes: Vec<String> = SpecificationEvidenceFilter::ALL
@@ -676,10 +677,10 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     &REGISTRY_COLUMNS,
                     &[
                         ("No specifications", Tone::Neutral),
-                        ("nothing judges this plan's results", Tone::Warn),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
-                        ("—", Tone::Neutral),
+                        ("", Tone::Neutral),
+                        ("", Tone::Neutral),
+                        ("", Tone::Neutral),
+                        ("", Tone::Neutral),
                     ],
                     false,
                     RowPress::Ignored,
@@ -690,7 +691,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     ui,
                     &REGISTRY_COLUMNS,
                     &[
-                        ("No specification matches the filter", Tone::Warn),
+                        ("No specification matches the filter", Tone::Neutral),
                         (held.as_str(), Tone::Neutral),
                         ("—", Tone::Neutral),
                         ("—", Tone::Neutral),
@@ -708,11 +709,20 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                     ui,
                     &REGISTRY_COLUMNS,
                     &[
-                        (spec.measurement.as_str(), Tone::Accent),
+                        (spec.measurement.as_str(), Tone::Text),
                         (row.definition.as_str(), Tone::Neutral),
                         (row.limit.as_str(), Tone::Neutral),
                         (row.result.as_str(), row.tone),
-                        (row.margin.as_str(), row.tone),
+                        // The verdict's colour carries to its margin; a mark
+                        // is stated once, on the result.
+                        (
+                            row.margin.as_str(),
+                            if row.tone == Tone::Fail {
+                                Tone::Fail
+                            } else {
+                                Tone::Dim
+                            },
+                        ),
                     ],
                     selected.as_deref() == Some(spec.measurement.as_str()),
                     RowPress::Taken,
@@ -1257,16 +1267,7 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
     let mut picked_missing = None;
     let mut picked_regression = None;
     let mut picked_monte_carlo = None;
-    let policy_tone = if matches!(
-        policy.missing_measurement,
-        MissingMeasurementPolicy::FailClosed
-    ) && matches!(policy.nominal_failure, NominalFailurePolicy::Block)
-    {
-        ("fail closed", Tone::Ok)
-    } else {
-        ("review dispositions enabled", Tone::Warn)
-    };
-    card(ui, "Evaluation policy", Some(policy_tone), |ui| {
+    card(ui, "Evaluation policy", None, |ui| {
         card_body(ui, |ui| {
             rule_row(ui, "Evidence dataset", &dataset);
             rule_row(ui, "Dataset acceptance", &acceptance);

@@ -100,7 +100,7 @@ pub(super) fn capture_groups(
                     if selection_error.is_some() || over_budget {
                         Tone::Error
                     } else if indeterminate == 0 {
-                        Tone::Ok
+                        Tone::Neutral
                     } else {
                         Tone::Warn
                     },
@@ -167,16 +167,9 @@ pub(super) fn capture_groups(
                     ui,
                     &GROUP_COLUMNS,
                     &[
-                        (row.name.as_str(), Tone::Accent),
+                        (row.name.as_str(), Tone::Text),
                         (row.policy.as_str(), Tone::Neutral),
-                        (
-                            outputs_cell.as_str(),
-                            if row.outputs == 0 {
-                                Tone::Neutral
-                            } else {
-                                Tone::Accent
-                            },
-                        ),
+                        (outputs_cell.as_str(), Tone::Neutral),
                         (bytes_cell.as_str(), Tone::Neutral),
                         (
                             indeterminate_cell.as_str(),
@@ -338,11 +331,7 @@ fn stage_group_removal(
         )
         .explained(
             PlanRemovalTone::Warn,
-            format!(
-                "The outputs above fall back to {UNGROUPED_NAME}, which overrides nothing: each \
-                 one reverts to the save policy, precision and streaming its own record declares, \
-                 and the plan's forecast changes with them."
-            ),
+            format!("These outputs move to {UNGROUPED_NAME} and lose the group's overrides."),
         ),
         PlanRemovalConsequence::stated(
             "Overrides it applies",
@@ -353,11 +342,7 @@ fn stage_group_removal(
             },
         ),
         PlanRemovalConsequence::stated("Rules it resolves by", group.rules.len().to_string())
-            .explained(
-                PlanRemovalTone::Aside,
-                "Removing a group removes a capture policy, never an output. Every output it held \
-                 stays in the registry and is still captured by the run.",
-            ),
+            .explained(PlanRemovalTone::Aside, "Its outputs are still captured."),
     ];
     state.dialogs.plan_removal_review.open(
         PlanRemovalTarget::CaptureGroup { plan, id },

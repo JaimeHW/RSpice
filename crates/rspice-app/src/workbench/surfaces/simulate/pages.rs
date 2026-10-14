@@ -105,7 +105,7 @@ pub(super) fn plan_configuration_receipts(ui: &mut Ui, app: &RSpiceApp) {
                 .map(|receipt| ReceiptRow {
                     sequence: receipt.sequence().to_string(),
                     action: receipt.detail().to_owned(),
-                    tone: Tone::Ok,
+                    tone: Tone::Neutral,
                     revision: format!(
                         "{} → {}",
                         receipt.source_revision().get(),

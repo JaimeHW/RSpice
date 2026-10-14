@@ -262,7 +262,7 @@ fn a_saved_output_offers_the_trace_it_stored() {
 fn the_resolved_point_table_offers_each_point_its_family_member() {
     let rendered = render_with(SimulationPage::RunSet, 1400.0, |_| {});
     assert!(
-        rendered.contains("FAMILY"),
+        rendered.lines().any(|line| line.trim() == "Family"),
         "the point table carries a column for the route out:\n{rendered}"
     );
     assert!(

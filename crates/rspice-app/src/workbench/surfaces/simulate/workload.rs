@@ -633,7 +633,7 @@ pub(super) fn task_rate_card(
                     (
                         rate.as_str(),
                         if row.tasks_per_point > 1 {
-                            Tone::Accent
+                            Tone::Text
                         } else {
                             Tone::Neutral
                         },
