@@ -17,9 +17,10 @@ use rspice_results::{
     waveform::RetainedWaveform,
 };
 use rspice_ui_kit::{
+    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{SegmentedWidth, chip, section_header, segmented},
+    widgets::{SegmentedWidth, chip, segmented},
 };
 use std::collections::BTreeSet;
 const ROW_HEIGHT: f32 = 28.0;

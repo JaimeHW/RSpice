@@ -18,10 +18,11 @@ use rspice_results::{
     waveform::RetainedWaveform,
 };
 use rspice_ui_kit::{
+    panels::section_header,
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Problem, measurement_table, paint_problem_mark, section_header},
+    widgets::{Problem, measurement_table, paint_problem_mark},
 };
 
 /// How a status cell reads: a failure in the error tone behind its mark, a

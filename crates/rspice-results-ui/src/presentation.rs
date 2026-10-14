@@ -1,7 +1,8 @@
 //! Shared result plot navigation, readout cards and status presentation.
 
 use egui::{Ui, WidgetInfo, WidgetType};
-use rspice_ui_kit::panels::inspector::{INSPECTOR_TEXT_INSET, toned_inspector_copy};
+use rspice_ui_kit::panels::inspector::toned_inspector_copy;
+use rspice_ui_kit::panels::panel_inset;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 
@@ -187,7 +188,8 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
-    let (name_width, value_width) = stat_column_widths(width);
+    let inset = panel_inset(ui);
+    let (name_width, value_width) = stat_column_widths(width, inset);
     for (i, (name, value, highlight)) in rows.iter().enumerate() {
         let name_galley = ui.painter().layout(
             (*name).to_owned(),
@@ -215,7 +217,7 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
         }
         let painter = ui.painter();
         let name_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + INSPECTOR_TEXT_INSET, rect.top() + 4.0),
+            egui::pos2(rect.left() + inset, rect.top() + 4.0),
             egui::vec2(name_width, row_height - 8.0),
         );
         let value_rect = egui::Rect::from_min_size(
@@ -240,10 +242,10 @@ pub fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     }
 }
 
-/// The table's two columns inside the inspector's text inset on both sides.
-fn stat_column_widths(width: f32) -> (f32, f32) {
+/// The table's two columns inside the panel inset on both sides.
+fn stat_column_widths(width: f32, inset: f32) -> (f32, f32) {
     const GAP: f32 = 8.0;
-    let content = (width - 2.0 * INSPECTOR_TEXT_INSET - GAP).max(0.0);
+    let content = (width - 2.0 * inset - GAP).max(0.0);
     let name = content * 0.42;
     (name, content - name)
 }

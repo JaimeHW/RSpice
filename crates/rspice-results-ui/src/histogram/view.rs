@@ -9,14 +9,13 @@ use rspice_results::histogram::display::{HistogramDisplay, hist_axis};
 use rspice_results::histogram::{Histogram, HistogramDisplayMode, SampleMoments};
 use rspice_results::monte_carlo::{MonteCarloMeanConfidence, MonteCarloMeanInterval};
 use rspice_results::yield_analysis::YieldResult;
-use rspice_ui_kit::panels::inspector::inspector_inset;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::panels::{
-    PROPERTY_ROW_TRAILING_PAD, property_row_control_columns, property_row_height,
+    panel_body, panel_inset, property_row_control_columns, property_row_height,
 };
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::section_header;
 
 /// Why the host cannot supply a qualified selected distribution.
 #[derive(Clone, Copy)]
@@ -426,7 +425,7 @@ pub fn range_controls(
     current_range: Option<(f64, f64)>,
 ) -> bool {
     section_header(ui, "Display range", None);
-    let mut range_changed = inspector_inset(ui, |ui| {
+    let mut range_changed = panel_body(ui, |ui| {
         ui.checkbox(&mut settings.custom_range, "Custom range")
             .changed()
     });
@@ -450,7 +449,8 @@ pub fn range_controls(
 fn bound_row(ui: &mut Ui, label: &str, value: &mut f64) -> bool {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (label_left, value_left) = property_row_control_columns(width);
+    let trailing = panel_inset(ui);
+    let (label_left, value_left) = property_row_control_columns(ui, width);
     let (rect, _) = ui.allocate_exact_size(
         egui::vec2(width, property_row_height(ui)),
         egui::Sense::hover(),
@@ -464,7 +464,7 @@ fn bound_row(ui: &mut Ui, label: &str, value: &mut f64) -> bool {
     );
     let value_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + value_left, rect.top()),
-        egui::pos2(rect.right() - PROPERTY_ROW_TRAILING_PAD, rect.bottom()),
+        egui::pos2(rect.right() - trailing, rect.bottom()),
     );
     let field = ui
         .scope_builder(

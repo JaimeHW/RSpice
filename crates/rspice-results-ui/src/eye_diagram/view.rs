@@ -14,10 +14,11 @@ use crate::eye_diagram::{
     EyeData, EyeRateEditor, EyeTimebase, EyeTimebaseProvenance, parse_eye_timebase,
 };
 use crate::presentation::PlotView;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::{chip, section_header};
+use rspice_ui_kit::widgets::chip;
 
 use crate::presentation::well_hint;
 use crate::strip::{self, LegendChip};

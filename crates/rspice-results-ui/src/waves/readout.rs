@@ -7,7 +7,7 @@ use super::{
 use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
-use rspice_ui_kit::panels::inspector::section_header_explained;
+use rspice_ui_kit::panels::section_header_explained;
 use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
     sample_branches_into,

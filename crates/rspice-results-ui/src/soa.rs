@@ -15,10 +15,10 @@ use rspice_results::{
     soa_evidence::{SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence},
 };
 use rspice_ui_kit::{
+    panels::section_header,
     plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::section_header,
 };
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
 const ROW_HEIGHT: f32 = 29.0;

@@ -15,11 +15,11 @@ use rspice_results::sensitivity::{
     SensitivityBasisEvidence, SensitivityStudyEvidence, SensitivityStudyRow, SensitivityValue,
 };
 use rspice_ui_kit::{
-    panels::inspector::inspector_inset,
+    panels::{panel_body, section_header},
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{measurement_table, section_header},
+    widgets::measurement_table,
 };
 use std::cmp::Ordering;
 
@@ -704,7 +704,7 @@ pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan
     let header_color = Tokens::get(ui.ctx()).color.text_faint;
     // The table scrolls inside the rows' inset, so its first column starts
     // where every label above it does rather than on the panel edge.
-    inspector_inset(ui, |ui| {
+    panel_body(ui, |ui| {
         egui::ScrollArea::both()
             .id_salt("rspice.results.sensitivity-study-ranked-table")
             .auto_shrink([false, true])

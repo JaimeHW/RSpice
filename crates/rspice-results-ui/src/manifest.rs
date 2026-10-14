@@ -9,9 +9,10 @@ use rspice_results::{
     saved_output::{SavedOutputMaterializationStatus, SavedOutputReceipt},
 };
 use rspice_ui_kit::{
+    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{measurement_table, section_header},
+    widgets::measurement_table,
 };
 const MIN_TABLE_WIDTH: f32 = 1_030.0;
 const TABLE_HEAD_HEIGHT: f32 = 27.0;

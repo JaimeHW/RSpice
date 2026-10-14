@@ -9,8 +9,7 @@ use rspice_results::report_document::{
 };
 use rspice_ui_kit::{
     panels::{
-        Problem, code_inspector_property_list, code_inspector_section,
-        inspector::inspector_problem, property_row, property_row_problem,
+        Problem, code_inspector_section, problem_line, property_row, property_row_problem,
     },
     theme::{self, FontWeight},
     tokens::{self, Tokens},
@@ -50,7 +49,7 @@ pub fn show(
             .id_salt("report-authoring.inspector")
             .show(ui, |ui| {
                 code_inspector_section(ui, "Output formats", None, None, |ui| {
-                    code_inspector_property_list(ui, |ui| {
+                    ui.scope(|ui| {
                         let mut output_formats = document.output_formats();
                         let enabled_count = [
                             output_formats.pdf_a,
@@ -105,7 +104,7 @@ pub fn show(
                     });
                 });
                 code_inspector_section(ui, "Publication", None, None, |ui| {
-                    code_inspector_property_list(ui, |ui| {
+                    ui.scope(|ui| {
                         let mut profile = document.publication_profile();
                         let mut changed = false;
                         changed |= inspector_publication_select(
@@ -205,7 +204,7 @@ pub fn show(
                     });
                 });
                 code_inspector_section(ui, "Release handoff", None, None, |ui| {
-                    code_inspector_property_list(ui, |ui| {
+                    ui.scope(|ui| {
                         let (bound_result, exact_binding) = host.bound_result_label(document);
                         property_row(ui, "Artifact identity", &document.id().to_string());
                         property_row(ui, "Bound result", &bound_result);
@@ -236,7 +235,7 @@ pub fn show(
                     ui.add_space(8.0);
                 });
                 if let Some(error) = host.transaction_error() {
-                    inspector_problem(ui, Problem::Failure, error);
+                    problem_line(ui, Problem::Failure, error);
                 }
             });
     });

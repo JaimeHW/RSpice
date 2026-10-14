@@ -3,7 +3,8 @@ use crate::presentation::panel_note;
 use rspice_core::engine::{
     QpnoiseAnalysisResult, QpnoiseObservation, QpnoiseUnavailable, QpnoiseValue, QpxfQuantity,
 };
-use rspice_ui_kit::widgets::{measurement_table, section_header};
+use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::widgets::measurement_table;
 
 fn value(v: QpnoiseValue, unit: &str) -> String {
     match v {

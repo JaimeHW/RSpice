@@ -19,10 +19,11 @@ use egui::{Sense, Ui, WidgetInfo, WidgetType};
 use crate::waveform::WaveformData;
 use rspice_results::{analysis_type::AnalysisType, family_metadata::AnalysisResultFamilyMetadata};
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::fmt_si;
 use rspice_ui_kit::theme::{self, FontWeight, paint_focus_ring};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::{SegmentedWidth, chip, section_header, segmented, select};
+use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select};
 
 use crate::presentation::well_hint;
 use crate::strip::{self, LegendChip};

@@ -11,11 +11,10 @@
 
 use egui::Ui;
 
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, InteractionMode, PlotSpec, XScale, fmt_si};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::{
-    SegmentedWidth, chip, section_header, segmented, select, select_with_disabled,
-};
+use rspice_ui_kit::widgets::{SegmentedWidth, chip, segmented, select, select_with_disabled};
 
 use crate::presentation::well_hint;
 use crate::strip::{self, LegendChip};

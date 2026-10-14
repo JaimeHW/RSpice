@@ -5,7 +5,7 @@ use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_core::engine::{QpacAnalysisResult, QpxfAnalysisResult};
 use rspice_results::bode::AcBodeMetrics;
 use rspice_results::waveform::SharedWaveformValues;
-use rspice_ui_kit::widgets::section_header;
+use rspice_ui_kit::panels::section_header;
 
 /// The selected response and the evidence its inspector may display.
 pub enum BodeInspector<'a> {

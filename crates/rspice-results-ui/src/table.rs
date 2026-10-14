@@ -19,9 +19,10 @@ use rspice_results::{
     result_presentation::{AnalysisPresentationKey, TracePresentationKey},
 };
 use rspice_ui_kit::{
+    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{chip, measurement_table, section_header},
+    widgets::{chip, measurement_table},
 };
 use std::borrow::Cow;
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;

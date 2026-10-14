@@ -2,10 +2,11 @@
 
 use egui::{Align2, Sense, Ui};
 use rspice_results::noise::NoiseSummary;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{DecimationCache, fmt_si};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::{measurement_table, section_header};
+use rspice_ui_kit::widgets::measurement_table;
 
 mod figure;
 

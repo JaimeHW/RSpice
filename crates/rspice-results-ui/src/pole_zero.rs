@@ -11,9 +11,9 @@ use rspice_results::pole_zero::{
     metrics::{pole_stability, summarize_roots},
 };
 use rspice_ui_kit::{
+    panels::section_header,
     plot::{self, Axis, PlotSpec, XScale, fmt_si},
     tokens::Tokens,
-    widgets::section_header,
 };
 
 /// The plot response and header reset request to apply to the host's shared view.

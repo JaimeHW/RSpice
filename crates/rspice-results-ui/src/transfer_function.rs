@@ -9,9 +9,10 @@ use rspice_results::transfer_function::{
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 use rspice_ui_kit::{
+    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{measurement_table, section_header},
+    widgets::measurement_table,
 };
 
 /// Borrowed retained values and provenance labels selected and validated by the host.

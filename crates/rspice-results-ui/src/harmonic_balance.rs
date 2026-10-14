@@ -5,8 +5,8 @@ use crate::strip::{self, LegendChip};
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
 use rspice_results::waveform::SharedWaveformValues;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
-use rspice_ui_kit::widgets::section_header;
 use std::sync::Arc;
 
 pub mod recorded_fft;

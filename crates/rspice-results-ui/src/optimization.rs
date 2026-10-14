@@ -6,10 +6,10 @@ use crate::waveform::WaveformData;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 use rspice_results::{analysis_result::AnalysisResult, optimization::history::OptimizationView};
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::section_header;
 use std::collections::BTreeMap;
 
 /// History and display inputs qualified for the host's active analysis.

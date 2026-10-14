@@ -10,10 +10,11 @@ use rspice_results::operating_point::{
     },
 };
 use rspice_ui_kit::{
+    panels::section_header,
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Problem, measurement_table, paint_problem_mark, section_header},
+    widgets::{Problem, measurement_table, paint_problem_mark},
 };
 use std::{borrow::Cow, collections::BTreeMap};
 const NAME_W: f32 = 146.0;

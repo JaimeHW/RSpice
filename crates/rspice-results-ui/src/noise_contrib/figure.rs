@@ -2,10 +2,10 @@
 
 use egui::Ui;
 use rspice_results::noise::NoiseFigureEvidence;
-use rspice_ui_kit::panels::inspector::inspector_inset;
+use rspice_ui_kit::panels::{panel_body, section_header};
 use rspice_ui_kit::plot::{self, Axis, DecimationCache, PlotSpec, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::{measurement_table, section_header};
+use rspice_ui_kit::widgets::measurement_table;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -108,7 +108,7 @@ pub(super) fn show(ui: &mut Ui, figure: &Arc<NoiseFigureEvidence>, cache: &mut D
     }
     // Folded on the rows' inset: the fold's arrow and the sample lines under it
     // start where every label above them does, not on the panel edge.
-    inspector_inset(ui, |ui| {
+    panel_body(ui, |ui| {
         egui::CollapsingHeader::new("Exact noise-figure samples").show(ui, |ui| {
             egui::ScrollArea::vertical().max_height(180.0).show_rows(
                 ui,

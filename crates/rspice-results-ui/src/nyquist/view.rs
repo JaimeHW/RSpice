@@ -2,9 +2,9 @@
 
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::section_header;
 
 use super::{EncirclementCount, NyquistData, NyquistMargin};
 use crate::presentation::{PlotView, well_hint};

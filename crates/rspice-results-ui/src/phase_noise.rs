@@ -9,9 +9,9 @@ use rspice_results::analysis_result::AnalysisResult;
 use rspice_results::phase_noise::{
     exact_retained_value_at, retained_device_noise_shares, retained_measurement,
 };
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale};
 use rspice_ui_kit::tokens::Tokens;
-use rspice_ui_kit::widgets::section_header;
 
 /// A retained phase-noise trace qualified by the host's source gate.
 pub struct PhaseNoiseTrace<'a> {
@@ -202,7 +202,7 @@ pub fn right_panel(
     ];
     crate::presentation::stat_table(ui, &rows);
     // The fold sits on the rows' inset rather than on the panel edge.
-    rspice_ui_kit::panels::inspector::inspector_inset(ui, |ui| {
+    rspice_ui_kit::panels::panel_body(ui, |ui| {
         ui.collapsing("Device noise shares", |ui| {
             let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
             if shares.is_empty() {
