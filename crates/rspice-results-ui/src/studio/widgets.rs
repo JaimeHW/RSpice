@@ -43,6 +43,8 @@ pub fn paint_bottom_rule(ui: &Ui, rect: Rect, color: Color32) {
         .hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, color));
 }
 
+/// A Studio panel's heading: its title as written (sentence case) with
+/// faint metadata at the trailing edge.
 pub fn panel_heading(ui: &mut Ui, title: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE
@@ -52,7 +54,7 @@ pub fn panel_heading(ui: &mut Ui, title: &str, detail: &str) {
             ui.set_min_height(PANEL_HEADING_HEIGHT);
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(title.to_uppercase())
+                    RichText::new(title)
                         .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                         .color(t.color.text_dim),
                 );
@@ -67,10 +69,11 @@ pub fn panel_heading(ui: &mut Ui, title: &str, detail: &str) {
         });
 }
 
+/// A Studio table's column header, painted as written (sentence case).
 pub fn table_header(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
-        RichText::new(label.to_uppercase())
+        RichText::new(label)
             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
             .color(t.color.text_faint),
     );

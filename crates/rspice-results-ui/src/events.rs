@@ -255,7 +255,7 @@ fn show_current_impulse_tables(
             .column(Column::initial(100.0).clip(true))
             .column(Column::initial(120.0).clip(true))
             .header(HEADER_HEIGHT, |mut header| {
-                for label in ["CURRENT", "EVENTS", "COVERAGE"] {
+                for label in ["Current", "Events", "Coverage"] {
                     header.col(|ui| table_header(ui, label));
                 }
             })
@@ -299,7 +299,7 @@ fn show_current_impulse_tables(
         .column(Column::remainder().at_least(100.0).clip(true))
         .column(Column::initial(210.0).clip(true))
         .header(HEADER_HEIGHT, |mut header| {
-            for label in ["TIME (s)", "CURRENT", "SIGNED CHARGE (C)"] {
+            for label in ["Time (s)", "Current", "Signed charge (C)"] {
                 header.col(|ui| table_header(ui, label));
             }
         })
@@ -411,12 +411,12 @@ pub fn show<W: AsRef<RetainedWaveform>>(ui: &mut Ui, source: &EventView<'_, W>) 
                 .column(Column::initial(112.0).clip(true))
                 .header(HEADER_HEIGHT, |mut header| {
                     for label in [
-                        "EVENT",
-                        "PHYSICAL TIME",
-                        "SIGNAL",
-                        "VALUE",
-                        "DOMAIN",
-                        "KIND",
+                        "Event",
+                        "Physical time",
+                        "Signal",
+                        "Value",
+                        "Domain",
+                        "Kind",
                     ] {
                         header.col(|ui| table_header(ui, label));
                     }

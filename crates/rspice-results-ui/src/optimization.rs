@@ -258,13 +258,13 @@ pub fn show(
             table
                 .column(Column::remainder().at_least(110.0))
                 .header(31.0, |mut header| {
-                    header.col(|ui| table_header(ui, "ITERATION"));
-                    header.col(|ui| table_header(ui, "COST"));
-                    header.col(|ui| table_header(ui, "Δ FROM BEST"));
+                    header.col(|ui| table_header(ui, "Iteration"));
+                    header.col(|ui| table_header(ui, "Cost"));
+                    header.col(|ui| table_header(ui, "Δ from best"));
                     for (name, _) in &visible_variables {
                         header.col(|ui| table_header(ui, name));
                     }
-                    header.col(|ui| table_header(ui, "DISPOSITION"));
+                    header.col(|ui| table_header(ui, "Disposition"));
                 })
                 // Only the candidates the viewport can show. An optimizer run
                 // is thousands of iterations long, and every row here formats

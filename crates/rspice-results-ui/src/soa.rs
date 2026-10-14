@@ -363,14 +363,14 @@ pub fn show(
                 .column(Column::initial(210.0))
                 .header(31.0, |mut header| {
                     for label in [
-                        "DEVICE",
-                        "RULE",
-                        "OBSERVED",
-                        "LIMIT",
-                        "MARGIN",
-                        "WORST INTERVAL",
-                        "STATUS",
-                        "OPEN",
+                        "Device",
+                        "Rule",
+                        "Observed",
+                        "Limit",
+                        "Margin",
+                        "Worst interval",
+                        "Status",
+                        "Open",
                     ] {
                         header.col(|ui| table_header(ui, label));
                     }
