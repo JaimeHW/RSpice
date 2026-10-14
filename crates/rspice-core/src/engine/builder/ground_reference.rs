@@ -33,12 +33,15 @@
 //! exists, so every device and internal node is built against the final
 //! numbering and nothing is renumbered afterwards.
 //!
-//! A terminal a card leaves out, which the card's syntax ties to node 0 (a
-//! three-terminal BJT's substrate, a generated model's omitted thermal node,
-//! an unconnected Verilog-A port), does not count: it joins the chosen
-//! reference, as it would had the deck named that net 0. Nor does a node a
-//! module keeps as private state, such as a potential that carries a charge,
-//! or a thermal port's tie to ambient.
+//! A terminal a card leaves out does not count. Where the card letter's
+//! syntax ties it to node 0 (a Q card's substrate and thermal node), it joins
+//! the chosen reference, as it would had the deck named that net 0. Anywhere
+//! else (a Verilog-A port an X card leaves out, or one a card routed to a
+//! generated model does) it is a net of the instance's own, which does not
+//! touch node 0, so it neither keeps the reference nor takes it: a module's
+//! branch from it to ground counts only through a port the card connects.
+//! Nor does a node a module keeps as private state, such as a potential that
+//! carries a charge, or a thermal port's tie to ambient.
 //!
 //! A native device is judged by its card alone. A Verilog-A or Verilog-AMS
 //! module is judged by its equations, read from its canonical IR by

@@ -294,7 +294,7 @@ pub(super) fn runtime_instance_ports(
 /// Ports of a generated model, labelled as the model's catalog labels them.
 ///
 /// The first `authored` terminals connect to the card's nodes in order; the
-/// rest are ground the card left out. `aliases` are the card's other
+/// rest are the card's omitted terminals. `aliases` are the card's other
 /// spellings of a terminal's current.
 #[cfg(feature = "veriloga-builtins-base")]
 fn catalog_ports(

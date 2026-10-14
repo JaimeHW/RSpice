@@ -3278,9 +3278,8 @@ impl VerilogADevice {
             not(feature = "native"),
             not(all(feature = "wasm-jit", target_arch = "wasm32"))
         ))]
-        let one_step_dae_split_safe = canonical_artifact.is_some_and(|artifact| {
-            crate::canonical_ir::charge::one_step_dae_split_safe(artifact)
-        });
+        let one_step_dae_split_safe =
+            canonical_artifact.is_some_and(crate::canonical_ir::charge::one_step_dae_split_safe);
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
@@ -5443,6 +5442,35 @@ impl VerilogADevice {
     pub fn try_set_internal_node_indices(&mut self, indices: &[usize]) -> Result<(), VmError> {
         Self::validate_solver_indices("internal-node", indices, self.internal_node_indices.len())?;
         self.internal_node_indices.copy_from_slice(indices);
+        self.rebuild_matrix_indices();
+        Ok(())
+    }
+
+    /// Place the trailing terminals the card left out, one circuit node each,
+    /// in terminal order. `$port_connected` still reads them unconnected.
+    ///
+    /// Until this is called they sit on node 0. The Verilog-AMS LRM makes an
+    /// unconnected port's net an implicit net local to the instance instead,
+    /// as OSDI simulators build it: a module that ties such a port itself,
+    /// `Temp(t) <+ 0`, then ties its own net rather than stamping a branch
+    /// from ground to ground.
+    pub fn try_set_unconnected_terminal_indices(
+        &mut self,
+        indices: &[usize],
+    ) -> Result<(), VmError> {
+        let connected = self
+            .context
+            .port_connected
+            .iter()
+            .take_while(|connected| **connected != 0)
+            .count()
+            .min(self.node_mapping.len());
+        Self::validate_solver_indices(
+            "unconnected-terminal",
+            indices,
+            self.node_mapping.len() - connected,
+        )?;
+        self.node_mapping[connected..].copy_from_slice(indices);
         self.rebuild_matrix_indices();
         Ok(())
     }

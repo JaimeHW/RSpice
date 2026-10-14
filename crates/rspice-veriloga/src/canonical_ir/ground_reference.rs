@@ -33,6 +33,14 @@
 //!
 //! A port is electrical when its discipline's potential is a voltage or its
 //! flow a current; a thermal port's ground is ambient, not node 0.
+//!
+//! A port counts only when the card connects it. One the card leaves out is a
+//! net of the instance's own, as the Verilog-AMS LRM makes an unconnected
+//! port's net, so a branch from it to ground ties that net alone and connects
+//! node 0 to the circuit only through a port the card does connect. The
+//! summary therefore joins every electrical port to one group for the circuit
+//! under that port's `$port_connected`, and asks whether the circuit reaches
+//! ground.
 
 use std::collections::HashMap;
 
@@ -55,10 +63,11 @@ pub struct GroundReferenceSummary<'a> {
     guards: Vec<GroundGuardOp<'a>>,
 }
 
+/// Never `Always`: whether a port reaches ground depends on the card
+/// connecting it (see [`summarize`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SummaryKind {
     Never,
-    Always,
     Conditional,
 }
 
@@ -66,7 +75,6 @@ impl GroundReferenceSummary<'_> {
     pub fn view(&self) -> GroundReference<'_> {
         match self.kind {
             SummaryKind::Never => GroundReference::Never,
-            SummaryKind::Always => GroundReference::Always,
             SummaryKind::Conditional => GroundReference::Conditional(GroundReferenceGraph {
                 group_count: self.group_count,
                 port_groups: &self.port_groups,
@@ -656,6 +664,13 @@ impl<'a> Groups<'a> {
         let (low, high) = (left.min(right), left.max(right));
         self.parent[high as usize] = low;
     }
+
+    /// A group no net of the module's names.
+    fn fresh(&mut self) -> u32 {
+        let next = u32::try_from(self.parent.len()).expect("a module has fewer than 2^32 nets");
+        self.parent.push(next);
+        next
+    }
 }
 
 /// Make every join that always happens, and keep the ones an instance has to
@@ -696,27 +711,26 @@ fn summarize<'a>(hir: &'a HirModel, joins: Vec<RawJoin<'a>>) -> GroundReferenceS
         }
         decided.push((ends, guard));
     }
-    let ports: Vec<u32> = hir
-        .ports
-        .iter()
-        .filter(|port| {
-            port.nature_potential.as_deref() == Some("Voltage")
-                || port.nature_flow.as_deref() == Some("Current")
-        })
-        .filter_map(|port| groups.index.get(port.name.as_str()).copied())
-        .collect();
-    let ground = groups.root(0);
-    let mut port_roots: Vec<u32> = ports.iter().map(|&port| groups.root(port)).collect();
-    let fixed = |kind| GroundReferenceSummary {
-        kind,
-        group_count: 0,
-        port_groups: Vec::new(),
-        joins: Vec::new(),
-        guards: Vec::new(),
-    };
-    if port_roots.contains(&ground) {
-        return fixed(SummaryKind::Always);
+    // The circuit the card connects the module into. An electrical port joins
+    // it when the card connects that port. One the card leaves out is a net of
+    // the instance's own, as the Verilog-AMS LRM makes an unconnected port's
+    // net, so a branch from it to ground ties that net alone: it connects node
+    // 0 to the circuit only through a port the card does connect.
+    let circuit = groups.fresh();
+    for (index, port) in hir.ports.iter().enumerate() {
+        let electrical = port.nature_potential.as_deref() == Some("Voltage")
+            || port.nature_flow.as_deref() == Some("Current");
+        if let (true, Some(&group), Ok(index)) = (
+            electrical,
+            groups.index.get(port.name.as_str()),
+            u32::try_from(index),
+        ) {
+            decided.push(([circuit, group], vec![GroundGuardOp::PortConnected(index)]));
+        }
     }
+    // Only a guarded join reaches `circuit`, so no module reaches ground
+    // whatever the card connects: the summary is `Never` or `Conditional`.
+    let ground = groups.root(0);
     let decided: Vec<_> = decided
         .into_iter()
         .map(|([left, right], guard)| ([groups.root(left), groups.root(right)], guard))
@@ -730,9 +744,14 @@ fn summarize<'a>(hir: &'a HirModel, joins: Vec<RawJoin<'a>>) -> GroundReferenceS
     for ([left, right], _) in &decided {
         all.join(*left, *right);
     }
-    let ground_all = all.root(0);
-    if !port_roots.iter().any(|&port| all.root(port) == ground_all) {
-        return fixed(SummaryKind::Never);
+    if all.root(circuit) != all.root(0) {
+        return GroundReferenceSummary {
+            kind: SummaryKind::Never,
+            group_count: 0,
+            port_groups: Vec::new(),
+            joins: Vec::new(),
+            guards: Vec::new(),
+        };
     }
     // Number the groups the remaining joins and ports use, ground first.
     let mut numbering: Vec<u32> = vec![ground];
@@ -754,10 +773,7 @@ fn summarize<'a>(hir: &'a HirModel, joins: Vec<RawJoin<'a>>) -> GroundReferenceS
             guard: [start, len],
         });
     }
-    port_roots.dedup();
-    let mut port_groups: Vec<u32> = port_roots.into_iter().map(&mut number).collect();
-    port_groups.sort_unstable();
-    port_groups.dedup();
+    let port_groups = vec![number(groups.root(circuit))];
     GroundReferenceSummary {
         kind: SummaryKind::Conditional,
         group_count: u32::try_from(numbering.len()).expect("group count fits u32"),
@@ -864,6 +880,51 @@ mod tests {
         ] {
             assert_eq!(references_ground(body, &[], true), expected, "{body}");
         }
+    }
+
+    /// A port the card leaves out is a net of the instance's own: a branch
+    /// from it to ground ties that net alone, and connects node 0 to the
+    /// circuit only through a port the card connects.
+    #[test]
+    fn a_port_the_card_leaves_out_reaches_node_zero_only_through_a_connected_one() {
+        struct Card(&'static [bool]);
+        impl GroundReferenceInputs for Card {
+            fn parameter(&self, _: &str) -> Option<f64> {
+                None
+            }
+            fn parameter_given(&self, _: &str) -> Option<bool> {
+                None
+            }
+            fn port_connected(&self, port: u32) -> Option<bool> {
+                self.0.get(port as usize).copied()
+            }
+        }
+        let decide = |body: &str, card: &'static [bool]| {
+            ground_reference(&artifact(body))
+                .view()
+                .references_ground(&Card(card))
+        };
+        let both = &[true, true, true];
+        let n_left_out = &[true, false, false];
+        // `n` tied: it counts when the card connects it, not otherwise.
+        let tied = "analog V(n) <+ 0;";
+        assert!(decide(tied, both));
+        assert!(!decide(tied, n_left_out));
+        // Through a branch from a connected port, the tie still reaches it.
+        let through = "analog begin I(p, n) <+ V(p, n) / r; V(n) <+ 0; end";
+        assert!(decide(through, both));
+        assert!(decide(through, n_left_out));
+        // A connected port's own single-ended branch counts whatever the
+        // card leaves out.
+        let own = "analog begin I(p) <+ V(p) / r; V(n) <+ 0; end";
+        assert!(decide(own, n_left_out));
+        assert!(!decide(own, &[false, false, false]));
+        // An unknown connection counts, as any unknown guard does.
+        assert!(
+            ground_reference(&artifact(tied))
+                .view()
+                .references_ground(&Card(&[]))
+        );
     }
 
     /// A contribution under an `if` the instance's parameters decide counts

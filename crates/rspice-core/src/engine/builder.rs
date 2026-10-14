@@ -387,6 +387,11 @@ pub(super) struct VerilogAUnknownNames<'a> {
     /// One entry per branch unknown, in solver order; `None` for a source the
     /// module never named.
     pub(super) branches: &'a [Option<String>],
+    /// The declared names of the trailing terminals the card leaves out, in
+    /// terminal order. Each is a net of the instance's own, as the
+    /// Verilog-AMS LRM makes an unconnected port's net, so it is named as an
+    /// internal net is.
+    pub(super) unconnected: &'a [String],
 }
 
 /// A net name as the output layer compares it: case-insensitive, and with `:`
@@ -427,6 +432,11 @@ impl VerilogAUnknownNames<'_> {
         }
     }
 
+    /// A terminal the card leaves out: `X1.t` for the `index`th of them.
+    pub(super) fn unconnected_terminal(&self, instance: &str, index: usize) -> String {
+        format!("{instance}.{}", self.unconnected[index])
+    }
+
     /// And its branch currents `X1:b`, in the separate namespace Spectre gives
     /// them. A source the module never named has no name to take, so it keeps
     /// its ordinal.
@@ -449,8 +459,17 @@ impl VerilogAUnknownNames<'_> {
     ) -> Result<(), (crate::ElaborationErrorKind, String)> {
         let mut claimed: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
-        let candidates = (0..internal_count)
-            .map(|index| ("internal node", self.internal_node(instance, index)))
+        let candidates = (0..self.unconnected.len())
+            .map(|index| {
+                (
+                    "unconnected terminal",
+                    self.unconnected_terminal(instance, index),
+                )
+            })
+            .chain(
+                (0..internal_count)
+                    .map(|index| ("internal node", self.internal_node(instance, index))),
+            )
             .chain(
                 (0..branch_count)
                     .map(|index| ("branch current", self.branch_unknown(instance, index))),
@@ -488,6 +507,16 @@ fn bind_veriloga_solver_unknowns(
     device: &mut rspice_veriloga::device::VerilogADevice,
     names: &VerilogAUnknownNames<'_>,
 ) -> Result<(), String> {
+    // Before the internal nodes, so the numbering follows the module's own
+    // order, terminals first: the order a generated instance is built in.
+    let unconnected: Vec<_> = (0..names.unconnected.len())
+        .map(|index| circuit.get_or_create_node(&names.unconnected_terminal(instance, index)))
+        .collect();
+    if !unconnected.is_empty() {
+        device
+            .try_set_unconnected_terminal_indices(&unconnected)
+            .map_err(|error| error.to_string())?;
+    }
     let internal_nodes: Vec<_> = (0..device.num_internal_nodes())
         .map(|index| circuit.get_or_create_node(&names.internal_node(instance, index)))
         .collect();
@@ -8645,9 +8674,16 @@ impl Engine {
                                 model.internal_nodes,
                             );
                             let branch_names = veriloga_branch_unknown_names(model);
+                            let unconnected_names: Vec<String> = model
+                                .terminal_names
+                                .iter()
+                                .skip(element.nodes.len())
+                                .map(ToString::to_string)
+                                .collect();
                             let names = VerilogAUnknownNames {
                                 internal: &internal_names,
                                 branches: &branch_names,
+                                unconnected: &unconnected_names,
                             };
                             names
                                 .check_free(

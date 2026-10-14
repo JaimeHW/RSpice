@@ -566,9 +566,9 @@ fn a_deck_without_node_zero_matches_it_for_a_generated_resistor_r_card() {
     );
 }
 
-/// The R card leaves R2_ET_CMC's thermal node out, and the route ties it to
-/// node 0. That tie is the card's, not the deck naming ground: the deck still
-/// takes `ref` as its reference, and the thermal node joins it.
+/// The R card leaves R2_ET_CMC's thermal node out, and it is a net of the
+/// instance's own: it does not touch node 0, so the deck still takes `ref` as
+/// its reference.
 #[cfg(feature = "veriloga-model-r2-et-cmc")]
 #[test]
 fn a_deck_without_node_zero_matches_it_with_an_omitted_thermal_node() {
@@ -623,12 +623,11 @@ fn both_routes_keep_node_zero_for_a_module_that_reaches_a_port_single_ended() {
 // ---------------------------------------------------------------------------
 // `$port_connected` — a card that leaves trailing terminals out
 //
-// Either route ties a terminal the card leaves out to node 0, and the `.va`
-// route reads it unconnected. The generated route folded `$port_connected` to
-// 1, so BSIM-SOI 4.7 with `tnodeout=1` and `t` left out took the 7-terminal
-// arm there, `Temp(t) <+ 0` on node 0, a singular system, where the `.va`
-// route took the `b` arm and tied `b`; and an X card that omitted a terminal
-// was refused outright.
+// The `.va` route reads a terminal the card leaves out unconnected. The
+// generated route folded `$port_connected` to 1, so BSIM-SOI 4.7 with
+// `tnodeout=1` and `t` left out took the 7-terminal arm there, `Temp(t) <+ 0`
+// with `t` on node 0, a singular system, where the `.va` route took the `b` arm
+// and tied `b`; and an X card that omitted a terminal was refused outright.
 //
 // BSIM-SOI's generated crate is 914 KB of Rust and its `.va` compile is not a
 // debug build's work, so the rows carry their own `cfg` and run in a release
@@ -678,7 +677,6 @@ impl Drop for Bsimsoi47Source {
 }
 
 /// The value an operating-point trace recorded for `key`.
-#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
 fn traced(trace: &[Entry], key: &str) -> f64 {
     trace
         .iter()
@@ -788,6 +786,328 @@ fn bsimsoi_takes_the_same_reference_on_both_routes_when_its_body_terminals_are_o
             "the generated {card} card must take the reference the .va route takes"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// An omitted terminal is a net of the instance's own
+//
+// The Verilog-AMS LRM makes an unconnected port's net an implicit net local to
+// the instance, and an OSDI simulator builds it so: ngspice's `OSDIsetup`
+// makes a node for every terminal past the connected ones. Both routes put it
+// on node 0 instead, so a module that ties the port itself, `Temp(t) <+ 0`,
+// stamped a potential branch from ground to ground and the operating point was
+// singular: every 4-terminal BSIM-BULK, ASM-HEMT and BSIM-SOI 4.7 card. The
+// `.va` route names the net as it names an internal one, `X1.t`; the generated
+// route as it names its own, `X1.__t.internal`.
+// ---------------------------------------------------------------------------
+
+/// The operating point of `deck`, the instance's own net `private` recorded
+/// under `key` whichever name the route gives it.
+#[cfg(any(
+    feature = "veriloga-model-bsimbulk",
+    feature = "veriloga-model-asmhemt",
+    feature = "veriloga-model-bsimsoi-18c250bc"
+))]
+fn operating_point_with_private_net(
+    deck: &str,
+    nodes: &[&str],
+    branches: &[&str],
+    private: &str,
+    key: &str,
+) -> Vec<Entry> {
+    let mut all = nodes.to_vec();
+    all.push(private);
+    let mut trace = operating_point_trace(deck, &all, branches);
+    let spelled = format!("op.v({private})");
+    if let Some(entry) = trace.iter_mut().find(|entry| entry.key == spelled) {
+        entry.key = format!("op.v({key})");
+    }
+    trace
+}
+
+/// Every trace reached an operating point and records the same bits as the
+/// first.
+#[cfg(any(
+    feature = "veriloga-model-bsimbulk",
+    feature = "veriloga-model-asmhemt",
+    feature = "veriloga-model-bsimsoi-18c250bc"
+))]
+fn assert_operating_points_identical(label: &str, traces: &[(&str, Vec<Entry>)]) {
+    let bits = |trace: &[Entry]| {
+        trace
+            .iter()
+            .map(|entry| (entry.key.clone(), entry.text.clone(), entry.value.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    let (first, reference) = &traces[0];
+    for (card, trace) in traces {
+        assert_eq!(
+            trace.first().and_then(|entry| entry.text.as_deref()),
+            Some("ok"),
+            "{label} {card}: {trace:?}"
+        );
+        assert_eq!(
+            bits(trace),
+            bits(reference),
+            "{label}: {card} against {first}\n{card} {trace:?}\n{first} {reference:?}"
+        );
+    }
+}
+
+/// The `.va` route alone, on a module a debug build compiles at once: the card
+/// leaves `t` out and the module ties it. On node 0 that tie is `V(0) <+ 0`,
+/// and the operating point is singular; on a net of the instance's own it
+/// holds that net at 0 V and the rest of the circuit solves. The net does not
+/// touch node 0, so a deck that names no node 0 still takes its reference.
+#[test]
+fn an_omitted_port_the_module_ties_is_a_net_of_the_instances_own() {
+    let path = std::env::temp_dir().join(format!("rspice_omitted_tie_{}.va", std::process::id()));
+    std::fs::write(
+        &path,
+        "`include \"disciplines.vams\"\nmodule tie(a, b, t);\ninout a, b, t;\n\
+         electrical a, b, t;\nanalog begin\n  I(a, b) <+ V(a, b) / 1k;\n  V(t) <+ 0;\nend\n\
+         endmodule\n",
+    )
+    .expect("write the module");
+    let source = path.display().to_string().replace('\\', "/");
+    let deck = |reference: &str| {
+        format!(
+            "* omitted tied port\n.va \"{source}\" tie\nV1 in {reference} 1\n\
+             X1 in {reference} tie\n.end\n"
+        )
+    };
+    let trace = operating_point_trace(&deck("0"), &["in", "x1.t"], &["V1"]);
+    let netlist = Netlist::parse_validated(&deck("ref")).expect("deck parses");
+    let reference = Engine::default()
+        .build_circuit(&netlist)
+        .expect("deck builds")
+        .get_node_by_name("ref");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(trace[0].text.as_deref(), Some("ok"), "{trace:?}");
+    assert_eq!(traced(&trace, "op.v(x1.t)"), 0.0);
+    assert!(
+        (traced(&trace, "op.i(V1)") + 1.0e-3).abs() < 1.0e-9,
+        "1 V across 1k, and gmin: {trace:?}"
+    );
+    assert_eq!(
+        reference,
+        Some(0),
+        "the tie reaches only the instance's own net, so the deck takes `ref`"
+    );
+}
+
+/// BSIM-BULK 107.2.1 on `d g s b`, `t` left out: `Temp(t) <+ 0` with
+/// self-heating off. The `.va` route's X card, the generated X card and the
+/// generated M card reach the same operating point, bit for bit, the thermal
+/// net held at 0.
+#[cfg(feature = "veriloga-model-bsimbulk")]
+#[test]
+fn bsimbulk_reaches_an_operating_point_with_its_thermal_terminal_omitted() {
+    let supplies = "Vd d 0 0.5\nVg g 0 1.0";
+    let x_card = format!("{supplies}\nX1 d g 0 0 bsimbulk L=1u W=10u");
+    let m_card = format!("{supplies}\nM1 d g 0 0 nch L=1u W=10u\n.model nch bsimbulk");
+    let runtime = format!(
+        "* bsimbulk runtime route\n.va \"{}\" bsimbulk\n{x_card}\n.end\n",
+        model_source("models/veriloga/cmc/BSIM-BULK107.2.1_02112025/code/bsimbulk.va")
+    );
+    let generated_x = format!("* bsimbulk generated X card\n{x_card}\n.end\n");
+    let generated_m = format!("* bsimbulk generated M card\n{m_card}\n.end\n");
+    assert!(!uses_generated_devices(&runtime));
+    assert!(uses_generated_devices(&generated_x) && uses_generated_devices(&generated_m));
+    let (nodes, branches) = (&["d", "g"][..], &["Vd", "Vg"][..]);
+    let traces = [
+        (
+            ".va X",
+            operating_point_with_private_net(&runtime, nodes, branches, "x1.t", "t"),
+        ),
+        (
+            "generated X",
+            operating_point_with_private_net(&generated_x, nodes, branches, "x1.__t.internal", "t"),
+        ),
+        (
+            "generated M",
+            operating_point_with_private_net(&generated_m, nodes, branches, "m1.__t.internal", "t"),
+        ),
+    ];
+    assert_operating_points_identical("BSIM-BULK on d g s b", &traces);
+    assert_eq!(traced(&traces[0].1, "op.v(t)"), 0.0);
+    assert!(
+        traced(&traces[0].1, "op.i(Vd)") < -1.0e-6,
+        "{:?}",
+        traces[0].1
+    );
+}
+
+/// ASM-HEMT 101.6.0 on `d g s b`, `dt` left out. With self-heating off the
+/// module ties `dt` (`Temp(dt) <+ 0`); `shmod` is a model-card parameter, so
+/// the generated route takes it on the M card's `.model`. With the default
+/// self-heating (`shmod=1`, `rth0=5`) the thermal network heats `dt`, which
+/// on node 0 it never could.
+///
+/// The `.va` route matches ngspice-46 running `asmhemt.osdi` on the same N
+/// card to 1e-12: `i(Vd)` -0.273940199358580 A with self-heating off, and
+/// -0.273673402940843 A at a 1.368367014699217 K rise with it on. The
+/// generated cards agree with each other bit for bit, but the generated
+/// lowering of ASM-HEMT sits 3e-8 relative from both, with `dt` connected
+/// as much as without it, so they are held to that against the `.va` route.
+#[cfg(feature = "veriloga-model-asmhemt")]
+#[test]
+fn asmhemt_reaches_an_operating_point_with_its_thermal_terminal_omitted() {
+    let supplies = "Vd d 0 1.0\nVg g 0 0";
+    let source = model_source("models/veriloga/cmc/ASM-HEMT101.6.0_05132026/vacode/asmhemt.va");
+    let (nodes, branches) = (&["d", "g"][..], &["Vd", "Vg"][..]);
+    let close = |left: f64, right: f64, relative: f64| {
+        (left - right).abs() <= relative * left.abs().max(right.abs())
+    };
+    for (heating, instance, model, drain, rise) in [
+        ("shmod=0", " shmod=0", " shmod=0", -0.273940199358580, 0.0),
+        ("default", "", "", -0.273673402940843, 1.368367014699217),
+    ] {
+        let label = format!("ASM-HEMT on d g s b, {heating}");
+        let x_card = format!("{supplies}\nX1 d g 0 0 asmhemt{instance}");
+        let runtime =
+            format!("* {label} runtime route\n.va \"{source}\" asmhemt\n{x_card}\n.end\n");
+        let generated_m = format!(
+            "* {label} generated M card\n{supplies}\nM1 d g 0 0 hemt\n.model hemt asmhemt{model}\n.end\n"
+        );
+        assert!(!uses_generated_devices(&runtime));
+        assert!(uses_generated_devices(&generated_m));
+        let va = operating_point_with_private_net(&runtime, nodes, branches, "x1.dt", "dt");
+        assert_eq!(va[0].text.as_deref(), Some("ok"), "{label}: {va:?}");
+        assert!(
+            close(traced(&va, "op.i(Vd)"), drain, 1.0e-12),
+            "{label}: ngspice-OSDI drain current {drain}: {va:?}"
+        );
+        assert!(
+            close(traced(&va, "op.v(dt)"), rise, 1.0e-12),
+            "{label}: ngspice-OSDI temperature rise {rise}: {va:?}"
+        );
+        let mut generated = vec![(
+            "generated M",
+            operating_point_with_private_net(
+                &generated_m,
+                nodes,
+                branches,
+                "m1.__dt.internal",
+                "dt",
+            ),
+        )];
+        if instance.is_empty() {
+            let generated_x = format!("* {label} generated X card\n{x_card}\n.end\n");
+            assert!(uses_generated_devices(&generated_x));
+            generated.push((
+                "generated X",
+                operating_point_with_private_net(
+                    &generated_x,
+                    nodes,
+                    branches,
+                    "x1.__dt.internal",
+                    "dt",
+                ),
+            ));
+        }
+        assert_operating_points_identical(&label, &generated);
+        for (left, right) in generated[0].1.iter().zip(&va) {
+            assert!(
+                left.key == right.key
+                    && left.text == right.text
+                    && close(left.value, right.value, 1.0e-7),
+                "{label}: generated {left:?} against .va {right:?}"
+            );
+        }
+    }
+}
+
+/// BSIM-SOI 4.7 on `d g s e`, `p`, `b` and `t` left out: the floating-body
+/// configuration, with the body on a net of its own. With `shmod=0` the
+/// module ties `t`; with `shmod=1` and `rth0` the temperature rise is the
+/// thermal network's on `t`, which is above ambient. Both routes reach the
+/// same operating point, bit for bit.
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+#[test]
+fn bsimsoi_reaches_an_operating_point_with_body_and_thermal_terminals_omitted() {
+    let source = Bsimsoi47Source::write("floating");
+    let supplies = "Vd d 0 1.0\nVg g 0 1.0";
+    let (nodes, branches) = (&["d", "g"][..], &["Vd", "Vg"][..]);
+    for (heating, parameters) in [("shmod=0", "shmod=0"), ("shmod=1", "shmod=1 rth0=50")] {
+        let label = format!("BSIM-SOI 4.7 on d g s e, {heating}");
+        let x_card = format!("{supplies}\nX1 d g 0 0 bsimsoi__18c250bc {parameters}");
+        let m_card = format!("{supplies}\nM1 d g 0 0 nch {parameters}\n.model nch bsimsoi47");
+        let runtime = source.runtime_deck(&label, &x_card);
+        let generated_x = format!("* {label} generated X card\n{x_card}\n.end\n");
+        let generated_m = format!("* {label} generated M card\n{m_card}\n.end\n");
+        assert!(!uses_generated_devices(&runtime));
+        assert!(uses_generated_devices(&generated_x) && uses_generated_devices(&generated_m));
+        let traces = [
+            (
+                ".va X",
+                operating_point_with_private_net(&runtime, nodes, branches, "x1.t", "t"),
+            ),
+            (
+                "generated X",
+                operating_point_with_private_net(
+                    &generated_x,
+                    nodes,
+                    branches,
+                    "x1.__t.internal",
+                    "t",
+                ),
+            ),
+            (
+                "generated M",
+                operating_point_with_private_net(
+                    &generated_m,
+                    nodes,
+                    branches,
+                    "m1.__t.internal",
+                    "t",
+                ),
+            ),
+        ];
+        assert_operating_points_identical(&label, &traces);
+        let rise = traced(&traces[0].1, "op.v(t)");
+        if heating == "shmod=0" {
+            assert_eq!(rise, 0.0, "{label}");
+        } else {
+            assert!(
+                rise > 0.0,
+                "{label}: the device heats its own net, {rise} K"
+            );
+        }
+    }
+}
+
+/// ANGELOV_GAN ties its thermal node `t` to ground (`I(t) <+ V(t) *
+/// SPICE_GMIN` without self-heating), and nothing else in the module reaches
+/// a port single-ended. Left out, `t` is a net of the instance's own and the
+/// tie reaches nothing of the deck's, so a deck that names no node 0 takes
+/// its reference on both routes; connected, the tie keeps node 0
+/// (`both_routes_keep_node_zero_for_a_module_that_reaches_a_port_single_ended`).
+/// On node 0 the omitted `t` kept node 0 for a tie from ground to ground.
+#[cfg(feature = "veriloga-model-angelov-gan")]
+#[test]
+fn both_routes_take_the_reference_when_only_an_omitted_port_reaches_ground() {
+    let reference = |deck: &str| {
+        let netlist = Netlist::parse_validated(deck).unwrap_or_else(|err| panic!("{err}\n{deck}"));
+        Engine::default()
+            .build_circuit(&netlist)
+            .unwrap_or_else(|err| panic!("{err}\n{deck}"))
+            .get_node_by_name("ref")
+    };
+    let body = "V1 d ref 5\nV2 g ref -1\nX1 d g ref angelov_gan\n.end\n";
+    let generated = format!("* angelov_gan generated, t and rf left out\n{body}");
+    let runtime = format!(
+        "* angelov_gan .va, t and rf left out\n.va \"{}\" angelov_gan\n{body}",
+        model_source("models/veriloga/angelov_2.0/vacode/angelov_gan.va")
+    );
+    assert!(uses_generated_devices(&generated));
+    assert!(!uses_generated_devices(&runtime));
+    assert_eq!(reference(&runtime), Some(0), "the .va route takes `ref`");
+    assert_eq!(
+        reference(&generated),
+        Some(0),
+        "the generated route takes `ref`"
+    );
 }
 
 // ---------------------------------------------------------------------------

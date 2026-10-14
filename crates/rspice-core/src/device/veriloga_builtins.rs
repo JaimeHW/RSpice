@@ -2237,15 +2237,20 @@ pub fn instantiate_builtin(
         .map(|(name, value)| BuiltinParameterAssignment::instance(name, value.clone()))
         .collect::<Vec<_>>();
     // An X card may leave trailing terminals out, as it may on the `.va`
-    // route: they sit on node 0 and `$port_connected` reads them unconnected.
+    // route: each sits on a net of the instance's own, and
+    // `$port_connected` reads it unconnected.
     let terminals = builtins::builtin_names()
         .iter()
         .find(|name| name.eq_ignore_ascii_case(model_name))
         .and_then(|name| builtins::descriptor(name))
-        .map_or(0, |descriptor| descriptor.terminals.len());
+        .map_or(&[][..], |descriptor| descriptor.terminals);
     let mut nodes = node_names.to_vec();
-    if nodes.len() < terminals {
-        nodes.resize(terminals, "0".to_string());
+    for (index, terminal) in terminals.iter().enumerate().skip(nodes.len()) {
+        nodes.push(unconnected_terminal_net(
+            instance_name,
+            terminal.name,
+            index,
+        ));
     }
     instantiate_builtin_scoped(
         model_name,
@@ -2259,10 +2264,33 @@ pub fn instantiate_builtin(
     )
 }
 
+/// The net a generated instance's terminal sits on when the card leaves it
+/// out: one of the instance's own, named as its internal nets are. The
+/// Verilog-AMS LRM makes an unconnected port's net an implicit net local to
+/// the instance, as an OSDI simulator builds it, and the `.va` route builds
+/// the same card the same way. Node 0 would turn a module's own tie of the
+/// port, `Temp(t) <+ 0`, into a branch from ground to ground.
+///
+/// `index` names a terminal whose declared name is unknown.
+#[cfg(feature = "veriloga-builtins-base")]
+pub(crate) fn unconnected_terminal_net(
+    instance_name: &str,
+    terminal: &str,
+    index: usize,
+) -> String {
+    if terminal.is_empty() {
+        format!("{instance_name}.__port{}.internal", index + 1)
+    } else {
+        format!("{instance_name}.__{terminal}.internal")
+    }
+}
+
 /// Build a generated instance on `node_names`: every external terminal, then
 /// any of `optional_internal_nodes` the card binds. The card itself connected
-/// the first `connected_terminals` of the external terminals; the rest are
-/// node 0, and `$port_connected` reads them unconnected.
+/// the first `connected_terminals` of the external terminals, and
+/// `$port_connected` reads the rest unconnected: each sits on the instance's
+/// own net ([`unconnected_terminal_net`]), or on node 0 where the card
+/// letter's syntax ties it there.
 #[cfg(feature = "veriloga-builtins-base")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn instantiate_builtin_scoped(

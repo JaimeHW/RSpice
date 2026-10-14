@@ -22,6 +22,11 @@
 //! branch joins its net's group to ground, which is group 0. A port reaches
 //! node 0 when a chain of joins connects its group to group 0.
 //!
+//! Only a port the card connects counts: one it leaves out is a net of the
+//! instance's own, and a branch from it to ground ties that net alone. The
+//! summary keeps one group for the circuit, joined to each electrical port
+//! under that port's `$port_connected`, and that group is the one asked.
+//!
 //! A branch that sits inside an `if` or `case` exists only when its
 //! conditions hold, so its join carries them as a guard. A guard the instance
 //! can decide before it solves reads only literals, public parameters,
@@ -87,7 +92,8 @@ pub struct GroundJoin {
 pub struct GroundReferenceGraph<'a> {
     /// How many groups the unconditional joins leave, ground included.
     pub group_count: u32,
-    /// The groups that hold an electrical port.
+    /// The groups whose reaching ground connects node 0 to the circuit: the
+    /// circuit's own group, which every port the card connects joins.
     pub port_groups: &'a [u32],
     pub joins: &'a [GroundJoin],
     pub guards: &'a [GroundGuardOp<'a>],

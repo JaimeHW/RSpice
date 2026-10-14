@@ -1,7 +1,8 @@
 use super::version_metadata::parse_dotted_version_metadata;
 use super::*;
 use crate::device::veriloga_builtins::{
-    BuiltinParameterAssignment, GeneratedTerminalCurrentAlias, builtins, instantiate_builtin_scoped,
+    BuiltinParameterAssignment, GeneratedTerminalCurrentAlias, builtins,
+    instantiate_builtin_scoped, unconnected_terminal_net,
 };
 use crate::netlist::{Element, ModelDef, ParametricValue};
 use rspice_veriloga_runtime::{GeneratedParameterOrigin, GeneratedVerilogAParameterScope};
@@ -65,8 +66,9 @@ pub(super) struct GeneratedRoutingContext<'a> {
 }
 
 /// Where a SPICE card goes on the generated route: the module, the nodes it
-/// is instantiated on — the card's own, then ground for terminals the card
-/// leaves out — and how many of those the card wrote.
+/// is instantiated on — the card's own, then one for each terminal the card
+/// leaves out, as [`OmittedTerminal`] places it — and how many of those the
+/// card wrote.
 struct GeneratedCardRoute<'a> {
     target: GeneratedTarget,
     nodes: Vec<String>,
@@ -76,7 +78,7 @@ struct GeneratedCardRoute<'a> {
 
 /// The nodes a generated instance is built on, and how many of its leading
 /// terminals the card wrote: those the card connects, as `$port_connected`
-/// answers. The rest are node 0.
+/// answers. The rest sit where [`OmittedTerminal`] puts them.
 struct CardTerminals<'a> {
     nodes: &'a [String],
     authored: usize,
@@ -112,7 +114,7 @@ pub(super) struct GeneratedCardTerminals {
     /// The generated module's catalog name.
     pub(super) model_name: &'static str,
     /// How many of the module's leading terminals the card's own nodes
-    /// connect, in order; the rest are ground.
+    /// connect, in order; the rest are the card's omitted terminals.
     pub(super) authored: usize,
     /// The card's other spellings of a terminal's current, a diode's `id`.
     pub(super) aliases: &'static [GeneratedTerminalCurrentAlias],
@@ -188,28 +190,30 @@ fn generated_resistor_route<'a>(
         return Ok(None);
     };
 
-    let mut nodes = element.nodes.clone();
     let expected = expected_terminal_count(element, target)?;
-    if nodes.len() > expected {
+    if element.nodes.len() > expected {
         return Err(generated_terminal_error(
             element,
             target,
-            nodes.len(),
+            element.nodes.len(),
             expected,
         ));
     }
-    if target.model_name.eq_ignore_ascii_case("R3_CMC") && nodes.len() < expected {
+    if target.model_name.eq_ignore_ascii_case("R3_CMC") && element.nodes.len() < expected {
         return Err(SimulationError::Circuit(format!(
             "Resistor '{}': generated Verilog-A model '{}' requires explicit control and thermal terminals; instantiate it as an X-device instead of a two-terminal R element",
             element.name, target.model_name
         )));
     }
-    while nodes.len() < expected {
-        nodes.push("0".to_string());
-    }
     Ok(Some(GeneratedCardRoute {
         target,
-        nodes,
+        nodes: padded_nodes(
+            element,
+            target,
+            element.nodes.clone(),
+            expected,
+            OmittedTerminal::Private,
+        ),
         authored: element.nodes.len(),
         model_def,
     }))
@@ -240,7 +244,7 @@ fn generated_diode_route<'a>(
     };
     Ok(Some(GeneratedCardRoute {
         target,
-        nodes: exact_or_ground_padded_nodes(element, target, 0)?,
+        nodes: exact_or_padded_nodes(element, target, 0, OmittedTerminal::Private)?,
         authored: element.nodes.len(),
         model_def,
     }))
@@ -310,7 +314,12 @@ fn generated_bjt_route<'a>(
     let max_implicit_ground_nodes = expected.saturating_sub(3);
     Ok(Some(GeneratedCardRoute {
         target,
-        nodes: exact_or_ground_padded_nodes(element, target, max_implicit_ground_nodes)?,
+        nodes: exact_or_padded_nodes(
+            element,
+            target,
+            max_implicit_ground_nodes,
+            OmittedTerminal::Ground,
+        )?,
         authored: element.nodes.len(),
         model_def,
     }))
@@ -345,9 +354,9 @@ fn generated_mos_route<'a>(
     let (nodes, authored) = if compact_syntax {
         compact_generated_mos_nodes(element, target, expected)?
     } else {
-        let max_implicit_ground_nodes = expected.saturating_sub(4);
+        let max_omitted_nodes = expected.saturating_sub(4);
         (
-            exact_or_ground_padded_nodes(element, target, max_implicit_ground_nodes)?,
+            exact_or_padded_nodes(element, target, max_omitted_nodes, OmittedTerminal::Private)?,
             element.nodes.len(),
         )
     };
@@ -395,9 +404,13 @@ fn compact_generated_mos_prefix_nodes(
             prefix_len,
         ));
     }
-    let mut nodes = element.nodes[..prefix_len].to_vec();
-    nodes.resize(expected, "0".to_string());
-    Ok(nodes)
+    Ok(padded_nodes(
+        element,
+        target,
+        element.nodes[..prefix_len].to_vec(),
+        expected,
+        OmittedTerminal::Private,
+    ))
 }
 
 fn generated_resistor_target(
@@ -743,8 +756,8 @@ fn add_generated_instance(
             element.nodes.len()
         };
         let terminals = device.external_terminals();
-        // Use declared electrical ports only. Missing/ground-padded thermal or
-        // internal ports cannot become a fabricated external body connection.
+        // Use declared electrical ports only. Omitted thermal or internal
+        // ports cannot become a fabricated external body connection.
         let find = |names: &[&str]| {
             terminals.iter().take(authored).position(|terminal| {
                 terminal.discipline.eq_ignore_ascii_case("electrical")
@@ -1551,10 +1564,53 @@ fn is_bjt_multiplier_param(name: &str) -> bool {
     matches_model_type(name, &["AREA", "M", "MULT"])
 }
 
-fn exact_or_ground_padded_nodes(
+/// Where a SPICE card puts a trailing terminal of the module it leaves out.
+#[derive(Clone, Copy)]
+enum OmittedTerminal {
+    /// On node 0, because the card letter's own syntax connects it there: a
+    /// Q card's substrate and thermal node, as SPICE3 and ngspice tie them
+    /// ("tie missing ports to ground", ngspice `inp2q.c`).
+    Ground,
+    /// On a net of the instance's own, which is what the Verilog-AMS LRM makes
+    /// an unconnected port's net and what an OSDI simulator builds for it
+    /// (ngspice `osdisetup.c` creates a node for every terminal past the
+    /// connected ones). An M card leaves a node it does not give for the
+    /// device to place (ngspice `inp2m.c` marks it -1, and BSIM-SOI and
+    /// HiSIM-HV make an internal body or temperature node of it); an R card
+    /// has no syntax for a third terminal; an X card names the module itself.
+    Private,
+}
+
+/// `nodes`, the ones the card wrote, followed by one for each of the
+/// `expected` terminals it leaves out, placed as `omitted` says.
+fn padded_nodes(
     element: &Element,
     target: GeneratedTarget,
-    max_implicit_ground_nodes: usize,
+    mut nodes: Vec<String>,
+    expected: usize,
+    omitted: OmittedTerminal,
+) -> Vec<String> {
+    let terminals =
+        builtins::descriptor(target.model_name).map_or(&[][..], |descriptor| descriptor.terminals);
+    while nodes.len() < expected {
+        let index = nodes.len();
+        nodes.push(match omitted {
+            OmittedTerminal::Ground => "0".to_string(),
+            OmittedTerminal::Private => unconnected_terminal_net(
+                &element.name,
+                terminals.get(index).map_or("", |terminal| terminal.name),
+                index,
+            ),
+        });
+    }
+    nodes
+}
+
+fn exact_or_padded_nodes(
+    element: &Element,
+    target: GeneratedTarget,
+    max_omitted_nodes: usize,
+    omitted: OmittedTerminal,
 ) -> Result<Vec<String>, SimulationError> {
     let expected = expected_terminal_count(element, target)?;
     let maximum = expected + target.optional_internal_nodes.len();
@@ -1579,7 +1635,7 @@ fn exact_or_ground_padded_nodes(
         ));
     }
     let missing = expected.saturating_sub(element.nodes.len());
-    if missing > max_implicit_ground_nodes {
+    if missing > max_omitted_nodes {
         return Err(SimulationError::Circuit(format!(
             "{} '{}': generated Verilog-A model '{}' expects {} terminals, found {}; missing terminals cannot be inferred for .model routing",
             element_kind_name(element),
@@ -1589,9 +1645,13 @@ fn exact_or_ground_padded_nodes(
             element.nodes.len()
         )));
     }
-    let mut nodes = element.nodes.clone();
-    nodes.extend(std::iter::repeat_n("0".to_string(), missing));
-    Ok(nodes)
+    Ok(padded_nodes(
+        element,
+        target,
+        element.nodes.clone(),
+        expected,
+        omitted,
+    ))
 }
 
 fn expected_terminal_count(

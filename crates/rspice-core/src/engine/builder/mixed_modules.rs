@@ -167,9 +167,11 @@ pub(super) fn try_build_mixed_signal_instance(
     // probes that read it.
     let internal_names = super::veriloga_internal_node_names(Some(artifact), model.internal_nodes);
     let branch_names = super::veriloga_branch_unknown_names(model);
+    // A mixed instance connects every port (checked above).
     let unknown_names = super::VerilogAUnknownNames {
         internal: &internal_names,
         branches: &branch_names,
+        unconnected: &[],
     };
     unknown_names
         .check_free(

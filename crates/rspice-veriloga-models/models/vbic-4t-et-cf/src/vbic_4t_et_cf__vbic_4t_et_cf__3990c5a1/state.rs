@@ -535,7 +535,7 @@ impl Instance {
 	pub const EVENT_STATE_COUNT: usize = 0;
 	pub const ONE_STEP_DAE_SPLIT_SAFE: bool = true;
 	pub const REQUIRES_NODESET_PHASE: bool = false;
-	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Always;
+	pub const GROUND_REFERENCE: rspice_veriloga_runtime::GroundReference<'static> = rspice_veriloga_runtime::GroundReference::Conditional(rspice_veriloga_runtime::GroundReferenceGraph { group_count: 3, port_groups: &[1], joins: &[rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [0, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [1, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [2, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 2], guard: [3, 1] }, rspice_veriloga_runtime::GroundJoin { groups: [1, 0], guard: [4, 1] }], guards: &[rspice_veriloga_runtime::GroundGuardOp::PortConnected(0), rspice_veriloga_runtime::GroundGuardOp::PortConnected(1), rspice_veriloga_runtime::GroundGuardOp::PortConnected(2), rspice_veriloga_runtime::GroundGuardOp::PortConnected(3), rspice_veriloga_runtime::GroundGuardOp::PortConnected(4)] });
 	pub const CHECKPOINT_MODEL_IDENTITY: &'static str = "2b833c3d0536d62b0c76a664396864a54427a997be3dbefb4d1bb65c8effb64f";
 	pub const MAX_ANALOG_LOOP_ITERATIONS: usize = 1_000_000;
 
