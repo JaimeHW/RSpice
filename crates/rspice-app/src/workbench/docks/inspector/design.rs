@@ -53,6 +53,7 @@ use super::{ComponentModelEvidence, component_model_evidence, muted_inspector_co
 use rspice_ui_kit::panels::inspector::toned_inspector_copy;
 use rspice_ui_kit::panels::{
     panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,
+    section_header_explained,
 };
 
 // =============================================================================

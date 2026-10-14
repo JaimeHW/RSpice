@@ -1243,57 +1243,73 @@ fn the_title_takes_one_panel_row() {
     assert_eq!(measured.0, measured.1);
 }
 
+/// A MOS transistor shows the designer's set — region, the bias point and the
+/// small-signal parameters — in engineering notation with units, and the
+/// temperature its run solved it at. What the report carries beyond the set
+/// (the gate and bulk currents, gmb) has no row.
 #[test]
-fn operating_point_summary_matches_the_upgraded_inset_contract() {
-    assert_eq!(OP_SUMMARY_PADDING, 9.0);
-    assert_eq!(OP_SUMMARY_ROW_H, 22.0);
-}
+fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
+    use rspice_core::op_label::OpLabel;
 
-/// Lay one annotation row out at the docked inspector's real inner width.
-fn measured_operating_point_row(label: &str, value: &str) -> (f32, f32, f32, usize) {
-    use crate::workbench::design_system::PANEL_INSET;
-    const PANEL_W: f32 = 312.0;
-    let inner_width = PANEL_W - 2.0 * PANEL_INSET - 2.0 * OP_SUMMARY_PADDING;
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let mut measured = (0.0, 0.0, 0.0, 0);
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_width(PANEL_W);
-            let row = operating_point_row(ui, inner_width, label, value);
-            // Both galleys are placed against the card's inner box: the label
-            // from its left edge, the right-aligned value back from its right.
-            let label_right = row.label.size().x;
-            let value_left = inner_width - row.value.size().x;
-            measured = (label_right, value_left, row.height, row.value.rows.len());
-        });
-    });
-    measured
-}
-
-#[test]
-fn a_long_operating_point_value_wraps_instead_of_covering_its_label() {
-    let (label_right, value_left, height, rows) =
-        measured_operating_point_row("Selection", "No retained device operating point");
-
-    assert!(
-        value_left >= label_right,
-        "the value column started at {value_left} and the label ran to {label_right}"
+    let entry = rspice_core::circuit::DeviceOpEntry::new(
+        "mn".to_owned(),
+        OpLabel::MOSFET,
+        Some(OpLabel::SATURATION),
+        vec![
+            (OpLabel::ID, 96.86112e-6),
+            (OpLabel::IG, 0.0),
+            (OpLabel::VGS, 0.9),
+            (OpLabel::VDS, 0.85),
+            (OpLabel::VTH, 0.45),
+            (OpLabel::VDSAT, 0.45),
+            (OpLabel::GM, 430.5e-6),
+            (OpLabel::GDS, 4.6e-6),
+            (OpLabel::GMB, 1.0e-6),
+            (OpLabel::TEMP, 85.0),
+        ],
     );
-    assert!(rows > 1, "the value was not wrapped: {rows} row(s)");
-    assert!(
-        height > OP_SUMMARY_ROW_H,
-        "a wrapped row must grow the card, measured {height}"
+    let rows = operating_point_rows(&entry, 4);
+    let rows = rows
+        .iter()
+        .map(|(label, value)| (label.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        [
+            ("Region", "saturation"),
+            ("Id", "96.86 µA"),
+            ("Vgs", "900.0 mV"),
+            ("Vds", "850.0 mV"),
+            ("Vth", "450.0 mV"),
+            ("Vdsat", "450.0 mV"),
+            ("gm", "430.5 µS"),
+            ("gds", "4.600 µS"),
+            ("Temperature", "85 °C"),
+        ]
     );
 }
 
+/// A device below the design root is reported under its instance path. The
+/// inspector used to look the bare card name up, which below the root read
+/// another instance's operating point, or the top sheet's device of that name.
 #[test]
-fn a_short_operating_point_row_keeps_the_base_band_and_one_line() {
-    let (label_right, value_left, height, rows) = measured_operating_point_row("Region", "sat");
-
-    assert!(value_left > label_right + OP_SUMMARY_GAP);
-    assert_eq!(rows, 1);
-    assert_eq!(height, OP_SUMMARY_ROW_H);
+fn a_device_below_the_root_is_read_under_its_instance_path() {
+    let mut state = AppState::default();
+    let component = Component::new(7, ComponentType::Nmos, Point::origin())
+        .with_name_value("MN", "nch");
+    assert_eq!(
+        device_engine_name(&state, &component).as_deref(),
+        Some("mn")
+    );
+    state.workspace.descend_into(
+        "X1".to_owned(),
+        CellViewRef::new("user", "inverter", "schematic"),
+        ViewType::Schematic,
+    );
+    assert_eq!(
+        device_engine_name(&state, &component).as_deref(),
+        Some("x1.mn")
+    );
 }
 
 /// Measure, in the dock's panel body, the space between a section header and
@@ -1342,14 +1358,6 @@ fn every_inspector_section_frames_its_body_with_the_same_step() {
         terminal_row(ui, "-", None);
     });
     assert_eq!(tree, list, "a tree body is framed like a property list");
-
-    let annotation = section_body_padding(|ui| {
-        operating_point_summary(ui, &[("Region".to_owned(), "saturation".to_owned())]);
-    });
-    assert_eq!(
-        annotation, list,
-        "an annotation card is framed like a property list"
-    );
 
     let actions = section_body_padding(|ui| {
         action_stack(ui, |ui| {

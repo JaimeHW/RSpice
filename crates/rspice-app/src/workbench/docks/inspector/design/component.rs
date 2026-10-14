@@ -967,203 +967,170 @@ pub(super) fn terminals_section(
     }
 }
 
-/// The card's edges sit on the panel inset; its rows sit this far inside it.
-pub(super) const OP_SUMMARY_PADDING: f32 = 9.0;
-pub(super) const OP_SUMMARY_ROW_H: f32 = 22.0;
-/// Gap between an annotation row's label and its value.
-pub(super) const OP_SUMMARY_GAP: f32 = 8.0;
-/// Widest share of a row the label may hold once the two columns compete.
-pub(super) const OP_SUMMARY_LABEL_FRACTION: f32 = 0.45;
+/// A device class's designer set of operating-point quantities, in the order
+/// a designer reads them: the reported parameter, its row label, its unit.
+type OpQuantitySet = &'static [(&'static str, &'static str, &'static str)];
 
-/// One measured row of the annotation card.
-pub(super) struct OperatingPointRow {
-    pub(super) label: std::sync::Arc<egui::Galley>,
-    pub(super) value: std::sync::Arc<egui::Galley>,
-    /// Top of each galley relative to the row, so the first line of a wrapped
-    /// value sits on the same band as every single-line row.
-    pub(super) label_top: f32,
-    pub(super) value_top: f32,
-    pub(super) height: f32,
-}
+/// MOS-like devices, field-effect transistors of every model family: the bias
+/// point, then the small-signal parameters.
+const MOS_OP_SET: OpQuantitySet = &[
+    ("id", "Id", "A"),
+    ("vgs", "Vgs", "V"),
+    ("vds", "Vds", "V"),
+    ("vth", "Vth", "V"),
+    ("vdsat", "Vdsat", "V"),
+    ("gm", "gm", "S"),
+    ("gds", "gds", "S"),
+];
+const BJT_OP_SET: OpQuantitySet = &[
+    ("ic", "Ic", "A"),
+    ("vbe", "Vbe", "V"),
+    ("vce", "Vce", "V"),
+    ("gm", "gm", "S"),
+    ("beta", "β", ""),
+];
+const DIODE_OP_SET: OpQuantitySet = &[("id", "Id", "A"), ("vd", "Vd", "V"), ("power", "Power", "W")];
 
-/// Height of a laid-out column's first line.
-fn first_line_height(galley: &egui::Galley) -> f32 {
-    galley
-        .rows
-        .first()
-        .map_or_else(|| galley.size().y, |row| row.rect().height())
-}
-
-/// How much taller than one line a wrapped column is.
-fn wrapped_overflow(galley: &egui::Galley) -> f32 {
-    (galley.size().y - first_line_height(galley)).max(0.0)
-}
-
-/// Lay a row out against the card's inner width.
-///
-/// The label keeps its measured width while both columns fit, and is capped
-/// at [`OP_SUMMARY_LABEL_FRACTION`] once they compete. Whatever the value
-/// then needs it wraps into, growing the row: retained evidence and the
-/// reason a run does not apply are facts, and neither may be hidden behind an
-/// ellipsis or painted over its own label.
-pub(super) fn operating_point_row(
-    ui: &Ui,
-    inner_width: f32,
-    label: &str,
-    value: &str,
-) -> OperatingPointRow {
-    let t = Tokens::get(ui.ctx());
-    let label_font = theme::sans(tokens::FS_2, FontWeight::Regular);
-    let value_font = theme::mono(tokens::FS_2, FontWeight::Medium);
-    let columns = (inner_width - OP_SUMMARY_GAP).max(1.0);
-    let measure = |text: &str, font: &egui::FontId| {
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE)
-            .size()
-            .x
-    };
-    let natural_label = measure(label, &label_font);
-    let label_width = if natural_label + measure(value, &value_font) <= columns {
-        natural_label
-    } else {
-        natural_label.min(columns * OP_SUMMARY_LABEL_FRACTION)
-    };
-    let value_width = (columns - label_width).max(1.0);
-
-    let label_galley =
-        ui.painter()
-            .layout(label.to_owned(), label_font, t.color.text_dim, label_width);
-    let mut value_job = egui::text::LayoutJob::simple(
-        value.to_owned(),
-        value_font,
-        t.color.text,
-        value_width.max(1.0),
-    );
-    value_job.halign = egui::Align::RIGHT;
-    let value_galley = ui.fonts_mut(|fonts| fonts.layout_job(value_job));
-
-    // Center each column's *first* line in the base band, then grow the row
-    // by whatever the taller wrapped column spills past one line. Measuring
-    // the galley rather than the font metric keeps a row of single-line
-    // columns exactly one band tall: the two disagree by a fraction of a
-    // pixel, and that fraction would compound down the card.
-    let label_top = (OP_SUMMARY_ROW_H - first_line_height(&label_galley)) * 0.5;
-    let value_top = (OP_SUMMARY_ROW_H - first_line_height(&value_galley)) * 0.5;
-    let height =
-        OP_SUMMARY_ROW_H + wrapped_overflow(&label_galley).max(wrapped_overflow(&value_galley));
-    OperatingPointRow {
-        label: label_galley,
-        value: value_galley,
-        label_top,
-        value_top,
-        height,
+/// The designer set for a reported device family, or `None` for a family
+/// without one, whose currents, terminal voltages and power are shown as the
+/// report gives them.
+fn op_quantity_set(device_kind: &str) -> Option<OpQuantitySet> {
+    match device_kind {
+        "MOSFET" | "MOS9" | "BSIM3" | "BSIM4" | "B3SOIFD" | "B3SOIDD" | "B3SOIPD" | "EKV26"
+        | "EKV3" | "VDMOS" | "JFET" | "JFET2" | "JFET2_XYCE" | "MESFET" | "HFET1" | "HFET2" => {
+            Some(MOS_OP_SET)
+        }
+        "BJT" => Some(BJT_OP_SET),
+        "DIODE" => Some(DIODE_OP_SET),
+        _ => None,
     }
 }
 
-pub(super) fn operating_point_summary(ui: &mut Ui, rows: &[(String, String)]) {
-    let t = Tokens::get(ui.ctx());
-    let inset = panel_inset(ui);
-    let inner_width = (ui.available_width() - 2.0 * inset - 2.0 * OP_SUMMARY_PADDING).max(1.0);
-    let measured = rows
-        .iter()
-        .map(|(label, value)| operating_point_row(ui, inner_width, label, value))
-        .collect::<Vec<_>>();
-    let height = OP_SUMMARY_PADDING * 2.0 + measured.iter().map(|row| row.height).sum::<f32>();
-    let (outer, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
-    let card = egui::Rect::from_min_max(
-        egui::pos2(outer.left() + inset, outer.top()),
-        egui::pos2(outer.right() - inset, outer.bottom()),
-    );
-    ui.painter().rect(
-        card,
-        t.radius,
-        t.color.bg_inset,
-        egui::Stroke::new(1.0, t.color.border),
-        egui::StrokeKind::Inside,
-    );
-    let painter = ui.painter().with_clip_rect(card);
-    let mut top = card.top() + OP_SUMMARY_PADDING;
-    for row in measured {
-        painter.galley(
-            egui::pos2(card.left() + OP_SUMMARY_PADDING, top + row.label_top),
-            row.label,
-            t.color.text_dim,
-        );
-        painter.galley(
-            egui::pos2(card.right() - OP_SUMMARY_PADDING, top + row.value_top),
-            row.value,
-            t.color.text,
-        );
-        top += row.height;
-    }
-}
+/// The rows an operating-point entry shows: its region, its class's designer
+/// set in engineering notation with units, and the temperature the run
+/// solved it at. A quantity the report does not carry has no row.
+pub(super) fn operating_point_rows(
+    entry: &rspice_core::circuit::DeviceOpEntry,
+    significant_digits: usize,
+) -> Vec<(String, String)> {
+    use rspice_results::number_format::fmt_si_significant;
 
-pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
-    let retained = app.state.simulation.active_run().and_then(|run| {
-        run.analyses.iter().find_map(|analysis| {
-            analysis.device_op.as_ref().and_then(|report| {
-                report
-                    .entries
-                    .iter()
-                    .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
-                    .map(|entry| {
-                        (
-                            run.id,
-                            analysis.label.clone(),
-                            entry.region,
-                            entry.params.clone(),
-                            active_run_matches_design(&app.state),
-                        )
-                    })
-            })
-        })
-    });
-    if let Some((run_id, analysis, region, params, current)) = retained {
-        section_header(
-            ui,
-            &format!("Operating point · Run {run_id}"),
-            Some(if current { "current" } else { "stale" }),
-        );
-        let mut rows = Vec::new();
-        if !current {
-            rows.push((
-                "Provenance".to_owned(),
-                "Historical evidence · rerun for current schematic".to_owned(),
-            ));
+    let value = |key: &str| {
+        entry
+            .params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(key))
+            .map(|(_, value)| *value)
+    };
+    let mut rows = Vec::new();
+    if let Some(region) = entry.region {
+        rows.push(("Region".to_owned(), region.to_owned()));
+    }
+    match op_quantity_set(entry.device_kind) {
+        Some(set) => {
+            for (key, label, unit) in set {
+                if let Some(value) = value(key) {
+                    rows.push((
+                        (*label).to_owned(),
+                        fmt_si_significant(value, unit, significant_digits),
+                    ));
+                }
+            }
         }
-        if let Some(region) = region {
-            rows.push(("Region".to_owned(), region.to_owned()));
+        None => {
+            for (name, value) in &entry.params {
+                let unit = if *name == "power" {
+                    "W"
+                } else if name.starts_with('i') {
+                    "A"
+                } else if name.starts_with('v') && !name.ends_with("_intrinsic") {
+                    "V"
+                } else {
+                    continue;
+                };
+                let mut label = (*name).to_owned();
+                if let Some(first) = label.get_mut(..1) {
+                    first.make_ascii_uppercase();
+                }
+                rows.push((
+                    label,
+                    fmt_si_significant(*value, unit, significant_digits),
+                ));
+            }
         }
-        for (name, value) in params.into_iter().take(2_usize.saturating_sub(rows.len())) {
-            rows.push((name.to_owned(), format!("{value:.6e}")));
-        }
+    }
+    // The device's own temperature, which is the run's: the setup may have
+    // moved on since.
+    if let Some(temperature) = value("temp") {
         rows.push((
             "Temperature".to_owned(),
             format!(
-                "{:.1} °C",
-                app.state.sim_setup.reference_pvt.temperature_celsius
+                "{} °C",
+                crate::quantity::engineering::format_engineering_display_with(
+                    temperature,
+                    crate::quantity::EngineeringPrecision::Adaptive,
+                )
             ),
         ));
-        rows.push(("Analysis".to_owned(), analysis));
-        operating_point_summary(ui, &rows);
+    }
+    rows
+}
+
+/// The engine's name for `component` at the occurrence being edited: the
+/// card name on the top sheet, the dotted instance path below it. The report
+/// names every device that way, so a bare name below the root would read the
+/// operating point of a different instance of the same master.
+pub(super) fn device_engine_name(state: &AppState, component: &Component) -> Option<String> {
+    state
+        .workspace
+        .content
+        .occurrence_path()
+        .engine_name_for(&component.emitted_instance_name())
+        .ok()
+}
+
+/// The active run's operating point for `component`, when the run solved one
+/// for it. With none the section is absent.
+pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
+    let Some(engine_name) = device_engine_name(&app.state, component) else {
+        return;
+    };
+    let Some(run) = app.state.simulation.active_run() else {
+        return;
+    };
+    let Some(entry) = run
+        .analyses
+        .iter()
+        .filter_map(|analysis| analysis.device_op.as_ref())
+        .find_map(|report| {
+            report
+                .entries
+                .iter()
+                .find(|entry| entry.name.eq_ignore_ascii_case(&engine_name))
+        })
+    else {
+        return;
+    };
+    if active_run_matches_design(&app.state) {
+        section_header(ui, "Operating point", None);
     } else {
-        section_header(ui, "Operating point", Some("no evidence"));
-        operating_point_summary(
+        section_header_explained(
             ui,
-            &[
-                (
-                    "Selection".to_owned(),
-                    "No retained device operating point".to_owned(),
-                ),
-                (
-                    "Required analysis".to_owned(),
-                    "DC operating point".to_owned(),
-                ),
-            ],
+            "Operating point",
+            "stale, rerun",
+            &format!("Run {} solved an earlier version of this schematic.", run.id),
         );
+    }
+    let digits = usize::from(
+        app.state
+            .ui
+            .preferences
+            .result_presentation_policy()
+            .displayed_significant_digits()
+            .get(),
+    );
+    for (label, value) in operating_point_rows(entry, digits) {
+        property_row(ui, &label, &value);
     }
 }
 
