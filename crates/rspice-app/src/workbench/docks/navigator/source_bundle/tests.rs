@@ -1,3 +1,8 @@
+//! Which files a source rail offers and what each row says about itself.
+//!
+//! A row states the role its bundle records, and only a role other than
+//! ordinary source.
+
 use super::*;
 
 /// The defect this rail exists for: `selected_file` had no UI writer, so

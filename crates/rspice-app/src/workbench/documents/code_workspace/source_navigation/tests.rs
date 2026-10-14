@@ -1,3 +1,10 @@
+//! What the navigator reads from a Verilog-A file: its outline, as the
+//! compiler's parser sees it, and its includes, resolved where the
+//! compile resolves them.
+//!
+//! The include cases are checked against a real compile of the same
+//! closure, so the panel and the compiler cannot drift apart unnoticed.
+
 use super::*;
 use crate::state::{CellViewRef, ProjectSourceDependency, ProjectSourceFile, ProjectSourceOwner};
 
