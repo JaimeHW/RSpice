@@ -14,7 +14,7 @@ use super::*;
 
 use crate::state::{ProjectSourceId, ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceFileAction, SourceOutlineRow, VerilogAFileSelection, document_outline,
+    self, CodeSourceFileAction, SourceOutlineRow, VerilogAFileSelection, document_navigation,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -319,12 +319,15 @@ fn show_rail(
             language,
         ),
     ) {
-        (Some(path), Some(bundle)) => document_outline(
-            app.state.workspace.content.project.id(),
-            bundle,
-            &mut app.state.ui.code_workspace.source_index_cache,
-            path,
-        ),
+        (Some(path), Some(bundle)) => {
+            document_navigation(
+                app.state.workspace.content.project.id(),
+                bundle,
+                &mut app.state.ui.code_workspace.source_index_cache,
+                path,
+            )
+            .outline
+        }
         _ => Vec::new(),
     };
 

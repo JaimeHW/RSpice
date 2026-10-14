@@ -11,6 +11,7 @@ mod editor;
 mod language_services;
 mod page;
 mod source_files;
+mod source_navigation;
 mod source_search;
 mod veriloga;
 mod veriloga_inspector;
@@ -35,9 +36,9 @@ pub use editor::{
     show_code_document_interaction_versioned, show_code_document_with_debug_versioned,
 };
 pub(crate) use language_services::{
-    CodeLanguageToolsState, LanguageToolView, SourceCodeAction, SourceIndexCache, SourceOutlineRow,
-    SourceSymbol, SourceSymbolKind, commit_language_code_action, commit_language_completion,
-    commit_language_rename, document_outline, open_language_tools, open_language_tools_in_bundle,
+    CodeLanguageToolsState, LanguageToolView, SourceCodeAction, SourceSymbol, SourceSymbolKind,
+    commit_language_code_action, commit_language_completion, commit_language_rename,
+    open_language_tools, open_language_tools_in_bundle,
 };
 pub use page::{
     AutomationArtifactStore, AutomationBreakpointKind, AutomationDebugPhase,
@@ -58,6 +59,7 @@ pub(crate) use source_files::{
     source_bundle_contains_document, source_bundle_document_is_editable,
     source_document_is_editable, source_file_mutation_block_reason,
 };
+pub(crate) use source_navigation::{SourceIndexCache, SourceOutlineRow, document_navigation};
 pub(crate) use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
     open_active_source_search, open_source_search, open_source_search_in_bundle,
