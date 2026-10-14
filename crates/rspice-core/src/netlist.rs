@@ -1045,6 +1045,10 @@ pub struct Netlist {
     /// Typed `.FFT` post-processing requests. These remain inert unless the
     /// selected primary analysis is transient.
     pub fft_analyses: Vec<FftAnalysis>,
+    /// Small-signal cards that linearize around a transient state
+    /// (`ACTIMES=`/`CHECKPOINT=`), each naming its card by index into
+    /// `analyses`. A card with no entry runs at the operating point.
+    pub small_signal_states: Vec<SmallSignalStateRequest>,
     /// Named `.DATA` tables retained for table-driven analyses such as
     /// `.STEP DATA=<name>`.
     pub data_tables: Vec<DataTable>,
@@ -1171,6 +1175,47 @@ impl Netlist {
         });
         self.output_requests.extend(requests.iter().cloned());
         self.ast_overlay.output_selection = Some((saves, requests));
+    }
+
+    /// The transient state the analysis card at `analysis_index` linearizes
+    /// around, when the card names one with `ACTIMES=` or `CHECKPOINT=`.
+    pub fn small_signal_state(&self, analysis_index: usize) -> Option<&SmallSignalStateSource> {
+        self.small_signal_states
+            .iter()
+            .find(|request| request.analysis_index == analysis_index)
+            .map(|request| &request.source)
+    }
+
+    /// Keep the analysis cards `keep` accepts, given each card's index and
+    /// the card, and keep every small-signal state request with its card: a
+    /// request whose card is dropped goes with it, and the rest follow their
+    /// cards to their new positions.
+    pub fn retain_analyses(&mut self, mut keep: impl FnMut(usize, &AnalysisCommand) -> bool) {
+        let mut positions = Vec::with_capacity(self.analyses.len());
+        let mut kept_count = 0usize;
+        for (index, analysis) in self.analyses.iter().enumerate() {
+            if keep(index, analysis) {
+                positions.push(Some(kept_count));
+                kept_count += 1;
+            } else {
+                positions.push(None);
+            }
+        }
+        let mut index = 0usize;
+        self.analyses.retain(|_| {
+            let kept = positions[index].is_some();
+            index += 1;
+            kept
+        });
+        self.small_signal_states.retain_mut(|request| {
+            match positions.get(request.analysis_index).copied().flatten() {
+                Some(position) => {
+                    request.analysis_index = position;
+                    true
+                }
+                None => false,
+            }
+        });
     }
 
     /// Register a terminal current meter without rewriting authored hierarchy.
@@ -3669,6 +3714,7 @@ impl Default for Netlist {
             analyses: Vec::new(),
             lin_analysis: None,
             fft_analyses: Vec::new(),
+            small_signal_states: Vec::new(),
             data_tables: Vec::new(),
             models: Vec::new(),
             subcircuits: Vec::new(),

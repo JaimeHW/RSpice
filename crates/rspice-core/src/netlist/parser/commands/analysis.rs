@@ -1,5 +1,6 @@
 //! Stage analysis cards and their effects before changing parser-owned state.
 use super::*;
+use crate::netlist::{SmallSignalStateRequest, SmallSignalStateSource};
 
 mod plan;
 pub(in crate::netlist::parser) use plan::AnalysisCardPlan;
@@ -34,7 +35,56 @@ pub(super) struct ParsedAnalysisCard {
     monte_carlo_source_card: Option<monte_carlo_identity::SourceCard>,
     output_request: Option<OutputRequest>,
     transient_noise: Option<TransientNoiseConfig>,
+    /// The card's `ACTIMES=`/`CHECKPOINT=` state, with its line.
+    small_signal_state: Option<(usize, SmallSignalStateSource)>,
     diagnostics: Vec<ParseDiagnostic>,
+}
+
+/// A card's small-signal state request, held with the line that authored it
+/// until the whole deck is read and the `.TRAN` window it needs is known.
+#[derive(Debug)]
+pub(in crate::netlist::parser) struct StagedSmallSignalState {
+    line: usize,
+    request: SmallSignalStateRequest,
+}
+
+/// Check every staged state request against the finished deck and release
+/// the requests.
+///
+/// `ACTIMES=` runs the deck's first `.TRAN` card, so that card must exist and
+/// every requested time must lie inside its `[0, TSTOP]` window.
+pub(in crate::netlist::parser) fn validate_small_signal_states(
+    staged: Vec<StagedSmallSignalState>,
+    analyses: &[AnalysisCommand],
+) -> Result<Vec<SmallSignalStateRequest>, ParseError> {
+    let transient_stop = analyses.iter().find_map(|analysis| match analysis {
+        AnalysisCommand::Tran { stop, .. } => Some(*stop),
+        _ => None,
+    });
+    let mut requests = Vec::with_capacity(staged.len());
+    for StagedSmallSignalState { line, request } in staged {
+        if let SmallSignalStateSource::TransientTimes(times) = &request.source {
+            let Some(stop) = transient_stop else {
+                return Err(ParseError::Syntax {
+                    line,
+                    message: "ACTIMES= linearizes around the state the deck's .TRAN card \
+                              reaches, and this deck has no .TRAN card"
+                        .to_owned(),
+                });
+            };
+            if let Some(time) = times.iter().find(|time| **time > stop) {
+                return Err(ParseError::Syntax {
+                    line,
+                    message: format!(
+                        "ACTIMES={time:e} lies past the .TRAN stop time {stop:e}; the \
+                         transient never reaches it"
+                    ),
+                });
+            }
+        }
+        requests.push(request);
+    }
+    Ok(requests)
 }
 
 #[derive(Clone, Copy)]
@@ -410,6 +460,26 @@ impl ParsedAnalysisCard {
                 )?);
             }
         }
+        let small_signal_state = if head.takes_small_signal_state() {
+            let state = parse_small_signal_state(stream, line_num, params, command)?;
+            if state.is_some()
+                && matches!(
+                    analysis,
+                    Some(AnalysisCommand::AcData { .. } | AnalysisCommand::NoiseData { .. })
+                )
+            {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "{command} DATA= solves one table row per point and takes no ACTIMES= \
+                         or CHECKPOINT="
+                    ),
+                });
+            }
+            state.map(|state| (line_num, state))
+        } else {
+            None
+        };
         reject_unconsumed_command_tokens(stream, line_num, command)?;
         source_map_diagnostics(&mut collected_diagnostics, origin);
         let card = Self {
@@ -419,6 +489,7 @@ impl ParsedAnalysisCard {
             monte_carlo_source_card,
             output_request,
             transient_noise,
+            small_signal_state,
             diagnostics: collected_diagnostics,
         };
         card.validate_constraints(line_num, lin_exists, current_noise)?;
@@ -448,7 +519,19 @@ impl ParsedAnalysisCard {
         Ok(())
     }
 
-    pub(super) fn publish(self, sink: AnalysisCardSink<'_>) {
+    /// Publish the card's effects. A card that linearizes around a transient
+    /// state returns that request, naming the card by the index it was given.
+    pub(super) fn publish(self, sink: AnalysisCardSink<'_>) -> Option<StagedSmallSignalState> {
+        let analysis_index = sink.analyses.len();
+        let small_signal_state = self.small_signal_state.and_then(|(line, source)| {
+            self.analysis.is_some().then_some(StagedSmallSignalState {
+                line,
+                request: SmallSignalStateRequest {
+                    analysis_index,
+                    source,
+                },
+            })
+        });
         if let Some(analysis) = self.analysis {
             sink.analyses.push(analysis);
         }
@@ -468,6 +551,24 @@ impl ParsedAnalysisCard {
             sink.options.transient_noise = Some(noise);
         }
         sink.diagnostics.extend(self.diagnostics);
+        small_signal_state
+    }
+}
+
+impl AnalysisHead {
+    /// The small-signal cards that may linearize around a transient state.
+    const fn takes_small_signal_state(self) -> bool {
+        matches!(
+            self,
+            Self::Ac
+                | Self::Noise
+                | Self::Transfer
+                | Self::Sp
+                | Self::Stb
+                | Self::PoleZero
+                | Self::Sensitivity
+                | Self::Disto
+        )
     }
 }
 

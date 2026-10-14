@@ -211,6 +211,7 @@ impl ParseState {
 
         let mut analyses = self.analyses;
         resolve_implicit_step_targets(&mut analyses, &params);
+        let small_signal_states = self.analysis_cards.into_small_signal_states(&analyses)?;
 
         let mut options = self.options;
         if options.replace_ground == Some(false) {
@@ -224,6 +225,7 @@ impl ParseState {
             analyses,
             lin_analysis: self.lin_analysis,
             fft_analyses: self.fft_analyses,
+            small_signal_states,
             data_tables: self.data_tables,
             models: self.models,
             subcircuits: self.subcircuits,

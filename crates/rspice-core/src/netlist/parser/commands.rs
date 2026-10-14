@@ -393,7 +393,7 @@ fn parse_stb_command(
     let mut compute_nyquist: Option<bool> = None;
     loop {
         skip_commas(stream);
-        if at_card_end(stream) {
+        if at_card_end(stream) || at_small_signal_state_keyword(stream) {
             break;
         }
         if let Some(keyword) = take_keyword(stream) {

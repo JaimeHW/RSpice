@@ -772,6 +772,7 @@ fn clone_netlist_with_abort(
     let elements = clone_slice(&source.elements, abort)?;
     let analyses = clone_slice(&source.analyses, abort)?;
     let fft_analyses = clone_slice(&source.fft_analyses, abort)?;
+    let small_signal_states = clone_slice(&source.small_signal_states, abort)?;
     let data_tables = clone_slice(&source.data_tables, abort)?;
     let models = clone_slice(&source.models, abort)?;
     let subcircuits = clone_slice(&source.subcircuits, abort)?;
@@ -806,6 +807,7 @@ fn clone_netlist_with_abort(
         analyses,
         lin_analysis: source.lin_analysis,
         fft_analyses,
+        small_signal_states,
         data_tables,
         models,
         subcircuits,

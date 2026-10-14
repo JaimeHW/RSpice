@@ -251,7 +251,7 @@ impl DeckPlanMaterializer<'_> {
 
         // A concrete run must never feed its meta-analysis cards back into an
         // executor. Post-processing cards such as FOUR remain on the netlist.
-        netlist.analyses.retain(|analysis| {
+        netlist.retain_analyses(|_, analysis| {
             !matches!(
                 analysis,
                 AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }

@@ -905,7 +905,7 @@ pub(super) fn parse_sp_command(
     let points = expect_positive_usize_value(stream, line_num, params, ".SP point count")?;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
-    let do_noise = if at_card_end(stream) || at_keyword(stream) {
+    let do_noise = if at_small_signal_fields_end(stream) || at_keyword(stream) {
         false
     } else {
         match &stream.peek().kind {
@@ -969,7 +969,7 @@ fn parse_sp_card_ports(
     let mut ports: Vec<SpCardPort> = Vec::new();
     loop {
         skip_commas(stream);
-        if at_card_end(stream) {
+        if at_small_signal_fields_end(stream) {
             break;
         }
         let Some(keyword) = take_keyword(stream) else {
@@ -1344,7 +1344,7 @@ pub(super) fn parse_disto_command(
     let points = expect_positive_usize_value(stream, line_num, params, ".DISTO point count")?;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
-    let f2_over_f1 = if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+    let f2_over_f1 = if at_small_signal_fields_end(stream) {
         None
     } else {
         Some(expect_value(stream, line_num, params)?)
@@ -1380,7 +1380,9 @@ pub(super) fn parse_noise_command(
             });
         }
         let table_name = expect_ident(stream, line_num)?;
-        let _summary_interval = try_value(stream, params);
+        if !at_small_signal_fields_end(stream) {
+            let _summary_interval = try_value(stream, params);
+        }
         return Ok(AnalysisCommand::NoiseData {
             output_node,
             reference_node,
@@ -1403,7 +1405,9 @@ pub(super) fn parse_noise_command(
     let points = expect_positive_usize_value(stream, line_num, params, ".NOISE point count")?;
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
-    let _summary_interval = try_value(stream, params);
+    if !at_small_signal_fields_end(stream) {
+        let _summary_interval = try_value(stream, params);
+    }
 
     Ok(AnalysisCommand::Noise {
         output_node,
@@ -1514,7 +1518,7 @@ pub(super) fn parse_sens_command(
     };
 
     let mut filters = Vec::new();
-    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+    while !at_small_signal_fields_end(stream) {
         let is_mode = matches!(
             &stream.peek().kind,
             TokenKind::Ident(mode)
@@ -1528,10 +1532,10 @@ pub(super) fn parse_sens_command(
 
     let mut ac_sweep = None;
 
-    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+    if !at_small_signal_fields_end(stream) {
         let mode = expect_ident(stream, line_num)?;
         if mode.eq_ignore_ascii_case("DC") {
-            if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            if !at_small_signal_fields_end(stream) {
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: ".SENS DC does not accept a frequency sweep".to_string(),
@@ -1661,6 +1665,153 @@ pub(super) fn parse_pz_command(
         transfer_type,
         analysis_type,
     })
+}
+
+/// Whether the next tokens open a small-signal card's state keyword,
+/// `ACTIMES=` or `CHECKPOINT=`.
+///
+/// Either keyword closes the card that takes it, so every reader of an
+/// optional trailing field stops here as it would at the end of the line.
+pub(super) fn at_small_signal_state_keyword(stream: &TokenStream) -> bool {
+    at_keyword(stream)
+        && matches!(
+            &stream.peek().kind,
+            TokenKind::Ident(name)
+                if name.eq_ignore_ascii_case("ACTIMES") || name.eq_ignore_ascii_case("CHECKPOINT")
+        )
+}
+
+/// The end of a small-signal card's own fields: the end of the line or its
+/// closing state keyword.
+fn at_small_signal_fields_end(stream: &TokenStream) -> bool {
+    at_card_end(stream) || at_small_signal_state_keyword(stream)
+}
+
+/// Read a small-signal card's closing `ACTIMES=t1[,t2,…]` or
+/// `CHECKPOINT="<file>"`, when it has one.
+///
+/// `ACTIMES` takes one time, a comma-separated list, or a bracketed list
+/// (`[1u 2u]`, Spectre's spelling); the times must be finite, non-negative
+/// and strictly increasing. Whether they lie inside the deck's `.TRAN`
+/// window is checked once the whole deck is read. The two keywords are
+/// mutually exclusive: a card linearizes around one state source.
+pub(super) fn parse_small_signal_state(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    card: &str,
+) -> Result<Option<crate::netlist::SmallSignalStateSource>, ParseError> {
+    use crate::netlist::SmallSignalStateSource;
+
+    let mut source: Option<SmallSignalStateSource> = None;
+    while at_small_signal_state_keyword(stream) {
+        let keyword = take_keyword(stream).unwrap_or_default();
+        let next = if keyword == "ACTIMES" {
+            SmallSignalStateSource::TransientTimes(parse_small_signal_times(
+                stream, line_num, params, card,
+            )?)
+        } else {
+            SmallSignalStateSource::CheckpointFile(parse_small_signal_checkpoint(
+                stream, line_num, card,
+            )?)
+        };
+        if let Some(previous) = &source {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: if previous.keyword() == next.keyword() {
+                    format!("{card} accepts {}= at most once", next.keyword())
+                } else {
+                    format!(
+                        "{card} cannot take both ACTIMES= and CHECKPOINT=: a card linearizes \
+                         around one state"
+                    )
+                },
+            });
+        }
+        source = Some(next);
+    }
+    Ok(source)
+}
+
+fn parse_small_signal_times(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    card: &str,
+) -> Result<Vec<Value>, ParseError> {
+    let bracketed = stream.consume(&TokenKind::LBracket);
+    let mut times = vec![expect_value(stream, line_num, params)?];
+    loop {
+        if bracketed {
+            skip_commas(stream);
+            if stream.consume(&TokenKind::RBracket) {
+                break;
+            }
+            if at_card_end(stream) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("{card} ACTIMES=[…] is missing its closing ']'"),
+                });
+            }
+        } else if !stream.consume(&TokenKind::Comma) {
+            break;
+        }
+        times.push(expect_value(stream, line_num, params)?);
+    }
+    let mut previous: Option<Value> = None;
+    for &time in &times {
+        if !time.is_finite() || time < 0.0 {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "{card} ACTIMES={time:e} is not a time: each must be finite and non-negative"
+                ),
+            });
+        }
+        if let Some(previous) = previous
+            && time <= previous
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "{card} ACTIMES must be strictly increasing; {time:e} follows {previous:e}"
+                ),
+            });
+        }
+        previous = Some(time);
+    }
+    Ok(times)
+}
+
+fn parse_small_signal_checkpoint(
+    stream: &mut TokenStream,
+    line_num: usize,
+    card: &str,
+) -> Result<String, ParseError> {
+    let name = quoted_path_lexeme(stream).or_else(|| {
+        // An unquoted name is the run of tokens written without a space,
+        // so `state.chk` reads as one name however the lexer splits it.
+        let first = stream.peek().clone();
+        if at_small_signal_fields_end(stream) {
+            return None;
+        }
+        let mut name = first.lexeme;
+        let mut end = first.span.end;
+        stream.advance();
+        while stream.peek().span.start == end && !at_card_end(stream) {
+            let token = stream.advance().clone();
+            end = token.span.end;
+            name.push_str(&token.lexeme);
+        }
+        Some(name)
+    });
+    match name {
+        Some(name) if !name.trim().is_empty() => Ok(name),
+        _ => Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{card} CHECKPOINT= needs a checkpoint file name"),
+        }),
+    }
 }
 
 /// Parse .MC command:

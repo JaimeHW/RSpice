@@ -8,6 +8,9 @@ use crate::netlist::parser::scopes::LexicalScopes;
 #[derive(Debug, Default)]
 pub(in crate::netlist::parser) struct AnalysisCardPlan {
     entries: Vec<Entry>,
+    /// Published cards' `ACTIMES=`/`CHECKPOINT=` requests, checked against
+    /// the deck's `.TRAN` card once the whole deck is read.
+    small_signal_states: Vec<super::StagedSmallSignalState>,
 }
 
 #[derive(Debug)]
@@ -71,7 +74,7 @@ impl AnalysisCardPlan {
         let card = match ParsedAnalysisCard::parse(command, &mut probe, parsing) {
             Ok(Some(card)) if !queued => {
                 *stream = probe;
-                card.publish(sink);
+                self.small_signal_states.extend(card.publish(sink));
                 return Ok(true);
             }
             Ok(Some(card)) => Card::Ready(Box::new(card)),
@@ -243,7 +246,7 @@ impl AnalysisCardPlan {
             );
             output_cursor = output_position;
             diagnostic_cursor = diagnostic_position;
-            card.publish(AnalysisCardSink {
+            let staged = card.publish(AnalysisCardSink {
                 analyses: sink.analyses,
                 monte_carlo_source_cards: sink.monte_carlo_source_cards,
                 lin_analysis: sink.lin_analysis,
@@ -252,10 +255,20 @@ impl AnalysisCardPlan {
                 diagnostics: sink.diagnostics,
                 options: sink.options,
             });
+            self.small_signal_states.extend(staged);
         }
         sink.output_requests.extend(outputs);
         sink.diagnostics.extend(diagnostics);
         Ok(())
+    }
+
+    /// Release every published card's small-signal state request, checked
+    /// against the finished deck's analysis cards.
+    pub(in crate::netlist::parser) fn into_small_signal_states(
+        self,
+        analyses: &[AnalysisCommand],
+    ) -> Result<Vec<SmallSignalStateRequest>, ParseError> {
+        super::validate_small_signal_states(self.small_signal_states, analyses)
     }
 }
 

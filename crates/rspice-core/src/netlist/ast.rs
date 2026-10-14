@@ -2230,6 +2230,43 @@ pub struct SpCardPort {
     pub z0: Value,
 }
 
+/// A small-signal card that linearizes around an accepted transient state
+/// instead of the operating point.
+///
+/// `.AC`, `.NOISE`, `.TF`, `.SP`, `.STB`, `.PZ`, `.SENS` and `.DISTO` accept
+/// either `ACTIMES=t1[,t2,…]` (Spectre's `actimes`) or `CHECKPOINT="<file>"`
+/// as their last fields. The card itself is unchanged; this request rides
+/// beside it, naming the card by its position in [`super::Netlist::analyses`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SmallSignalStateRequest {
+    /// Index of the card in the deck's analysis list.
+    pub analysis_index: usize,
+    /// Where the state the card linearizes around comes from.
+    pub source: SmallSignalStateSource,
+}
+
+/// The state a small-signal card linearizes around.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SmallSignalStateSource {
+    /// `ACTIMES=`: run the deck's first `.TRAN` card and linearize at each
+    /// accepted time, which are strictly increasing and inside its window.
+    TransientTimes(Vec<Value>),
+    /// `CHECKPOINT=`: linearize at the state a transient checkpoint file
+    /// holds. The name follows the `.OPTIONS RESTART FILE=` rules: one
+    /// portable file name in the deck's directory.
+    CheckpointFile(String),
+}
+
+impl SmallSignalStateSource {
+    /// The card keyword this source is spelled with.
+    pub const fn keyword(&self) -> &'static str {
+        match self {
+            Self::TransientTimes(_) => "ACTIMES",
+            Self::CheckpointFile(_) => "CHECKPOINT",
+        }
+    }
+}
+
 /// Analysis command from netlist
 #[derive(Debug, Clone)]
 pub enum AnalysisCommand {
