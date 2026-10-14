@@ -38,7 +38,7 @@ fn first_instance(app: &RSpiceApp) -> AnalysisInstanceId {
 /// Retain Run 12 of `instance`, finished in `elapsed` seconds, failed with
 /// `error` when there is one.
 fn retain_run(
-    app: &mut RSpiceApp,
+    runs: &mut crate::state::RunHistory,
     instance: AnalysisInstanceId,
     error: Option<&str>,
     elapsed: f64,
@@ -65,7 +65,7 @@ fn retain_run(
     };
     run.restore_lifecycle(lifecycle, elapsed)
         .expect("a finite elapsed time");
-    app.state.simulation.retained.runs.insert(0, run);
+    runs.insert(0, run);
 }
 
 fn simulate_app() -> RSpiceApp {
@@ -77,7 +77,12 @@ fn simulate_app() -> RSpiceApp {
 fn simulate_last_run_ok() -> RSpiceApp {
     let mut app = simulate_app();
     let instance = first_instance(&app);
-    retain_run(&mut app, instance, None, 1.84);
+    retain_run(
+        &mut app.state.simulation.retained.runs,
+        instance,
+        None,
+        1.84,
+    );
     app
 }
 
@@ -85,7 +90,7 @@ fn simulate_last_run_failed() -> RSpiceApp {
     let mut app = simulate_app();
     let instance = first_instance(&app);
     retain_run(
-        &mut app,
+        &mut app.state.simulation.retained.runs,
         instance,
         Some("Timestep too small at t = 1.25 µs"),
         0.42,
@@ -301,7 +306,7 @@ fn a_run_of_another_analysis_is_not_this_ones_last_run() {
     let mut app = simulate_app();
     let other = AnalysisInstanceId::new();
     assert_ne!(other, first_instance(&app));
-    retain_run(&mut app, other, None, 1.84);
+    retain_run(&mut app.state.simulation.retained.runs, other, None, 1.84);
     let painted = simulate_text(&mut app);
 
     assert!(
