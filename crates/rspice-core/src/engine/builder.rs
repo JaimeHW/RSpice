@@ -5401,6 +5401,14 @@ impl Engine {
         transient_stop_time: Option<Value>,
         abort: &dyn AbortSignal,
     ) -> Result<BuiltRfCircuit, SimulationError> {
+        // An engine holding a transient state elaborates the transient's own
+        // topology, so the circuit a small-signal analysis builds and the
+        // state it linearizes around are one elaboration.
+        let transient_stop_time = transient_stop_time.or_else(|| {
+            self.small_signal_state
+                .as_deref()
+                .map(super::small_signal_state::TransientStateBias::transient_stop)
+        });
         let (built, reference) =
             self.elaborate_circuit(netlist, default_ports, transient_stop_time, None, abort)?;
         let Some(reference) = reference else {

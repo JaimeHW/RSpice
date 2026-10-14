@@ -102,6 +102,8 @@ mod progress;
 mod sensitivity;
 pub use sensitivity::SensitivityCardResult;
 mod small_signal_bias;
+mod small_signal_state;
+pub use small_signal_state::{SmallSignalCardResult, StateLinearizedResult};
 mod sp;
 pub use sp::SParameterRun;
 mod source_values;

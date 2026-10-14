@@ -2259,7 +2259,7 @@ pub enum SmallSignalStateSource {
 
 impl SmallSignalStateSource {
     /// The card keyword this source is spelled with.
-    pub const fn keyword(&self) -> &'static str {
+    pub(crate) const fn keyword(&self) -> &'static str {
         match self {
             Self::TransientTimes(_) => "ACTIMES",
             Self::CheckpointFile(_) => "CHECKPOINT",

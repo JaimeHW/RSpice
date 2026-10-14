@@ -76,6 +76,21 @@ pub struct Engine {
     /// address alone is a sound key inside the scope and for nothing outside
     /// it.
     startup_directives: std::sync::Mutex<Option<std::sync::Arc<CachedStartupDirectives>>>,
+    /// The accepted transient state every small-signal analysis on this
+    /// engine linearizes around instead of the operating point.
+    ///
+    /// Configuration of a per-run engine only. It is set on the private
+    /// engine copy that runs one `ACTIMES=` or `CHECKPOINT=` card around one
+    /// state, which that card's run consumes, and never on a shared or
+    /// long-lived engine: no constructor or setter outside
+    /// `small_signal_state` reaches it, so a later analysis on the caller's
+    /// engine cannot inherit it. It saves threading a parameter through every
+    /// analysis's entry point to the one bias preparation that reads it.
+    /// [`Self::resolved_for_netlist`] carries it to the engine each of that
+    /// card's entry points resolves; the transient that captures a state runs
+    /// on a copy without it.
+    pub(super) small_signal_state:
+        Option<std::sync::Arc<super::small_signal_state::TransientStateBias>>,
 }
 
 /// One elaboration's validated startup netlist and its subcircuit-scoped
@@ -237,6 +252,7 @@ impl Engine {
             #[cfg(feature = "veriloga")]
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
+            small_signal_state: None,
         }
     }
 
@@ -262,6 +278,7 @@ impl Engine {
             #[cfg(feature = "veriloga")]
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
+            small_signal_state: None,
         })
     }
 
@@ -287,6 +304,7 @@ impl Engine {
             #[cfg(feature = "veriloga")]
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
+            small_signal_state: None,
         }
     }
 
@@ -314,6 +332,7 @@ impl Engine {
             #[cfg(feature = "veriloga")]
             compiler_diagnostic_handler: None,
             startup_directives: std::sync::Mutex::new(None),
+            small_signal_state: None,
         })
     }
 
@@ -560,6 +579,7 @@ impl Engine {
                 std::sync::Arc::clone(&self.compiler_diagnostics);
             resolved_engine.compiler_diagnostic_handler = self.compiler_diagnostic_handler.clone();
         }
+        resolved_engine.small_signal_state = self.small_signal_state.clone();
         resolved_engine
     }
 

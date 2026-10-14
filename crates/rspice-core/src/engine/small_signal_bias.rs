@@ -24,10 +24,11 @@ use crate::{CircuitData, Netlist, Value};
 
 /// Where the bias a small-signal analysis linearizes around comes from.
 ///
-/// The operating point is the only source an analysis card selects today. The
-/// accepted transient state at a time T (design S10) joins this enum with the
-/// `ACTIMES=` and `CHECKPOINT=` spellings, as two further arms that skip the
-/// solve and the commit because that state is already accepted.
+/// The operating point is the only source an analysis's own call selects. An
+/// engine that holds an accepted transient state (design S10, a card's
+/// `ACTIMES=` or `CHECKPOINT=`) overrides it: every analysis on that engine
+/// adopts the state, skipping the solve and the commit because the state is
+/// already accepted (`small_signal_state`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::engine) enum BiasSource {
     /// The coupled time-zero operating point, committed as the held
@@ -96,6 +97,11 @@ impl Engine {
         source: BiasSource,
         abort: &dyn AbortSignal,
     ) -> Result<SmallSignalBias, SimulationError> {
+        if let Some(state) = self.small_signal_state.clone() {
+            return self.prepare_small_signal_bias_at_state(
+                netlist, circuit, analysis, physical, &state, abort,
+            );
+        }
         let BiasSource::OperatingPoint = source;
         let run_scope = ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
@@ -110,28 +116,7 @@ impl Engine {
         Self::deliver_initial_analog_tasks(&mut circuit, abort)?;
         #[cfg(feature = "veriloga")]
         circuit.start_mixed_digital_execution()?;
-        if let Some(token) = coupled_line_token(analysis, physical)
-            && !circuit.coupled_tlines.is_empty()
-        {
-            return Err(UnsupportedCapabilityError::new(
-                token,
-                format!(
-                    "{} does not support coupled multiconductor (CPL) transmission lines",
-                    if analysis == CapabilityAnalysis::Disto {
-                        "Distortion analysis"
-                    } else {
-                        analysis.label()
-                    }
-                ),
-            )
-            .for_analysis_kind(analysis.kind())
-            .into());
-        }
-        match dynamic_charge_label(analysis, physical) {
-            Some("AC") => Self::ensure_supported_ac_dynamic_charges(&circuit)?,
-            Some(label) => Self::ensure_supported_dynamic_charges(&circuit, label)?,
-            None => {}
-        }
+        Self::ensure_small_signal_devices(&circuit, analysis, physical)?;
         circuit
             .prepare_veriloga_equilibrium_analysis_point(physical, true, false)
             .map_err(SimulationError::Circuit)?;
@@ -194,6 +179,38 @@ impl Engine {
             matrix,
             bias,
         })
+    }
+
+    /// The device refusals `analysis` raises before it linearizes: coupled
+    /// lines where the analysis has no small-signal load for them, and the
+    /// native charge models it cannot linearize.
+    pub(in crate::engine) fn ensure_small_signal_devices(
+        circuit: &CircuitData,
+        analysis: CapabilityAnalysis,
+        physical: u8,
+    ) -> Result<(), SimulationError> {
+        if let Some(token) = coupled_line_token(analysis, physical)
+            && !circuit.coupled_tlines.is_empty()
+        {
+            return Err(UnsupportedCapabilityError::new(
+                token,
+                format!(
+                    "{} does not support coupled multiconductor (CPL) transmission lines",
+                    if analysis == CapabilityAnalysis::Disto {
+                        "Distortion analysis"
+                    } else {
+                        analysis.label()
+                    }
+                ),
+            )
+            .for_analysis_kind(analysis.kind())
+            .into());
+        }
+        match dynamic_charge_label(analysis, physical) {
+            Some("AC") => Self::ensure_supported_ac_dynamic_charges(circuit),
+            Some(label) => Self::ensure_supported_dynamic_charges(circuit, label),
+            None => Ok(()),
+        }
     }
 
     /// Commit the converged operating point as the held equilibrium and return
