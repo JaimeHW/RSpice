@@ -187,37 +187,37 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                 (
                     RANK_WIDTH,
                     INSTANCE_WIDTH,
-                    "INSTANCE",
+                    "Instance",
                     egui::Align2::LEFT_CENTER,
                 ),
                 (
                     RANK_WIDTH + INSTANCE_WIDTH,
                     PARAMETER_WIDTH,
-                    "PARAMETER",
+                    "Parameter",
                     egui::Align2::LEFT_CENTER,
                 ),
                 (
                     scope_offset,
                     SCOPE_WIDTH,
-                    "SCOPE",
+                    "Scope",
                     egui::Align2::LEFT_CENTER,
                 ),
                 (
                     contribution_offset,
                     CONTRIBUTION_WIDTH,
-                    "CONTRIBUTION",
+                    "Contribution",
                     egui::Align2::RIGHT_CENTER,
                 ),
                 (
                     share_offset,
                     SHARE_WIDTH,
-                    "SHARE",
+                    "Share",
                     egui::Align2::RIGHT_CENTER,
                 ),
                 (
                     cumulative_offset,
                     CUMULATIVE_WIDTH,
-                    "CUM",
+                    "Cum.",
                     egui::Align2::RIGHT_CENTER,
                 ),
             ] {
@@ -242,7 +242,7 @@ pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>
                 paint_cell(
                     ui,
                     column_rect(header, bar_offset, bar_width),
-                    "SHARE OF VARIANCE",
+                    "Share of variance",
                     egui::Align2::LEFT_CENTER,
                     scale_font.clone(),
                     c.text_faint,
@@ -595,14 +595,14 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
                             };
                             if visible.start == 0 {
                                 for heading in [
-                                    "RANK",
-                                    "INSTANCE",
-                                    "PARAMETER",
-                                    "SCOPE",
-                                    "SIGMA PARAM",
-                                    "SENSITIVITY",
-                                    "CONTRIBUTION",
-                                    "SHARE",
+                                    "Rank",
+                                    "Instance",
+                                    "Parameter",
+                                    "Scope",
+                                    "Sigma param",
+                                    "Sensitivity",
+                                    "Contribution",
+                                    "Share",
                                 ] {
                                     ui.label(
                                         egui::RichText::new(heading)

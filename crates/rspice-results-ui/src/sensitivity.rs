@@ -283,7 +283,7 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
             paint_cell(
                 ui,
                 column_rect(header, RANK_WIDTH, PARAMETER_WIDTH),
-                "PARAMETER",
+                "Parameter",
                 egui::Align2::LEFT_CENTER,
                 header_font.clone(),
                 c.text_faint,
@@ -291,7 +291,7 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
             paint_cell(
                 ui,
                 column_rect(header, sensitivity_offset, sensitivity_width),
-                "NORMALIZED SENSITIVITY",
+                "Normalized sensitivity",
                 egui::Align2::LEFT_CENTER,
                 header_font.clone(),
                 c.text_faint,
@@ -299,7 +299,7 @@ pub fn show(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sensitivit
             paint_cell(
                 ui,
                 column_rect(header, value_offset, VALUE_WIDTH),
-                "VALUE",
+                "Value",
                 egui::Align2::RIGHT_CENTER,
                 header_font,
                 c.text_faint,
@@ -546,10 +546,10 @@ pub fn right_panel(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sen
                                 .color(header_color)
                         };
                         if visible.start == 0 {
-                            ui.label(heading("RANK"));
-                            ui.label(heading("PARAMETER"));
-                            ui.label(heading("NORMALIZED"));
-                            ui.label(heading("RAW"));
+                            ui.label(heading("Rank"));
+                            ui.label(heading("Parameter"));
+                            ui.label(heading("Normalized"));
+                            ui.label(heading("Raw"));
                             ui.end_row();
                         }
                         // Row 0 of the virtual list is the heading, so the data

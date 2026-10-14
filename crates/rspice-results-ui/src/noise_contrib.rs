@@ -323,10 +323,10 @@ fn contributor_header(ui: &mut Ui, width: f32) {
     );
     for (index, (label, offset, column_width, align)) in [
         ("#", 0.0, RANK_W, Align2::LEFT_CENTER),
-        ("SOURCE", RANK_W, SOURCE_W, Align2::LEFT_CENTER),
-        ("POWER", RANK_W + SOURCE_W, POWER_W, Align2::RIGHT_CENTER),
+        ("Source", RANK_W, SOURCE_W, Align2::LEFT_CENTER),
+        ("Power", RANK_W + SOURCE_W, POWER_W, Align2::RIGHT_CENTER),
         (
-            "SHARE",
+            "Share",
             RANK_W + SOURCE_W + POWER_W,
             width - RANK_W - SOURCE_W - POWER_W,
             Align2::RIGHT_CENTER,

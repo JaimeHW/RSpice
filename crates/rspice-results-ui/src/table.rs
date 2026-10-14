@@ -316,7 +316,7 @@ pub fn show_operating_point_table(ui: &mut Ui, analysis: &AnalysisResult, row_co
         .column(egui_extras::Column::initial(72.0).at_least(52.0))
         .column(egui_extras::Column::initial(150.0).at_least(96.0))
         .header(HEADER_H, |mut header| {
-            for label in ["SOURCE", "QUANTITY", "EXACT VALUE", "UNIT", "STATUS"] {
+            for label in ["Source", "Quantity", "Exact value", "Unit", "Status"] {
                 header.col(|ui| header_cell(ui, label));
             }
         })
@@ -394,7 +394,7 @@ pub fn show_artifact(
         .column(egui_extras::Column::initial(INDEX_W).at_least(52.0))
         .column(egui_extras::Column::remainder().at_least(240.0))
         .header(HEADER_H, |mut header| {
-            for label in ["LINE", "EXACT RETAINED EVIDENCE"] {
+            for label in ["Line", "Evidence"] {
                 header.col(|ui| header_cell(ui, label));
             }
         })
@@ -783,7 +783,7 @@ pub fn show_samples(
                     header.min,
                     egui::pos2(header.left() + INDEX_W, header.bottom()),
                 ),
-                "ROW",
+                "Row",
                 c.text_faint,
                 egui::Align2::LEFT_CENTER,
             );

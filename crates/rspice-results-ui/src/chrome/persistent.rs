@@ -275,22 +275,27 @@ pub fn tracking_banner(ui: &mut Ui, reason: &str) {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
-    ui.painter().rect_filled(
-        egui::Rect::from_min_size(rect.left_top(), egui::vec2(3.0, rect.height())),
-        0.0,
-        t.color.warn,
+    // The mark says this is a warning; the reason stays neutral text.
+    rspice_ui_kit::widgets::paint_problem_mark(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            pos2(rect.left() + 13.5, rect.center().y),
+            egui::Vec2::splat(11.0),
+        ),
+        rspice_ui_kit::widgets::Problem::Warning,
     );
     ui.painter().text(
-        pos2(rect.left() + 13.0, rect.center().y),
+        pos2(rect.left() + 25.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         reason,
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text,
+        t.color.text_dim,
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, reason));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
         node.set_label(reason);
+        node.set_description(rspice_ui_kit::widgets::Problem::Warning.announcement());
     });
 }
 

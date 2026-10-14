@@ -433,19 +433,19 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                 (
                     RANK_WIDTH,
                     PARAMETER_WIDTH,
-                    "VARIABLE",
+                    "Variable",
                     egui::Align2::LEFT_CENTER,
                 ),
                 (
                     bar_offset,
                     bar_width,
-                    "NORMALIZED SENSITIVITY",
+                    "Normalized sensitivity",
                     egui::Align2::LEFT_CENTER,
                 ),
                 (
                     value_offset,
                     VALUE_WIDTH,
-                    "VALUE",
+                    "Value",
                     egui::Align2::RIGHT_CENTER,
                 ),
             ] {
@@ -462,7 +462,7 @@ pub fn show(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan>) {
                 paint_cell(
                     ui,
                     column_rect(header, profile_offset, profile_width),
-                    "VS FREQUENCY",
+                    "Across frequency",
                     egui::Align2::LEFT_CENTER,
                     header_font.clone(),
                     c.text_faint,
@@ -722,12 +722,12 @@ pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan
                                 .color(header_color)
                         };
                         if visible.start == 0 {
-                            ui.label(heading("RANK"));
-                            ui.label(heading("VARIABLE"));
-                            ui.label(heading("NORMALIZED"));
-                            ui.label(heading("RAW"));
+                            ui.label(heading("Rank"));
+                            ui.label(heading("Variable"));
+                            ui.label(heading("Normalized"));
+                            ui.label(heading("Raw"));
                             if has_phase {
-                                ui.label(heading("PHASE"));
+                                ui.label(heading("Phase"));
                             }
                             ui.end_row();
                         }

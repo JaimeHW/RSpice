@@ -6,10 +6,15 @@ use egui::{Label, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 use rspice_ui_kit::icons::Icon;
 use rspice_ui_kit::theme::{self, FontWeight, mix};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::IconButton;
+use rspice_ui_kit::widgets::{IconButton, Problem, paint_problem_mark};
 
 /// Height of a strip header.
 pub const HEADER_HEIGHT: f32 = 28.0;
+
+/// The warning mark an incomplete result sets after its kind tag, and the
+/// air between the tag and the mark.
+const KIND_MARK_SIDE: f32 = 11.0;
+const KIND_MARK_GAP: f32 = 6.0;
 
 const HEADER_PADDING_X: f32 = 10.0;
 const HEADER_ACTION_GAP: f32 = 6.0;
@@ -299,36 +304,27 @@ impl<'a> StripHeader<'a> {
         let content_rect =
             Rect::from_min_max(inner.left_top(), egui::pos2(content_right, inner.bottom()));
 
-        // Kind tag: mono semibold, letterspaced. Metadata is measured before
-        // rendering so it receives a bounded region instead of consuming the
-        // legend or action budget.
+        // Kind tag: mono medium, painted as written. An incomplete result
+        // keeps the tag in primary text and sets a warning mark after it.
+        // Metadata is measured before rendering so it receives a bounded
+        // region instead of consuming the legend or action budget.
         let mut job = egui::text::LayoutJob::default();
         job.append(
             self.kind,
             0.0,
             egui::TextFormat {
                 font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-                color: if self.incomplete.is_some() {
-                    c.warn
-                } else {
-                    c.text
-                },
-                extra_letter_spacing: 0.08 * tokens::FS_0,
+                color: c.text,
                 ..Default::default()
             },
         );
-        if self.incomplete.is_some() {
-            job.append(
-                " \u{26a0}",
-                0.0,
-                egui::TextFormat {
-                    font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-                    color: c.warn,
-                    ..Default::default()
-                },
-            );
-        }
-        let kind_natural_width = ui.fonts_mut(|fonts| fonts.layout_job(job.clone()).size().x);
+        let kind_text_width = ui.fonts_mut(|fonts| fonts.layout_job(job.clone()).size().x);
+        let mark_room = if self.incomplete.is_some() {
+            KIND_MARK_GAP + KIND_MARK_SIDE
+        } else {
+            0.0
+        };
+        let kind_natural_width = kind_text_width + mark_room;
         let subtitle_font = theme::sans(tokens::FS_0, FontWeight::Regular);
         let subtitle_natural_width = if self.subtitle.is_empty() {
             0.0
@@ -356,18 +352,37 @@ impl<'a> StripHeader<'a> {
                 egui::pos2(content_rect.left() + span.end(), content_rect.bottom()),
             )
         };
-        // Colour alone would not carry this, so the hover — and the
+        // The mark alone would not carry this, so the hover — and the
         // accessibility text behind it — states the reason in words.
         let kind_hover = match self.incomplete {
             Some(reason) => format!("{} · {reason}", self.kind),
             None => self.kind.to_owned(),
         };
+        let kind_rect = span_rect(layout.kind);
         truncated_label(
             ui,
-            span_rect(layout.kind),
+            Rect::from_min_max(
+                kind_rect.min,
+                egui::pos2(
+                    (kind_rect.right() - mark_room).max(kind_rect.left()),
+                    kind_rect.bottom(),
+                ),
+            ),
             Label::new(job).truncate(),
             &kind_hover,
         );
+        if self.incomplete.is_some() && kind_rect.width() >= KIND_MARK_SIDE {
+            let left = (kind_rect.left() + kind_text_width + KIND_MARK_GAP)
+                .min(kind_rect.right() - KIND_MARK_SIDE);
+            paint_problem_mark(
+                &ui.painter().with_clip_rect(kind_rect),
+                Rect::from_center_size(
+                    egui::pos2(left + KIND_MARK_SIDE * 0.5, kind_rect.center().y),
+                    egui::Vec2::splat(KIND_MARK_SIDE),
+                ),
+                Problem::Warning,
+            );
+        }
         if layout.subtitle.width > 0.0 {
             truncated_label(
                 ui,
