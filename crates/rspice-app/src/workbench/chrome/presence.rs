@@ -81,6 +81,20 @@ fn presence_facts(app: &RSpiceApp) -> Option<PresenceFacts> {
     })
 }
 
+/// Radius of the cluster's live dot.
+const PRESENCE_LIVE_DOT_RADIUS: f32 = 3.0;
+/// From the live dot's left edge to where the state label starts.
+const PRESENCE_LIVE_DOT_ADVANCE: f32 = 2.0 * PRESENCE_LIVE_DOT_RADIUS + 5.0;
+
+/// What the relay is doing, in the words the cluster paints after its dot.
+fn presence_state_label(relay_connected: bool) -> &'static str {
+    if relay_connected {
+        "Live"
+    } else {
+        "Reconnecting"
+    }
+}
+
 fn peer_initials(name: &str) -> String {
     let words = name
         .split_whitespace()
@@ -117,20 +131,12 @@ pub(super) fn session_presence_cluster(
         return actions;
     };
     let t = Tokens::get(ui.ctx());
-    let mark_text = if facts.relay_connected {
-        "LIVE"
-    } else {
-        "SYNC"
-    };
-    let mark_color = if facts.relay_connected {
-        t.color.ok
-    } else {
-        t.color.warn
-    };
+    // The session is the cluster's one live state: an accent dot, then what
+    // the relay is doing in plain words and neutral ink.
     let mark_galley = ui.painter().layout_no_wrap(
-        mark_text.to_owned(),
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        mark_color,
+        presence_state_label(facts.relay_connected).to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
     );
     let admitted: Vec<&PresencePeer> = facts
         .peers
@@ -140,7 +146,8 @@ pub(super) fn session_presence_cluster(
     let chip_count = admitted.len().min(3);
     let overflow = admitted.len().saturating_sub(chip_count);
     let chip = if large_target { 24.0 } else { 20.0 };
-    let width = mark_galley.size().x
+    let width = PRESENCE_LIVE_DOT_ADVANCE
+        + mark_galley.size().x
         + 8.0
         + chip_count as f32 * (chip + 2.0)
         + if overflow > 0 { chip + 2.0 } else { 0.0 }
@@ -167,10 +174,16 @@ pub(super) fn session_presence_cluster(
         ui.painter().rect_filled(rect, t.radius, t.color.bg_hover);
     }
     let mut x = rect.left() + 4.0;
+    ui.painter().circle_filled(
+        egui::pos2(x + PRESENCE_LIVE_DOT_RADIUS, rect.center().y),
+        PRESENCE_LIVE_DOT_RADIUS,
+        t.color.accent,
+    );
+    x += PRESENCE_LIVE_DOT_ADVANCE;
     ui.painter().galley(
         egui::pos2(x, rect.center().y - mark_galley.size().y * 0.5),
         mark_galley.clone(),
-        mark_color,
+        t.color.text_dim,
     );
     x += mark_galley.size().x + 6.0;
     for peer in admitted.iter().take(chip_count) {
@@ -353,4 +366,18 @@ fn render_presence_popover(
 /// A wire document key as the roster shows it.
 fn presented_doc(doc: &str) -> String {
     doc.strip_prefix("schematic/").unwrap_or(doc).to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cluster names the session's state in sentence case and neutral
+    /// ink. It used to read "LIVE" in green and "SYNC" in amber, which made a
+    /// reconnecting relay look like a fault and a connected one like a pass.
+    #[test]
+    fn the_presence_cluster_says_live_or_reconnecting_in_plain_words() {
+        assert_eq!(presence_state_label(true), "Live");
+        assert_eq!(presence_state_label(false), "Reconnecting");
+    }
 }

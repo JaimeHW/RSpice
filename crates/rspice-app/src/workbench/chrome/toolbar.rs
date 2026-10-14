@@ -1884,6 +1884,12 @@ fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
     }
 }
 
+/// From the reference PVT chip's left edge to its label. The chip is a
+/// labelled control; it carries no dot in front of the label.
+const PVT_CHIP_TEXT_INSET: f32 = 10.0;
+/// The chip's right end: the chevron and the space around it.
+const PVT_CHIP_CHEVRON_SPAN: f32 = 21.0;
+
 fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
     let t = Tokens::get(ui.ctx());
     let reference = app.state.sim_setup.reference_pvt;
@@ -1902,7 +1908,8 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
         )
         .size()
         .x
-        + 42.0;
+        + PVT_CHIP_TEXT_INSET
+        + PVT_CHIP_CHEVRON_SPAN;
     let (response, _) = ui
         .scope(|ui| {
             ui.spacing_mut().button_padding = Vec2::ZERO;
@@ -1988,17 +1995,21 @@ fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
         ),
         egui::StrokeKind::Inside,
     );
-    ui.painter().circle_filled(
-        egui::pos2(response.rect.left() + 11.0, response.rect.center().y),
-        3.0,
-        t.color.accent,
-    );
     let text_clip = egui::Rect::from_min_max(
-        egui::pos2(response.rect.left() + 21.0, response.rect.top()),
-        egui::pos2(response.rect.right() - 21.0, response.rect.bottom()),
+        egui::pos2(
+            response.rect.left() + PVT_CHIP_TEXT_INSET,
+            response.rect.top(),
+        ),
+        egui::pos2(
+            response.rect.right() - PVT_CHIP_CHEVRON_SPAN,
+            response.rect.bottom(),
+        ),
     );
     ui.painter().with_clip_rect(text_clip).text(
-        egui::pos2(response.rect.left() + 21.0, response.rect.center().y),
+        egui::pos2(
+            response.rect.left() + PVT_CHIP_TEXT_INSET,
+            response.rect.center().y,
+        ),
         egui::Align2::LEFT_CENTER,
         label,
         theme::mono(tokens::FS_0, FontWeight::Medium),
