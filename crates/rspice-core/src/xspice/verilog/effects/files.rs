@@ -28,6 +28,7 @@
 //! output.
 
 mod calls;
+pub(crate) mod readmem;
 pub(crate) mod scan;
 
 use std::collections::BTreeMap;

@@ -1,4 +1,4 @@
-//! File I/O and string I/O end to end (design P2 section 4.3).
+//! File I/O, string I/O and `$readmem*` end to end (design P2 section 4.3).
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
 //! (`iverilog -g2005`, `vvp -n`, probes `scratchpad/p2l5/probe/p4.v` and
@@ -142,15 +142,29 @@ fn a_testbench_writes_and_reads_files_as_icarus_does() {
     assert!(stdout(&report).contains("appended 0 [12 34 end+tail]\n"));
 }
 
-/// `$sformat` with a literal and a variable format, `$swriteh`, and `$sscanf`
-/// of a literal and of a variable.
+/// `$sformat` with a literal and a variable format, `$swriteh`, `$sscanf`
+/// of a literal and of a variable, `$readmemh` past the memory's end and
+/// `$readmemb` downward into a narrower memory with comments, `x`, `z` and
+/// `_`.
 #[test]
-fn string_io_runs_as_icarus_runs_it() {
+fn string_io_and_readmem_run_as_icarus_runs_them() {
     let directory = run_directory("strings");
+    std::fs::write(
+        directory.join("work").join("p3a.txt"),
+        "1 2 3\n4 // c\n/* x */ 5\n",
+    )
+    .unwrap();
+    std::fs::write(
+        directory.join("work").join("p5b.txt"),
+        "// nibbles\n1010 0_1x1\nzz11\n",
+    )
+    .unwrap();
     let report = bench_in(
         &directory,
         r#"module tb;
   reg [8*12:1] s, fmt;
+  reg [7:0] mem [0:3];
+  reg [3:0] nib [7:4];
   integer r, a, b;
   real x;
   initial begin
@@ -165,6 +179,10 @@ fn string_io_runs_as_icarus_runs_it() {
     $display("%0d %0d %f %h", r, a, x, b);
     r = $sscanf(s, "%h", a);
     $display("%0d %h", r, a);
+    $readmemh("work/p3a.txt", mem);
+    $display("%h %h %h %h", mem[0], mem[1], mem[2], mem[3]);
+    $readmemb("work/p5b.txt", nib, 6, 4);
+    $display("%b %b %b %b", nib[4], nib[5], nib[6], nib[7]);
   end
 endmodule
 "#,
@@ -176,7 +194,113 @@ endmodule
          [a-ff]\n\
          [ab|3]\n\
          3 7 2.500000 zzzzzzzz\n\
-         1 000000ab\n"
+         1 000000ab\n\
+         01 02 03 04\n\
+         zz11 01x1 1010 xxxx\n"
+    );
+    assert_eq!(
+        warnings(&report),
+        ["$readmemh: work/p3a.txt: too many words in the file for the requested range [0:3]"]
+    );
+}
+
+/// Every condition ivtest's `readmem-error` diagnoses is reported, in call
+/// order, and loads what Icarus loads: an unknown register or integer as the
+/// file name, a non-printable character in it, a real start or finish
+/// address (rounded, and the load goes ahead), a start or finish address
+/// outside an ascending or offset memory (nothing loads), too many and too
+/// few words for the range, and an invalid digit (the load stops there).
+/// Icarus 13.0 printed the same contents and one `WARNING:` or `ERROR:` per
+/// call (probe `p8.v`).
+#[test]
+fn readmem_reports_every_condition_icarus_reports() {
+    let directory = run_directory("readmem-errors");
+    for (name, text) in [
+        ("p8a.txt", "1 2 3 4\n"),
+        ("p8b.txt", "5 6\n"),
+        ("p8c.txt", "7 8 u 9\n"),
+    ] {
+        std::fs::write(directory.join("work").join(name), text).unwrap();
+    }
+    let report = bench_in(
+        &directory,
+        r#"module tb;
+  reg [8*12:1] str;
+  integer istr, i;
+  real rval;
+  reg [7:0] mem [0:3];
+  reg [7:0] hi [8:11];
+  task clear;
+    for (i = 0; i < 4; i = i + 1) begin
+      mem[i] = 0;
+      hi[i + 8] = 0;
+    end
+  endtask
+  task show;
+    $display("%h %h %h %h | %h %h %h %h", mem[0], mem[1], mem[2], mem[3],
+             hi[8], hi[9], hi[10], hi[11]);
+  endtask
+  initial begin
+    clear;
+    $readmemh(str, mem);
+    $readmemh(istr, mem);
+    str = "work/p8a.txt";
+    str[8:1] = 8'd2;
+    $readmemh(str, mem);
+    show;
+    rval = 0.0;
+    $readmemh("work/p8a.txt", mem, rval);
+    show;
+    clear;
+    rval = 3.0;
+    $readmemh("work/p8a.txt", mem, 0, rval);
+    show;
+    clear;
+    $readmemh("work/p8a.txt", mem, -1, 3);
+    $readmemh("work/p8a.txt", hi, 7, 11);
+    $readmemh("work/p8a.txt", mem, 0, 4);
+    $readmemh("work/p8a.txt", hi, 8, 12);
+    show;
+    $readmemh("work/p8a.txt", mem, 0, 1);
+    show;
+    clear;
+    $readmemh("work/p8b.txt", mem);
+    show;
+    clear;
+    $readmemh("work/p8c.txt", mem);
+    show;
+  end
+endmodule
+"#,
+        false,
+    );
+    assert_eq!(
+        stdout(&report),
+        "00 00 00 00 | 00 00 00 00\n\
+         01 02 03 04 | 00 00 00 00\n\
+         01 02 03 04 | 00 00 00 00\n\
+         00 00 00 00 | 00 00 00 00\n\
+         01 02 00 00 | 00 00 00 00\n\
+         05 06 00 00 | 00 00 00 00\n\
+         07 08 00 00 | 00 00 00 00\n"
+    );
+    assert_eq!(
+        warnings(&report),
+        [
+            "$readmemh: the file name argument is not a valid string",
+            "$readmemh: the file name argument is not a valid string",
+            "$readmemh: the file name argument contains non-printable characters: \
+             \"work/p8a.tx\\002\"",
+            "$readmemh: the start address is a real value; it is rounded to an integer",
+            "$readmemh: the finish address is a real value; it is rounded to an integer",
+            "$readmemh: work/p8a.txt: Start address -1 is out of bounds for the memory [0:3]",
+            "$readmemh: work/p8a.txt: Start address 7 is out of bounds for the memory [8:11]",
+            "$readmemh: work/p8a.txt: Finish address 4 is out of bounds for the memory [0:3]",
+            "$readmemh: work/p8a.txt: Finish address 12 is out of bounds for the memory [8:11]",
+            "$readmemh: work/p8a.txt: too many words in the file for the requested range [0:1]",
+            "$readmemh: work/p8b.txt: not enough words in the file for the requested range [0:3]",
+            "$readmemh: work/p8c.txt: invalid input character: u",
+        ]
     );
 }
 

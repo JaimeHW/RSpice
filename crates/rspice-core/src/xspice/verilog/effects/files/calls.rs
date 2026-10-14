@@ -17,6 +17,7 @@ use rspice_veriloga::four_state::FourStateBit;
 use super::super::{
     CallOrigin, FileMonitor, HdlEffects, HdlStream, MonitorTask, integer_of, string_argument,
 };
+use super::readmem::{self, Readmem};
 use super::scan::{self, ScanContext, TextSource};
 use super::{EBADF, OpenFailure, WriteTarget, text_bytes};
 use crate::xspice::verilog::store::DigitalSignalStore;
@@ -155,6 +156,7 @@ impl HdlEffects {
         args: &[DigitalScalar],
         clock: Option<DigitalClock>,
         origin: CallOrigin,
+        store: &mut DigitalSignalStore,
     ) -> Result<DigitalTaskOutcome, DigitalEvalError> {
         let mut outcome = DigitalTaskOutcome::CONTINUE;
         match site.kind {
@@ -260,6 +262,9 @@ impl HdlEffects {
                     self.format(plan, site, args, 1, radix)?
                 };
                 outcome.outputs = vec![string_value(class, &text_bytes(&text))];
+            }
+            Kind::Readmemb | Kind::Readmemh => {
+                self.readmem(plan, site, args, clock, store)?;
             }
             other => {
                 return Err(DigitalEvalError::SystemCallUnavailable {
@@ -607,6 +612,107 @@ impl HdlEffects {
             name: declared.name.as_str(),
             bounds: declared.bounds,
         })
+    }
+
+    fn readmem(
+        &mut self,
+        plan: &CanonicalDigitalPlan,
+        site: &DigitalSystemCall,
+        args: &[DigitalScalar],
+        clock: Option<DigitalClock>,
+        store: &mut DigitalSignalStore,
+    ) -> Result<(), DigitalEvalError> {
+        let name = match file_name(site, args, 0) {
+            Ok(name) => name,
+            Err(message) => {
+                self.warn(plan, site, clock, &message);
+                return Ok(());
+            }
+        };
+        let Memory {
+            array,
+            class,
+            name: memory,
+            bounds,
+        } = Self::memory(plan, site, 1)?;
+        let DigitalValueClass::FourState { width, .. } = class else {
+            self.warn(plan, site, clock, &format!("`{memory}` is a real memory"));
+            return Ok(());
+        };
+        // A real address converts by rounding (section 4.8.2), with the
+        // warning Icarus gives, and the load goes ahead.
+        for (index, which) in [(2, "start"), (3, "finish")] {
+            if let Some((DigitalScalar::Real(_), _)) = value_at(site, args, index) {
+                self.warn(
+                    plan,
+                    site,
+                    clock,
+                    &format!("the {which} address is a real value; it is rounded to an integer"),
+                );
+            }
+        }
+        let address = |index: usize, which: &str| -> Result<Option<i64>, String> {
+            match site.arguments.get(index) {
+                None | Some(DigitalSystemArgument::Empty) => Ok(None),
+                Some(_) => integer_at(site, args, index)
+                    .map(Some)
+                    .ok_or_else(|| format!("the {which} address is unknown (x or z)")),
+            }
+        };
+        let (start, finish) = match (address(2, "start"), address(3, "finish")) {
+            (Ok(start), Ok(finish)) => (start, finish),
+            (Err(message), _) | (_, Err(message)) => {
+                self.warn(plan, site, clock, &message);
+                return Ok(());
+            }
+        };
+        let options = self.config.files.clone();
+        let text = match options
+            .resolve_read(&name)
+            .and_then(|path| self.files.view(&options, &path, &name))
+        {
+            Ok(Some(text)) => text,
+            Ok(None) => {
+                self.warn(
+                    plan,
+                    site,
+                    clock,
+                    &format!("cannot open `{name}` for reading"),
+                );
+                return Ok(());
+            }
+            Err(message) => {
+                self.warn(
+                    plan,
+                    site,
+                    clock,
+                    &format!("cannot read `{name}`: {message}"),
+                );
+                return Ok(());
+            }
+        };
+        let (low, high) = (bounds.0.min(bounds.1), bounds.0.max(bounds.1));
+        let loaded = readmem::load(&Readmem {
+            text: &text,
+            bits_per_digit: if site.kind == Kind::Readmemb { 1 } else { 4 },
+            width,
+            low,
+            high,
+            start,
+            finish,
+        });
+        for (address, value) in loaded.words {
+            if let Some(signal) = array.element(address) {
+                store.write_signal(signal, value);
+            }
+        }
+        for warning in loaded.warnings {
+            self.warn(plan, site, clock, &format!("{name}: {warning}"));
+        }
+        if let Some(error) = loaded.error {
+            self.warn(plan, site, clock, &format!("{name}: {error}"));
+        }
+        Ok(())
     }
 
     /// `$fread(memory, fd, start, count)` (section 17.2.4.4): big-endian

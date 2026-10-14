@@ -441,15 +441,13 @@ impl HdlEffects {
         ))
     }
 
-    /// Refuse a kind whose host behaviour has not landed (`$readmem*` and the
-    /// value change dump). The text names the feature, never the lane.
+    /// Refuse a kind whose host behaviour has not landed (the value change
+    /// dump). The text names the feature, never the lane.
     fn refuse_unlanded(site: &DigitalSystemCall) -> Result<(), DigitalEvalError> {
         use DigitalSystemCallKind as Kind;
         if matches!(
             site.kind,
-            Kind::Readmemb
-                | Kind::Readmemh
-                | Kind::Dumpfile
+            Kind::Dumpfile
                 | Kind::Dumpvars
                 | Kind::Dumpon
                 | Kind::Dumpoff
@@ -469,7 +467,7 @@ impl HdlEffects {
     }
 
     /// Perform a system task enable. `store` is the design's signals, which
-    /// `$fread` loads.
+    /// `$readmem*` and `$fread` load.
     pub(crate) fn system_task(
         &mut self,
         plan: &CanonicalDigitalPlan,
@@ -488,7 +486,7 @@ impl HdlEffects {
                 })?;
         Self::refuse_unlanded(site)?;
         if site.kind.lane() == DigitalSystemLane::Files && !site.kind.is_function() {
-            return self.file_task(plan, site, args, clock, origin);
+            return self.file_task(plan, site, args, clock, origin, store);
         }
         let mut outcome = DigitalTaskOutcome::CONTINUE;
         match site.kind {
