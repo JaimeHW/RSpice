@@ -237,6 +237,22 @@ pub fn toned_inspector_copy(ui: &mut Ui, text: &str, tone: Color32) {
     );
 }
 
+/// A problem stated in an inspector body: the mark, then `text` in
+/// `text_dim`, on the inset and rhythm of [`muted_inspector_copy`].
+///
+/// For a warning or a failure the reader has to notice. A note that only
+/// explains is [`muted_inspector_copy`]; colouring its words is never the way
+/// to make it louder.
+pub fn inspector_problem(ui: &mut Ui, problem: crate::widgets::Problem, text: &str) -> Response {
+    crate::widgets::problem_line_inset(
+        ui,
+        problem,
+        text,
+        INSPECTOR_TEXT_INSET,
+        INSPECTOR_COPY_PAD_Y,
+    )
+}
+
 /// Space above and below a note's text: the gap a property row leaves between
 /// its own edge and the text centred in it.
 const INSPECTOR_COPY_PAD_Y: f32 = 8.0;

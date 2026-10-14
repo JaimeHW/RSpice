@@ -551,6 +551,135 @@ fn a_long_path_keeps_its_root_and_the_folder_it_names() {
     assert!(shortened[1].len() > shortened[2].len());
 }
 
+/// The text shape that paints `wanted`, wherever it is nested.
+fn painted_text(shape: &Shape, wanted: &str) -> Option<egui::epaint::TextShape> {
+    match shape {
+        Shape::Text(text) if text.galley.text() == wanted => Some(text.clone()),
+        Shape::Vec(shapes) => shapes.iter().find_map(|shape| painted_text(shape, wanted)),
+        _ => None,
+    }
+}
+
+/// Every stroke colour a pass painted outside text: the marks.
+fn stroke_colors(shapes: &[egui::epaint::ClippedShape]) -> Vec<Color32> {
+    fn walk(shape: &Shape, colors: &mut Vec<Color32>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, colors)),
+            Shape::LineSegment { stroke, .. } => colors.push(stroke.color),
+            Shape::Path(path) => {
+                if let egui::epaint::ColorMode::Solid(color) = path.stroke.color {
+                    colors.push(color);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut colors = Vec::new();
+    for shape in shapes {
+        walk(&shape.shape, &mut colors);
+    }
+    colors
+}
+
+/// A row with no problem is a plain property row to the pixel; a row with one
+/// keeps its value in primary text and moves it right by the mark's advance,
+/// and the mark is the only colour on it.
+#[test]
+fn a_problem_row_keeps_its_value_neutral_and_only_marks_a_problem() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let palette = Tokens::default().color;
+    let render = |add: &dyn Fn(&mut Ui)| {
+        ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(280.0);
+                add(ui);
+            });
+        })
+        .shapes
+    };
+    let plain = render(&|ui| {
+        property_row(ui, "Terminal", "unplaced");
+    });
+    let clear = render(&|ui| {
+        property_row_problem(ui, "Terminal", "unplaced", None);
+    });
+    let value = |shapes: &[egui::epaint::ClippedShape]| {
+        shapes
+            .iter()
+            .find_map(|shape| painted_text(&shape.shape, "unplaced"))
+            .expect("the value is painted")
+    };
+    assert_eq!(value(&clear).pos, value(&plain).pos);
+    assert_eq!(value(&clear).fallback_color, palette.text);
+    assert!(stroke_colors(&clear).is_empty(), "no problem, no mark");
+
+    for problem in [Problem::Warning, Problem::Failure] {
+        let marked = render(&|ui| {
+            property_row_problem(ui, "Terminal", "unplaced", Some(problem));
+        });
+        let shown = value(&marked);
+        assert_eq!(shown.fallback_color, palette.text, "{problem:?}");
+        assert!(
+            (shown.pos.x - value(&plain).pos.x - crate::widgets::PROBLEM_MARK_ADVANCE).abs() < 0.5,
+            "{problem:?} value at {:?}",
+            shown.pos
+        );
+        let marks = stroke_colors(&marked);
+        assert!(!marks.is_empty(), "{problem:?} painted no mark");
+        assert!(
+            marks.iter().all(|color| *color == problem.color(&palette)),
+            "{problem:?} mark {marks:?}"
+        );
+    }
+
+    for (ink, expected) in [
+        (Ink::Text, palette.text),
+        (Ink::Dim, palette.text_dim),
+        (Ink::Faint, palette.text_faint),
+    ] {
+        let inked = render(&|ui| {
+            property_row_ink(ui, "Terminal", "unplaced", ink);
+        });
+        assert_eq!(value(&inked).fallback_color, expected, "{ink:?}");
+        assert_eq!(value(&inked).pos, value(&plain).pos, "{ink:?}");
+    }
+}
+
+/// An inspector problem starts on the inset a note starts on, with its words
+/// after the mark.
+#[test]
+fn an_inspector_problem_sits_on_the_note_inset() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut panel_left = 0.0;
+    let shapes = ctx
+        .run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(280.0);
+                panel_left = ui.max_rect().left();
+                inspector::muted_inspector_copy(ui, "A note");
+                inspector::inspector_problem(ui, Problem::Warning, "A problem");
+            });
+        })
+        .shapes;
+    let note = shapes
+        .iter()
+        .find_map(|shape| painted_text(&shape.shape, "A note"))
+        .expect("note painted");
+    let problem = shapes
+        .iter()
+        .find_map(|shape| painted_text(&shape.shape, "A problem"))
+        .expect("problem painted");
+    assert!(
+        (problem.pos.x - note.pos.x - crate::widgets::PROBLEM_MARK_ADVANCE).abs() < 0.5,
+        "note {:?}, problem {:?}",
+        note.pos,
+        problem.pos
+    );
+    assert!((note.pos.x - panel_left - inspector::INSPECTOR_TEXT_INSET).abs() < 0.5);
+}
+
 /// A header too narrow for its title and metadata side by side sets the
 /// metadata under the title, from the same left edge, inside its band.
 #[test]

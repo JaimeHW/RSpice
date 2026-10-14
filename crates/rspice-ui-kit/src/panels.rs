@@ -120,7 +120,35 @@ pub enum WorkbenchIcon {
 /// They moved down to [`crate::widgets`] when a painter below the shell
 /// needed the same warning triangle: a mini that cannot draw the engine's
 /// refusal has to say so with the mark the row beside it uses.
-pub use crate::widgets::{StatusMark, paint_status_mark};
+pub use crate::widgets::{
+    Problem, StatusMark, paint_problem_mark, paint_status_mark, problem_line,
+};
+
+/// The neutral text ramp a value is painted in.
+///
+/// Text is never coloured to say how things stand: a warning or a failure is a
+/// [`Problem`] mark in front of neutral text. What a value may still say with
+/// its ink is how much it matters beside its neighbours.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ink {
+    /// Primary text: a value the row exists to show.
+    Text,
+    /// Secondary text: a value that qualifies another.
+    Dim,
+    /// Tertiary text: metadata, or a value that is absent.
+    Faint,
+}
+
+impl Ink {
+    /// The palette colour this ink names.
+    pub fn color(self, palette: &crate::palette::Palette) -> Color32 {
+        match self {
+            Self::Text => palette.text,
+            Self::Dim => palette.text_dim,
+            Self::Faint => palette.text_faint,
+        }
+    }
+}
 
 impl WorkbenchIcon {
     pub fn paint(self, painter: &egui::Painter, rect: Rect, color: Color32) {
@@ -1091,6 +1119,52 @@ pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Col
     property_row_with_tone(ui, label, value, value_tone, None, tokens::FS_0, elide_text)
 }
 
+/// Property row whose value is quieter than a plain [`property_row`]'s: a
+/// qualifier, or a value that is absent. The ink is one of the neutral ramp.
+pub fn property_row_ink(ui: &mut Ui, label: &str, value: &str, ink: Ink) -> Response {
+    let palette = Tokens::get(ui.ctx()).color;
+    property_row_with_tone(
+        ui,
+        label,
+        value,
+        ink.color(&palette),
+        None,
+        tokens::FS_0,
+        elide_text,
+    )
+}
+
+/// Property row whose value may carry a problem.
+///
+/// The value is always primary text. A [`Problem`] paints its mark in front of
+/// the value, and is the only colour on the row; with none the row is a plain
+/// [`property_row`], to the pixel.
+pub fn property_row_problem(
+    ui: &mut Ui,
+    label: &str,
+    value: &str,
+    problem: Option<Problem>,
+) -> Response {
+    let palette = Tokens::get(ui.ctx()).color;
+    let response = property_row_with_tone(
+        ui,
+        label,
+        value,
+        palette.text,
+        problem.map(|problem| (problem.mark(), problem.color(&palette))),
+        tokens::FS_0,
+        elide_text,
+    );
+    if let Some(problem) = problem {
+        // The mark is the row's only statement of severity, and a screen
+        // reader cannot see it.
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_description(problem.announcement());
+        });
+    }
+    response
+}
+
 /// Property row with a font-independent semantic mark before its value.
 pub fn property_row_status(
     ui: &mut Ui,
@@ -1104,7 +1178,7 @@ pub fn property_row_status(
         label,
         value,
         value_tone,
-        Some(mark),
+        Some((mark, value_tone)),
         tokens::FS_0,
         elide_text,
     )
@@ -1123,7 +1197,7 @@ pub fn schematic_property_row_status(
         label,
         value,
         value_tone,
-        Some(mark),
+        Some((mark, value_tone)),
         tokens::FS_1,
         elide_text,
     )
@@ -1682,7 +1756,7 @@ fn property_row_with_tone(
     label: &str,
     value: &str,
     value_tone: Color32,
-    mark: Option<StatusMark>,
+    mark: Option<(StatusMark, Color32)>,
     value_size: f32,
     elide_value: fn(&Ui, &str, &egui::FontId, f32) -> String,
 ) -> Response {
@@ -1697,7 +1771,11 @@ fn property_row_with_tone(
     let label_galley = ui
         .painter()
         .layout_no_wrap(display_label, label_font, t.color.text_dim);
-    let status_prefix = if mark.is_some() { 17.0 } else { 0.0 };
+    let status_prefix = if mark.is_some() {
+        crate::widgets::PROBLEM_MARK_ADVANCE
+    } else {
+        0.0
+    };
     let value_width = (value_column - status_prefix).max(1.0);
     let display_value = elide_value(ui, value, &value_font, value_width);
     let value_galley = ui
@@ -1724,15 +1802,16 @@ fn property_row_with_tone(
         label_galley,
         t.color.text_dim,
     );
-    if let Some(mark) = mark {
+    if let Some((mark, mark_tone)) = mark {
+        let side = crate::widgets::PROBLEM_MARK_SIDE;
         paint_status_mark(
             &ui.painter().with_clip_rect(value_rect),
             Rect::from_center_size(
-                Pos2::new(value_rect.left() + 5.5, rect.center().y),
-                Vec2::splat(11.0),
+                Pos2::new(value_rect.left() + side * 0.5, rect.center().y),
+                Vec2::splat(side),
             ),
             mark,
-            value_tone,
+            mark_tone,
         );
     }
     ui.painter().with_clip_rect(value_rect).galley(
