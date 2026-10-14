@@ -111,10 +111,8 @@ pub(super) fn route_resumes(
         // A small-signal card around a checkpoint's state carries the image
         // it reads and no schedule; the engine validates the image against
         // the task's deck when it restores it.
-        if matches!(
-            task.task.spec,
-            AnalysisSpec::Ac { .. } | AnalysisSpec::Noise { .. }
-        ) && request.times.is_empty()
+        if crate::engine_services::StateCard::of_spec(&task.task.spec).is_some()
+            && request.times.is_empty()
             && task.transient_resumes.is_empty()
             && let Some(input) = &request.resume
         {

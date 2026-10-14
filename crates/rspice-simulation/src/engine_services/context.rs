@@ -35,6 +35,34 @@ impl<'a> ServiceContext<'a> {
         )
     }
 
+    /// Parse `source` for a run around `bias`.
+    ///
+    /// Around a transient state the deck parses as its transient does, with
+    /// the parser's own statistical mode rather than the services' nominal
+    /// one: a checkpoint's restart identity records the mode, so only then is
+    /// a state the deck's transient wrote a state of this deck, and only then
+    /// does the card see the circuit whose trajectory it linearizes.
+    pub(crate) fn parse_around(
+        self,
+        source: &str,
+        bias: super::Bias<'_>,
+    ) -> ServiceRunResult<Netlist> {
+        match bias {
+            super::Bias::OperatingPoint => self.parse(source),
+            super::Bias::TransientState { .. } => {
+                crate::netlist_preparation::parse_runner_netlist_with_options_and_abort(
+                    source,
+                    self.source_path,
+                    rspice_core::netlist::NetlistParseOptions {
+                        resource_limits: self.limits,
+                        ..Default::default()
+                    },
+                    self.abort,
+                )
+            }
+        }
+    }
+
     pub(crate) fn engine_config(self, netlist: &Netlist) -> SimulationConfig {
         let mut config = super::build_engine_config(netlist, None);
         config.resource_limits = self.limits;

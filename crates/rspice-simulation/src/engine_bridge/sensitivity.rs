@@ -90,38 +90,7 @@ impl EngineBridge {
                     )
                     .map_err(|error| self.translate_error(error))?;
                 ensure_not_aborted(abort)?;
-                let mut rows: Vec<SensitivityStudyRow> = result
-                    .sensitivities
-                    .iter()
-                    .map(|trace| SensitivityStudyRow {
-                        parameter: trace.vector_name.clone(),
-                        nominal_value: trace.nominal_value,
-                        raw: trace.magnitude.clone(),
-                        normalized: trace
-                            .normalized
-                            .iter()
-                            .map(|value| value.map(|value| value.re))
-                            .collect(),
-                        phase: trace.phase.clone(),
-                    })
-                    .collect();
-                rows.sort_by(|left, right| left.parameter.cmp(&right.parameter));
-                SensitivityStudyEvidence {
-                    output: config.output_var.trim().to_owned(),
-                    filter: config.filter.trim().to_owned(),
-                    basis: SensitivityBasisEvidence::Ac {
-                        frequencies_hz: result.frequencies.clone(),
-                        output: result
-                            .output_values
-                            .iter()
-                            .map(|value| ComplexResultValue {
-                                real: value.re,
-                                imaginary: value.im,
-                            })
-                            .collect(),
-                    },
-                    rows,
-                }
+                Self::ac_sensitivity_evidence(config, &result)
             }
             None => {
                 let result = engine
@@ -152,6 +121,53 @@ impl EngineBridge {
         };
 
         ensure_not_aborted(abort)?;
+        Self::sensitivity_result(evidence)
+    }
+
+    /// The study an AC sensitivity run answered, under the configured
+    /// output and filter.
+    pub(super) fn ac_sensitivity_evidence(
+        config: &SensitivityConfig,
+        result: &rspice_core::analysis::sensitivity::AcSensitivityResult,
+    ) -> SensitivityStudyEvidence {
+        let mut rows: Vec<SensitivityStudyRow> = result
+            .sensitivities
+            .iter()
+            .map(|trace| SensitivityStudyRow {
+                parameter: trace.vector_name.clone(),
+                nominal_value: trace.nominal_value,
+                raw: trace.magnitude.clone(),
+                normalized: trace
+                    .normalized
+                    .iter()
+                    .map(|value| value.map(|value| value.re))
+                    .collect(),
+                phase: trace.phase.clone(),
+            })
+            .collect();
+        rows.sort_by(|left, right| left.parameter.cmp(&right.parameter));
+        SensitivityStudyEvidence {
+            output: config.output_var.trim().to_owned(),
+            filter: config.filter.trim().to_owned(),
+            basis: SensitivityBasisEvidence::Ac {
+                frequencies_hz: result.frequencies.clone(),
+                output: result
+                    .output_values
+                    .iter()
+                    .map(|value| ComplexResultValue {
+                        real: value.re,
+                        imaginary: value.im,
+                    })
+                    .collect(),
+            },
+            rows,
+        }
+    }
+
+    /// Retain one sensitivity study.
+    pub(super) fn sensitivity_result(
+        evidence: SensitivityStudyEvidence,
+    ) -> Result<SimulationResult, SimulationError> {
         // Refused here rather than at the sheet: a study that cannot be
         // validated is not evidence, and the run is what knows why.
         evidence.validate().map_err(SimulationError::SolverError)?;

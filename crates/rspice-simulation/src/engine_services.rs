@@ -10,7 +10,7 @@ pub use context::ServiceContext;
 mod dcmatch;
 pub use dcmatch::run_dc_mismatch_analysis_with_context;
 mod disto;
-pub use disto::run_disto_analysis_with_context;
+pub(crate) use disto::run_disto_analysis_with_bias;
 mod envelope_fourier;
 mod hb;
 mod hbnoise;
@@ -35,13 +35,15 @@ pub(crate) use qpss::run_qpss_analysis_with_dc_seed_on_materialized_with_context
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_context;
 mod soa;
 mod sparameter;
-pub use sparameter::run_sparameter_analysis_with_context;
+pub(crate) use sparameter::run_sparameter_analysis_with_bias;
 mod stb;
-pub use stb::run_stb_analysis_with_context;
+pub(crate) use stb::run_stb_analysis_with_bias;
 mod sweeps;
 mod tf;
-pub use tf::run_tf_analysis_with_context;
+pub(crate) use tf::run_tf_analysis_with_bias;
 mod transient;
+mod transient_state;
+pub(crate) use transient_state::{Bias, StateCard, StateRunError, linearize_at_state};
 // Each analysis re-exports the request types a caller must construct and the
 // entry point it calls. Result types are not re-exported: callers receive them
 // from the entry point and never name them here.

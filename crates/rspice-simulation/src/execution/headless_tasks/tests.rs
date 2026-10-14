@@ -222,17 +222,27 @@ fn a_card_at_a_transient_state_carries_the_transient_it_names() {
     assert!(prepare(vec![task]).is_ok());
 }
 
+/// Every small-signal kind, not only `.AC`, binds to the transient it names.
+#[test]
+fn every_small_signal_kind_binds_to_its_transient() {
+    let disto = request(AnalysisSpec::Disto {
+        start_freq: 1.0,
+        stop_freq: 1e3,
+        points_per_unit: 10,
+        sweep: FrequencySweep::Decade,
+        f2_over_f1: None,
+    });
+    let line = ".disto dec 10 1 1k actimes=0.5";
+    let [parent, task] = state_task(disto, line);
+    let tasks = prepare(vec![parent, task]).unwrap();
+    assert_eq!(
+        tasks[1].queued_analysis().analysis_line,
+        format!(".tran 10m 1\n{line}")
+    );
+}
+
 #[test]
 fn a_card_at_a_transient_state_is_refused_rather_than_run_another_way() {
-    let disto = || {
-        request(AnalysisSpec::Disto {
-            start_freq: 1.0,
-            stop_freq: 1e3,
-            points_per_unit: 10,
-            sweep: FrequencySweep::Decade,
-            f2_over_f1: None,
-        })
-    };
     for (graph, expected) in [
         (
             state_task(ac(), ".ac dec 10 1 1k actimes=0.25,0.5").to_vec(),
@@ -249,10 +259,6 @@ fn a_card_at_a_transient_state_is_refused_rather_than_run_another_way() {
         (
             state_task(ac(), ".ac dec 10 1 1k checkpoint=\"state.chk\"").to_vec(),
             "CHECKPOINT=",
-        ),
-        (
-            state_task(disto(), ".disto dec 10 1 1k actimes=0.5").to_vec(),
-            "runs .AC and .NOISE cards around a state",
         ),
         (
             vec![state_task(ac(), ".ac dec 10 1 1k actimes=0.5")[1].clone()]

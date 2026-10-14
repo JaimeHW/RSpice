@@ -110,7 +110,7 @@ pub(super) fn run_spec_request_in_context(
     // A small-signal card around a checkpoint's state carries the image it
     // reads, and no schedule, as its transient checkpoint request.
     let state_checkpoint = options.tran_checkpoint.as_ref().filter(|request| {
-        matches!(spec, AnalysisSpec::Ac { .. } | AnalysisSpec::Noise { .. })
+        svc_runner::StateCard::of_spec(&spec).is_some()
             && request.times.is_empty()
             && options.mc_checkpoint.is_none()
     });
@@ -210,6 +210,57 @@ pub(super) fn run_spec_request_in_context(
         limits: bridge.resource_limits(),
         abort: abort_flag,
     };
+    // A `.SP`, `.TF`, `.STB` or `.DISTO` card that names a transient state
+    // runs around it, and its result is projected as at the operating point.
+    if matches!(
+        spec,
+        AnalysisSpec::SParameter { .. }
+            | AnalysisSpec::Tf { .. }
+            | AnalysisSpec::Stb { .. }
+            | AnalysisSpec::Disto { .. }
+    ) && (state_checkpoint.is_some()
+        || crate::execution::small_signal_state_keyword(netlist).is_some())
+    {
+        let checkpoint = state_checkpoint
+            .map(|request| {
+                request
+                    .resume
+                    .as_ref()
+                    .ok_or_else(|| {
+                        SimulationError::InvalidConfig(
+                            "A small-signal card around a checkpoint's state carries no image"
+                                .into(),
+                        )
+                    })?
+                    .decode(bridge.resource_limits(), abort_flag)
+            })
+            .transpose()?;
+        let bias = svc_runner::Bias::TransientState {
+            checkpoint: checkpoint.as_ref(),
+        };
+        let (result, _state_time) = match spec {
+            AnalysisSpec::Disto {
+                start_freq,
+                stop_freq,
+                points_per_unit,
+                sweep,
+                f2_over_f1,
+            } => periodic::run_disto(
+                netlist,
+                periodic::DistoRunRequest {
+                    start_freq,
+                    stop_freq,
+                    points_per_unit,
+                    sweep,
+                    f2_over_f1,
+                },
+                bias,
+                service_context,
+            )?,
+            spec => frequency::run_small_signal_spec(spec, netlist, bias, service_context)?,
+        };
+        return Ok(result);
+    }
     match spec {
         AnalysisSpec::MonteCarlo { .. } | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
             sweeps::run_sweep_spec(

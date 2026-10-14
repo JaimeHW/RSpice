@@ -79,6 +79,16 @@ impl EngineBridge {
                 abort,
             )
             .map_err(|e| self.translate_error(e))?;
+        Self::pole_zero_result(pz_result, input_sign * output_sign, abort)
+    }
+
+    /// Retain one pole-zero solve, its DC gain scaled by `gain_sign`: the
+    /// sign the solve's port orientation took from the requested one.
+    pub(super) fn pole_zero_result(
+        pz_result: rspice_core::analysis::PoleZeroResult,
+        gain_sign: f64,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
         if pz_result.dc_gain.is_some_and(|gain| !gain.is_finite())
             || pz_result
                 .poles
@@ -107,9 +117,7 @@ impl EngineBridge {
             zeros,
             pole_evidence: retained_root_evidence(&pz_result.pole_evidence)?,
             zero_evidence: retained_root_evidence(&pz_result.zero_evidence)?,
-            gain: pz_result
-                .dc_gain
-                .map(|gain| input_sign * output_sign * gain),
+            gain: pz_result.dc_gain.map(|gain| gain_sign * gain),
         })
     }
 }

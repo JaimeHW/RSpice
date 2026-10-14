@@ -23,6 +23,30 @@ pub(super) fn run_frequency_spec(
     let abort = context.abort;
     super::ensure_not_aborted(abort)?;
     match spec {
+        AnalysisSpec::Pac => run_pac(netlist, options, dependencies, context),
+        AnalysisSpec::Pxf => run_pxf(netlist, options, dependencies, context),
+        AnalysisSpec::Pnoise => run_pnoise(netlist, options, dependencies, context),
+        AnalysisSpec::Pstb => run_pstb(netlist, options, dependencies, context),
+        spec @ (AnalysisSpec::SParameter { .. }
+        | AnalysisSpec::Tf { .. }
+        | AnalysisSpec::Stb { .. }) => {
+            run_small_signal_spec(spec, netlist, svc_runner::Bias::OperatingPoint, context)
+                .map(|(result, _)| result)
+        }
+        other => Err(super::misrouted_spec_error("frequency", &other)),
+    }
+}
+
+/// Run a `.SP`, `.TF` or `.STB` request around `bias`, returning the time of
+/// the transient state it linearized at, if any. Both biases project the
+/// result through the same code.
+pub(super) fn run_small_signal_spec(
+    spec: AnalysisSpec,
+    netlist: &str,
+    bias: svc_runner::Bias<'_>,
+    context: svc_runner::ServiceContext<'_>,
+) -> Result<(SimulationResult, Option<f64>), SimulationError> {
+    match spec {
         AnalysisSpec::SParameter {
             start_freq,
             stop_freq,
@@ -42,6 +66,7 @@ pub(super) fn run_frequency_spec(
                 ports,
                 do_noise,
             },
+            bias,
             context,
         ),
         AnalysisSpec::Tf {
@@ -86,11 +111,9 @@ pub(super) fn run_frequency_spec(
             },
             normalization,
             accuracy,
+            bias,
             context,
         ),
-        AnalysisSpec::Pac => run_pac(netlist, options, dependencies, context),
-        AnalysisSpec::Pxf => run_pxf(netlist, options, dependencies, context),
-        AnalysisSpec::Pnoise => run_pnoise(netlist, options, dependencies, context),
         AnalysisSpec::Stb {
             probe_node,
             start_freq,
@@ -105,9 +128,9 @@ pub(super) fn run_frequency_spec(
                 .with_sweep_type(stb_sweep_type(sweep))
                 .with_probe(&probe_node)
                 .with_nyquist(compute_nyquist),
+            bias,
             context,
         ),
-        AnalysisSpec::Pstb => run_pstb(netlist, options, dependencies, context),
         other => Err(super::misrouted_spec_error("frequency", &other)),
     }
 }
@@ -125,8 +148,9 @@ struct SParameterRequest {
 fn run_sparameter(
     netlist: &str,
     request: SParameterRequest,
+    bias: svc_runner::Bias<'_>,
     context: svc_runner::ServiceContext<'_>,
-) -> Result<SimulationResult, SimulationError> {
+) -> Result<(SimulationResult, Option<f64>), SimulationError> {
     let abort = context.abort;
     let sweep = match request.sweep {
         FrequencySweep::Decade => svc_runner::SParameterSweep::Decade,
@@ -151,8 +175,8 @@ fn run_sparameter(
         ports: configured_ports,
         do_noise: request.do_noise,
     };
-    let run = super::run_abort_aware_service(abort, || {
-        svc_runner::run_sparameter_analysis_with_context(netlist, &cfg, context)
+    let (run, state_time) = super::run_abort_aware_service(abort, || {
+        svc_runner::run_sparameter_analysis_with_bias(netlist, &cfg, bias, context)
     })?;
     let data = run.scattering;
     let mut frequencies = Vec::with_capacity(data.data.len());
@@ -231,14 +255,15 @@ fn run_sparameter(
             waveforms.insert("Sopt".to_owned(), optimum);
         }
     }
-    Ok(SimulationResult::Ac {
+    let result = SimulationResult::Ac {
         convergence: None,
         frequencies,
         waveforms,
         measurements: Vec::new(),
         reference_impedances_ohm: Some(reference_impedances_ohm),
         noise_reference_temperature_kelvin,
-    })
+    };
+    Ok((result, state_time))
 }
 
 fn run_tf(
@@ -246,17 +271,18 @@ fn run_tf(
     config: svc_runner::TfRunConfig,
     normalization: rspice_simulation_contract::analysis_spec::TfNormalization,
     accuracy: rspice_simulation_contract::analysis_spec::TfAccuracy,
+    bias: svc_runner::Bias<'_>,
     context: svc_runner::ServiceContext<'_>,
-) -> Result<SimulationResult, SimulationError> {
+) -> Result<(SimulationResult, Option<f64>), SimulationError> {
     let abort = context.abort;
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_tf_analysis_with_context(netlist, &config, context)
+    let (data, state_time) = super::run_abort_aware_service(abort, || {
+        svc_runner::run_tf_analysis_with_bias(netlist, &config, bias, context)
     })?;
     super::ensure_not_aborted(abort)?;
 
     let input_quantity = transfer_quantity(data.gain_metadata.input_quantity);
     let output_quantity = transfer_quantity(data.gain_metadata.output_quantity);
-    Ok(SimulationResult::TransferFunction {
+    let result = SimulationResult::TransferFunction {
         input_source: data.input_source,
         output_expression: data.output_label,
         input_quantity,
@@ -279,7 +305,8 @@ fn run_tf(
             .transpose()?,
         nominal_input: finite_optional(data.nominal_input, "nominal input")?,
         nominal_output: finite_optional(data.nominal_output, "nominal output")?,
-    })
+    };
+    Ok((result, state_time))
 }
 
 fn transfer_quantity(quantity: svc_runner::TfQuantity) -> crate::results::TransferFunctionQuantity {
@@ -876,18 +903,20 @@ fn pnoise_phase_contributor_shares_are_measurements_not_density_curves() {
 fn run_stb(
     netlist: &str,
     config: rspice_core::analysis::stb::StbConfig,
+    bias: svc_runner::Bias<'_>,
     context: svc_runner::ServiceContext<'_>,
-) -> Result<SimulationResult, SimulationError> {
+) -> Result<(SimulationResult, Option<f64>), SimulationError> {
     let abort = context.abort;
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_stb_analysis_with_context(netlist, config, context)
+    let (data, state_time) = super::run_abort_aware_service(abort, || {
+        svc_runner::run_stb_analysis_with_bias(netlist, config, bias, context)
     })?;
 
     super::ensure_not_aborted(abort)?;
-    Ok(SimulationResult::Stb {
+    let result = SimulationResult::Stb {
         measurements: stb_margin_measurements(&data.margins),
         response: std::sync::Arc::new(data),
-    })
+    };
+    Ok((result, state_time))
 }
 
 /// The margins the loop-gain extraction produced, as measurements.
@@ -1631,9 +1660,11 @@ fn stability_margin_units_survive_execution_and_retention() {
             .with_sweep_type(stb_sweep_type(FrequencySweep::Decade))
             .with_probe("VPROBE")
             .with_nyquist(true),
+        svc_runner::Bias::OperatingPoint,
         svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
     )
-    .unwrap();
+    .unwrap()
+    .0;
     let SimulationResult::Stb {
         measurements,
         response,
@@ -1730,8 +1761,9 @@ fn stability_missing_margins_retain_availability_and_units() {
             .with_sweep(10.0, 1000.0, 1)
             .with_sweep_type(stb_sweep_type(FrequencySweep::Linear))
             .with_probe("VP"),
+        svc_runner::Bias::OperatingPoint,
         svc_runner::ServiceContext::with_defaults(None, &rspice_core::NoAbort),
-    ).unwrap();
+    ).unwrap().0;
     let worker = WorkerSimulationResult::try_from(result).unwrap();
     let received: WorkerSimulationResult =
         serde_json::from_str(&serde_json::to_string(&worker).unwrap()).unwrap();

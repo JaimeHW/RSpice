@@ -198,8 +198,10 @@ pub(super) fn run_periodic_spec(
                 sweep,
                 f2_over_f1,
             },
+            svc_runner::Bias::OperatingPoint,
             context,
-        ),
+        )
+        .map(|(result, _)| result),
         AnalysisSpec::Psp {
             start_freq,
             stop_freq,
@@ -1327,19 +1329,23 @@ fn fourier_from_transient_artifact(
     })
 }
 
-struct DistoRunRequest {
-    start_freq: f64,
-    stop_freq: f64,
-    points_per_unit: usize,
-    sweep: FrequencySweep,
-    f2_over_f1: Option<f64>,
+pub(super) struct DistoRunRequest {
+    pub(super) start_freq: f64,
+    pub(super) stop_freq: f64,
+    pub(super) points_per_unit: usize,
+    pub(super) sweep: FrequencySweep,
+    pub(super) f2_over_f1: Option<f64>,
 }
 
-fn run_disto(
+/// Run a `.DISTO` request around `bias`, returning the time of the
+/// transient state it linearized at, if any. Both biases project the result
+/// through the same code.
+pub(super) fn run_disto(
     netlist: &str,
     request: DistoRunRequest,
+    bias: svc_runner::Bias<'_>,
     context: svc_runner::ServiceContext<'_>,
-) -> Result<SimulationResult, SimulationError> {
+) -> Result<(SimulationResult, Option<f64>), SimulationError> {
     let abort = context.abort;
     let DistoRunRequest {
         start_freq,
@@ -1360,8 +1366,8 @@ fn run_disto(
         sweep,
         f2_over_f1,
     };
-    let data = super::run_abort_aware_service(abort, || {
-        svc_runner::run_disto_analysis_with_context(netlist, &cfg, context)
+    let (data, state_time) = super::run_abort_aware_service(abort, || {
+        svc_runner::run_disto_analysis_with_bias(netlist, &cfg, bias, context)
     })?;
     let frequencies = data.frequencies;
 
@@ -1413,14 +1419,15 @@ fn run_disto(
         ));
     }
 
-    Ok(SimulationResult::Ac {
+    let result = SimulationResult::Ac {
         convergence: None,
         noise_reference_temperature_kelvin: None,
         reference_impedances_ohm: None,
         frequencies,
         waveforms,
         measurements: Vec::new(),
-    })
+    };
+    Ok((result, state_time))
 }
 
 fn insert_complex_waveform(

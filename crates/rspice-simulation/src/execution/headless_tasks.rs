@@ -259,16 +259,6 @@ fn bind_transient_states(
                 request.instance_id
             ))
         };
-        if !matches!(
-            request.analysis.spec,
-            AnalysisSpec::Ac { .. } | AnalysisSpec::Noise { .. }
-        ) {
-            return Err(context(
-                "a task runs .AC and .NOISE cards around a state; run this card at a state \
-                 with `rspice run`"
-                    .to_owned(),
-            ));
-        }
         let mut parents = request
             .dependencies
             .iter()
@@ -425,7 +415,10 @@ fn same_request(lowered: AnalysisSpec, requested: &AnalysisSpec) -> bool {
 
 /// The transient-state keyword a small-signal card in `analysis_line` carries:
 /// `ACTIMES=` or `CHECKPOINT=`, spelled with or without space around `=`.
-fn small_signal_state_keyword(analysis_line: &str) -> Option<&'static str> {
+///
+/// The spec runner asks the same of a task's deck, to send a card that
+/// names a state to the state's runner rather than the operating point's.
+pub(crate) fn small_signal_state_keyword(analysis_line: &str) -> Option<&'static str> {
     const CARDS: [&str; 8] = [
         ".ac", ".noise", ".tf", ".sp", ".stb", ".pz", ".sens", ".disto",
     ];

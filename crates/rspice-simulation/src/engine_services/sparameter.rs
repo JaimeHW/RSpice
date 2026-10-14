@@ -123,17 +123,49 @@ pub fn run_sparameter_analysis_with_source_path_and_abort(
 }
 
 /// Execute with the caller's source, cancellation, and resource policy.
+#[cfg(test)]
 pub fn run_sparameter_analysis_with_context(
     netlist_text: &str,
     config: &SParameterRunConfig,
     context: super::ServiceContext<'_>,
 ) -> ServiceRunResult<rspice_core::engine::SParameterRun> {
+    run_sparameter_analysis_with_bias(netlist_text, config, super::Bias::OperatingPoint, context)
+        .map(|(run, _)| run)
+}
+
+/// Execute around `bias`, returning the time of the transient state it
+/// linearized at, if any. Around a state the deck's `.SP` card runs there,
+/// over its own grid and ports, which the task's configuration states.
+pub(crate) fn run_sparameter_analysis_with_bias(
+    netlist_text: &str,
+    config: &SParameterRunConfig,
+    bias: super::Bias<'_>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<(rspice_core::engine::SParameterRun, Option<Value>)> {
     let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
-    let netlist = context.parse(netlist_text)?;
+    let netlist = context.parse_around(netlist_text, bias)?;
+    if let super::Bias::TransientState { checkpoint } = bias {
+        let engine = Engine::new(context.engine_config(&netlist));
+        let state = super::linearize_at_state(
+            &engine,
+            &netlist,
+            super::StateCard::SParameters,
+            checkpoint,
+            abort,
+        )
+        .map_err(|error| error.into_service("S-parameter analysis error"))?;
+        let rspice_core::engine::SmallSignalCardResult::SParameters(run) = state.result else {
+            return Err(ServiceRunError::Failure(
+                "A .SP card around a transient state returned another analysis's result".to_owned(),
+            ));
+        };
+        ensure_not_aborted(abort)?;
+        return Ok((*run, Some(state.state_time)));
+    }
 
     let frequencies = super::helpers::generate_freq_points_with_limit_and_abort(
         config.start_freq,
@@ -167,7 +199,7 @@ pub fn run_sparameter_analysis_with_context(
         )
         .map_err(|error| ServiceRunError::from_core("S-parameter analysis error", error))?;
     ensure_not_aborted(abort)?;
-    Ok(run)
+    Ok((run, None))
 }
 
 #[cfg(test)]

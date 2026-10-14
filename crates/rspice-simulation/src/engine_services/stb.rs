@@ -24,7 +24,7 @@ pub type StbData = rspice_core::analysis::stb::StbResult;
 /// Run STB analysis over a decade sweep with cooperative cancellation.
 ///
 /// Test-only. The shipping path is
-/// [`run_stb_analysis_with_context`].
+/// [`run_stb_analysis_with_bias`].
 #[cfg(test)]
 pub fn run_stb_analysis_with_abort(
     netlist_text: &str,
@@ -94,22 +94,59 @@ pub fn run_stb_analysis_with_sweep_and_source_path_and_abort(
 }
 
 /// Execute with the caller's source, cancellation, and resource policy.
+#[cfg(test)]
 pub fn run_stb_analysis_with_context(
     netlist_text: &str,
     stb_config: rspice_core::analysis::stb::StbConfig,
     context: super::ServiceContext<'_>,
 ) -> ServiceRunResult<StbData> {
+    run_stb_analysis_with_bias(
+        netlist_text,
+        stb_config,
+        super::Bias::OperatingPoint,
+        context,
+    )
+    .map(|(data, _)| data)
+}
+
+/// Execute around `bias`, returning the time of the transient state it
+/// linearized at, if any. Around a state the deck's `.STB` card runs there;
+/// the task's configuration is that card's.
+pub(crate) fn run_stb_analysis_with_bias(
+    netlist_text: &str,
+    stb_config: rspice_core::analysis::stb::StbConfig,
+    bias: super::Bias<'_>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<(StbData, Option<rspice_core::Value>)> {
     let abort = context.abort;
-    let netlist = context.parse(netlist_text)?;
+    let netlist = context.parse_around(netlist_text, bias)?;
     ensure_not_aborted(abort)?;
     let engine = Engine::new(context.engine_config(&netlist));
+    if let super::Bias::TransientState { checkpoint } = bias {
+        let state = super::linearize_at_state(
+            &engine,
+            &netlist,
+            super::StateCard::Stability,
+            checkpoint,
+            abort,
+        )
+        .map_err(|error| error.into_service("STB analysis error"))?;
+        let rspice_core::engine::SmallSignalCardResult::Stability(analysis) = state.result else {
+            return Err(ServiceRunError::Failure(
+                "A .STB card around a transient state returned another analysis's result"
+                    .to_owned(),
+            ));
+        };
+        ensure_not_aborted(abort)?;
+        return Ok((analysis.result, Some(state.state_time)));
+    }
 
     let analysis = engine
         .run_stb_with_abort(&netlist, stb_config, abort)
         .map_err(|error| ServiceRunError::from_core("STB analysis error", error))?;
 
     ensure_not_aborted(abort)?;
-    Ok(analysis.result)
+    Ok((analysis.result, None))
 }
 
 #[cfg(test)]

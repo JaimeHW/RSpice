@@ -143,7 +143,7 @@ pub struct TfData {
 /// failures as strings.
 ///
 /// Test-only; the shipping path is
-/// [`run_tf_analysis_with_context`], which keeps the typed error.
+/// [`run_tf_analysis_with_bias`], which keeps the typed error.
 #[cfg(test)]
 pub fn run_tf_analysis_with_config(
     netlist_text: &str,
@@ -181,17 +181,34 @@ pub fn run_tf_analysis_with_config_and_source_path_and_abort(
 }
 
 /// Execute with the caller's source, cancellation, and resource policy.
+#[cfg(test)]
 pub fn run_tf_analysis_with_context(
     netlist_text: &str,
     config: &TfRunConfig,
     context: super::ServiceContext<'_>,
 ) -> ServiceRunResult<TfData> {
+    run_tf_analysis_with_bias(netlist_text, config, super::Bias::OperatingPoint, context)
+        .map(|(data, _)| data)
+}
+
+/// Execute around `bias`, returning the time of the transient state it
+/// linearized at, if any.
+///
+/// Around a transient state the deck's `.TF` card runs there, and the result
+/// is projected as a run at the operating point is. A gain relative to the
+/// nominal operating point is refused there: the state is not one.
+pub(crate) fn run_tf_analysis_with_bias(
+    netlist_text: &str,
+    config: &TfRunConfig,
+    bias: super::Bias<'_>,
+    context: super::ServiceContext<'_>,
+) -> ServiceRunResult<(TfData, Option<Value>)> {
     let abort = context.abort;
     ensure_not_aborted(abort)?;
     config.validate().map_err(ServiceRunError::Failure)?;
     ensure_not_aborted(abort)?;
 
-    let parsed_netlist = context.parse(netlist_text)?;
+    let parsed_netlist = context.parse_around(netlist_text, bias)?;
     let probe = TfOutputProbe::parse(&config.output_expression)?;
     ensure_not_aborted(abort)?;
 
@@ -202,18 +219,48 @@ pub fn run_tf_analysis_with_context(
     let engine = Engine::try_new(engine_config).map_err(|error| {
         ServiceRunError::Failure(format!("Invalid TF numerical policy: {error}"))
     })?;
-    let result = engine
-        .run_transfer_function_with_abort(
-            &parsed_netlist,
-            probe.engine_target(),
-            probe.reference_node(),
-            probe.is_current(),
-            config.input_source.trim(),
-            abort,
-        )
-        .map_err(|error| {
-            ServiceRunError::from_core("DC transfer-function analysis error", error)
-        })?;
+    let (result, state_time) = match bias {
+        super::Bias::OperatingPoint => (
+            engine
+                .run_transfer_function_with_abort(
+                    &parsed_netlist,
+                    probe.engine_target(),
+                    probe.reference_node(),
+                    probe.is_current(),
+                    config.input_source.trim(),
+                    abort,
+                )
+                .map_err(|error| {
+                    ServiceRunError::from_core("DC transfer-function analysis error", error)
+                })?,
+            None,
+        ),
+        super::Bias::TransientState { checkpoint } => {
+            if config.transfer_gain && config.normalization == TfNormalization::RelativeToNominal {
+                return Err(ServiceRunError::Failure(
+                    "A transfer function around a transient state has no nominal operating \
+                     point to normalize its gain to"
+                        .to_owned(),
+                ));
+            }
+            let state = super::linearize_at_state(
+                &engine,
+                &parsed_netlist,
+                super::StateCard::TransferFunction,
+                checkpoint,
+                abort,
+            )
+            .map_err(|error| error.into_service("DC transfer-function analysis error"))?;
+            let rspice_core::engine::SmallSignalCardResult::TransferFunction(result) = state.result
+            else {
+                return Err(ServiceRunError::Failure(
+                    "A .TF card around a transient state returned another analysis's result"
+                        .to_owned(),
+                ));
+            };
+            (result, Some(state.state_time))
+        }
+    };
     ensure_not_aborted(abort)?;
 
     if !result.gain.is_finite() {
@@ -247,22 +294,25 @@ pub fn run_tf_analysis_with_context(
         "output resistance",
     )?;
 
-    Ok(TfData {
-        input_source: result.input,
-        output_label: result.output,
-        gain,
-        input_resistance,
-        output_resistance,
-        normalization: config.normalization,
-        gain_metadata: TfGainMetadata {
-            input_quantity,
-            output_quantity,
-            unit: gain_unit(input_quantity, output_quantity, config.normalization),
-            basis: gain_basis(config.normalization),
+    Ok((
+        TfData {
+            input_source: result.input,
+            output_label: result.output,
+            gain,
+            input_resistance,
+            output_resistance,
+            normalization: config.normalization,
+            gain_metadata: TfGainMetadata {
+                input_quantity,
+                output_quantity,
+                unit: gain_unit(input_quantity, output_quantity, config.normalization),
+                basis: gain_basis(config.normalization),
+            },
+            nominal_input,
+            nominal_output,
         },
-        nominal_input,
-        nominal_output,
-    })
+        state_time,
+    ))
 }
 
 fn retain_resistance(

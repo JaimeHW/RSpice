@@ -21,6 +21,7 @@ pub use authorization::PreparedRunAuthorization;
 pub use headless::{
     HeadlessPreparationError, HeadlessRunInput, HeadlessSourceResolver, prepare_headless_run,
 };
+pub(crate) use headless_tasks::small_signal_state_keyword;
 pub use headless_tasks::{HeadlessTaskRequest, prepare_headless_tasks};
 pub use snapshot::{
     AuthorizedRunDispatch, AuthorizedTaskDispatch, ExecutionTargetCapabilities, PSS_SPECTRUM_ROLE,
