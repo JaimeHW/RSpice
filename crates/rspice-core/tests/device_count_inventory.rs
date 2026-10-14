@@ -147,6 +147,10 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "the solver-controlled `$simparam` environment",
     ),
     (
+        "veriloga_point_time",
+        "the time `$abstime` reads at a frozen-time point, a solver scalar",
+    ),
+    (
         "ground_census",
         "the build's note of which counted Verilog-A instance connects node 0, \
          a reference decision rather than a device",
