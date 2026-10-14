@@ -524,7 +524,14 @@ pub(super) fn show_dock_if_open(ui: &mut Ui, app: &mut RSpiceApp, compact: bool)
             } else {
                 ui.set_max_width(620.0);
             }
-            close_requested = dock_body(ui, app, dock);
+            // The body puts the dock's labels, fields and buttons on the inset
+            // its property rows already keep: one left edge. A dock is a form
+            // of stacked labels and fields, so it keeps the form's spacing.
+            let form_spacing = ui.spacing().item_spacing.y;
+            close_requested = rspice_ui_kit::panels::panel_body(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = form_spacing;
+                dock_body(ui, app, dock)
+            });
         });
     if !window_open || close_requested {
         app.state.workbench.visualization_studio.dock = None;

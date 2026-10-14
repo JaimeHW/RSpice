@@ -1283,7 +1283,6 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 .debug
                 .exception_policy = policy;
 
-            subsection_header(ui, &messages.text(MessageId::AutomationBreakpoints));
             let breakpoints = app
                 .state
                 .ui
@@ -1292,6 +1291,11 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 .debug
                 .breakpoints
                 .clone();
+            // A group header titles its rows; with no breakpoints set it
+            // would title nothing.
+            if !breakpoints.is_empty() {
+                subsection_header(ui, &messages.text(MessageId::AutomationBreakpoints));
+            }
             let mut remove_breakpoint = None;
             let mut breakpoints_changed = false;
             for breakpoint in breakpoints {

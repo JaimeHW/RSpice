@@ -24,7 +24,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    StatusMark, code_inspector_section, panel_bleed, panel_inset, property_row,
+    StatusMark, code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
     property_row_height, property_row_input, property_row_status, section_block_gap,
     subsection_header,
 };
@@ -911,22 +911,27 @@ fn lifecycle_body(
 ) -> LifecycleAction {
     let t = Tokens::get(ui.ctx());
     let mut action = LifecycleAction::None;
+    // One body around every section, so they stack on the section gap rather
+    // than on the scroll area's item spacing.
     ScrollArea::vertical()
         .id_salt("source-document-lifecycle")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            if let Some(chosen) = current_document(ui, facts, t.color.ok, t.color.accent, messages)
-            {
-                action = chosen;
-            }
-            operations(ui, facts, &mut action, messages);
-            if let Some(chosen) = operation_review(ui, state, messages) {
-                action = chosen;
-            }
-            includes(ui, facts, messages);
-            if let Some(chosen) = revision_history(ui, state, facts, messages) {
-                action = chosen;
-            }
+            panel_body(ui, |ui| {
+                if let Some(chosen) =
+                    current_document(ui, facts, t.color.ok, t.color.accent, messages)
+                {
+                    action = chosen;
+                }
+                operations(ui, facts, &mut action, messages);
+                if let Some(chosen) = operation_review(ui, state, messages) {
+                    action = chosen;
+                }
+                includes(ui, facts, messages);
+                if let Some(chosen) = revision_history(ui, state, facts, messages) {
+                    action = chosen;
+                }
+            });
         });
     action
 }
@@ -942,187 +947,196 @@ fn netlist_lifecycle_body(
         .id_salt("netlist-document-lifecycle")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            code_inspector_section(
-                ui,
-                &messages.text(MessageId::CodeSourceCurrentDocument),
-                Some(&messages.text(MessageId::CodeSourceOwnedEditable)),
-                None,
-                |ui| {
-                    if facts.include_identity.is_some() {
+            panel_body(ui, |ui| {
+                code_inspector_section(
+                    ui,
+                    &messages.text(MessageId::CodeSourceCurrentDocument),
+                    Some(&messages.text(MessageId::CodeSourceOwnedEditable)),
+                    None,
+                    |ui| {
+                        if facts.include_identity.is_some() {
+                            property_row(
+                                ui,
+                                &messages.text(MessageId::NetlistLogicalIdentity),
+                                facts.include_identity.as_deref().unwrap_or_default(),
+                            );
+                        } else if facts.decks.is_empty() {
+                            property_row(
+                                ui,
+                                &messages.text(MessageId::NetlistTopDeck),
+                                &facts.logical_path,
+                            );
+                        } else {
+                            let choices = facts
+                                .decks
+                                .iter()
+                                .map(|(_, path)| (path.clone(), path.clone()))
+                                .collect::<Vec<_>>();
+                            let mut selected = facts.logical_path.clone();
+                            if crate::workbench::design_system::property_row_combo(
+                                ui,
+                                &messages.text(MessageId::NetlistTopDeck),
+                                "netlist-top-deck-selector",
+                                &mut selected,
+                                &choices,
+                                facts.operations_blocked.is_none()
+                                    && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
+                            ) && let Some((deck_id, _)) =
+                                facts.decks.iter().find(|(_, path)| *path == selected)
+                                && Some(*deck_id) != facts.deck_id
+                            {
+                                action = NetlistLifecycleAction::SelectDeck(*deck_id);
+                            }
+                        }
                         property_row(
                             ui,
-                            &messages.text(MessageId::NetlistLogicalIdentity),
-                            facts.include_identity.as_deref().unwrap_or_default(),
-                        );
-                    } else if facts.decks.is_empty() {
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::NetlistTopDeck),
+                            &messages.text(MessageId::CodeSourcePath),
                             &facts.logical_path,
                         );
-                    } else {
-                        let choices = facts
-                            .decks
-                            .iter()
-                            .map(|(_, path)| (path.clone(), path.clone()))
-                            .collect::<Vec<_>>();
-                        let mut selected = facts.logical_path.clone();
-                        if crate::workbench::design_system::property_row_combo(
+                        property_row(
                             ui,
-                            &messages.text(MessageId::NetlistTopDeck),
-                            "netlist-top-deck-selector",
-                            &mut selected,
-                            &choices,
-                            facts.operations_blocked.is_none()
-                                && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
-                        ) && let Some((deck_id, _)) =
-                            facts.decks.iter().find(|(_, path)| *path == selected)
-                            && Some(*deck_id) != facts.deck_id
-                        {
-                            action = NetlistLifecycleAction::SelectDeck(*deck_id);
-                        }
-                    }
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSourcePath),
-                        &facts.logical_path,
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSourceIdentity),
-                        &facts.identity,
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSourceContent),
-                        &facts.shape,
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSourceLineEndings),
-                        &messages.text(facts.line_endings),
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::NetlistPublishedOrigin),
-                        &facts.published_origin,
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::NetlistTopDeckCatalog),
-                        &messages.format(
-                            if facts.decks.len() == 1 {
-                                MessageId::CodeSourceDocumentSingular
-                            } else {
-                                MessageId::CodeSourceDocuments
-                            },
-                            &[("count", &facts.decks.len().to_string())],
-                        ),
-                    );
-                },
-            );
-            code_inspector_section(
-                ui,
-                &messages.text(MessageId::CodeSourceFileOperations),
-                None,
-                None,
-                |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                        let transaction_open =
-                            state.ui.netlist.lifecycle_dialog.transaction.is_some()
-                                || state
-                                    .ui
-                                    .netlist
-                                    .lifecycle_dialog
-                                    .include_transaction
-                                    .is_some();
-                        if facts.include_identity.is_some() {
-                            if Button::new(&messages.text(MessageId::NetlistCopyProject))
-                                .enabled(!facts.include_owned && !transaction_open)
-                                .show(ui)
-                                .clicked()
-                            {
-                                action = NetlistLifecycleAction::CopyIncludeOwnership;
-                            }
-                            for (label, candidate) in [
-                                (MessageId::CodeSourceRename, CodeSourceFileAction::Rename),
-                                (MessageId::CodeSourceMove, CodeSourceFileAction::Move),
-                            ] {
-                                let response = Button::new(&messages.text(label))
-                                    .enabled(facts.include_owned && !transaction_open)
-                                    .show(ui);
-                                if response.clicked() {
-                                    action = NetlistLifecycleAction::BeginInclude(candidate);
+                            &messages.text(MessageId::CodeSourceIdentity),
+                            &facts.identity,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeSourceContent),
+                            &facts.shape,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeSourceLineEndings),
+                            &messages.text(facts.line_endings),
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::NetlistPublishedOrigin),
+                            &facts.published_origin,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::NetlistTopDeckCatalog),
+                            &messages.format(
+                                if facts.decks.len() == 1 {
+                                    MessageId::CodeSourceDocumentSingular
+                                } else {
+                                    MessageId::CodeSourceDocuments
+                                },
+                                &[("count", &facts.decks.len().to_string())],
+                            ),
+                        );
+                    },
+                );
+                code_inspector_section(
+                    ui,
+                    &messages.text(MessageId::CodeSourceFileOperations),
+                    None,
+                    None,
+                    |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                            let transaction_open =
+                                state.ui.netlist.lifecycle_dialog.transaction.is_some()
+                                    || state
+                                        .ui
+                                        .netlist
+                                        .lifecycle_dialog
+                                        .include_transaction
+                                        .is_some();
+                            if facts.include_identity.is_some() {
+                                if Button::new(&messages.text(MessageId::NetlistCopyProject))
+                                    .enabled(!facts.include_owned && !transaction_open)
+                                    .show(ui)
+                                    .clicked()
+                                {
+                                    action = NetlistLifecycleAction::CopyIncludeOwnership;
                                 }
-                            }
-                            let response = Button::new(
-                                &messages.text(MessageId::NetlistReleaseProjectOwnership),
-                            )
-                            .enabled(facts.include_owned && !transaction_open)
-                            .show(ui);
-                            if response.clicked() {
-                                action = NetlistLifecycleAction::ReleaseIncludeOwnership;
-                            }
-                            if !facts.include_owned {
-                                response.on_disabled_hover_text(
+                                for (label, candidate) in [
+                                    (MessageId::CodeSourceRename, CodeSourceFileAction::Rename),
+                                    (MessageId::CodeSourceMove, CodeSourceFileAction::Move),
+                                ] {
+                                    let response = Button::new(&messages.text(label))
+                                        .enabled(facts.include_owned && !transaction_open)
+                                        .show(ui);
+                                    if response.clicked() {
+                                        action = NetlistLifecycleAction::BeginInclude(candidate);
+                                    }
+                                }
+                                let response = Button::new(
+                                    &messages.text(MessageId::NetlistReleaseProjectOwnership),
+                                )
+                                .enabled(facts.include_owned && !transaction_open)
+                                .show(ui);
+                                if response.clicked() {
+                                    action = NetlistLifecycleAction::ReleaseIncludeOwnership;
+                                }
+                                if !facts.include_owned {
+                                    response.on_disabled_hover_text(
                                     facts.operations_blocked.as_deref().unwrap_or(
                                         "This include is already a read-only referenced source.",
                                     ),
                                 );
-                            }
-                            ui.label(messages.text(MessageId::NetlistReleaseOwnershipDescription));
-                        } else {
-                            if Button::new(&messages.text(if cfg!(target_arch = "wasm32") {
-                                MessageId::NetlistDownloadSourceCopy
+                                }
+                                ui.label(
+                                    messages.text(MessageId::NetlistReleaseOwnershipDescription),
+                                );
                             } else {
-                                MessageId::NetlistSaveSourceAs
-                            }))
-                            .enabled(facts.deck_id.is_some() && !transaction_open)
-                            .show(ui)
-                            .clicked()
-                            {
-                                action = NetlistLifecycleAction::SaveSourceAs;
-                            }
-                            for (label, candidate) in FILE_OPERATIONS {
-                                let enabled = facts.operations_blocked.is_none()
-                                    && !transaction_open
-                                    && (facts.deck_id.is_some()
-                                        || candidate == CodeSourceFileAction::New);
-                                let response = Button::new(&messages.text(label))
-                                    .enabled(enabled)
-                                    .destructive(candidate == CodeSourceFileAction::Delete)
-                                    .show(ui);
-                                if response.clicked() {
-                                    action = NetlistLifecycleAction::Begin(candidate);
-                                }
-                                if let Some(reason) = facts.operations_blocked.as_deref() {
-                                    response.on_disabled_hover_text(reason);
-                                }
-                            }
-                            if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
-                                .enabled(
-                                    facts.history_count > 0
-                                        && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
-                                )
+                                if Button::new(&messages.text(if cfg!(target_arch = "wasm32") {
+                                    MessageId::NetlistDownloadSourceCopy
+                                } else {
+                                    MessageId::NetlistSaveSourceAs
+                                }))
+                                .enabled(facts.deck_id.is_some() && !transaction_open)
                                 .show(ui)
                                 .clicked()
-                            {
-                                action = NetlistLifecycleAction::OpenHistory;
+                                {
+                                    action = NetlistLifecycleAction::SaveSourceAs;
+                                }
+                                for (label, candidate) in FILE_OPERATIONS {
+                                    let enabled = facts.operations_blocked.is_none()
+                                        && !transaction_open
+                                        && (facts.deck_id.is_some()
+                                            || candidate == CodeSourceFileAction::New);
+                                    let response = Button::new(&messages.text(label))
+                                        .enabled(enabled)
+                                        .destructive(candidate == CodeSourceFileAction::Delete)
+                                        .show(ui);
+                                    if response.clicked() {
+                                        action = NetlistLifecycleAction::Begin(candidate);
+                                    }
+                                    if let Some(reason) = facts.operations_blocked.as_deref() {
+                                        response.on_disabled_hover_text(reason);
+                                    }
+                                }
+                                if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
+                                    .enabled(
+                                        facts.history_count > 0
+                                            && state
+                                                .ui
+                                                .netlist
+                                                .lifecycle_dialog
+                                                .transaction
+                                                .is_none(),
+                                    )
+                                    .show(ui)
+                                    .clicked()
+                                {
+                                    action = NetlistLifecycleAction::OpenHistory;
+                                }
                             }
-                        }
-                    });
-                },
-            );
-            if let Some(chosen) = include_search_paths(ui, state, messages) {
-                action = chosen;
-            }
-            if let Some(chosen) = netlist_operation_review(ui, state, messages) {
-                action = chosen;
-            }
-            if let Some(chosen) = netlist_include_operation_review(ui, state, messages) {
-                action = chosen;
-            }
+                        });
+                    },
+                );
+                if let Some(chosen) = include_search_paths(ui, state, messages) {
+                    action = chosen;
+                }
+                if let Some(chosen) = netlist_operation_review(ui, state, messages) {
+                    action = chosen;
+                }
+                if let Some(chosen) = netlist_include_operation_review(ui, state, messages) {
+                    action = chosen;
+                }
+            })
         });
     action
 }

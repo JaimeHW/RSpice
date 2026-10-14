@@ -23,7 +23,7 @@ use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    code_inspector_section, property_row, property_row_input, section_block_gap,
+    code_inspector_section, panel_body, property_row, property_row_input, section_block_gap,
 };
 use crate::workbench::documents::code_workspace::{
     self, LanguageToolView, SourceCodeAction, SourceSymbolKind,
@@ -267,62 +267,64 @@ fn tools_body(
         .id_salt("source-language-tools")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            code_inspector_section(
-                ui,
-                &messages.text(MessageId::CodeToolsIndexedClosure),
-                Some(&messages.format(
-                    MessageId::CodeToolsIndexRevision,
-                    &[("revision", &tools.index.bundle_revision.to_string())],
-                )),
-                None,
-                |ui| {
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeToolsDocument),
-                        &tools.active_path,
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeToolsIndexedSymbols),
-                        &tools.index.symbols().len().to_string(),
-                    );
-                    let mut query = tools.query.clone();
-                    if property_row_input(
-                        ui,
-                        &messages.text(MessageId::CodeToolsSymbol),
-                        &mut query,
-                        false,
-                    )
-                    .changed()
-                    {
-                        action = ToolAction::Query(query);
-                    }
-                    section_block_gap(ui);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
-                        for view in LanguageToolView::ALL {
-                            if ui
-                                .selectable_label(
-                                    tools.view == view,
-                                    messages.text(view_text(view).0),
-                                )
-                                .clicked()
-                            {
-                                action = ToolAction::Select(view);
-                            }
+            panel_body(ui, |ui| {
+                code_inspector_section(
+                    ui,
+                    &messages.text(MessageId::CodeToolsIndexedClosure),
+                    Some(&messages.format(
+                        MessageId::CodeToolsIndexRevision,
+                        &[("revision", &tools.index.bundle_revision.to_string())],
+                    )),
+                    None,
+                    |ui| {
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeToolsDocument),
+                            &tools.active_path,
+                        );
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::CodeToolsIndexedSymbols),
+                            &tools.index.symbols().len().to_string(),
+                        );
+                        let mut query = tools.query.clone();
+                        if property_row_input(
+                            ui,
+                            &messages.text(MessageId::CodeToolsSymbol),
+                            &mut query,
+                            false,
+                        )
+                        .changed()
+                        {
+                            action = ToolAction::Query(query);
                         }
-                    });
-                },
-            );
+                        section_block_gap(ui);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
+                            for view in LanguageToolView::ALL {
+                                if ui
+                                    .selectable_label(
+                                        tools.view == view,
+                                        messages.text(view_text(view).0),
+                                    )
+                                    .clicked()
+                                {
+                                    action = ToolAction::Select(view);
+                                }
+                            }
+                        });
+                    },
+                );
 
-            if let Some(chosen) = view_results(ui, tools, &t, writable, messages) {
-                action = chosen;
-            }
-            if tools.view == LanguageToolView::References
-                && let Some(chosen) = rename_transaction(ui, tools, writable, messages)
-            {
-                action = chosen;
-            }
+                if let Some(chosen) = view_results(ui, tools, &t, writable, messages) {
+                    action = chosen;
+                }
+                if tools.view == LanguageToolView::References
+                    && let Some(chosen) = rename_transaction(ui, tools, writable, messages)
+                {
+                    action = chosen;
+                }
+            })
         });
     action
 }
