@@ -1,6 +1,6 @@
 //! Create Result Document presentation with immediate host validation.
 
-use egui::{Color32, RichText, Sense, Ui, UiBuilder, vec2};
+use egui::{RichText, Sense, Ui, UiBuilder, vec2};
 use rspice_app_types::product::DatasetId;
 use rspice_results::{
     document_creation::{ResultDocumentFamily, ResultDocumentLayout},
@@ -104,17 +104,6 @@ pub fn show(
                 .max_height(body_height)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-            ui.label(
-                RichText::new("RESULTS · DATASET-DRIVEN DOCUMENT")
-                    .monospace()
-                    .color(t.color.text_dim),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                "Choose the engineering question first. RSpice selects a compatible viewer family from the immutable dataset and keeps specialist tools available inside the resulting document.",
-            );
-            ui.add_space(10.0);
-
             ui.label(RichText::new("Result document type").strong());
             for row in ResultDocumentFamily::ALL.chunks(2) {
                 ui.columns(2, |columns| {
@@ -237,8 +226,7 @@ pub fn show(
                                     } else if !compatibility.is_compatible() {
                                         viewer_requirement(viewer)
                                     } else {
-                                        "This viewer has no renderer for the selected dataset yet."
-                                            .to_owned()
+                                        "Not available for this dataset.".to_owned()
                                     });
                                     ui.label(
                                         RichText::new(viewer.group.label())
@@ -247,12 +235,12 @@ pub fn show(
                                     );
                                 });
                                 ui.label(viewer_requirement(viewer));
-                                let (status, color) = if belongs_to_family {
-                                    viewer_status(viewer, compatibility, renderer_available, &t)
+                                let status = if belongs_to_family {
+                                    viewer_status(viewer, compatibility, renderer_available)
                                 } else {
-                                    (Cow::Borrowed("other document family"), t.color.text_dim)
+                                    Cow::Borrowed("other document family")
                                 };
-                                ui.label(RichText::new(status).color(color));
+                                ui.label(RichText::new(status).color(t.color.text_dim));
                                 ui.end_row();
                             }
                         });
@@ -263,7 +251,11 @@ pub fn show(
                 .as_deref()
                 .or(validation_message.as_deref())
             {
-                ui.label(RichText::new(message).color(t.color.err));
+                rspice_ui_kit::widgets::problem_line(
+                    ui,
+                    rspice_ui_kit::widgets::Problem::Failure,
+                    message,
+                );
             }
                 });
 
@@ -385,31 +377,27 @@ fn result_setting_row(ui: &mut Ui, title: &str, detail: &str, value: impl FnOnce
     });
 }
 
+/// Why a viewer row cannot be chosen, or nothing when it can: an enabled row
+/// already says it is available. A requirement is a fact about the dataset,
+/// not an alarm, so the caller sets it in neutral text.
 fn viewer_status(
     viewer: &ViewerDocumentDefinition,
     compatibility: ViewerCompatibility,
     renderer_available: bool,
-    tokens: &Tokens,
-) -> (Cow<'static, str>, Color32) {
+) -> Cow<'static, str> {
     if viewer.release != ViewerReleaseClass::ReleaseTarget {
-        return (viewer.unavailable_reason(), tokens.color.warn);
+        return viewer.unavailable_reason();
     }
     if compatibility.is_compatible() && !renderer_available {
-        return (
-            Cow::Borrowed("viewer integration required"),
-            tokens.color.warn,
-        );
+        return Cow::Borrowed("Not available");
     }
     match compatibility {
-        ViewerCompatibility::Compatible => (Cow::Borrowed("available"), tokens.color.ok),
-        ViewerCompatibility::MissingAnalysis { .. } => {
-            (Cow::Borrowed("analysis required"), tokens.color.warn)
+        ViewerCompatibility::Compatible => Cow::Borrowed(""),
+        ViewerCompatibility::UnknownDocument => Cow::Borrowed("Not available"),
+        ViewerCompatibility::MissingAnalysis { .. } => Cow::Borrowed("analysis required"),
+        ViewerCompatibility::MissingExternalCapability { .. } => {
+            Cow::Borrowed("specialist dataset required")
         }
-        ViewerCompatibility::MissingExternalCapability { .. } => (
-            Cow::Borrowed("specialist dataset required"),
-            tokens.color.warn,
-        ),
-        ViewerCompatibility::UnknownDocument => (Cow::Borrowed("unregistered"), tokens.color.err),
     }
 }
 
