@@ -11,7 +11,7 @@
 //! memory or the requested range is an error that stops the load; a count of
 //! words that differs from the range, when the file names no address, is a
 //! warning. Each expected value in the tests below is an Icarus 13.0 run of
-//! an RSpice-authored probe (`scratchpad/p2l5/probe/p3.v`).
+//! an RSpice-authored probe.
 
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::four_state::FourStateBit;

@@ -6,8 +6,7 @@
 //! and then reads as much of its field as it can. Where section 17.2.4.3
 //! leaves a choice open the choice is Icarus Verilog's, so that a test
 //! written against Icarus reads the same here; each expected value in the
-//! tests below is an Icarus 13.0 run of an RSpice-authored probe
-//! (`scratchpad/p2l5/probe/p1.v`, `p2.v`).
+//! tests below is an Icarus 13.0 run of an RSpice-authored probe.
 //!
 //! - `%d` reads an optional sign and decimal digits, or one `x`, `z` or `?`,
 //!   which makes the whole value unknown or high impedance.

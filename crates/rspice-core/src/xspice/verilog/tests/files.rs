@@ -2,9 +2,9 @@
 //! (design P2 section 4.3).
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
-//! (`iverilog -g2005`, `vvp -n`, probes `scratchpad/p2l5/probe/p4.v` and
-//! `p5.v`), with binary modes so that its Windows build's text-mode newline
-//! translation does not move `$ftell`.
+//! (`iverilog -g2005`, `vvp -n`, RSpice-authored probes), with binary modes
+//! so that its Windows build's text-mode newline translation does not move
+//! `$ftell`.
 
 use super::*;
 
@@ -489,8 +489,7 @@ endmodule
 /// `$fread` into a memory (IEEE 1364-2005 section 17.2.4.4): whole bytes,
 /// most significant first, from a start address for a count of words; a
 /// count past the memory's end is cut to it, and a start outside it reads
-/// nothing. Expected text from Icarus 13.0 (probe
-/// `scratchpad/p2l5/probe/p7.v`).
+/// nothing. Expected text from Icarus 13.0 running the same source.
 #[test]
 fn fread_loads_a_memory_as_icarus_does() {
     let directory = run_directory("fread-memory");
@@ -555,7 +554,7 @@ fn writes_to_the_stderr_descriptor_are_stderr_records() {
 /// `$fread` into a reg (IEEE 1364-2005 section 17.2.4.4): whole bytes, most
 /// significant first, a narrow reg keeping the low bits, and a short read
 /// keeping the bytes it did not reach. Expected text from Icarus 13.0
-/// (probe `scratchpad/p2l5/probe/p7.v`).
+/// running the same source.
 #[test]
 fn fread_loads_a_reg_as_icarus_does() {
     let directory = run_directory("fread-reg");

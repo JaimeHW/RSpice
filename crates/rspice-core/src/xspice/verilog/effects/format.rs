@@ -5,8 +5,7 @@
 //! Every format specification, width rule and `x`/`z` digit rule follows the
 //! standard; where it leaves a choice open the choice is Icarus Verilog's, so
 //! that a gold file written by Icarus reads the same here. Each expected string
-//! in the tests below is an Icarus 13.0 run of an RSpice-authored probe
-//! (`scratchpad/p2l1/f1.v`–`f4.v`).
+//! in the tests below is an Icarus 13.0 run of an RSpice-authored probe.
 
 use num_bigint::{BigInt, BigUint, Sign};
 use rspice_veriloga::canonical_ir::digital::DigitalRadix;
