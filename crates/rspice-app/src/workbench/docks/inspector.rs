@@ -14,8 +14,8 @@ mod veriloga;
 
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
-    Problem, code_inspector_section, panel_bleed, panel_body, panel_inset, section_block_gap,
-    section_header,
+    PANEL_INSET, Problem, code_inspector_section, panel_bleed, panel_body, panel_inset,
+    section_block_gap, section_header,
 };
 
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -379,13 +379,16 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
         ui.painter().galley(
-            egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y * 0.5),
+            egui::pos2(
+                rect.left() + PANEL_INSET,
+                rect.center().y - galley.size().y * 0.5,
+            ),
             galley,
             t.color.text,
         );
     } else {
         ui.painter().text(
-            egui::pos2(rect.left() + 11.0, rect.center().y),
+            egui::pos2(rect.left() + PANEL_INSET, rect.center().y),
             egui::Align2::LEFT_CENTER,
             title.to_ascii_uppercase(),
             theme::sans(tokens::FS_0, FontWeight::SemiBold),
@@ -1897,12 +1900,17 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
         Pos2::new(rect.left() + value_left, rect.top()),
         Pos2::new(rect.right() - trailing, rect.bottom()),
     );
+    // The swatch is the row's field: as tall as a field in any other row, a
+    // pixel in from the row's top and bottom, not a free-standing control
+    // that would stand out of the row.
+    let field = value_rect.shrink2(Vec2::new(0.0, 1.0));
     let swatch = ui
         .scope_builder(
             egui::UiBuilder::new()
-                .max_rect(value_rect)
+                .max_rect(field)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
             |ui| {
+                ui.spacing_mut().interact_size.y = field.height();
                 egui::color_picker::color_edit_button_srgba(
                     ui,
                     color,
@@ -1911,6 +1919,9 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
             },
         )
         .inner;
+    // Placing the swatch left the cursor under it; the row ends at its own
+    // bottom.
+    let _ = ui.advance_cursor_after_rect(rect);
     let hex = format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b());
     ui.painter().with_clip_rect(value_rect).text(
         Pos2::new(swatch.rect.right() + 8.0, rect.center().y),

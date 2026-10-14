@@ -717,7 +717,9 @@ fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     let inset = panel_inset(ui);
     let width = (ui.available_width() - 2.0 * inset).max(1.0);
     section_block_gap(ui);
-    ui.horizontal(|ui| {
+    // Top-aligned: a centred row is a control's height tall before anything
+    // is in it, and centred the wrapping group half that far down.
+    ui.horizontal_top(|ui| {
         ui.add_space(inset);
         ui.allocate_ui_with_layout(
             egui::vec2(width, 0.0),

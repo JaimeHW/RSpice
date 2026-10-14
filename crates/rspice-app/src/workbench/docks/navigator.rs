@@ -332,13 +332,19 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
         ui.painter().galley(
-            egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y * 0.5),
+            egui::pos2(
+                rect.left() + rspice_ui_kit::panels::PANEL_INSET,
+                rect.center().y - galley.size().y * 0.5,
+            ),
             galley,
             t.color.text,
         );
     } else {
         ui.painter().text(
-            egui::pos2(rect.left() + 11.0, rect.center().y),
+            egui::pos2(
+                rect.left() + rspice_ui_kit::panels::PANEL_INSET,
+                rect.center().y,
+            ),
             egui::Align2::LEFT_CENTER,
             title.to_ascii_uppercase(),
             theme::sans(tokens::FS_0, FontWeight::SemiBold),
