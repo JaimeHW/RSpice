@@ -53,11 +53,11 @@ use rspice_schematic_editor::view::resolved_symbol_render::{
     draw_resolved_symbol_artwork, resolved_symbol_artwork_bounds,
 };
 
-use super::{
-    ComponentModelEvidence, component_model_evidence, muted_inspector_copy,
-    schematic_section_header as section_header, schematic_section_header_action, section_block_gap,
+use super::{ComponentModelEvidence, component_model_evidence, muted_inspector_copy};
+use rspice_ui_kit::panels::inspector::toned_inspector_copy;
+use rspice_ui_kit::panels::{
+    PANEL_INSET, panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,
 };
-use rspice_ui_kit::panels::inspector::{inspector_inset, toned_inspector_copy};
 
 /// The mockup's `.inspector-hero` is an 82 px band: an 82 px square symbol
 /// stage beside four stacked text lines.
@@ -584,6 +584,7 @@ struct Hero {
 
 fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
     let t = Tokens::get(ui.ctx());
+    let inset = panel_inset(ui);
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), HERO_H),
         if spec.open_properties.is_some() {
@@ -592,11 +593,14 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
             egui::Sense::hover()
         },
     );
+    // The band reaches the panel's edges; its text keeps the panel inset on
+    // the right.
+    let band = panel_bleed(ui, rect);
     let preview = egui::Rect::from_min_max(
-        rect.min,
+        band.min,
         egui::pos2(
-            (rect.left() + HERO_PREVIEW_W).min(rect.right()),
-            rect.bottom(),
+            (band.left() + HERO_PREVIEW_W).min(band.right()),
+            band.bottom(),
         ),
     );
     ui.painter().rect_filled(preview, 0.0, t.color.canvas_bg);
@@ -606,8 +610,8 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
         egui::Stroke::new(1.0, t.color.border),
     );
     ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
+        band.x_range(),
+        band.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
 
@@ -630,8 +634,11 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
         }
     }
 
-    let text_left = preview.right() + 10.0;
-    let text_clip = egui::Rect::from_x_y_ranges(text_left..=(rect.right() - 10.0), rect.y_range());
+    let text_left = preview.right() + PANEL_INSET;
+    let text_clip = egui::Rect::from_x_y_ranges(
+        text_left..=(rect.right() - inset).max(text_left),
+        rect.y_range(),
+    );
     let painter = ui.painter().with_clip_rect(text_clip);
     let at = |index: usize| egui::pos2(text_left, rect.top() + HERO_BASELINES[index]);
     let eyebrow_job = egui::text::LayoutJob::single_section(
@@ -702,15 +709,16 @@ fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
 ///
 /// The row takes the section's own step from the block above it and leaves
 /// the closing step to the section, so a body that ends in buttons is framed
-/// exactly like one that ends in a property list.
-const ACTION_ROW_PAD_X: f32 = 10.0;
+/// exactly like one that ends in a property list. It starts and stops on the
+/// panel inset, like the rows above it.
 const ACTION_ROW_GAP: f32 = 6.0;
 
 fn action_stack(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
-    let width = (ui.available_width() - 2.0 * ACTION_ROW_PAD_X).max(1.0);
+    let inset = panel_inset(ui);
+    let width = (ui.available_width() - 2.0 * inset).max(1.0);
     section_block_gap(ui);
     ui.horizontal(|ui| {
-        ui.add_space(ACTION_ROW_PAD_X);
+        ui.add_space(inset);
         ui.allocate_ui_with_layout(
             egui::vec2(width, 0.0),
             egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
@@ -1286,7 +1294,7 @@ fn drawing_sheet_overflow_advisory(
         Color32::from_rgba_unmultiplied(t.color.warn.r(), t.color.warn.g(), t.color.warn.b(), 18);
     let border =
         Color32::from_rgba_unmultiplied(t.color.warn.r(), t.color.warn.g(), t.color.warn.b(), 102);
-    ui.add_space(2.0);
+    section_block_gap(ui);
     let shown = egui::Frame::new()
         .fill(fill)
         .stroke(egui::Stroke::new(1.0, border))
@@ -1644,27 +1652,22 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
 
     let writable = !app.state.schematic_edit_read_only();
     let mut enabled = probe.enabled;
-    // On the rows' inset: a checkbox added to the body bare puts its box on
-    // the panel edge.
-    let enabled_response = inspector_inset(ui, |ui| {
-        ui.add_enabled(
-            writable,
-            egui::Checkbox::new(&mut enabled, "Include this probe in future runs"),
-        )
-    });
+    section_block_gap(ui);
+    let enabled_response = ui.add_enabled(
+        writable,
+        egui::Checkbox::new(&mut enabled, "Include this probe in future runs"),
+    );
     if !writable {
         enabled_response.on_disabled_hover_text("The active schematic is read-only.");
     }
     let mut plot_on_materialization = probe.plot_on_materialization;
-    let plot_response = inspector_inset(ui, |ui| {
-        ui.add_enabled(
-            writable && enabled,
-            egui::Checkbox::new(
-                &mut plot_on_materialization,
-                "Show automatically when the next run materializes it",
-            ),
-        )
-    });
+    let plot_response = ui.add_enabled(
+        writable && enabled,
+        egui::Checkbox::new(
+            &mut plot_on_materialization,
+            "Show automatically when the next run materializes it",
+        ),
+    );
     if !writable {
         plot_response.on_disabled_hover_text("The active schematic is read-only.");
     } else if !enabled {

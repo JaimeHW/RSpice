@@ -1186,15 +1186,15 @@ fn the_hero_band_matches_the_mockup_geometry() {
 
 #[test]
 fn operating_point_summary_matches_the_upgraded_inset_contract() {
-    assert_eq!(OP_SUMMARY_MARGIN_X, 8.0);
     assert_eq!(OP_SUMMARY_PADDING, 9.0);
     assert_eq!(OP_SUMMARY_ROW_H, 22.0);
 }
 
 /// Lay one annotation row out at the docked inspector's real inner width.
 fn measured_operating_point_row(label: &str, value: &str) -> (f32, f32, f32, usize) {
+    use crate::workbench::design_system::PANEL_INSET;
     const PANEL_W: f32 = 312.0;
-    let inner_width = PANEL_W - 2.0 * OP_SUMMARY_MARGIN_X - 2.0 * OP_SUMMARY_PADDING;
+    let inner_width = PANEL_W - 2.0 * PANEL_INSET - 2.0 * OP_SUMMARY_PADDING;
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut measured = (0.0, 0.0, 0.0, 0);
@@ -1237,30 +1237,32 @@ fn a_short_operating_point_row_keeps_the_base_band_and_one_line() {
     assert_eq!(height, OP_SUMMARY_ROW_H);
 }
 
-/// Measure the space a section body leaves above its first block and below
-/// its last, for a body drawn by `content`.
+/// Measure, in the dock's panel body, the space between a section header and
+/// the first block of its body, and between the body's last block and the
+/// next section's header, for a body drawn by `content`.
 fn section_body_padding(mut content: impl FnMut(&mut Ui)) -> (f32, f32) {
-    use super::super::{begin_inspector_sections, finish_inspector_sections};
-    use crate::workbench::design_system::PANEL_SECTION_H;
+    use crate::workbench::design_system::{PANEL_HEADER_GAP, PANEL_SECTION_H, panel_body};
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut measured = (0.0, 0.0);
     let _ = ctx.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.set_width(312.0);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            begin_inspector_sections(ui);
-            let before_header = ui.cursor().top();
-            section_header(ui, "Identity", Some("editable"));
-            let body_top = ui.cursor().top();
-            content(ui);
-            let body_bottom = ui.cursor().top();
-            finish_inspector_sections(ui);
-            measured = (
-                body_top - before_header - PANEL_SECTION_H,
-                ui.cursor().top() - body_bottom,
-            );
+            ui.allocate_ui(egui::vec2(312.0, 800.0), |ui| {
+                panel_body(ui, |ui| {
+                    let before_header = ui.cursor().top();
+                    section_header(ui, "Identity", Some("editable"));
+                    let body_top = ui.cursor().top();
+                    content(ui);
+                    let body_bottom = ui.cursor().top();
+                    section_header(ui, "Checks", None);
+                    let next_header = ui.cursor().top() - PANEL_HEADER_GAP - PANEL_SECTION_H;
+                    measured = (
+                        body_top - before_header - PANEL_SECTION_H,
+                        next_header - body_bottom,
+                    );
+                });
+            });
         });
     });
     measured
@@ -1268,13 +1270,13 @@ fn section_body_padding(mut content: impl FnMut(&mut Ui)) -> (f32, f32) {
 
 #[test]
 fn every_inspector_section_frames_its_body_with_the_same_step() {
-    use super::super::INSPECTOR_SECTION_PADDING;
+    use crate::workbench::design_system::{PANEL_HEADER_GAP, PANEL_SECTION_GAP};
 
     let list = section_body_padding(|ui| {
         property_row(ui, "Instance", "R1");
         property_row(ui, "Value", "1k");
     });
-    assert_eq!(list, (INSPECTOR_SECTION_PADDING, INSPECTOR_SECTION_PADDING));
+    assert_eq!(list, (PANEL_HEADER_GAP, PANEL_SECTION_GAP));
 
     let tree = section_body_padding(|ui| {
         terminal_row(ui, "+", Some("net1"));
@@ -1315,10 +1317,52 @@ fn every_inspector_section_frames_its_body_with_the_same_step() {
 #[test]
 fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
     // The table has no parent row and no pin expands, so the row leads with
-    // its status icon at the same 10 px inset as the section title and the
-    // property labels — not behind a nesting inset and a blank caret column.
-    assert_eq!(TERMINAL_ROW_PAD_X, 10.0);
-    assert_eq!(TERMINAL_ROW_LABEL_X, 31.0);
+    // its status icon on the panel inset, like the section title and the
+    // property labels — not behind a nesting inset and a blank caret column —
+    // and its net ends on the inset on the right.
+    use crate::workbench::design_system::{PANEL_INSET, panel_body};
+    fn texts(shape: &egui::epaint::Shape, into: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => into.push((
+                text.galley.text().to_owned(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+            )),
+            egui::epaint::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, into)),
+            _ => {}
+        }
+    }
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.allocate_ui(egui::vec2(312.0, 100.0), |ui| {
+                    panel_body(ui, |ui| {
+                        let _ = terminal_row(ui, "PLUS", Some("net1"));
+                    });
+                });
+            });
+    });
+    let mut painted = Vec::new();
+    for clipped in &output.shapes {
+        texts(&clipped.shape, &mut painted);
+    }
+    let find = |wanted: &str| {
+        painted
+            .iter()
+            .find(|(text, _)| text == wanted)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{wanted:?} was not painted: {painted:?}"))
+    };
+    let pin = find("PLUS");
+    let net = find("net1");
+    assert_eq!(
+        pin.left(),
+        PANEL_INSET + TERMINAL_ROW_ICON_W + TERMINAL_ROW_ICON_GAP
+    );
+    assert!((net.right() - (312.0 - PANEL_INSET)).abs() < 0.5, "{net:?}");
 }
 
 #[test]

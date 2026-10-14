@@ -10,8 +10,8 @@ use egui::Ui;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, RunHistoryRevision, SimulationState,
 };
-use crate::ui::widgets::section_header;
 use crate::workbench::AppState;
+use crate::workbench::design_system::section_header;
 
 use std::sync::Arc;
 

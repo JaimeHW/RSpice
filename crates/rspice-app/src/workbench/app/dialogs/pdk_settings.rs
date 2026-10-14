@@ -19,11 +19,12 @@ use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W,
-    PaneSide, chip, pane_footer, pane_header, pane_section_label, two_pane,
+    PaneSide, chip, pane_footer, pane_header, two_pane,
 };
 use crate::workbench::app_state::session::pdk_settings::{
     PdkSettingsDialogResult, PdkSettingsDialogState,
 };
+use crate::workbench::design_system::subsection_header;
 
 /// Height of the two-pane region.
 const PANE_HEIGHT: f32 = 340.0;
@@ -230,7 +231,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
     ui.painter()
         .hline(ui.max_rect().x_range(), sep_y, Stroke::new(1.0, c.border));
     ui.add_space(1.0);
-    pane_section_label(ui, "Environment");
+    subsection_header(ui, "Environment");
 
     let mut env_action: Option<EnvAction> = None;
     egui::ScrollArea::vertical()

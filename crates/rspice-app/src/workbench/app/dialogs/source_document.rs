@@ -22,9 +22,11 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    StatusMark, code_inspector_property_list, code_inspector_section, property_row,
-    property_row_input, property_row_status, section_header,
+    StatusMark, code_inspector_section, panel_bleed, panel_inset, property_row,
+    property_row_height, property_row_input, property_row_status, section_block_gap,
+    subsection_header,
 };
 use crate::workbench::documents::code_workspace::{self, CodeSourceFileAction};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -832,37 +834,35 @@ impl RSpiceApp {
                 None,
                 None,
                 |ui| {
-                    code_inspector_property_list(ui, |ui| {
-                        property_row_input(
-                            ui,
-                            &messages.text(MessageId::CodeSourceWorkspaceRootPath),
-                            &mut edited.root_path,
-                            false,
-                        );
-                        property_row_input(
-                            ui,
-                            &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
-                            &mut edited.run_plan_path,
-                            false,
-                        );
-                        property_row_input(
-                            ui,
-                            &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
-                            &mut edited.environment_lock_path,
-                            false,
-                        );
-                        property_row_input(
-                            ui,
-                            &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
-                            &mut edited.permission_manifest_path,
-                            false,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSourceWorkspaceBoundDeck),
-                            &edited.netlist_source_path,
-                        );
-                    });
+                    property_row_input(
+                        ui,
+                        &messages.text(MessageId::CodeSourceWorkspaceRootPath),
+                        &mut edited.root_path,
+                        false,
+                    );
+                    property_row_input(
+                        ui,
+                        &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
+                        &mut edited.run_plan_path,
+                        false,
+                    );
+                    property_row_input(
+                        ui,
+                        &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
+                        &mut edited.environment_lock_path,
+                        false,
+                    );
+                    property_row_input(
+                        ui,
+                        &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
+                        &mut edited.permission_manifest_path,
+                        false,
+                    );
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourceWorkspaceBoundDeck),
+                        &edited.netlist_source_path,
+                    );
                 },
             );
         });
@@ -948,79 +948,77 @@ fn netlist_lifecycle_body(
                 Some(&messages.text(MessageId::CodeSourceOwnedEditable)),
                 None,
                 |ui| {
-                    code_inspector_property_list(ui, |ui| {
-                        if facts.include_identity.is_some() {
-                            property_row(
-                                ui,
-                                &messages.text(MessageId::NetlistLogicalIdentity),
-                                facts.include_identity.as_deref().unwrap_or_default(),
-                            );
-                        } else if facts.decks.is_empty() {
-                            property_row(
-                                ui,
-                                &messages.text(MessageId::NetlistTopDeck),
-                                &facts.logical_path,
-                            );
-                        } else {
-                            let choices = facts
-                                .decks
-                                .iter()
-                                .map(|(_, path)| (path.clone(), path.clone()))
-                                .collect::<Vec<_>>();
-                            let mut selected = facts.logical_path.clone();
-                            if crate::workbench::design_system::property_row_combo(
-                                ui,
-                                &messages.text(MessageId::NetlistTopDeck),
-                                "netlist-top-deck-selector",
-                                &mut selected,
-                                &choices,
-                                facts.operations_blocked.is_none()
-                                    && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
-                            ) && let Some((deck_id, _)) =
-                                facts.decks.iter().find(|(_, path)| *path == selected)
-                                && Some(*deck_id) != facts.deck_id
-                            {
-                                action = NetlistLifecycleAction::SelectDeck(*deck_id);
-                            }
-                        }
+                    if facts.include_identity.is_some() {
                         property_row(
                             ui,
-                            &messages.text(MessageId::CodeSourcePath),
+                            &messages.text(MessageId::NetlistLogicalIdentity),
+                            facts.include_identity.as_deref().unwrap_or_default(),
+                        );
+                    } else if facts.decks.is_empty() {
+                        property_row(
+                            ui,
+                            &messages.text(MessageId::NetlistTopDeck),
                             &facts.logical_path,
                         );
-                        property_row(
+                    } else {
+                        let choices = facts
+                            .decks
+                            .iter()
+                            .map(|(_, path)| (path.clone(), path.clone()))
+                            .collect::<Vec<_>>();
+                        let mut selected = facts.logical_path.clone();
+                        if crate::workbench::design_system::property_row_combo(
                             ui,
-                            &messages.text(MessageId::CodeSourceIdentity),
-                            &facts.identity,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSourceContent),
-                            &facts.shape,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSourceLineEndings),
-                            &messages.text(facts.line_endings),
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::NetlistPublishedOrigin),
-                            &facts.published_origin,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::NetlistTopDeckCatalog),
-                            &messages.format(
-                                if facts.decks.len() == 1 {
-                                    MessageId::CodeSourceDocumentSingular
-                                } else {
-                                    MessageId::CodeSourceDocuments
-                                },
-                                &[("count", &facts.decks.len().to_string())],
-                            ),
-                        );
-                    });
+                            &messages.text(MessageId::NetlistTopDeck),
+                            "netlist-top-deck-selector",
+                            &mut selected,
+                            &choices,
+                            facts.operations_blocked.is_none()
+                                && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
+                        ) && let Some((deck_id, _)) =
+                            facts.decks.iter().find(|(_, path)| *path == selected)
+                            && Some(*deck_id) != facts.deck_id
+                        {
+                            action = NetlistLifecycleAction::SelectDeck(*deck_id);
+                        }
+                    }
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourcePath),
+                        &facts.logical_path,
+                    );
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourceIdentity),
+                        &facts.identity,
+                    );
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourceContent),
+                        &facts.shape,
+                    );
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeSourceLineEndings),
+                        &messages.text(facts.line_endings),
+                    );
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::NetlistPublishedOrigin),
+                        &facts.published_origin,
+                    );
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::NetlistTopDeckCatalog),
+                        &messages.format(
+                            if facts.decks.len() == 1 {
+                                MessageId::CodeSourceDocumentSingular
+                            } else {
+                                MessageId::CodeSourceDocuments
+                            },
+                            &[("count", &facts.decks.len().to_string())],
+                        ),
+                    );
                 },
             );
             code_inspector_section(
@@ -1029,7 +1027,6 @@ fn netlist_lifecycle_body(
                 None,
                 None,
                 |ui| {
-                    ui.add_space(6.0);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                         let transaction_open =
@@ -1115,7 +1112,6 @@ fn netlist_lifecycle_body(
                             }
                         }
                     });
-                    ui.add_space(6.0);
                 },
             );
             if let Some(chosen) = include_search_paths(ui, state, messages) {
@@ -1130,11 +1126,6 @@ fn netlist_lifecycle_body(
         });
     action
 }
-
-/// Height of one search-path row. The chain is a list of directories, not a
-/// property list, so it uses the dense navigator row rather than the 29 px
-/// property row beside it.
-const INCLUDE_SEARCH_ROW_H: f32 = 20.0;
 
 /// The project's ordered include search chain.
 ///
@@ -1170,18 +1161,14 @@ fn include_search_paths(
         )),
         None,
         |ui| {
-            ui.add_space(4.0);
             if authored.is_empty() {
-                ui.label(
-                    RichText::new(messages.text(MessageId::NetlistIncludeSearchPathEmpty))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
+                muted_inspector_copy(ui, &messages.text(MessageId::NetlistIncludeSearchPathEmpty));
             }
+            let inset = panel_inset(ui);
             for (index, entry) in chain.entries().iter().enumerate() {
                 let selected = state.ui.code_workspace.include_search_selected == Some(index);
                 let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), INCLUDE_SEARCH_ROW_H),
+                    egui::vec2(ui.available_width(), property_row_height(ui)),
                     egui::Sense::click(),
                 );
                 // The row is a painted galley, so nothing here reaches a screen
@@ -1197,7 +1184,8 @@ fn include_search_paths(
                 });
                 if ui.is_rect_visible(rect) {
                     if selected {
-                        ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
+                        ui.painter()
+                            .rect_filled(panel_bleed(ui, rect), 0.0, t.color.accent_dim);
                     }
                     let state_text = if rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence() {
                         messages.text(if entry.exists() {
@@ -1220,7 +1208,7 @@ fn include_search_paths(
                         .size()
                         .x;
                     ui.painter().text(
-                        egui::pos2(rect.right() - 8.0, rect.center().y),
+                        egui::pos2(rect.right() - inset, rect.center().y),
                         egui::Align2::RIGHT_CENTER,
                         &state_text,
                         state_font,
@@ -1228,11 +1216,11 @@ fn include_search_paths(
                     );
                     ui.painter()
                         .with_clip_rect(egui::Rect::from_x_y_ranges(
-                            (rect.left() + 8.0)..=(rect.right() - 16.0 - state_width),
+                            (rect.left() + inset)..=(rect.right() - inset - 8.0 - state_width),
                             rect.y_range(),
                         ))
                         .text(
-                            egui::pos2(rect.left() + 8.0, rect.center().y),
+                            egui::pos2(rect.left() + inset, rect.center().y),
                             egui::Align2::LEFT_CENTER,
                             format!("{}. {}", index + 1, entry.authored().display()),
                             theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -1246,31 +1234,32 @@ fn include_search_paths(
                 }
             }
             if unsaved && !authored.is_empty() {
-                ui.label(
-                    RichText::new(messages.text(MessageId::NetlistIncludeSearchPathUnsaved))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.warn),
+                toned_inspector_copy(
+                    ui,
+                    &messages.text(MessageId::NetlistIncludeSearchPathUnsaved),
+                    t.color.warn,
                 );
             }
-            ui.add_space(6.0);
+            section_block_gap(ui);
             let selected = state
                 .ui
                 .code_workspace
                 .include_search_selected
                 .filter(|index| *index < authored.len());
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let draft = state.ui.code_workspace.include_search_draft.clone();
-                let mut edited = draft.clone();
-                ui.add(
-                    egui::TextEdit::singleline(&mut edited)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(220.0)
-                        .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint)),
-                );
-                if edited != draft {
-                    state.ui.code_workspace.include_search_draft = edited.clone();
-                }
+            // The field spans the body; the commands under it wrap.
+            let draft = state.ui.code_workspace.include_search_draft.clone();
+            let mut edited = draft.clone();
+            ui.add(
+                egui::TextEdit::singleline(&mut edited)
+                    .font(egui::TextStyle::Monospace)
+                    .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint)),
+            );
+            if edited != draft {
+                state.ui.code_workspace.include_search_draft = edited.clone();
+            }
+            section_block_gap(ui);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                 if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathAdd))
                     .enabled(!edited.trim().is_empty())
                     .show(ui)
@@ -1328,7 +1317,6 @@ fn include_search_paths(
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
             });
-            ui.add_space(6.0);
         },
     );
     action
@@ -1371,43 +1359,36 @@ fn netlist_operation_review(
         Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                if deleting {
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSourceRemoving),
-                        &transaction.source_path,
-                    );
-                } else {
-                    property_row_input(
-                        ui,
-                        &messages.text(MessageId::CodeSourceLogicalPath),
-                        &mut transaction.proposed_path,
-                        transaction.error.is_some(),
-                    );
-                }
+            if deleting {
                 property_row(
                     ui,
-                    &messages.text(MessageId::CodeSourceAgainst),
-                    &match (transaction.document_revision, transaction.content_digest) {
-                        (Some(revision), Some(digest)) => format!(
-                            "doc rev {} · {}",
-                            revision.get(),
-                            digest.to_string().chars().take(12).collect::<String>()
-                        ),
-                        _ => "empty project netlist workspace".to_owned(),
-                    },
+                    &messages.text(MessageId::CodeSourceRemoving),
+                    &transaction.source_path,
                 );
-            });
-            if let Some(error) = transaction.error.as_deref() {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(error)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.err),
+            } else {
+                property_row_input(
+                    ui,
+                    &messages.text(MessageId::CodeSourceLogicalPath),
+                    &mut transaction.proposed_path,
+                    transaction.error.is_some(),
                 );
             }
-            ui.add_space(6.0);
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceAgainst),
+                &match (transaction.document_revision, transaction.content_digest) {
+                    (Some(revision), Some(digest)) => format!(
+                        "doc rev {} · {}",
+                        revision.get(),
+                        digest.to_string().chars().take(12).collect::<String>()
+                    ),
+                    _ => "empty project netlist workspace".to_owned(),
+                },
+            );
+            if let Some(error) = transaction.error.as_deref() {
+                toned_inspector_copy(ui, error, t.color.err);
+            }
+            section_block_gap(ui);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 if Button::new(&messages.text(commit))
@@ -1426,15 +1407,10 @@ fn netlist_operation_review(
                 {
                     action = Some(NetlistLifecycleAction::Cancel);
                 }
-                if deleting {
-                    ui.label(
-                        RichText::new(messages.text(MessageId::CodeSourceDeleteWarning))
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                }
             });
-            ui.add_space(6.0);
+            if deleting {
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceDeleteWarning));
+            }
         },
     );
     action
@@ -1470,33 +1446,26 @@ fn netlist_include_operation_review(
         Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::NetlistRequestedAs),
-                    &transaction.logical_identity,
-                );
-                property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeSourceLogicalPath),
-                    &mut transaction.proposed_identity,
-                    transaction.error.is_some(),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceAgainst),
-                    &format!("root rev {}", transaction.root_revision.get()),
-                );
-            });
+            property_row(
+                ui,
+                &messages.text(MessageId::NetlistRequestedAs),
+                &transaction.logical_identity,
+            );
+            property_row_input(
+                ui,
+                &messages.text(MessageId::CodeSourceLogicalPath),
+                &mut transaction.proposed_identity,
+                transaction.error.is_some(),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceAgainst),
+                &format!("root rev {}", transaction.root_revision.get()),
+            );
             if let Some(error) = transaction.error.as_deref() {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(error)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.err),
-                );
+                toned_inspector_copy(ui, error, t.color.err);
             }
-            ui.add_space(6.0);
+            section_block_gap(ui);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 if Button::new(&messages.text(commit))
@@ -1515,7 +1484,6 @@ fn netlist_include_operation_review(
                     action = Some(NetlistLifecycleAction::CancelInclude);
                 }
             });
-            ui.add_space(6.0);
         },
     );
     action
@@ -1540,51 +1508,49 @@ fn current_document(
         Some(&ownership),
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourcePath),
-                    &facts.logical_path,
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceIdentity),
-                    &facts.identity,
-                );
-                if let Some(chosen) = role_control(ui, facts, messages) {
-                    action = Some(chosen);
-                }
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceContent),
-                    &facts.shape,
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceLineEndings),
-                    &messages.text(facts.line_endings),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceBundle),
-                    &facts.bundle,
-                );
-                property_row_status(
-                    ui,
-                    &messages.text(MessageId::CodeSourceValidation),
-                    &messages.text(if facts.validation_current {
-                        MessageId::CodeSourceValidationCurrent
-                    } else {
-                        MessageId::CodeSourceValidationStale
-                    }),
-                    if facts.validation_current { ok } else { accent },
-                    if facts.validation_current {
-                        StatusMark::Success
-                    } else {
-                        StatusMark::Warning
-                    },
-                );
-            });
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourcePath),
+                &facts.logical_path,
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceIdentity),
+                &facts.identity,
+            );
+            if let Some(chosen) = role_control(ui, facts, messages) {
+                action = Some(chosen);
+            }
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceContent),
+                &facts.shape,
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceLineEndings),
+                &messages.text(facts.line_endings),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceBundle),
+                &facts.bundle,
+            );
+            property_row_status(
+                ui,
+                &messages.text(MessageId::CodeSourceValidation),
+                &messages.text(if facts.validation_current {
+                    MessageId::CodeSourceValidationCurrent
+                } else {
+                    MessageId::CodeSourceValidationStale
+                }),
+                if facts.validation_current { ok } else { accent },
+                if facts.validation_current {
+                    StatusMark::Success
+                } else {
+                    StatusMark::Warning
+                },
+            );
         },
     );
     action
@@ -1653,7 +1619,6 @@ fn operations(
         None,
         None,
         |ui| {
-            ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                 for (label, candidate) in FILE_OPERATIONS {
@@ -1688,7 +1653,6 @@ fn operations(
                     }
                 }
             });
-            ui.add_space(6.0);
         },
     );
 }
@@ -1780,42 +1744,35 @@ fn operation_review(
         Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                if deleting {
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSourceRemoving),
-                        &draft.source_path,
-                    );
-                } else {
-                    property_row_input(
-                        ui,
-                        &messages.text(MessageId::CodeSourceLogicalPath),
-                        &mut draft.proposed_path,
-                        draft.error.is_some(),
-                    );
-                }
+            if deleting {
                 property_row(
                     ui,
-                    &messages.text(MessageId::CodeSourceAgainst),
-                    &messages.format(
-                        MessageId::CodeSourceAgainstRevision,
-                        &[
-                            ("revision", &draft.bundle_revision.to_string()),
-                            ("digest", &short_digest(draft.closure_digest)),
-                        ],
-                    ),
+                    &messages.text(MessageId::CodeSourceRemoving),
+                    &draft.source_path,
                 );
-            });
-            if let Some(error) = draft.error.as_deref() {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(error)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.err),
+            } else {
+                property_row_input(
+                    ui,
+                    &messages.text(MessageId::CodeSourceLogicalPath),
+                    &mut draft.proposed_path,
+                    draft.error.is_some(),
                 );
             }
-            ui.add_space(6.0);
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeSourceAgainst),
+                &messages.format(
+                    MessageId::CodeSourceAgainstRevision,
+                    &[
+                        ("revision", &draft.bundle_revision.to_string()),
+                        ("digest", &short_digest(draft.closure_digest)),
+                    ],
+                ),
+            );
+            if let Some(error) = draft.error.as_deref() {
+                toned_inspector_copy(ui, error, t.color.err);
+            }
+            section_block_gap(ui);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 if Button::new(&messages.text(commit))
@@ -1834,22 +1791,16 @@ fn operation_review(
                 {
                     action = Some(LifecycleAction::Cancel);
                 }
-                if deleting {
-                    ui.label(
-                        RichText::new(messages.text(MessageId::CodeSourceDeleteWarning))
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                }
             });
-            ui.add_space(6.0);
+            if deleting {
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceDeleteWarning));
+            }
         },
     );
     action
 }
 
 fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
-    let t = Tokens::get(ui.ctx());
     let total = facts.imports.len() + facts.imported_by.len();
     code_inspector_section(
         ui,
@@ -1858,25 +1809,17 @@ fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
         None,
         |ui| {
             if total == 0 {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(messages.text(MessageId::CodeSourceNoIncludes))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-                ui.add_space(6.0);
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceNoIncludes));
                 return;
             }
-            code_inspector_property_list(ui, |ui| {
-                let imports = messages.text(MessageId::CodeSourceImports);
-                let imported_by = messages.text(MessageId::CodeSourceImportedBy);
-                for imported in &facts.imports {
-                    property_row(ui, &imports, imported);
-                }
-                for importer in &facts.imported_by {
-                    property_row(ui, &imported_by, importer);
-                }
-            });
+            let imports = messages.text(MessageId::CodeSourceImports);
+            let imported_by = messages.text(MessageId::CodeSourceImportedBy);
+            for imported in &facts.imports {
+                property_row(ui, &imports, imported);
+            }
+            for importer in &facts.imported_by {
+                property_row(ui, &imported_by, importer);
+            }
         },
     );
 }
@@ -1899,20 +1842,16 @@ fn revision_history(
         None,
         |ui| {
             if facts.history.is_empty() {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(messages.text(MessageId::CodeSourceNoRetainedRevision))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-                ui.add_space(6.0);
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceNoRetainedRevision));
                 return;
             }
-            ui.add_space(4.0);
-            section_header(
+            subsection_header(
                 ui,
-                &messages.text(MessageId::CodeSourceRetainedClosures),
-                Some(&messages.text(MessageId::CodeSourceNewestLast)),
+                &format!(
+                    "{} \u{b7} {}",
+                    messages.text(MessageId::CodeSourceRetainedClosures),
+                    messages.text(MessageId::CodeSourceNewestLast)
+                ),
             );
             Grid::new("source-document-revisions")
                 .num_columns(4)
@@ -1986,14 +1925,9 @@ fn revision_history(
                     }
                 });
             if let Some(error) = error.as_deref() {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(error)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.err),
-                );
+                toned_inspector_copy(ui, error, t.color.err);
             }
-            ui.add_space(6.0);
+            section_block_gap(ui);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 let response =
@@ -2015,7 +1949,6 @@ fn revision_history(
                     action = Some(LifecycleAction::CloseHistory);
                 }
             });
-            ui.add_space(6.0);
         },
     );
     action

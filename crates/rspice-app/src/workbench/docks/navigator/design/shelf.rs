@@ -38,7 +38,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
 use super::super::super::super::design_system::{
-    WorkbenchIcon, schematic_section_header as shelf_section_header,
+    WorkbenchIcon, section_header as shelf_section_header,
 };
 use super::super::rail::{self, RailDisclosure, RailFold};
 use super::super::{

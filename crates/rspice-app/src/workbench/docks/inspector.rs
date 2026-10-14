@@ -12,11 +12,10 @@ pub(super) mod stimulus;
 mod symbol;
 mod veriloga;
 
-#[cfg(test)]
-use rspice_ui_kit::panels::inspector::INSPECTOR_SECTION_PADDING;
-use rspice_ui_kit::panels::inspector::{
-    begin_inspector_sections, finish_inspector_sections, inspector_inset, muted_inspector_copy,
-    schematic_section_header, schematic_section_header_action, section_block_gap, section_header,
+use rspice_ui_kit::panels::inspector::muted_inspector_copy;
+use rspice_ui_kit::panels::{
+    Problem, code_inspector_section, panel_bleed, panel_body, panel_inset, section_block_gap,
+    section_header,
 };
 
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -36,7 +35,7 @@ use rspice_results_ui::session::PaneAxis;
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row,
-    property_row_input_action, property_row_status, section_header as design_section_header,
+    property_row_input_action, property_row_status,
 };
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
@@ -243,43 +242,45 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         scroll_area
     };
     let output = scroll_area.show(ui, |ui| {
-        begin_inspector_sections(ui);
-        if split_selected_trace_is_inspected(app) {
-            results(ui, app);
-        } else {
-            match app.state.workbench.workspace {
-                Workspace::Project => project(ui, app),
-                // A symbol cellview is edited against its pin contract, not
-                // against a schematic selection.
-                Workspace::Design
-                    if app.state.workspace.content.active_view_type()
-                        == crate::state::ViewType::Symbol =>
-                {
-                    symbol::show(ui, &mut app.state);
-                }
-                // A Verilog-A module is inspected for what it compiles to,
-                // not for a schematic selection it does not have.
-                Workspace::Design
-                    if app.state.workspace.content.active_view_type()
-                        == crate::state::ViewType::VerilogA =>
-                {
-                    veriloga::show(ui, app);
-                }
-                Workspace::Design => design::show(ui, app),
-                Workspace::Simulate => simulation::simulate(ui, app),
-                Workspace::Stimulus => stimulus::show(ui, &mut app.state),
-                Workspace::Results => results(ui, app),
-                Workspace::Verify => verify(ui, app),
-                Workspace::Models => models::show(ui, app),
-                Workspace::Netlist => code_workspace_inspector(ui, app),
-            }
-        }
-        finish_inspector_sections(ui);
+        panel_body(ui, |ui| inspector_body(ui, app));
     });
     scroll_memory.record(scroll_identity, output.state.offset.y);
     ui.ctx().data_mut(|data| {
         data.insert_temp(inspector_scroll_memory_id(), scroll_memory);
     });
+}
+
+/// The inspected subject's sections, laid out on the panel body.
+fn inspector_body(ui: &mut Ui, app: &mut RSpiceApp) {
+    if split_selected_trace_is_inspected(app) {
+        results(ui, app);
+        return;
+    }
+    match app.state.workbench.workspace {
+        Workspace::Project => project(ui, app),
+        // A symbol cellview is edited against its pin contract, not against a
+        // schematic selection.
+        Workspace::Design
+            if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol =>
+        {
+            symbol::show(ui, &mut app.state);
+        }
+        // A Verilog-A module is inspected for what it compiles to, not for a
+        // schematic selection it does not have.
+        Workspace::Design
+            if app.state.workspace.content.active_view_type()
+                == crate::state::ViewType::VerilogA =>
+        {
+            veriloga::show(ui, app);
+        }
+        Workspace::Design => design::show(ui, app),
+        Workspace::Simulate => simulation::simulate(ui, app),
+        Workspace::Stimulus => stimulus::show(ui, &mut app.state),
+        Workspace::Results => results(ui, app),
+        Workspace::Verify => verify(ui, app),
+        Workspace::Models => models::show(ui, app),
+        Workspace::Netlist => code_workspace_inspector(ui, app),
+    }
 }
 
 fn inspector_scroll_identity(app: &RSpiceApp) -> String {
@@ -1295,7 +1296,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     } else if let Some(selected) = selected_artifact.as_ref() {
         selected_result_artifact(ui, app, selected);
     }
-    ui.add_space(8.0);
 
     // The workspace's memoized projection: taking it fresh re-digested the run.
     let manifest = active_manifest(&mut app.state);
@@ -1343,7 +1343,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // harmonics, eye metrics, distribution statistics, and so on). It follows
     // the trace and pane controls, matching the upgraded mockup's hierarchy
     // without creating a second result-data owner here.
-    ui.add_space(8.0);
     if app.state.ui.results.session.viewer != ResultViewer::Manifest {
         crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
     }
@@ -1415,6 +1414,7 @@ fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bo
     let c = &t.color;
     let memory = egui::Id::new(("workbench.inspector.disclosure", key));
     let open = inspector_disclosure_open(ui.ctx(), key);
+    let inset = panel_inset(ui);
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), PANEL_SECTION_H),
         Sense::click(),
@@ -1431,7 +1431,7 @@ fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bo
     }
     let painter = ui.painter();
     if response.hovered() {
-        painter.rect_filled(rect, 0.0, c.bg_hover);
+        painter.rect_filled(panel_bleed(ui, rect), 0.0, c.bg_hover);
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     let text = if response.hovered() {
@@ -1440,21 +1440,21 @@ fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bo
         c.text_dim
     };
     painter.text(
-        Pos2::new(rect.left() + 10.0, rect.center().y),
+        Pos2::new(rect.left() + inset, rect.center().y),
         Align2::LEFT_CENTER,
         if open { "\u{2304}" } else { "\u{203a}" },
         theme::mono(tokens::FS_1, FontWeight::Regular),
         text,
     );
     painter.text(
-        Pos2::new(rect.left() + 22.0, rect.center().y),
+        Pos2::new(rect.left() + inset + 12.0, rect.center().y),
         Align2::LEFT_CENTER,
         title,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         text,
     );
     painter.text(
-        Pos2::new(rect.right() - 10.0, rect.center().y),
+        Pos2::new(rect.right() - inset, rect.center().y),
         Align2::RIGHT_CENTER,
         status,
         theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -1522,11 +1522,10 @@ fn selected_result_artifact(
     property_row(ui, "Lifecycle", lifecycle);
     property_row(ui, "Integrity", &integrity);
     property_row(ui, "Dataset", &dataset);
-    ui.add_space(6.0);
-    if inspector_inset(ui, |ui| ui.button("Copy stable source path")).clicked() {
+    section_block_gap(ui);
+    if ui.button("Copy stable source path").clicked() {
         ui.ctx().copy_text(stable_path);
     }
-    ui.add_space(8.0);
 }
 
 fn selected_result_trace(
@@ -1604,57 +1603,55 @@ fn selected_result_trace(
         set_selected_trace_color(&mut app.state, selected, color);
     }
 
-    inspector_inset(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .button(if waveform_visible {
-                    "Hide trace"
-                } else {
-                    "Show trace"
-                })
-                .clicked()
-            {
-                crate::workbench::documents::result_document::toggle_visibility(
-                    &mut app.state,
-                    analysis_index,
-                    waveform_index,
-                );
-            }
+    section_block_gap(ui);
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button(if waveform_visible {
+                "Hide trace"
+            } else {
+                "Show trace"
+            })
+            .clicked()
+        {
+            crate::workbench::documents::result_document::toggle_visibility(
+                &mut app.state,
+                analysis_index,
+                waveform_index,
+            );
+        }
 
-            if is_schematic_cross_probe_candidate(selected.source_name()) {
-                let signal = selected.source_name().to_owned();
-                let unavailable =
-                    schematic_cross_probe_unavailability(&app.state, selected, &signal);
-                let mut response =
-                    ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
-                if let Some(reason) = unavailable {
-                    response = response.on_hover_text(reason);
-                }
-                if response.clicked() {
-                    match cross_probe_trace_to_design(app, &signal) {
-                        Ok(net) => {
-                            app.state.ui.toasts.success(
-                                ui.ctx(),
-                                "Schematic net located",
-                                format!("{signal} cross-probed to {net}."),
-                            );
-                            app.state.push_user_message(ConsoleMessage::info(format!(
-                                "Selected conductor {net} from {signal}."
-                            )));
-                        }
-                        Err(message) => {
-                            app.state.ui.toasts.warn_with_title(
-                                ui.ctx(),
-                                "Cannot cross-probe",
-                                message.clone(),
-                            );
-                            app.state
-                                .push_user_message(ConsoleMessage::warning(message));
-                        }
+        if is_schematic_cross_probe_candidate(selected.source_name()) {
+            let signal = selected.source_name().to_owned();
+            let unavailable = schematic_cross_probe_unavailability(&app.state, selected, &signal);
+            let mut response =
+                ui.add_enabled(unavailable.is_none(), egui::Button::new("Cross-probe net"));
+            if let Some(reason) = unavailable {
+                response = response.on_hover_text(reason);
+            }
+            if response.clicked() {
+                match cross_probe_trace_to_design(app, &signal) {
+                    Ok(net) => {
+                        app.state.ui.toasts.success(
+                            ui.ctx(),
+                            "Schematic net located",
+                            format!("{signal} cross-probed to {net}."),
+                        );
+                        app.state.push_user_message(ConsoleMessage::info(format!(
+                            "Selected conductor {net} from {signal}."
+                        )));
+                    }
+                    Err(message) => {
+                        app.state.ui.toasts.warn_with_title(
+                            ui.ctx(),
+                            "Cannot cross-probe",
+                            message.clone(),
+                        );
+                        app.state
+                            .push_user_message(ConsoleMessage::warning(message));
                     }
                 }
             }
-        })
+        }
     });
 }
 
@@ -1755,10 +1752,10 @@ fn active_result_pane(
     } else {
         "Fit active pane"
     };
-    if inspector_inset(ui, |ui| {
-        ui.add_enabled(pinned, egui::Button::new(fit_label))
-    })
-    .clicked()
+    section_block_gap(ui);
+    if ui
+        .add_enabled(pinned, egui::Button::new(fit_label))
+        .clicked()
     {
         crate::workbench::documents::result_document::request_view_gesture(
             &mut app.state,
@@ -1881,12 +1878,11 @@ fn finite_trace_statistics(values: &[f64]) -> Option<TraceStatistics> {
 /// and in the value column the swatch that opens the picker beside the hex
 /// value it holds. Returns whether the reader picked a different colour.
 fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
-    use super::super::design_system::{
-        PROPERTY_ROW_TRAILING_PAD, property_row_control_columns, property_row_height,
-    };
+    use super::super::design_system::{property_row_control_columns, property_row_height};
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (label_left, value_left) = property_row_control_columns(width);
+    let trailing = panel_inset(ui);
+    let (label_left, value_left) = property_row_control_columns(ui, width);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(width, property_row_height(ui)), Sense::hover());
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
@@ -1899,7 +1895,7 @@ fn trace_colour_row(ui: &mut Ui, color: &mut Color32) -> bool {
     );
     let value_rect = Rect::from_min_max(
         Pos2::new(rect.left() + value_left, rect.top()),
-        Pos2::new(rect.right() - PROPERTY_ROW_TRAILING_PAD, rect.bottom()),
+        Pos2::new(rect.right() - trailing, rect.bottom()),
     );
     let swatch = ui
         .scope_builder(
@@ -2501,7 +2497,7 @@ fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let messages = app.state.ui.messages();
-    design_section_header(
+    section_header(
         ui,
         &messages.text(MessageId::CodeInspectorExactContext),
         None,
@@ -2569,7 +2565,7 @@ fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         &ownership,
     );
 
-    design_section_header(
+    section_header(
         ui,
         &messages.text(MessageId::CodeInspectorCommandAvailability),
         None,
@@ -2619,65 +2615,70 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     let summary = diagnostics.summary();
 
     if summary.current_errors > 0 {
-        diagnostic_section_header(
+        code_inspector_section(
             ui,
             &messages.text(crate::workbench::MessageId::NetlistErrors),
-            summary.current_errors,
-            DiagnosticSeverity::Error,
+            Some(&summary.current_errors.to_string()),
+            Some(Problem::Failure),
+            |ui| {
+                for diagnostic in diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic.is_current() && diagnostic.severity == DiagnosticSeverity::Error
+                    })
+                    .take(DIAGNOSTIC_PREVIEW_LIMIT)
+                {
+                    diagnostic_row(ui, diagnostic);
+                }
+                if summary.current_errors > DIAGNOSTIC_PREVIEW_LIMIT {
+                    empty_diagnostic_row(
+                        ui,
+                        &format!(
+                            "{} more errors · open Problems for the complete virtualized list",
+                            summary.current_errors - DIAGNOSTIC_PREVIEW_LIMIT
+                        ),
+                    );
+                }
+            },
         );
-        for diagnostic in diagnostics
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic.is_current() && diagnostic.severity == DiagnosticSeverity::Error
-            })
-            .take(DIAGNOSTIC_PREVIEW_LIMIT)
-        {
-            diagnostic_row(ui, diagnostic);
-        }
-        if summary.current_errors > DIAGNOSTIC_PREVIEW_LIMIT {
-            empty_diagnostic_row(
-                ui,
-                &format!(
-                    "{} more errors · open Problems for the complete virtualized list",
-                    summary.current_errors - DIAGNOSTIC_PREVIEW_LIMIT
-                ),
-            );
-        }
     }
 
-    diagnostic_section_header(
+    let advisories = summary.current_advisories();
+    code_inspector_section(
         ui,
         &messages.text(crate::workbench::MessageId::NetlistAdvisories),
-        summary.current_advisories(),
-        DiagnosticSeverity::Warning,
+        Some(&advisories.to_string()),
+        (advisories > 0).then_some(Problem::Warning),
+        |ui| {
+            if advisories == 0 {
+                empty_diagnostic_row(
+                    ui,
+                    &messages.text(crate::workbench::MessageId::NetlistNoAdvisories),
+                );
+                return;
+            }
+            for diagnostic in diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
+                })
+                .take(DIAGNOSTIC_PREVIEW_LIMIT)
+            {
+                diagnostic_row(ui, diagnostic);
+            }
+            if advisories > DIAGNOSTIC_PREVIEW_LIMIT {
+                empty_diagnostic_row(
+                    ui,
+                    &format!(
+                        "{} more advisories · open Problems for the complete virtualized list",
+                        advisories - DIAGNOSTIC_PREVIEW_LIMIT
+                    ),
+                );
+            }
+        },
     );
-    if summary.current_advisories() == 0 {
-        empty_diagnostic_row(
-            ui,
-            &messages.text(crate::workbench::MessageId::NetlistNoAdvisories),
-        );
-    } else {
-        for diagnostic in diagnostics
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
-            })
-            .take(DIAGNOSTIC_PREVIEW_LIMIT)
-        {
-            diagnostic_row(ui, diagnostic);
-        }
-        if summary.current_advisories() > DIAGNOSTIC_PREVIEW_LIMIT {
-            empty_diagnostic_row(
-                ui,
-                &format!(
-                    "{} more advisories · open Problems for the complete virtualized list",
-                    summary.current_advisories() - DIAGNOSTIC_PREVIEW_LIMIT
-                ),
-            );
-        }
-    }
 
-    design_section_header(
+    section_header(
         ui,
         &messages.text(crate::workbench::MessageId::NetlistParameterExploration),
         Some(&messages.text(crate::workbench::MessageId::NetlistDedicatedWorkspace)),
@@ -2698,78 +2699,19 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn diagnostic_section_header(
-    ui: &mut Ui,
-    title: &str,
-    count: usize,
-    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
-) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), PANEL_SECTION_H),
-        Sense::hover(),
-    );
-    ui.painter().rect_filled(
-        rect,
-        0.0,
-        Color32::from_rgba_unmultiplied(
-            t.color.bg_panel_2.r(),
-            t.color.bg_panel_2.g(),
-            t.color.bg_panel_2.b(),
-            204,
-        ),
-    );
-    ui.painter()
-        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
-    ui.painter().text(
-        Pos2::new(rect.left() + 10.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        title.to_ascii_uppercase(),
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text_dim,
-    );
-
-    let tone = if count == 0 {
-        t.color.ok
-    } else {
-        diagnostic_tone(&t, severity)
-    };
-    let count_text = count.to_string();
-    let count_galley = ui.painter().layout_no_wrap(
-        count_text,
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        tone,
-    );
-    let count_width = count_galley.size().x;
-    let count_pos = Pos2::new(rect.right() - 10.0, rect.center().y);
-    ui.painter().galley(
-        Pos2::new(
-            count_pos.x - count_width,
-            count_pos.y - count_galley.size().y * 0.5,
-        ),
-        count_galley,
-        tone,
-    );
-    ui.painter().circle_filled(
-        Pos2::new(count_pos.x - count_width - 8.5, rect.center().y),
-        2.5,
-        tone,
-    );
-}
-
 fn diagnostic_row(
     ui: &mut Ui,
     diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
 ) {
     const ICON_COLUMN_W: f32 = 14.0;
     const COLUMN_GAP: f32 = 7.0;
-    const PADDING_X: f32 = 9.0;
     const PADDING_Y: f32 = 8.0;
     const DETAIL_GAP: f32 = 3.0;
 
     let t = Tokens::get(ui.ctx());
+    let padding_x = panel_inset(ui);
     let width = ui.available_width().max(1.0);
-    let text_width = (width - PADDING_X * 2.0 - ICON_COLUMN_W - COLUMN_GAP).max(1.0);
+    let text_width = (width - padding_x * 2.0 - ICON_COLUMN_W - COLUMN_GAP).max(1.0);
     let message_galley = ui.painter().layout(
         diagnostic.message.clone(),
         theme::sans(tokens::FS_0, FontWeight::Medium),
@@ -2816,13 +2758,13 @@ fn diagnostic_row(
     icon.paint(
         ui.painter(),
         Rect::from_min_size(
-            Pos2::new(rect.left() + PADDING_X, rect.top() + PADDING_Y),
+            Pos2::new(rect.left() + padding_x, rect.top() + PADDING_Y),
             Vec2::splat(ICON_COLUMN_W),
         ),
         diagnostic_tone(&t, diagnostic.severity),
     );
 
-    let text_x = rect.left() + PADDING_X + ICON_COLUMN_W + COLUMN_GAP;
+    let text_x = rect.left() + padding_x + ICON_COLUMN_W + COLUMN_GAP;
     ui.painter().galley(
         Pos2::new(text_x, rect.top() + PADDING_Y),
         message_galley,
@@ -2836,34 +2778,12 @@ fn diagnostic_row(
 }
 
 fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
-    let t = Tokens::get(ui.ctx());
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let galley = ui.painter().layout(
-        message.to_owned(),
-        font,
-        t.color.text_faint,
-        (ui.available_width() - 20.0).max(1.0),
-    );
-    let height = (galley.size().y + 16.0).max(31.0);
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message)
-    });
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    ui.painter().galley(
-        Pos2::new(rect.left() + 10.0, rect.top() + 8.0),
-        galley,
-        t.color.text_faint,
-    );
+    let faint = Tokens::get(ui.ctx()).color.text_faint;
+    rspice_ui_kit::panels::inspector::toned_inspector_copy(ui, message, faint);
 }
 
 fn generated_provenance(ui: &mut Ui, state: &AppState) {
-    design_section_header(ui, "Generated provenance", None);
+    section_header(ui, "Generated provenance", None);
     let netlist = &state.ui.netlist;
     let canonical = netlist.generated_document.as_ref();
     let source = canonical
@@ -2894,7 +2814,7 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
     let project = &state.workspace.content;
-    design_section_header(ui, "Owned source provenance", None);
+    section_header(ui, "Owned source provenance", None);
     let source = &state.simulation.source.netlist_content;
     let source_digest = crate::state::content_digest(source);
     property_row(
@@ -2949,7 +2869,7 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
         return;
     };
     let messages = state.ui.messages();
-    design_section_header(
+    section_header(
         ui,
         &messages.text(crate::workbench::MessageId::NetlistIncludeProvenance),
         None,

@@ -19,8 +19,9 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    code_inspector_property_list, code_inspector_section, property_row, property_row_combo,
+    code_inspector_section, panel_body, property_row, property_row_combo, section_block_gap,
 };
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceSearchResults, CodeSourceSearchScope, SOURCE_SEARCH_RESULT_LIMIT,
@@ -197,17 +198,17 @@ fn find_body(
         .id_salt("source-find")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            let Some(search) = state.ui.code_workspace.source_search.as_mut() else {
-                return;
-            };
-            let has_selection = search.selection_char_range.is_some();
-            code_inspector_section(
-                ui,
-                &messages.text(MessageId::CodeSearchQuery),
-                None,
-                None,
-                |ui| {
-                    code_inspector_property_list(ui, |ui| {
+            panel_body(ui, |ui| {
+                let Some(search) = state.ui.code_workspace.source_search.as_mut() else {
+                    return;
+                };
+                let has_selection = search.selection_char_range.is_some();
+                code_inspector_section(
+                    ui,
+                    &messages.text(MessageId::CodeSearchQuery),
+                    None,
+                    None,
+                    |ui| {
                         property_row(
                             ui,
                             &messages.text(MessageId::CodeSearchActiveDocument),
@@ -258,45 +259,41 @@ fn find_body(
                         {
                             search.scope = *scope;
                         }
-                    });
-                    ui.add_space(6.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
-                        ui.checkbox(
-                            &mut search.match_case,
-                            messages.text(MessageId::CodeSearchMatchCase),
-                        );
-                        ui.checkbox(
-                            &mut search.whole_symbol,
-                            messages.text(MessageId::CodeSearchWholeSymbol),
-                        );
-                        ui.checkbox(
-                            &mut search.regular_expression,
-                            messages.text(MessageId::CodeSearchRegularExpression),
-                        );
-                        ui.checkbox(
-                            &mut search.include_comments,
-                            messages.text(MessageId::CodeSearchIncludeComments),
-                        );
-                        ui.add_enabled(
-                            search.scope == CodeSourceSearchScope::ActiveLanguageProject,
-                            egui::Checkbox::new(
-                                &mut search.include_generated_references,
-                                messages.text(MessageId::CodeSearchIncludeGenerated),
-                            ),
-                        )
-                        .on_disabled_hover_text(
-                            messages.text(MessageId::CodeSearchIncludeGeneratedHint),
-                        );
-                    });
-                    ui.add_space(6.0);
-                },
-            );
+                        section_block_gap(ui);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
+                            ui.checkbox(
+                                &mut search.match_case,
+                                messages.text(MessageId::CodeSearchMatchCase),
+                            );
+                            ui.checkbox(
+                                &mut search.whole_symbol,
+                                messages.text(MessageId::CodeSearchWholeSymbol),
+                            );
+                            ui.checkbox(
+                                &mut search.regular_expression,
+                                messages.text(MessageId::CodeSearchRegularExpression),
+                            );
+                            ui.checkbox(
+                                &mut search.include_comments,
+                                messages.text(MessageId::CodeSearchIncludeComments),
+                            );
+                            ui.add_enabled(
+                                search.scope == CodeSourceSearchScope::ActiveLanguageProject,
+                                egui::Checkbox::new(
+                                    &mut search.include_generated_references,
+                                    messages.text(MessageId::CodeSearchIncludeGenerated),
+                                ),
+                            )
+                            .on_disabled_hover_text(
+                                messages.text(MessageId::CodeSearchIncludeGeneratedHint),
+                            );
+                        });
+                    },
+                );
 
-            if replaceable {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
+                if replaceable {
+                    section_block_gap(ui);
                     if Button::new(&messages.text(MessageId::CodeSearchReplaceAllEligible))
                         .accent()
                         .enabled(!search.query.is_empty() && found.editable_matches > 0)
@@ -306,26 +303,25 @@ fn find_body(
                         action = FindAction::Replace;
                     }
                     if found.read_only_matches > 0 {
-                        ui.label(
-                            RichText::new(messages.format(
+                        toned_inspector_copy(
+                            ui,
+                            &messages.format(
                                 if found.read_only_matches == 1 {
                                     MessageId::CodeSearchReadOnlyMatchSingular
                                 } else {
                                     MessageId::CodeSearchReadOnlyMatches
                                 },
                                 &[("count", &found.read_only_matches.to_string())],
-                            ))
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.warn),
+                            ),
+                            t.color.warn,
                         );
                     }
-                });
-                ui.add_space(4.0);
-            }
+                }
 
-            if let Some(reveal) = results_table(ui, found, &t, messages) {
-                action = FindAction::Reveal(reveal.0, reveal.1);
-            }
+                if let Some(reveal) = results_table(ui, found, &t, messages) {
+                    action = FindAction::Reveal(reveal.0, reveal.1);
+                }
+            })
         });
     action
 }
@@ -352,13 +348,7 @@ fn results_table(
         None,
         |ui| {
             if found.matches.is_empty() {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(messages.text(MessageId::CodeSearchNoMatches))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-                ui.add_space(6.0);
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeSearchNoMatches));
                 return;
             }
             Grid::new("source-find-results")
@@ -418,9 +408,9 @@ fn results_table(
             // Silence about a cap reads as "this is everything". Say what was
             // dropped and why the number on screen is not the total.
             if found.display_truncated {
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(messages.format(
+                toned_inspector_copy(
+                    ui,
+                    &messages.format(
                         if found.truncated {
                             MessageId::CodeSearchShowingFirstStreamStopped
                         } else {
@@ -430,12 +420,10 @@ fn results_table(
                             ("limit", &SOURCE_SEARCH_RESULT_LIMIT.to_string()),
                             ("count", &found.total_matches.to_string()),
                         ],
-                    ))
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.warn),
+                    ),
+                    t.color.warn,
                 );
             }
-            ui.add_space(6.0);
         },
     );
     reveal

@@ -18,10 +18,10 @@ use crate::state::SimulationState;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
-    pane_section_label, two_pane,
+    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header, two_pane,
 };
 use crate::workbench::app_state::session::calculator::{CalculatorPanel, FunctionCategory};
+use crate::workbench::design_system::subsection_header;
 
 const PANE_HEIGHT: f32 = 286.0;
 
@@ -456,7 +456,7 @@ impl CalculatorPanel {
                             continue;
                         }
                         any = true;
-                        pane_section_label(ui, &format!("run #{} · {}", run.id, analysis.label));
+                        subsection_header(ui, &format!("run #{} · {}", run.id, analysis.label));
                         for row in rows {
                             if signal_row(ui, &row).clicked() {
                                 *insert = Some((row.name.clone(), 0));

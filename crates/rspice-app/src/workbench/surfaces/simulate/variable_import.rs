@@ -625,10 +625,9 @@ fn mapping_rows(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let row_width = ui.available_width().max(1.0);
+            let trailing = crate::workbench::design_system::panel_inset(ui);
             super::paint_control_row_label(ui, &label, row_width);
-            let select_width = (ui.available_width()
-                - crate::workbench::design_system::PROPERTY_ROW_TRAILING_PAD)
-                .max(1.0);
+            let select_width = (ui.available_width() - trailing).max(1.0);
             if let Some(picked) = select(
                 ui,
                 &format!("variable-import-column-{column}"),

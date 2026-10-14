@@ -10,9 +10,10 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp, ScalarPreference};
 
+use super::super::design_system::inspector::muted_inspector_copy;
 use super::super::design_system::{
-    Problem, WorkbenchIcon, code_inspector_property_list, code_inspector_section, heading,
-    property_row, workspace_title_row,
+    Problem, WorkbenchIcon, code_inspector_section, heading, panel_bleed, panel_body, panel_inset,
+    property_row, property_row_height, section_block_gap, subsection_header, workspace_title_row,
 };
 use crate::workbench::documents::code_workspace::{
     AutomationExecutionState, CodeDiagnosticCollection, CodeEditorLanguage, CodeWorkspacePage,
@@ -879,9 +880,12 @@ fn code_pane(
 }
 
 fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
-    let messages = app.state.ui.messages();
     ui.set_width(ui.available_width());
+    panel_body(ui, |ui| inspector_sections(ui, app));
+}
+
+fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
+    let messages = app.state.ui.messages();
     let manifest = app.state.ui.code_workspace.automation.manifest.clone();
     let preview = execution_preview(app);
     let runtime_status = app
@@ -905,40 +909,38 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationPython),
-                    manifest
-                        .as_ref()
-                        .map_or(not_validated.as_str(), |manifest| {
-                            manifest.python_version.as_str()
-                        }),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationRspiceApi),
-                    manifest
-                        .as_ref()
-                        .map_or(not_validated.as_str(), |manifest| {
-                            manifest.api_version.as_str()
-                        }),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationEnvironment),
-                    manifest
-                        .as_ref()
-                        .map_or(not_validated.as_str(), |manifest| {
-                            manifest.environment_digest.as_str()
-                        }),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationPlatform),
-                    &runtime_status,
-                );
-            });
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationPython),
+                manifest
+                    .as_ref()
+                    .map_or(not_validated.as_str(), |manifest| {
+                        manifest.python_version.as_str()
+                    }),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationRspiceApi),
+                manifest
+                    .as_ref()
+                    .map_or(not_validated.as_str(), |manifest| {
+                        manifest.api_version.as_str()
+                    }),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationEnvironment),
+                manifest
+                    .as_ref()
+                    .map_or(not_validated.as_str(), |manifest| {
+                        manifest.environment_digest.as_str()
+                    }),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationPlatform),
+                &runtime_status,
+            );
         },
     );
 
@@ -948,49 +950,47 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationProjectFiles),
-                    manifest
-                        .as_ref()
-                        .map_or(not_validated.as_str(), |manifest| {
-                            manifest.project_files.as_str()
-                        }),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationArtifactDirectory),
-                    manifest
-                        .as_ref()
-                        .map_or(not_validated.as_str(), |manifest| {
-                            manifest.artifact_directory.as_str()
-                        }),
-                );
-                let deny = messages.text(MessageId::AutomationDeny);
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationNetwork),
-                    manifest
-                        .as_ref()
-                        .map_or(deny.as_str(), |manifest| manifest.network.as_str()),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationProcessSpawn),
-                    manifest
-                        .as_ref()
-                        .map_or(deny.as_str(), |manifest| manifest.process_spawn.as_str()),
-                );
-                let redact = messages.text(MessageId::AutomationRedact);
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationSecretLogging),
-                    manifest
-                        .as_ref()
-                        .map_or(redact.as_str(), |manifest| manifest.secret_logging.as_str()),
-                );
-            });
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationProjectFiles),
+                manifest
+                    .as_ref()
+                    .map_or(not_validated.as_str(), |manifest| {
+                        manifest.project_files.as_str()
+                    }),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationArtifactDirectory),
+                manifest
+                    .as_ref()
+                    .map_or(not_validated.as_str(), |manifest| {
+                        manifest.artifact_directory.as_str()
+                    }),
+            );
+            let deny = messages.text(MessageId::AutomationDeny);
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationNetwork),
+                manifest
+                    .as_ref()
+                    .map_or(deny.as_str(), |manifest| manifest.network.as_str()),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationProcessSpawn),
+                manifest
+                    .as_ref()
+                    .map_or(deny.as_str(), |manifest| manifest.process_spawn.as_str()),
+            );
+            let redact = messages.text(MessageId::AutomationRedact);
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationSecretLogging),
+                manifest
+                    .as_ref()
+                    .map_or(redact.as_str(), |manifest| manifest.secret_logging.as_str()),
+            );
         },
     );
 
@@ -1006,25 +1006,23 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(&diagnostic_status),
         (diagnostic_count > 0).then_some(Problem::Failure),
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationCurrentFindings),
-                    &diagnostic_count.to_string(),
-                );
-                let validation_status = messages.text(
-                    if app.state.ui.code_workspace.automation.receipt.is_some() {
-                        MessageId::AutomationExactRevisionRetained
-                    } else {
-                        MessageId::AutomationRequired
-                    },
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationValidation),
-                    &validation_status,
-                );
-            });
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationCurrentFindings),
+                &diagnostic_count.to_string(),
+            );
+            let validation_status = messages.text(
+                if app.state.ui.code_workspace.automation.receipt.is_some() {
+                    MessageId::AutomationExactRevisionRetained
+                } else {
+                    MessageId::AutomationRequired
+                },
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationValidation),
+                &validation_status,
+            );
         },
     );
     code_inspector_section(
@@ -1034,39 +1032,37 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(&preview_status),
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationProjectRevision),
-                    &app.state
-                        .workspace
-                        .content
-                        .project
-                        .revision()
-                        .get()
-                        .to_string(),
-                );
-                let slots = preview.slots.to_string();
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationRunTarget),
-                    &messages.format(MessageId::AutomationLocalSlots, &[("slots", &slots)]),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationPvtPoints),
-                    &preview.pvt_points.to_string(),
-                );
-                let release_checks = preview.release_checks.to_string();
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationReleaseChecks),
-                    &messages.format(
-                        MessageId::AutomationConfiguredCount,
-                        &[("count", &release_checks)],
-                    ),
-                );
-            });
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationProjectRevision),
+                &app.state
+                    .workspace
+                    .content
+                    .project
+                    .revision()
+                    .get()
+                    .to_string(),
+            );
+            let slots = preview.slots.to_string();
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationRunTarget),
+                &messages.format(MessageId::AutomationLocalSlots, &[("slots", &slots)]),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationPvtPoints),
+                &preview.pvt_points.to_string(),
+            );
+            let release_checks = preview.release_checks.to_string();
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationReleaseChecks),
+                &messages.format(
+                    MessageId::AutomationConfiguredCount,
+                    &[("count", &release_checks)],
+                ),
+            );
         },
     );
 
@@ -1078,7 +1074,6 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
         None,
         |ui| {
-            ui.add_space(4.0);
             artifact_row(
                 ui,
                 app,
@@ -1097,7 +1092,6 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
                 ArtifactKind::VerificationPdf,
                 &messages.text(MessageId::AutomationArtifactReport),
             );
-            ui.add_space(7.0);
         },
     );
 
@@ -1107,20 +1101,10 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         None,
         None,
         |ui| {
-            egui::Frame::new()
-                .inner_margin(egui::Margin::symmetric(10, 9))
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(
-                                messages.text(MessageId::AutomationManagedRuntimeSafety),
-                            )
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                        )
-                        .wrap(),
-                    );
-                });
+            muted_inspector_copy(
+                ui,
+                &messages.text(MessageId::AutomationManagedRuntimeSafety),
+            );
         },
     );
 }
@@ -1150,7 +1134,6 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(&phase_label),
         problem,
         |ui| {
-            ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::splat(4.0);
                 let can_start = matches!(
@@ -1240,33 +1223,31 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     crate::workbench::documents::code_workspace::stop_automation_debugger(app);
                 }
             });
-            ui.add_space(7.0);
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationDebugCurrentLine),
-                    &app.state
+            section_block_gap(ui);
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationDebugCurrentLine),
+                &app.state
+                    .ui
+                    .code_workspace
+                    .automation
+                    .debug
+                    .current_line
+                    .map_or_else(|| "—".to_owned(), |line| line.to_string()),
+            );
+            property_row(
+                ui,
+                &messages.text(MessageId::AutomationDebugExceptionPolicy),
+                &automation_exception_policy_label(
+                    app.state
                         .ui
                         .code_workspace
                         .automation
                         .debug
-                        .current_line
-                        .map_or_else(|| "—".to_owned(), |line| line.to_string()),
-                );
-                property_row(
-                    ui,
-                    &messages.text(MessageId::AutomationDebugExceptionPolicy),
-                    &automation_exception_policy_label(
-                        app.state
-                            .ui
-                            .code_workspace
-                            .automation
-                            .debug
-                            .exception_policy,
-                        messages,
-                    ),
-                );
-            });
+                        .exception_policy,
+                    messages,
+                ),
+            );
 
             let mut policy = app
                 .state
@@ -1302,12 +1283,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 .debug
                 .exception_policy = policy;
 
-            ui.add_space(7.0);
-            ui.label(
-                egui::RichText::new(messages.text(MessageId::AutomationBreakpoints))
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text_faint),
-            );
+            subsection_header(ui, &messages.text(MessageId::AutomationBreakpoints));
             let breakpoints = app
                 .state
                 .ui
@@ -1518,12 +1494,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 .call_stack
                 .clone();
             if !frames.is_empty() {
-                ui.add_space(7.0);
-                ui.label(
-                    egui::RichText::new(messages.text(MessageId::AutomationCallStack))
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_faint),
-                );
+                subsection_header(ui, &messages.text(MessageId::AutomationCallStack));
                 let selected = app
                     .state
                     .ui
@@ -1549,12 +1520,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
 
             let values = app.state.ui.code_workspace.automation.debug.locals.clone();
             if !values.is_empty() {
-                ui.add_space(7.0);
-                ui.label(
-                    egui::RichText::new(messages.text(MessageId::AutomationLocals))
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_faint),
-                );
+                subsection_header(ui, &messages.text(MessageId::AutomationLocals));
                 for value in values {
                     property_row(
                         ui,
@@ -1570,12 +1536,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
 
             let globals = app.state.ui.code_workspace.automation.debug.globals.clone();
             if !globals.is_empty() {
-                ui.add_space(7.0);
-                ui.label(
-                    egui::RichText::new(messages.text(MessageId::AutomationGlobals))
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_faint),
-                );
+                subsection_header(ui, &messages.text(MessageId::AutomationGlobals));
                 for value in globals {
                     property_row(
                         ui,
@@ -1589,22 +1550,20 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
 
-            ui.add_space(7.0);
-            ui.label(
-                egui::RichText::new(messages.text(MessageId::AutomationWatches))
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text_faint),
-            );
+            subsection_header(ui, &messages.text(MessageId::AutomationWatches));
             ui.horizontal(|ui| {
+                // The field takes the row up to its button, which ends on
+                // the inset.
+                ui.spacing_mut().item_spacing.x = WATCH_ROW_GAP;
                 let response = ui.add(
                     egui::TextEdit::singleline(
                         &mut app.state.ui.code_workspace.automation.debug.watch_input,
                     )
                     .hint_text(messages.text(MessageId::AutomationExpression))
-                    .desired_width((ui.available_width() - 48.0).max(60.0)),
+                    .desired_width((ui.available_width() - WATCH_ADD_W - WATCH_ROW_GAP).max(60.0)),
                 );
                 let add = messages.text(MessageId::AutomationAdd);
-                let submit = Button::new(&add).show(ui).clicked()
+                let submit = Button::new(&add).min_width(WATCH_ADD_W).show(ui).clicked()
                     || (response.lost_focus()
                         && ui.input(|input| input.key_pressed(egui::Key::Enter)));
                 if submit {
@@ -1669,12 +1628,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 .cloned()
                 .collect::<Vec<_>>();
             if !output.is_empty() {
-                ui.add_space(7.0);
-                ui.label(
-                    egui::RichText::new(messages.text(MessageId::AutomationStructuredOutput))
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_faint),
-                );
+                subsection_header(ui, &messages.text(MessageId::AutomationStructuredOutput));
                 for record in output.into_iter().rev() {
                     property_row(
                         ui,
@@ -1683,10 +1637,13 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     );
                 }
             }
-            ui.add_space(7.0);
         },
     );
 }
+
+/// The watch row's Add button, and the gap between it and the field.
+const WATCH_ADD_W: f32 = 48.0;
+const WATCH_ROW_GAP: f32 = 6.0;
 
 struct ExecutionPreview {
     task_points: usize,
@@ -1750,6 +1707,11 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
     }
 }
 
+/// An artifact row's file icon, on the panel inset, and the gap before its
+/// name.
+const ARTIFACT_ICON_W: f32 = 14.0;
+const ARTIFACT_ICON_GAP: f32 = 6.0;
+
 fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str) {
     let t = Tokens::get(ui.ctx());
     let available = app
@@ -1760,8 +1722,9 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
         .artifacts
         .get(kind)
         .is_some();
+    let inset = panel_inset(ui);
     let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), 28.0),
+        Vec2::new(ui.available_width(), property_row_height(ui)),
         if available {
             Sense::click()
         } else {
@@ -1773,11 +1736,12 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
         egui::WidgetInfo::labeled(egui::WidgetType::Button, available, &accessible_label)
     });
     if response.hovered() && available {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+        ui.painter()
+            .rect_filled(panel_bleed(ui, rect), 0.0, t.color.bg_hover);
     }
-    let icon = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 15.0, rect.center().y),
-        Vec2::splat(14.0),
+    let icon = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + inset, rect.center().y - ARTIFACT_ICON_W * 0.5),
+        Vec2::splat(ARTIFACT_ICON_W),
     );
     WorkbenchIcon::File.paint(
         ui.painter(),
@@ -1789,7 +1753,7 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
         },
     );
     ui.painter().text(
-        egui::pos2(rect.left() + 28.0, rect.center().y),
+        egui::pos2(icon.right() + ARTIFACT_ICON_GAP, rect.center().y),
         egui::Align2::LEFT_CENTER,
         kind.file_name(),
         theme::sans(tokens::FS_0, FontWeight::Regular),
@@ -1800,7 +1764,7 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
         },
     );
     ui.painter().text(
-        egui::pos2(rect.right() - 8.0, rect.center().y),
+        egui::pos2(rect.right() - inset, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         meta,
         theme::mono(tokens::FS_0, FontWeight::Regular),

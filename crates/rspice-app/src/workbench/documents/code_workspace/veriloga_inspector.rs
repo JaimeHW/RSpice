@@ -16,7 +16,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::design_system::{
-    Problem, StatusMark, WorkbenchIcon, code_inspector_property_list, code_inspector_section,
+    Problem, StatusMark, WorkbenchIcon, code_inspector_section, panel_bleed, panel_inset,
     property_row, property_row_control_columns, property_row_height, property_row_status,
     property_row_toned,
 };
@@ -162,15 +162,9 @@ pub(crate) fn show_veriloga_inspector(
     action
 }
 
-/// Height of one row of the parameter table, and of its column captions.
-const PARAMETER_ROW_H: f32 = 22.0;
-const PARAMETER_CAPTION_H: f32 = 20.0;
-/// Gap between two columns of the parameter table.
+/// Gap between two columns of the parameter table. The table's rows are panel
+/// rows: one row tall, on the panel inset.
 const PARAMETER_COLUMN_GAP: f32 = 8.0;
-/// Inset of the table from the section's edges, matching the property rows'.
-const PARAMETER_TABLE_PAD: f32 = 10.0;
-/// Space above the captions and below the last row.
-const PARAMETER_TABLE_INSET_Y: f32 = 6.0;
 
 /// The parameters an instance of the compiled module takes, one dense row
 /// each: name, type, default, range and units, with the module's description
@@ -321,9 +315,11 @@ fn parameter_table(
             .fold(measure(&captions[column], &caption), f32::max);
     }
     let width = ui.available_width();
-    let widths = parameter_column_widths(natural, width - 2.0 * PARAMETER_TABLE_PAD);
+    let pad = panel_inset(ui);
+    let row_height = property_row_height(ui);
+    let widths = parameter_column_widths(natural, width - 2.0 * pad);
     let lefts = {
-        let mut left = PARAMETER_TABLE_PAD;
+        let mut left = pad;
         widths.map(|width| {
             let start = left;
             left += width + PARAMETER_COLUMN_GAP;
@@ -356,8 +352,7 @@ fn parameter_table(
         }
     };
 
-    ui.add_space(PARAMETER_TABLE_INSET_Y);
-    let (header, _) = ui.allocate_exact_size(Vec2::new(width, PARAMETER_CAPTION_H), Sense::hover());
+    let (header, _) = ui.allocate_exact_size(Vec2::new(width, row_height), Sense::hover());
     paint_cells(
         ui,
         header,
@@ -372,10 +367,10 @@ fn parameter_table(
         [t.color.text_faint; 5],
     );
     for row in &cells {
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(width, PARAMETER_ROW_H), Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(width, row_height), Sense::hover());
         if response.hovered() {
-            ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+            ui.painter()
+                .rect_filled(panel_bleed(ui, rect), 0.0, t.color.bg_hover);
         }
         paint_cells(
             ui,
@@ -409,7 +404,6 @@ fn parameter_table(
             None => spoken.clone(),
         });
     }
-    ui.add_space(PARAMETER_TABLE_INSET_Y);
 }
 
 fn module_section(
@@ -436,39 +430,37 @@ fn module_section(
         None,
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
+            property_row(
+                ui,
+                &messages.text(MessageId::VerilogACompileReviewEntryModule),
+                &module,
+            );
+            if let crate::state::ProjectSourceOwner::CellView { reference } =
+                selected.bundle().owner()
+            {
                 property_row(
                     ui,
-                    &messages.text(MessageId::VerilogACompileReviewEntryModule),
-                    &module,
+                    &messages.text(MessageId::VerilogACellView),
+                    &reference.display_path(),
                 );
-                if let crate::state::ProjectSourceOwner::CellView { reference } =
-                    selected.bundle().owner()
-                {
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::VerilogACellView),
-                        &reference.display_path(),
-                    );
-                }
-                property_row(
-                    ui,
-                    &messages.text(MessageId::VerilogARootSource),
-                    selected.document().logical_path(),
-                );
-                property_row_toned(
-                    ui,
-                    &messages.text(MessageId::VerilogACompileStatus),
-                    &status,
-                    tone,
-                );
-                if let crate::state::ProjectSourceOwner::CellView { reference } =
-                    selected.bundle().owner()
-                    && interface_rows(ui, state, receipt, reference, messages, t)
-                {
-                    action = Some(VerilogAInspectorAction::UpdateSymbol);
-                }
-            });
+            }
+            property_row(
+                ui,
+                &messages.text(MessageId::VerilogARootSource),
+                selected.document().logical_path(),
+            );
+            property_row_toned(
+                ui,
+                &messages.text(MessageId::VerilogACompileStatus),
+                &status,
+                tone,
+            );
+            if let crate::state::ProjectSourceOwner::CellView { reference } =
+                selected.bundle().owner()
+                && interface_rows(ui, state, receipt, reference, messages, t)
+            {
+                action = Some(VerilogAInspectorAction::UpdateSymbol);
+            }
         },
     );
     action
@@ -560,7 +552,7 @@ pub(crate) fn symbol_drift_text(drift: &VerilogASymbolDrift, messages: MessageCa
 /// stays on the inspector's label/value grid.
 fn value_column_button(ui: &mut Ui, label: &str) -> bool {
     let width = ui.available_width();
-    let (_, value_left) = property_row_control_columns(width);
+    let (_, value_left) = property_row_control_columns(ui, width);
     let height = property_row_height(ui) + 6.0;
     ui.allocate_ui_with_layout(
         Vec2::new(width, height),
@@ -586,63 +578,61 @@ fn build_targets_section(
         None,
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                let Some(receipt) = receipt else {
-                    let required = messages.text(MessageId::VerilogACompileRequired);
-                    for label in [
-                        MessageId::VerilogASemanticIr,
-                        MessageId::VerilogABytecodeVm,
-                        MessageId::VerilogANativeJit,
-                        MessageId::VerilogAWasmInterpreter,
-                        MessageId::VerilogAGeneratedRust,
-                    ] {
-                        property_row(ui, &messages.text(label), &required);
-                    }
-                    return;
-                };
+            let Some(receipt) = receipt else {
+                let required = messages.text(MessageId::VerilogACompileRequired);
+                for label in [
+                    MessageId::VerilogASemanticIr,
+                    MessageId::VerilogABytecodeVm,
+                    MessageId::VerilogANativeJit,
+                    MessageId::VerilogAWasmInterpreter,
+                    MessageId::VerilogAGeneratedRust,
+                ] {
+                    property_row(ui, &messages.text(label), &required);
+                }
+                return;
+            };
+            property_row_status(
+                ui,
+                &messages.text(MessageId::VerilogASemanticIr),
+                &messages.text(MessageId::VerilogACanonical),
+                t.color.ok,
+                StatusMark::Success,
+            );
+            if receipt.bytecode_available {
                 property_row_status(
                     ui,
-                    &messages.text(MessageId::VerilogASemanticIr),
-                    &messages.text(MessageId::VerilogACanonical),
+                    &messages.text(MessageId::VerilogABytecodeVm),
+                    &messages.text(MessageId::VerilogAAvailable),
                     t.color.ok,
                     StatusMark::Success,
                 );
-                if receipt.bytecode_available {
-                    property_row_status(
-                        ui,
-                        &messages.text(MessageId::VerilogABytecodeVm),
-                        &messages.text(MessageId::VerilogAAvailable),
-                        t.color.ok,
-                        StatusMark::Success,
-                    );
-                } else {
-                    property_row_status(
-                        ui,
-                        &messages.text(MessageId::VerilogABytecodeVm),
-                        &messages.text(MessageId::VerilogAUnavailable),
-                        t.color.err,
-                        StatusMark::Failure,
-                    );
-                }
-                target_row(
+            } else {
+                property_row_status(
                     ui,
-                    &messages.text(MessageId::VerilogANativeJit),
-                    &receipt.native_jit,
-                    messages,
+                    &messages.text(MessageId::VerilogABytecodeVm),
+                    &messages.text(MessageId::VerilogAUnavailable),
+                    t.color.err,
+                    StatusMark::Failure,
                 );
-                target_row(
-                    ui,
-                    &messages.text(MessageId::VerilogAWasmInterpreter),
-                    &receipt.wasm_interpreter,
-                    messages,
-                );
-                target_row(
-                    ui,
-                    &messages.text(MessageId::VerilogAGeneratedRust),
-                    &receipt.generated_rust,
-                    messages,
-                );
-            });
+            }
+            target_row(
+                ui,
+                &messages.text(MessageId::VerilogANativeJit),
+                &receipt.native_jit,
+                messages,
+            );
+            target_row(
+                ui,
+                &messages.text(MessageId::VerilogAWasmInterpreter),
+                &receipt.wasm_interpreter,
+                messages,
+            );
+            target_row(
+                ui,
+                &messages.text(MessageId::VerilogAGeneratedRust),
+                &receipt.generated_rust,
+                messages,
+            );
         },
     );
 }
@@ -732,31 +722,29 @@ fn abi_section(ui: &mut Ui, receipt: Option<&VerilogACompileReceipt>, messages: 
         None,
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                // Counts exist only for a module that compiled. Before that a
-                // dash, not a zero: an uncompiled module has no contract yet,
-                // which is different from a contract with nothing in it.
-                // The parameters have a section of their own above.
-                let counts = receipt.map(|receipt| {
-                    [
-                        receipt.analog_ports,
-                        receipt.noise_sources,
-                        receipt.state_variables,
-                    ]
-                });
-                for (index, label) in [
-                    MessageId::VerilogAAnalogPorts,
-                    MessageId::VerilogANoiseSources,
-                    MessageId::VerilogAStateVariables,
+            // Counts exist only for a module that compiled. Before that a
+            // dash, not a zero: an uncompiled module has no contract yet,
+            // which is different from a contract with nothing in it.
+            // The parameters have a section of their own above.
+            let counts = receipt.map(|receipt| {
+                [
+                    receipt.analog_ports,
+                    receipt.noise_sources,
+                    receipt.state_variables,
                 ]
-                .into_iter()
-                .enumerate()
-                {
-                    let value = counts
-                        .map_or_else(|| "\u{2014}".to_owned(), |counts| counts[index].to_string());
-                    property_row(ui, &messages.text(label), &value);
-                }
             });
+            for (index, label) in [
+                MessageId::VerilogAAnalogPorts,
+                MessageId::VerilogANoiseSources,
+                MessageId::VerilogAStateVariables,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let value = counts
+                    .map_or_else(|| "\u{2014}".to_owned(), |counts| counts[index].to_string());
+                property_row(ui, &messages.text(label), &value);
+            }
         },
     );
 }
@@ -798,20 +786,11 @@ fn target_row(ui: &mut Ui, label: &str, target: &TargetQualification, messages: 
 }
 
 fn muted_row(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(9, 8))
-        .show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
+    crate::workbench::design_system::inspector::muted_inspector_copy(ui, text);
 }
+
+/// Space above and below a diagnostic's two lines, inside the rule under it.
+const DIAGNOSTIC_PAD_Y: i8 = 8;
 
 fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
     let t = Tokens::get(ui.ctx());
@@ -820,8 +799,10 @@ fn diagnostic_row(ui: &mut Ui, diagnostic: &CodeEditorDiagnostic) {
         CodeEditorSeverity::Warning => t.color.warn,
         CodeEditorSeverity::Error => t.color.err,
     };
+    // On the panel inset: the body has set it already, so the row adds none.
+    let inset = panel_inset(ui) as i8;
     let shown = egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(9, 8))
+        .inner_margin(egui::Margin::symmetric(inset, DIAGNOSTIC_PAD_Y))
         .show(ui, |ui| {
             ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;

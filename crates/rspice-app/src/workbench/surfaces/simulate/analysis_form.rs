@@ -1239,13 +1239,14 @@ pub(super) fn prerequisite_rows(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let width = ui.available_width().max(1.0);
+            let trailing = crate::workbench::design_system::panel_inset(ui);
             // The property rows above and below this one are the same block,
             // so the control starts where their values do. The share this
             // replaces was a second account of the same column that collapsed
             // to the label's own text width, opening a second label column a
             // hundred points left of the first.
             super::paint_control_row_label(ui, &label, width);
-            let select_width = (ui.available_width() - super::PROPERTY_ROW_TRAILING_PAD).max(1.0);
+            let select_width = (ui.available_width() - trailing).max(1.0);
             let salt = format!(
                 "analysis.{}.prerequisite.{}",
                 selected.id,

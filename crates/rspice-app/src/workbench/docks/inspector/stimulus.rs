@@ -28,7 +28,8 @@ use crate::workbench::state::{PURPOSE_FIELD, SimulationPage, Workspace};
 use crate::workbench::{AppState, MessageId};
 
 use super::super::super::design_system::{
-    card_well, property_row, property_row_input_with_hint, property_row_wrapped,
+    card_well, panel_inset, property_row, property_row_input_with_hint, property_row_wrapped,
+    section_block_gap,
 };
 use super::{muted_inspector_copy, section_header};
 
@@ -40,9 +41,6 @@ const CARD_INSET: i8 = 8;
 /// height they claim.
 const ACTION_GAP: f32 = 6.0;
 const ACTION_HEIGHT: f32 = 24.0;
-/// The column a property row's label starts in, which every sentence and every
-/// card in this dock lines up with.
-const SECTION_PAD: f32 = 10.0;
 
 /// One thing the reader asked the inspector to do, collected while painting so
 /// no section mutates the design under the sections after it.
@@ -380,11 +378,9 @@ fn contract_section(ui: &mut Ui, state: &AppState, definition: &StimulusDefiniti
         )
         .map_err(|errors| errors.join("; "));
         caption(ui, &messages.text(MessageId::StimulusContractCard));
-        ui.horizontal(|ui| {
-            ui.add_space(SECTION_PAD);
-            card_well(ui, card.as_deref().map_err(String::as_str), SECTION_PAD);
-        });
-        ui.add_space(6.0);
+        let trailing = panel_inset(ui);
+        card_well(ui, card.as_deref().map_err(String::as_str), trailing);
+        section_block_gap(ui);
     }
     let findings = empty
         .map(|record| stimulus_actions::contract_findings(state, &record))
@@ -435,14 +431,11 @@ fn empty_card(
 /// A quiet line naming what the block under it is.
 fn caption(ui: &mut Ui, text: &str) {
     let palette = Tokens::get(ui.ctx()).color;
-    ui.horizontal(|ui| {
-        ui.add_space(SECTION_PAD);
-        ui.label(
-            egui::RichText::new(text)
-                .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-                .color(palette.text_faint),
-        );
-    });
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+            .color(palette.text_faint),
+    );
 }
 
 /// The record's own bookkeeping, and the one field of it a reader edits here.

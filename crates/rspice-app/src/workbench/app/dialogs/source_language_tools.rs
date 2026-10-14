@@ -21,8 +21,9 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    code_inspector_property_list, code_inspector_section, property_row, property_row_input,
+    code_inspector_section, property_row, property_row_input, section_block_gap,
 };
 use crate::workbench::documents::code_workspace::{
     self, LanguageToolView, SourceCodeAction, SourceSymbolKind,
@@ -275,30 +276,28 @@ fn tools_body(
                 )),
                 None,
                 |ui| {
-                    code_inspector_property_list(ui, |ui| {
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeToolsDocument),
-                            &tools.active_path,
-                        );
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeToolsIndexedSymbols),
-                            &tools.index.symbols().len().to_string(),
-                        );
-                        let mut query = tools.query.clone();
-                        if property_row_input(
-                            ui,
-                            &messages.text(MessageId::CodeToolsSymbol),
-                            &mut query,
-                            false,
-                        )
-                        .changed()
-                        {
-                            action = ToolAction::Query(query);
-                        }
-                    });
-                    ui.add_space(6.0);
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeToolsDocument),
+                        &tools.active_path,
+                    );
+                    property_row(
+                        ui,
+                        &messages.text(MessageId::CodeToolsIndexedSymbols),
+                        &tools.index.symbols().len().to_string(),
+                    );
+                    let mut query = tools.query.clone();
+                    if property_row_input(
+                        ui,
+                        &messages.text(MessageId::CodeToolsSymbol),
+                        &mut query,
+                        false,
+                    )
+                    .changed()
+                    {
+                        action = ToolAction::Query(query);
+                    }
+                    section_block_gap(ui);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(5.0, 5.0);
                         for view in LanguageToolView::ALL {
@@ -313,7 +312,6 @@ fn tools_body(
                             }
                         }
                     });
-                    ui.add_space(6.0);
                 },
             );
 
@@ -321,7 +319,7 @@ fn tools_body(
                 action = chosen;
             }
             if tools.view == LanguageToolView::References
-                && let Some(chosen) = rename_transaction(ui, tools, &t, writable, messages)
+                && let Some(chosen) = rename_transaction(ui, tools, writable, messages)
             {
                 action = chosen;
             }
@@ -462,7 +460,7 @@ fn symbol_table(
         None,
         |ui| {
             if rows.is_empty() {
-                muted_line(ui, t, &messages.text(MessageId::CodeToolsNoAnswer));
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeToolsNoAnswer));
                 return;
             }
             Grid::new(format!("source-language-tools-{salt}"))
@@ -505,7 +503,6 @@ fn symbol_table(
                         ui.end_row();
                     }
                 });
-            ui.add_space(6.0);
         },
     );
     action
@@ -529,7 +526,7 @@ fn completions(
         None,
         |ui| {
             if offered.is_empty() {
-                muted_line(ui, t, &messages.text(MessageId::CodeToolsNoCompletion));
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeToolsNoCompletion));
                 return;
             }
             Grid::new("source-language-tools-completions")
@@ -553,7 +550,6 @@ fn completions(
                         ui.end_row();
                     }
                 });
-            ui.add_space(6.0);
         },
     );
     action
@@ -578,19 +574,12 @@ fn code_actions(
             // The formatter refuses documents it cannot prove it would not
             // corrupt. That refusal is the finding, so it is shown as one.
             Err(refusal) => {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(refusal)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.warn),
-                );
-                ui.add_space(6.0);
+                toned_inspector_copy(ui, refusal, t.color.warn);
             }
             Ok(actions) if actions.is_empty() => {
-                muted_line(ui, t, &messages.text(MessageId::CodeToolsNoCodeActions));
+                muted_inspector_copy(ui, &messages.text(MessageId::CodeToolsNoCodeActions));
             }
             Ok(actions) => {
-                ui.add_space(6.0);
                 for candidate in actions {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
@@ -610,7 +599,6 @@ fn code_actions(
                         );
                     });
                 }
-                ui.add_space(6.0);
             }
         },
     );
@@ -622,7 +610,6 @@ fn code_actions(
 fn rename_transaction(
     ui: &mut Ui,
     tools: &code_workspace::CodeLanguageToolsState,
-    t: &Tokens,
     writable: bool,
     messages: MessageCatalog,
 ) -> Option<ToolAction> {
@@ -634,25 +621,23 @@ fn rename_transaction(
         None,
         None,
         |ui| {
-            code_inspector_property_list(ui, |ui| {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeToolsRenaming),
-                    &tools.query,
-                );
-                let mut replacement = tools.replacement.clone();
-                if property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeToolsRenameTo),
-                    &mut replacement,
-                    false,
-                )
-                .changed()
-                {
-                    action = Some(ToolAction::Replacement(replacement));
-                }
-            });
-            ui.add_space(6.0);
+            property_row(
+                ui,
+                &messages.text(MessageId::CodeToolsRenaming),
+                &tools.query,
+            );
+            let mut replacement = tools.replacement.clone();
+            if property_row_input(
+                ui,
+                &messages.text(MessageId::CodeToolsRenameTo),
+                &mut replacement,
+                false,
+            )
+            .changed()
+            {
+                action = Some(ToolAction::Replacement(replacement));
+            }
+            section_block_gap(ui);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 let response = Button::new(&messages.format(
@@ -674,9 +659,8 @@ fn rename_transaction(
                         messages.text(MessageId::CodeToolsRenameNotAllowed),
                     );
                 }
-                dim(ui, t, &messages.text(MessageId::CodeToolsRenameAtomic));
             });
-            ui.add_space(6.0);
+            muted_inspector_copy(ui, &messages.text(MessageId::CodeToolsRenameAtomic));
         },
     );
     action
@@ -689,25 +673,15 @@ fn prose(
     body: Option<String>,
     empty: String,
 ) -> Option<ToolAction> {
-    code_inspector_section(ui, &title, None, None, |ui| {
-        ui.add_space(6.0);
-        match body {
-            Some(text) => {
-                ui.label(
-                    RichText::new(text)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text),
-                );
-            }
-            None => {
-                ui.label(
-                    RichText::new(&empty)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-            }
+    code_inspector_section(ui, &title, None, None, |ui| match body {
+        Some(text) => {
+            ui.label(
+                RichText::new(text)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text),
+            );
         }
-        ui.add_space(6.0);
+        None => muted_inspector_copy(ui, &empty),
     });
     None
 }
@@ -718,12 +692,6 @@ fn dim(ui: &mut Ui, t: &Tokens, text: &str) {
             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(t.color.text_dim),
     );
-}
-
-fn muted_line(ui: &mut Ui, t: &Tokens, text: &str) {
-    ui.add_space(6.0);
-    dim(ui, t, text);
-    ui.add_space(6.0);
 }
 
 #[cfg(test)]

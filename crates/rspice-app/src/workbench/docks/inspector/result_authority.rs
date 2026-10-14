@@ -12,7 +12,7 @@ use super::super::super::design_system::{
     property_row, property_row_height, property_row_toned, property_row_wrapped,
 };
 use super::{
-    executed_deck, inspector_disclosure, inspector_inset, muted_inspector_copy, section_header,
+    executed_deck, inspector_disclosure, muted_inspector_copy, section_block_gap, section_header,
 };
 use crate::ui::tokens::Tokens;
 
@@ -353,12 +353,11 @@ pub(super) fn result_dataset_authority(
         // this is the route back to the surface that owns it. Refusals are
         // stated on the disabled control, in the same words the dispatcher
         // would have used, so the reason is visible before the click.
-        let route = inspector_inset(ui, |ui| {
-            crate::ui::widgets::Button::new("Open producing plan")
-                .min_width(ui.available_width())
-                .enabled(plan_block.is_none())
-                .show(ui)
-        });
+        section_block_gap(ui);
+        let route = crate::ui::widgets::Button::new("Open producing plan")
+            .min_width(ui.available_width())
+            .enabled(plan_block.is_none())
+            .show(ui);
         match plan_block {
             None => {
                 open_producing_plan = route

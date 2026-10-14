@@ -59,9 +59,8 @@ use rspice_simulation::runner::{TfRunConfig, infer_tf_run_config};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    PROPERTY_ROW_TRAILING_PAD, StatusMark, WorkbenchIcon, elide_text, heading, property_row,
-    property_row_control_columns, property_row_toned, property_row_wrapped, status_dot,
-    workspace_title_row,
+    StatusMark, WorkbenchIcon, elide_text, heading, property_row, property_row_control_columns,
+    property_row_toned, property_row_wrapped, status_dot, workspace_title_row,
 };
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
@@ -2433,7 +2432,7 @@ fn analysis_validation_error(
 /// shrinks to its own text is what put these rows' controls in a column of
 /// their own.
 pub(super) fn paint_control_row_label(ui: &mut Ui, label: &str, row_width: f32) {
-    let (label_left, value_left) = property_row_control_columns(row_width);
+    let (label_left, value_left) = property_row_control_columns(ui, row_width);
     let (rect, _) = ui.allocate_exact_size(
         vec2(value_left, ui.spacing().interact_size.y),
         Sense::hover(),

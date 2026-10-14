@@ -138,7 +138,7 @@ pub(super) fn instance_view_contract(state: &AppState, component: &Component) ->
 
 pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Component) {
     let editable = !app.state.schematic_edit_read_only();
-    let properties = schematic_section_header_action(ui, "Identity", "Properties…", editable);
+    let properties = section_header_action(ui, "Identity", "Properties…", editable);
     if properties.clicked() {
         crate::workbench::app::open_property_editor(&mut app.state, component.id);
     }
@@ -868,15 +868,11 @@ pub(super) fn inline_parameter_contract(
     rows
 }
 
-/// Leading inset of a terminal row's status icon, matching the section
-/// header's title and the property rows' label column.
-pub(super) const TERMINAL_ROW_PAD_X: f32 = 10.0;
-/// Icon box, then the gap before the pin name.
+/// Icon box, then the gap before the pin name. The icon box starts on the
+/// panel inset, with the section header's title and the property rows' label
+/// column.
 pub(super) const TERMINAL_ROW_ICON_W: f32 = 15.0;
 pub(super) const TERMINAL_ROW_ICON_GAP: f32 = 6.0;
-/// Where a terminal row's pin name starts.
-pub(super) const TERMINAL_ROW_LABEL_X: f32 =
-    TERMINAL_ROW_PAD_X + TERMINAL_ROW_ICON_W + TERMINAL_ROW_ICON_GAP;
 
 /// Per-pin terminal table: every declared terminal with the net it binds,
 /// clickable to select that conductor. Unbound pins read `open` and are
@@ -886,8 +882,14 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
         let t = Tokens::get(ui.ctx());
         let meta = net.unwrap_or("open");
         let accessible_label = format!("{pin}, {meta}");
-        let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::click());
+        let inset = panel_inset(ui);
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(
+                ui.available_width(),
+                crate::workbench::design_system::property_row_height(ui),
+            ),
+            egui::Sense::click(),
+        );
         response.widget_info(|| {
             egui::WidgetInfo::labeled(
                 egui::WidgetType::SelectableLabel,
@@ -904,15 +906,16 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
 
         if ui.is_rect_visible(rect) {
             if response.hovered() && ui.is_enabled() {
-                ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+                ui.painter()
+                    .rect_filled(panel_bleed(ui, rect), 0.0, t.color.bg_hover);
             }
 
             // The list has no parent row and no pin ever expands, so the
             // mockup's nesting inset and blank caret column would only push
             // the whole table away from the panel edge. The status icon takes
-            // the section's own 10 px inset instead.
+            // the panel inset instead.
             let icon_center = egui::pos2(
-                rect.left() + TERMINAL_ROW_PAD_X + TERMINAL_ROW_ICON_W * 0.5,
+                rect.left() + inset + TERMINAL_ROW_ICON_W * 0.5,
                 rect.center().y,
             );
             if net.is_some() {
@@ -931,8 +934,8 @@ pub(super) fn terminal_row(ui: &mut Ui, pin: &str, net: Option<&str>) -> TreeRow
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 t.color.text_faint,
             );
-            let meta_left = rect.right() - TERMINAL_ROW_PAD_X - meta_galley.size().x;
-            let label_left = rect.left() + TERMINAL_ROW_LABEL_X;
+            let meta_left = rect.right() - inset - meta_galley.size().x;
+            let label_left = rect.left() + inset + TERMINAL_ROW_ICON_W + TERMINAL_ROW_ICON_GAP;
             ui.painter()
                 .with_clip_rect(egui::Rect::from_x_y_ranges(
                     label_left..=(meta_left - 8.0).max(label_left),
@@ -1012,7 +1015,7 @@ pub(super) fn terminals_section(
     }
 }
 
-pub(super) const OP_SUMMARY_MARGIN_X: f32 = 8.0;
+/// The card's edges sit on the panel inset; its rows sit this far inside it.
 pub(super) const OP_SUMMARY_PADDING: f32 = 9.0;
 pub(super) const OP_SUMMARY_ROW_H: f32 = 22.0;
 /// Gap between an annotation row's label and its value.
@@ -1107,8 +1110,8 @@ pub(super) fn operating_point_row(
 
 pub(super) fn operating_point_summary(ui: &mut Ui, rows: &[(String, String)]) {
     let t = Tokens::get(ui.ctx());
-    let inner_width =
-        (ui.available_width() - 2.0 * OP_SUMMARY_MARGIN_X - 2.0 * OP_SUMMARY_PADDING).max(1.0);
+    let inset = panel_inset(ui);
+    let inner_width = (ui.available_width() - 2.0 * inset - 2.0 * OP_SUMMARY_PADDING).max(1.0);
     let measured = rows
         .iter()
         .map(|(label, value)| operating_point_row(ui, inner_width, label, value))
@@ -1119,8 +1122,8 @@ pub(super) fn operating_point_summary(ui: &mut Ui, rows: &[(String, String)]) {
         egui::Sense::hover(),
     );
     let card = egui::Rect::from_min_max(
-        egui::pos2(outer.left() + OP_SUMMARY_MARGIN_X, outer.top()),
-        egui::pos2(outer.right() - OP_SUMMARY_MARGIN_X, outer.bottom()),
+        egui::pos2(outer.left() + inset, outer.top()),
+        egui::pos2(outer.right() - inset, outer.bottom()),
     );
     ui.painter().rect(
         card,

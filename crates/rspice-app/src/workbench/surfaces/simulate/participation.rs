@@ -912,7 +912,15 @@ mod tests {
     #[test]
     fn the_participation_row_fits_the_column_it_asks_for() {
         let width = super::CONTROL_ROW_MIN_WIDTH;
-        let (_, value_left) = crate::workbench::design_system::property_row_control_columns(width);
+        // The row is laid out on the Analyses page, outside any panel body.
+        let mut value_left = 0.0;
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                value_left =
+                    crate::workbench::design_system::property_row_control_columns(ui, width).1;
+            });
+        });
         assert!(
             value_left <= super::PROPERTY_VALUE_COLUMN,
             "the property list starts its value column at {value_left} in a {width}-point row, \

@@ -908,12 +908,13 @@ pub(super) fn rejection_slot(ui: &mut Ui, editing: bool, reason: Option<&str>) -
     if !editing && reason.is_none() {
         return egui::Rect::from_min_size(ui.cursor().min, egui::Vec2::ZERO);
     }
+    let inset = crate::workbench::design_system::panel_inset(ui);
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), INLINE_VALIDATION_SLOT_H),
         egui::Sense::hover(),
     );
     if let Some(reason) = reason {
-        let label_rect = rect.shrink2(egui::vec2(10.0, 0.0));
+        let label_rect = rect.shrink2(egui::vec2(inset, 0.0));
         let label = ui.put(
             label_rect,
             egui::Label::new(

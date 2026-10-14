@@ -5,7 +5,7 @@ use crate::state::{
     Cell, CellViewRef, Library, Point, SymbolDocument, SymbolEditorMetadata, SymbolShape, View,
     ViewType,
 };
-use rspice_ui_kit::panels::inspector::{begin_inspector_sections, finish_inspector_sections};
+use rspice_ui_kit::panels::panel_body;
 use std::collections::HashMap;
 
 struct Editor {
@@ -72,25 +72,24 @@ impl Editor {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    begin_inspector_sections(ui);
-                    let document = self.state.load_active_symbol_document().unwrap();
-                    let metadata = self
-                        .state
-                        .load_active_symbol_editor_metadata(&document)
-                        .unwrap();
-                    request = Some(inspector::show(
-                        ui,
-                        self.state.symbol_editor_request_source(),
-                        document,
-                        metadata,
-                        &[],
-                        &self.state.ui.symbol.editor,
-                        SymbolEditCapabilities {
-                            edit: !self.state.schematic_edit_read_only(),
-                        },
-                    ));
-                    finish_inspector_sections(ui);
+                    panel_body(ui, |ui| {
+                        let document = self.state.load_active_symbol_document().unwrap();
+                        let metadata = self
+                            .state
+                            .load_active_symbol_editor_metadata(&document)
+                            .unwrap();
+                        request = Some(inspector::show(
+                            ui,
+                            self.state.symbol_editor_request_source(),
+                            document,
+                            metadata,
+                            &[],
+                            &self.state.ui.symbol.editor,
+                            SymbolEditCapabilities {
+                                edit: !self.state.schematic_edit_read_only(),
+                            },
+                        ));
+                    });
                 });
             },
         );
