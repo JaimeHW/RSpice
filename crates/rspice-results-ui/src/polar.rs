@@ -757,8 +757,8 @@ fn paint_canvas(
         paint_decade_marks(&painter, t, locus, &place, policy);
     }
 
-    // Cursor flags.
-    for (label, sample, color) in [("A", samples.a, c.traces[1]), ("B", samples.b, c.accent)] {
+    // Cursor flags, in the colours the shared cursor pair has on every plot.
+    for (label, sample, color) in [("A", samples.a, c.accent), ("B", samples.b, c.traces[4])] {
         let Some(point) = sample.and_then(&place) else {
             continue;
         };

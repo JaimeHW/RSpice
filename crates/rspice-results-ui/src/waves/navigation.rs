@@ -333,7 +333,9 @@ pub fn show_shared_x_axis(
             .then(|| plot_left + (plot_right - plot_left) * fraction.clamp(0.0, 1.0) as f32)
     };
     if let Some(cursors) = cursor_values {
-        for (label, value, color) in [("A", cursors.a, c.traces[1]), ("B", cursors.b, c.accent)] {
+        // The same colours the plot draws each cursor in and the readout
+        // heads its column with, so one cursor is one colour everywhere.
+        for (label, value, color) in [("A", cursors.a, c.accent), ("B", cursors.b, c.traces[4])] {
             let Some(value) = value else { continue };
             if let Some(px) = flag_centre(value) {
                 let flag = egui::Rect::from_min_max(
