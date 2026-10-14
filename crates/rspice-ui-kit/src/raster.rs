@@ -344,7 +344,28 @@ fn render_with_output(
         let _ = run();
     }
     let output = run();
+    let canvas = rasterize_onto(&ctx, size, background, &output);
+    (canvas, output)
+}
 
+/// Rasterize the last pass of a context the caller drove itself.
+///
+/// [`render`] runs its passes without input, so a surface that only opens
+/// through input (a menu a press opens, a context menu a right-click
+/// opens) never reaches it. Drive the context through those frames, then
+/// hand its last output here. `ctx` must be the context that produced
+/// `output`, at one pixel per point: the glyphs come from its font atlas.
+pub fn rasterize(ctx: &egui::Context, size: Vec2, output: &egui::FullOutput) -> Canvas {
+    let background = super::tokens::Tokens::get(ctx).color.bg_app;
+    rasterize_onto(ctx, size, background, output)
+}
+
+fn rasterize_onto(
+    ctx: &egui::Context,
+    size: Vec2,
+    background: Color32,
+    output: &egui::FullOutput,
+) -> Canvas {
     let atlas = ctx.fonts(|fonts| fonts.image());
     let primitives = ctx.tessellate(output.shapes.clone(), 1.0);
 
@@ -375,7 +396,7 @@ fn render_with_output(
     for shape in &output.shapes {
         paint_text_regression_shape(&mut canvas, &shape.shape, shape.clip_rect);
     }
-    (canvas, output)
+    canvas
 }
 
 fn paint_text_regression_shape(canvas: &mut Canvas, shape: &egui::Shape, clip: Rect) {
