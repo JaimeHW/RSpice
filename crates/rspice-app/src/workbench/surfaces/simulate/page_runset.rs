@@ -20,13 +20,12 @@ use crate::workbench::state::RunSetBudgetDrafts;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::run_set::{
     self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
-    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetReceiptStatus, RunSetState,
-    RunSetValidation,
+    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetState, RunSetValidation,
 };
 
 use super::page_kit::{
-    CARD_PAD_X, ReceiptRow, Tone, card, card_body, card_head_row, card_note, card_row, field_pair,
-    ledger_head, note_line, pressable_note_line, receipts_card, rule_row,
+    CARD_PAD_X, Tone, card, card_body, card_head_row, card_note, card_row, field_pair, ledger_head,
+    note_line, pressable_note_line, rule_row,
 };
 
 mod toolbar;
@@ -80,7 +79,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     run_space(ui, app, &frame);
     super::workload::task_rate_card(ui, app, &frame.validation, frame.workload.as_ref());
     card_row(ui, app, selected_dimension, composition);
-    card_row(ui, app, |ui, app| budgets(ui, app, &frame), receipts);
+    budgets(ui, app, &frame);
     point_table(ui, app, &frame);
 }
 
@@ -1453,41 +1452,6 @@ fn budgets_from(drafts: &RunSetBudgetDrafts) -> Result<RunSetBudgets, String> {
             .map_err(|_| format!("{:?} is not a duration in ms", drafts.cost_per_point_ms))?,
         bytes_per_point: run_set::parse_bytes(&drafts.bytes_per_point)?,
     })
-}
-
-// ---------------------------------------------------------------- receipts
-
-fn receipts(ui: &mut Ui, app: &mut RSpiceApp) {
-    let rows = app
-        .state
-        .sim_setup
-        .run_set
-        .receipts
-        .iter()
-        .map(|receipt| ReceiptRow {
-            sequence: receipt.sequence.to_string(),
-            action: receipt.action.to_owned(),
-            tone: match receipt.status {
-                RunSetReceiptStatus::Completed => Tone::Neutral,
-                RunSetReceiptStatus::Blocked => Tone::Error,
-            },
-            revision: format!("{} → {}", receipt.before_revision, receipt.after_revision),
-            digest: receipt.digest.clone(),
-        })
-        .collect::<Vec<_>>();
-    receipts_card(
-        ui,
-        "Transaction receipts",
-        "no transaction",
-        (
-            "No run-set transaction has run in this session. Editing an axis, a composition or a \
-             budget records one; so does a validate-and-preview, which creates planning evidence \
-             only and no numerical result.",
-            "Every prior dataset is retained unchanged. A blocked transaction leaves the \
-             declaration exactly as it was and still records that it was attempted.",
-        ),
-        &rows,
-    );
 }
 
 // ---------------------------------------------------------- resolved points

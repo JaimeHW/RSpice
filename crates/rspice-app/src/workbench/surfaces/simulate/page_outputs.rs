@@ -69,7 +69,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, app| selected_record(ui, app, &payload),
         |ui, app| storage_read(ui, app, &payload, &workload),
     );
-    super::pages::plan_configuration_receipts(ui, app);
 }
 
 /// The outputs this page lists, or why there is no list to draw.

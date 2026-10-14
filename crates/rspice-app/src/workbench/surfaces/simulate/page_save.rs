@@ -100,7 +100,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui, state| streaming_contract(ui, state, &payload),
         retention_contract,
     );
-    super::pages::plan_configuration_receipts(ui, app);
 }
 
 /// What the plan's queue costs the ledger, per analysis.

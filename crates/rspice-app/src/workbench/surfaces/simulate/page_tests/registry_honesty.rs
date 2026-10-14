@@ -97,12 +97,14 @@ fn an_empty_registry_over_a_resolvable_plan_still_paints_its_table() {
 }
 
 /// Specifications commits through `commit_plan_change` like every other
-/// registry, and was the only route that never showed the log it wrote to — so
-/// a successful edit here had no surface at all.
+/// registry. The commit lands in the plan's log, which the console reports;
+/// the page itself shows no receipts card, because a change that worked is the
+/// edited row, not a ledger of digests under it.
 #[test]
-fn the_specifications_route_shows_the_receipts_it_writes() {
+fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
     use crate::state::{SpecEntry, SpecPointScope};
 
+    let mut last_receipt = None;
     let rendered = render_with(SimulationPage::Specifications, 1200.0, |app| {
         let id = plan_id(app);
         app.state.workspace.content.replace_active_specs(
@@ -117,15 +119,23 @@ fn the_specifications_route_shows_the_receipts_it_writes() {
             }],
         );
         super::super::page_specs::commit_scope(app, "gain", SpecPointScope::Nominal);
+        last_receipt = app
+            .state
+            .sim_setup
+            .stable_analysis_plan()
+            .ok()
+            .and_then(|plan| plan.configuration_receipts().last())
+            .map(|receipt| receipt.detail().to_owned());
     });
 
-    assert!(
-        rendered.contains("Plan configuration receipts"),
-        "the Specifications route must show the plan's receipt log:\n{rendered}"
+    assert_eq!(
+        last_receipt.as_deref(),
+        Some("Scoped specification gain to nominal only."),
+        "the change this route committed must be the plan log's newest entry"
     );
     assert!(
-        rendered.contains("Scoped specification gain to nominal only."),
-        "and the change this route just committed must be a row in it:\n{rendered}"
+        !rendered.contains("receipts") && !rendered.contains("Digest"),
+        "the Specifications route shows no receipts card:\n{rendered}"
     );
 }
 
