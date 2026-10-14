@@ -17,6 +17,8 @@ use egui::{Color32, Rect, Shape};
 pub enum PanelElementKind {
     /// A section header.
     Header,
+    /// A group's header inside a section's body: the explicit second level.
+    Subheader,
     /// A label beside a value, or a measurement-table row.
     Row,
     /// A line of text that is neither: a note, a problem, a caption.
@@ -39,7 +41,7 @@ impl PanelElementKind {
     fn measured_by_text(self) -> bool {
         matches!(
             self,
-            Self::Header | Self::Row | Self::Note | Self::Disclosure
+            Self::Header | Self::Subheader | Self::Row | Self::Note | Self::Disclosure
         )
     }
 }
@@ -178,6 +180,36 @@ impl PanelLayout {
         (first_gaps, section_gaps)
     }
 
+    /// The space from each subheader's bottom to the first element of its
+    /// group, when the group has one.
+    fn subheader_first_gaps(&self) -> Vec<f32> {
+        let is_header =
+            |kind| matches!(kind, PanelElementKind::Header | PanelElementKind::Subheader);
+        self.of_kind(PanelElementKind::Subheader)
+            .filter_map(|subheader| {
+                let next_header = self
+                    .elements
+                    .iter()
+                    .filter(|element| {
+                        is_header(element.kind) && element.rect.top() >= subheader.rect.bottom()
+                    })
+                    .map(|element| element.rect.top())
+                    .fold(f32::INFINITY, f32::min);
+                let first = self
+                    .elements
+                    .iter()
+                    .filter(|element| {
+                        !is_header(element.kind)
+                            && element.rect.top() >= subheader.rect.bottom() - 0.5
+                            && element.rect.top() < next_header
+                    })
+                    .map(|element| element.rect.top())
+                    .fold(f32::INFINITY, f32::min);
+                first.is_finite().then(|| first - subheader.rect.bottom())
+            })
+            .collect()
+    }
+
     /// The review table: one line per element kind with every distinct left
     /// and right edge, then the vertical rhythm, then any text that starts
     /// left of `inset`.
@@ -205,6 +237,16 @@ impl PanelLayout {
         let (first_gaps, section_gaps) = self.header_rhythm();
         let _ = writeln!(out, "  header height {}", heights(PanelElementKind::Header));
         let _ = writeln!(out, "  header to first {}", distinct(first_gaps));
+        let _ = writeln!(
+            out,
+            "  subheader height {}",
+            heights(PanelElementKind::Subheader)
+        );
+        let _ = writeln!(
+            out,
+            "  subheader to first {}",
+            distinct(self.subheader_first_gaps())
+        );
         let _ = writeln!(out, "  row height {}", heights(PanelElementKind::Row));
         let _ = writeln!(out, "  note height {}", heights(PanelElementKind::Note));
         let _ = writeln!(out, "  section gap {}", distinct(section_gaps));
@@ -249,6 +291,20 @@ impl PanelLayout {
         } else {
             let _ = writeln!(out, "  text left of {inset}: {}", stray.join("; "));
         }
+        // Every element where it landed, so a column with two values can be
+        // traced to the element that put the second one there.
+        let _ = writeln!(out, "  elements: kind top..bottom left..right");
+        for element in &self.elements {
+            let _ = writeln!(
+                out,
+                "    {:<10} {:.1}..{:.1} {:.1}..{:.1}",
+                format!("{:?}", element.kind),
+                element.rect.top(),
+                element.rect.bottom(),
+                element.left(),
+                element.right()
+            );
+        }
         out
     }
 }
@@ -290,6 +346,7 @@ fn element_of(node: &Node, width: f32) -> Option<PanelElement> {
     let kind = match node.role() {
         // The panel's own title is a level-2 heading; sections are level 3.
         Role::Heading if node.level() == Some(2) => return None,
+        Role::Heading if node.level() == Some(4) => PanelElementKind::Subheader,
         Role::Heading => PanelElementKind::Header,
         Role::TextInput | Role::MultilineTextInput | Role::SearchInput => PanelElementKind::Field,
         Role::ComboBox => PanelElementKind::Select,
@@ -298,7 +355,10 @@ fn element_of(node: &Node, width: f32) -> Option<PanelElement> {
         Role::Button => PanelElementKind::Button,
         Role::Row => PanelElementKind::Row,
         _ if node.value().is_some() && labelled => PanelElementKind::Row,
-        Role::Label if labelled => PanelElementKind::Note,
+        // egui publishes a label's words as its value, not its label.
+        Role::Label if labelled || node.value().is_some_and(|value| !value.is_empty()) => {
+            PanelElementKind::Note
+        }
         _ => return None,
     };
     Some(PanelElement {
