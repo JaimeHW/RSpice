@@ -29,28 +29,6 @@ pub(crate) enum StandardCommand {
 }
 
 impl StandardCommand {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Undo => "Undo",
-            Self::Redo => "Redo",
-            Self::Cut => "Cut",
-            Self::Copy => "Copy",
-            Self::Paste => "Paste",
-            Self::SelectAll => "Select all",
-        }
-    }
-
-    const fn shortcut(self) -> &'static str {
-        match self {
-            Self::Undo => "Ctrl+Z",
-            Self::Redo => "Ctrl+Shift+Z",
-            Self::Cut => "Ctrl+X",
-            Self::Copy => "Ctrl+C",
-            Self::Paste => "Ctrl+V",
-            Self::SelectAll => "Ctrl+A",
-        }
-    }
-
     pub(crate) const fn mutates_source(self) -> bool {
         matches!(self, Self::Undo | Self::Redo | Self::Cut | Self::Paste)
     }
@@ -104,52 +82,7 @@ pub(crate) enum EditorViewCommand {
     UnfoldAll,
 }
 
-impl EditorViewCommand {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::FoldSelection => "Fold selection",
-            Self::UnfoldAtCaret => "Unfold at caret",
-            Self::FoldAll => "Fold all regions",
-            Self::UnfoldAll => "Unfold all regions",
-        }
-    }
-
-    const fn shortcut(self) -> &'static str {
-        match self {
-            Self::FoldSelection => "Ctrl+Shift+[",
-            Self::UnfoldAtCaret => "Ctrl+Shift+]",
-            Self::FoldAll | Self::UnfoldAll => "",
-        }
-    }
-}
-
 impl StructuralCommand {
-    const fn label(self) -> &'static str {
-        match self {
-            Self::Indent => "Indent lines",
-            Self::Outdent => "Outdent lines",
-            Self::ToggleComment => "Toggle line comment",
-            Self::DuplicateLine => "Duplicate line",
-            Self::DeleteLine => "Delete line",
-            Self::MoveLineUp => "Move line up",
-            Self::MoveLineDown => "Move line down",
-            Self::MatchBracket => "Go to matching bracket",
-        }
-    }
-
-    const fn shortcut(self) -> &'static str {
-        match self {
-            Self::Indent => "Tab",
-            Self::Outdent => "Shift+Tab",
-            Self::ToggleComment => "Ctrl+/",
-            Self::DuplicateLine => "Ctrl+D",
-            Self::DeleteLine => "Ctrl+Shift+K",
-            Self::MoveLineUp => "Alt+Up",
-            Self::MoveLineDown => "Alt+Down",
-            Self::MatchBracket => "Ctrl+Shift+\\",
-        }
-    }
-
     pub(crate) const fn mutates_source(self) -> bool {
         !matches!(self, Self::MatchBracket)
     }
@@ -297,7 +230,45 @@ pub(crate) fn take_queued_standard_command(
     })
 }
 
-/// Consume a standard command queued by the shared Editor menu. Keyboard
+/// The source editor a page shows as its document, as the application's
+/// menus, palette and shortcuts address it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ActiveSourceEditor {
+    pub id: Id,
+    pub editable: bool,
+}
+
+/// What the application asks of the active source editor. Each one is
+/// exactly what its shortcut does with the editor focused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SourceEditorRequest {
+    Standard(StandardCommand),
+}
+
+impl SourceEditorRequest {
+    pub(crate) const fn mutates_source(self) -> bool {
+        match self {
+            Self::Standard(command) => command.mutates_source(),
+        }
+    }
+}
+
+/// Hand `request` to the editor `editor_id`, which applies it the next time
+/// it is drawn.
+pub(crate) fn queue_source_editor_request(
+    context: &egui::Context,
+    editor_id: Id,
+    request: SourceEditorRequest,
+) {
+    match request {
+        SourceEditorRequest::Standard(command) => {
+            queue_standard_command(context, editor_id, command);
+        }
+    }
+    context.request_repaint();
+}
+
+/// Consume a standard command queued by the application's Edit menu. Keyboard
 /// shortcuts remain owned by TextEdit itself.
 pub(crate) fn consume_standard_command(
     ui: &Ui,
@@ -398,142 +369,6 @@ pub(crate) fn take_queued_caret_char_index(
     context.data_mut(|data| data.remove_temp::<usize>(editor_id.with("caret-char-index")))
 }
 
-/// A single command menu shared by SPICE, Verilog-A, Python, YAML, and TOML.
-/// The menu's own label. Toolbars that reserve room for this control measure
-/// it rather than carrying a second copy of the width.
-pub(crate) const EDITOR_COMMAND_MENU_LABEL: &str = "Editor";
-
-/// The Editor menu. `replace_from_file` adds "Replace source from file…",
-/// which asks the owning surface to replace the document from a picked file;
-/// the surface takes the request with [`take_replace_source_request`].
-pub(crate) fn editor_command_menu(
-    ui: &mut Ui,
-    editor_id: Id,
-    editable: bool,
-    source_bundle_search: bool,
-    replace_from_file: bool,
-) {
-    ui.menu_button(EDITOR_COMMAND_MENU_LABEL, |ui| {
-        for command in [
-            StandardCommand::Undo,
-            StandardCommand::Redo,
-            StandardCommand::Cut,
-            StandardCommand::Copy,
-            StandardCommand::Paste,
-            StandardCommand::SelectAll,
-        ] {
-            let enabled = editable || !command.mutates_source();
-            if ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(command.label()).shortcut_text(command.shortcut()),
-                )
-                .clicked()
-            {
-                queue_standard_command(ui.ctx(), editor_id, command);
-                ui.close();
-            }
-        }
-        ui.separator();
-        if ui
-            .add_enabled(editable, egui::Button::new("Format document"))
-            .clicked()
-        {
-            queue_format_document(ui.ctx(), editor_id);
-            ui.close();
-        }
-        for command in [
-            EditorViewCommand::FoldSelection,
-            EditorViewCommand::UnfoldAtCaret,
-            EditorViewCommand::FoldAll,
-            EditorViewCommand::UnfoldAll,
-        ] {
-            let mut button = egui::Button::new(command.label());
-            if !command.shortcut().is_empty() {
-                button = button.shortcut_text(command.shortcut());
-            }
-            if ui.add(button).clicked() {
-                queue_view_command(ui.ctx(), editor_id, command);
-                ui.close();
-            }
-        }
-        ui.separator();
-        for command in [
-            StructuralCommand::Indent,
-            StructuralCommand::Outdent,
-            StructuralCommand::ToggleComment,
-            StructuralCommand::DuplicateLine,
-            StructuralCommand::DeleteLine,
-            StructuralCommand::MoveLineUp,
-            StructuralCommand::MoveLineDown,
-            StructuralCommand::MatchBracket,
-        ] {
-            let enabled = editable || !command.mutates_source();
-            let response = ui.add_enabled(
-                enabled,
-                egui::Button::new(command.label()).shortcut_text(command.shortcut()),
-            );
-            if response.clicked() {
-                queue_structural_command(ui.ctx(), editor_id, command);
-                ui.close();
-            }
-        }
-        ui.separator();
-        if ui
-            .add(egui::Button::new("Go to line...").shortcut_text("Ctrl+G"))
-            .clicked()
-        {
-            queue_go_to_line(ui.ctx(), editor_id);
-            ui.close();
-        }
-        if source_bundle_search
-            && ui
-                .add(egui::Button::new("Find in source bundle...").shortcut_text("Ctrl+Shift+H"))
-                .clicked()
-        {
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(editor_id.with("find-in-source-bundle"), true);
-            });
-            ui.close();
-        }
-        if source_bundle_search
-            && ui
-                .button("Source navigation and language tools...")
-                .clicked()
-        {
-            ui.ctx().data_mut(|data| {
-                data.insert_temp(editor_id.with("source-language-tools"), true);
-            });
-            ui.close();
-        }
-        if replace_from_file {
-            ui.separator();
-            if ui
-                .add_enabled(
-                    editable,
-                    egui::Button::new("Replace source from file\u{2026}"),
-                )
-                .clicked()
-            {
-                queue_replace_source_request(ui.ctx(), editor_id);
-                ui.close();
-            }
-        }
-    });
-}
-
-pub(crate) fn queue_replace_source_request(context: &egui::Context, editor_id: Id) {
-    context.data_mut(|data| {
-        data.insert_temp(editor_id.with("replace-source-from-file"), true);
-    });
-}
-
-pub(crate) fn take_replace_source_request(ui: &Ui, editor_id: Id) -> bool {
-    ui.ctx()
-        .data_mut(|data| data.remove_temp::<bool>(editor_id.with("replace-source-from-file")))
-        .unwrap_or(false)
-}
-
 pub(crate) fn queue_format_document(context: &egui::Context, editor_id: Id) {
     context.data_mut(|data| {
         data.insert_temp(editor_id.with("format-document"), true);
@@ -546,33 +381,21 @@ pub(crate) fn take_format_document_request(ui: &Ui, editor_id: Id) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn take_source_language_tools_request(ui: &Ui, editor_id: Id) -> bool {
-    ui.ctx()
-        .data_mut(|data| data.remove_temp::<bool>(editor_id.with("source-language-tools")))
-        .unwrap_or(false)
-}
-
-/// Consume a bundle-search request from the shared editor command surface or
-/// the conventional desktop shortcut while this editor owns focus.
+/// Consume the conventional desktop bundle-search shortcut while this editor
+/// owns focus.
 pub(crate) fn take_find_in_source_bundle_request(
     ui: &Ui,
     editor_id: Id,
 ) -> Option<crate::ui::input::InputTransition> {
-    let queued = ui.ctx().data_mut(|data| {
-        data.remove_temp::<bool>(editor_id.with("find-in-source-bundle"))
-            .unwrap_or(false)
-    });
-    if ui.ctx().memory(|memory| memory.has_focus(editor_id))
-        && let Some(input) = ui.ctx().input(|input| {
-            crate::ui::input::InputTransition::after_shortcut(
-                input,
-                KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::H),
-            )
-        })
-    {
-        return Some(input);
+    if !ui.ctx().memory(|memory| memory.has_focus(editor_id)) {
+        return None;
     }
-    queued.then(|| ui.ctx().input(crate::ui::input::InputTransition::remaining))
+    ui.ctx().input(|input| {
+        crate::ui::input::InputTransition::after_shortcut(
+            input,
+            KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::H),
+        )
+    })
 }
 
 pub(crate) fn queue_reveal_line(context: &egui::Context, editor_id: Id, line: usize) {

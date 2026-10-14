@@ -670,14 +670,9 @@ fn code_pane(
         ui.painter()
             .layout_no_wrap(status, theme::mono(tokens::FS_0, FontWeight::Medium), color);
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    ui.painter().circle_filled(
-        egui::pos2(
-            toolbar_content_right - status_galley.size().x - 17.0,
-            toolbar.center().y,
-        ),
-        2.5,
-        color,
-    );
+    let status_dot_x = toolbar_content_right - status_galley.size().x - 17.0;
+    ui.painter()
+        .circle_filled(egui::pos2(status_dot_x, toolbar.center().y), 2.5, color);
     ui.painter().galley(
         egui::pos2(
             toolbar_content_right - status_galley.size().x - 8.0,
@@ -686,14 +681,9 @@ fn code_pane(
         status_galley.clone(),
         color,
     );
-    let menu_right = toolbar_content_right - status_galley.size().x - 24.0;
-    let menu_rect = egui::Rect::from_min_max(
-        egui::pos2((menu_right - 64.0).max(toolbar.left() + 8.0), toolbar.top()),
-        egui::pos2(menu_right, toolbar.bottom()),
-    );
-    // Keep even unusually long logical paths out of the command and status
-    // regions. The full path remains available from the file tree.
-    let path_right = (menu_rect.left() - 6.0).max(path_clip.left());
+    // Keep even unusually long logical paths out of the status. The full path
+    // remains available from the file tree.
+    let path_right = (status_dot_x - 13.0).max(path_clip.left());
     let path_clip =
         egui::Rect::from_min_max(path_clip.min, egui::pos2(path_right, path_clip.bottom()));
     ui.painter().with_clip_rect(path_clip).text(
@@ -703,18 +693,6 @@ fn code_pane(
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_dim,
     );
-    let mut menu_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(menu_rect)
-            .layout(Layout::right_to_left(Align::Center)),
-    );
-    crate::workbench::documents::text_editor_commands::editor_command_menu(
-        &mut menu_ui,
-        editor_id,
-        editable,
-        true,
-        false,
-    );
     let search_input =
         crate::workbench::documents::text_editor_commands::take_find_in_source_bundle_request(
             ui, editor_id,
@@ -722,6 +700,14 @@ fn code_pane(
     let preceding_input = search_input
         .as_ref()
         .map(|input| input.preceding_scope(ui.ctx()));
+    super::publish_source_editor(
+        ui.ctx(),
+        app,
+        crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+            id: editor_id,
+            editable,
+        },
+    );
     let interaction = egui::Frame::new().fill(t.color.bg_inset).show(ui, |ui| {
         let debuggable = language == CodeEditorLanguage::Python;
         let interaction = if debuggable && !legacy {
@@ -849,17 +835,6 @@ fn code_pane(
                 .state
                 .push_user_message(crate::diagnostics::ConsoleMessage::error(error)),
         }
-    }
-    if crate::workbench::documents::text_editor_commands::take_source_language_tools_request(
-        ui, editor_id,
-    ) && let Err(error) = crate::workbench::documents::code_workspace::open_language_tools(
-        app,
-        ProjectSourceLanguage::RSpiceAutomation,
-        selected_path,
-        interaction.cursor_char_index,
-    ) {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
     }
     drop(preceding_input);
     if let Some(input) = search_input {

@@ -30,10 +30,38 @@ use crate::workbench::RSpiceApp;
 use super::state::Workspace;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    // The page that draws a source editor publishes it again below; whatever
+    // else is on screen has none for the Edit menu to act on.
+    app.state.ui.active_source_editor = None;
     if split_results_is_visible(app) {
         show_split_with_results(ui, app);
     } else {
         show_primary(ui, app);
+    }
+    if app.state.ui.source_editor_request.is_some() {
+        if app.state.ui.active_source_editor.is_some() {
+            // Asked after the editor was drawn: it takes it next frame.
+            ui.ctx().request_repaint();
+        } else {
+            // No editor is on screen to take it.
+            app.state.ui.source_editor_request = None;
+        }
+    }
+}
+
+/// Publish the source editor a page shows as its document, and hand it any
+/// request the menus, palette or shortcuts made for it. Called before the
+/// editor is drawn so it applies the request in the same frame.
+fn publish_source_editor(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
+) {
+    app.state.ui.active_source_editor = Some(editor);
+    if let Some(request) = app.state.ui.source_editor_request.take() {
+        crate::workbench::documents::text_editor_commands::queue_source_editor_request(
+            ctx, editor.id, request,
+        );
     }
 }
 

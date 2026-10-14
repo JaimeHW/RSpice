@@ -165,6 +165,17 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
         } else {
+            super::publish_source_editor(
+                ui.ctx(),
+                app,
+                crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+                    id: crate::workbench::documents::netlist_document::editor_id(&app.state),
+                    editable:
+                        crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
+                            &app.state,
+                        ),
+                },
+            );
             crate::workbench::documents::netlist_document::show_editor(ui, &mut app.state);
         }
     });

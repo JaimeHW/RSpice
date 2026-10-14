@@ -175,13 +175,8 @@ fn source_editor(
         selected.bundle().id(),
         active_path,
     ));
-    // A coarse pointer raises the Editor menu to the touch target; the strip
-    // grows with it rather than letting the menu hang into the source.
     let (toolbar, _) = ui.allocate_exact_size(
-        Vec2::new(
-            ui.available_width(),
-            EDITOR_TOOLBAR_HEIGHT.max(t.metrics.ctl_h),
-        ),
+        Vec2::new(ui.available_width(), EDITOR_TOOLBAR_HEIGHT),
         Sense::hover(),
     );
     // The page's tone, which the active document tab above wears too: the
@@ -208,14 +203,9 @@ fn source_editor(
         ui.painter()
             .layout_no_wrap(status, theme::mono(tokens::FS_0, FontWeight::Medium), color);
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    ui.painter().circle_filled(
-        egui::pos2(
-            toolbar_content_right - status_galley.size().x - 17.0,
-            toolbar.center().y,
-        ),
-        2.5,
-        color,
-    );
+    let status_dot_x = toolbar_content_right - status_galley.size().x - 17.0;
+    ui.painter()
+        .circle_filled(egui::pos2(status_dot_x, toolbar.center().y), 2.5, color);
     ui.painter().galley(
         egui::pos2(
             toolbar_content_right - status_galley.size().x - 8.0,
@@ -224,14 +214,9 @@ fn source_editor(
         status_galley.clone(),
         color,
     );
-    let menu_right = toolbar_content_right - status_galley.size().x - 24.0;
-    let menu_rect = egui::Rect::from_min_max(
-        egui::pos2((menu_right - 64.0).max(toolbar.left() + 8.0), toolbar.top()),
-        egui::pos2(menu_right, toolbar.bottom()),
-    );
-    // Keep even unusually long logical paths out of the command and status
-    // regions. The full path remains available from the file tree.
-    let path_right = (menu_rect.left() - 6.0).max(path_clip.left());
+    // Keep even unusually long logical paths out of the status. The full path
+    // remains available from the file tree.
+    let path_right = (status_dot_x - 13.0).max(path_clip.left());
     let path_clip =
         egui::Rect::from_min_max(path_clip.min, egui::pos2(path_right, path_clip.bottom()));
     ui.painter().with_clip_rect(path_clip).text(
@@ -241,32 +226,6 @@ fn source_editor(
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_dim,
     );
-    let mut menu_ui = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(menu_rect)
-            .layout(Layout::right_to_left(Align::Center)),
-    );
-    crate::workbench::documents::text_editor_commands::editor_command_menu(
-        &mut menu_ui,
-        editor_id,
-        editable,
-        editable,
-        editable,
-    );
-    // Replacing the file from disk is this menu's explicit, confirmed
-    // transaction; File > Import never does it.
-    if editable
-        && crate::workbench::documents::text_editor_commands::take_replace_source_request(
-            ui, editor_id,
-        )
-        && let Err(error) =
-            crate::workbench::documents::code_workspace::request_veriloga_source_replacement(
-                app,
-                active_path,
-            )
-    {
-        app.state.push_user_message(ConsoleMessage::warning(error));
-    }
     interface_strip(ui, &mut app.state, selected);
     let search_input = editable
         .then(|| {
@@ -278,6 +237,22 @@ fn source_editor(
     let preceding_input = search_input
         .as_ref()
         .map(|input| input.preceding_scope(ui.ctx()));
+    // A built-in header is read here whatever the bundle allows.
+    let writable = editable
+        && crate::workbench::documents::code_workspace::source_bundle_document_is_editable(
+            app,
+            crate::state::ProjectSourceLanguage::VerilogA,
+            selected.bundle().id(),
+            active_path,
+        );
+    super::publish_source_editor(
+        ui.ctx(),
+        app,
+        crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
+            id: editor_id,
+            editable: writable,
+        },
+    );
     let interaction = egui::Frame::new()
         .fill(t.color.bg_inset)
         .show(ui, |ui| {
@@ -362,20 +337,6 @@ fn source_editor(
                 .state
                 .push_user_message(crate::diagnostics::ConsoleMessage::error(error)),
         }
-    }
-    if crate::workbench::documents::text_editor_commands::take_source_language_tools_request(
-        ui, editor_id,
-    ) && let Err(error) =
-        crate::workbench::documents::code_workspace::open_language_tools_in_bundle(
-            app,
-            crate::state::ProjectSourceLanguage::VerilogA,
-            bundle_id,
-            active_path,
-            interaction.cursor_char_index,
-        )
-    {
-        app.state
-            .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
     }
     drop(preceding_input);
     if let Some(input) = search_input {

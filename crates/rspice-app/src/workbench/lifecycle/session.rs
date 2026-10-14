@@ -291,6 +291,15 @@ pub struct UiSessionState {
     /// engineering readouts. Kept transient so clipboard intent is never
     /// serialized into a project/session.
     pub clipboard_text_request: Option<String>,
+    /// The source editor the page on screen shows as its document, published
+    /// by that page every frame it draws one. The Edit menu, the palette and
+    /// the shortcuts act on it rather than on a schematic hidden behind it.
+    pub(crate) active_source_editor:
+        Option<crate::workbench::documents::text_editor_commands::ActiveSourceEditor>,
+    /// One-shot request for [`Self::active_source_editor`], handed to the
+    /// editor by the page that draws it.
+    pub(crate) source_editor_request:
+        Option<crate::workbench::documents::text_editor_commands::SourceEditorRequest>,
     /// One-shot request to change platform fullscreen state. Keeping this
     /// transient prevents the web backend from receiving the same viewport
     /// command every frame and preserves the user's persisted preference in

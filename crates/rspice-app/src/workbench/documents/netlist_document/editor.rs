@@ -21,7 +21,9 @@ use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
-use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
+use crate::workbench::documents::text_editor_commands::{
+    EditorSyntax, StandardCommand, show_go_to_line,
+};
 use crate::workbench::{AppState, MessageId};
 
 #[cfg(test)]
@@ -150,6 +152,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let hover_char_index;
     let editor_response;
     let anchor;
+    let unanswered_history;
 
     {
         let messages = state.ui.messages();
@@ -242,6 +245,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         cursor_char_index = output.cursor_char_index;
         selected_char_range = output.selected_char_range;
         hover_char_index = output.hover_char_index;
+        unanswered_history = output.unanswered_history;
         editor_response = output.response.clone();
         anchor = completion::CompletionAnchor {
             focused: output.response.has_focus(),
@@ -293,6 +297,25 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }
     if source_changed && state.ui.netlist.active_dependency_identity.is_none() {
         super::refresh_diff_pips_from_baseline(state);
+    }
+    // The editor's history starts again whenever the document is replaced
+    // underneath it, so once it is spent the next older step is the
+    // netlist's own: a replace-all or a rename.
+    if let Some(step) = unanswered_history {
+        let (stepped, verb) = if step == StandardCommand::Undo {
+            (super::undo_netlist_edit(state), "Undo")
+        } else {
+            (super::redo_netlist_edit(state), "Redo")
+        };
+        match stepped {
+            Ok(Some(description)) => state.push_user_message(
+                crate::diagnostics::ConsoleMessage::info(format!("{verb}: {description}")),
+            ),
+            Ok(None) => {}
+            Err(error) => {
+                state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+            }
+        }
     }
     // A value the deck actually answers outranks the project symbol; a token
     // that resolves to neither still says so, so a hover never goes silent.

@@ -82,10 +82,8 @@ fn full_action_extent(
     context: ActionSetContext,
 ) -> f32 {
     let button = |label: &str| action_button_width(ui, label);
-    // The editor command menu, then find, source lifecycle and language tools
-    // as icon buttons.
+    // Find, source lifecycle and language tools as icon buttons.
     let mut widths = vec![
-        button(crate::workbench::documents::text_editor_commands::EDITOR_COMMAND_MENU_LABEL),
         CODE_TOOLBAR_ICON_WIDTH,
         CODE_TOOLBAR_ICON_WIDTH,
         CODE_TOOLBAR_ICON_WIDTH,
@@ -291,19 +289,6 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
     actions.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
     if compact {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add_enabled_ui(active_available, |ui| {
-                crate::workbench::documents::text_editor_commands::editor_command_menu(
-                    ui,
-                    crate::workbench::documents::netlist_document::editor_id(&app.state),
-                    crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
-                        &app.state,
-                    ),
-                    false,
-                    false,
-                );
-            })
-            .response
-            .on_disabled_hover_text(messages.text(MessageId::NetlistEditorCommandsUnavailable));
             let mut find_clicked = false;
             ui.add_enabled_ui(active_available, |ui| {
                 find_clicked = icon_button(
@@ -481,19 +466,6 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
         });
     } else {
         actions.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.add_enabled_ui(active_available, |ui| {
-                crate::workbench::documents::text_editor_commands::editor_command_menu(
-                    ui,
-                    crate::workbench::documents::netlist_document::editor_id(&app.state),
-                    crate::workbench::documents::netlist_document::active_netlist_source_is_editable(
-                        &app.state,
-                    ),
-                    false,
-                    false,
-                );
-            })
-            .response
-            .on_disabled_hover_text(messages.text(MessageId::NetlistEditorCommandsUnavailable));
             let mut find_clicked = false;
             ui.add_enabled_ui(active_available, |ui| {
                 find_clicked = icon_button(

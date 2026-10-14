@@ -92,7 +92,6 @@ define_messages! {
     EditorAccessibleSeverityWarning => "warning",
     EditorAccessibleSeverityError => "error",
     NetlistFindActiveDocument => "Find in active netlist document",
-    NetlistEditorCommandsUnavailable => "Open or generate a netlist document before using editor commands.",
     NetlistSearchUnavailable => "Open or generate a netlist document before searching.",
     NetlistReturnRoot => "Return to root",
     NetlistTopDeck => "Top deck",

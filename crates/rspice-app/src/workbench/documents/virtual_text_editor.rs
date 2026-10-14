@@ -56,6 +56,9 @@ struct VirtualEditorSession {
     drag_anchor: Option<(usize, usize)>,
     column_drag: bool,
     ime: Option<ImeComposition>,
+    /// An undo or redo this frame asked for that the editor's own history
+    /// could not answer, for the owner to step a history of its own.
+    unanswered_history: Option<StandardCommand>,
 }
 
 #[derive(Clone, Copy)]
@@ -76,6 +79,7 @@ impl Default for VirtualEditorSession {
             drag_anchor: None,
             column_drag: false,
             ime: None,
+            unanswered_history: None,
         }
     }
 }
@@ -116,6 +120,10 @@ pub(crate) struct VirtualEditorOutput {
     pub hover_char_index: Option<usize>,
     pub selected_char_range: Option<(usize, usize)>,
     pub breakpoint_toggled: Option<usize>,
+    /// Undo or Redo, when it was asked for and the editor's own history had
+    /// no step to take. An owner with an older history of its own (a bulk
+    /// replace, a rename) steps that one, so the request is never lost.
+    pub unanswered_history: Option<StandardCommand>,
     /// Screen position just below the primary caret, for a popover that has to
     /// point at what is being typed. `None` when the caret's line is scrolled
     /// out of the viewport or folded away — an anchor is only offered when
@@ -566,6 +574,7 @@ pub(crate) fn show_virtual_text_editor(
         style,
         &mut line_diagnostic_context,
     );
+    let unanswered_history = session.unanswered_history.take();
     ui.ctx()
         .data_mut(|data| data.insert_temp(session_id, session));
     VirtualEditorOutput {
@@ -575,6 +584,7 @@ pub(crate) fn show_virtual_text_editor(
         hover_char_index,
         selected_char_range,
         breakpoint_toggled,
+        unanswered_history,
         caret_anchor,
         response,
     }
@@ -734,15 +744,15 @@ fn handle_key(
                 return;
             }
             Key::Z if editable && modifiers.shift => {
-                session.model.redo();
+                step_history(session, StandardCommand::Redo);
                 return;
             }
             Key::Z if editable => {
-                session.model.undo();
+                step_history(session, StandardCommand::Undo);
                 return;
             }
             Key::Y if editable => {
-                session.model.redo();
+                step_history(session, StandardCommand::Redo);
                 return;
             }
             Key::C => {
@@ -863,11 +873,8 @@ fn handle_standard_command(
     editable: bool,
 ) {
     match command {
-        StandardCommand::Undo if editable => {
-            session.model.undo();
-        }
-        StandardCommand::Redo if editable => {
-            session.model.redo();
+        StandardCommand::Undo | StandardCommand::Redo if editable => {
+            step_history(session, command);
         }
         StandardCommand::Copy => copy_selection(ui, &session.model),
         StandardCommand::Cut if editable => {
@@ -885,6 +892,19 @@ fn handle_standard_command(
     }
     ui.ctx()
         .memory_mut(|memory| memory.request_focus(editor_id));
+}
+
+/// Undo or redo one step of the editor's own history, or say that it had
+/// none so the owner can step its own.
+fn step_history(session: &mut VirtualEditorSession, command: StandardCommand) {
+    let stepped = if command == StandardCommand::Undo {
+        session.model.undo()
+    } else {
+        session.model.redo()
+    };
+    if !stepped {
+        session.unanswered_history = Some(command);
+    }
 }
 
 fn apply_model_structural(

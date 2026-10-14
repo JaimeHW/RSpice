@@ -317,6 +317,26 @@ pub(crate) fn close_model_editor_workflow() {
 pub use registry::{CommandAvailability, ShortcutContext, ShortcutKind};
 
 impl Command {
+    /// What this command asks of a source editor when one is the document on
+    /// screen: the same thing its shortcut does with the editor focused, never
+    /// an edit of the schematic hidden behind it.
+    pub(crate) const fn source_editor_request(
+        self,
+    ) -> Option<crate::workbench::documents::text_editor_commands::SourceEditorRequest> {
+        use crate::workbench::documents::text_editor_commands::{
+            SourceEditorRequest, StandardCommand,
+        };
+        Some(SourceEditorRequest::Standard(match self {
+            Self::Undo => StandardCommand::Undo,
+            Self::Redo => StandardCommand::Redo,
+            Self::Cut => StandardCommand::Cut,
+            Self::Copy => StandardCommand::Copy,
+            Self::Paste => StandardCommand::Paste,
+            Self::SelectAll => StandardCommand::SelectAll,
+            _ => return None,
+        }))
+    }
+
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
         if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(state)
@@ -326,6 +346,11 @@ impl Command {
         }
         if self.requires_open_project() && !state.project_lifecycle.is_open() {
             return false;
+        }
+        if let Some(request) = self.source_editor_request()
+            && let Some(editor) = state.ui.active_source_editor
+        {
+            return editor.editable || !request.mutates_source();
         }
         match self {
             Self::OpenWorkspace(workspace) => {
@@ -1076,6 +1101,14 @@ impl Command {
                 .push_user_message(crate::diagnostics::ConsoleMessage::warning(
                     "Open a project before using this command.",
                 ));
+            return;
+        }
+        if let Some(request) = self.source_editor_request()
+            && let Some(editor) = app.state.ui.active_source_editor
+        {
+            if editor.editable || !request.mutates_source() {
+                app.state.ui.source_editor_request = Some(request);
+            }
             return;
         }
         if active_schematic_editor(app)
