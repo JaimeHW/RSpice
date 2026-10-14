@@ -5,7 +5,7 @@ use crate::analysis_result::AnalysisResult;
 use crate::analysis_type::AnalysisType;
 use crate::result_digest::ResultDigestEncoding;
 use crate::run::SimulationRun;
-use crate::studio_presentation::{ComparisonAlignmentDraft, MAX_DIFFERENCE_TRACE_NUMERIC_VALUES};
+use crate::studio_presentation::MAX_DIFFERENCE_TRACE_NUMERIC_VALUES;
 use crate::visualization_document::{
     ColumnRole, ComparisonAlignmentMethod, ComparisonExecutionContract,
     ComparisonExtrapolationPolicy, ComparisonInterpolationPolicy, ComparisonPolicy,
@@ -15,6 +15,32 @@ use crate::visualization_document::{
 };
 use crate::waveform::RetainedWaveform;
 use rspice_app_types::product::DatasetBinding;
+
+/// How the baseline and candidate series are brought onto one X axis before
+/// they are compared.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ComparisonAlignmentDraft {
+    #[default]
+    FirstThresholdCrossing,
+    AbsoluteXAxis,
+    CrossCorrelation,
+}
+
+impl ComparisonAlignmentDraft {
+    pub const ALL: [Self; 3] = [
+        Self::FirstThresholdCrossing,
+        Self::AbsoluteXAxis,
+        Self::CrossCorrelation,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::FirstThresholdCrossing => "First threshold crossing",
+            Self::AbsoluteXAxis => "Absolute X axis",
+            Self::CrossCorrelation => "Cross-correlation alignment",
+        }
+    }
+}
 
 /// The shared coordinate axis, then the baseline and candidate series
 /// resampled onto it.

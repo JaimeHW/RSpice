@@ -10,30 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
 use crate::result_presentation::ResultViewer;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum ComparisonAlignmentDraft {
-    #[default]
-    FirstThresholdCrossing,
-    AbsoluteXAxis,
-    CrossCorrelation,
-}
-
-impl ComparisonAlignmentDraft {
-    pub const ALL: [Self; 3] = [
-        Self::FirstThresholdCrossing,
-        Self::AbsoluteXAxis,
-        Self::CrossCorrelation,
-    ];
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::FirstThresholdCrossing => "First threshold crossing",
-            Self::AbsoluteXAxis => "Absolute X axis",
-            Self::CrossCorrelation => "Cross-correlation alignment",
-        }
-    }
-}
+pub use crate::waveform_comparison::ComparisonAlignmentDraft;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
