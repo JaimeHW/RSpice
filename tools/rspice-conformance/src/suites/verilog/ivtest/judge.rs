@@ -27,8 +27,14 @@
 //! - `: $finish called at ` and `: $stop called at ` (with an optional level);
 //! - `^<path>:<line>: warning:` and `^<path>:<line>: sorry:`;
 //! - `^WARNING: `;
+//! - `^ERROR: <path>:<line>: `, a system task's located run-time error, which
+//!   RSpice reports as a diagnostic of its own rather than as output;
 //! - the continuation lines of a compiler warning or sorry message:
 //!   `^<path>:<line>:<white space>: `, each directly after the message or
+//!   after another of its continuation lines;
+//! - the continuation lines of a located run-time `WARNING:` or `ERROR:`
+//!   message: indented with spaces to exactly the width of the message's
+//!   `<kind>: <path>:<line>: ` prefix, each directly after the message or
 //!   after another of its continuation lines.
 //!
 //! A file the design wrote (a `diff` test) and its gold first lose their VCD
@@ -217,13 +223,35 @@ pub fn is_icarus_text(line: &str) -> bool {
     if line.starts_with("VCD info:") || line.starts_with("VCD warning:") {
         return true;
     }
-    if line.starts_with("WARNING: ") {
+    if line.starts_with("WARNING: ") || runtime_message_indent(line).is_some() {
         return true;
     }
     if finish_report(line) {
         return true;
     }
     compiler_message(line)
+}
+
+/// For a located run-time message, `^WARNING: <path>:<line>: ` or
+/// `^ERROR: <path>:<line>: `, the width of that prefix: Icarus indents the
+/// message's further lines (`"%*s "` of the prefix) to it. An `ERROR:` line
+/// is dropped only in this located form, the form of a system task's own
+/// run-time error, which RSpice reports as a diagnostic of its own.
+fn runtime_message_indent(line: &str) -> Option<usize> {
+    let rest = line
+        .strip_prefix("WARNING: ")
+        .or_else(|| line.strip_prefix("ERROR: "))?;
+    let message = after_location(rest)?;
+    message
+        .strip_prefix(' ')
+        .map(|text| line.len() - text.len())
+}
+
+/// A further line of a run-time message: exactly `indent` spaces, then text.
+fn runtime_continuation(line: &str, indent: usize) -> bool {
+    line.len() > indent
+        && line.as_bytes()[..indent].iter().all(|byte| *byte == b' ')
+        && !line.as_bytes()[indent].is_ascii_whitespace()
 }
 
 /// `<anything>: $finish called at ` or `: $stop(<digit>) called at `.
@@ -272,6 +300,9 @@ pub fn normalize(text: &str) -> Vec<String> {
     // Whether the previous line was a dropped compiler message or one of its
     // continuation lines.
     let mut in_message = false;
+    // The indent of a dropped run-time message's further lines, while the
+    // previous line was that message or one of them.
+    let mut runtime_indent: Option<usize> = None;
     text.split_inclusive('\n')
         .map(|line| match line.strip_suffix("\r\n") {
             Some(body) => format!("{body}\n"),
@@ -279,9 +310,16 @@ pub fn normalize(text: &str) -> Vec<String> {
         })
         .filter(|line| {
             let line = line.trim_end_matches('\n');
-            let continued = in_message && continuation(line);
-            in_message = continued || compiler_message(line);
-            !(continued || is_icarus_text(line))
+            let compiler_continued = in_message && continuation(line);
+            let runtime_continued = !compiler_continued
+                && runtime_indent.is_some_and(|indent| runtime_continuation(line, indent));
+            in_message = compiler_continued || compiler_message(line);
+            runtime_indent = match runtime_message_indent(line) {
+                Some(indent) => Some(indent),
+                None if runtime_continued => runtime_indent,
+                None => None,
+            };
+            !(compiler_continued || runtime_continued || is_icarus_text(line))
         })
         .collect()
 }
@@ -874,11 +912,14 @@ mod tests {
             "./ivltests/t.v:7: warning: Port 1 (a) of m expects 2 bits, got 1.",
             "ivltests/t.v:9: sorry: constant selects are not supported.",
             "WARNING: ivltests/t.v:4: $readmemh: Standard inconsistency",
+            "ERROR: ./ivltests/t.v:59: $readmemb: Start address -1 is out of bounds",
         ] {
             assert!(is_icarus_text(line), "{line}");
         }
         for line in [
             "PASSED",
+            "ERROR: not located",
+            "ERROR: t.v:x: not a line number",
             "VCD infos",
             "$finish called at 100",
             "t.v:12: error: something",
@@ -889,6 +930,50 @@ mod tests {
         ] {
             assert!(!is_icarus_text(line), "{line}");
         }
+    }
+
+    #[test]
+    fn a_located_run_time_error_and_its_indented_lines_are_icarus_text() {
+        let kept = |text: &str| normalize(text).concat();
+        // The lines of ivtest's readmem-error gold: a located `ERROR:`, and
+        // a `WARNING:` whose second line is indented to its prefix.
+        let indent = |prefix: &str| " ".repeat(prefix.len());
+        let (two_digit, three_digit) = (
+            "WARNING: ./ivltests/r.v:33: ",
+            "WARNING: ./ivltests/r.v:138: ",
+        );
+        let gold = format!(
+            "ERROR: ./ivltests/r.v:59: $readmemb: Start address -1 is out of bounds!\n\
+             {two_digit}$readmemb's file name argument contains non-printable characters.\n\
+             {}\"r.tx\\002\"\n\
+             {three_digit}name.\n{}\"two\"\n{}\"and a third\"\n\
+             out 1\n",
+            indent(two_digit),
+            indent(three_digit),
+            indent(three_digit),
+        );
+        assert_eq!(kept(&gold), "out 1\n");
+        // An unlocated `ERROR:` is the design's own text, as is an indented
+        // line whose indent is not the prefix's, or that follows no message.
+        let located = "WARNING: ./a.v:3: ";
+        for text in [
+            "ERROR: not located\n".to_owned(),
+            "ERROR:./a.v:3: no space\n".to_owned(),
+            format!("{located}w.\n{}short\n", " ".repeat(located.len() - 1)),
+            format!("{located}w.\n{}deep\n", " ".repeat(located.len() + 1)),
+            format!("out\n{}\"x\"\n", indent(located)),
+        ] {
+            let expected: String = text
+                .split_inclusive('\n')
+                .filter(|line| !line.starts_with("WARNING: "))
+                .collect();
+            assert_eq!(kept(&text), expected, "{text:?}");
+        }
+        // A located error takes its own indented lines, and only those.
+        let error = "ERROR: a.v:1: ";
+        assert_eq!(kept(&format!("{error}e.\n{}\"gone\"\n", indent(error))), "");
+        let shallow = format!("{}kept\n", " ".repeat(error.len() - 2));
+        assert_eq!(kept(&format!("{error}e.\n{shallow}")), shallow);
     }
 
     #[test]
