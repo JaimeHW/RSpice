@@ -14,9 +14,9 @@ pub use rspice_results::dc_mismatch::DcMismatchEvidence;
 pub use rspice_results::dc_mismatch::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
 #[cfg(test)]
 pub use rspice_results::dc_sweep::DcSweepEvidence;
-pub use rspice_results::dc_sweep::{DcCurveSelection, DcSweepFamily};
+pub use rspice_results::dc_sweep::DcSweepFamily;
 #[cfg(test)]
-pub use rspice_results::dc_sweep::{DcSweepDirection, DcSweepQuantity};
+pub use rspice_results::dc_sweep::{DcCurveSelection, DcSweepDirection, DcSweepQuantity};
 mod cross_probe;
 mod result_digest;
 pub use rspice_results::noise::NoiseSummary;

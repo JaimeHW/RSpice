@@ -640,10 +640,10 @@ fn count_label(count: usize, noun: &str) -> String {
 /// The findings a check of the drawing as it stands reported for whatever
 /// `targets` picks out. A check run against an earlier drawing reports none:
 /// its findings may name objects that have since moved or gone.
-fn current_findings<'a>(
-    state: &'a AppState,
+fn current_findings(
+    state: &AppState,
     targets: impl Fn(&DrcViolation) -> bool,
-) -> Vec<&'a DrcViolation> {
+) -> Vec<&DrcViolation> {
     if !checks_current(state) {
         return Vec::new();
     }

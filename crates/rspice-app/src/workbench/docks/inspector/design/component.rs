@@ -535,17 +535,17 @@ pub(super) fn parameters_section(
         .as_ref()
         .and_then(|binding| binding.model_section.clone())
         .unwrap_or_default();
-    if section_choices.len() > 1 {
-        if property_row_combo(
+    if section_choices.len() > 1
+        && property_row_combo(
             ui,
             "Section",
             ("design-inspector-model-section", component.id),
             &mut selected_section,
             &section_choices,
             editable,
-        ) {
-            apply_bound_model_section(app, component.id, &selected_section);
-        }
+        )
+    {
+        apply_bound_model_section(app, component.id, &selected_section);
     }
 
     // Instance temperature is the `temp` parameter. Left empty it inherits

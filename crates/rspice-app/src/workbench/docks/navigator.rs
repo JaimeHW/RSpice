@@ -2045,7 +2045,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         },
                         &run.label,
                         run_active,
-                        &run_meta,
+                        run_meta,
                         overlaid,
                     );
                     if responses.selection.clicked() {
@@ -3795,7 +3795,7 @@ fn show_virtualized_result_signals(
                                 ui,
                                 "DS",
                                 &run.label,
-                                &domain,
+                                domain,
                                 count,
                                 count,
                                 active_run == Some(run.run_index),
