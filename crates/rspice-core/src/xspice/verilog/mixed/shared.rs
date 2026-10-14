@@ -651,14 +651,19 @@ impl MixedDigitalCoordinator {
         use super::super::effects::files::{HdlFileOptions, HdlFileStore, HdlFileTarget};
         self.hdl_output = config.output.clone();
         // Design P2 section 4.3: relative HDL paths resolve against the
-        // deck's directory.
+        // explicit run directory, else the deck's directory.
+        let directory = config
+            .run_directory
+            .as_deref()
+            .or(config.deck_directory.as_deref());
         self.digital
             .make_mut()
             .configure_effects(super::super::effects::HdlEffectsConfig {
                 plusargs: config.plusargs.clone(),
                 seed: config.seed,
                 files: HdlFileOptions::new(
-                    config.deck_directory.as_deref(),
+                    directory,
+                    config.unrestricted_io,
                     Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
                 ),
             });

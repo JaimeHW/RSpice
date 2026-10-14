@@ -438,6 +438,54 @@ endmodule
     );
 }
 
+/// Design P2 section 4.3: a write that would leave the run directory fails as
+/// section 17.2.1 prescribes, with a located warning; the run may lift the
+/// confinement.
+#[test]
+fn writes_outside_the_run_directory_fail_unless_unrestricted() {
+    let directory = run_directory("sandbox");
+    let source = r#"module tb;
+  integer fd;
+  initial begin
+    fd = $fopen("../escaped.txt", "w");
+    $display("fd=%0d", fd != 0);
+    $dumpfile("../escaped.vcd");
+    $dumpvars;
+  end
+endmodule
+"#;
+    let report = bench_in(&directory, source, false);
+    assert_eq!(stdout(&report), "fd=0\n");
+    let escapes = warnings(&report);
+    assert_eq!(escapes.len(), 2, "{escapes:?}");
+    assert!(
+        escapes
+            .iter()
+            .all(|warning| warning.contains("outside the run directory")),
+        "{escapes:?}"
+    );
+    let warning = report
+        .records
+        .iter()
+        .find(|record| matches!(record.stream, HdlStream::Diagnostic { .. }))
+        .unwrap();
+    assert_eq!(
+        (warning.origin.file.as_str(), warning.origin.line),
+        ("tb.v", 4)
+    );
+
+    let report = testbench(
+        &[("tb.v", source)],
+        &HdlTestbenchOptions {
+            run_directory: Some(directory.clone()),
+            unrestricted_io: true,
+            ..HdlTestbenchOptions::default()
+        },
+    );
+    assert_eq!(stdout(&report), "fd=1\n");
+    assert!(warnings(&report).is_empty());
+}
+
 /// `$fread` into a memory (IEEE 1364-2005 section 17.2.4.4): whole bytes,
 /// most significant first, from a start address for a count of words; a
 /// count past the memory's end is cut to it, and a start outside it reads

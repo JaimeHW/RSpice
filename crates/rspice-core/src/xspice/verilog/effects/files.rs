@@ -3,10 +3,15 @@
 //!
 //! # Where a path goes
 //!
-//! A relative path resolves against the run directory: the deck's directory,
+//! A relative path resolves against the run directory: the deck's directory
+//! on the command line, an explicit `--hdl-run-dir` or `.options hdl_rundir`,
 //! the root of the browser worker's virtual file system, or what a testbench
 //! caller names. Reads may name any path the host can read, as `.include`
-//! does; in the browser that is the virtual data-file registry only.
+//! does; in the browser that is the virtual data-file registry only. Writes
+//! stay inside the run directory's subtree unless the run lifts the
+//! confinement: a path that leaves it fails the way section 17.2.1 prescribes
+//! for a file that cannot be opened (`$fopen` returns 0), with a located
+//! warning.
 //!
 //! # Accepted-only
 //!
@@ -301,6 +306,8 @@ fn path_key(path: &Path) -> String {
 pub(crate) struct HdlFileOptions {
     /// What a relative path resolves against.
     pub run_directory: PathBuf,
+    /// `--hdl-unrestricted-io`: writes may leave the run directory.
+    pub unrestricted: bool,
     pub store: Arc<HdlFileStore>,
 }
 
@@ -308,6 +315,7 @@ impl Default for HdlFileOptions {
     fn default() -> Self {
         Self::new(
             None,
+            false,
             Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
         )
     }
@@ -315,7 +323,9 @@ impl Default for HdlFileOptions {
 
 impl PartialEq for HdlFileOptions {
     fn eq(&self, other: &Self) -> bool {
-        self.run_directory == other.run_directory && Arc::ptr_eq(&self.store, &other.store)
+        self.run_directory == other.run_directory
+            && self.unrestricted == other.unrestricted
+            && Arc::ptr_eq(&self.store, &other.store)
     }
 }
 
@@ -325,7 +335,11 @@ impl HdlFileOptions {
     /// Options over `run_directory`, made absolute against the process's
     /// working directory when it is relative; no directory is the working
     /// directory itself (the browser's virtual root).
-    pub(crate) fn new(run_directory: Option<&Path>, store: Arc<HdlFileStore>) -> Self {
+    pub(crate) fn new(
+        run_directory: Option<&Path>,
+        unrestricted: bool,
+        store: Arc<HdlFileStore>,
+    ) -> Self {
         let directory = run_directory.map_or_else(PathBuf::new, Path::to_path_buf);
         let run_directory = if directory.is_absolute() {
             directory
@@ -337,6 +351,7 @@ impl HdlFileOptions {
         };
         Self {
             run_directory: normalize(&run_directory),
+            unrestricted,
             store,
         }
     }
@@ -349,9 +364,29 @@ impl HdlFileOptions {
         Ok(normalize(&self.run_directory.join(name)))
     }
 
-    /// The path a design's file name names, for writing.
+    /// The path a design's file name names, for writing: inside the run
+    /// directory unless the run lifted the confinement.
     pub(crate) fn resolve_write(&self, name: &str) -> Result<PathBuf, String> {
-        self.resolve_read(name)
+        let path = self.resolve_read(name)?;
+        if self.unrestricted || self.confines(&path) {
+            return Ok(path);
+        }
+        Err(format!(
+            "`{name}` resolves to {}, outside the run directory {}; HDL writes stay \
+             inside it unless the run passes --hdl-unrestricted-io",
+            path.display(),
+            self.run_directory.display()
+        ))
+    }
+
+    fn confines(&self, path: &Path) -> bool {
+        let escapes = path
+            .components()
+            .any(|component| component == Component::ParentDir);
+        if escapes || (path.has_root() && !self.run_directory.has_root()) {
+            return false;
+        }
+        path.starts_with(&self.run_directory) && path != self.run_directory
     }
 }
 
@@ -594,7 +629,7 @@ pub(crate) enum OpenFailure {
     /// The file does not exist, or its directory does not: section 17.2.1's
     /// ordinary failure, reported only through the value.
     Quiet,
-    /// The call itself was wrong: a warning.
+    /// The call itself was wrong, or the sandbox refused the path: a warning.
     Warn(String),
 }
 

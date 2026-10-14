@@ -5199,6 +5199,85 @@ fn a_rolled_back_trial_prints_nothing() {
     assert_eq!(coarse.len(), 8, "seven edges and the finish");
 }
 
+/// The ticker, writing its edges to a file and dumping its variables.
+const FILE_TICKER: &str = r#"
+`timescale 1ns/1ns
+module file_ticker(p, n, q);
+    inout p, n;
+    electrical p, n;
+    output q;
+    reg q, clk;
+    integer count, fd;
+    initial begin
+        clk = 0; q = 0; count = 0;
+        fd = $fopen("edges.txt", "w");
+        $dumpfile("ticker.vcd");
+        $dumpvars;
+    end
+    always #5 clk = ~clk;
+    always @(posedge clk) begin
+        q <= ~q;
+        count = count + 1;
+        $fdisplay(fd, "edge %0d at %0t", count, $time);
+        if (count == 7) begin
+            $fclose(fd);
+            $finish(1);
+        end
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// Design P2 sections 4.3 and 5.3: file writes land only when a trial is
+/// accepted, so a run whose step controller throws timepoints away writes
+/// exactly the files a run that throws none away writes — the design's own
+/// file and its value change dump alike — under the run directory.
+#[test]
+fn a_rolled_back_trial_writes_nothing_to_its_files() {
+    let model = ModelFile::new("file_ticker", FILE_TICKER);
+    let deck = ticker_deck(&model).replace("ticker\n", "file_ticker\n");
+    let run = |max_step: f64, name: &str| {
+        let directory = std::env::temp_dir().join(format!(
+            "rspice-hdl-mixed-files-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut config = SimulationConfig::default();
+        config.hdl.run_directory = Some(directory.clone());
+        let engine = Engine::new(config);
+        let netlist = Netlist::parse(&deck).expect("the deck parses");
+        engine
+            .run_with_outcome(&rspice_core::NoAbort, |engine, signal| {
+                engine.run_tran_with_abort(&netlist, 200.0e-9, max_step, signal)
+            })
+            .expect("the run completes");
+        let rejections = engine.convergence_quality().timestep_reductions;
+        let read = |file: &str| std::fs::read_to_string(directory.join(file)).unwrap();
+        (read("edges.txt"), read("ticker.vcd"), rejections)
+    };
+    let (coarse_edges, coarse_dump, rejections) = run(4.0e-9, "coarse");
+    let (fine_edges, fine_dump, _) = run(2.0e-11, "fine");
+    assert!(
+        rejections > 0,
+        "this test is vacuous unless the coarse run rejected timepoints"
+    );
+    assert_eq!(coarse_edges, fine_edges);
+    assert_eq!(coarse_dump, fine_dump);
+    let expected: String = (1..=7)
+        .map(|count| format!("edge {count} at {}\n", 10 * count - 5))
+        .collect();
+    assert_eq!(coarse_edges, expected);
+    let dump = rspice_core::io::vcd::parse_vcd_reader(coarse_dump.as_bytes())
+        .unwrap_or_else(|error| panic!("{error}:\n{coarse_dump}"));
+    let clk = dump
+        .signals
+        .iter()
+        .find(|signal| signal.variables[0].name == "clk")
+        .expect("clk is dumped");
+    assert_eq!(clk.changes.len(), 14, "time zero and thirteen toggles");
+}
+
 // ---------------------------------------------------------------------------
 // Cross-domain events and values
 // ---------------------------------------------------------------------------

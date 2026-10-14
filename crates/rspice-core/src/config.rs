@@ -388,23 +388,11 @@ impl HdlRunConfig {
     }
 
     /// The refusal for the first option set away from its default whose
-    /// behaviour has not landed. The run directory and unrestricted I/O are
-    /// P2 lane L5's; delay selection, path delays and timing checks L6's;
-    /// library maps L8's. The token says which; the text names the feature.
+    /// behaviour has not landed. Delay selection, path delays and timing
+    /// checks are P2 lane L6's; library maps L8's. The token says which; the
+    /// text names the feature.
     fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
-        let (capability, option, reason) = if self.run_directory.is_some() {
-            (
-                "hdl.option.rundir",
-                "the HDL run directory (`--hdl-run-dir`, `.options hdl_rundir`)",
-                "HDL file I/O is not implemented",
-            )
-        } else if self.unrestricted_io {
-            (
-                "hdl.option.unrestricted_io",
-                "`--hdl-unrestricted-io`",
-                "HDL file I/O is not implemented",
-            )
-        } else if self.delay_select != HdlDelaySelect::Typ {
+        let (capability, option, reason) = if self.delay_select != HdlDelaySelect::Typ {
             (
                 "hdl.option.delay_select",
                 "min:typ:max delay selection (`--hdl-delay-select`, `.options hdl_delay_select`)",
@@ -1462,23 +1450,16 @@ mod timeint_config_tests {
         HdlRunConfig::default()
             .validate()
             .expect("the defaults are valid");
+        // HDL file I/O has landed: its run directory and confinement are
+        // ordinary options now.
+        HdlRunConfig {
+            run_directory: Some("out".into()),
+            unrestricted_io: true,
+            ..HdlRunConfig::default()
+        }
+        .validate()
+        .expect("the file I/O options are valid");
         for (config, token, feature) in [
-            (
-                HdlRunConfig {
-                    run_directory: Some("out".into()),
-                    ..HdlRunConfig::default()
-                },
-                "hdl.option.rundir",
-                "HDL file I/O is not implemented",
-            ),
-            (
-                HdlRunConfig {
-                    unrestricted_io: true,
-                    ..HdlRunConfig::default()
-                },
-                "hdl.option.unrestricted_io",
-                "HDL file I/O is not implemented",
-            ),
             (
                 HdlRunConfig {
                     delay_select: HdlDelaySelect::Min,

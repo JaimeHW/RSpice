@@ -1,5 +1,5 @@
-//! Resolution, snapshot reads and commit-time writes (design P2 section
-//! 4.3).
+//! Resolution, confinement, snapshot reads and commit-time writes (design P2
+//! section 4.3).
 
 use super::*;
 
@@ -14,7 +14,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn options(directory: &Path, target: HdlFileTarget) -> HdlFileOptions {
-    HdlFileOptions::new(Some(directory), Arc::new(HdlFileStore::new(target)))
+    HdlFileOptions::new(Some(directory), false, Arc::new(HdlFileStore::new(target)))
 }
 
 fn read_all(file: &mut OpenFile) -> Vec<u8> {
@@ -51,11 +51,63 @@ fn relative_names_resolve_against_the_run_directory() {
     // A relative run directory is the working directory's.
     let relative = HdlFileOptions::new(
         Some(Path::new("out")),
+        false,
         Arc::new(HdlFileStore::new(HdlFileTarget::Memory)),
     );
     assert_eq!(
         relative.run_directory,
         normalize(&std::env::current_dir().unwrap().join("out"))
+    );
+}
+
+#[test]
+fn writes_stay_inside_the_run_directory() {
+    let run = scratch("confine");
+    let confined = options(&run, HdlFileTarget::Memory);
+    assert_eq!(
+        confined.resolve_write("sub/out.txt").unwrap(),
+        run.join("sub").join("out.txt")
+    );
+    assert_eq!(
+        confined.resolve_write("sub/../out.txt").unwrap(),
+        run.join("out.txt")
+    );
+    let inside = run.join("abs.txt");
+    assert_eq!(
+        confined.resolve_write(inside.to_str().unwrap()).unwrap(),
+        inside
+    );
+    for escape in [
+        "../out.txt".to_owned(),
+        "sub/../../out.txt".to_owned(),
+        run.parent()
+            .unwrap()
+            .join("abs.txt")
+            .to_string_lossy()
+            .into_owned(),
+        ".".to_owned(),
+    ] {
+        let error = confined.resolve_write(&escape).unwrap_err();
+        assert!(
+            error.contains("outside the run directory"),
+            "{escape}: {error}"
+        );
+        assert!(error.contains("--hdl-unrestricted-io"), "{error}");
+    }
+    let mut files = HdlFiles::default();
+    assert_eq!(
+        files.open(&confined, "../out.txt", Some("w")),
+        Err(OpenFailure::Warn(
+            confined.resolve_write("../out.txt").unwrap_err()
+        ))
+    );
+    let unrestricted = HdlFileOptions {
+        unrestricted: true,
+        ..confined
+    };
+    assert_eq!(
+        unrestricted.resolve_write("../out.txt").unwrap(),
+        run.parent().unwrap().join("out.txt")
     );
 }
 

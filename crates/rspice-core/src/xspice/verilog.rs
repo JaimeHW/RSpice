@@ -681,6 +681,8 @@ pub struct HdlTestbenchOptions {
     /// Where relative HDL file paths resolve; the working directory when
     /// absent.
     pub run_directory: Option<std::path::PathBuf>,
+    /// Let file writes leave the run directory (`--hdl-unrestricted-io`).
+    pub unrestricted_io: bool,
     /// Write the design's files to disk. Otherwise they stay in memory: the
     /// report's `File` records carry them, and the design reads back what it
     /// wrote, but nothing on disk changes.
@@ -874,6 +876,7 @@ pub fn run_digital_testbench(
         seed: options.seed,
         files: effects::files::HdlFileOptions::new(
             options.run_directory.as_deref(),
+            options.unrestricted_io,
             Arc::new(effects::files::HdlFileStore::new(target)),
         ),
     });

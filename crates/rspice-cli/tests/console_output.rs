@@ -346,18 +346,83 @@ fn unsupported_hdl_options_are_refused_as_not_supported_yet() {
         "hdl.option.delay_select",
         "min:typ:max delay selection",
     );
-    refused(
-        &["--hdl-run-dir", "."],
-        "hdl.option.rundir",
-        "HDL file I/O is not implemented",
-    );
-    refused(
-        &["--hdl-unrestricted-io"],
-        "hdl.option.unrestricted_io",
-        "HDL file I/O is not implemented",
-    );
     hdl_console_deck(&directory, ".options hdl_libmap=\"lib.map\"\n");
     refused(&[], "hdl.option.libmap", "library maps are not implemented");
     let output = rspice_in(&directory, &["--quiet", "run", "talker.cir", "N=4"]);
     assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+/// Design P2 section 4.3: a design's relative file names resolve against the
+/// deck's directory, or `--hdl-run-dir`; a write that would leave that
+/// directory fails as `$fopen` failures do (0, with a located warning) unless
+/// the run passes `--hdl-unrestricted-io`.
+#[test]
+fn hdl_files_resolve_against_the_run_directory_and_stay_inside_it() {
+    let root = common::test_dir("hdl_files");
+    let deck = root.join("deck");
+    std::fs::create_dir_all(deck.join("sub")).unwrap();
+    std::fs::write(
+        deck.join("writer.va"),
+        "`timescale 1ns/1ns\n\
+         module writer(p, n);\n\
+         \x20 inout p, n;\n\
+         \x20 electrical p, n;\n\
+         \x20 integer fd, up;\n\
+         \x20 initial begin\n\
+         \x20   fd = $fopen(\"out.txt\", \"w\");\n\
+         \x20   $fdisplay(fd, \"hello %0d\", 5);\n\
+         \x20   $fclose(fd);\n\
+         \x20   up = $fopen(\"../escape.txt\", \"w\");\n\
+         \x20   $display(\"escape=%0d\", up != 0);\n\
+         \x20   if (up != 0) $fclose(up);\n\
+         \x20 end\n\
+         \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    std::fs::write(
+        deck.join("writer.cir"),
+        "* HDL files\nx1 p 0 writer\nrp p 0 1k\n.va \"writer.va\" writer\n.tran 1n 5n\n.end\n",
+    )
+    .unwrap();
+    // From the root: the deck's directory is the run directory.
+    let output = rspice_in(&root, &["--quiet", "run", "deck/writer.cir"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        std::fs::read_to_string(deck.join("out.txt")).unwrap(),
+        "hello 5\n"
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("escape=0\n"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("outside the run directory") && stderr.contains("writer.va:10"),
+        "{stderr}"
+    );
+    assert!(!root.join("escape.txt").exists());
+
+    let output = rspice_in(
+        &root,
+        &[
+            "--quiet",
+            "run",
+            "deck/writer.cir",
+            "--hdl-run-dir",
+            "deck/sub",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(
+        std::fs::read_to_string(deck.join("sub").join("out.txt")).unwrap(),
+        "hello 5\n"
+    );
+    // `deck/sub/../escape.txt` is `deck/escape.txt`, outside `deck/sub`.
+    assert!(!deck.join("escape.txt").exists());
+
+    let output = rspice_in(
+        &root,
+        &["--quiet", "run", "deck/writer.cir", "--hdl-unrestricted-io"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("escape=1\n"));
+    assert!(root.join("escape.txt").exists());
 }

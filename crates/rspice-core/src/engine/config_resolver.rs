@@ -524,7 +524,14 @@ fn resolve_hdl_options(hdl: &mut crate::config::HdlRunConfig, options: &NetlistS
     if hdl.run_directory.is_none()
         && let Some(directory) = &options.hdl_rundir
     {
-        hdl.run_directory = Some(directory.into());
+        // A deck's relative run directory is relative to the deck, as its
+        // other file references are; the command line's to the working
+        // directory.
+        let directory = std::path::PathBuf::from(directory);
+        hdl.run_directory = Some(match &hdl.deck_directory {
+            Some(deck) if directory.is_relative() => deck.join(directory),
+            _ => directory,
+        });
     }
     if hdl.delay_select == crate::config::HdlDelaySelect::Typ
         && let Some(selection) = options.hdl_delay_select
