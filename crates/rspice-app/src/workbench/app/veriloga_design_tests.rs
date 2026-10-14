@@ -406,17 +406,23 @@ pub(super) fn wait_for_compile(ctx: &egui::Context, app: &mut RSpiceApp) {
 }
 
 /// Whether the frame stated `value` for the property row labelled `label`.
-fn states(output: &egui::FullOutput, label: &str, value: &str) -> bool {
-    output
-        .platform_output
-        .accesskit_update
-        .as_ref()
-        .is_some_and(|update| {
-            update
-                .nodes
-                .iter()
-                .any(|(_, node)| node.label() == Some(label) && node.value() == Some(value))
-        })
+/// Whether `shape` paints an error count ("1 error", "3 errors"), as the
+/// inspector's diagnostics section heads a failed compile.
+fn paints_error_count(shape: &egui::Shape) -> bool {
+    match shape {
+        egui::Shape::Vec(shapes) => shapes.iter().any(paints_error_count),
+        egui::Shape::Text(painted) => {
+            painted
+                .galley
+                .text()
+                .split_once(' ')
+                .is_some_and(|(count, word)| {
+                    count.parse::<usize>().is_ok_and(|count| count > 0)
+                        && matches!(word, "error" | "errors")
+                })
+        }
+        _ => false,
+    }
 }
 
 /// A compile is of the closure the click took. Text typed after the click is
@@ -485,7 +491,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
 }
 
 /// A compile that fails says so where the reader already is: the inspector's
-/// compile status, the editor's diagnostics and the Problems list, with
+/// diagnostics, the editor's diagnostics and the Problems list, with
 /// nothing to open first.
 #[test]
 fn a_failed_compile_is_on_screen_without_opening_anything() {
@@ -522,14 +528,12 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
         .is_empty(),
         "and are the editor's diagnostics for the source in front"
     );
-    let messages = app.state.ui.messages();
     assert!(
-        states(
-            &output,
-            &messages.text(crate::workbench::MessageId::VerilogACompileStatus),
-            &messages.text(crate::workbench::MessageId::VerilogAStatusFailed),
-        ),
-        "the inspector states the failure"
+        output
+            .shapes
+            .iter()
+            .any(|clipped| paints_error_count(&clipped.shape)),
+        "the inspector's diagnostics state the failure"
     );
     assert!(
         app.state
