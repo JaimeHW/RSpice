@@ -134,26 +134,3 @@ pub fn pane_footer(ui: &mut Ui, text: &str) {
         );
     });
 }
-
-/// The `.seclab` section label: small mono text painted as written (sentence
-/// case), baseline near the strip bottom so it caps the list section that
-/// follows.
-pub fn pane_section_label(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    let galley = ui.fonts_mut(|f| {
-        f.layout_no_wrap(
-            text.to_owned(),
-            theme::mono(9.5, FontWeight::Medium),
-            t.color.text_faint,
-        )
-    });
-    ui.painter().galley(
-        pos2(rect.left() + 10.0, rect.bottom() - galley.size().y - 2.0),
-        galley,
-        t.color.text_faint,
-    );
-}

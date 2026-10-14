@@ -3,22 +3,25 @@
 
 use egui::{Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::panels::{PROPERTY_ROW_PAD, property_row_columns};
+use crate::panels::{panel_inset, property_row_columns, property_row_height};
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
 /// Render a measurement table across the available width.
 ///
-/// Its columns are a property row's columns: a table of measurements sits in
-/// the same inspector as the rows naming what was measured, and a name or a
-/// value starting a few points off theirs reads as a second, misaligned grid.
+/// Its columns and its row height are a property row's: a table of
+/// measurements sits in the same inspector as the rows naming what was
+/// measured, and a name or a value starting a few points off theirs, or a row
+/// a few points taller, reads as a second, misaligned grid.
 pub fn measurement_table(ui: &mut Ui, rows: &[(&str, &str)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
+    let pad = panel_inset(ui);
+    let row_height = property_row_height(ui);
 
     for (i, (name, value)) in rows.iter().enumerate() {
-        let (name_width, gap, value_width) = property_row_columns(width);
+        let (name_width, gap, value_width) = property_row_columns(width - 2.0 * pad);
         let name_galley = ui.painter().layout(
             (*name).to_owned(),
             theme::sans(tokens::FS_1, FontWeight::Regular),
@@ -31,7 +34,7 @@ pub fn measurement_table(ui: &mut Ui, rows: &[(&str, &str)]) {
             c.text,
             value_width,
         );
-        let row_h = (name_galley.size().y.max(value_galley.size().y) + 8.0).max(25.0);
+        let row_h = (name_galley.size().y.max(value_galley.size().y) + 8.0).max(row_height);
         let (rect, response) = ui.allocate_exact_size(vec2(width, row_h), egui::Sense::hover());
         response.widget_info(|| {
             WidgetInfo::labeled(
@@ -48,12 +51,12 @@ pub fn measurement_table(ui: &mut Ui, rows: &[(&str, &str)]) {
         }
         let painter = ui.painter();
         let name_rect = egui::Rect::from_min_max(
-            egui::pos2(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-            egui::pos2(rect.left() + PROPERTY_ROW_PAD + name_width, rect.bottom()),
+            egui::pos2(rect.left() + pad, rect.top()),
+            egui::pos2(rect.left() + pad + name_width, rect.bottom()),
         );
         let value_rect = egui::Rect::from_min_max(
             egui::pos2(name_rect.right() + gap, rect.top()),
-            egui::pos2(rect.right() - PROPERTY_ROW_PAD, rect.bottom()),
+            egui::pos2(rect.right() - pad, rect.bottom()),
         );
         painter.with_clip_rect(name_rect).galley(
             egui::pos2(

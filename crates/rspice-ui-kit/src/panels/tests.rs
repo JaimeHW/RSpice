@@ -223,6 +223,7 @@ fn semantic_status_marks_are_font_independent_vector_geometry() {
 
 #[test]
 fn section_header_uses_measured_copy_before_eliding() {
+    use section::{SECTION_HEADER_COLUMN_GAP, section_header_column_widths, section_header_wraps};
     let (title, meta) = section_header_column_widths(210.0, 47.0, 91.0, true);
     assert_eq!(meta, 91.0);
     assert!((title + SECTION_HEADER_COLUMN_GAP + meta - 210.0).abs() <= 0.001);
@@ -232,6 +233,10 @@ fn section_header_uses_measured_copy_before_eliding() {
 
 #[test]
 fn overconstrained_section_header_wraps_instead_of_eliding_both_columns() {
+    use section::{
+        SECTION_HEADER_COLUMN_GAP, section_header_column_widths, section_header_full_text,
+        section_header_wraps,
+    };
     let (title, meta) = section_header_column_widths(100.0, 80.0, 80.0, true);
     assert!((title - 50.6).abs() <= 0.001);
     assert!((meta - 41.4).abs() <= 0.001);
@@ -429,7 +434,7 @@ fn long_read_only_cells_do_not_reflow_property_rows() {
         });
     });
 
-    assert_eq!(short_height, PROPERTY_ROW_MIN_H);
+    assert_eq!(short_height, PANEL_ROW_H);
     assert_eq!(long_value_height, short_height);
     assert_eq!(long_label_height, short_height);
 }
@@ -440,8 +445,8 @@ fn narrow_property_rows_keep_the_proportional_label_split() {
     // in-surface inspector is 330. None of them reach the cap, so every
     // narrow property list lays out exactly as it did before the cap.
     for width in [278.0_f32, 281.6, 312.0, 330.0, 440.0] {
-        let (label_column, gap, value_column) = property_row_columns(width);
-        let inner = width - 2.0 * PROPERTY_ROW_PAD;
+        let inner = width - 2.0 * PANEL_INSET;
+        let (label_column, gap, value_column) = property_row_columns(inner);
         let columns = inner - PROPERTY_ROW_GAP;
         assert!(
             (label_column - columns * PROPERTY_LABEL_FRACTION).abs() <= 0.001,
@@ -456,8 +461,8 @@ fn wide_property_rows_stop_pushing_the_value_column_rightwards() {
     // A two-column dialog that collapses at its 820 pt breakpoint hands its
     // aside the full dialog width. Without the cap each value would start
     // ~40% across, leaving a gap that reads as unfinished layout.
-    let inner = 780.0 - 2.0 * PROPERTY_ROW_PAD;
-    let (label_column, gap, value_column) = property_row_columns(780.0);
+    let inner = 780.0 - 2.0 * PANEL_INSET;
+    let (label_column, gap, value_column) = property_row_columns(inner);
     assert_eq!(label_column, PROPERTY_LABEL_MAX_W);
     assert!(label_column < (inner - PROPERTY_ROW_GAP) * PROPERTY_LABEL_FRACTION);
     assert!((label_column + gap + value_column - inner).abs() <= 0.001);
@@ -508,27 +513,15 @@ fn every_section_header_and_field_label_paints_its_title_verbatim() {
             _ => {}
         }
     }
-    const TITLE: &str = "Run history for DC sweep";
+    const TITLE: &str = "Simulation parameters";
     type Header = fn(&mut Ui);
-    let headers: [(&str, Header); 9] = [
+    let headers: [(&str, Header); 5] = [
         ("section_header", |ui| section_header(ui, TITLE, Some("3"))),
         ("section_header_explained", |ui| {
             section_header_explained(ui, TITLE, "3", "Three runs")
         }),
-        ("schematic_section_header", |ui| {
-            schematic_section_header(ui, TITLE, None)
-        }),
-        ("inspector::section_header", |ui| {
-            inspector::section_header(ui, TITLE, None)
-        }),
-        ("inspector::schematic_section_header_action", |ui| {
-            let _ = inspector::schematic_section_header_action(ui, TITLE, "Clear", true);
-        }),
-        ("widgets::section_header", |ui| {
-            let _ = crate::widgets::section_header(ui, TITLE, Some("Clear"));
-        }),
-        ("widgets::pane_section_label", |ui| {
-            crate::widgets::pane_section_label(ui, TITLE)
+        ("section_header_action", |ui| {
+            let _ = section_header_action(ui, TITLE, "Properties\u{2026}", true);
         }),
         ("code_inspector_section", |ui| {
             code_inspector_section(ui, TITLE, Some("3"), None, |_| {})
@@ -793,10 +786,10 @@ fn a_code_inspector_section_paints_no_status_dot() {
     }
 }
 
-/// An inspector problem starts on the inset a note starts on, with its words
-/// after the mark.
+/// A problem line starts on the inset a note starts on, with its words after
+/// the mark.
 #[test]
-fn an_inspector_problem_sits_on_the_note_inset() {
+fn a_problem_line_sits_on_the_note_inset() {
     let ctx = egui::Context::default();
     crate::Theme::default().apply(&ctx);
     let mut panel_left = 0.0;
@@ -806,7 +799,7 @@ fn an_inspector_problem_sits_on_the_note_inset() {
                 ui.set_width(280.0);
                 panel_left = ui.max_rect().left();
                 inspector::muted_inspector_copy(ui, "A note");
-                inspector::inspector_problem(ui, Problem::Warning, "A problem");
+                problem_line(ui, Problem::Warning, "A problem");
             });
         })
         .shapes;
@@ -824,7 +817,7 @@ fn an_inspector_problem_sits_on_the_note_inset() {
         note.pos,
         problem.pos
     );
-    assert!((note.pos.x - panel_left - inspector::INSPECTOR_TEXT_INSET).abs() < 0.5);
+    assert!((note.pos.x - panel_left - PANEL_INSET).abs() < 0.5);
 }
 
 /// A header too narrow for its title and metadata side by side sets the
@@ -843,7 +836,7 @@ fn a_wrapped_section_header_sets_its_metadata_under_the_title() {
                     // The band ends where the cursor stops, with no spacing.
                     ui.spacing_mut().item_spacing.y = 0.0;
                     let top = ui.cursor().top();
-                    schematic_section_header(ui, "Drawing sheet", Some(meta));
+                    section_header(ui, "Drawing sheet", Some(meta));
                     header = Rect::from_min_max(
                         Pos2::new(ui.min_rect().left(), top),
                         Pos2::new(ui.min_rect().right(), ui.cursor().top()),
@@ -874,4 +867,228 @@ fn a_wrapped_section_header_sets_its_metadata_under_the_title() {
         (above - below).abs() <= 2.0,
         "unbalanced: {above} above, {below} below"
     );
+}
+
+/// Every text shape a pass painted, wherever it is nested.
+fn all_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<egui::epaint::TextShape> {
+    fn walk(shape: &Shape, out: &mut Vec<egui::epaint::TextShape>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            Shape::Text(text) => out.push(text.clone()),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for shape in shapes {
+        walk(&shape.shape, &mut out);
+    }
+    out
+}
+
+/// Every section header helper paints the one header: the same height, the
+/// same band reaching the panel's edges, and its title in the same face, size
+/// and colour, starting on the panel inset — inside a panel body and out of
+/// one.
+#[test]
+fn every_section_header_helper_paints_the_same_header() {
+    const TITLE: &str = "Simulation parameters";
+    type Header = fn(&mut Ui);
+    let headers: [(&str, Header); 4] = [
+        ("section_header", |ui| {
+            section_header(ui, TITLE, Some("editable"))
+        }),
+        ("section_header_explained", |ui| {
+            section_header_explained(ui, TITLE, "editable", "Every field can be typed into.")
+        }),
+        ("section_header_action", |ui| {
+            let _ = section_header_action(ui, TITLE, "Properties\u{2026}", true);
+        }),
+        ("code_inspector_section", |ui| {
+            code_inspector_section(ui, TITLE, Some("editable"), None, |_| {});
+        }),
+    ];
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let palette = Tokens::default().color;
+    let band = Color32::from_rgba_unmultiplied(
+        palette.bg_panel_2.r(),
+        palette.bg_panel_2.g(),
+        palette.bg_panel_2.b(),
+        204,
+    );
+    for in_body in [false, true] {
+        let mut seen: Option<(f32, egui::FontId, Color32, f32, Rect)> = None;
+        for (name, header) in headers {
+            let mut panel = Rect::NOTHING;
+            let output = ctx.run_ui(Default::default(), |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        ui.allocate_ui(Vec2::new(312.0, 200.0), |ui| {
+                            panel = ui.max_rect();
+                            if in_body {
+                                panel_body(ui, |ui| header(ui));
+                            } else {
+                                header(ui);
+                            }
+                        });
+                    });
+            });
+            let title = all_texts(&output.shapes)
+                .into_iter()
+                .find(|text| text.galley.text() == TITLE)
+                .unwrap_or_else(|| panic!("{name} did not paint its title"));
+            let section = &title.galley.job.sections[0].format;
+            let bands: Vec<Rect> = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    Shape::Rect(rect) if rect.fill == band => Some(rect.rect),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(bands.len(), 1, "{name} (body: {in_body}) painted {bands:?}");
+            let band = bands[0];
+            assert!(
+                (band.left() - panel.left()).abs() < 0.5 && (band.right() - 312.0).abs() < 0.5,
+                "{name} (body: {in_body}) band {band:?} does not reach the panel's edges"
+            );
+            assert!(
+                (title.pos.x - panel.left() - PANEL_INSET).abs() < 0.5,
+                "{name} (body: {in_body}) title at {}",
+                title.pos.x
+            );
+            let painted = (
+                band.height(),
+                section.font_id.clone(),
+                section.color,
+                title.pos.y - band.top(),
+                band,
+            );
+            assert_eq!(painted.0, PANEL_SECTION_H, "{name} (body: {in_body})");
+            match &seen {
+                None => seen = Some(painted),
+                Some(first) => {
+                    assert_eq!(first.0, painted.0, "{name} (body: {in_body}) height");
+                    assert_eq!(first.1, painted.1, "{name} (body: {in_body}) title face");
+                    assert_eq!(first.2, painted.2, "{name} (body: {in_body}) title colour");
+                    assert!(
+                        (first.3 - painted.3).abs() < 0.5,
+                        "{name} (body: {in_body}) title baseline"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Whatever is placed in a panel body starts on the panel inset and stops on
+/// it — a bare label, a button row, a field, a note, a problem, a property
+/// row — because the body put it there, and a field with no width of its own
+/// spans the body. The rows stack with no gap; a header leaves its one gap
+/// under itself.
+#[test]
+fn a_widget_placed_in_a_panel_body_starts_on_the_inset() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut field = Rect::NOTHING;
+    let mut button = Rect::NOTHING;
+    let mut rows = Vec::new();
+    let mut text = String::from("expression");
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                ui.allocate_ui(Vec2::new(312.0, 400.0), |ui| {
+                    panel_body(ui, |ui| {
+                        section_header(ui, "Debug", Some("inactive"));
+                        rows.push(property_row(ui, "Current line", "\u{2014}").rect);
+                        rows.push(property_row(ui, "Exception policy", "uncaught").rect);
+                        ui.label("Breakpoints");
+                        button = crate::widgets::Button::new("Start").show(ui).rect;
+                        field = ui.text_edit_singleline(&mut text).rect;
+                        inspector::muted_inspector_copy(ui, "A note");
+                        problem_line(ui, Problem::Warning, "A problem");
+                    });
+                });
+            });
+    });
+    let texts = all_texts(&output.shapes);
+    let left_of = |wanted: &str| {
+        texts
+            .iter()
+            .find(|text| text.galley.text() == wanted)
+            .map(|text| text.pos.x)
+            .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+    };
+    for wanted in [
+        "Debug",
+        "Current line",
+        "Exception policy",
+        "Breakpoints",
+        "A note",
+    ] {
+        assert!(
+            (left_of(wanted) - PANEL_INSET).abs() < 0.5,
+            "{wanted:?} starts at {}",
+            left_of(wanted)
+        );
+    }
+    assert!(
+        (left_of("A problem") - PANEL_INSET - crate::widgets::PROBLEM_MARK_ADVANCE).abs() < 0.5
+    );
+    assert!(
+        (button.left() - PANEL_INSET).abs() < 0.5,
+        "button {button:?}"
+    );
+    assert!((field.left() - PANEL_INSET).abs() < 0.5, "field {field:?}");
+    assert!(
+        (field.right() - (312.0 - PANEL_INSET)).abs() < 0.5,
+        "a field with no width of its own spans the body: {field:?}"
+    );
+    let band = output
+        .shapes
+        .iter()
+        .find_map(|clipped| match &clipped.shape {
+            Shape::Rect(rect) if rect.rect.height() == PANEL_SECTION_H => Some(rect.rect),
+            _ => None,
+        })
+        .expect("the header painted its band");
+    assert_eq!(band.left(), 0.0, "the band reaches the panel's edge");
+    assert_eq!(rows[0].top() - band.bottom(), PANEL_HEADER_GAP);
+    assert_eq!(rows[0].height(), PANEL_ROW_H);
+    assert_eq!(rows[1].top(), rows[0].bottom(), "rows stack with no gap");
+}
+
+/// A row painted outside any panel body keeps the inset itself, so a property
+/// list in a dialog lines up exactly as one in a panel does.
+#[test]
+fn a_row_outside_a_panel_body_keeps_the_inset_itself() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut lefts = Vec::new();
+    for in_body in [false, true] {
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    ui.allocate_ui(Vec2::new(312.0, 100.0), |ui| {
+                        if in_body {
+                            panel_body(ui, |ui| {
+                                property_row(ui, "Instance", "D1");
+                            });
+                        } else {
+                            property_row(ui, "Instance", "D1");
+                        }
+                    });
+                });
+        });
+        let label = all_texts(&output.shapes)
+            .into_iter()
+            .find(|text| text.galley.text() == "Instance")
+            .expect("label painted");
+        lefts.push(label.pos.x);
+    }
+    assert!((lefts[0] - PANEL_INSET).abs() < 0.5, "{lefts:?}");
+    assert!((lefts[0] - lefts[1]).abs() < 0.5, "{lefts:?}");
 }

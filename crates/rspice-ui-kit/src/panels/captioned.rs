@@ -6,10 +6,10 @@
 //! not it has a unit, and so `Ω` — which the bundled mono face does not carry
 //! — paints. The editable text stops short of it.
 
-use egui::{Align2, Color32, Galley, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
+use egui::{Color32, Galley, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2};
 use std::sync::Arc;
 
-use super::{PROPERTY_ROW_PAD, elide_text, property_row_columns, property_row_height};
+use super::{elide_text, row_label, row_slot};
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 use crate::widgets::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
@@ -27,8 +27,6 @@ pub struct PropertyRowCaption<'a> {
 /// Inset between a field's frame and its text, and between its unit and its
 /// trailing edge.
 const FIELD_INSET: f32 = 8.0;
-/// Inset between a field's frame and its text, above and below.
-const FIELD_INSET_Y: i8 = 4;
 /// Gap between a value and its unit.
 const UNIT_GAP: f32 = 4.0;
 
@@ -58,16 +56,7 @@ fn unit_galley(ui: &Ui, unit: Option<&str>, size: f32, color: Color32) -> Option
 
 /// The label column of a row, with the description on hover.
 fn caption_label(ui: &mut Ui, label_rect: Rect, label: &str, description: Option<&str>) {
-    let t = Tokens::get(ui.ctx());
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let shown = elide_text(ui, label, &font, label_rect.width());
-    ui.painter().with_clip_rect(label_rect).text(
-        Pos2::new(label_rect.left(), label_rect.center().y),
-        Align2::LEFT_CENTER,
-        shown,
-        font,
-        t.color.text_dim,
-    );
+    row_label(ui, label_rect, label);
     if let Some(description) = description.filter(|description| !description.is_empty()) {
         let _ = ui
             .interact(
@@ -90,41 +79,26 @@ pub fn property_row_input_captioned(
     caption: PropertyRowCaption<'_>,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
-    let height = property_row_height(ui);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
-    );
-    caption_label(ui, label_rect, label, caption.description);
-    let value_rect = Rect::from_min_max(
-        Pos2::new(
-            label_rect.right() + gap,
-            rect.center().y - t.metrics.ctl_h * 0.5,
-        ),
-        Pos2::new(
-            rect.right() - PROPERTY_ROW_PAD,
-            rect.center().y + t.metrics.ctl_h * 0.5,
-        ),
-    );
+    let (slot, _) = row_slot(ui, None, Sense::hover());
+    caption_label(ui, slot.label, label, caption.description);
+    let value_rect = slot.field();
     let value_size = egui::TextStyle::Monospace.resolve(ui.style()).size;
     let unit = unit_galley(ui, caption.unit, value_size, t.color.text_faint);
     let unit_room = unit
         .as_ref()
         .map_or(0.0, |galley| galley.size().x + UNIT_GAP);
     let trailing = (FIELD_INSET + unit_room).min(f32::from(i8::MAX));
+    let field_inset_y = super::field_margin(ui, value_rect, 0).top;
     let mut edit = egui::TextEdit::singleline(value)
         .hint_text(hint)
         .font(egui::TextStyle::Monospace)
         .margin(egui::Margin {
             left: FIELD_INSET as i8,
             right: trailing as i8,
-            top: FIELD_INSET_Y,
-            bottom: FIELD_INSET_Y,
+            top: field_inset_y,
+            bottom: field_inset_y,
         })
-        .desired_width(value_column);
+        .desired_width(value_rect.width());
     if invalid {
         edit = edit.text_color(t.color.err);
     }
@@ -136,7 +110,7 @@ pub fn property_row_input_captioned(
         let probe = ui
             .painter()
             .layout_no_wrap("0".to_owned(), value_font, t.color.text);
-        let baseline = response.rect.top() + f32::from(FIELD_INSET_Y) + first_baseline(&probe);
+        let baseline = response.rect.top() + f32::from(field_inset_y) + first_baseline(&probe);
         ui.painter().with_clip_rect(value_rect).galley(
             Pos2::new(
                 response.rect.right() - FIELD_INSET - galley.size().x,
@@ -183,19 +157,10 @@ pub fn property_row_captioned(
     caption: PropertyRowCaption<'_>,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
-    let height = property_row_height(ui);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
-    );
-    caption_label(ui, label_rect, label, caption.description);
-    let value_rect = Rect::from_min_max(
-        Pos2::new(label_rect.right() + gap, rect.top()),
-        Pos2::new(rect.right() - PROPERTY_ROW_PAD, rect.bottom()),
-    );
+    let (slot, response) = row_slot(ui, None, Sense::hover());
+    caption_label(ui, slot.label, label, caption.description);
+    let value_rect = slot.value;
+    let value_column = value_rect.width();
     let unit = unit_galley(ui, caption.unit, tokens::FS_1, t.color.text_faint);
     let unit_room = unit
         .as_ref()
@@ -226,13 +191,11 @@ pub fn property_row_captioned(
         .unit
         .filter(|unit| !unit.is_empty())
         .map_or_else(|| value.to_owned(), |unit| format!("{value} {unit}"));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(label);
-        node.set_value(stated.as_str());
-        if let Some(description) = caption.description {
-            node.set_description(description);
-        }
-    });
+    super::announce_row(ui, &response, label, &stated);
+    if let Some(description) = caption.description {
+        ui.ctx()
+            .accesskit_node_builder(response.id, |node| node.set_description(description));
+    }
     response
 }
 
@@ -251,34 +214,27 @@ pub fn property_row_flagged(
     action: &str,
 ) -> bool {
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
-    let height = property_row_height(ui);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
-    );
-    caption_label(ui, label_rect, label, None);
+    let (slot, _) = row_slot(ui, None, Sense::hover());
+    caption_label(ui, slot.label, label, None);
+    let value_column = slot.value.width();
 
     let action_font = theme::sans(tokens::FS_0, FontWeight::Medium);
     let action_galley = ui
         .painter()
         .layout_no_wrap(action.to_owned(), action_font, t.color.text);
-    let action_size = Vec2::new(
-        action_galley.size().x + 2.0 * FIELD_INSET,
-        t.metrics.ctl_h.min(height),
-    );
-    let action_rect = Rect::from_min_size(
+    // The action is framed like the row's field would be: the field's height,
+    // ending on the inset.
+    let field = slot.field();
+    let action_rect = Rect::from_min_max(
         Pos2::new(
-            rect.right() - PROPERTY_ROW_PAD - action_size.x,
-            rect.center().y - action_size.y * 0.5,
+            field.right() - action_galley.size().x - 2.0 * FIELD_INSET,
+            field.top(),
         ),
-        action_size,
+        field.max,
     );
     let value_rect = Rect::from_min_max(
-        Pos2::new(label_rect.right() + gap, rect.top()),
-        Pos2::new(action_rect.left() - UNIT_GAP, rect.bottom()),
+        Pos2::new(slot.value.left(), slot.rect.top()),
+        Pos2::new(action_rect.left() - UNIT_GAP, slot.rect.bottom()),
     );
     let value_font = theme::mono(tokens::FS_1, FontWeight::Regular);
     let note_font = theme::sans(tokens::FS_0, FontWeight::Regular);

@@ -4,11 +4,21 @@
 //! the shared palette and typography assets, but none of the retired layout's
 //! layout or widget implementations are reused.
 
+mod body;
 mod captioned;
 pub mod inspector;
+mod section;
 
+pub use body::{
+    PANEL_HEADER_GAP, PANEL_INSET, PANEL_ROW_H, PANEL_SECTION_GAP, panel_bleed, panel_body,
+    panel_inset, property_row_height, section_block_gap,
+};
 pub use captioned::{
     PropertyRowCaption, property_row_captioned, property_row_flagged, property_row_input_captioned,
+};
+pub use section::{
+    code_inspector_section, section_header, section_header_action, section_header_explained,
+    subsection_header,
 };
 
 use egui::{Align2, Color32, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
@@ -27,8 +37,8 @@ pub const PANEL_HEADER_H: f32 = 39.0;
 /// Desktop panel tabs use the upgraded mockup's compact 25 px track.
 /// Coarse-pointer layouts still raise this to the shared touch target.
 pub const PANEL_TABS_H: f32 = 25.0;
-/// Section heads keep a 24 px single-line rhythm and grow only when the
-/// title/metadata pair genuinely needs a second line.
+/// A section header's height: one line, and taller only when its title and
+/// metadata genuinely need a second.
 pub const PANEL_SECTION_H: f32 = 24.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -796,241 +806,6 @@ pub fn labeled_icon_button_sized(
     response.on_hover_text(label)
 }
 
-/// A panel section's header: its title as written — sentence case, no
-/// letter tracking — with optional metadata at the trailing edge.
-pub fn section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    section_header_with_typography(ui, title, meta, tokens::FS_0, None);
-}
-
-/// [`section_header`] whose metadata needs a sentence to be read correctly:
-/// `explanation` is the header's hover text in place of its own words.
-pub fn section_header_explained(ui: &mut Ui, title: &str, meta: &str, explanation: &str) {
-    section_header_with_typography(ui, title, Some(meta), tokens::FS_0, Some(explanation));
-}
-
-/// Schematic-dock section heading from the upgraded design mockup.
-///
-/// This stays separate from [`section_header`] so the schematic's 13 px
-/// headings do not silently enlarge unrelated workspaces.
-pub fn schematic_section_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
-    section_header_with_typography(ui, title, meta, tokens::FS_2, None);
-}
-
-fn header_galley(
-    ui: &Ui,
-    text: String,
-    font_id: egui::FontId,
-    color: Color32,
-) -> std::sync::Arc<egui::Galley> {
-    ui.fonts_mut(|fonts| fonts.layout_no_wrap(text, font_id, color))
-}
-
-fn wrapped_header_galley(
-    ui: &Ui,
-    text: String,
-    font_id: egui::FontId,
-    color: Color32,
-    max_width: f32,
-) -> std::sync::Arc<egui::Galley> {
-    let mut job = egui::text::LayoutJob::simple(text, font_id, color, max_width.max(1.0));
-    job.wrap.max_rows = 2;
-    job.wrap.break_anywhere = true;
-    ui.fonts_mut(|fonts| fonts.layout_job(job))
-}
-
-fn section_header_full_text(title: &str, meta: Option<&str>) -> String {
-    meta.map_or_else(|| title.to_owned(), |meta| format!("{title}, {meta}"))
-}
-
-fn section_header_with_typography(
-    ui: &mut Ui,
-    title: &str,
-    meta: Option<&str>,
-    title_size: f32,
-    explanation: Option<&str>,
-) {
-    let t = Tokens::get(ui.ctx());
-    let title_font = theme::sans(title_size, FontWeight::SemiBold);
-    let meta_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let title = title.to_owned();
-    let content_width = (ui.available_width() - 20.0).max(0.0);
-    let title_width = header_galley(ui, title.clone(), title_font.clone(), t.color.text_dim)
-        .size()
-        .x;
-    let meta_width = meta.map_or(0.0, |meta| {
-        ui.painter()
-            .layout_no_wrap(meta.to_owned(), meta_font.clone(), t.color.text_faint)
-            .size()
-            .x
-    });
-    let wraps = section_header_wraps(content_width, title_width, meta_width, meta.is_some());
-    let height = if wraps {
-        PANEL_SECTION_WRAPPED_H
-    } else {
-        PANEL_SECTION_H
-    };
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
-    let accessible_label = section_header_full_text(&title, meta);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            accessible_label.clone(),
-        )
-    });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Heading);
-        node.set_label(accessible_label.clone());
-        node.set_level(3);
-    });
-    let _ = response.on_hover_text(explanation.map_or(accessible_label, str::to_owned));
-    ui.painter().rect_filled(
-        rect,
-        0.0,
-        Color32::from_rgba_unmultiplied(
-            t.color.bg_panel_2.r(),
-            t.color.bg_panel_2.g(),
-            t.color.bg_panel_2.b(),
-            204,
-        ),
-    );
-    ui.painter()
-        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
-    let content_left = rect.left() + 10.0;
-    let content_right = rect.right() - 10.0;
-    let content_width = (content_right - content_left).max(0.0);
-    if wraps {
-        if meta.is_none() {
-            let title_rect = Rect::from_min_max(
-                Pos2::new(content_left, rect.top()),
-                Pos2::new(content_right, rect.bottom()),
-            );
-            let title_galley =
-                wrapped_header_galley(ui, title, title_font, t.color.text_dim, title_rect.width());
-            ui.painter().with_clip_rect(title_rect).galley(
-                Pos2::new(
-                    title_rect.left(),
-                    title_rect.center().y - title_galley.size().y * 0.5,
-                ),
-                title_galley,
-                t.color.text_dim,
-            );
-            return;
-        }
-        // Title over its metadata, both from the left edge and centred as one
-        // block in the band. Right-aligned on a line of its own, the metadata
-        // hung under nothing and read as a layout fault.
-        let title = elide_text(ui, &title, &title_font, content_width);
-        let title_galley = header_galley(ui, title, title_font, t.color.text_dim);
-        let meta = meta.map(|meta| {
-            let meta = elide_text(ui, meta, &meta_font, content_width);
-            ui.painter()
-                .layout_no_wrap(meta, meta_font.clone(), t.color.text_faint)
-        });
-        let line_gap = 2.0;
-        let block_height =
-            title_galley.size().y + meta.as_ref().map_or(0.0, |meta| line_gap + meta.size().y);
-        let top = rect.center().y - block_height * 0.5;
-        let clip = Rect::from_min_max(
-            Pos2::new(content_left, rect.top()),
-            Pos2::new(content_right, rect.bottom()),
-        );
-        let meta_top = top + title_galley.size().y + line_gap;
-        ui.painter().with_clip_rect(clip).galley(
-            Pos2::new(content_left, top),
-            title_galley,
-            t.color.text_dim,
-        );
-        if let Some(meta) = meta {
-            ui.painter().with_clip_rect(clip).galley(
-                Pos2::new(content_left, meta_top),
-                meta,
-                t.color.text_faint,
-            );
-        }
-        return;
-    }
-    let (title_region_width, meta_region_width) =
-        section_header_column_widths(content_width, title_width, meta_width, meta.is_some());
-    let title_right = content_left + title_region_width;
-    let title_rect = Rect::from_min_max(
-        Pos2::new(content_left, rect.top()),
-        Pos2::new(title_right.max(content_left), rect.bottom()),
-    );
-    let title = elide_text(ui, &title, &title_font, title_rect.width());
-    let title_galley = header_galley(ui, title, title_font, t.color.text_dim);
-    ui.painter().with_clip_rect(title_rect).galley(
-        Pos2::new(
-            title_rect.left(),
-            title_rect.center().y - title_galley.size().y * 0.5,
-        ),
-        title_galley,
-        t.color.text_dim,
-    );
-    if let Some(meta) = meta {
-        let meta_rect = Rect::from_min_max(
-            Pos2::new(content_right - meta_region_width, rect.top()),
-            Pos2::new(content_right, rect.bottom()),
-        );
-        let meta = elide_text(ui, meta, &meta_font, meta_rect.width());
-        ui.painter().with_clip_rect(meta_rect).text(
-            meta_rect.right_center(),
-            Align2::RIGHT_CENTER,
-            meta,
-            meta_font,
-            t.color.text_faint,
-        );
-    }
-}
-
-const SECTION_HEADER_COLUMN_GAP: f32 = 8.0;
-const PANEL_SECTION_WRAPPED_H: f32 = 42.0;
-
-fn section_header_wraps(
-    available_width: f32,
-    desired_title_width: f32,
-    desired_meta_width: f32,
-    has_meta: bool,
-) -> bool {
-    let available_width = available_width.max(0.0);
-    desired_title_width > available_width
-        || (has_meta
-            && desired_title_width + SECTION_HEADER_COLUMN_GAP + desired_meta_width
-                > available_width)
-}
-
-/// Allocate a section header from the measured copy instead of a fixed ratio.
-///
-/// Short title/metadata pairs remain complete at the mockup's 228 px navigator
-/// width. Only genuinely over-constrained pairs are elided, with the title
-/// retaining the slightly larger share because it identifies the section.
-fn section_header_column_widths(
-    available_width: f32,
-    desired_title_width: f32,
-    desired_meta_width: f32,
-    has_meta: bool,
-) -> (f32, f32) {
-    let available_width = available_width.max(0.0);
-    if !has_meta {
-        return (available_width, 0.0);
-    }
-
-    let columns_width = (available_width - SECTION_HEADER_COLUMN_GAP).max(0.0);
-    if desired_title_width + desired_meta_width <= columns_width {
-        return (
-            (columns_width - desired_meta_width).max(0.0),
-            desired_meta_width.max(0.0),
-        );
-    }
-
-    let meta_region_width = desired_meta_width.max(0.0).min(columns_width * 0.45);
-    (
-        (columns_width - meta_region_width).max(0.0),
-        meta_region_width,
-    )
-}
-
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     property_row_with_tone(
@@ -1184,13 +959,6 @@ pub fn schematic_property_row_status(
     )
 }
 
-/// Horizontal padding inside a property row.
-///
-/// Every line of text an inspector paints starts at this inset and stops at
-/// it on the right — section titles, notes and the tables beside the rows
-/// included — so the panel reads as one column rather than as blocks set at
-/// slightly different margins.
-pub(crate) const PROPERTY_ROW_PAD: f32 = 10.0;
 /// Gap between a property row's label and value columns.
 const PROPERTY_ROW_GAP: f32 = 8.0;
 /// Share of the column space the label takes while the row is narrow enough
@@ -1206,13 +974,12 @@ const PROPERTY_LABEL_FRACTION: f32 = 0.4;
 /// no label that fits today begins to elide; below roughly 470 px of row it
 /// never binds, leaving inspector docks and narrow asides untouched.
 const PROPERTY_LABEL_MAX_W: f32 = 176.0;
-/// Shortest a property row is ever drawn.
-const PROPERTY_ROW_MIN_H: f32 = 29.0;
 
-/// Column widths shared by every property row so a read-only row and an
-/// editable row in the same list line up to the pixel.
-pub(crate) fn property_row_columns(width: f32) -> (f32, f32, f32) {
-    let inner_width = (width - 2.0 * PROPERTY_ROW_PAD).max(1.0);
+/// Label and value column widths, and the gap between them, for a row whose
+/// text spans `inner_width`: shared by every property row so a read-only row
+/// and an editable row in the same list line up to the pixel.
+pub(crate) fn property_row_columns(inner_width: f32) -> (f32, f32, f32) {
+    let inner_width = inner_width.max(1.0);
     let gap = PROPERTY_ROW_GAP.min(inner_width);
     let columns_width = (inner_width - gap).max(1.0);
     let label_column = (columns_width * PROPERTY_LABEL_FRACTION).min(PROPERTY_LABEL_MAX_W);
@@ -1222,28 +989,17 @@ pub(crate) fn property_row_columns(width: f32) -> (f32, f32, f32) {
 
 /// The horizontal geometry a control row needs to sit inside a property list:
 /// where the label starts, and where the value column it has to line up with
-/// begins. Both measured from the row's left edge.
+/// begins, both measured from the left of a row `width` wide laid out in `ui`.
+/// The value column ends [`panel_inset`] short of the row's right edge.
 ///
 /// A row that carries a live control rather than a painted value cannot use
 /// [`property_row`], but it is read as part of the same block, and a block with
 /// two label columns reads as two blocks. The only honest source for that
 /// offset is the arithmetic the painted rows already use.
-pub fn property_row_control_columns(width: f32) -> (f32, f32) {
-    let (label_column, gap, _) = property_row_columns(width);
-    (PROPERTY_ROW_PAD, PROPERTY_ROW_PAD + label_column + gap)
-}
-
-/// The trailing inset a control row leaves so its right edge meets the value
-/// column's.
-pub const PROPERTY_ROW_TRAILING_PAD: f32 = PROPERTY_ROW_PAD;
-
-/// How tall one editable property row is under the active density.
-///
-/// A surface that lays property rows into a grid has to know a row's height
-/// before it paints one, to size the band the grid sits in. Restating the
-/// arithmetic there would hold until the density tokens next moved.
-pub fn property_row_height(ui: &Ui) -> f32 {
-    Tokens::get(ui.ctx()).metrics.ctl_h.max(PROPERTY_ROW_MIN_H)
+pub fn property_row_control_columns(ui: &Ui, width: f32) -> (f32, f32) {
+    let pad = panel_inset(ui);
+    let (label_column, gap, _) = property_row_columns(width - 2.0 * pad);
+    (pad, pad + label_column + gap)
 }
 
 /// [`property_row_columns`] for a caller that knows how wide its labels are.
@@ -1254,8 +1010,8 @@ pub fn property_row_height(ui: &Ui) -> f32 {
 /// spare, so a grid that has measured its labels states the width they need
 /// and the value takes the rest. The stated width is held to what leaves a
 /// value column worth typing in.
-fn property_row_columns_with(width: f32, label_width: Option<f32>) -> (f32, f32, f32) {
-    let (label_column, gap, value_column) = property_row_columns(width);
+fn property_row_columns_with(inner_width: f32, label_width: Option<f32>) -> (f32, f32, f32) {
+    let (label_column, gap, value_column) = property_row_columns(inner_width);
     let Some(stated) = label_width else {
         return (label_column, gap, value_column);
     };
@@ -1268,13 +1024,95 @@ fn property_row_columns_with(width: f32, label_width: Option<f32>) -> (f32, f32,
 const PROPERTY_VALUE_MIN_W: f32 = 96.0;
 
 /// How wide a property row has to be to show a label `label_width` wide
-/// beside the narrowest value column.
+/// beside the narrowest value column, outside a panel body.
 pub fn property_row_width_for_label(label_width: f32) -> f32 {
-    2.0 * PROPERTY_ROW_PAD + label_width + PROPERTY_ROW_GAP + PROPERTY_VALUE_MIN_W
+    2.0 * PANEL_INSET + label_width + PROPERTY_ROW_GAP + PROPERTY_VALUE_MIN_W
 }
 
-/// Vertical inset above and below a wrapped property row's text.
-const PROPERTY_ROW_WRAP_PAD: f32 = 6.0;
+/// One property row's slot: the whole row, and its label and value columns
+/// on the panel inset.
+#[derive(Debug, Clone, Copy)]
+struct RowSlot {
+    rect: Rect,
+    label: Rect,
+    value: Rect,
+}
+
+impl RowSlot {
+    /// Where a field goes in the row's value column: a pixel in from the
+    /// row's top and bottom.
+    fn field(&self) -> Rect {
+        body::row_field(self.value)
+    }
+}
+
+/// A row's column widths before it is allocated, so a row that measures its
+/// text against its columns can size itself first.
+#[derive(Debug, Clone, Copy)]
+struct RowColumns {
+    pad: f32,
+    width: f32,
+    label: f32,
+    gap: f32,
+    value: f32,
+}
+
+impl RowColumns {
+    fn of(ui: &Ui, label_width: Option<f32>) -> Self {
+        let pad = panel_inset(ui);
+        let width = ui.available_width().max(1.0);
+        let (label, gap, value) = property_row_columns_with(width - 2.0 * pad, label_width);
+        Self {
+            pad,
+            width,
+            label,
+            gap,
+            value,
+        }
+    }
+
+    /// Allocate a row `height` tall on these columns.
+    fn allocate(self, ui: &mut Ui, height: f32, sense: Sense) -> (RowSlot, Response) {
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(self.width, height), sense);
+        let label_left = rect.left() + self.pad;
+        let label = Rect::from_x_y_ranges(label_left..=label_left + self.label, rect.y_range());
+        let value_left = label.right() + self.gap;
+        let value = Rect::from_x_y_ranges(
+            value_left..=(rect.right() - self.pad).max(value_left),
+            rect.y_range(),
+        );
+        (RowSlot { rect, label, value }, response)
+    }
+}
+
+/// A one-line row's slot, `property_row_height` tall.
+fn row_slot(ui: &mut Ui, label_width: Option<f32>, sense: Sense) -> (RowSlot, Response) {
+    let height = property_row_height(ui);
+    RowColumns::of(ui, label_width).allocate(ui, height, sense)
+}
+
+/// Publish a row's bounds and words for assistive technology: the row is
+/// painted rather than laid out from widgets, so nothing else would.
+fn announce_row(ui: &Ui, response: &Response, label: &str, value: &str) {
+    let rect = response.rect;
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label);
+        node.set_value(value);
+        node.set_bounds(egui::accesskit::Rect {
+            x0: rect.min.x.into(),
+            y0: rect.min.y.into(),
+            x1: rect.max.x.into(),
+            y1: rect.max.y.into(),
+        });
+    });
+}
+
+/// The margin a single-line field takes so its text sits centred in `field`.
+fn field_margin(ui: &Ui, field: Rect, horizontal: i8) -> egui::Margin {
+    let text = ui.text_style_height(&egui::TextStyle::Monospace);
+    let vertical = ((field.height() - text) * 0.5).floor().clamp(0.0, 12.0) as i8;
+    egui::Margin::symmetric(horizontal, vertical)
+}
 
 /// Property row whose right-hand column is a sentence or a list rather than a
 /// value.
@@ -1290,36 +1128,58 @@ pub fn property_row_wrapped(ui: &mut Ui, label: &str, text: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let value_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
+    let columns = RowColumns::of(ui, None);
     let label_galley = ui.painter().layout_no_wrap(
-        elide_text(ui, label, &label_font, label_column),
+        elide_text(ui, label, &label_font, columns.label),
         label_font,
         t.color.text_dim,
     );
-    let value_galley = ui
-        .painter()
-        .layout(text.to_owned(), value_font, t.color.text, value_column);
-    let height = (value_galley.size().y + 2.0 * PROPERTY_ROW_WRAP_PAD)
-        .max(t.metrics.ctl_h.max(PROPERTY_ROW_MIN_H));
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let value_galley =
+        ui.painter()
+            .layout(text.to_owned(), value_font, t.color.text, columns.value);
+    // The first line sits where a one-line row's text sits; further lines
+    // grow the row downwards.
+    let row_height = property_row_height(ui);
+    let pad = text_pad(row_height, &label_galley);
+    let height = (value_galley.size().y + 2.0 * pad).max(row_height);
+    let (slot, response) = columns.allocate(ui, height, Sense::hover());
     ui.painter().galley(
-        Pos2::new(
-            rect.left() + PROPERTY_ROW_PAD,
-            rect.top() + PROPERTY_ROW_WRAP_PAD,
-        ),
+        Pos2::new(slot.label.left(), slot.rect.top() + pad),
         label_galley,
         t.color.text_dim,
     );
     ui.painter().galley(
-        Pos2::new(
-            rect.left() + PROPERTY_ROW_PAD + label_column + gap,
-            rect.top() + PROPERTY_ROW_WRAP_PAD,
-        ),
+        Pos2::new(slot.value.left(), slot.rect.top() + pad),
         value_galley,
         t.color.text,
     );
+    announce_row(ui, &response, label, text);
     response
+}
+
+/// A row's label, in its column: secondary sans, centred on the row, elided
+/// when the column is too narrow for it.
+pub(crate) fn row_label(ui: &Ui, column: Rect, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let shown = elide_text(ui, label, &font, column.width());
+    ui.painter().with_clip_rect(column).text(
+        Pos2::new(column.left(), column.center().y),
+        Align2::LEFT_CENTER,
+        shown,
+        font,
+        t.color.text_dim,
+    );
+}
+
+/// Space above a line of text set in a row `row_height` tall so the line sits
+/// centred in it, as a one-line row's text does.
+pub(crate) fn text_pad(row_height: f32, line: &egui::Galley) -> f32 {
+    let first = line
+        .rows
+        .first()
+        .map_or(line.size().y, |row| row.rect().height());
+    ((row_height - first) * 0.5).max(2.0)
 }
 
 /// Editable twin of [`property_row`]: the same label column and value
@@ -1387,35 +1247,13 @@ fn property_row_text_edit_in(
     label_width: Option<f32>,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns_with(width, label_width);
-    let height = property_row_height(ui);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(label_rect).text(
-        Pos2::new(label_rect.left(), label_rect.center().y),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    let value_rect = Rect::from_min_max(
-        Pos2::new(
-            label_rect.right() + gap,
-            rect.center().y - t.metrics.ctl_h * 0.5,
-        ),
-        Pos2::new(
-            rect.right() - PROPERTY_ROW_PAD,
-            rect.center().y + t.metrics.ctl_h * 0.5,
-        ),
-    );
+    let (slot, _) = row_slot(ui, label_width, Sense::hover());
+    row_label(ui, slot.label, label);
+    let value_rect = slot.field();
     let mut edit = edit
         .font(egui::TextStyle::Monospace)
-        .margin(egui::Margin::symmetric(8, 4))
-        .desired_width(value_column);
+        .margin(field_margin(ui, value_rect, 8))
+        .desired_width(value_rect.width());
     if invalid {
         edit = edit.text_color(t.color.err);
     }
@@ -1471,42 +1309,23 @@ pub fn property_row_input_action(
         disabled_reason: action_disabled_reason,
     } = action;
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
-    let height = property_row_height(ui);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(label_rect).text(
-        Pos2::new(label_rect.left(), label_rect.center().y),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
+    let (slot, _) = row_slot(ui, None, Sense::hover());
+    row_label(ui, slot.label, label);
 
-    let action_size = t.metrics.ctl_h;
+    // The action is a square as tall as the field beside it, ending on the
+    // inset where every other row's value ends.
+    let field = slot.field();
+    let action_size = field.height();
     let action_gap = 4.0;
     let action_rect = Rect::from_min_max(
-        Pos2::new(
-            rect.right() - PROPERTY_ROW_PAD - action_size,
-            rect.center().y - action_size * 0.5,
-        ),
-        Pos2::new(
-            rect.right() - PROPERTY_ROW_PAD,
-            rect.center().y + action_size * 0.5,
-        ),
+        Pos2::new(field.right() - action_size, field.top()),
+        field.max,
     );
     let value_rect = Rect::from_min_max(
+        field.min,
         Pos2::new(
-            label_rect.right() + gap,
-            rect.center().y - t.metrics.ctl_h * 0.5,
-        ),
-        Pos2::new(
-            action_rect.left() - action_gap,
-            rect.center().y + t.metrics.ctl_h * 0.5,
+            (action_rect.left() - action_gap).max(field.left()),
+            field.bottom(),
         ),
     );
     let text_color = if invalid {
@@ -1518,8 +1337,8 @@ pub fn property_row_input_action(
     };
     let edit = egui::TextEdit::singleline(value)
         .font(egui::TextStyle::Monospace)
-        .desired_width((value_column - action_size - action_gap).max(1.0))
-        .margin(egui::Margin::symmetric(7, 3));
+        .desired_width(value_rect.width())
+        .margin(field_margin(ui, value_rect, 7));
     let (edit_response, elided) = ui
         .scope_builder(
             egui::UiBuilder::new()
@@ -1678,32 +1497,9 @@ fn property_row_combo_in(
     enabled: bool,
     label_width: Option<f32>,
 ) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns_with(width, label_width);
-    let height = property_row_height(ui);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(label_rect).text(
-        Pos2::new(label_rect.left(), label_rect.center().y),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    let value_rect = Rect::from_min_max(
-        Pos2::new(
-            label_rect.right() + gap,
-            rect.center().y - t.metrics.ctl_h * 0.5,
-        ),
-        Pos2::new(
-            rect.right() - PROPERTY_ROW_PAD,
-            rect.center().y + t.metrics.ctl_h * 0.5,
-        ),
-    );
+    let (slot, _) = row_slot(ui, label_width, Sense::hover());
+    row_label(ui, slot.label, label);
+    let value_rect = slot.field();
     let selected_label = options
         .iter()
         .find(|(value, _)| value == selected)
@@ -1715,9 +1511,15 @@ fn property_row_combo_in(
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
             ui.set_width(value_rect.width());
+            // The combo's frame is the field's: its padding shrinks to what
+            // centres its text in the row's field height.
+            let text = ui.text_style_height(&egui::TextStyle::Button);
+            let spacing = ui.spacing_mut();
+            spacing.button_padding.y = ((value_rect.height() - text) * 0.5).max(0.0);
+            spacing.interact_size.y = value_rect.height();
             ui.add_enabled_ui(enabled, |ui| {
                 let output = egui::ComboBox::from_id_salt(id_source)
-                    .width(value_column)
+                    .width(value_rect.width())
                     .selected_text(selected_label)
                     .show_ui(ui, |ui| {
                         for (value, display) in options {
@@ -1741,48 +1543,26 @@ fn property_row_with_tone(
     value_size: f32,
     elide_value: fn(&Ui, &str, &egui::FontId, f32) -> String,
 ) -> Response {
-    let t = Tokens::get(ui.ctx());
     let full_label = label;
     let full_value = value;
-    let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let value_font = theme::mono(value_size, FontWeight::Regular);
-    let width = ui.available_width().max(1.0);
-    let (label_column, gap, value_column) = property_row_columns(width);
-    let display_label = elide_text(ui, label, &label_font, label_column);
-    let label_galley = ui
-        .painter()
-        .layout_no_wrap(display_label, label_font, t.color.text_dim);
+    // Read-only property cells share the editable row's invariant geometry.
+    // Both columns are one line and ellipsized so changing the selected object
+    // can never move the rows below it.
+    let (slot, response) = row_slot(ui, None, Sense::hover());
+    let value_rect = slot.value;
+    let rect = slot.rect;
     let status_prefix = if mark.is_some() {
         crate::widgets::PROBLEM_MARK_ADVANCE
     } else {
         0.0
     };
-    let value_width = (value_column - status_prefix).max(1.0);
+    let value_width = (value_rect.width() - status_prefix).max(1.0);
     let display_value = elide_value(ui, value, &value_font, value_width);
     let value_galley = ui
         .painter()
         .layout_no_wrap(display_value, value_font, value_tone);
-    // Read-only property cells share the editable row's invariant geometry.
-    // Both columns are one line and ellipsized so changing the selected object
-    // can never move the rows below it.
-    let height = property_row_height(ui);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let label_rect = Rect::from_min_max(
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD, rect.top()),
-        Pos2::new(rect.left() + PROPERTY_ROW_PAD + label_column, rect.bottom()),
-    );
-    let value_rect = Rect::from_min_max(
-        Pos2::new(label_rect.right() + gap, rect.top()),
-        Pos2::new(rect.right() - PROPERTY_ROW_PAD, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(label_rect).galley(
-        Pos2::new(
-            label_rect.left(),
-            label_rect.center().y - label_galley.size().y * 0.5,
-        ),
-        label_galley,
-        t.color.text_dim,
-    );
+    row_label(ui, slot.label, label);
     if let Some((mark, mark_tone)) = mark {
         let side = crate::widgets::PROBLEM_MARK_SIDE;
         paint_status_mark(
@@ -1803,10 +1583,7 @@ fn property_row_with_tone(
         value_galley,
         value_tone,
     );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(full_label);
-        node.set_value(full_value);
-    });
+    announce_row(ui, &response, full_label, full_value);
     response.on_hover_text(format!("{full_label}: {full_value}"))
 }
 
@@ -2054,102 +1831,6 @@ pub fn heading(ui: &mut Ui, title: &str, description: Option<&str>) {
             .wrap(),
         );
     }
-}
-
-/// One canonical section of the embedded Code-workspace inspector.
-///
-/// The section owns its header and bottom divider. `status` is the header's
-/// trailing metadata — a count, a state — in faint mono, the grammar of
-/// [`section_header`]'s metadata. A `problem` paints its mark in front of the
-/// status, or alone at the trailing edge, and is the header's only colour.
-/// The title is painted as written.
-pub fn code_inspector_section(
-    ui: &mut Ui,
-    title: &str,
-    status: Option<&str>,
-    problem: Option<Problem>,
-    body: impl FnOnce(&mut Ui),
-) {
-    let t = Tokens::get(ui.ctx());
-    let shown = ui.scope(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::ZERO;
-        let (rect, _) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), PANEL_SECTION_H),
-            Sense::hover(),
-        );
-        ui.painter().rect_filled(
-            rect,
-            0.0,
-            Color32::from_rgba_unmultiplied(
-                t.color.bg_panel_2.r(),
-                t.color.bg_panel_2.g(),
-                t.color.bg_panel_2.b(),
-                204,
-            ),
-        );
-
-        let mut trailing = rect.right() - 10.0;
-        if let Some(label) = status {
-            let galley = ui.painter().layout_no_wrap(
-                label.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Medium),
-                t.color.text_faint,
-            );
-            let label_pos = Pos2::new(
-                trailing - galley.size().x,
-                rect.center().y - galley.size().y * 0.5,
-            );
-            ui.painter().galley(label_pos, galley, t.color.text_faint);
-            trailing = label_pos.x
-                - (crate::widgets::PROBLEM_MARK_ADVANCE - crate::widgets::PROBLEM_MARK_SIDE);
-        }
-        if let Some(problem) = problem {
-            let side = crate::widgets::PROBLEM_MARK_SIDE;
-            let mark = Rect::from_center_size(
-                Pos2::new(trailing - side * 0.5, rect.center().y),
-                Vec2::splat(side),
-            );
-            paint_problem_mark(ui.painter(), mark, problem);
-            trailing = mark.left();
-        }
-        let status_left = if status.is_some() || problem.is_some() {
-            trailing
-        } else {
-            rect.right()
-        };
-
-        let title_galley = ui.painter().layout_no_wrap(
-            title.to_owned(),
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text_dim,
-        );
-        ui.painter()
-            .with_clip_rect(Rect::from_min_max(
-                Pos2::new(rect.left() + 10.0, rect.top()),
-                Pos2::new((status_left - 6.0).max(rect.left() + 10.0), rect.bottom()),
-            ))
-            .galley(
-                Pos2::new(
-                    rect.left() + 10.0,
-                    rect.center().y - title_galley.size().y * 0.5,
-                ),
-                title_galley,
-                t.color.text_dim,
-            );
-        body(ui);
-    });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-}
-
-/// Canonical seven/ten-point vertical inset around inspector property rows.
-pub fn code_inspector_property_list(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
-    ui.add_space(7.0);
-    body(ui);
-    ui.add_space(10.0);
 }
 
 /// Full-width title row used by non-project workspaces in the reference shell.

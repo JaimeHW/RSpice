@@ -138,22 +138,13 @@ pub fn paint_problem_mark(painter: &egui::Painter, rect: Rect, problem: Problem)
 
 /// A problem stated on its own line: the mark, then `text` in `text_dim`.
 ///
-/// The text wraps to the width the line is given, the mark sits on its first
-/// line, and a screen reader hears "Warning: …" or "Error: …" for the whole.
+/// The line keeps a panel's inset and rhythm: it starts where a property row's
+/// label starts, its first line sits where a row's text sits, and the text
+/// wraps short of the row's right edge. The mark sits on the first line, and a
+/// screen reader hears "Warning: …" or "Error: …" for the whole.
 pub fn problem_line(ui: &mut Ui, problem: Problem, text: &str) -> Response {
-    problem_line_inset(ui, problem, text, 0.0, 0.0)
-}
-
-/// [`problem_line`] set `inset` in from both edges, with `pad_y` above and
-/// below its text.
-pub(crate) fn problem_line_inset(
-    ui: &mut Ui,
-    problem: Problem,
-    text: &str,
-    inset: f32,
-    pad_y: f32,
-) -> Response {
     let t = Tokens::get(ui.ctx());
+    let inset = crate::panels::panel_inset(ui);
     let width = ui.available_width().max(1.0);
     let wrap_width = (width - 2.0 * inset - PROBLEM_MARK_ADVANCE).max(1.0);
     let galley = ui.painter().layout(
@@ -162,6 +153,7 @@ pub(crate) fn problem_line_inset(
         t.color.text_dim,
         wrap_width,
     );
+    let pad_y = crate::panels::text_pad(crate::panels::property_row_height(ui), &galley);
     let (rect, response) =
         ui.allocate_exact_size(vec2(width, galley.size().y + 2.0 * pad_y), Sense::hover());
     let announcement = problem.announce(text);

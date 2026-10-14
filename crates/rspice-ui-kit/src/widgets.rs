@@ -30,7 +30,6 @@ pub mod notice;
 pub mod painted_runs;
 mod pane;
 mod schematic_command;
-mod section;
 mod segmented;
 mod select;
 mod selection_command;
@@ -55,11 +54,9 @@ pub use form::{
     choice_row, field_label, input_row, kv_row, mono_input, read_only_value, switch_row,
 };
 pub use pane::{
-    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
-    pane_section_label, two_pane,
+    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header, two_pane,
 };
 pub use schematic_command::{SchematicCommandPreview, schematic_command_workflow};
-pub use section::section_header;
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};
 pub use select::{select_mono_with_response, select_with_disabled, select_with_response};
@@ -67,7 +64,7 @@ pub use selection_command::{
     NotePreviewStyle, PreviewPoint, SelectionImpact, SelectionPreview, ShapePreviewStroke,
     selection_command_workflow, workflow_preview_status,
 };
-pub(crate) use status_mark::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, problem_line_inset};
+pub(crate) use status_mark::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE};
 pub use status_mark::{Problem, StatusMark, paint_problem_mark, paint_status_mark, problem_line};
 pub use switch::{SWITCH_WIDTH, paint_switch};
 pub use table::measurement_table;
