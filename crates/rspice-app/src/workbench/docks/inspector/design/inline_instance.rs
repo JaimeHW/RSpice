@@ -948,8 +948,8 @@ pub(super) struct OffSheetDeclaration {
     pub(super) partners: String,
 }
 
-/// `None` for a net no off-sheet connector names, which is why the three rows
-/// are absent rather than filled with "not applicable".
+/// `None` for a net no off-sheet connector names, which is why its rows are
+/// absent rather than filled with "not applicable".
 pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffSheetDeclaration> {
     let policy = state.schematic.document().document_policy.net_naming;
     let same_name = |candidate: &str| match policy {
@@ -1034,7 +1034,6 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
     let class = net.class;
     let port = net.port;
     let net_name = net.name.clone();
-    let segment_count = net.wire_ids.len();
     let terminals = net.terminals.clone();
     let scope = match port {
         Some(direction) => format!("interface port · {}", direction.keyword()),
@@ -1047,31 +1046,15 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
     let off_sheet = off_sheet_declaration(&app.state, &net_name);
 
     section_header(ui, "Net identity", None);
-    property_row(ui, "Class", class.keyword());
     property_row(ui, "Scope", &scope);
     if let Some(declaration) = &off_sheet {
-        property_row(ui, "Kind", "off-sheet connector");
-        property_row(ui, "Direction", &declaration.direction);
+        property_row(
+            ui,
+            "Direction",
+            &format!("Off-sheet · {}", declaration.direction),
+        );
         property_row(ui, "Partners", &declaration.partners);
     }
-    property_row(
-        ui,
-        "Conductors",
-        &match segment_count {
-            0 => "no drawn segments".to_owned(),
-            1 => "1 wire".to_owned(),
-            count => format!("{count} wires"),
-        },
-    );
-    property_row(
-        ui,
-        "Terminals",
-        &if terminals.is_empty() {
-            "unwired".to_owned()
-        } else {
-            terminals.len().to_string()
-        },
-    );
 
     section_header(
         ui,
@@ -1079,10 +1062,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         Some(&terminals.len().to_string()),
     );
     if terminals.is_empty() {
-        muted_inspector_copy(
-            ui,
-            "No bound terminals. A wire binds when it ends on an instance pin.",
-        );
+        muted_inspector_copy(ui, "No pins on this net.");
     } else {
         let mut select: Option<u64> = None;
         for terminal in &terminals {
@@ -1107,62 +1087,39 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         }
     }
 
-    match net_operating_point(&app.state, &net_name) {
-        Some(annotation) => {
-            section_header(
+    // The node voltage the active run solved for this net, when it solved
+    // one; with none the section is absent.
+    if let Some(annotation) = net_operating_point(&app.state, &net_name) {
+        if annotation.current {
+            section_header(ui, "Operating point", None);
+        } else {
+            section_header_explained(
                 ui,
-                &format!("Operating point · Run {}", annotation.run_id),
-                Some(if annotation.current {
-                    "current"
-                } else {
-                    "stale"
-                }),
-            );
-            if !annotation.current {
-                property_row(
-                    ui,
-                    "Provenance",
-                    "Historical evidence · rerun for current schematic",
-                );
-            }
-            property_row(
-                ui,
-                "Node voltage",
+                "Operating point",
+                "stale, rerun",
                 &format!(
-                    "{} {}",
-                    crate::quantity::format_engineering_value(annotation.voltage),
-                    annotation.unit
-                ),
-            );
-            property_row(
-                ui,
-                "Detail",
-                &format!(
-                    "V({net_name}) · {} node solution",
-                    if annotation.current {
-                        "current"
-                    } else {
-                        "historical"
-                    }
-                ),
-            );
-            property_row(ui, "Analysis", &annotation.analysis);
-            property_row(
-                ui,
-                "Temperature",
-                &format!(
-                    "{:.1} °C",
-                    app.state.sim_setup.reference_pvt.temperature_celsius
+                    "Run {} solved an earlier version of this schematic.",
+                    annotation.run_id
                 ),
             );
         }
-        None => {
-            section_header(ui, "Operating point", Some("no evidence"));
-            muted_inspector_copy(
-                ui,
-                "No retained operating point names this conductor. Run a DC operating point to annotate it.",
-            );
-        }
+        let digits = usize::from(
+            app.state
+                .ui
+                .preferences
+                .result_presentation_policy()
+                .displayed_significant_digits()
+                .get(),
+        );
+        property_row(
+            ui,
+            "Node voltage",
+            &rspice_results::number_format::fmt_si_significant(
+                annotation.voltage,
+                &annotation.unit,
+                digits,
+            ),
+        );
     }
 
     // Only this net's own findings, and only from a check of the drawing as it
@@ -1240,16 +1197,28 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
 
 pub(super) struct NetAnnotation {
     run_id: u64,
-    analysis: String,
     voltage: f64,
     unit: String,
     current: bool,
 }
 
-/// The selected run's DC node voltage for a net. Historical values remain
-/// inspectable but carry an explicit stale provenance label.
+/// The engine's name for net `name` at the occurrence being edited: the bare
+/// name on the top sheet, the dotted instance path below it. The run names
+/// every node that way, so a bare name below the root would read a node of
+/// the top sheet.
+pub(super) fn net_engine_name(state: &AppState, name: &str) -> Option<String> {
+    state
+        .workspace
+        .content
+        .occurrence_path()
+        .engine_name_for(name)
+        .ok()
+}
+
+/// The selected run's DC node voltage for a net. A run of an earlier
+/// drawing is still read, and says it is stale.
 pub(super) fn net_operating_point(state: &AppState, net: &str) -> Option<NetAnnotation> {
-    let bare = net.to_ascii_lowercase();
+    let bare = net_engine_name(state, net)?;
     let wrapped = format!("v({bare})");
     let current = active_run_matches_design(state);
     state.simulation.active_run().and_then(|run| {
@@ -1263,7 +1232,6 @@ pub(super) fn net_operating_point(state: &AppState, net: &str) -> Option<NetAnno
                     })
                     .map(|value| NetAnnotation {
                         run_id: run.id,
-                        analysis: analysis.label.clone(),
                         voltage: value.value,
                         unit: value.unit.clone(),
                         current,

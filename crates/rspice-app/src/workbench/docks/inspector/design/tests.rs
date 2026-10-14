@@ -479,6 +479,41 @@ fn open_terminal_rows_are_disabled_while_bound_rows_remain_actionable() {
     assert!(!bound.is_disabled());
 }
 
+/// A net below the design root is read under its instance path, as the run
+/// names its node; the bare name is the top sheet's node of that name.
+#[test]
+fn a_net_below_the_root_is_read_under_its_instance_path() {
+    let mut state = AppState::default();
+    assert_eq!(net_engine_name(&state, "OUT").as_deref(), Some("out"));
+    state.workspace.descend_into(
+        "X1".to_owned(),
+        CellViewRef::new("user", "inverter", "schematic"),
+        ViewType::Schematic,
+    );
+    assert_eq!(net_engine_name(&state, "OUT").as_deref(), Some("x1.out"));
+}
+
+/// A net names where it reaches and what it connects. Its class, wire count
+/// and a terminal count beside the terminal list are not restated.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_net_panel_states_scope_and_pins_only() {
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .push(crate::state::Wire::segment(1, Point::new(0, 0), Point::new(40, 0)));
+    app.state.sync_active_schematic_to_workspace();
+    let nets = sheet_connectivity(&app.state).nets;
+    let name = nets.first().expect("the wire is a net").name.clone();
+    let painted = painted_panel(|ui| net_panel(ui, &mut app, &name, &nets));
+    for gone in ["Class", "Conductors", "Terminals\n", "Operating point", "Checks"] {
+        assert!(!painted.contains(gone), "{gone}: {painted}");
+    }
+    assert!(painted.contains("No pins on this net."), "{painted}");
+}
+
 /// The Terminals header counts only open pins, since the rows count
 /// themselves, and an instance without terminals has no section at all.
 #[cfg(not(target_arch = "wasm32"))]
