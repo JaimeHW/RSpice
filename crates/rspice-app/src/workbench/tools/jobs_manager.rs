@@ -20,7 +20,7 @@ use crate::state::{
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Dialog, DialogChoice, DialogSize},
+    widgets::{Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark},
 };
 use crate::workbench::state::JobsPlanScope;
 use crate::workbench::{AppState, RSpiceApp};
@@ -43,13 +43,22 @@ enum RunTone {
 }
 
 impl RunTone {
-    fn color(self, t: &Tokens) -> Color32 {
+    /// The mark a run or task in this state earns in front of its neutral
+    /// status text: a failure or a warning only. Completion says nothing.
+    fn problem(self) -> Option<Problem> {
+        match self {
+            Self::Error => Some(Problem::Failure),
+            Self::Warning => Some(Problem::Warning),
+            Self::Active | Self::Success | Self::Neutral => None,
+        }
+    }
+
+    /// A progress bar's fill: the accent while the work is live, neutral once
+    /// it has stopped, whatever the outcome.
+    fn progress_fill(self, t: &Tokens) -> Color32 {
         match self {
             Self::Active => t.color.accent,
-            Self::Success => t.color.ok,
-            Self::Warning => t.color.warn,
-            Self::Error => t.color.err,
-            Self::Neutral => t.color.text_dim,
+            Self::Success | Self::Warning | Self::Error | Self::Neutral => t.color.text_dim,
         }
     }
 }
@@ -512,7 +521,7 @@ fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
             selected
                 .map(|row| format!("{} tasks", row.task_count))
                 .unwrap_or_else(|| "Run the active plan to create one".to_owned()),
-            selected.map_or(RunTone::Neutral, |row| row.tone),
+            None,
         ),
         (
             "Execution",
@@ -522,7 +531,9 @@ fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
             selected
                 .map(|row| row.elapsed.clone())
                 .unwrap_or_else(|| "No active engine job".to_owned()),
-            selected.map_or(RunTone::Neutral, |row| row.tone),
+            // The one tile that may carry a mark: the run failed or stopped
+            // short. Every value is neutral text.
+            selected.and_then(|row| row.tone.problem()),
         ),
         (
             "Target",
@@ -532,7 +543,7 @@ fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
             selected
                 .map(|_| "Retained with selected run".to_owned())
                 .unwrap_or_else(|| format!("{} runtime", snapshot.current_target.runtime())),
-            RunTone::Success,
+            None,
         ),
         (
             "Evidence",
@@ -542,13 +553,7 @@ fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
             selected
                 .map(|row| format!("source {}", row.source_revision))
                 .unwrap_or_else(|| "Nothing selected".to_owned()),
-            selected.map_or(RunTone::Neutral, |row| {
-                if row.evidence.starts_with("Prepared") {
-                    RunTone::Success
-                } else {
-                    RunTone::Warning
-                }
-            }),
+            None,
         ),
     ];
     let width = ui.available_width().max(1.0);
@@ -557,14 +562,18 @@ fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
     for row in entries.chunks(columns) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-            for (index, (label, value, detail, tone)) in row.iter().enumerate() {
+            for (index, (label, value, detail, problem)) in row.iter().enumerate() {
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(cell_width, 68.0), Sense::hover());
+                let announced = format!("{label}: {value}. {detail}");
                 response.widget_info(|| {
                     WidgetInfo::labeled(
                         WidgetType::Label,
                         true,
-                        format!("{label}: {value}. {detail}"),
+                        problem.map_or_else(
+                            || announced.clone(),
+                            |problem| problem.announce(&announced),
+                        ),
                     )
                 });
                 ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
@@ -577,12 +586,21 @@ fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
                     theme::sans(tokens::FS_0, FontWeight::Regular),
                     t.color.text_dim,
                 );
+                let mut value_left = content.left();
+                if let Some(problem) = problem {
+                    paint_problem_mark(
+                        &painter,
+                        Rect::from_min_size(pos2(value_left, rect.top() + 32.0), vec2(11.0, 11.0)),
+                        *problem,
+                    );
+                    value_left += 17.0;
+                }
                 painter.text(
-                    pos2(content.left(), rect.top() + 28.0),
+                    pos2(value_left, rect.top() + 28.0),
                     Align2::LEFT_TOP,
                     value,
                     theme::mono(17.0, FontWeight::Medium),
-                    tone.color(&t),
+                    t.color.text,
                 );
                 painter.text(
                     pos2(content.left(), rect.top() + 50.0),
@@ -606,6 +624,27 @@ fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
             Stroke::new(1.0, t.color.border_strong),
         );
     }
+}
+
+/// A campaign's roll-up in counts, and whether any member failed. Members
+/// still running and members this history no longer holds are counted only
+/// when there are some.
+fn campaign_summary(campaign: &CampaignRollup) -> (String, bool) {
+    let mut summary = format!(
+        "{}/{} complete",
+        campaign.completed_members, campaign.declared_members
+    );
+    if campaign.active_members > 0 {
+        summary.push_str(&format!(" · {} running", campaign.active_members));
+    }
+    if campaign.failed_members > 0 {
+        summary.push_str(&format!(" · {} failed", campaign.failed_members));
+    }
+    let missing = (campaign.declared_members as usize).saturating_sub(campaign.retained_members);
+    if missing > 0 {
+        summary.push_str(&format!(" · {missing} not in history"));
+    }
+    (summary, campaign.failed_members > 0)
 }
 
 fn jobs_status_columns(width: f32) -> usize {
@@ -661,7 +700,6 @@ fn render_content(
             Stroke::new(1.0, t.color.border),
         );
     }
-    render_recovery(ui, snapshot);
 }
 
 fn render_queue_and_graph(
@@ -672,15 +710,11 @@ fn render_queue_and_graph(
 ) {
     let t = Tokens::get(ui.ctx());
     ui.set_min_width(1.0);
+    // An idle queue is the ordinary state and says nothing.
     section_head(
         ui,
         "Execution queue",
-        if snapshot.running { "1 active" } else { "idle" },
-        if snapshot.running {
-            t.color.accent
-        } else {
-            t.color.text_dim
-        },
+        if snapshot.running { "1 active" } else { "" },
     );
     ScrollArea::horizontal()
         .id_salt("workbench.jobs-manager.queue-table")
@@ -692,12 +726,12 @@ fn render_queue_and_graph(
                 ui,
                 width,
                 &[
-                    "RUN",
-                    "PLAN / SCOPE",
-                    "TARGET",
-                    "PROGRESS",
-                    "DURATION",
-                    "STATUS",
+                    "Run",
+                    "Plan / scope",
+                    "Target",
+                    "Progress",
+                    "Duration",
+                    "Status",
                 ],
                 &QUEUE_COLUMN_FRACTIONS,
             );
@@ -722,51 +756,30 @@ fn render_queue_and_graph(
             ui,
             "Campaign roll-up",
             &format!("{} retained campaign(s)", snapshot.campaigns.len()),
-            t.color.text_dim,
         );
         Frame::NONE
             .fill(t.color.bg_app)
             .inner_margin(Margin::symmetric(10, 7))
             .show(ui, |ui| {
                 for campaign in &snapshot.campaigns {
-                    let outcome = if campaign.active_members > 0 {
-                        "running"
-                    } else if campaign.retained_members < campaign.declared_members as usize {
-                        "partial history"
-                    } else if campaign.failed_members > 0 {
-                        "completed with errors"
-                    } else {
-                        "complete"
-                    };
+                    let (summary, failed) = campaign_summary(campaign);
                     ui.horizontal_wrapped(|ui| {
                         ui.label(
                             RichText::new(&campaign.name)
                                 .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                                 .color(t.color.text),
                         );
-                        ui.label(
-                            RichText::new(campaign.id.to_string())
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(
-                                RichText::new(format!(
-                                    "{outcome} · {}/{} retained · {} complete · {} failed",
-                                    campaign.retained_members,
-                                    campaign.declared_members,
-                                    campaign.completed_members,
-                                    campaign.failed_members
-                                ))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(
-                                    if campaign.failed_members > 0 {
-                                        t.color.warn
-                                    } else {
-                                        t.color.ok
-                                    },
-                                ),
+                                RichText::new(summary)
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.text_dim),
                             );
+                            if failed {
+                                let (mark, _) =
+                                    ui.allocate_exact_size(vec2(11.0, 11.0), Sense::hover());
+                                paint_problem_mark(ui.painter(), mark, Problem::Failure);
+                            }
                         });
                     });
                 }
@@ -781,7 +794,6 @@ fn render_queue_and_graph(
             .map(|row| format!("{} analysis nodes", row.tasks.len()))
             .as_deref()
             .unwrap_or("no selected run"),
-        t.color.text_dim,
     );
     ScrollArea::horizontal()
         .id_salt("workbench.jobs-manager.graph-table")
@@ -792,7 +804,7 @@ fn render_queue_and_graph(
             table_header(
                 ui,
                 width,
-                &["ANALYSIS", "EXPANSION", "ANALYSIS", "PROGRESS", "STATUS"],
+                &["Type", "Expansion", "Analysis", "Progress", "Status"],
                 &[0.15, 0.21, 0.34, 0.14, 0.16],
             );
             match selected {
@@ -823,12 +835,6 @@ fn render_inspector(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             crate::workbench::design_system::property_card(ui, "Execution target", |ui| {
-                crate::workbench::design_system::property_row_toned(
-                    ui,
-                    "Readiness",
-                    "Ready",
-                    t.color.ok,
-                );
                 crate::workbench::design_system::property_row(
                     ui,
                     "Runtime",
@@ -903,11 +909,11 @@ fn render_inspector(
                         "Tasks",
                         &row.task_count.to_string(),
                     );
-                    crate::workbench::design_system::property_row_toned(
+                    crate::workbench::design_system::property_row_problem(
                         ui,
                         "Status",
                         &row.status,
-                        row.tone.color(&t),
+                        row.tone.problem(),
                     );
                     // The manifest states what the run produced; these are the
                     // two controls that go and look at it — the dataset it
@@ -1000,15 +1006,8 @@ fn target_row(ui: &mut Ui, label: &str, status: &str, selected: bool) {
             t.color.accent,
         );
     }
-    ui.painter().circle_filled(
-        pos2(rect.left() + 12.0, rect.center().y),
-        3.0,
-        if selected {
-            t.color.ok
-        } else {
-            t.color.text_faint
-        },
-    );
+    // The fill and the accent bar already say which target is the current
+    // one, so the row carries no dot.
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let status_desired = ui
@@ -1016,7 +1015,7 @@ fn target_row(ui: &mut Ui, label: &str, status: &str, selected: bool) {
         .layout_no_wrap(status.to_owned(), status_font.clone(), t.color.text)
         .size()
         .x;
-    let (label_rect, status_rect) = trailing_text_regions(rect, 22.0, 9.0, status_desired);
+    let (label_rect, status_rect) = trailing_text_regions(rect, 10.0, 9.0, status_desired);
     let visible_label =
         crate::workbench::design_system::elide_text(ui, label, &label_font, label_rect.width());
     let visible_status =
@@ -1038,84 +1037,18 @@ fn target_row(ui: &mut Ui, label: &str, status: &str, selected: bool) {
         visible_status,
         status_font,
         if selected {
-            t.color.ok
+            t.color.text_dim
         } else {
             t.color.text_faint
         },
     );
 }
 
-fn render_recovery(ui: &mut Ui, snapshot: &JobsSnapshot) {
+/// A section band: its title, and its count or state in secondary neutral ink
+/// at the trailing edge. An empty status leaves the edge blank.
+fn section_head(ui: &mut Ui, title: &str, status: &str) {
     let t = Tokens::get(ui.ctx());
-    section_head(
-        ui,
-        "Failure, interruption and recovery",
-        if snapshot.cancelling {
-            "cancellation requested"
-        } else if snapshot.running {
-            "active job is cancellable"
-        } else if snapshot.rows.iter().any(|row| row.tone == RunTone::Error) {
-            "failed evidence retained"
-        } else if snapshot.rows.iter().any(|row| row.tone == RunTone::Warning) {
-            "interrupted evidence retained"
-        } else {
-            "no recoverable condition"
-        },
-        if snapshot
-            .rows
-            .iter()
-            .any(|row| matches!(row.tone, RunTone::Error | RunTone::Warning))
-        {
-            t.color.warn
-        } else {
-            t.color.text_dim
-        },
-    );
-    Frame::NONE
-        .fill(t.color.bg_app)
-        .inner_margin(Margin::symmetric(10, 9))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            if snapshot.cancelling {
-                ui.label(
-                    RichText::new("Cancellation is bound to the active job and run identity. The controller is acknowledging the request; completed analysis results remain retained exactly as produced.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.warn),
-                );
-            } else if snapshot.running {
-                ui.label(
-                    RichText::new("The active local job can be cancelled cooperatively. Completed analysis results remain attached to the run; no completed result is relabeled or discarded.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-            } else if snapshot.rows.iter().any(|row| row.tone == RunTone::Error) {
-                ui.label(
-                    RichText::new("Failed run evidence is retained exactly as reported. This build has no resumable checkpoint for the selected job; a new dispatch receives a new job and run identity.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.warn),
-                );
-            } else if snapshot
-                .rows
-                .iter()
-                .any(|row| row.tone == RunTone::Warning)
-            {
-                ui.label(
-                    RichText::new("Aborted or interrupted run evidence is retained exactly as reported. This build has no resumable checkpoint for that execution; a new dispatch receives a new job and run identity.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.warn),
-                );
-            } else {
-                ui.label(
-                    RichText::new("No disconnected scheduler, preempted job, quota rejection, partial result, or failed convergence condition is currently reported by the execution controller.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-            }
-        });
-}
-
-fn section_head(ui: &mut Ui, title: &str, status: &str, tone: Color32) {
-    let t = Tokens::get(ui.ctx());
+    let tone = t.color.text_dim;
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 37.0), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, title));
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
@@ -1184,7 +1117,7 @@ fn table_header(ui: &mut Ui, width: f32, labels: &[&str], fractions: &[f32]) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(width, 28.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
-    paint_cells(ui, rect, labels, fractions, t.color.text_dim, true);
+    paint_cells(ui, rect, labels, fractions, t.color.text_dim, true, None);
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
@@ -1252,6 +1185,7 @@ fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> Optio
         &QUEUE_COLUMN_FRACTIONS,
         t.color.text,
         false,
+        row.tone.problem(),
     );
     let progress_left = rect.left() + rect.width() * (0.08 + 0.24 + 0.18) + 8.0;
     let progress_width = (rect.width() * 0.18 - 16.0).max(10.0);
@@ -1262,7 +1196,7 @@ fn run_table_row(ui: &mut Ui, width: f32, row: &RunRow, selected: bool) -> Optio
             vec2(progress_width, 3.0),
         ),
         row.progress,
-        row.tone.color(&t),
+        row.tone.progress_fill(&t),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
     if openable && response.double_clicked() {
@@ -1291,6 +1225,7 @@ fn task_table_row(ui: &mut Ui, width: f32, task: &TaskRow) {
         &[0.15, 0.21, 0.34, 0.14, 0.16],
         t.color.text,
         false,
+        task.tone.problem(),
     );
     let left = rect.left() + rect.width() * (0.15 + 0.21 + 0.34) + 8.0;
     paint_progress(
@@ -1300,7 +1235,7 @@ fn task_table_row(ui: &mut Ui, width: f32, task: &TaskRow) {
             vec2((rect.width() * 0.14 - 16.0).max(10.0), 3.0),
         ),
         task.progress,
-        task.tone.color(&t),
+        task.tone.progress_fill(&t),
     );
     ui.painter().hline(
         rect.x_range(),
@@ -1322,6 +1257,8 @@ fn empty_row(ui: &mut Ui, width: f32, message: &str) {
     );
 }
 
+/// Paint one table row's cells. `status_problem` marks the last cell, the
+/// status, with a warning or a failure in front of its neutral text.
 fn paint_cells(
     ui: &Ui,
     rect: Rect,
@@ -1329,13 +1266,25 @@ fn paint_cells(
     fractions: &[f32],
     color: Color32,
     header: bool,
+    status_problem: Option<Problem>,
 ) {
     let t = Tokens::get(ui.ctx());
     let mut x = rect.left();
     for (index, (label, fraction)) in labels.iter().zip(fractions).enumerate() {
         let cell_width = rect.width() * *fraction;
         let cell = Rect::from_min_max(pos2(x, rect.top()), pos2(x + cell_width, rect.bottom()));
-        let clipped = cell.shrink2(vec2(8.0, 0.0));
+        let mut clipped = cell.shrink2(vec2(8.0, 0.0));
+        if let Some(problem) = status_problem.filter(|_| index + 1 == labels.len()) {
+            paint_problem_mark(
+                &ui.painter().with_clip_rect(clipped),
+                Rect::from_min_size(
+                    pos2(clipped.left(), clipped.center().y - 5.5),
+                    vec2(11.0, 11.0),
+                ),
+                problem,
+            );
+            clipped.min.x = (clipped.left() + 17.0).min(clipped.right());
+        }
         ui.painter().with_clip_rect(clipped).text(
             clipped.left_center(),
             Align2::LEFT_CENTER,
@@ -2011,6 +1960,55 @@ mod tests {
         let tasks = [task(1.0), task(0.25), task(0.0), task(0.0)];
         assert!((batch_progress(&tasks) - 0.3125).abs() < f32::EPSILON);
         assert_eq!(batch_progress(&[]), 0.0);
+    }
+
+    /// Status text is neutral. A failed run or task carries a failure mark, a
+    /// run that stopped short a warning mark, and completion carries nothing;
+    /// only live work fills its progress bar with the accent.
+    #[test]
+    fn run_states_mark_only_problems_and_never_colour_success() {
+        assert_eq!(RunTone::Error.problem(), Some(Problem::Failure));
+        assert_eq!(RunTone::Warning.problem(), Some(Problem::Warning));
+        for quiet in [RunTone::Active, RunTone::Success, RunTone::Neutral] {
+            assert_eq!(quiet.problem(), None);
+        }
+        let t = Tokens::default();
+        assert_eq!(RunTone::Active.progress_fill(&t), t.color.accent);
+        for stopped in [
+            RunTone::Success,
+            RunTone::Warning,
+            RunTone::Error,
+            RunTone::Neutral,
+        ] {
+            assert_eq!(stopped.progress_fill(&t), t.color.text_dim);
+        }
+    }
+
+    /// A campaign rolls up in counts. It used to read "complete · 2/2
+    /// retained · 2 complete · 0 failed" in green.
+    #[test]
+    fn a_campaign_rolls_up_in_counts_and_marks_only_failures() {
+        let campaign = |completed, failed, active, retained| CampaignRollup {
+            id: crate::product::SimulationCampaignId::new(),
+            name: "Nightly".to_owned(),
+            retained_members: retained,
+            declared_members: 3,
+            completed_members: completed,
+            failed_members: failed,
+            active_members: active,
+        };
+        assert_eq!(
+            campaign_summary(&campaign(3, 0, 0, 3)),
+            ("3/3 complete".to_owned(), false)
+        );
+        assert_eq!(
+            campaign_summary(&campaign(1, 1, 1, 3)),
+            ("1/3 complete · 1 running · 1 failed".to_owned(), true)
+        );
+        assert_eq!(
+            campaign_summary(&campaign(2, 0, 0, 2)),
+            ("2/3 complete · 1 not in history".to_owned(), false)
+        );
     }
 
     #[test]
