@@ -275,6 +275,47 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
         "Toggle line comment commented the caret's line"
     );
 
+    // Edit's Find is the source's own find, with the key that opens it from
+    // the focused editor; the design's find is not offered over a source.
+    let output = frame(&ctx, &mut app, DESKTOP);
+    let (trigger, _) = menu_item(&output, "Edit").expect("the Edit menu");
+    press(
+        &ctx,
+        &mut app,
+        trigger.center(),
+        egui::PointerButton::Primary,
+    );
+    let mut output = frame(&ctx, &mut app, DESKTOP);
+    for _ in 0..3 {
+        output = frame(&ctx, &mut app, DESKTOP);
+    }
+    let find = Command::FindCodeDocument.spec().label;
+    assert_eq!(menu_shortcut(&output, find).as_deref(), Some("Ctrl+F"));
+    assert!(menu_item(&output, "Find in design…").is_none());
+    frame_with(
+        &ctx,
+        &mut app,
+        vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+    );
+    let editor =
+        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    ctx.memory_mut(|memory| memory.request_focus(editor));
+    frame(&ctx, &mut app, DESKTOP);
+    assert!(app.state.ui.code_workspace.source_search.is_none());
+    frame_with(
+        &ctx,
+        &mut app,
+        vec![key(
+            egui::Key::F,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )],
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    assert!(
+        app.state.ui.code_workspace.source_search.is_some(),
+        "Ctrl+F in the focused editor opened the source's find"
+    );
+
     // On a drawing there is no source editor: the source commands are not
     // offered at all, rather than offered disabled.
     app.state.workbench.activate(Workspace::Project);
@@ -379,6 +420,20 @@ fn menu_item(output: &egui::FullOutput, label: &str) -> Option<(egui::Rect, bool
                 )
             })
         })
+}
+
+/// The menu row's shortcut, as a screen reader is told it.
+fn menu_shortcut(output: &egui::FullOutput, label: &str) -> Option<String> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()?
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.role() == egui::accesskit::Role::MenuItem && node.label() == Some(label)
+        })
+        .and_then(|(_, node)| node.keyboard_shortcut().map(str::to_owned))
 }
 
 fn press(

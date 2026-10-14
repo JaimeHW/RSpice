@@ -349,6 +349,10 @@ const RENAME_SYMBOL: &[ShortcutBinding] = &[primary(
 )];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
+// Ctrl+F in a focused source editor finds in that source; on a drawing it
+// finds in the design. As with Ctrl+D the focused surface decides.
+const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
+    &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
 const ZOOM_IN: &[ShortcutBinding] = &[
     primary(chord(Key::Plus, false, false, false, "+"), ALL),
     alternate(chord(Key::Plus, false, false, true, "+"), ALL),
@@ -837,15 +841,21 @@ impl Command {
             | Self::UnfoldAll
             | Self::GoToDefinition
             | Self::FindReferences
-            | Self::RenameSymbol => ShortcutContext::SourceEditor,
+            | Self::RenameSymbol
+            | Self::FindCodeDocument => ShortcutContext::SourceEditor,
             _ => ShortcutContext::Global,
         }
     }
 
     /// Whether this command exists only for the source editor in front of the
     /// reader. Elsewhere it is hidden rather than offered disabled.
+    ///
+    /// Find is the exception: its key acts in the focused editor, but the
+    /// command searches whichever code page is on screen, from its toolbar
+    /// and the palette as well.
     pub(crate) const fn source_editor_only(self) -> bool {
         matches!(self.shortcut_context(), ShortcutContext::SourceEditor)
+            && !matches!(self, Self::FindCodeDocument)
     }
 
     /// The language-service group: offered only where the document's
@@ -990,6 +1000,7 @@ impl Command {
             Self::GoToDefinition => GO_TO_DEFINITION,
             Self::FindReferences => FIND_REFERENCES,
             Self::RenameSymbol => RENAME_SYMBOL,
+            Self::FindCodeDocument => FIND_CODE_DOCUMENT,
             _ => NONE,
         }
     }
