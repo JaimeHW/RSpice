@@ -1051,13 +1051,8 @@ impl Command {
                     && state.simulation.retained.has_results()
             }
             Self::VisualizationDocumentProperties => {
-                let surface = state.workbench.current_route().surface_id();
-                matches!(
-                    surface,
-                    super::SurfaceId::Results | super::SurfaceId::VisualizationStudio
-                ) && state.project_lifecycle.is_open()
-                    && (surface == super::SurfaceId::VisualizationStudio
-                        || state.simulation.retained.has_results())
+                state.workbench.current_route().surface_id() == super::SurfaceId::Results
+                    && state.simulation.retained.has_results()
             }
             // Both return edges are judged on the dataset, never on the
             // surface the reader is standing on: they exist precisely to be
@@ -2344,8 +2339,7 @@ impl Command {
                 }
             },
             Self::VisualizationDocumentProperties => {
-                open_studio_tool(app, "Plot document properties");
-                crate::workbench::documents::visualization_studio::open_document_properties(app);
+                crate::workbench::documents::result_document::open_properties(&mut app.state);
             }
             Self::ExportVisualizationDocument => {
                 crate::workbench::documents::visualization_studio::export_document(app);

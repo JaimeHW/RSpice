@@ -132,6 +132,12 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 rspice_results_ui::document_dialogs::family::show(ctx, &mut draft, &choices);
             (ResultDocumentDialog::Family(draft), choice)
         }
+        ResultDocumentDialog::Properties(mut draft) => {
+            let scope = properties::scope(&app.state);
+            let choice =
+                rspice_results_ui::document_dialogs::properties::show(ctx, &mut draft, &scope);
+            (ResultDocumentDialog::Properties(draft), choice)
+        }
     };
     app.state.workbench.result_document_dialog = Some(dialog);
     match choice {
@@ -151,6 +157,7 @@ fn commit_open_dialog(state: &mut AppState) {
         Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
         Some(ResultDocumentDialog::Measurement(draft)) => measurement::commit(state, &draft),
         Some(ResultDocumentDialog::Family(draft)) => family::commit(state, &draft),
+        Some(ResultDocumentDialog::Properties(draft)) => properties::commit(state, draft),
         None => return,
     };
     match result {
@@ -527,10 +534,12 @@ mod compare;
 pub(super) mod family;
 pub(super) mod links;
 mod measurement;
+mod properties;
 
 pub(crate) use compare::{compare_available, open_compare};
 pub(crate) use family::{family_available, open_family, set_family_filter};
 pub(crate) use measurement::open_measurement;
+pub(crate) use properties::open_properties;
 
 #[cfg(test)]
 mod tests;

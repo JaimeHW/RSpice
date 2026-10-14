@@ -21,7 +21,7 @@ pub(in crate::workbench::documents::result_document) fn cached_models(
             overlay_dataset_ids: &simulation.view.overlay_dataset_ids,
             viewer: session.viewer,
             projection: ProjectionOptions {
-                phase_continuous: session.phase_continuous,
+                phase_continuous: session.presented_phase_continuous(),
                 complex_display,
                 selection: session.sample_selection.as_ref(),
                 hidden_family_traces: &session.hidden_family_traces,

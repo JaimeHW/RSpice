@@ -252,7 +252,6 @@ fn outcome(
     let digits = usize::from(
         state
             .ui
-            .preferences
             .result_presentation_policy()
             .displayed_significant_digits()
             .get(),

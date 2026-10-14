@@ -745,12 +745,14 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
         .insert_visualization_document(document)
         .expect("the project keeps the document");
     app.state.workbench.activate(Workspace::Results);
-    assert!(
-        crate::workbench::chrome::document_bar::activate_document_by_id(
-            &mut app.state,
-            &WorkspaceDocumentId::VisualizationDocument(document_id),
-        )
-    );
+    assert!(super::super::activate_persistent_document(
+        &mut app.state,
+        document_id
+    ));
+    app.state
+        .workbench
+        .documents
+        .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
     document_id
 }
 
@@ -852,5 +854,91 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
     assert_eq!(
         choices.refusal.as_deref(),
         Some("The document keeps no Status values for this pane to slice by.")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Plot properties
+// ---------------------------------------------------------------------------
+
+/// Open Plot properties through its command and set `digits` and `phase`.
+fn apply_properties(app: &mut RSpiceApp, digits: u8, phase_continuous: bool) {
+    crate::workbench::commands::vocabulary::Command::VisualizationDocumentProperties.execute(app);
+    let Some(ResultDocumentDialog::Properties(mut draft)) =
+        app.state.workbench.result_document_dialog.clone()
+    else {
+        panic!("Plot properties opens its form");
+    };
+    draft.significant_digits = digits;
+    draft.phase_continuous = phase_continuous;
+    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
+    commit_open_dialog(&mut app.state);
+    assert!(
+        app.state.workbench.result_document_dialog.is_none(),
+        "applied properties close their form"
+    );
+}
+
+fn shown_digits(app: &RSpiceApp) -> u8 {
+    app.state
+        .ui
+        .result_presentation_policy()
+        .displayed_significant_digits()
+        .get()
+}
+
+/// A document's digits and phase are kept with it and applied whenever it
+/// is shown, in place of the reader's own, which come back on leaving it.
+/// The result viewer ignored both; only the Studio honored them.
+#[test]
+fn a_document_s_digits_and_phase_are_applied_as_saved() {
+    let (mut app, document_id) = document_fixture("single-pane");
+    app.state.workbench.workspace = Workspace::Results;
+    show_document(&mut app, document_id);
+    let own_digits = shown_digits(&app);
+    assert_ne!(own_digits, 4);
+
+    apply_properties(&mut app, 4, true);
+    reload(&mut app, document_id);
+    let presentation = retained(&app, document_id).presentation();
+    assert_eq!(
+        (
+            presentation.significant_digits,
+            presentation.phase_continuous
+        ),
+        (4, true)
+    );
+    show_document(&mut app, document_id);
+    assert_eq!(shown_digits(&app), 4);
+    assert!(app.state.ui.results.session.presented_phase_continuous());
+    assert!(
+        !app.state.ui.results.session.phase_continuous,
+        "the reader's own phase setting is left alone"
+    );
+
+    drive_frame(|ui| super::super::show(ui, &mut app));
+    assert_eq!(shown_digits(&app), own_digits);
+    assert!(!app.state.ui.results.session.presented_phase_continuous());
+}
+
+/// Over a quick view the properties are the reader's own: the digits
+/// preference and the session's phase setting. No document appears.
+#[test]
+fn quick_view_properties_are_the_reader_s_own() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.simulation.retained.runs = vec![transient_run(1)].into();
+    assert!(app.state.simulation.select_run(0));
+    assert!(app.state.simulation.select_analysis(0));
+    app.state.workbench.workspace = Workspace::Results;
+
+    apply_properties(&mut app, 5, true);
+    assert_eq!(shown_digits(&app), 5);
+    assert!(app.state.ui.results.session.phase_continuous);
+    assert!(
+        app.state
+            .workspace
+            .content
+            .visualization_documents
+            .is_empty()
     );
 }

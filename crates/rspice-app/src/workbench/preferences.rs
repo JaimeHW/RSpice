@@ -366,6 +366,16 @@ impl ResultPresentationPolicy {
         self.displayed_significant_digits
     }
 
+    /// The same policy with `digits` significant digits, as a result
+    /// document carries its own. Digits out of range leave it unchanged.
+    #[must_use]
+    pub fn with_significant_digits(mut self, digits: u8) -> Self {
+        if let Ok(digits) = DisplayedSignificantDigits::try_from(digits) {
+            self.displayed_significant_digits = digits;
+        }
+        self
+    }
+
     #[must_use]
     pub const fn cursor_interpolation(self) -> CursorInterpolation {
         self.cursor_interpolation

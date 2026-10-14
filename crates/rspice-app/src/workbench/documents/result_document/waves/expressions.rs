@@ -362,17 +362,18 @@ pub(crate) fn toggle_visibility(
 pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let x = state.ui.results.session.cursors.a?;
     state.ui.results.synchronize_wave_caches(&state.simulation);
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
     let sample_selection = state.ui.results.session.sample_selection.clone();
     let hidden_family_traces = state.ui.results.session.hidden_family_traces.clone();
     let waveform_visibility = state.ui.results.session.waveform_visibility.clone();
+    let phase_continuous = state.ui.results.session.presented_phase_continuous();
     let mut models = build_models(
         &state.simulation,
         &mut state.ui.results.session.derived,
         &Tokens::default(),
-        state.ui.results.session.phase_continuous,
+        phase_continuous,
         presentation.complex_number_display(),
         sample_selection.as_ref(),
         &hidden_family_traces,
@@ -426,7 +427,7 @@ mod tests {
             .active_run()
             .unwrap()
             .dataset_content_digest();
-        let policy = state.ui.preferences.result_presentation_policy();
+        let policy = state.ui.result_presentation_policy();
         let models = cached_models(
             &state.simulation,
             &mut state.ui.results,

@@ -224,7 +224,7 @@ pub(crate) fn open_create_document(app: &mut RSpiceApp) {
 
 pub(crate) use document_edit::{
     add_pane_available, compare_available, family_available, open_add_pane, open_compare,
-    open_family, open_measurement, set_family_filter, toggle_linked_cursors,
+    open_family, open_measurement, open_properties, set_family_filter, toggle_linked_cursors,
 };
 
 pub(crate) fn visualization_source_dataset(
@@ -2200,8 +2200,7 @@ fn show_docbar_for_family(
     } else if actions.add_pane {
         document_edit::open_add_pane(&mut app.state);
     } else if actions.open_properties {
-        crate::workbench::documents::visualization_studio::open(app);
-        crate::workbench::documents::visualization_studio::open_document_properties(app);
+        document_edit::open_properties(&mut app.state);
     }
     actions.page
 }

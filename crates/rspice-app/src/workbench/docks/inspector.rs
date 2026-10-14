@@ -1220,7 +1220,6 @@ fn selected_result_trace(
     let digits = usize::from(
         app.state
             .ui
-            .preferences
             .result_presentation_policy()
             .displayed_significant_digits()
             .get(),

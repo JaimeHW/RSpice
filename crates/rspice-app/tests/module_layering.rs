@@ -803,11 +803,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Presentation reaching sideways into a peer surface.
     ("docks", "documents/visualization_studio", 5),
     ("documents/result_document", "chrome", 1),
-    (
-        "documents/result_document",
-        "documents/visualization_studio",
-        2,
-    ),
     ("surfaces", "documents/visualization_studio", 1),
     // A route describing its own catalog and availability.
     ("routing/surface_route", "routing/surface_catalog", 1),

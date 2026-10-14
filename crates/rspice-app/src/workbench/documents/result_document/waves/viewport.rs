@@ -55,7 +55,7 @@ pub(super) fn scaled_range(
 /// decades: scaling a logarithmic pane's endpoints linearly moves its
 /// geometric centre, so a zoom in and a zoom back out did not return.
 pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,
@@ -110,7 +110,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
 /// had just asked to leave — and any ordinal the strip no longer draws kept
 /// the whole strip reading as zoomed, with no pane left to fit it from.
 pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,
@@ -170,7 +170,7 @@ pub(crate) fn fit_active_strip(state: &mut AppState) {
 /// full retained sweep, so one keypress moves the same visible distance
 /// however far the sheet is zoomed in.
 pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool, steps: f64) {
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,

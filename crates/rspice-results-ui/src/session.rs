@@ -488,6 +488,11 @@ pub struct ResultViewerState {
     /// strips' phase traces; the margin math always reads the raw wrapped
     /// arrays. Transient — not persisted with the session.
     pub phase_continuous: bool,
+    /// The digits and phase of the project result document being shown.
+    /// They stand in for the reader's own while it is, and go when the
+    /// workspace leaves it.
+    pub document_presentation:
+        Option<rspice_results::visualization_document::VisualizationPresentationPolicy>,
     /// Screen rect of the document well (docbar excluded) from the last
     /// rendered frame — the crop window for viewer PNG export. Transient.
     pub well_rect: Option<egui::Rect>,
@@ -811,6 +816,14 @@ impl ResultViewerState {
     pub fn leave_persistent_document(&mut self) {
         self.persistent_pane_context = None;
         self.document_markers.clear();
+        self.document_presentation = None;
+    }
+
+    /// Whether phase traces are drawn unwrapped: as the document being shown
+    /// keeps it, or as the reader set it for quick views.
+    pub fn presented_phase_continuous(&self) -> bool {
+        self.document_presentation
+            .map_or(self.phase_continuous, |document| document.phase_continuous)
     }
 
     pub fn persistent_viewer_key(viewer: ResultViewer) -> ResultViewer {

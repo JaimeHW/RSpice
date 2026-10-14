@@ -10,6 +10,7 @@ pub mod add_pane;
 pub mod compare;
 pub mod family;
 pub mod measurement;
+pub mod properties;
 
 /// The one result-document form open at a time.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,9 @@ pub enum ResultDocumentDialog {
     /// Family slicing keeps its policy with the selected pane over a
     /// document, and with the analysis for the session over a quick view.
     Family(family::FamilyDraft),
+    /// Plot properties set the document's digits and phase over a document,
+    /// and the reader's own over a quick view.
+    Properties(properties::PropertiesDraft),
 }
 
 /// Option labels for a select row, and the label of the selected entry.

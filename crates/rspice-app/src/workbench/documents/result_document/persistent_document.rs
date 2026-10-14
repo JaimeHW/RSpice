@@ -75,6 +75,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         );
         return;
     };
+    // The document's digits and phase stand in for the reader's own while it
+    // is shown; leaving it for a quick view drops them.
+    app.state.ui.results.session.document_presentation = app
+        .state
+        .workspace
+        .content
+        .visualization_document(document_id)
+        .map(VisualizationDocument::presentation);
     let Some(first_page) = document.pages.first() else {
         unavailable_surface(
             ui,

@@ -113,7 +113,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
     let t = Tokens::get(ui.ctx());
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
@@ -181,7 +181,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         viewer::operating_point_controls(ui);
         return;
     }
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,
@@ -215,7 +215,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         viewer::operating_point_panel(ui, &analysis.data);
         return;
     }
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,

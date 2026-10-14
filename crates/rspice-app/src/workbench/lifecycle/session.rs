@@ -336,6 +336,21 @@ impl UiSessionState {
         crate::workbench::MessageCatalog::new(self.text_locale)
     }
 
+    /// The reader's result presentation, with the significant digits of the
+    /// project result document the Results workspace is showing, if any.
+    #[must_use]
+    pub(crate) fn result_presentation_policy(
+        &self,
+    ) -> crate::workbench::preferences::ResultPresentationPolicy {
+        let policy = self.preferences.result_presentation_policy();
+        self.results
+            .session
+            .document_presentation
+            .map_or(policy, |document| {
+                policy.with_significant_digits(document.significant_digits)
+            })
+    }
+
     pub(crate) fn set_grid_style(&mut self, style: GridStyle) {
         if style.visible() {
             self.grid_restore_style = style;

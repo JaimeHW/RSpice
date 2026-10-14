@@ -541,10 +541,6 @@ pub(crate) fn open_cursor_manager(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::CursorManager);
 }
 
-pub(crate) fn open_document_properties(app: &mut RSpiceApp) {
-    open_dock(app, VisualizationDock::DocumentProperties);
-}
-
 pub(crate) fn open_annotation_editor(app: &mut RSpiceApp) {
     open_dock(app, VisualizationDock::Annotation);
 }

@@ -35,7 +35,7 @@ fn with_readout<R>(
     need_models: bool,
     render: impl FnOnce(&mut ResultViewerState, ReadoutInput<'_>) -> R,
 ) -> R {
-    let presentation = state.ui.preferences.result_presentation_policy();
+    let presentation = state.ui.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = need_models.then(|| {
         cached_models(

@@ -33,43 +33,32 @@ pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> Measurement
             };
         }
     };
-    let document = active_document_id(state).and_then(|document_id| {
+    let pane = active_document_id(state).and_then(|document_id| {
         let (_, pane_id) = super::super::persistent_document::reading_position(state, document_id)?;
         let document = state
             .workspace
             .content
             .visualization_document(document_id)?;
         let pane = document.panes().iter().find(|pane| pane.id == pane_id)?;
-        Some((
-            format!("{} · {}", document.title(), pane.title),
-            usize::from(document.presentation().significant_digits),
-        ))
+        Some(format!("{} · {}", document.title(), pane.title))
     });
     let expression = draft.expression.trim();
-    let digits = document.as_ref().map_or_else(
-        || {
-            usize::from(
-                state
-                    .ui
-                    .preferences
-                    .result_presentation_policy()
-                    .displayed_significant_digits()
-                    .get(),
-            )
-        },
-        |(_, digits)| *digits,
+    let digits = usize::from(
+        state
+            .ui
+            .result_presentation_policy()
+            .displayed_significant_digits()
+            .get(),
     );
     let value = if expression.is_empty() {
         Ok(None)
     } else {
         evaluate(analysis, expression).map(|value| Some(fmt_si_significant(value, "", digits)))
     };
-    let refusal = document.is_none().then(|| QUICK_VIEW.to_owned());
+    let refusal = pane.is_none().then(|| QUICK_VIEW.to_owned());
     MeasurementPreview {
-        pane: document.map_or_else(
-            || format!("Run {} · {} · {}", run.id, run.label, analysis.label),
-            |(pane, _)| pane,
-        ),
+        pane: pane
+            .unwrap_or_else(|| format!("Run {} · {} · {}", run.id, run.label, analysis.label)),
         value,
         refusal,
     }
