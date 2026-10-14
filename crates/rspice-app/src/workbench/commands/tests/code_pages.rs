@@ -124,5 +124,16 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     );
     assert_eq!(app.state.workspace.content.active_view, reference);
     assert_eq!(app.state.ui.code_workspace.page, page_before);
-    assert!(app.state.ui.code_workspace.veriloga.compile_requested);
+    let request = app
+        .state
+        .ui
+        .code_workspace
+        .veriloga
+        .compile_request
+        .as_ref()
+        .expect("the click took the view's closure for the compile");
+    assert_eq!(
+        request.bundle().owner(),
+        &crate::state::ProjectSourceOwner::cell_view(reference)
+    );
 }

@@ -582,7 +582,7 @@ impl RSpiceApp {
         // result belongs to the bundle, not to whichever editor host happens
         // to be on screen when the worker answers.
         crate::workbench::documents::code_workspace::poll_veriloga_compile(self);
-        crate::workbench::documents::code_workspace::consume_veriloga_compile_request(self);
+        crate::workbench::documents::code_workspace::consume_veriloga_compile_request(self, ctx);
         // Where the open module's symbol stands is measured here, once per
         // library revision, so neither the editor nor the inspector parses it.
         crate::workbench::documents::code_workspace::refresh_symbol_standing(

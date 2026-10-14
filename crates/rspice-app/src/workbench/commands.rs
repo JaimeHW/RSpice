@@ -2121,13 +2121,18 @@ impl Command {
             }
             Self::CompileVerilogA => {
                 // The command compiles the active Verilog-A cell view and
-                // takes the reader to where its review and result are shown:
-                // the view is edited in Design, so that is where a compile of
-                // it lands, whichever workspace offered the command.
+                // takes the reader to where its result is shown: the view is
+                // edited in Design, so that is where a compile of it lands,
+                // whichever workspace offered the command.
                 activate_workspace(app, Workspace::Design);
-                // Navigating is not compiling. The frame loop turns the request
-                // into the review transaction on the next frame.
-                app.state.ui.code_workspace.veriloga.compile_requested = true;
+                // The closure is taken now, at the click; the frame loop
+                // starts the compile on its next pass. Nothing is asked.
+                if let Err(error) =
+                    crate::workbench::documents::code_workspace::request_veriloga_compile(app)
+                {
+                    app.state
+                        .push_user_message(crate::diagnostics::ConsoleMessage::error(error));
+                }
             }
             Self::AutomationConsole => {
                 activate_workspace(app, Workspace::Netlist);

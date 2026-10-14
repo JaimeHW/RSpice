@@ -422,7 +422,7 @@ fn module_section(
     let module = receipt
         .map(|receipt| receipt.compilation.report().abi.module_name.to_string())
         .or_else(|| selected.selected_module().map(str::to_owned))
-        .unwrap_or_else(|| messages.text(MessageId::VerilogACompileReviewAutomaticModule));
+        .unwrap_or_else(|| messages.text(MessageId::VerilogAAutomaticModule));
     let (status, tone) = veriloga_compile_status(state, project_id, selected, messages, t);
     code_inspector_section(
         ui,
@@ -430,11 +430,7 @@ fn module_section(
         None,
         None,
         |ui| {
-            property_row(
-                ui,
-                &messages.text(MessageId::VerilogACompileReviewEntryModule),
-                &module,
-            );
+            property_row(ui, &messages.text(MessageId::VerilogAEntryModule), &module);
             if let crate::state::ProjectSourceOwner::CellView { reference } =
                 selected.bundle().owner()
             {

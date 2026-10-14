@@ -1,7 +1,7 @@
 //! The Verilog-A device flow, driven end to end the way a user drives it.
 //!
 //! One project: File → New project, a right-click on the empty canvas and
-//! New Verilog-A device…, the module written and compiled through its review,
+//! New Verilog-A device…, the module written and compiled,
 //! Place in the top schematic and a placement click, the wiring, `gain` set in
 //! the inspector, Run plan and the operating point; then the project saved,
 //! reopened from disk and run again. Each step goes through the entry point
@@ -264,22 +264,15 @@ fn wired_device() -> (User, Device) {
     super::veriloga_interface_tests::edit_source(&mut user.app, MODULE);
     user.settle();
 
-    // 4. Compile, through its review, until the frame loop publishes it.
+    // 4. Compile, which asks nothing: the next frame starts it, and the frame
+    // loop publishes it.
     assert!(Command::CompileVerilogA.is_enabled(&user.app));
     Command::CompileVerilogA.execute(&mut user.app);
-    user.wait_for("the compile review", |app| {
-        app.state
-            .ui
-            .code_workspace
-            .veriloga
-            .compile_dialog
-            .is_some()
-    });
-    user.settle();
-    user.click("Compile exact build");
     user.wait_for("the compile result", |app| {
-        app.state.ui.code_workspace.veriloga.pending.is_none()
+        let veriloga = &app.state.ui.code_workspace.veriloga;
+        veriloga.compile_request.is_none() && veriloga.pending.is_none()
     });
+    assert!(!user.app.state.application_modal_open());
     assert!(
         user.app
             .state

@@ -298,8 +298,11 @@ fn two_cell_views_sharing_a_logical_path_keep_separate_carets() {
 /// Compile is a Design command for a Verilog-A view, and its answer is
 /// published by the frame loop. It used to be consumed only while the
 /// Netlist page was drawn, so a result landing in Design was never read.
+///
+/// Compile asks nothing: the next frame starts the compile, and no dialog,
+/// modal or draft stands between the click and the compiler.
 #[test]
-fn a_compile_from_design_is_reviewed_and_published_while_design_is_showing() {
+fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_is_showing() {
     let mut app = open_project_app();
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
@@ -308,20 +311,44 @@ fn a_compile_from_design_is_reviewed_and_published_while_design_is_showing() {
     assert!(Command::CompileVerilogA.is_enabled(&app));
     Command::CompileVerilogA.execute(&mut app);
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
-    app.prepare_frame(&ctx);
-    let review = app
+    let clicked = app
         .state
         .ui
         .code_workspace
         .veriloga
-        .compile_dialog
+        .compile_request
+        .clone()
+        .expect("the click took the closure");
+    assert_eq!(clicked.bundle().id(), bundle_id);
+    app.prepare_frame(&ctx);
+    assert!(
+        app.state
+            .ui
+            .code_workspace
+            .veriloga
+            .compile_request
+            .is_none()
+    );
+    let started = app
+        .state
+        .ui
+        .code_workspace
+        .veriloga
+        .pending
         .as_ref()
-        .expect("the request became the review transaction");
-    assert_eq!(review.bundle_id, bundle_id);
-    assert!(!app.state.ui.code_workspace.veriloga.compile_requested);
+        .expect("the frame started the compile");
+    assert_eq!(started.token.bundle_id, bundle_id);
+    assert_eq!(
+        started.token.closure_digest,
+        clicked.bundle().closure_digest(),
+        "the compile is of the closure the click took"
+    );
+    assert!(
+        !app.state.application_modal_open(),
+        "nothing modal stands between the click and the compiler"
+    );
 
     // The worker answers while Design is still the workspace on screen.
-    app.state.ui.code_workspace.veriloga.compile_dialog = None;
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     let receipt = code_workspace::compile_project_bundle_receipt(
         app.state.workspace.content.project.id(),
@@ -351,6 +378,155 @@ fn a_compile_from_design_is_reviewed_and_published_while_design_is_showing() {
         .as_ref()
         .expect("the result was published");
     assert_eq!(published.compilation.token().bundle_id, bundle_id);
+}
+
+/// Frame until the compile in flight answers, as the application would.
+pub(super) fn wait_for_compile(ctx: &egui::Context, app: &mut RSpiceApp) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    while app.state.ui.code_workspace.veriloga.pending.is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the compile never answered"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        frame(ctx, app, DESKTOP);
+    }
+}
+
+/// Whether the frame stated `value` for the property row labelled `label`.
+fn states(output: &egui::FullOutput, label: &str, value: &str) -> bool {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .is_some_and(|update| {
+            update
+                .nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(label) && node.value() == Some(value))
+        })
+}
+
+/// A compile is of the closure the click took. Text typed after the click is
+/// not in it, so what comes back is stale: no receipt, no failure, and the
+/// source in front of the reader still reads as needing a compile.
+#[test]
+fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
+    let mut app = open_project_app();
+    let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    let ctx = themed_context();
+
+    Command::CompileVerilogA.execute(&mut app);
+    let clicked = app
+        .state
+        .ui
+        .code_workspace
+        .veriloga
+        .compile_request
+        .clone()
+        .expect("the click took the closure");
+    // The reader types before the frame that starts the compile.
+    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    assert!(
+        code_workspace::replace_selected_veriloga_file(
+            &mut app,
+            &selected,
+            "model.va",
+            module_source("gain", "  real unused;\n"),
+        )
+        .unwrap()
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    let started = app
+        .state
+        .ui
+        .code_workspace
+        .veriloga
+        .pending
+        .as_ref()
+        .expect("the click's compile started")
+        .token;
+    let edited = code_workspace::selected_veriloga_source(&app).unwrap();
+    assert_eq!(started.closure_digest, clicked.bundle().closure_digest());
+    assert_ne!(started.closure_digest, edited.bundle().closure_digest());
+    wait_for_compile(&ctx, &mut app);
+
+    let veriloga = &app.state.ui.code_workspace.veriloga;
+    assert!(
+        veriloga.receipt.is_none(),
+        "a result for the clicked closure is not the edited source's"
+    );
+    assert!(veriloga.last_failure_token.is_none());
+    let messages = app.state.ui.messages();
+    let (status, _) = code_workspace::veriloga_compile_status(
+        veriloga,
+        app.state.workspace.content.project.id(),
+        &edited,
+        messages,
+        &crate::ui::tokens::Tokens::default(),
+    );
+    assert_eq!(
+        status,
+        messages.text(crate::workbench::MessageId::VerilogAStatusModified)
+    );
+}
+
+/// A compile that fails says so where the reader already is: the inspector's
+/// compile status, the editor's diagnostics and the Problems list, with
+/// nothing to open first.
+#[test]
+fn a_failed_compile_is_on_screen_without_opening_anything() {
+    let mut app = open_project_app();
+    let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    app.state.workbench.inspector_visible = true;
+    let ctx = themed_context();
+    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    code_workspace::replace_selected_veriloga_file(
+        &mut app,
+        &selected,
+        "model.va",
+        module_source("gain", "  real broken = ;\n"),
+    )
+    .unwrap();
+
+    Command::CompileVerilogA.execute(&mut app);
+    frame(&ctx, &mut app, DESKTOP);
+    wait_for_compile(&ctx, &mut app);
+    frame(&ctx, &mut app, DESKTOP);
+    let output = frame(&ctx, &mut app, DESKTOP);
+
+    let veriloga = &app.state.ui.code_workspace.veriloga;
+    assert!(veriloga.receipt.is_none());
+    assert!(!veriloga.last_failure.is_empty(), "the findings are kept");
+    let current = code_workspace::selected_veriloga_source(&app).unwrap();
+    assert!(
+        !code_workspace::veriloga_diagnostics(
+            veriloga,
+            app.state.workspace.content.project.id(),
+            &current
+        )
+        .is_empty(),
+        "and are the editor's diagnostics for the source in front"
+    );
+    let messages = app.state.ui.messages();
+    assert!(
+        states(
+            &output,
+            &messages.text(crate::workbench::MessageId::VerilogACompileStatus),
+            &messages.text(crate::workbench::MessageId::VerilogAStatusFailed),
+        ),
+        "the inspector states the failure"
+    );
+    assert!(
+        app.state
+            .log_buffer
+            .count_by_severity(crate::diagnostics::LogSeverity::Error)
+            > 0,
+        "and Problems lists it"
+    );
+    assert!(!app.state.application_modal_open());
 }
 
 /// A cell view's bundle is part of that view's document: an edit marks the

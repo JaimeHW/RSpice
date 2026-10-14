@@ -19,9 +19,8 @@ use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
     CodeDiagnosticCollection, CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile,
-    TargetQualification, VerilogACompileDialogState, VerilogACompileOutcome,
-    VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState,
-    VerilogAQualificationHistoryRow, VerilogAReplaceReview, VerilogAReplaceTarget,
+    TargetQualification, VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection,
+    VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -738,9 +737,16 @@ pub(crate) fn replace_selected_veriloga_file(
     Ok(changed)
 }
 
-pub(crate) fn open_veriloga_compile_dialog(app: &mut RSpiceApp) -> Result<(), String> {
+/// Ask for a compile of the source in front of the reader, as it stands now.
+///
+/// Compile asks nothing: the closure and its build profile are taken here, at
+/// the click, and the frame loop starts exactly that on its next pass. A
+/// source still on the compiler's built-in defaults has them written into the
+/// bundle as its build profile first, so what compiles is always a profile
+/// the project holds.
+pub(crate) fn request_veriloga_compile(app: &mut RSpiceApp) -> Result<(), String> {
     if app.state.ui.code_workspace.veriloga.pending.is_some() {
-        return Err("A Verilog-A compile transaction is already active.".to_owned());
+        return Err("A Verilog-A compile is already running.".to_owned());
     }
     let mut selected = selected_veriloga_source(app)?;
     if selected.bundle().qualifications().len()
@@ -757,132 +763,16 @@ pub(crate) fn open_veriloga_compile_dialog(app: &mut RSpiceApp) -> Result<(), St
         selected = selected_veriloga_source(app)?;
         resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
     }
-    let selected_module = selected
-        .selected_module()
-        .map(str::to_owned)
-        .or_else(|| resolved.profile.entry_modules.first().cloned())
-        .unwrap_or_default();
-    if !selected_module.is_empty()
-        && !resolved.profile.entry_modules.is_empty()
-        && !resolved
-            .profile
-            .entry_modules
-            .iter()
-            .any(|module| module == &selected_module)
+    let entry_modules = &resolved.profile.entry_modules;
+    if let Some(module) = selected.selected_module()
+        && !entry_modules.is_empty()
+        && !entry_modules.iter().any(|entry| entry == module)
     {
         return Err(format!(
-            "Selected module '{selected_module}' is not declared by the Verilog-A build profile."
+            "Selected module '{module}' is not declared by the Verilog-A build profile."
         ));
     }
-    let checks = [
-        ("hidden-state", resolved.profile.checks.hidden_state),
-        ("discontinuities", resolved.profile.checks.discontinuities),
-        ("units-and-ranges", resolved.profile.checks.units_and_ranges),
-        ("convergence", resolved.profile.checks.convergence),
-        ("portability", resolved.profile.checks.portability),
-    ]
-    .into_iter()
-    .map(|(name, enabled)| (name.to_owned(), enabled))
-    .collect();
-    let dialog = VerilogACompileDialogState {
-        project_id: app.state.workspace.content.project.id(),
-        bundle_id: selected.bundle().id(),
-        bundle_revision: selected.bundle().revision().get(),
-        closure_digest: selected.bundle().closure_digest(),
-        profile_digest: resolved.digest,
-        profile_path: resolved
-            .logical_path
-            .unwrap_or_else(|| "<built-in migration profile>".to_owned()),
-        package_name: resolved.profile.package.name.clone(),
-        package_version: resolved.profile.package.version.clone(),
-        selected_module,
-        compile_order: veriloga_compile_order(selected.bundle()),
-        include_paths: resolved.profile.include_paths.clone(),
-        definitions: resolved
-            .profile
-            .preprocessor
-            .defines
-            .iter()
-            .map(|(name, value)| (name.clone(), value.clone()))
-            .collect(),
-        undefinitions: resolved.profile.preprocessor.undefines.clone(),
-        generated_rust: resolved.profile.targets.generated_rust,
-        native_x64_jit: resolved.profile.targets.native_x64_jit,
-        reject_fallback: matches!(
-            resolved.profile.targets.fallback,
-            super::veriloga_profile::VerilogAFallbackPolicy::Reject
-        ),
-        checks,
-        cell_bindings: resolved
-            .profile
-            .cell_bindings
-            .iter()
-            .map(|(cell, module)| (cell.clone(), module.clone()))
-            .collect(),
-        qualification_attempts: selected.bundle().qualifications().len(),
-        recent_qualifications: selected
-            .bundle()
-            .qualifications()
-            .iter()
-            .rev()
-            .take(20)
-            .map(|record| VerilogAQualificationHistoryRow {
-                sequence: record.sequence(),
-                recorded_at_unix_ms: record.recorded_at_unix_ms,
-                disposition: record.disposition,
-                selected_module: record.selected_module.clone(),
-                report_digest: record.report_digest,
-            })
-            .collect(),
-        error: None,
-    };
-    app.state.ui.code_workspace.veriloga.compile_dialog = Some(dialog);
-    Ok(())
-}
-
-pub(crate) fn commit_veriloga_compile_dialog(
-    app: &mut RSpiceApp,
-    repaint: egui::Context,
-) -> Result<(), String> {
-    let dialog = app
-        .state
-        .ui
-        .code_workspace
-        .veriloga
-        .compile_dialog
-        .clone()
-        .ok_or_else(|| "No Verilog-A compile transaction is open.".to_owned())?;
-    let selected = selected_veriloga_source(app)?;
-    let current_project = app.state.workspace.content.project.id();
-    if dialog.project_id != current_project
-        || dialog.bundle_id != selected.bundle().id()
-        || dialog.bundle_revision != selected.bundle().revision().get()
-        || dialog.closure_digest != selected.bundle().closure_digest()
-    {
-        return Err(
-            "The project source changed after this compile review opened. Reopen it to review the current build inputs."
-                .to_owned(),
-        );
-    }
-    let resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
-    if resolved.digest != dialog.profile_digest {
-        return Err(
-            "The Verilog-A build profile changed after this review opened. Reopen it before compiling."
-                .to_owned(),
-        );
-    }
-    let current_module = selected
-        .selected_module()
-        .map(str::to_owned)
-        .or_else(|| resolved.profile.entry_modules.first().cloned())
-        .unwrap_or_default();
-    if current_module != dialog.selected_module {
-        return Err(
-            "The selected Verilog-A entry module changed after this review opened.".to_owned(),
-        );
-    }
-    app.state.ui.code_workspace.veriloga.compile_dialog = None;
-    start_veriloga_compile(app, repaint);
+    app.state.ui.code_workspace.veriloga.compile_request = Some(selected);
     Ok(())
 }
 
@@ -891,6 +781,20 @@ fn persist_legacy_build_profile(
     selected: &SelectedVerilogASource,
     profile: &super::veriloga_profile::VerilogABuildProfile,
 ) -> Result<(), String> {
+    let path = add_build_profile_document(app, selected, profile)?;
+    app.state.push_user_message(ConsoleMessage::info(format!(
+        "Persisted the legacy Verilog-A compiler defaults as project build profile '{path}'."
+    )));
+    Ok(())
+}
+
+/// Add `profile` to `selected`'s bundle as its build-profile document, at the
+/// first free path under `.rspice/`. Returns the path it was written at.
+fn add_build_profile_document(
+    app: &mut RSpiceApp,
+    selected: &SelectedVerilogASource,
+    profile: &super::veriloga_profile::VerilogABuildProfile,
+) -> Result<String, String> {
     let base = ".rspice/veriloga-build";
     let path = (1_u32..=10_000)
         .map(|index| {
@@ -915,52 +819,21 @@ fn persist_legacy_build_profile(
         )
         .map_err(|error| error.to_string())?;
     invalidate_veriloga_evidence(app, selected.bundle().id());
-    app.state.push_user_message(ConsoleMessage::info(format!(
-        "Persisted the legacy Verilog-A compiler defaults as project build profile '{path}'."
-    )));
-    Ok(())
+    Ok(path)
 }
 
-fn veriloga_compile_order(bundle: &ProjectSourceBundle) -> Vec<String> {
-    fn visit(bundle: &ProjectSourceBundle, path: &str, order: &mut Vec<String>) {
-        if order
-            .iter()
-            .any(|existing| existing.eq_ignore_ascii_case(path))
-        {
-            return;
-        }
-        if bundle.role_for_path(path) == Some(ProjectSourceRole::VerilogABuildProfile) {
-            return;
-        }
-        order.push(path.to_owned());
-        for edge in bundle
-            .dependencies()
-            .iter()
-            .filter(|edge| edge.importer().eq_ignore_ascii_case(path))
-        {
-            visit(bundle, edge.imported(), order);
-        }
-    }
-
-    let mut order = Vec::new();
-    visit(bundle, bundle.root().logical_path(), &mut order);
-    order
-}
-
-/// Compile the exact current project source. Native builds use an operating-
-/// system thread; browser builds dispatch the same sealed bundle to a dedicated
-/// module worker so compilation never stalls egui's event/rendering thread.
-pub(crate) fn start_veriloga_compile(app: &mut RSpiceApp, repaint: egui::Context) {
+/// Compile `selected`, the closure a Compile request took at its click.
+/// Native builds use an operating-system thread; browser builds dispatch the
+/// same sealed bundle to a dedicated module worker so compilation never stalls
+/// egui's event/rendering thread.
+fn start_veriloga_compile(
+    app: &mut RSpiceApp,
+    selected: SelectedVerilogASource,
+    repaint: &egui::Context,
+) {
     if app.state.ui.code_workspace.veriloga.pending.is_some() {
         return;
     }
-    let selected = match selected_veriloga_source(app) {
-        Ok(selected) => selected,
-        Err(error) => {
-            app.state.push_user_message(ConsoleMessage::error(error));
-            return;
-        }
-    };
     let token = selected.token(app.state.workspace.content.project.id());
     let (sender, receiver) = mpsc::channel();
     Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
@@ -993,17 +866,14 @@ pub(crate) fn cancel_veriloga_compile(app: &mut RSpiceApp) {
     app.state.ui.code_workspace.veriloga.pending = None;
 }
 
-/// Turn a Compile command into its review transaction.
+/// Start the compile a Compile command asked for.
 ///
-/// The command records intent; opening the review needs only the project, so
-/// the frame loop consumes it before any surface draws. The review dialog is
-/// drawn by whichever host is showing the editor, and the command has already
-/// taken the reader there.
-pub fn consume_veriloga_compile_request(app: &mut RSpiceApp) {
-    if std::mem::take(&mut app.state.ui.code_workspace.veriloga.compile_requested)
-        && let Err(error) = open_veriloga_compile_dialog(app)
-    {
-        app.state.push_user_message(ConsoleMessage::error(error));
+/// The command took the closure at the click; the frame loop starts it here,
+/// before any surface draws, with the context the worker wakes when it
+/// answers. Its result lands wherever the reader is by then.
+pub fn consume_veriloga_compile_request(app: &mut RSpiceApp, repaint: &egui::Context) {
+    if let Some(selected) = app.state.ui.code_workspace.veriloga.compile_request.take() {
+        start_veriloga_compile(app, selected, repaint);
     }
 }
 
@@ -1580,27 +1450,29 @@ mod tests {
         module_source_with("legacy", "module legacy; endmodule\n")
     }
 
+    /// A compile of a source still on the compiler's built-in defaults writes
+    /// them into the bundle as its build profile, and compiles the closure
+    /// holding it: the request is taken after the write, not before.
     #[test]
-    fn compile_review_migrates_legacy_defaults_to_a_persisted_role() {
+    fn a_compile_request_writes_legacy_defaults_as_the_build_profile_it_compiles() {
         let mut app = portless_module();
 
-        open_veriloga_compile_dialog(&mut app).unwrap();
+        request_veriloga_compile(&mut app).unwrap();
 
-        let bundle_id = app
+        let request = app
             .state
             .ui
             .code_workspace
             .veriloga
-            .compile_dialog
-            .as_ref()
-            .unwrap()
-            .bundle_id;
+            .compile_request
+            .clone()
+            .expect("the click took the closure");
         let bundle = app
             .state
             .workspace
             .content
             .project_sources
-            .get_bundle(bundle_id)
+            .get_bundle(request.bundle().id())
             .unwrap();
         let profile_path = bundle
             .paths_for_role(ProjectSourceRole::VerilogABuildProfile)
@@ -1609,61 +1481,15 @@ mod tests {
         assert_eq!(profile_path, ".rspice/veriloga-build.toml");
         assert!(!bundle.root().content().contains(profile_path));
         assert!(app.state.workspace.content.project_sources_dirty);
-        let dialog = app
-            .state
-            .ui
-            .code_workspace
-            .veriloga
-            .compile_dialog
-            .as_ref()
-            .unwrap();
-        assert_eq!(dialog.profile_path, profile_path);
-        assert_eq!(dialog.bundle_revision, bundle.revision().get());
-        assert_eq!(dialog.closure_digest, bundle.closure_digest());
-    }
-
-    #[test]
-    fn compile_review_rejects_a_profile_changed_after_review() {
-        let mut app = portless_module();
-        open_veriloga_compile_dialog(&mut app).unwrap();
-        let dialog = app
-            .state
-            .ui
-            .code_workspace
-            .veriloga
-            .compile_dialog
-            .clone()
-            .unwrap();
-        let source = app
-            .state
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(dialog.bundle_id)
-            .unwrap()
-            .file_content(&dialog.profile_path)
-            .unwrap()
-            .to_owned();
-        app.state
-            .workspace
-            .content
-            .replace_project_source_bundle_file(
-                dialog.bundle_id,
-                &dialog.profile_path,
-                format!("{source}\n# changed after review\n"),
-            )
-            .unwrap();
-
-        let error = commit_veriloga_compile_dialog(&mut app, egui::Context::default())
-            .expect_err("stale review must not launch compilation");
-        assert!(error.contains("source changed"));
-        assert!(app.state.ui.code_workspace.veriloga.pending.is_none());
+        assert_eq!(request.bundle().revision(), bundle.revision());
+        assert_eq!(request.bundle().closure_digest(), bundle.closure_digest());
+        assert!(request.bundle().contains_file(profile_path));
     }
 
     #[test]
     fn qualification_history_is_append_only_without_changing_source_identity() {
         let mut app = portless_module();
-        open_veriloga_compile_dialog(&mut app).unwrap();
+        request_veriloga_compile(&mut app).unwrap();
         let selected = selected_veriloga_source(&app).unwrap();
         let token = selected.token(app.state.workspace.content.project.id());
         let revision = selected.bundle().revision();

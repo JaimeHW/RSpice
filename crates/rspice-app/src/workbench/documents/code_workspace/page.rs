@@ -124,43 +124,6 @@ pub struct PendingVerilogACompile {
     pub receiver: Arc<Mutex<mpsc::Receiver<VerilogACompileOutcome>>>,
 }
 
-/// Immutable, identity-bound review of one Verilog-A build transaction. All
-/// editable policy remains in the project-owned build-profile document; this
-/// snapshot exists so the user can verify exactly what will execute.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerilogACompileDialogState {
-    pub project_id: crate::product::ProjectId,
-    pub bundle_id: crate::state::ProjectSourceId,
-    pub bundle_revision: u64,
-    pub closure_digest: crate::product::ContentDigest,
-    pub profile_digest: crate::product::ContentDigest,
-    pub profile_path: String,
-    pub package_name: String,
-    pub package_version: String,
-    pub selected_module: String,
-    pub compile_order: Vec<String>,
-    pub include_paths: Vec<String>,
-    pub definitions: Vec<(String, String)>,
-    pub undefinitions: Vec<String>,
-    pub generated_rust: bool,
-    pub native_x64_jit: bool,
-    pub reject_fallback: bool,
-    pub checks: Vec<(String, bool)>,
-    pub cell_bindings: Vec<(String, String)>,
-    pub qualification_attempts: usize,
-    pub recent_qualifications: Vec<VerilogAQualificationHistoryRow>,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerilogAQualificationHistoryRow {
-    pub sequence: u64,
-    pub recorded_at_unix_ms: u64,
-    pub disposition: crate::state::ProjectSourceQualificationDisposition,
-    pub selected_module: String,
-    pub report_digest: crate::product::ContentDigest,
-}
-
 impl Clone for PendingVerilogACompile {
     fn clone(&self) -> Self {
         Self {
@@ -216,11 +179,11 @@ pub enum TargetQualification {
 #[derive(Debug, Clone, Default)]
 pub struct VerilogAWorkbenchState {
     pub import_requested: bool,
-    /// One-shot command-palette/menu request. The surface consumes this only
-    /// after it owns an egui context, then the ordinary revision-bound compile
-    /// transaction becomes authoritative.
-    pub compile_requested: bool,
-    pub compile_dialog: Option<VerilogACompileDialogState>,
+    /// A Compile the reader asked for: the source closure, build profile
+    /// included, exactly as it stood at the click. The frame loop starts it
+    /// on its next pass, where it has the egui context the worker wakes; a
+    /// result for a closure that has moved on since is stale like any other.
+    pub compile_request: Option<super::SelectedVerilogASource>,
     /// A dependency import is bound to the exact bundle/importer that launched
     /// the asynchronous picker.
     pub import_target: Option<VerilogAImportTarget>,
