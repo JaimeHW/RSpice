@@ -432,3 +432,73 @@ fn a_string_parameter_takes_its_override_from_the_card_and_from_the_source() {
         "{message}"
     );
 }
+
+/// One level of a recursive ladder conducts `count` mA/V into its own `mid`;
+/// the recursion ends in one plain unit where the generate stops.
+const LADDER: &str = r#"
+`include "disciplines.vams"
+module unit(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+module ladder(p, n);
+    inout p, n;
+    electrical p, n, mid;
+    parameter integer count = 3 from [1:inf);
+    analog I(p, mid) <+ V(p, mid) * count / 1000.0;
+    generate if (count > 1) begin : more
+        ladder #(.count(count - 1)) rest (mid, n);
+    end else begin : last
+        unit tail (mid, n);
+    end endgenerate
+endmodule
+"#;
+
+/// [`LADDER`] reading its level through an initial block, so the same card
+/// takes the mixed route.
+const MIXED_LADDER: &str = r#"
+`include "disciplines.vams"
+module unit(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+module ladder(p, n);
+    inout p, n;
+    electrical p, n, mid;
+    parameter integer count = 3 from [1:inf);
+    integer level;
+    initial level = count;
+    analog I(p, mid) <+ V(p, mid) * level / 1000.0;
+    generate if (count > 1) begin : more
+        ladder #(.count(count - 1)) rest (mid, n);
+    end else begin : last
+        unit tail (mid, n);
+    end endgenerate
+endmodule
+"#;
+
+/// A recursive hierarchy elaborates as deep as its card says, and each level
+/// keeps its own closed `count`: the lower leg is 1k·(1/count + … + 1/1) for
+/// the levels and 1k for the tail. A level that read another's value, or a
+/// depth the card did not name, reads a different divider.
+#[test]
+fn a_recursive_hierarchy_elaborates_the_depth_its_card_names() {
+    for (name, source) in [("ladder", LADDER), ("mixed_ladder", MIXED_LADDER)] {
+        let model = ModelFile::new(name, source);
+        for (card, levels) in [("", 3_u32), ("count=4", 4), ("count=1", 1)] {
+            let deck = format!(
+                "* a recursive ladder\nv1 in 0 dc 1.0\nr1 in out 1k\nx1 out 0 ladder {card}\n\
+                 .va \"{}\" module=ladder\n.op\n.end\n",
+                model.deck_path()
+            );
+            let lower = 1000.0 * (1..=levels).map(|k| 1.0 / f64::from(k)).sum::<f64>() + 1000.0;
+            assert_close(
+                &format!("{name} {card}"),
+                node_voltage(&deck, "out"),
+                divided(lower),
+            );
+        }
+    }
+}

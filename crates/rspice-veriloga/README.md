@@ -744,9 +744,12 @@ Cycle detection compares the module and its closed typed overrides along the
 active ancestor path; repeated templates in sibling instances remain independent.
 Traversal is iterative and preserves source order. Repeating specializations
 report the instance and ancestor; non-repeating expansion is bounded to 256
-instance levels below the root and 65,536 digital child instances per compiled
+instance levels below the root and 65,536 child instances per compiled
 root. Exceeding these limits is a resource diagnostic, not a claim that the
-design is cyclic. Recursive analog or mixed child modules remain unsupported.
+design is cyclic. Analog and mixed child modules follow the same rule: the
+continuous pass walks the hierarchy with an explicit stack and compares closed
+overrides along the ancestor path, so a finite recursive analog or mixed
+hierarchy elaborates one occurrence per level.
 This uses the existing schema 87 flat plan and Wasm helper ABI 20.
 Source: [VAMS-2023, 6.3 and 6.6](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 

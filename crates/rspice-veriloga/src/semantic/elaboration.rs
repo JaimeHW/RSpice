@@ -106,8 +106,7 @@ pub(crate) fn elaborate_executable_module<'a>(
     elaborator
         .parameter_hierarchy
         .register(root, selected, &root_scope, None)?;
-    let mut module_stack = vec![selected.name.clone()];
-    elaborator.append_instances(root, &root_scope, &mut module_stack, selected.name.as_str())?;
+    elaborator.append_instances(root, root_scope, selected.name.as_str())?;
     Ok(Cow::Owned(elaborator.finish()?))
 }
 
@@ -126,6 +125,35 @@ fn source_modules<'a>(analyzed: &'a AnalyzedFile) -> CompileResult<HashMap<SmolS
         }
     }
     Ok(modules)
+}
+
+/// The module one occurrence elaborated as, held for its children.
+enum FrameModule<'s> {
+    Source(&'s Module),
+    Shared(std::sync::Arc<super::digital_elaborate::SpecializedModule>),
+    Specialized(std::sync::Arc<parameters::SpecializedModule>),
+}
+
+impl FrameModule<'_> {
+    fn source(&self) -> &Module {
+        match self {
+            Self::Source(module) => module,
+            Self::Shared(module) => &module.source,
+            Self::Specialized(module) => &module.source,
+        }
+    }
+}
+
+/// One occurrence on the active ancestor path and the children it has left.
+struct AnalogFrame<'s> {
+    /// The closed specialization, or `None` for an occurrence the discrete
+    /// pass specialized and checked.
+    key: Option<parameters::SpecializationKey>,
+    path: SmolStr,
+    module: FrameModule<'s>,
+    scope: ScopeMap,
+    pending: std::vec::IntoIter<ModuleInstance>,
+    seen: HashSet<SmolStr>,
 }
 
 #[derive(Clone)]
@@ -576,16 +604,37 @@ impl<'a> HierarchyElaborator<'a> {
 
     /// Flatten the analog content of each concrete occurrence. Digital processes
     /// remain in independently named frames with bindings to this same storage.
-    fn append_instances(
+    ///
+    /// The traversal follows the discrete pass's rule. An explicit stack keeps
+    /// depth-first source order without the host call stack, so a finite
+    /// parameter-recursive hierarchy ends where its conditional generate stops
+    /// instantiating. A child whose closed specialization repeats one on its
+    /// own ancestor path cannot terminate and is a cycle; finished siblings
+    /// have left the stack, so sharing their specialization is not one.
+    /// Non-repeating expansion is bounded by the shared resource limits.
+    fn append_instances<'s>(
         &mut self,
-        source_module: &Module,
-        parent_scope: &ScopeMap,
-        module_stack: &mut Vec<SmolStr>,
-        parent_path: &str,
-    ) -> CompileResult<()> {
-        let mut instance_names = HashSet::new();
-        for instance in &source_module.instances {
-            if !instance_names.insert(instance.name.clone()) {
+        root: &'s Module,
+        scope: ScopeMap,
+        path: &str,
+    ) -> CompileResult<()>
+    where
+        'a: 's,
+    {
+        let mut stack = vec![AnalogFrame {
+            key: Some(parameters::root_specialization_key(root)?),
+            path: path.into(),
+            pending: root.instances.clone().into_iter(),
+            module: FrameModule::Source(root),
+            scope,
+            seen: HashSet::new(),
+        }];
+        let mut instances = 0_usize;
+        while let Some(mut frame) = stack.pop() {
+            let Some(instance) = frame.pending.next() else {
+                continue;
+            };
+            if !frame.seen.insert(instance.name.clone()) {
                 return Err(semantic_error(
                     SemanticErrorKind::DuplicateSymbol {
                         name: instance.name.clone(),
@@ -594,20 +643,33 @@ impl<'a> HierarchyElaborator<'a> {
                     instance.span,
                 ));
             }
-            let path = format!("{parent_path}.{}", instance.name);
-            self.append_instance(instance, source_module, parent_scope, module_stack, &path)?;
+            let path = format!("{}.{}", frame.path, instance.name);
+            stack.push(frame);
+            super::digital_elaborate::check_hierarchy_capacity(
+                stack.len(),
+                instances,
+                &path,
+                instance.span,
+            )?;
+            instances += 1;
+            let next = self.append_instance(&instance, &stack, &path)?;
+            stack.push(next);
         }
         Ok(())
     }
 
-    fn append_instance(
+    fn append_instance<'s>(
         &mut self,
         instance: &ModuleInstance,
-        parent_source: &Module,
-        parent_scope: &ScopeMap,
-        module_stack: &mut Vec<SmolStr>,
+        ancestors: &[AnalogFrame<'s>],
         path: &str,
-    ) -> CompileResult<()> {
+    ) -> CompileResult<AnalogFrame<'s>>
+    where
+        'a: 's,
+    {
+        let parent = ancestors.last().expect("instance parent");
+        let parent_source = parent.module.source();
+        let parent_scope = &parent.scope;
         let relative = path
             .strip_prefix(self.flattened.name.as_str())
             .and_then(|suffix| suffix.strip_prefix('.'))
@@ -615,10 +677,8 @@ impl<'a> HierarchyElaborator<'a> {
                 internal_error("hierarchy path does not name the selected root".into())
             })?;
         let shared = self.shared_occurrences.get(relative).cloned();
-        let child_source = self
-            .source_modules
-            .get(&instance.module)
-            .copied()
+        let declared: Option<&'a Module> = self.source_modules.get(&instance.module).copied();
+        let child_source = declared
             .or_else(|| shared.as_deref().map(|module| &module.source))
             .ok_or_else(|| {
                 semantic_error(
@@ -637,20 +697,6 @@ impl<'a> HierarchyElaborator<'a> {
                     instance.module
                 ))
             })?;
-        // Shared occurrences already passed specialization-aware cycle and
-        // resource checks, so finite parameter-recursive hierarchies are legal.
-        if shared.is_none() && module_stack.contains(&instance.module) {
-            let mut cycle = module_stack.iter().map(SmolStr::as_str).collect::<Vec<_>>();
-            cycle.push(instance.module.as_str());
-            return Err(semantic_error(
-                SemanticErrorKind::CircularDependency(format!(
-                    "module hierarchy {} at instance '{path}'",
-                    cycle.join(" -> ")
-                )),
-                instance.span,
-            ));
-        }
-
         let overrides = bind_parameter_overrides(instance, child, path)?;
         self.validate_parameter_array_overrides(
             child_source,
@@ -659,10 +705,53 @@ impl<'a> HierarchyElaborator<'a> {
             &overrides,
             path,
         )?;
-        let specialized = if shared.is_none() {
-            self.specialize_parameters(child_source, child, parent_source, &overrides, path)?
+        // Shared occurrences already passed the discrete pass's cycle and
+        // resource checks. A shared subtree is a prefix of every path through
+        // it, since a module above a discrete one is itself shared, so the
+        // keys below compare only occurrences this pass specializes.
+        let (key, specialized) = if shared.is_none() {
+            let (key, specialized) =
+                self.specialize_parameters(child_source, child, parent_source, &overrides, path)?;
+            (Some(key), specialized)
         } else {
-            None
+            (None, None)
+        };
+        if let Some(key) = &key
+            && let Some(first) = ancestors
+                .iter()
+                .position(|frame| frame.key.as_ref() == Some(key))
+        {
+            let mut cycle: Vec<_> = ancestors[first..]
+                .iter()
+                .map(|frame| frame.module.source().name.as_str())
+                .collect();
+            cycle.push(instance.module.as_str());
+            return Err(semantic_error(
+                SemanticErrorKind::CircularDependency(format!(
+                    "module hierarchy {} at instance '{path}': specialization repeats ancestor '{}'",
+                    cycle.join(" -> "),
+                    ancestors[first].path
+                )),
+                instance.span,
+            ));
+        }
+        let pending = shared
+            .as_deref()
+            .map(|module| &module.source)
+            .or_else(|| specialized.as_deref().map(|module| &module.source))
+            .unwrap_or(child_source)
+            .instances
+            .clone()
+            .into_iter();
+        let frame_module = match (&shared, &specialized, declared) {
+            (Some(shared), _, _) => FrameModule::Shared(shared.clone()),
+            (None, Some(specialized), _) => FrameModule::Specialized(specialized.clone()),
+            (None, None, Some(declared)) => FrameModule::Source(declared),
+            (None, None, None) => {
+                return Err(internal_error(format!(
+                    "instance '{path}' has neither a declared nor a shared module"
+                )));
+            }
         };
         let (child_source, child) = if let Some(shared) = shared.as_deref() {
             (&shared.source, &shared.analyzed)
@@ -1189,10 +1278,14 @@ impl<'a> HierarchyElaborator<'a> {
             }
             result?;
         }
-        module_stack.push(instance.module.clone());
-        let nested = self.append_instances(child_source, &scope, module_stack, path);
-        module_stack.pop();
-        nested
+        Ok(AnalogFrame {
+            key,
+            path: path.into(),
+            pending,
+            module: frame_module,
+            scope,
+            seen: HashSet::new(),
+        })
     }
 
     /// Validate array-valued overrides before any child state is appended to

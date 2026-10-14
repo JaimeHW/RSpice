@@ -1056,3 +1056,81 @@ endmodule
         assert!(error.to_string().contains(diagnostic), "{error}");
     }
 }
+
+/// Each level conducts `count` mA/V into its own `mid`, and the recursion
+/// ends in one plain unit where the generate stops instantiating.
+const RECURSIVE_LADDER: &str = r#"
+`include "disciplines.vams"
+module unit(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+module ladder(p, n);
+    inout p, n;
+    electrical p, n, mid;
+    parameter integer count = 3 from [1:inf);
+    analog I(p, mid) <+ V(p, mid) * count / 1000.0;
+    generate if (count > 1) begin : more
+        ladder #(.count(count - 1)) rest (mid, n);
+    end else begin : last
+        unit tail (mid, n);
+    end endgenerate
+endmodule
+"#;
+
+#[test]
+fn a_finite_recursive_analog_hierarchy_elaborates_one_occurrence_per_level() {
+    let model = compile_selected(RECURSIVE_LADDER, "ladder");
+    // Three levels, each with its own `mid`; three level laws and the tail.
+    assert_eq!(model.internal_nodes, 3);
+    assert_eq!(model.stamp_programs.len(), 4);
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_runtime(RECURSIVE_LADDER, Some("ladder"))
+        .expect("bytecode and canonical hierarchy artifacts must match");
+}
+
+#[test]
+fn a_repeating_analog_specialization_is_a_cycle() {
+    for source in [
+        // The same closed value again repeats the parent's specialization.
+        r#"
+module again(p, n); inout p, n; electrical p, n; parameter integer side = 0;
+    analog I(p, n) <+ V(p, n);
+    generate if (1) begin : more again #(.side(side)) next (p, n); end endgenerate
+endmodule
+"#,
+        // Alternating values repeat a specialization two levels up.
+        r#"
+module again(p, n); inout p, n; electrical p, n; parameter integer side = 0;
+    analog I(p, n) <+ V(p, n);
+    generate if (1) begin : more again #(.side(1 - side)) next (p, n); end endgenerate
+endmodule
+"#,
+    ] {
+        let error = VerilogACompiler::default()
+            .compile_runtime(source, Some("again"))
+            .expect_err("a repeated specialization cannot terminate")
+            .to_string();
+        assert!(error.contains("Circular dependency"), "{error}");
+        assert!(error.contains("specialization repeats ancestor"), "{error}");
+    }
+}
+
+#[test]
+fn a_non_repeating_analog_recursion_stops_at_the_depth_limit() {
+    let error = VerilogACompiler::default()
+        .compile_runtime(
+            r#"
+module grow(p, n); inout p, n; electrical p, n; parameter integer depth = 0;
+    analog I(p, n) <+ V(p, n);
+    generate if (1) begin : more grow #(.depth(depth + 1)) next (p, n); end endgenerate
+endmodule
+"#,
+            Some("grow"),
+        )
+        .expect_err("distinct values do not prove termination")
+        .to_string();
+    assert!(error.contains("depth limit of 256"), "{error}");
+    assert!(!error.contains("Circular dependency"), "{error}");
+}

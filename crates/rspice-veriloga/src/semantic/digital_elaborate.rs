@@ -383,10 +383,10 @@ pub(super) fn check_hierarchy_capacity(
     path: &str,
     span: Span,
 ) -> CompileResult<()> {
-    let detail = if depth > MAX_DIGITAL_HIERARCHY_DEPTH {
-        format!("exceeds the digital hierarchy depth limit of {MAX_DIGITAL_HIERARCHY_DEPTH}")
-    } else if instances >= MAX_DIGITAL_HIERARCHY_INSTANCES {
-        format!("exceeds the digital hierarchy instance limit of {MAX_DIGITAL_HIERARCHY_INSTANCES}")
+    let detail = if depth > MAX_HIERARCHY_DEPTH {
+        format!("exceeds the module hierarchy depth limit of {MAX_HIERARCHY_DEPTH}")
+    } else if instances >= MAX_HIERARCHY_INSTANCES {
+        format!("exceeds the module hierarchy instance limit of {MAX_HIERARCHY_INSTANCES}")
     } else {
         return Ok(());
     };
@@ -402,10 +402,11 @@ pub(super) struct SpecializedModule {
     pub analyzed: AnalyzedModule,
 }
 
-/// These bounds apply to the discrete hierarchy below the compiled root.
-/// They limit non-repeating expansion as well as finite but oversized designs.
-const MAX_DIGITAL_HIERARCHY_DEPTH: usize = 256;
-const MAX_DIGITAL_HIERARCHY_INSTANCES: usize = 65_536;
+/// These bounds apply to the hierarchy below the compiled root, in the
+/// discrete pass and the continuous one alike. They limit non-repeating
+/// expansion as well as finite but oversized designs.
+const MAX_HIERARCHY_DEPTH: usize = 256;
+const MAX_HIERARCHY_INSTANCES: usize = 65_536;
 
 /// Closed explicit overrides identify a deterministic source specialization.
 /// An omitted override and an explicit value equal to its default may have

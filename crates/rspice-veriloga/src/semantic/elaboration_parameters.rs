@@ -56,7 +56,31 @@ pub(super) fn specialization_modules(
     result
 }
 
+/// The specialization a root compiles as: its given parameters, closed.
+pub(super) fn root_specialization_key(source: &Module) -> CompileResult<SpecializationKey> {
+    let overrides = source
+        .parameters
+        .iter()
+        .enumerate()
+        .filter(|(_, parameter)| parameter.is_given)
+        .filter_map(|(index, parameter)| parameter.default.as_ref().map(|value| (index, value)))
+        .map(|(index, value)| {
+            crate::semantic::instance_parameters::override_identity(value)
+                .map(|identity| (index, identity))
+                .map_err(internal_error)
+        })
+        .collect::<CompileResult<Vec<_>>>()?;
+    Ok((source.name.clone(), overrides))
+}
+
 impl HierarchyElaborator<'_> {
+    /// Close an instance's overrides in its parent and return the
+    /// specialization they select, with the key that identifies it.
+    ///
+    /// A module outside [`specialization_modules`] keeps its symbolic path and
+    /// the key of its name alone. Nothing below such a module is conditional,
+    /// so if it repeats on one ancestor path the hierarchy cannot terminate,
+    /// whatever its overrides are.
     pub(super) fn specialize_parameters(
         &mut self,
         source: &Module,
@@ -64,9 +88,9 @@ impl HierarchyElaborator<'_> {
         parent: &Module,
         overrides: &HashMap<usize, Expression>,
         path: &str,
-    ) -> CompileResult<Option<std::sync::Arc<SpecializedModule>>> {
+    ) -> CompileResult<(SpecializationKey, Option<std::sync::Arc<SpecializedModule>>)> {
         if overrides.is_empty() || !self.specialization_modules.contains(&source.name) {
-            return Ok(None);
+            return Ok(((source.name.clone(), Vec::new()), None));
         }
         let constants = crate::semantic::instance_parameters::constants(parent);
         let mut indices: Vec<_> = overrides.keys().copied().collect();
@@ -98,7 +122,7 @@ impl HierarchyElaborator<'_> {
         }
         let key = (source.name.clone(), key);
         if let Some(specialized) = self.specializations.get(&key) {
-            return Ok(Some(specialized.clone()));
+            return Ok((key, Some(specialized.clone())));
         }
         let mut source = source.clone();
         for (index, value) in values {
@@ -112,8 +136,9 @@ impl HierarchyElaborator<'_> {
         let mut analyzed = analyzer.analyze_module(&source, child.default_transition)?;
         analyzed.default_discipline = child.default_discipline.clone();
         let specialized = std::sync::Arc::new(SpecializedModule { source, analyzed });
-        self.specializations.insert(key, specialized.clone());
-        Ok(Some(specialized))
+        self.specializations
+            .insert(key.clone(), specialized.clone());
+        Ok((key, Some(specialized)))
     }
 }
 
