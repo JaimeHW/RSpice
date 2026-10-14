@@ -31,6 +31,7 @@ use super::dialog::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use super::form;
 use super::segmented::{SegmentedWidth, segmented};
 use super::select::select;
+use super::status_mark::{PROBLEM_MARK_ADVANCE, PROBLEM_MARK_SIDE, Problem, paint_problem_mark};
 
 /// Air between a row's label column and its control.
 const LABEL_GAP: f32 = 8.0;
@@ -475,7 +476,8 @@ impl<'a> CommandForm<'a> {
     }
 
     /// The validation slot: `Ok(None)` says nothing, `Ok(Some(_))` states a
-    /// neutral fact, `Err(_)` states why the primary is refused.
+    /// neutral fact, `Err(_)` states why the primary is refused, behind a
+    /// failure mark.
     pub fn status(mut self, status: Result<Option<&'a str>, &'a str>) -> Self {
         self.status = status;
         self
@@ -573,24 +575,33 @@ fn paint_context_line(ui: &mut Ui, context: &str) {
 
 /// The status slot: `lines` lines tall when `reserved`, whatever it says;
 /// otherwise only as tall as what it says, and absent when it says nothing.
+///
+/// A neutral fact is set in `text_dim`. A refusal belongs to no one field, so
+/// it carries a failure mark in front of primary text: the mark says it is a
+/// refusal, and the words stay as readable as the rows above them.
 fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>, lines: usize, reserved: bool) {
     let t = Tokens::get(ui.ctx());
     let message = match status {
         Ok(None) => None,
-        Ok(Some(message)) => Some((message, t.color.text_dim)),
-        Err(message) => Some((message, t.color.err)),
+        Ok(Some(message)) => Some((message, t.color.text_dim, None)),
+        Err(message) => Some((message, t.color.text, Some(Problem::Failure))),
     };
     if !reserved && message.is_none() {
         return;
     }
     ui.add_space(ROW_GAP);
     let width = ui.available_width();
-    let Some((message, color)) = message else {
+    let Some((message, color, problem)) = message else {
         ui.allocate_exact_size(
             vec2(width, STATUS_LINE_H * lines as f32),
             egui::Sense::hover(),
         );
         return;
+    };
+    let text_left = if problem.is_some() {
+        PROBLEM_MARK_ADVANCE
+    } else {
+        0.0
     };
     let mut job = egui::text::LayoutJob::single_section(
         message.to_owned(),
@@ -601,7 +612,7 @@ fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>, lines: usize, r
         },
     );
     job.wrap = egui::text::TextWrapping {
-        max_width: width,
+        max_width: (width - text_left).max(1.0),
         max_rows: lines,
         overflow_character: Some('\u{2026}'),
         ..Default::default()
@@ -616,12 +627,35 @@ fn paint_status(ui: &mut Ui, status: Result<Option<&str>, &str>, lines: usize, r
         vec2(width, STATUS_LINE_H * shown_lines as f32),
         egui::Sense::hover(),
     );
-    ui.painter()
-        .galley(egui::pos2(rect.left(), rect.top()), galley, color);
+    if let Some(problem) = problem {
+        let first_line = galley
+            .rows
+            .first()
+            .map_or(galley.size().y * 0.5, |row| row.rect().center().y);
+        paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(
+                    rect.left() + PROBLEM_MARK_SIDE * 0.5,
+                    rect.top() + first_line,
+                ),
+                egui::Vec2::splat(PROBLEM_MARK_SIDE),
+            ),
+            problem,
+        );
+    }
+    ui.painter().galley(
+        egui::pos2(rect.left() + text_left, rect.top()),
+        galley,
+        color,
+    );
     let message = message.to_owned();
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Label);
         node.set_value(message.clone());
+        if let Some(problem) = problem {
+            node.set_description(problem.announcement());
+        }
     });
 }
 
@@ -742,6 +776,90 @@ mod tests {
         assert_eq!(
             valid.rect_of("Place").map(|rect| rect.top()),
             invalid.rect_of("Place").map(|rect| rect.top()),
+        );
+    }
+
+    /// A refusal that belongs to no field is a failure mark in front of
+    /// primary text, never red words; a neutral fact is dim and unmarked.
+    #[test]
+    fn a_form_level_refusal_is_a_failure_mark_before_neutral_text() {
+        fn status_paint(
+            status: Result<Option<&str>, &str>,
+            message: &str,
+        ) -> (egui::epaint::TextShape, Vec<egui::Rect>) {
+            fn walk(
+                shape: &egui::Shape,
+                message: &str,
+                text: &mut Option<egui::epaint::TextShape>,
+                segments: &mut Vec<egui::Rect>,
+            ) {
+                match shape {
+                    egui::Shape::Vec(shapes) => {
+                        for shape in shapes {
+                            walk(shape, message, text, segments);
+                        }
+                    }
+                    egui::Shape::Text(painted) if painted.galley.text() == message => {
+                        *text = Some(painted.clone());
+                    }
+                    egui::Shape::LineSegment { .. } => segments.push(shape.visual_bounding_rect()),
+                    _ => {}
+                }
+            }
+            let ctx = Context::default();
+            crate::Theme::default().apply(&ctx);
+            // The card fades in, and a faded colour is not the authored one.
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            let input = || egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1024.0, 640.0),
+                )),
+                ..Default::default()
+            };
+            let mut shapes = Vec::new();
+            for _ in 0..3 {
+                shapes = ctx
+                    .run_ui(input(), |ctx| {
+                        let _ =
+                            CommandForm::new("Import", "Import")
+                                .status(status)
+                                .show(ctx, |rows| {
+                                    rows.value_mono("File", "pair.va");
+                                    None
+                                });
+                    })
+                    .shapes;
+            }
+            let mut text = None;
+            let mut segments = Vec::new();
+            for clipped in &shapes {
+                walk(&clipped.shape, message, &mut text, &mut segments);
+            }
+            (text.expect("the status is painted"), segments)
+        }
+
+        let palette = Tokens::default().color;
+        let refusal = "The module declares no ports";
+        let (text, segments) = status_paint(Err(refusal), refusal);
+        assert_eq!(text.fallback_color, palette.text);
+        let first_line = text.galley.rows[0].rect().translate(text.pos.to_vec2());
+        let mark = segments
+            .iter()
+            .filter(|segment| {
+                segment.right() <= text.pos.x
+                    && (segment.center().y - first_line.center().y).abs() < 4.0
+            })
+            .count();
+        assert_eq!(mark, 2, "a refusal carries the failure cross: {segments:?}");
+
+        let fact = "One module, two ports";
+        let (text, segments) = status_paint(Ok(Some(fact)), fact);
+        assert_eq!(text.fallback_color, palette.text_dim);
+        assert!(
+            !segments.iter().any(|segment| segment.right() <= text.pos.x
+                && (segment.center().y - text.pos.y).abs() < STATUS_LINE_H),
+            "a neutral fact is unmarked: {segments:?}"
         );
     }
 
