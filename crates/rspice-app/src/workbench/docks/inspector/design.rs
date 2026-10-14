@@ -48,23 +48,12 @@ use rspice_design::connectivity::extract_with_hierarchy as extract;
 use rspice_design::connectivity::summary::{DesignNet, NetClass};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
-use rspice_design::resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolSource};
-use rspice_schematic_editor::view::resolved_symbol_render::{
-    draw_resolved_symbol_artwork, resolved_symbol_artwork_bounds,
-};
 
 use super::{ComponentModelEvidence, component_model_evidence, muted_inspector_copy};
 use rspice_ui_kit::panels::inspector::toned_inspector_copy;
 use rspice_ui_kit::panels::{
-    PANEL_INSET, panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,
+    panel_bleed, panel_inset, section_block_gap, section_header, section_header_action,
 };
-
-/// The mockup's `.inspector-hero` is an 82 px band: an 82 px square symbol
-/// stage beside four stacked text lines.
-const HERO_H: f32 = 82.0;
-const HERO_PREVIEW_W: f32 = 82.0;
-/// Vertical centers of the eyebrow, title, subtitle, and status lines.
-const HERO_BASELINES: [f32; 4] = [12.0, 31.0, 49.0, 68.0];
 
 // =============================================================================
 // Subject resolution
@@ -488,215 +477,77 @@ fn unresolved_projection_note(ui: &mut Ui, reason: &str) {
 }
 
 // =============================================================================
-// Hero
+// Title
 // =============================================================================
 
-enum HeroPreview {
-    Symbol(ComponentType),
-    /// A cell instance, drawn with the symbol the canvas resolves for it.
-    Cell(std::sync::Arc<ResolvedCellSymbol>),
-    Icon(WorkbenchIcon),
-}
+/// Space between the title's name, its kind and its occurrence.
+const TITLE_GAP: f32 = 8.0;
 
-/// The hero's picture of `component`: a cell instance's resolved symbol, the
-/// one the canvas draws, else its kind's canonical artwork. Resolving reads
-/// the symbol view, so a resolution is held for as long as the canvas would
-/// hold its own: one symbol-context revision.
-fn component_hero_preview(
-    ctx: &egui::Context,
-    state: &AppState,
-    component: &Component,
-) -> HeroPreview {
-    let Some(binding) = component
-        .library_cell
-        .as_ref()
-        .filter(|_| component.kind == ComponentType::CellInstance)
-    else {
-        return HeroPreview::Symbol(component.kind);
-    };
-    let revision = crate::workbench::app::symbol_context_revision(state);
-    let id = egui::Id::new((
-        "design-inspector.hero-symbol",
-        &binding.library,
-        &binding.cell,
-        &binding.view,
-        &binding.terminal_order,
-    ));
-    type Held = (u64, Option<std::sync::Arc<ResolvedCellSymbol>>);
-    let held = ctx
-        .data(|data| data.get_temp::<Held>(id))
-        .filter(|(at, _)| *at == revision);
-    let symbol = held.map_or_else(
-        || {
-            let symbol = rspice_design::symbol_resolver::SymbolResolver::new(
-                state.library_manager.catalog(),
-                &state.workspace.content.schematic_buffers,
-            )
-            .resolve_binding(binding)
-            .filter(|symbol| symbol.source() == ResolvedSymbolSource::Authored)
-            .map(std::sync::Arc::new);
-            ctx.data_mut(|data| data.insert_temp::<Held>(id, (revision, symbol.clone())));
-            symbol
-        },
-        |(_, symbol)| symbol,
-    );
-    symbol.map_or(HeroPreview::Symbol(component.kind), HeroPreview::Cell)
-}
-
-/// `symbol` upright and fitted to `rect`, as artwork without type: at a
-/// thumbnail's scale pin names are noise.
-fn paint_cell_preview(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    symbol: &ResolvedCellSymbol,
-    color: Color32,
-) {
-    let upright = Component::new(
-        0,
-        ComponentType::CellInstance,
-        crate::state::Point::origin(),
-    );
-    let Some((min, max)) = resolved_symbol_artwork_bounds(symbol) else {
-        return;
-    };
-    let extent = egui::vec2((max.x - min.x).max(1) as f32, (max.y - min.y).max(1) as f32);
-    let scale = (rect.width() / extent.x).min(rect.height() / extent.y);
-    let center = egui::vec2((min.x + max.x) as f32, (min.y + max.y) as f32) * 0.5;
-    draw_resolved_symbol_artwork(
-        painter,
-        rect.center() - center * scale,
-        scale,
-        &upright,
-        symbol,
-        egui::Stroke::new(1.4, color),
-    );
-}
-
-struct Hero {
-    preview: HeroPreview,
-    eyebrow: String,
-    title: String,
-    subtitle: String,
-    statuses: Vec<(String, Color32)>,
-    /// Component whose property dialog opens on double-click.
-    open_properties: Option<u64>,
-}
-
-fn hero(ui: &mut Ui, app: &mut RSpiceApp, spec: Hero) {
+/// The inspected object, named on one row: its name, then what it is, then —
+/// below the design root — the occurrence it sits in. A line too long for the
+/// panel is cut at its end, so the name always stays readable.
+fn object_title(ui: &mut Ui, name: &str, kind: Option<&str>, occurrence: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let inset = panel_inset(ui);
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), HERO_H),
-        if spec.open_properties.is_some() {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
-    );
-    // The band reaches the panel's edges; its text keeps the panel inset on
-    // the right.
-    let band = panel_bleed(ui, rect);
-    let preview = egui::Rect::from_min_max(
-        band.min,
-        egui::pos2(
-            (band.left() + HERO_PREVIEW_W).min(band.right()),
-            band.bottom(),
+        egui::vec2(
+            ui.available_width(),
+            crate::workbench::design_system::property_row_height(ui),
         ),
+        egui::Sense::hover(),
     );
-    ui.painter().rect_filled(preview, 0.0, t.color.canvas_bg);
-    ui.painter().vline(
-        preview.right(),
-        preview.y_range(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    ui.painter().hline(
-        band.x_range(),
-        band.bottom(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
-
-    // The picture keeps to its own square: a symbol that cannot be drawn
-    // states why in there, never over the lines beside it.
-    let stage = ui.painter().with_clip_rect(preview.shrink(1.0));
-    match spec.preview {
-        HeroPreview::Symbol(kind) => rspice_schematic_editor::symbols::draw_symbol_preview(
-            &stage,
-            preview.shrink(12.0),
-            kind,
-            t.color.symbol,
-            app.symbol_library.as_ref(),
-        ),
-        HeroPreview::Cell(symbol) => {
-            paint_cell_preview(&stage, preview.shrink(12.0), &symbol, t.color.symbol);
-        }
-        HeroPreview::Icon(icon) => {
-            icon.paint(&stage, preview.shrink(28.0), t.color.text_faint);
-        }
+    let spoken = [Some(name), kind, occurrence]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &spoken)
+    });
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(spoken.as_str());
+        node.set_level(3);
+    });
+    if !ui.is_rect_visible(rect) {
+        return;
     }
-
-    let text_left = preview.right() + PANEL_INSET;
-    let text_clip = egui::Rect::from_x_y_ranges(
-        text_left..=(rect.right() - inset).max(text_left),
-        rect.y_range(),
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        name,
+        0.0,
+        egui::TextFormat::simple(theme::sans(tokens::FS_2, FontWeight::SemiBold), t.color.text),
     );
-    let painter = ui.painter().with_clip_rect(text_clip);
-    let at = |index: usize| egui::pos2(text_left, rect.top() + HERO_BASELINES[index]);
-    let eyebrow_job = egui::text::LayoutJob::single_section(
-        spec.eyebrow.to_uppercase(),
-        egui::TextFormat {
-            font_id: theme::mono(tokens::FS_1, FontWeight::Medium),
-            color: t.color.text_faint,
-            extra_letter_spacing: 0.09 * tokens::FS_1,
-            ..Default::default()
-        },
-    );
-    let eyebrow = ui.fonts_mut(|fonts| fonts.layout_job(eyebrow_job));
-    painter.galley(
-        egui::pos2(at(0).x, at(0).y - eyebrow.size().y * 0.5),
-        eyebrow,
-        t.color.text_faint,
-    );
-    painter.text(
-        at(1),
-        egui::Align2::LEFT_CENTER,
-        &spec.title,
-        theme::sans(tokens::FS_2, FontWeight::SemiBold),
+    if let Some(kind) = kind {
+        job.append(
+            kind,
+            TITLE_GAP,
+            egui::TextFormat::simple(
+                theme::sans(tokens::FS_1, FontWeight::Regular),
+                t.color.text_dim,
+            ),
+        );
+    }
+    if let Some(occurrence) = occurrence {
+        job.append(
+            occurrence,
+            TITLE_GAP,
+            egui::TextFormat::simple(
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+            ),
+        );
+    }
+    job.wrap = egui::text::TextWrapping::truncate_at_width((rect.width() - 2.0 * inset).max(1.0));
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    ui.painter().galley(
+        egui::pos2(
+            rect.left() + inset,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
         t.color.text,
     );
-    painter.text(
-        at(2),
-        egui::Align2::LEFT_CENTER,
-        &spec.subtitle,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let mut status_x = text_left;
-    for (label, tone) in &spec.statuses {
-        let galley = painter.layout_no_wrap(label.clone(), status_font.clone(), *tone);
-        let width = galley.size().x;
-        painter.galley(
-            egui::pos2(status_x, at(3).y - galley.size().y * 0.5),
-            galley,
-            *tone,
-        );
-        status_x += width + 4.0;
-    }
-
-    if let Some(component_id) = spec.open_properties {
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Button,
-                ui.is_enabled(),
-                "Open selected component properties",
-            )
-        });
-        if response.double_clicked() && !app.state.schematic_edit_read_only() {
-            crate::workbench::app::open_property_editor(&mut app.state, component_id);
-        }
-        theme::paint_focus_ring(ui, &response, rect);
-        response.on_hover_text("Double-click to edit component properties");
-    }
 }
 
 // =============================================================================
@@ -815,17 +666,6 @@ fn checks_status(state: &AppState) -> String {
     format!("{blocking} errors")
 }
 
-/// The dirty bit of the open cell view.
-fn active_view_dirty(state: &AppState) -> bool {
-    state
-        .workspace
-        .content
-        .open_views
-        .iter()
-        .find(|open| open.reference == state.workspace.content.active_view)
-        .is_some_and(|open| open.dirty)
-}
-
 // =============================================================================
 // Inline instance editing lives in `design/inline_instance.rs`.
 mod inline_instance;
@@ -836,9 +676,7 @@ use inline_instance::*;
 
 fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     let reference = app.state.workspace.content.active_view.clone();
-    let read_only = app.state.schematic_edit_read_only();
     let current = checks_current(&app.state);
-    let dirty = active_view_dirty(&app.state);
     let depth = app
         .state
         .workspace
@@ -865,43 +703,6 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     let floating_nets = current_violation_count(
         &app.state,
         rspice_design::drc::DrcViolationType::FloatingNode,
-    );
-
-    hero(
-        ui,
-        app,
-        Hero {
-            preview: HeroPreview::Icon(WorkbenchIcon::Design),
-            eyebrow: format!(
-                "SHEET · {} / {}",
-                reference.library.to_ascii_uppercase(),
-                reference.cell.to_ascii_uppercase()
-            ),
-            title: format!("{} · {}", reference.cell, reference.view),
-            subtitle: if read_only {
-                "read-only document".to_owned()
-            } else if depth == 0 {
-                "root sheet of the open design".to_owned()
-            } else {
-                format!("descended sheet · depth {depth}")
-            },
-            statuses: vec![
-                (
-                    if dirty { "unsaved" } else { "saved" }.to_owned(),
-                    tone_for(ui, !dirty),
-                ),
-                (
-                    if current {
-                        "checks current"
-                    } else {
-                        "checks stale"
-                    }
-                    .to_owned(),
-                    tone_for(ui, current),
-                ),
-            ],
-            open_properties: None,
-        },
     );
 
     section_header(ui, "Sheet", None);
@@ -1415,34 +1216,20 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         )
         .count(),
     };
-    let others = total.saturating_sub(selected.len());
-
-    hero(
+    // The instances are named only when the set holds something else too: a
+    // set of instances alone is counted once, by the title itself.
+    let instances = (!selected.is_empty() && selected.len() < total).then(|| {
+        format!(
+            "{} instance{}",
+            selected.len(),
+            if selected.len() == 1 { "" } else { "s" }
+        )
+    });
+    object_title(
         ui,
-        app,
-        Hero {
-            preview: HeroPreview::Icon(WorkbenchIcon::Select),
-            eyebrow: format!(
-                "MULTI-SELECTION · SHEET {}",
-                app.state
-                    .workspace
-                    .content
-                    .active_view
-                    .cell
-                    .to_ascii_uppercase()
-            ),
-            title: format!("{total} objects"),
-            subtitle: match (selected.len(), others) {
-                (0, other) => format!("{other} conductors and annotations"),
-                (instances, 0) => format!("{instances} instances"),
-                (instances, other) => format!("{instances} instances · {other} other objects"),
-            },
-            statuses: vec![(
-                "group transforms".to_owned(),
-                Tokens::get(ui.ctx()).color.accent,
-            )],
-            open_properties: None,
-        },
+        &format!("{total} selected"),
+        instances.as_deref(),
+        None,
     );
 
     section_header(ui, "Selected objects", Some(&selected.len().to_string()));
@@ -1521,21 +1308,7 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     else {
         return;
     };
-    hero(
-        ui,
-        app,
-        Hero {
-            preview: HeroPreview::Icon(WorkbenchIcon::Label),
-            eyebrow: format!("NOTE-{id}"),
-            title: note.kind.label().to_owned(),
-            subtitle: note.text.clone(),
-            statuses: vec![(
-                note.layer.label().to_owned(),
-                Tokens::get(ui.ctx()).color.text_dim,
-            )],
-            open_properties: None,
-        },
-    );
+    object_title(ui, "Note", Some(note.kind.label()), None);
     section_header(ui, "Documentation object", Some("editable"));
     property_row(ui, "Stable ID", &format!("NOTE-{id}"));
     property_row(ui, "Type", note.kind.label());
@@ -1562,21 +1335,7 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         return;
     };
     let (min, max) = shape.bounds();
-    hero(
-        ui,
-        app,
-        Hero {
-            preview: HeroPreview::Icon(WorkbenchIcon::Select),
-            eyebrow: format!("SHAPE-{id}"),
-            title: shape.kind().label().to_owned(),
-            subtitle: format!("{} control points", shape.geometry.points().len()),
-            statuses: vec![(
-                shape.layer.label().to_owned(),
-                Tokens::get(ui.ctx()).color.text_dim,
-            )],
-            open_properties: None,
-        },
-    );
+    object_title(ui, "Shape", Some(shape.kind().label()), None);
     section_header(ui, "Documentation shape", Some("editable"));
     property_row(ui, "Stable ID", &format!("SHAPE-{id}"));
     property_row(ui, "Type", shape.kind().label());
@@ -1608,38 +1367,7 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         return;
     };
     let bound = probe.source_expression.as_deref();
-    hero(
-        ui,
-        app,
-        Hero {
-            preview: HeroPreview::Icon(WorkbenchIcon::Label),
-            eyebrow: format!("PROBE-{id}"),
-            title: probe.reference.clone(),
-            subtitle: bound.map_or_else(
-                || "unbound saved-output marker".to_owned(),
-                |expression| format!("bound to {expression}"),
-            ),
-            statuses: vec![
-                (
-                    if bound.is_some() { "bound" } else { "unbound" }.to_owned(),
-                    if bound.is_some() {
-                        Tokens::get(ui.ctx()).color.ok
-                    } else {
-                        Tokens::get(ui.ctx()).color.warn
-                    },
-                ),
-                (
-                    if probe.enabled { "enabled" } else { "disabled" }.to_owned(),
-                    if probe.enabled {
-                        Tokens::get(ui.ctx()).color.ok
-                    } else {
-                        Tokens::get(ui.ctx()).color.text_dim
-                    },
-                ),
-            ],
-            open_properties: None,
-        },
-    );
+    object_title(ui, &probe.reference, Some("Probe"), None);
     section_header(ui, "Probe marker", Some("authored output intent"));
     property_row(ui, "Stable ID", &format!("PROBE-{id}"));
     property_row(ui, "Reference", &probe.reference);

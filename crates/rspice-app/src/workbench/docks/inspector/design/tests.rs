@@ -1175,13 +1175,31 @@ fn an_inline_session_folds_its_keystrokes_into_one_undo_entry() {
     );
 }
 
+/// The title is one panel row, whatever it names: the name, what the object
+/// is and where it sits share the line.
 #[test]
-fn the_hero_band_matches_the_mockup_geometry() {
-    assert_eq!(HERO_H, 82.0);
-    assert_eq!(HERO_PREVIEW_W, 82.0);
-    assert_eq!(HERO_BASELINES, [12.0, 31.0, 49.0, 68.0]);
-    assert!(HERO_BASELINES.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(HERO_BASELINES[3] < HERO_H);
+fn the_title_takes_one_panel_row() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut measured = (0.0, 0.0);
+    let _ = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.set_width(220.0);
+            let top = ui.cursor().top();
+            object_title(
+                ui,
+                "XBANDGAP_REFERENCE",
+                Some("bandgap_reference_trimmed"),
+                Some("/XAFE/XBIAS"),
+            );
+            measured = (
+                ui.cursor().top() - top,
+                crate::workbench::design_system::property_row_height(ui),
+            );
+        });
+    });
+    assert_eq!(measured.0, measured.1);
 }
 
 #[test]
@@ -2037,70 +2055,38 @@ fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
     assert_eq!(evidence.tone, super::super::ModelEvidenceTone::Warn);
 }
 
-/// The hero pictures a cell instance with the symbol the canvas draws for it.
-/// It used to look its kind up among the canonical device artwork, where a
-/// cell instance has none, and painted "missing canonical SVG" for every one.
+/// A component's title says what it is: a cell instance by its cell, a
+/// primitive by its device kind.
 #[test]
-fn a_cell_instances_hero_is_its_resolved_symbol() {
-    let (app, component) = app_with_owned_veriloga_instance();
-    let ctx = egui::Context::default();
-    assert!(matches!(
-        component_hero_preview(&ctx, &app.state, &component),
-        HeroPreview::Cell(_)
-    ));
+fn a_components_title_names_what_it_instantiates() {
+    let (_, module) = app_with_owned_veriloga_instance();
+    assert_eq!(component_title_kind(&module), "amp");
     let resistor = Component::new(9, ComponentType::Resistor, Point::origin());
-    assert!(matches!(
-        component_hero_preview(&ctx, &app.state, &resistor),
-        HeroPreview::Symbol(ComponentType::Resistor)
-    ));
+    assert_eq!(component_title_kind(&resistor), "Resistor");
 }
 
-/// A picture that cannot be drawn says why inside its own square, never over
-/// the subtitle beside it.
+/// The component panel opens on its title and names the occurrence only below
+/// the design root, where it says something.
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn a_hero_picture_that_cannot_draw_keeps_its_reason_in_its_square() {
-    fn reason_clip(shape: &egui::epaint::ClippedShape) -> Option<egui::Rect> {
-        fn holds_reason(shape: &egui::epaint::Shape) -> bool {
-            match shape {
-                egui::epaint::Shape::Text(text) => {
-                    text.galley.job.text.contains("missing canonical SVG")
-                }
-                egui::epaint::Shape::Vec(shapes) => shapes.iter().any(holds_reason),
-                _ => false,
-            }
-        }
-        holds_reason(&shape.shape).then_some(shape.clip_rect)
-    }
-
-    let mut app = RSpiceApp::test_instance();
-    let ctx = egui::Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    let output = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
-                ui.set_width(312.0);
-                hero(
-                    ui,
-                    &mut app,
-                    Hero {
-                        preview: HeroPreview::Symbol(ComponentType::CellInstance),
-                        eyebrow: "X1 · /".to_owned(),
-                        title: "amp".to_owned(),
-                        subtitle: "Cell Instance".to_owned(),
-                        statuses: Vec::new(),
-                        open_properties: None,
-                    },
-                );
-            });
-    });
-    let clip = output
-        .shapes
-        .iter()
-        .find_map(reason_clip)
-        .expect("the reason is painted");
+fn the_component_title_states_the_occurrence_only_below_the_root() {
+    let (mut app, id) = app_with_model_bound_instance();
+    let sheet = sheet_connectivity(&app.state);
+    let painted = painted_panel(|ui| component_panel(ui, &mut app, id, &sheet));
+    let first = painted.lines().next().unwrap_or_default();
     assert!(
-        clip.max.x <= HERO_PREVIEW_W && clip.max.y <= HERO_H,
-        "the reason is clipped to the {HERO_PREVIEW_W} px square, not {clip:?}"
+        first.starts_with("XU1") && !first.contains('/'),
+        "the title leads the panel and says nothing of the root: {painted}"
+    );
+
+    app.state.workspace.descend_into(
+        "XAFE".to_owned(),
+        CellViewRef::new("user", "afe_core", "schematic"),
+        ViewType::Schematic,
+    );
+    let painted = painted_panel(|ui| component_panel(ui, &mut app, id, &sheet));
+    assert!(
+        painted.lines().next().is_some_and(|line| line.ends_with("/XAFE")),
+        "{painted}"
     );
 }

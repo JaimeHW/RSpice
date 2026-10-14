@@ -918,18 +918,6 @@ enum ModelEvidenceTone {
     Ok,
 }
 
-impl ModelEvidenceTone {
-    fn color(self, tokens: &Tokens) -> egui::Color32 {
-        match self {
-            Self::Neutral => tokens.color.text_dim,
-            Self::Info => tokens.color.info,
-            Self::Warn => tokens.color.warn,
-            Self::Error => tokens.color.err,
-            Self::Ok => tokens.color.ok,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ComponentModelEvidence {
     status: String,

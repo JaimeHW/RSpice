@@ -28,68 +28,13 @@ pub(super) fn component_panel(
         return;
     };
     let evidence = component_model_evidence(&app.state, &component);
-    let editable = !app.state.schematic_edit_read_only();
-    let builtin_descriptor = component
-        .library_cell
-        .as_ref()
-        .filter(|binding| binding.is_builtin_xspice())
-        .and_then(|binding| crate::state::validate_builtin_xspice_binding(binding).ok());
-    let builtin_model = component
-        .library_cell
-        .as_ref()
-        .and_then(|binding| binding.builtin_xspice.as_ref())
-        .map(|contract| contract.model_type.as_str());
-    let generated_descriptor = component
-        .library_cell
-        .as_ref()
-        .filter(|binding| binding.is_generated_veriloga())
-        .and_then(|binding| crate::state::validate_generated_veriloga_binding(binding).ok());
-
-    hero(
+    // The design root is implicit: on the top sheet the path says nothing.
+    let occurrence = containing_occurrence_path(&app.state);
+    object_title(
         ui,
-        app,
-        Hero {
-            preview: component_hero_preview(ui.ctx(), &app.state, &component),
-            eyebrow: format!(
-                "{} · {}",
-                component.name,
-                containing_occurrence_path(&app.state)
-            ),
-            title: if let Some(descriptor) = builtin_descriptor {
-                descriptor.display_name.to_owned()
-            } else if let Some(descriptor) = generated_descriptor {
-                descriptor.model_name.to_owned()
-            } else if component.value.trim().is_empty() {
-                component.kind.display_name().to_owned()
-            } else {
-                component.value.clone()
-            },
-            subtitle: builtin_model.map_or_else(
-                || {
-                    generated_descriptor.map_or_else(
-                        || component.kind.display_name().to_owned(),
-                        |descriptor| format!("Generated Verilog-A · {}", descriptor.module_name),
-                    )
-                },
-                |model| format!("Built-in XSPICE · {model}"),
-            ),
-            statuses: vec![
-                (
-                    evidence.status.clone(),
-                    evidence.tone.color(&Tokens::get(ui.ctx())),
-                ),
-                (
-                    app.state
-                        .sim_setup
-                        .reference_pvt
-                        .process
-                        .short_name()
-                        .to_owned(),
-                    Tokens::get(ui.ctx()).color.text_dim,
-                ),
-            ],
-            open_properties: editable.then_some(component.id),
-        },
+        &component.name,
+        Some(&component_title_kind(&component)),
+        (occurrence != "/").then_some(occurrence.as_str()),
     );
 
     identity_section(ui, app, &component);
@@ -101,11 +46,33 @@ pub(super) fn component_panel(
 
 /// The occurrence the inspected component sits in.
 ///
-/// The hero names the component beside this, so the path carries the enclosing
-/// instances and stops there — and the design root is implicit, so an inspected
-/// component on the top sheet reports `/`.
+/// The title names the component beside this, so the path carries the
+/// enclosing instances and stops there — and the design root is implicit, so an
+/// inspected component on the top sheet reports `/`.
 pub(super) fn containing_occurrence_path(state: &AppState) -> String {
     state.workspace.content.occurrence_path().to_string()
+}
+
+/// What a component is, for its title: a built-in's catalog name, a generated
+/// module's name, a cell instance's cell, else its device kind.
+pub(super) fn component_title_kind(component: &Component) -> String {
+    let binding = component.library_cell.as_ref();
+    if let Some(descriptor) = binding
+        .filter(|binding| binding.is_builtin_xspice())
+        .and_then(|binding| crate::state::validate_builtin_xspice_binding(binding).ok())
+    {
+        return descriptor.display_name.to_owned();
+    }
+    if let Some(descriptor) = binding
+        .filter(|binding| binding.is_generated_veriloga())
+        .and_then(|binding| crate::state::validate_generated_veriloga_binding(binding).ok())
+    {
+        return descriptor.module_name.to_owned();
+    }
+    binding.map_or_else(
+        || component.kind.display_name().to_owned(),
+        |binding| binding.cell.clone(),
+    )
 }
 
 pub(super) fn component_view_contract(component: &Component) -> String {
@@ -1412,15 +1379,4 @@ pub(super) fn component_soa_display(
         }
     };
     ComponentSoaDisplay { label, tone }
-}
-
-// =============================================================================
-// Net inspector
-// =============================================================================
-
-pub(super) const fn net_icon(class: NetClass) -> WorkbenchIcon {
-    match class {
-        NetClass::Ground | NetClass::Supply => WorkbenchIcon::Supply,
-        NetClass::Signal => WorkbenchIcon::Wire,
-    }
 }

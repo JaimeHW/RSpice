@@ -935,14 +935,6 @@ pub(super) fn rejection_slot(ui: &mut Ui, editing: bool, reason: Option<&str>) -
     }
     rect
 }
-pub(super) fn net_class_tone(ui: &Ui, class: NetClass) -> Color32 {
-    let t = Tokens::get(ui.ctx());
-    match class {
-        NetClass::Ground => t.color.text_dim,
-        NetClass::Supply => t.color.accent,
-        NetClass::Signal => t.color.ok,
-    }
-}
 
 /// What a net's off-sheet connectors declare, for the identity section.
 ///
@@ -1050,26 +1042,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         None => "sheet-local".to_owned(),
     };
 
-    hero(
-        ui,
-        app,
-        Hero {
-            preview: HeroPreview::Icon(net_icon(class)),
-            eyebrow: format!(
-                "NET · SHEET {}",
-                app.state
-                    .workspace
-                    .content
-                    .active_view
-                    .cell
-                    .to_ascii_uppercase()
-            ),
-            title: net_name.clone(),
-            subtitle: scope.clone(),
-            statuses: vec![(class.keyword().to_owned(), net_class_tone(ui, class))],
-            open_properties: None,
-        },
-    );
+    object_title(ui, &net_name, Some("Net"), None);
 
     let off_sheet = off_sheet_declaration(&app.state, &net_name);
 
