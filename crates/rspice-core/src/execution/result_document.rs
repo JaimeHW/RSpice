@@ -898,6 +898,18 @@ impl AnalysisResultDocument {
             AnalysisResultKind::Qpac | AnalysisResultKind::Qpxf | AnalysisResultKind::Qpnoise => {
                 Some((true, &[AnalysisKind::Qpss]))
             }
+            // A small-signal card linearizes around the operating point, or,
+            // with `ACTIMES=`/`CHECKPOINT=`, around a state of a transient,
+            // which is then its parent.
+            AnalysisResultKind::Ac
+            | AnalysisResultKind::Noise
+            | AnalysisResultKind::SParameters
+            | AnalysisResultKind::PortNoise
+            | AnalysisResultKind::Distortion
+            | AnalysisResultKind::TransferFunction
+            | AnalysisResultKind::Stability
+            | AnalysisResultKind::Sensitivity
+            | AnalysisResultKind::PoleZero => Some((false, &[AnalysisKind::Tran])),
             _ => None,
         };
         match (required_parent, self.parent_analysis) {

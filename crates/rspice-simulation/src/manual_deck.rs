@@ -158,6 +158,18 @@ fn queue_manual_deck_analyses(
         if matches!(command, AnalysisCommand::Temp { .. }) {
             continue;
         }
+        // A queued analysis is a typed request with no transient state in
+        // it, so the card would silently linearize at the operating point.
+        if let Some(state) = parsed.small_signal_state(idx) {
+            errors.push(format!(
+                "{} carries {}=, which linearizes it around a transient state, and the Netlist \
+                 workspace cannot run that yet. Run the deck with `rspice run`, or remove the \
+                 keyword to linearize at the operating point.",
+                command_name(command),
+                small_signal_state_keyword(state)
+            ));
+            continue;
+        }
         // The netlist parser owns `.PSS`, `.PAC` and `.PNOISE`, so they arrive
         // here as parsed cards as well as in the periodic reader's queue. Only
         // that reader can queue them: it is what binds each dependent card to
@@ -258,6 +270,16 @@ fn queue_manual_deck_analyses(
         }
     } else {
         Err(errors)
+    }
+}
+
+/// The card keyword a transient state request is spelled with.
+fn small_signal_state_keyword(
+    state: &rspice_core::netlist::SmallSignalStateSource,
+) -> &'static str {
+    match state {
+        rspice_core::netlist::SmallSignalStateSource::TransientTimes(_) => "ACTIMES",
+        rspice_core::netlist::SmallSignalStateSource::CheckpointFile(_) => "CHECKPOINT",
     }
 }
 

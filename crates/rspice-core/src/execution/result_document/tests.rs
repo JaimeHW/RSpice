@@ -2712,14 +2712,75 @@ fn a_post_process_family_must_name_a_transient_parent() {
         }
     ));
 
-    let unexpected = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
-        .expect("AC projection")
-        .parent_analysis(instance(AnalysisKind::Tran))
-        .build()
-        .expect_err("AC is not a post-process");
+    let unexpected = AnalysisResultDocument::from_operating_point(
+        instance(AnalysisKind::Op),
+        &operating_point_result(),
+        None,
+    )
+    .expect("operating-point projection")
+    .parent_analysis(instance(AnalysisKind::Tran))
+    .build()
+    .expect_err("an operating point is not a post-process");
     assert!(matches!(
         unexpected,
         ResultDocumentError::UnexpectedParentAnalysis { .. }
+    ));
+}
+
+#[test]
+fn a_small_signal_result_at_a_transient_state_names_the_transient() {
+    let at_op = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
+        .expect("AC projection")
+        .build()
+        .expect("an AC result at the operating point has no parent");
+    assert_eq!(at_op.parent_analysis(), None);
+    assert!(at_op.scalars().is_empty());
+
+    let at_state = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
+        .expect("AC projection")
+        .at_transient_state(instance(AnalysisKind::Tran), 5.5e-4)
+        .expect("a transient names a state")
+        .build()
+        .expect("an AC result around a transient state");
+    assert_eq!(
+        at_state.parent_analysis(),
+        Some(instance(AnalysisKind::Tran))
+    );
+    let [scalar] = at_state.scalars() else {
+        panic!("one state_time scalar: {:?}", at_state.scalars())
+    };
+    assert_eq!(scalar.name(), "state_time");
+    assert_eq!(scalar.unit(), Some(&SignalUnit::Second));
+    assert_eq!(
+        scalar.value(),
+        &ScalarValue::Real {
+            value: Some(5.5e-4)
+        }
+    );
+    let decoded = AnalysisResultDocument::from_json(&at_state.to_json().expect("serializes"))
+        .expect("the document reads back");
+    assert_eq!(decoded, at_state);
+
+    let not_a_transient = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
+        .expect("AC projection")
+        .at_transient_state(instance(AnalysisKind::Ac), 5.5e-4)
+        .expect_err("only a transient has states");
+    assert!(matches!(
+        not_a_transient,
+        ResultDocumentError::Malformed { .. }
+    ));
+    let wrong = AnalysisResultDocument::from_ac(instance(AnalysisKind::Ac), &ac_points())
+        .expect("AC projection")
+        .parent_analysis(instance(AnalysisKind::Op))
+        .build()
+        .expect_err("an operating point is not a transient");
+    assert!(matches!(
+        wrong,
+        ResultDocumentError::WrongParentAnalysis {
+            expected: [AnalysisKind::Tran],
+            found: AnalysisKind::Op,
+            ..
+        }
     ));
 }
 

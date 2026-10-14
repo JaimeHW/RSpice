@@ -741,7 +741,7 @@ pub(super) fn run_sparam_from_command(
     publish_sparam_run(ctx, &run, "sp")
 }
 
-fn publish_sparam_run(
+pub(super) fn publish_sparam_run(
     ctx: &RunContext<'_>,
     run: &rspice_core::engine::SParameterRun,
     kind: &str,

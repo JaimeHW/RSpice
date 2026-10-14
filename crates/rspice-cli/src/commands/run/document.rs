@@ -167,11 +167,20 @@ pub(super) fn finish_at_coordinate(
 fn finalize(
     ctx: &RunContext<'_>,
     analysis_id: AnalysisInstanceId,
-    builder: AnalysisResultDocumentBuilder,
+    mut builder: AnalysisResultDocumentBuilder,
 ) -> Result<AnalysisResultDocument, CliError> {
+    // A result around a transient state names the transient and the state's
+    // time, and is written in its own dataset.
+    let mut output = analysis_id.tag();
+    if let Some(state) = ctx.transient_state() {
+        builder = builder
+            .at_transient_state(state.transient, state.time)
+            .map_err(|error| document_error(ctx, analysis_id, error))?;
+        output = state.dataset();
+    }
     builder
         .namespaces(ResultNamespaces {
-            output: analysis_id.tag(),
+            output,
             checkpoint: analysis_id.tag(),
         })
         .build_with_limits_and_abort(

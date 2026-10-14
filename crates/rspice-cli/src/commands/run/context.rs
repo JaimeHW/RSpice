@@ -109,6 +109,9 @@ pub(super) struct RunContext<'a> {
     next_transient_ordinal: std::cell::Cell<u32>,
     /// Zero-based ordinal assigned to source-authored Fourier cards.
     next_fourier_ordinal: std::cell::Cell<u32>,
+    /// The transient state the result being published linearized around,
+    /// while a card that names one (`ACTIMES=`/`CHECKPOINT=`) publishes it.
+    transient_state: std::cell::RefCell<Option<super::frequency::StatePublication>>,
 }
 
 /// The canonical identity of one planned `.FOUR` operand and the authored
@@ -328,6 +331,7 @@ impl<'a> RunContext<'a> {
             periodic: std::cell::RefCell::default(),
             next_transient_ordinal: std::cell::Cell::new(0),
             next_fourier_ordinal: std::cell::Cell::new(0),
+            transient_state: std::cell::RefCell::new(None),
         })
     }
 
@@ -461,6 +465,14 @@ impl<'a> RunContext<'a> {
     /// first instance of its family.
     pub(super) fn resolve_output(&self, tag: &str) -> Option<ResolvedOutput> {
         let path = self.output.clone()?;
+        // Every state of one card publishes under the card's identity, which
+        // the card took once, in a dataset of its own.
+        if let Some(state) = self.transient_state.borrow().as_ref() {
+            return Some(ResolvedOutput {
+                path: self.namespaced_artifact_path(path, &state.dataset()),
+                analysis: Some(state.analysis),
+            });
+        }
         let (qualified_tag, analysis) = self.take_planned_identity(tag)?;
         let resolved = self.namespaced_artifact_path(path, &qualified_tag);
         Some(ResolvedOutput {
@@ -657,9 +669,70 @@ impl<'a> RunContext<'a> {
     }
 
     /// Record one typed result this run published.
-    pub(super) fn record_published(&self, published: PublishedResult) {
+    pub(super) fn record_published(&self, mut published: PublishedResult) {
+        if let Some(state) = self.transient_state.borrow().as_ref() {
+            published.analysis_id = state.dataset();
+        }
         self.record_output(published.artifact.clone());
         self.published.borrow_mut().push(published);
+    }
+
+    /// The canonical identity a card that names a transient state publishes
+    /// every state's result under, taken from the plan once for the card.
+    pub(super) fn take_state_card_identity(
+        &self,
+        tag: &'static str,
+    ) -> Result<AnalysisInstanceId, CliError> {
+        self.take_planned_identity(tag)
+            .and_then(|(_, analysis)| analysis)
+            .ok_or_else(|| CliError::InternalError {
+                message: self
+                    .planned_namespace_error
+                    .borrow_mut()
+                    .take()
+                    .unwrap_or_else(|| format!("'{tag}' resolved no canonical analysis identity")),
+            })
+    }
+
+    /// The `.TRAN` analysis a small-signal state belongs to: the deck's
+    /// first, whose trajectory `ACTIMES=` runs and `CHECKPOINT=` resumes.
+    pub(super) fn state_transient_identity(&self) -> Result<AnalysisInstanceId, CliError> {
+        self.planned_transient_ids
+            .first()
+            .copied()
+            .ok_or_else(|| CliError::InternalError {
+                message: "a small-signal card at a transient state ran without a planned .TRAN \
+                          identity"
+                    .to_string(),
+            })
+    }
+
+    /// The checkpoint file a `CHECKPOINT=` name reads, in the namespace a
+    /// restart file of the deck's first transient is read from.
+    pub(super) fn state_checkpoint_name(&self, name: &str) -> String {
+        let transient = self
+            .planned_transient_ids
+            .first()
+            .map(|id| id.tag())
+            .unwrap_or_default();
+        self.checkpoint_namespace().restart_name(name, &transient)
+    }
+
+    /// Publish what `publish` publishes as the result around `state`.
+    pub(super) fn publish_at_state(
+        &self,
+        state: super::frequency::StatePublication,
+        publish: impl FnOnce() -> Result<(), CliError>,
+    ) -> Result<(), CliError> {
+        self.transient_state.replace(Some(state));
+        let published = publish();
+        self.transient_state.replace(None);
+        published
+    }
+
+    /// The transient state the result being published linearized around.
+    pub(super) fn transient_state(&self) -> Option<super::frequency::StatePublication> {
+        self.transient_state.borrow().clone()
     }
 
     pub(super) fn ensure_planned_namespaces_consumed(&self) -> Result<(), CliError> {
@@ -849,6 +922,17 @@ impl<'a> RunContext<'a> {
     }
 
     pub(super) fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
+        // A small-signal card that names a transient state runs around it,
+        // once per state, instead of at the operating point.
+        if let Some(index) = self
+            .netlist
+            .analyses
+            .iter()
+            .position(|card| std::ptr::eq(card, analysis))
+            && let Some(state) = self.netlist.small_signal_state(index)
+        {
+            return frequency::run_at_transient_state(self, index, analysis, state);
+        }
         match analysis {
             AnalysisCommand::Op => basic::run_dc_op(self)?,
             AnalysisCommand::Dc {

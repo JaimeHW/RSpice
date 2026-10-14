@@ -191,9 +191,15 @@ fn restart_namespace_parent(input: &Path) -> Result<PathBuf, CliError> {
 }
 
 fn validate_restart_logical_name(name: &str, option: &str) -> Result<(), CliError> {
+    validate_logical_name(name, &format!(".OPTIONS RESTART {option}"))
+}
+
+/// Check that `name`, which `subject` spells, is one portable file in the
+/// input deck's directory.
+fn validate_logical_name(name: &str, subject: &str) -> Result<(), CliError> {
     if name.is_empty() || name.trim() != name || name == "." || name == ".." {
         return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART {option} must be a non-empty logical filename without surrounding whitespace"
+            "{subject} must be a non-empty logical filename without surrounding whitespace"
         )));
     }
     if name.contains(['/', '\\'])
@@ -203,7 +209,7 @@ fn validate_restart_logical_name(name: &str, option: &str) -> Result<(), CliErro
         || name.ends_with(['.', ' '])
     {
         return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART {option} must be one portable filename, without separators or reserved filename characters"
+            "{subject} must be one portable filename, without separators or reserved filename characters"
         )));
     }
     let path = Path::new(name);
@@ -214,7 +220,7 @@ fn validate_restart_logical_name(name: &str, option: &str) -> Result<(), CliErro
         )
     {
         return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART {option} must name exactly one file in the input deck directory"
+            "{subject} must name exactly one file in the input deck directory"
         )));
     }
     let device_stem = name
@@ -230,7 +236,7 @@ fn validate_restart_logical_name(name: &str, option: &str) -> Result<(), CliErro
         );
     if reserved {
         return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART {option} uses reserved device filename '{name}'"
+            "{subject} uses reserved device filename '{name}'"
         )));
     }
     Ok(())
@@ -258,33 +264,64 @@ fn safe_restart_write_path(parent: &Path, name: &str) -> Result<PathBuf, CliErro
 }
 
 fn safe_restart_read_path(parent: &Path, name: &str) -> Result<PathBuf, CliError> {
-    validate_restart_logical_name(name, "FILE")?;
+    safe_read_path(parent, name, ".OPTIONS RESTART FILE")
+}
+
+/// The checkpoint file `name`, which `subject` spells, reads: a regular file
+/// in the input deck's directory, reached without a link.
+fn safe_read_path(parent: &Path, name: &str, subject: &str) -> Result<PathBuf, CliError> {
+    validate_logical_name(name, subject)?;
     let path = parent.join(name);
     let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
         restart_cli_error(format!(
-            "cannot inspect .OPTIONS RESTART FILE {}: {error}",
+            "cannot inspect {subject} {}: {error}",
             path.display()
         ))
     })?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART FILE must be a regular, non-symlink file in the input deck directory: {}",
+            "{subject} must be a regular, non-symlink file in the input deck directory: {}",
             path.display()
         )));
     }
     let resolved = std::fs::canonicalize(&path).map_err(|error| {
         restart_cli_error(format!(
-            "cannot resolve .OPTIONS RESTART FILE {}: {error}",
+            "cannot resolve {subject} {}: {error}",
             path.display()
         ))
     })?;
     if resolved.parent() != Some(parent) {
         return Err(restart_cli_error(format!(
-            ".OPTIONS RESTART FILE escapes the input deck directory: {}",
+            "{subject} escapes the input deck directory: {}",
             path.display()
         )));
     }
     Ok(resolved)
+}
+
+/// Load the checkpoint a small-signal card's `CHECKPOINT=` names.
+///
+/// The name follows `.OPTIONS RESTART FILE=`: one portable file in the input
+/// deck's directory, in the namespace a restart file of the deck's first
+/// transient is read from, and protected as an input of this run.
+pub(super) fn load_state_checkpoint(
+    ctx: &RunContext<'_>,
+    name: &str,
+) -> Result<rspice_core::engine::TransientCheckpoint, CliError> {
+    let parent = restart_namespace_parent(&ctx.args.input)?;
+    let path = safe_read_path(&parent, &ctx.state_checkpoint_name(name), "CHECKPOINT=")?;
+    protect_input(&path, None)?;
+    let limit = ctx.engine.config().resource_limits.max_external_data_bytes;
+    rspice_core::engine::TransientCheckpoint::load_with_limit_and_abort(
+        &path,
+        limit,
+        limit,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some(format!("CHECKPOINT= load ({})", path.display())),
+    })
 }
 
 pub(super) fn restart_cli_error(message: impl Into<String>) -> CliError {

@@ -6,6 +6,30 @@ use crate::sweeps::CornerBaseMode;
 use rspice_simulation_contract::{config::FrequencySweep, run_set::ReferencePoint};
 
 #[test]
+fn a_card_at_a_transient_state_is_refused_rather_than_queued_at_the_operating_point() {
+    for (card, keyword) in [
+        (".ac dec 10 1 1meg actimes=1u", "ACTIMES="),
+        (
+            ".noise v(out) v1 dec 10 1 1meg checkpoint=\"s.chk\"",
+            "CHECKPOINT=",
+        ),
+    ] {
+        let errors = build_manual_deck_queue(
+            27.0,
+            &format!(
+                "state card\nV1 in 0 pulse(0 1 0 1n 1n 1 2) ac 1\nR1 in out 1k\nC1 out 0 1n\n\
+                 .tran 10n 5u\n{card}\n.end\n"
+            ),
+        )
+        .expect_err("a typed queue cannot carry a transient state");
+        assert!(
+            errors.iter().any(|error| error.contains(keyword)),
+            "{card}: {errors:?}"
+        );
+    }
+}
+
+#[test]
 fn studio_sp_card_retains_differential_ports_and_effective_impedances() {
     use rspice_simulation_contract::sp_config::{SpConfig, SpPortConfig};
     let config = SpConfig {
