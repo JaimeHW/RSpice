@@ -194,7 +194,7 @@ fn contract_cards(ui: &mut Ui, view: &TransferFunctionView<'_>) {
 }
 
 fn transfer_definition_card(ui: &mut Ui, width: f32, view: &TransferFunctionView<'_>) {
-    contract_card(ui, width, "Transfer definition", "retained", |ui| {
+    contract_card(ui, width, "Transfer definition", None, |ui| {
         measurement_table(
             ui,
             &[
@@ -214,11 +214,9 @@ fn nominal_evidence_card(ui: &mut Ui, width: f32, view: &TransferFunctionView<'_
     let input_quantity = quantity_label(view.input_quantity);
     let output_quantity = quantity_label(view.output_quantity);
     let dataset = view.dataset_id.to_string();
-    let status = if view.nominal_input.is_some() && view.nominal_output.is_some() {
-        "retained"
-    } else {
-        "unavailable"
-    };
+    // The values say they were kept; only their absence is worth a word.
+    let status =
+        (view.nominal_input.is_none() || view.nominal_output.is_none()).then_some("unavailable");
     contract_card(ui, width, "Nominal evidence", status, |ui| {
         measurement_table(
             ui,
@@ -238,7 +236,7 @@ fn contract_card(
     ui: &mut Ui,
     width: f32,
     title: &str,
-    status: &str,
+    status: Option<&str>,
     add_contents: impl FnOnce(&mut Ui),
 ) {
     let t = Tokens::get(ui.ctx());
@@ -258,17 +256,18 @@ fn contract_card(
                                 .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
                                 .color(t.color.text),
                         );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(status)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                    .color(if status == "retained" {
-                                        t.color.ok
-                                    } else {
-                                        t.color.text_faint
-                                    }),
+                        if let Some(status) = status {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(status)
+                                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                            .color(t.color.text_faint),
+                                    );
+                                },
                             );
-                        });
+                        }
                     });
                     ui.separator();
                     add_contents(ui);

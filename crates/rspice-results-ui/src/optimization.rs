@@ -173,7 +173,8 @@ pub fn show(
     spec.markers.push(plot::Marker {
         x: view.iterations[best_index],
         y: view.best_cost,
-        color: Tokens::get(ui.ctx()).color.ok,
+        // The best candidate is a fact, not a success: primary ink.
+        color: Tokens::get(ui.ctx()).color.text,
         label: format!("best {:.6e}", view.best_cost),
         drop_line: true,
         label_dy: 0.0,
@@ -339,7 +340,7 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         .and_then(|waveform| waveform.y.get(index))
         .copied();
 
-    section_header(ui, "Selected optimization candidate", Some("RETAINED"));
+    section_header(ui, "Selected optimization candidate", None);
     let mut rows = vec![
         ("Iteration", format!("{:.17e}", iterations[index]), true),
         (
@@ -435,13 +436,27 @@ fn mono(ui: &mut Ui, text: &str) {
     ui.label(RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Regular)));
 }
 
+/// The outcome cell, in sentence case. A run that stopped short of
+/// convergence is the one verdict here and keeps the warning tone; the best
+/// candidate and a converged run are facts and read as plain text.
 fn outcome_badge(ui: &mut Ui, label: &str, converged: bool) {
-    let t = Tokens::get(ui.ctx());
+    let mut chars = label.chars();
+    let text = chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect::<String>()
+    });
     ui.label(
-        RichText::new(label.to_ascii_uppercase())
+        RichText::new(text)
             .strong()
-            .color(if converged { t.color.ok } else { t.color.warn }),
+            .color(outcome_color(converged, &Tokens::get(ui.ctx()).color)),
     );
+}
+
+fn outcome_color(converged: bool, palette: &rspice_ui_kit::palette::Palette) -> egui::Color32 {
+    if converged {
+        palette.text
+    } else {
+        palette.warn
+    }
 }
 
 #[cfg(test)]
@@ -458,5 +473,12 @@ mod tests {
     #[test]
     fn convergence_selection_rejects_non_finite_history() {
         assert_eq!(nearest_candidate_index(&[f64::NAN], 1.0), None);
+    }
+
+    #[test]
+    fn only_a_run_that_stopped_short_colours_its_outcome() {
+        let palette = Tokens::default().color;
+        assert_eq!(outcome_color(true, &palette), palette.text);
+        assert_eq!(outcome_color(false, &palette), palette.warn);
     }
 }

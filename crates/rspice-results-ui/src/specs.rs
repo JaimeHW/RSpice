@@ -21,8 +21,22 @@ use rspice_ui_kit::{
     plot::fmt_si,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{StatusMark, measurement_table, paint_status_mark, section_header},
+    widgets::{Problem, measurement_table, paint_problem_mark, section_header},
 };
+
+/// How a status cell reads: a failure in the error tone behind its mark, a
+/// pass in plain text with nothing to say it passed, and an unbound or missing
+/// measurement faint. Returns the text colour and whether a failure mark leads.
+fn verdict_tone(
+    status: SpecResultStatus,
+    c: &rspice_ui_kit::palette::Palette,
+) -> (egui::Color32, bool) {
+    match status {
+        SpecResultStatus::Pass => (c.text, false),
+        SpecResultStatus::Fail | SpecResultStatus::Invalid => (c.err, true),
+        SpecResultStatus::Unbound | SpecResultStatus::Missing => (c.text_faint, false),
+    }
+}
 
 /// The width each column wants, and the floor it may not be squeezed below.
 ///
@@ -189,13 +203,13 @@ fn paint_table_header(ui: &mut Ui, content_width: f32, row_height: f32) {
         egui::Stroke::new(1.0, c.border_strong),
     );
     for (index, label) in [
-        "MEASUREMENT",
-        "EXPRESSION",
-        "VALUE",
-        "SPEC",
-        "MARGIN",
-        "WORST CORNER",
-        "STATUS",
+        "Measurement",
+        "Expression",
+        "Value",
+        "Spec",
+        "Margin",
+        "Worst corner",
+        "Status",
     ]
     .iter()
     .enumerate()
@@ -352,11 +366,7 @@ fn paint_result_row(
         egui::Align2::RIGHT_CENTER,
         &value,
         theme::mono(tokens::FS_1, FontWeight::Regular),
-        if row.status == SpecResultStatus::Fail {
-            c.err
-        } else {
-            c.text
-        },
+        c.text,
     );
     paint_clipped_table_text(
         ui,
@@ -369,15 +379,16 @@ fn paint_result_row(
 
     let margin_cell = column_rect(rect, &widths, 4).shrink2(egui::vec2(9.0, 5.0));
     if let Some(value) = row.margin {
+        // The verdict cell says pass or fail; the margin is a quantity, so
+        // its text and bar stay neutral.
         let fraction = (value.abs() / max_margin).clamp(0.04, 1.0) as f32;
-        let color = if value >= 0.0 { c.ok } else { c.err };
         ui.painter().rect_filled(
             egui::Rect::from_min_size(
                 egui::pos2(margin_cell.left(), margin_cell.bottom() - 3.0),
                 egui::vec2(margin_cell.width() * fraction, 3.0),
             ),
             0.0,
-            color,
+            c.text_faint,
         );
         paint_clipped_table_text(
             ui,
@@ -385,7 +396,7 @@ fn paint_result_row(
             egui::Align2::RIGHT_CENTER,
             &margin,
             theme::mono(tokens::FS_1, FontWeight::Regular),
-            color,
+            c.text,
         );
     } else {
         paint_clipped_table_text(
@@ -435,22 +446,17 @@ fn paint_result_row(
     };
 
     let status_cell = column_rect(rect, &widths, 6).shrink2(egui::vec2(9.0, 0.0));
-    let (status_color, mark) = match row.status {
-        SpecResultStatus::Pass => (c.ok, StatusMark::Success),
-        SpecResultStatus::Fail | SpecResultStatus::Invalid => (c.err, StatusMark::Failure),
-        SpecResultStatus::Unbound | SpecResultStatus::Missing => {
-            (c.text_faint, StatusMark::Neutral)
-        }
-    };
-    paint_status_mark(
-        &ui.painter().with_clip_rect(status_cell),
-        egui::Rect::from_center_size(
-            egui::pos2(status_cell.left() + 5.0, status_cell.center().y),
-            egui::Vec2::splat(8.0),
-        ),
-        mark,
-        status_color,
-    );
+    let (status_color, failed) = verdict_tone(row.status, &c);
+    if failed {
+        paint_problem_mark(
+            &ui.painter().with_clip_rect(status_cell),
+            egui::Rect::from_center_size(
+                egui::pos2(status_cell.left() + 5.0, status_cell.center().y),
+                egui::Vec2::splat(8.0),
+            ),
+            Problem::Failure,
+        );
+    }
     paint_clipped_table_text(
         ui,
         egui::Rect::from_min_max(
@@ -570,13 +576,7 @@ fn show_table_shell(
     focused
 }
 
-fn paint_summary(
-    ui: &mut Ui,
-    title: &str,
-    detail: &str,
-    accessible_label: String,
-    detail_color: egui::Color32,
-) {
+fn paint_summary(ui: &mut Ui, title: &str, detail: &str, accessible_label: String) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let (rect, response) =
@@ -630,7 +630,7 @@ fn paint_summary(
         egui::Align2::LEFT_CENTER,
         detail,
         summary_detail_font(),
-        detail_color,
+        c.text_dim,
     );
 }
 
@@ -675,7 +675,6 @@ pub fn show<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
     workspace_specs: &[SpecEntry],
     carried: Option<&str>,
 ) -> Option<usize> {
-    let c = Tokens::get(ui.ctx()).color;
     let Some(run) = run else {
         let bounded = workspace_specs
             .iter()
@@ -688,7 +687,6 @@ pub fn show<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
             format!(
                 "Specifications: zero of {bounded} bounded measurements pass; no active dataset"
             ),
-            c.warn,
         );
         show_table_shell(
             ui,
@@ -720,11 +718,6 @@ pub fn show<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
             "Specifications for run {run_id}, dataset {dataset_id}, {}: {passing} of {bounded} bounded measurements pass; {unavailable} unavailable",
             lifecycle_label(lifecycle)
         ),
-        if lifecycle == SimulationRunLifecycle::Completed && unavailable == 0 {
-            c.text_dim
-        } else {
-            c.warn
-        },
     );
     // The studio's Requirements page and this table read one fact — which
     // limit is being looked at — rather than each keeping a selection of its

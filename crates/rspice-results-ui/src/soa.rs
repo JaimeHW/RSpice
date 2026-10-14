@@ -1181,13 +1181,22 @@ fn parameter_label(parameter: SoaParameterEvidence) -> &'static str {
 }
 
 fn verdict(ui: &mut Ui, value: SoaRuleVerdictEvidence) {
-    let t = Tokens::get(ui.ctx());
-    let color = match value {
-        SoaRuleVerdictEvidence::Pass => t.color.ok,
-        SoaRuleVerdictEvidence::Warning => t.color.warn,
-        SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => t.color.err,
-    };
+    let color = verdict_color(value, &Tokens::get(ui.ctx()).color);
     ui.label(RichText::new(value.label()).strong().color(color));
+}
+
+/// The ink of a rule's verdict cell: a violation in the error tone, a rule
+/// near its limit in the warning tone, and a pass in plain text, because a
+/// rule that holds has nothing to say.
+fn verdict_color(
+    value: SoaRuleVerdictEvidence,
+    palette: &rspice_ui_kit::palette::Palette,
+) -> egui::Color32 {
+    match value {
+        SoaRuleVerdictEvidence::Pass => palette.text,
+        SoaRuleVerdictEvidence::Warning => palette.warn,
+        SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => palette.err,
+    }
 }
 
 fn table_header(ui: &mut Ui, text: &str) {
@@ -1276,6 +1285,25 @@ pub mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_violation_or_a_rule_near_its_limit_colours_its_verdict() {
+        let palette = Tokens::default().color;
+        assert_eq!(
+            verdict_color(SoaRuleVerdictEvidence::Pass, &palette),
+            palette.text
+        );
+        assert_eq!(
+            verdict_color(SoaRuleVerdictEvidence::Warning, &palette),
+            palette.warn
+        );
+        for violation in [
+            SoaRuleVerdictEvidence::Violation,
+            SoaRuleVerdictEvidence::Critical,
+        ] {
+            assert_eq!(verdict_color(violation, &palette), palette.err);
+        }
+    }
 
     #[test]
     fn soa_filter_keeps_attention_and_passing_rules_disjoint() {

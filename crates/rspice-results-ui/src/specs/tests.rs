@@ -236,3 +236,21 @@ fn every_column_is_inside_the_pane_the_document_is_drawn_in() {
     let ample = super::spec_columns(super::table_width() + 200.0);
     assert_eq!(ample, super::SPEC_COLUMNS.map(|(want, _)| want));
 }
+
+/// Only a failure is coloured, and only in its own cell: a pass is plain text
+/// with no mark, and an unbound or missing measurement is faint with no dot.
+#[test]
+fn only_a_failing_verdict_cell_is_coloured() {
+    let c = Tokens::default().color;
+    assert_eq!(verdict_tone(SpecResultStatus::Pass, &c), (c.text, false));
+    for failed in [SpecResultStatus::Fail, SpecResultStatus::Invalid] {
+        assert_eq!(verdict_tone(failed, &c), (c.err, true), "{failed:?}");
+    }
+    for absent in [SpecResultStatus::Unbound, SpecResultStatus::Missing] {
+        assert_eq!(
+            verdict_tone(absent, &c),
+            (c.text_faint, false),
+            "{absent:?}"
+        );
+    }
+}
