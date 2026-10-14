@@ -80,9 +80,6 @@ impl presentation::StageHost for StageHost<'_> {
         paint_visualization_markers(ui, app);
         crate::ui::plot::set_interaction_mode(ui.ctx(), crate::ui::plot::InteractionMode::All);
     }
-    fn revision(&self) -> u64 {
-        self.app.state.workbench.visualization_studio.revision
-    }
     fn exact_rows(&self) -> Vec<ExactSourceRow> {
         exact_source_rows(&self.app.state)
     }

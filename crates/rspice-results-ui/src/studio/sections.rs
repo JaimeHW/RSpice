@@ -4,8 +4,7 @@ use super::{
     chrome::engineering_count,
     dock::VisualizationDock,
     widgets::{
-        concept_banner, labeled_combo, numeric_policy, policy_row, section_heading, section_scroll,
-        table_header,
+        labeled_combo, numeric_policy, policy_row, section_heading, section_scroll, table_header,
     },
 };
 use egui::{Grid, Ui, vec2};
@@ -331,10 +330,6 @@ pub fn families_section(ui: &mut Ui, host: &mut impl SectionHost) {
                 VisualizationDock::FamilyFilter,
             );
         });
-        concept_banner(
-            ui,
-            "Dataset overlays use stable dataset identities. Missing analyses remain absent; the viewer never invents family points or generated trace indices.",
-        );
     });
 }
 
@@ -516,10 +511,6 @@ pub fn large_data_section(ui: &mut Ui, host: &mut impl SectionHost) {
         if previous != *host.display_lod() {
             host.request(SectionAction::ApplyLod);
         }
-        concept_banner(
-            ui,
-            "Decimation and level-of-detail affect rendering only. Measurements, exports, and cursor exact-value requests operate on the immutable source dataset.",
-        );
     });
 }
 
@@ -578,10 +569,6 @@ pub fn export_section(ui: &mut Ui, host: &mut impl SectionHost) {
                 host.request(SectionAction::ExportFigure);
             }
         });
-        concept_banner(
-            ui,
-            "Every enabled export action is backed by a real writer. Formats without an installed writer are not offered and no placeholder artifact is created.",
-        );
     });
 }
 

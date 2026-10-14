@@ -2,8 +2,7 @@
 
 use super::{
     PANEL_HEADING_HEIGHT, bar_content_height,
-    chrome::status_label,
-    widgets::{paint_bottom_rule, paint_top_rule, panel_heading, table_header},
+    widgets::{paint_bottom_rule, panel_heading, table_header},
 };
 use egui::{
     Align, Align2, Frame, Grid, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui,
@@ -22,18 +21,17 @@ use rspice_ui_kit::{
 
 const VIEWER_STAGE_HEADER_HEIGHT: f32 = 44.0;
 const VIEWER_STAGE_HEADER_VERTICAL_MARGIN: f32 = 6.0;
-const VIEWER_STAGE_STATUS_HEIGHT: f32 = 27.0;
-const VIEWER_STAGE_STATUS_VERTICAL_MARGIN: f32 = 4.0;
-const EXACT_DATA_CARD_PADDING: f32 = 12.0;
+/// The dock card's padding: with its 1 pt stroke, its content starts on the
+/// same 11 pt edge as the bars above it.
+const EXACT_DATA_CARD_PADDING: i8 = 10;
 const EXACT_DATA_TABLE_HEIGHT: f32 = 102.0;
 const EXACT_DATA_DOCK_HEIGHT: f32 =
-    EXACT_DATA_CARD_PADDING * 2.0 + PANEL_HEADING_HEIGHT + EXACT_DATA_TABLE_HEIGHT;
+    EXACT_DATA_CARD_PADDING as f32 * 2.0 + PANEL_HEADING_HEIGHT + EXACT_DATA_TABLE_HEIGHT;
 
 /// The application resolves the source before drawing and coordinates the live renderer.
 pub trait StageHost {
     fn source_label(&self) -> String;
     fn render(&mut self, ui: &mut Ui, viewer: ResultViewer);
-    fn revision(&self) -> u64;
     fn exact_rows(&self) -> Vec<ExactSourceRow>;
 }
 
@@ -44,46 +42,42 @@ pub fn viewer_stage(
     host: &mut impl StageHost,
 ) {
     let t = Tokens::get(ui.ctx());
-    let compatible = availability.is_ok();
     let header = Frame::NONE
         .fill(t.color.bg_app)
-        .inner_margin(Margin::symmetric(9, 6))
+        .inner_margin(Margin::symmetric(11, 6))
         .show(ui, |ui| {
-            ui.set_min_height(bar_content_height(
-                VIEWER_STAGE_HEADER_HEIGHT,
-                VIEWER_STAGE_HEADER_VERTICAL_MARGIN,
-            ));
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        RichText::new(definition.map_or("RESULT VIEWER", |meta| meta.domain))
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    );
+            // The viewer's name, and the source it draws at the far edge, on
+            // one line centred in the bar.
+            ui.allocate_ui_with_layout(
+                vec2(
+                    ui.available_width(),
+                    bar_content_height(
+                        VIEWER_STAGE_HEADER_HEIGHT,
+                        VIEWER_STAGE_HEADER_VERTICAL_MARGIN,
+                    ),
+                ),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_width(ui.available_width());
                     ui.label(
                         RichText::new(definition.map_or("Unknown viewer", |meta| meta.title))
                             .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
                             .color(t.color.text),
                     );
-                });
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let source = host.source_label();
-                    status_label(
-                        ui,
-                        &source,
-                        if availability.is_ok() {
-                            t.color.ok
-                        } else {
-                            t.color.warn
-                        },
-                    );
-                });
-            });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(host.source_label())
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                .color(t.color.text_dim),
+                        );
+                    });
+                },
+            );
         });
     paint_bottom_rule(ui, header.response.rect, t.color.border_strong);
 
     let dock_height = EXACT_DATA_DOCK_HEIGHT;
-    let plot_height = (ui.available_height() - dock_height - VIEWER_STAGE_STATUS_HEIGHT).max(80.0);
+    let plot_height = (ui.available_height() - dock_height).max(80.0);
     ui.allocate_ui_with_layout(
         vec2(ui.available_width(), plot_height),
         Layout::top_down(Align::Min),
@@ -92,7 +86,6 @@ pub fn viewer_stage(
             Err(reason) => unavailable_viewer(ui, definition, &reason),
         },
     );
-    viewer_stage_status(ui, host.revision(), compatible);
     exact_data_dock(ui, host.exact_rows());
 }
 
@@ -125,13 +118,13 @@ pub fn paint_markers<'a>(
         let fraction = ((annotation.x - x_min) / (x_max - x_min)).clamp(0.0, 1.0) as f32;
         let x = egui::lerp(plot.x_range(), fraction);
         let anchor = egui::pos2(x, plot.bottom() - 8.0);
-        ui.painter().circle_filled(anchor, 3.0, t.color.info);
+        ui.painter().circle_filled(anchor, 3.0, t.color.text_dim);
         ui.painter().text(
             anchor + vec2(5.0, -1.0),
             egui::Align2::LEFT_CENTER,
             format!("NOTE-{}", annotation.id),
             theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.info,
+            t.color.text_dim,
         );
     }
 }
@@ -158,62 +151,9 @@ fn unavailable_viewer(ui: &mut Ui, definition: Option<&ViewerDocumentDefinition>
                         .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                         .color(t.color.text_dim),
                 );
-                ui.label(
-                    RichText::new("No fallback viewer or fabricated data was substituted.")
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text_faint),
-                );
             });
         });
     });
-}
-
-fn viewer_stage_status(ui: &mut Ui, revision: u64, compatible: bool) {
-    let t = Tokens::get(ui.ctx());
-    let status = Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(8, 4))
-        .show(ui, |ui| {
-            ui.set_min_height(bar_content_height(
-                VIEWER_STAGE_STATUS_HEIGHT,
-                VIEWER_STAGE_STATUS_VERTICAL_MARGIN,
-            ));
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(format!("Document  VIS-{:04} · revision {}", 1, revision))
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-                ui.separator();
-                ui.label(
-                    RichText::new("Source  immutable result samples")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-                ui.separator();
-                ui.label(
-                    RichText::new("Interpolation  source exact on dock queries")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        RichText::new(if compatible {
-                            "COMPATIBLE-RUNTIME"
-                        } else {
-                            "VIEWER-UNAVAILABLE"
-                        })
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(if compatible {
-                            t.color.ok
-                        } else {
-                            t.color.warn
-                        }),
-                    );
-                });
-            });
-        });
-    paint_top_rule(ui, status.response.rect, t.color.border_strong);
 }
 
 fn exact_data_dock(ui: &mut Ui, rows: Vec<ExactSourceRow>) {
@@ -222,12 +162,12 @@ fn exact_data_dock(ui: &mut Ui, rows: Vec<ExactSourceRow>) {
         .fill(t.color.bg_panel)
         .stroke(Stroke::new(1.0, t.color.border))
         .corner_radius(8.0)
-        .inner_margin(Margin::same(12))
+        .inner_margin(Margin::same(EXACT_DATA_CARD_PADDING))
         .show(ui, |ui| {
             panel_heading(
                 ui,
                 "Exact-data dock",
-                &format!("{} source rows · no display interpolation", rows.len()),
+                &format!("{} source rows", rows.len()),
             );
             ui.allocate_ui_with_layout(
                 vec2(ui.available_width(), EXACT_DATA_TABLE_HEIGHT),
@@ -249,8 +189,8 @@ fn exact_data_dock(ui: &mut Ui, rows: Vec<ExactSourceRow>) {
                                     ui.end_row();
                                     if rows.is_empty() {
                                         ui.label(
-                                            RichText::new("No exact source row is available")
-                                                .color(t.color.warn),
+                                            RichText::new("No source rows")
+                                                .color(t.color.text_faint),
                                         );
                                         for _ in 0..4 {
                                             ui.label("—");
@@ -341,7 +281,7 @@ pub fn result_entity_table(ui: &mut Ui, rows: &[ResultEntityRow]) {
             fixed_table_row(
                 ui,
                 FRACTIONS,
-                ["IDENTITY", "TYPE", "BINDING / DEFINITION", "STATE"],
+                ["Identity", "Type", "Binding / definition", "State"],
                 true,
                 520.0,
             );

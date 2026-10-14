@@ -1,6 +1,6 @@
 //! Source trace, cursor, measurement, annotation, and export dock controls.
 
-use super::super::widgets::{dock_intro, empty_note};
+use super::super::widgets::empty_note;
 use egui::{RichText, Ui};
 use rspice_app_types::product::{DatasetId, short_identity as short_dataset};
 use rspice_ui_kit::{
@@ -61,11 +61,6 @@ pub trait ExportHost {
 }
 
 pub fn traces(ui: &mut Ui, host: &mut impl TraceHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · SIGNALS · EXPRESSIONS",
-        "Show or hide native source traces and create a derived expression for the selected analysis.",
-    );
     let binding = host.binding();
     let rows = host.rows();
     if rows.visibility.is_empty() {
@@ -93,11 +88,6 @@ pub fn traces(ui: &mut Ui, host: &mut impl TraceHost) -> bool {
 }
 
 pub fn cursors(ui: &mut Ui, host: &mut impl CursorHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · EXACT VALUES",
-        "Manage linked cursors, source-sample markers, and exact-value behavior.",
-    );
     let canonical = host.canonical();
     let mut linked_cursors = host.linked();
     let link_response = ui.checkbox(
@@ -136,38 +126,39 @@ pub fn cursors(ui: &mut Ui, host: &mut impl CursorHost) -> bool {
 }
 
 pub fn measurement(ui: &mut Ui, host: &mut impl MeasurementHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · SCALAR EXPRESSION",
-        "Evaluate and retain a finite scalar measurement against the exact selected analysis.",
-    );
     ui.label("Expression");
     ui.text_edit_singleline(host.expression());
+    let definition = host.expression().trim().to_owned();
+    let evaluation = host.evaluate(&definition);
+    // The refusal belongs to the field above it, so it is set directly under
+    // that field rather than after the rows that follow.
+    if let Err(error) = &evaluation
+        && !definition.is_empty()
+    {
+        ui.label(
+            RichText::new(error)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(Tokens::get(ui.ctx()).color.err),
+        );
+    }
     property_row(
         ui,
         "Scope",
         "Current pane · active analysis · immutable source inputs",
     );
-    let definition = host.expression().trim().to_owned();
-    let evaluation = host.evaluate(&definition);
     match &evaluation {
         Ok((_, _, value)) => {
             property_row(ui, "Validated value", &format!("{value:.17e}"));
         }
-        Err(error) if !definition.is_empty() => {
-            ui.label(
-                RichText::new(error)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(Tokens::get(ui.ctx()).color.err),
-            );
-        }
-        Err(_) => {
+        Err(_) if definition.is_empty() => {
             property_row(
                 ui,
                 "Validation",
                 "Enter a scalar expression such as rms(V(out))",
             );
         }
+        // The refusal is already set under the field.
+        Err(_) => {}
     }
     let valid = evaluation.is_ok();
     let add = ui
@@ -183,11 +174,6 @@ pub fn measurement(ui: &mut Ui, host: &mut impl MeasurementHost) -> bool {
 }
 
 pub fn annotation(ui: &mut Ui, host: &mut impl AnnotationHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · REVIEW ANCHOR",
-        "Anchor a review note to an immutable dataset and exact source coordinate.",
-    );
     ui.label("Annotation text");
     ui.text_edit_multiline(host.text());
     let anchor = host.anchor();
@@ -227,11 +213,6 @@ pub fn annotation(ui: &mut Ui, host: &mut impl AnnotationHost) -> bool {
 }
 
 pub fn export(ui: &mut Ui, host: &mut impl ExportHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · EXACT DATA OR RENDERED VIEW",
-        "Choose a writer backed by the active immutable result dataset or viewer crop.",
-    );
     let exact_enabled = host.exact_available();
     let figure_enabled = host.figure_available();
     let mut close = false;

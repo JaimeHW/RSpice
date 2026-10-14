@@ -95,7 +95,7 @@ fn viewer_group_heading(ui: &mut Ui, label: &str) {
         })
         .show(ui, |ui| {
             ui.label(
-                RichText::new(label.to_uppercase())
+                RichText::new(label)
                     .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
                     .color(t.color.text_faint),
             );

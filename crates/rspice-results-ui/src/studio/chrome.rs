@@ -13,14 +13,10 @@ use rspice_ui_kit::{
     panels::WorkbenchIcon,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::Button,
+    widgets::{Button, Problem, paint_problem_mark},
 };
 
-const SUMMARY: &str = "Compose waveform, tabular, statistical, RF, eye, field, and report-page views with family slicing, exact axes, annotations, measurements, and large-data policies.";
-const EVIDENCE: &str = "Implemented visualization entities retain dataset and analysis identities, viewer type, pane/page placement, links, exact markers, scalar measurements, and annotations without mutating source samples.";
-const OWNERSHIP: &str =
-    "Owns result-document presentation entities, not solver data or release decisions.";
-const WORKSPACE_HEADER_HEIGHT: f32 = 58.0;
+const WORKSPACE_HEADER_HEIGHT: f32 = 44.0;
 const WORKSPACE_HEADER_VERTICAL_MARGIN: f32 = 7.0;
 const SECTION_NAVIGATION_HEIGHT: f32 = 36.0;
 
@@ -29,118 +25,103 @@ const fn uses_horizontal_kpi_strip(width: f32, coarse_pointer: bool, touch_scree
 }
 
 /// Returns whether the user requested the previous navigation origin.
+///
+/// A configuration that holds says nothing. One that is blocked says so
+/// behind a warning mark, with the reason on hover.
 pub fn workspace_header(ui: &mut Ui, configuration: Result<(), &str>, has_origin: bool) -> bool {
     let mut back_requested = false;
     let t = Tokens::get(ui.ctx());
-    let (configuration_label, configuration_color) = if configuration.is_ok() {
-        ("configuration valid", t.color.ok)
-    } else {
-        ("configuration blocked", t.color.warn)
-    };
-    let wide = ui.available_width() > 1_120.0;
-    let phone = ui.available_width() <= 600.0;
     let show_origin = ui.available_width() <= 760.0;
     let bar = Frame::NONE
         .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(14, 7))
+        // 11 pt in: the left edge the metric cards' text and the stage below
+        // share.
+        .inner_margin(Margin::symmetric(11, 7))
         .show(ui, |ui| {
-            ui.set_min_height(bar_content_height(
-                WORKSPACE_HEADER_HEIGHT,
-                WORKSPACE_HEADER_VERTICAL_MARGIN,
-            ));
-            ui.horizontal(|ui| {
-                let (mark, _) = ui.allocate_exact_size(Vec2::splat(34.0), Sense::hover());
-                ui.painter().rect(
-                    mark,
-                    0.0,
-                    t.color.accent_dim,
-                    Stroke::new(1.0, t.color.accent),
-                    egui::StrokeKind::Inside,
-                );
-                ui.painter().text(
-                    mark.center(),
-                    egui::Align2::CENTER_CENTER,
-                    "XY",
-                    theme::mono(tokens::FS_1, FontWeight::SemiBold),
-                    t.color.accent,
-                );
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
+            // One line, centred in the bar: the way back, the title, and a
+            // blocked configuration at the far edge.
+            ui.allocate_ui_with_layout(
+                vec2(
+                    ui.available_width(),
+                    bar_content_height(WORKSPACE_HEADER_HEIGHT, WORKSPACE_HEADER_VERTICAL_MARGIN),
+                ),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    // The bar spans the workspace whether or not anything
+                    // sits at its far edge.
+                    ui.set_min_width(ui.available_width());
                     if show_origin
                         && has_origin
                         && Button::new("← Source")
                             .ghost()
                             .show(ui)
-                            .on_hover_text("Return to the exact navigation origin")
+                            .on_hover_text("Return to where you came from")
                             .clicked()
                     {
                         back_requested = true;
                     }
                     ui.label(
-                        RichText::new("RESULT DOCUMENT · VIEWER-SPECIFIC CONTROLS")
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    );
-                    ui.label(
-                        RichText::new("Lab characterization data display")
+                        RichText::new("Visualization Studio")
                             .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
                             .color(t.color.text),
                     );
-                    if phone {
-                        let response = status_label(ui, configuration_label, configuration_color);
-                        if let Err(reason) = configuration {
-                            response.on_hover_text(reason);
-                        }
+                    if let Err(reason) = configuration {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            configuration_blocked(ui).on_hover_text(reason);
+                        });
                     }
-                    if wide {
-                        ui.label(
-                            RichText::new(SUMMARY)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
-                    }
-                });
-                if !phone {
-                    ui.with_layout(Layout::right_to_left(Align::TOP), |ui| {
-                        let response = status_label(ui, configuration_label, configuration_color);
-                        if let Err(reason) = configuration {
-                            response.on_hover_text(reason);
-                        }
-                        if wide {
-                            ui.add_space(10.0);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new("RESULT PRESENTATION")
-                                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                        .color(t.color.text_faint),
-                                );
-                                ui.label(
-                                    RichText::new(OWNERSHIP)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                        .color(t.color.text_dim),
-                                );
-                            });
-                        }
-                    });
-                }
-            });
+                },
+            );
         });
     paint_bottom_rule(ui, bar.response.rect, t.color.border_strong);
     back_requested
 }
 
-pub fn status_label(ui: &mut Ui, label: &str, color: Color32) -> egui::Response {
-    ui.horizontal(|ui| {
-        let (dot, _) = ui.allocate_exact_size(vec2(7.0, 13.0), Sense::hover());
-        ui.painter().circle_filled(dot.center(), 3.0, color);
-        ui.label(
-            RichText::new(label)
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(color),
-        );
-    })
-    .response
+/// "Configuration blocked" behind a warning mark, in neutral text.
+fn configuration_blocked(ui: &mut Ui) -> egui::Response {
+    const LABEL: &str = "Configuration blocked";
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(LABEL.to_owned(), font, t.color.text_dim);
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            MARK_ADVANCE + galley.size().x,
+            galley.size().y.max(MARK_SIDE),
+        ),
+        Sense::hover(),
+    );
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            egui::pos2(rect.left() + MARK_SIDE * 0.5, rect.center().y),
+            Vec2::splat(MARK_SIDE),
+        ),
+        Problem::Warning,
+    );
+    ui.painter().galley(
+        egui::pos2(
+            rect.left() + MARK_ADVANCE,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        t.color.text_dim,
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            true,
+            Problem::Warning.announce(LABEL),
+        )
+    });
+    response
 }
+
+/// Side of a problem mark set before a line of text, and the advance from
+/// its left edge to the text: the kit's own problem-line geometry.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
 
 /// Counts prepared from the retained bindings and exact source spans.
 pub struct StatusCounts {
@@ -199,7 +180,7 @@ pub fn status_strip(ui: &mut Ui, counts: StatusCounts, coarse_pointer: bool) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                     for (label, value, detail) in &metrics {
-                        status_metric_card(ui, &t, 142.0, label, value, detail);
+                        status_metric_card(ui, &t, 164.0, label, value, detail);
                     }
                 });
             });
@@ -220,17 +201,22 @@ pub fn status_strip(ui: &mut Ui, counts: StatusCounts, coarse_pointer: bool) {
 }
 
 fn status_metric_card(ui: &mut Ui, t: &Tokens, width: f32, label: &str, value: &str, detail: &str) {
+    const PAD_X: i8 = 10;
+    const STROKE: f32 = 1.0;
+    // `width` is the whole card; the frame adds its padding and stroke on
+    // both sides of the content, so four cards fill the strip and no more.
+    let content = (width - 2.0 * (f32::from(PAD_X) + STROKE)).max(1.0);
     Frame::NONE
         .fill(t.color.bg_app)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(Margin::symmetric(10, 6))
+        .stroke(Stroke::new(STROKE, t.color.border))
+        .inner_margin(Margin::symmetric(PAD_X, 6))
         .show(ui, |ui| {
-            ui.set_min_width((width - 1.0).max(1.0));
-            ui.set_max_width((width - 1.0).max(1.0));
+            ui.set_min_width(content);
+            ui.set_max_width(content);
             ui.set_min_height(38.0);
             ui.with_layout(Layout::top_down(Align::Min), |ui| {
                 ui.label(
-                    RichText::new(label.to_uppercase())
+                    RichText::new(label)
                         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                         .color(t.color.text_faint),
                 );
@@ -367,7 +353,6 @@ pub fn compact_section_picker(
     selected: &mut VisualizationSection,
     touch_pane: &mut VisualizationTouchPane,
 ) {
-    let t = Tokens::get(ui.ctx());
     ScrollArea::vertical()
         .id_salt("visualization.compact-sections")
         .show(ui, |ui| {
@@ -383,22 +368,6 @@ pub fn compact_section_picker(
                     *touch_pane = VisualizationTouchPane::Stage;
                 }
             }
-            ui.add_space(10.0);
-            Frame::NONE
-                .fill(t.color.bg_inset)
-                .inner_margin(Margin::same(10))
-                .show(ui, |ui| {
-                    ui.label(
-                        RichText::new("EVIDENCE CONTRACT")
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    );
-                    ui.label(
-                        RichText::new(EVIDENCE)
-                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                    );
-                });
         });
 }
 

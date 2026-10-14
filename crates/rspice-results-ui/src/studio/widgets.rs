@@ -2,30 +2,13 @@
 
 use super::PANEL_HEADING_HEIGHT;
 use egui::{
-    Align, Color32, Frame, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
-    vec2,
+    Align, Color32, Frame, Layout, Margin, Rect, RichText, ScrollArea, Sense, Stroke, Ui, vec2,
 };
 use rspice_results::studio_presentation::VisualizationSection;
 use rspice_ui_kit::{
-    panels::WorkbenchIcon,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
 };
-
-pub fn dock_intro(ui: &mut Ui, eyebrow: &str, description: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(eyebrow)
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.accent),
-    );
-    ui.label(
-        RichText::new(description)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
-    ui.add_space(8.0);
-}
 
 pub fn separator(ui: &mut Ui, color: Color32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -94,26 +77,6 @@ pub fn empty_note(ui: &mut Ui, text: &str) {
         });
 }
 
-pub fn concept_banner(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.add_space(12.0);
-    Frame::NONE
-        .fill(t.color.accent_dim)
-        .stroke(Stroke::new(1.0, t.color.border_strong))
-        .inner_margin(Margin::same(10))
-        .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                let (icon_rect, _) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::hover());
-                WorkbenchIcon::Info.paint(ui.painter(), icon_rect, t.color.info);
-                ui.label(
-                    RichText::new(text)
-                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-            });
-        });
-}
-
 pub fn policy_row(ui: &mut Ui, label: &str, value: &str) {
     table_header(ui, label);
     ui.label(value);
@@ -154,19 +117,9 @@ pub fn section_heading(ui: &mut Ui, section: VisualizationSection) {
         .inner_margin(Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.label(
-                RichText::new(format!("VIZ · {}", section.label().to_uppercase()))
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.text_faint),
-            );
-            ui.label(
                 RichText::new(section.title())
                     .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
                     .color(t.color.text),
-            );
-            ui.label(
-                RichText::new(section.description())
-                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                    .color(t.color.text_faint),
             );
         });
     separator(ui, t.color.border);

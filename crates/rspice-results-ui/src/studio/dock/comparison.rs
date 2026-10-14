@@ -1,5 +1,4 @@
 //! Comparison policy controls over immutable source choices and an application commit.
-use super::super::widgets::dock_intro;
 use egui::Ui;
 use rspice_app_types::product::{DatasetId, short_identity as short_dataset};
 use rspice_ui_kit::{panels::property_row, widgets::Button};
@@ -32,11 +31,6 @@ pub trait ComparisonHost {
 }
 
 pub fn show(ui: &mut Ui, host: &mut impl ComparisonHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · IMMUTABLE COMPARISON",
-        "Create an executable receipt only after every numerical policy is explicit.",
-    );
     let has_candidate = host.prepare();
     if let Some((dataset, label)) = host.candidate() {
         property_row(

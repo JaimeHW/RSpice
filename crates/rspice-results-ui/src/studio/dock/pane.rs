@@ -1,5 +1,4 @@
 //! Retained source selection and pane placement controls.
-use super::super::widgets::dock_intro;
 use egui::Ui;
 use rspice_app_types::product::{DatasetId, short_identity as short_dataset};
 use rspice_results::{
@@ -55,11 +54,6 @@ const NATIVE_VIEWERS: [ResultViewer; 12] = [
 ];
 
 pub fn show(ui: &mut Ui, host: &mut impl PaneHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · WORKSHEET LAYOUT",
-        "Create a compatible viewer pane without disturbing existing link groups.",
-    );
     let (draft_dataset, draft_analysis) = host.prepare();
     let options = NATIVE_VIEWERS.map(|viewer| {
         (

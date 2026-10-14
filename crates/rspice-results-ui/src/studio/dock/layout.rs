@@ -1,6 +1,6 @@
 //! Worksheet properties, pane order, link groups, and report-page controls.
 
-use super::super::widgets::{dock_intro, empty_note};
+use super::super::widgets::empty_note;
 use egui::Ui;
 use rspice_results::studio_presentation::{MAX_REPORT_PAGE_TITLE_BYTES, REPORT_PAGE_TEMPLATES};
 use rspice_ui_kit::{panels::property_row, widgets::Button};
@@ -35,11 +35,6 @@ pub trait PageHost {
 }
 
 pub fn properties(ui: &mut Ui, host: &mut impl PropertiesHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULT DOCUMENT · PRESENTATION POLICY",
-        "Edit the current worksheet's retained display properties.",
-    );
     let (current_significant_digits, current_phase_continuous) = host.current();
     let significant_digits = host
         .significant_digits()
@@ -63,11 +58,6 @@ pub fn properties(ui: &mut Ui, host: &mut impl PropertiesHost) -> bool {
 }
 
 pub fn reorder(ui: &mut Ui, active: Option<u64>, order: &mut [u64]) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · WORKSHEET LAYOUT",
-        "Move panes while preserving their stable identity, traces, and link groups.",
-    );
     let index = active.and_then(|id| order.iter().position(|pane_id| *pane_id == id));
     property_row(
         ui,
@@ -100,11 +90,6 @@ pub fn reorder(ui: &mut Ui, active: Option<u64>, order: &mut [u64]) -> bool {
 }
 
 pub fn links(ui: &mut Ui, host: &mut impl LinksHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · SYNCHRONIZED NAVIGATION",
-        "Define which panes share X ranges and cursor positions.",
-    );
     let active_pane = host.prepare();
     let Some(pane_id) = active_pane else {
         empty_note(ui, "Select a pane before editing link groups.");
@@ -152,11 +137,6 @@ pub fn links(ui: &mut Ui, host: &mut impl LinksHost) -> bool {
 }
 
 pub fn page(ui: &mut Ui, host: &mut impl PageHost) -> bool {
-    dock_intro(
-        ui,
-        "REPORTING · DOCUMENT COMPOSITION",
-        "Compose versioned pages from linked plots and immutable result evidence.",
-    );
     let Some(pane_id) = host.prepare() else {
         empty_note(ui, "Select a pane before editing its page.");
         return Button::new("Close").show(ui).clicked();
@@ -164,10 +144,14 @@ pub fn page(ui: &mut Ui, host: &mut impl PageHost) -> bool {
     let draft = host.draft();
     ui.label("Template");
     egui::ComboBox::from_id_salt("report.page.template")
-        .selected_text(draft.template.clone())
+        .selected_text(template_label(draft.template))
         .show_ui(ui, |ui| {
             for template in REPORT_PAGE_TEMPLATES {
-                ui.selectable_value(draft.template, template.to_owned(), template);
+                ui.selectable_value(
+                    draft.template,
+                    template.to_owned(),
+                    template_label(template),
+                );
             }
         });
     ui.label("Page");
@@ -189,4 +173,14 @@ pub fn page(ui: &mut Ui, host: &mut impl PageHost) -> bool {
         host.save(pane_id, page, template, freeze);
     }
     apply
+}
+
+/// A page template as the reader sees it. Saved documents keep the stored
+/// name, version suffix included, so only the label drops it.
+fn template_label(template: &str) -> &str {
+    if template == REPORT_PAGE_TEMPLATES[0] {
+        "Release verification"
+    } else {
+        template
+    }
 }

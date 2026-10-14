@@ -1,5 +1,5 @@
 //! Typed family selection, encoding, and filter controls.
-use super::super::widgets::{dock_intro, empty_note};
+use super::super::widgets::empty_note;
 use egui::Ui;
 use rspice_results::family_projection::{FamilyManifest, FamilyValueKind};
 use rspice_ui_kit::widgets::Button;
@@ -23,11 +23,6 @@ pub trait FamilyHost {
 }
 
 pub fn slice(ui: &mut Ui, host: &mut impl FamilyHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · N-DIMENSIONAL DATA",
-        "Choose typed dimensions from the active immutable result family.",
-    );
     let manifest = host.manifest();
     let valid = match manifest.as_ref() {
         Ok(manifest) => {
@@ -70,11 +65,6 @@ pub fn slice(ui: &mut Ui, host: &mut impl FamilyHost) -> bool {
 }
 
 pub fn encoding(ui: &mut Ui, host: &mut impl FamilyHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · ACCESSIBLE TRACE FAMILIES",
-        "Configure redundant visual encoding supported by the retained renderer.",
-    );
     let manifest = host.manifest();
     let valid = match manifest.as_ref() {
         Ok(manifest) => {
@@ -124,11 +114,6 @@ pub fn encoding(ui: &mut Ui, host: &mut impl FamilyHost) -> bool {
 }
 
 pub fn filter(ui: &mut Ui, host: &mut impl FamilyHost) -> bool {
-    dock_intro(
-        ui,
-        "RESULTS · DATA QUERY",
-        "Filter exact typed family points without changing immutable solver output.",
-    );
     ui.label("Expression");
     ui.text_edit_singleline(host.draft().query);
     ui.label("Missing points");
