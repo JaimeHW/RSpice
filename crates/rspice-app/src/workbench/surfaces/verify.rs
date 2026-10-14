@@ -8,7 +8,7 @@ use sha2::{Digest as _, Sha256};
 use crate::state::SpecEntry;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
 
 use super::super::commands::vocabulary::Command;
@@ -34,6 +34,10 @@ const VERIFY_STACKED_CHART_HEIGHT: f32 = 250.0;
 const VERIFY_PHONE_CHART_HEIGHT: f32 = 230.0;
 const VERIFY_FIRST_ROW_MIN_HEIGHT: f32 = 210.0;
 const VERIFY_FIRST_ROW_MAX_HEIGHT: f32 = 390.0;
+/// Side of a problem mark in a table cell or a KPI tile, and the advance from
+/// its left edge to the words after it: the kit's own row metrics.
+const TABLE_MARK_SIDE: f32 = 11.0;
+const TABLE_MARK_ADVANCE: f32 = 17.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // Persisted legacy pages can outlive their retired prototype surfaces.
@@ -302,26 +306,18 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
         .show(ctx, |ui| {
             let t = Tokens::get(ui.ctx());
             ui.label(
-                egui::RichText::new("GOVERNED RETAINED BASELINE")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.accent),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "Choose the immutable dataset used for the next exact comparison.",
-                )
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(t.color.text_dim),
+                egui::RichText::new("Choose the baseline run.")
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_dim),
             );
             ui.add_space(6.0);
 
             if candidates.is_empty() {
-                status_dot(
-                    ui,
-                    t.color.warn,
-                    "No distinct source-attributed retained run is available",
+                ui.label(
+                    egui::RichText::new("No other runs to compare against.")
+                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                        .color(t.color.text),
                 );
-                ui.label("Retain another completed run before selecting a regression baseline.");
             } else {
                 let list_width = ui.available_width();
                 ScrollArea::vertical()
@@ -573,11 +569,33 @@ struct SpecificationEvidence {
     values: Vec<(String, f64)>,
 }
 
+/// A result table's judgment of one value.
+///
+/// A failure is painted in the error colour and a value near its limit in the
+/// warning colour. A pass is neutral: success is the absence of a problem.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    Pass,
+    Near,
+    Fail,
+}
+
+/// How a table cell's words are inked beyond the column's own tone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CellInk {
+    Plain,
+    /// The metadata register: a value that is absent.
+    Faint,
+    Verdict(Verdict),
+    /// A problem's mark in front of neutral words.
+    Problem(Problem),
+}
+
 #[derive(Clone)]
 struct TableCell {
     text: String,
     mono: bool,
-    color: Option<egui::Color32>,
+    ink: CellInk,
 }
 
 impl TableCell {
@@ -585,7 +603,7 @@ impl TableCell {
         Self {
             text: text.into(),
             mono: false,
-            color: None,
+            ink: CellInk::Plain,
         }
     }
 
@@ -593,15 +611,32 @@ impl TableCell {
         Self {
             text: text.into(),
             mono: true,
-            color: None,
+            ink: CellInk::Plain,
         }
     }
 
-    fn tone(text: impl Into<String>, color: egui::Color32) -> Self {
+    /// A value the run does not hold, in the metadata register.
+    fn absent(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             mono: true,
-            color: Some(color),
+            ink: CellInk::Faint,
+        }
+    }
+
+    fn verdict(text: impl Into<String>, verdict: Verdict) -> Self {
+        Self {
+            text: text.into(),
+            mono: true,
+            ink: CellInk::Verdict(verdict),
+        }
+    }
+
+    fn problem(text: impl Into<String>, problem: Problem) -> Self {
+        Self {
+            text: text.into(),
+            mono: true,
+            ink: CellInk::Problem(problem),
         }
     }
 }
@@ -682,7 +717,6 @@ fn specification_evidence(app: &RSpiceApp, run_index: Option<usize>) -> Vec<Spec
 }
 
 fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[SpecificationEvidence]) {
-    let t = Tokens::get(ui.ctx());
     let yield_results = verification_yield_results(app);
     let joint_yield = joint_sample_summary(yield_results);
     let covered = evidence.iter().filter(|row| !row.values.is_empty()).count();
@@ -698,72 +732,49 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
         })
         .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let items = [
-        (
-            "Estimated yield".to_owned(),
+        KpiTile::new(
+            "Estimated yield",
             joint_yield.map_or_else(
-                || "No evidence".to_owned(),
+                || "—".to_owned(),
                 |summary| format!("{:.2}%", summary.yield_percent()),
             ),
             joint_yield.map_or_else(
-                || "No aligned all-spec sample trail".to_owned(),
+                || "No Monte Carlo run".to_owned(),
                 |summary| {
                     format!(
-                        "Joint AND · {} specs · {} samples",
+                        "All {} specs · {} samples",
                         summary.specification_count, summary.total
                     )
                 },
             ),
-            joint_yield.map_or(t.color.warn, |summary| {
-                if summary.passing == summary.total {
-                    t.color.ok
-                } else {
-                    t.color.warn
-                }
-            }),
         ),
-        (
-            "Passing samples".to_owned(),
+        KpiTile::new(
+            "Passing samples",
             joint_yield.map_or_else(
-                || "0 / 0".to_owned(),
+                || "—".to_owned(),
                 |summary| format!("{} / {}", summary.passing, summary.total),
             ),
-            joint_yield.map_or_else(
-                || "No retained sample trail".to_owned(),
-                |summary| {
-                    format!(
-                        "{} violate at least one executable specification",
-                        summary.total - summary.passing
-                    )
-                },
-            ),
-            joint_yield.map_or(t.color.text, |summary| {
-                if summary.passing == summary.total {
-                    t.color.ok
-                } else {
-                    t.color.text
-                }
+            joint_yield.map_or_else(String::new, |summary| {
+                format!("{} fail a spec", summary.total - summary.passing)
             }),
         ),
-        (
-            "Worst margin".to_owned(),
+        KpiTile::new(
+            "Worst margin",
             worst.map_or_else(
-                || "No evidence".to_owned(),
+                || "—".to_owned(),
                 |(margin, _, _, _)| format!("{:+.2}%", margin * 100.0),
             ),
-            worst.map_or_else(
-                || "No bounded measurement available".to_owned(),
-                |(_, row, run, _)| format!("{} · {run}", row.spec.measurement),
-            ),
-            worst.map_or(t.color.warn, |(margin, _, _, _)| {
-                if margin < 0.0 {
-                    t.color.err
-                } else {
-                    t.color.ok
-                }
+            worst.map_or_else(String::new, |(_, row, run, _)| {
+                format!("{} · {run}", row.spec.measurement)
             }),
+        )
+        .with_problem(
+            worst
+                .is_some_and(|(margin, _, _, _)| margin < 0.0)
+                .then_some(Problem::Failure),
         ),
-        (
-            "Evidence coverage".to_owned(),
+        KpiTile::new(
+            "Evidence coverage",
             format!("{} / {}", covered, evidence.len()),
             // When the selected dataset cannot answer this plan's limits, that
             // is the reason coverage is zero, and it is a different problem
@@ -772,23 +783,17 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
             verification_evidence_domain(app).refusal().map_or_else(
                 || {
                     if evidence.is_empty() {
-                        "No project specifications".to_owned()
+                        "No specifications".to_owned()
+                    } else if covered == evidence.len() {
+                        String::new()
                     } else {
-                        format!(
-                            "{} specifications lack active-run evidence",
-                            evidence.len() - covered
-                        )
+                        format!("{} specs not measured", evidence.len() - covered)
                     }
                 },
                 str::to_owned,
             ),
-            if covered == evidence.len() && !evidence.is_empty() {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
         ),
-        sign_off_tile(app, &t),
+        sign_off_tile(app),
     ];
     verification_kpi_strip(ui, &items);
 }
@@ -807,29 +812,51 @@ fn engineering_status_strip(ui: &mut Ui, app: &RSpiceApp, evidence: &[Specificat
 /// engine · non-sign-off` — was stamped `Eligible` here; and once it read the
 /// blocker, the eligible case was still a sentence of its own, which the
 /// Results manifest wrote as `unavailable` for the same receipt.
-fn sign_off_tile(app: &RSpiceApp, t: &Tokens) -> (String, String, String, egui::Color32) {
+fn sign_off_tile(app: &RSpiceApp) -> KpiTile {
     use crate::state::SignOffStanding;
 
-    let label = "Sign-off".to_owned();
+    let label = "Sign-off";
     let Some(receipt) =
         verification_run(app).and_then(crate::state::SimulationRun::prepared_receipt)
     else {
-        return (
-            label,
-            "Not assessed".to_owned(),
-            "No prepared receipt for the active dataset".to_owned(),
-            t.color.text_faint,
-        );
+        return KpiTile::new(label, "Not assessed", "No run selected");
     };
     let standing = receipt.sign_off_standing();
-    let tone = match standing {
-        SignOffStanding::Eligible => t.color.ok,
-        SignOffStanding::Blocked(_) => t.color.warn,
+    let problem = match standing {
+        SignOffStanding::Eligible => None,
+        SignOffStanding::Blocked(_) => Some(Problem::Warning),
     };
-    (label, standing.verdict().to_owned(), standing.cause(), tone)
+    KpiTile::new(label, standing.verdict(), standing.cause()).with_problem(problem)
 }
 
-fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::Color32)]) {
+/// One tile of a page's KPI strip.
+///
+/// A tile is not a verdict cell: its words are neutral, and a tile that reports
+/// a problem says so with the problem's mark in front of its value.
+struct KpiTile {
+    label: String,
+    value: String,
+    detail: String,
+    problem: Option<Problem>,
+}
+
+impl KpiTile {
+    fn new(label: impl Into<String>, value: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+            detail: detail.into(),
+            problem: None,
+        }
+    }
+
+    fn with_problem(mut self, problem: Option<Problem>) -> Self {
+        self.problem = problem;
+        self
+    }
+}
+
+fn verification_kpi_strip(ui: &mut Ui, items: &[KpiTile]) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let responsive_width = ui.ctx().content_rect().width();
@@ -844,9 +871,9 @@ fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::C
     for row in items.chunks(columns) {
         let row_height = row
             .iter()
-            .map(|(_, _, detail, _)| {
+            .map(|tile| {
                 let galley = ui.painter().layout(
-                    detail.clone(),
+                    tile.detail.clone(),
                     theme::sans(tokens::FS_0, FontWeight::Regular),
                     t.color.text_faint,
                     (cell_width - 20.0).max(1.0),
@@ -856,14 +883,21 @@ fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::C
             .fold(73.0_f32, f32::max);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-            for (index, (label, value, detail, tone)) in row.iter().enumerate() {
+            for (index, tile) in row.iter().enumerate() {
+                let KpiTile {
+                    label,
+                    value,
+                    detail,
+                    problem,
+                } = tile;
                 let (rect, response) = ui
                     .allocate_exact_size(egui::vec2(cell_width, row_height), egui::Sense::hover());
                 response.widget_info(|| {
+                    let spoken = format!("{label}: {value}. {detail}");
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Label,
                         ui.is_enabled(),
-                        format!("{label}: {value}. {detail}"),
+                        problem.map_or_else(|| spoken.clone(), |problem| problem.announce(&spoken)),
                     )
                 });
                 if ui.is_rect_visible(rect) {
@@ -877,12 +911,31 @@ fn verification_kpi_strip(ui: &mut Ui, items: &[(String, String, String, egui::C
                         theme::sans(tokens::FS_0, FontWeight::Regular),
                         t.color.text_dim,
                     );
+                    let value_font = theme::mono(17.0, FontWeight::Medium);
+                    let value_left = if let Some(problem) = problem {
+                        let line = painter
+                            .layout_no_wrap(value.clone(), value_font.clone(), t.color.text)
+                            .size()
+                            .y;
+                        paint_problem_mark(
+                            &painter,
+                            egui::Rect::from_center_size(
+                                rect.left_top()
+                                    + egui::vec2(10.0 + TABLE_MARK_SIDE * 0.5, 29.0 + line * 0.5),
+                                egui::Vec2::splat(TABLE_MARK_SIDE),
+                            ),
+                            *problem,
+                        );
+                        10.0 + TABLE_MARK_ADVANCE
+                    } else {
+                        10.0
+                    };
                     painter.text(
-                        rect.left_top() + egui::vec2(10.0, 29.0),
+                        rect.left_top() + egui::vec2(value_left, 29.0),
                         egui::Align2::LEFT_TOP,
                         value,
-                        theme::mono(17.0, FontWeight::Medium),
-                        *tone,
+                        value_font,
+                        t.color.text,
                     );
                     let detail_galley = painter.layout(
                         detail.clone(),
@@ -1129,16 +1182,20 @@ fn yield_chart(ui: &mut Ui, app: &RSpiceApp, height: f32) {
 }
 
 fn yield_limit_text(spec: &rspice_results::yield_analysis::YieldSpec) -> String {
-    match (spec.min, spec.max) {
-        (Some(min), Some(max)) => format!(
-            "{}…{} {}",
-            format_scalar(min),
-            format_scalar(max),
-            spec.unit
-        ),
-        (Some(min), None) => format!("≥ {} {}", format_scalar(min), spec.unit),
-        (None, Some(max)) => format!("≤ {} {}", format_scalar(max), spec.unit),
-        (None, None) => "unbounded".to_owned(),
+    bounds_text(spec.min, spec.max, &spec.unit).unwrap_or_else(|| "unbounded".to_owned())
+}
+
+/// A limit's bounds, each in engineering notation with its unit.
+fn bounds_text(min: Option<f64>, max: Option<f64>, unit: &str) -> Option<String> {
+    match (min, max) {
+        (Some(min), Some(max)) => Some(format!(
+            "{} … {}",
+            format_value(min, unit),
+            format_value(max, unit)
+        )),
+        (Some(min), None) => Some(format!("≥ {}", format_value(min, unit))),
+        (None, Some(max)) => Some(format!("≤ {}", format_value(max, unit))),
+        (None, None) => None,
     }
 }
 
@@ -1190,14 +1247,14 @@ fn run_margin_matrix(
                     limit_text(&row.spec)
                 )),
                 margin.map_or_else(
-                    || TableCell::tone("NO EVIDENCE", Tokens::get(ui.ctx()).color.warn),
+                    || TableCell::absent("—"),
                     |margin| {
-                        TableCell::tone(
+                        TableCell::verdict(
                             format!("{:+.2}%", margin * 100.0),
                             if margin < 0.0 {
-                                Tokens::get(ui.ctx()).color.err
+                                Verdict::Fail
                             } else {
-                                Tokens::get(ui.ctx()).color.ok
+                                Verdict::Pass
                             },
                         )
                     },
@@ -1221,7 +1278,6 @@ fn specification_matrix(ui: &mut Ui, app: &mut RSpiceApp, evidence: &[Specificat
     if action {
         Command::EditSpecifications.execute(app);
     }
-    let t = Tokens::get(ui.ctx());
     let headers = vec![
         ("Measurement".to_owned(), 0.25),
         ("Limit".to_owned(), 0.15),
@@ -1248,22 +1304,13 @@ fn specification_matrix(ui: &mut Ui, app: &mut RSpiceApp, evidence: &[Specificat
                     |margin| format!("{:+.2}%", margin * 100.0),
                 )),
                 TableCell::text(active.map_or("—", |(run, _)| run)),
-                TableCell::tone(
-                    if row.values.is_empty() {
-                        "NO EVIDENCE"
-                    } else if failed {
-                        "FAIL"
-                    } else {
-                        "PASS"
-                    },
-                    if row.values.is_empty() {
-                        t.color.warn
-                    } else if failed {
-                        t.color.err
-                    } else {
-                        t.color.ok
-                    },
-                ),
+                if row.values.is_empty() {
+                    TableCell::absent("—")
+                } else if failed {
+                    TableCell::verdict("FAIL", Verdict::Fail)
+                } else {
+                    TableCell::verdict("PASS", Verdict::Pass)
+                },
             ]
         })
         .collect::<Vec<_>>();
@@ -1645,7 +1692,6 @@ fn verification_table_empty_message(id: &str) -> &'static str {
         "verification-run-margin" => "No retained run-margin evidence",
         "verification-specification-matrix" => "No specification evidence",
         "verify-corner-matrix" => "No retained corner-signal evidence",
-        "verify-corner-worst-points" => "No point-attributed corner verdicts",
         "verify-optimization-results" => "No retained optimization traces",
         "verify-soa-rule-results" => "No evaluated SOA rules",
         "verify-regression-checks" => "No aligned regression checks",
@@ -1699,20 +1745,48 @@ fn paint_table_cells(
                 },
             )
         };
-        let text = elide_table_text(ui, &value.text, &font, (cell_rect.width() - 16.0).max(0.0));
+        let plain = if header {
+            t.color.text_faint
+        } else {
+            t.color.text_dim
+        };
+        let (color, problem) = match value.ink {
+            CellInk::Plain | CellInk::Verdict(Verdict::Pass) => (plain, None),
+            CellInk::Faint => (t.color.text_faint, None),
+            CellInk::Verdict(Verdict::Near) => (t.color.warn, None),
+            CellInk::Verdict(Verdict::Fail) => (t.color.err, None),
+            CellInk::Problem(problem) => (plain, Some(problem)),
+        };
+        let mark_room = if problem.is_some() {
+            TABLE_MARK_ADVANCE
+        } else {
+            0.0
+        };
+        let text = elide_table_text(
+            ui,
+            &value.text,
+            &font,
+            (cell_rect.width() - 16.0 - mark_room).max(0.0),
+        );
         let painter = ui
             .painter()
             .with_clip_rect(cell_rect.shrink2(egui::vec2(8.0, 0.0)));
+        if let Some(problem) = problem {
+            paint_problem_mark(
+                &painter,
+                egui::Rect::from_center_size(
+                    cell_rect.left_center() + egui::vec2(8.0 + TABLE_MARK_SIDE * 0.5, 0.0),
+                    egui::Vec2::splat(TABLE_MARK_SIDE),
+                ),
+                problem,
+            );
+        }
         painter.text(
-            cell_rect.left_center() + egui::vec2(8.0, 0.0),
+            cell_rect.left_center() + egui::vec2(8.0 + mark_room, 0.0),
             egui::Align2::LEFT_CENTER,
             text,
             font,
-            value.color.unwrap_or(if header {
-                t.color.text_faint
-            } else {
-                t.color.text_dim
-            }),
+            color,
         );
         x += width;
     }
@@ -1873,34 +1947,23 @@ fn normalized_margin(spec: &SpecEntry, value: f64) -> Option<f64> {
 }
 
 fn limit_text(spec: &SpecEntry) -> String {
-    match (spec.min, spec.max) {
-        (Some(min), Some(max)) => format!(
-            "{}…{} {}",
-            format_scalar(min),
-            format_scalar(max),
-            spec.unit
-        ),
-        (Some(min), None) => format!("≥ {} {}", format_scalar(min), spec.unit),
-        (None, Some(max)) => format!("≤ {} {}", format_scalar(max), spec.unit),
-        (None, None) => "tracked value".to_owned(),
-    }
+    bounds_text(spec.min, spec.max, &spec.unit).unwrap_or_else(|| "tracked value".to_owned())
 }
 
+/// A measured value in engineering notation with its unit: four significant
+/// digits, an SI prefix, never a bare exponent.
 fn format_value(value: f64, unit: &str) -> String {
-    if unit.is_empty() {
-        format_scalar(value)
-    } else {
-        format!("{} {unit}", format_scalar(value))
-    }
+    rspice_results::number_format::fmt_si_significant(value, unit, 4)
 }
 
 fn format_scalar(value: f64) -> String {
-    let magnitude = value.abs();
-    if magnitude != 0.0 && !(1.0e-3..1.0e6).contains(&magnitude) {
-        format!("{value:.4e}")
-    } else {
-        format!("{value:.6}")
-    }
+    format_value(value, "")
+}
+
+/// A difference in engineering notation, signed either way.
+fn signed_scalar(value: f64) -> String {
+    let sign = if value >= 0.0 { "+" } else { "" };
+    format!("{sign}{}", format_scalar(value))
 }
 
 fn latest_analysis(

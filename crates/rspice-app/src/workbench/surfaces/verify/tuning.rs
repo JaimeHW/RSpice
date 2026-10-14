@@ -472,28 +472,16 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
         .max_width(width)
         .show(ctx, |ui| {
             let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new("TUNING · REVIEWABLE WORKING CHANGE")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.accent),
-            );
-            ui.label(
-                egui::RichText::new(
-                    "Review the exact active-plan expressions before committing one transactional revision.",
-                )
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                .color(t.color.text_dim),
-            );
-            ui.add_space(8.0);
             egui::Frame::new()
                 .fill(t.color.bg_panel_2)
-                .stroke(egui::Stroke::new(1.0, t.color.warn))
+                .stroke(egui::Stroke::new(1.0, t.color.border))
                 .inner_margin(egui::Margin::same(10))
                 .show(ui, |ui| {
-                    status_dot(ui, t.color.warn, "Existing retained evidence stays immutable");
                     ui.add(
                         egui::Label::new(
-                            "The commit changes design inputs. Existing checks and results remain preserved and become stale until the required production run completes.",
+                            egui::RichText::new("Results go stale until you rerun.")
+                                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                                .color(t.color.text_dim),
                         )
                         .wrap(),
                     );
@@ -508,7 +496,11 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
             ];
             render_data_table(ui, "verify-tuning-review", &headers, &rows, None);
             ui.add_space(8.0);
-            property_row(ui, "New simulation", "required · queued through active plan");
+            property_row(
+                ui,
+                "New simulation",
+                "required · queued through active plan",
+            );
             property_row(ui, "Release evidence", "never copied from sandbox");
             property_row(ui, "Change set", "one transactional working revision");
             ui.add_space(8.0);
@@ -586,7 +578,7 @@ fn tuning_delta(
 }
 
 pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some((_plan_id, plan_revision, _committed_variables, specs)) = app
+    let Some((_plan_id, _plan_revision, _committed_variables, specs)) = app
         .state
         .sim_setup
         .stable_analysis_plan()
@@ -608,17 +600,11 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         })
     else {
         card(ui, "Exploration variables", |ui| {
-            status_dot(
-                ui,
-                Tokens::get(ui.ctx()).color.warn,
-                "No active simulation plan payload",
-            );
-            ui.label("Create or activate a simulation plan before opening the parameter tuner.");
+            ui.label("No active simulation plan.");
         });
         return;
     };
     let variables = tuning_session_variables(app);
-    let t = Tokens::get(ui.ctx());
     let dirty_count = app
         .state
         .workbench
@@ -647,70 +633,34 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         .count();
     let baseline_run = tuning_baseline_run(app);
     let candidate_run = tuning_candidate_run(app);
-    verification_kpi_strip(
-        ui,
-        &[
-            (
-                "Design variables".to_owned(),
-                variables.len().to_string(),
-                format!("active plan · revision {}", plan_revision.get()),
-                if variables.is_empty() {
-                    t.color.warn
-                } else {
-                    t.color.text
-                },
-            ),
-            (
-                "Provisional changes".to_owned(),
-                dirty_count.to_string(),
-                if dirty_count == 0 {
-                    "committed baseline".to_owned()
-                } else {
-                    "sandbox only · not committed".to_owned()
-                },
-                if dirty_count == 0 {
-                    t.color.ok
-                } else {
-                    t.color.warn
-                },
-            ),
-            (
-                "Validation".to_owned(),
-                if invalid_count == 0 {
-                    "Ready"
-                } else {
-                    "Blocked"
-                }
-                .to_owned(),
-                if invalid_count == 0 {
-                    "typed values and bounds valid".to_owned()
-                } else {
-                    format!("{invalid_count} invalid candidate value(s)")
-                },
-                if invalid_count == 0 {
-                    t.color.ok
-                } else {
-                    t.color.err
-                },
-            ),
-            (
-                "Retained baseline".to_owned(),
-                baseline_run.map_or_else(|| "None".to_owned(), |run| format!("Run {}", run.id)),
-                if candidate_run.is_some() {
-                    "candidate result retained".to_owned()
-                } else if baseline_run.is_some() {
-                    "immutable comparison source".to_owned()
-                } else {
-                    "run required for this plan".to_owned()
-                },
-                if candidate_run.is_some() {
-                    t.color.ok
-                } else {
-                    t.color.warn
-                },
-            ),
-        ],
-    );
+    let mut tiles = vec![
+        KpiTile::new("Design variables", variables.len().to_string(), ""),
+        KpiTile::new("Uncommitted changes", dirty_count.to_string(), ""),
+    ];
+    // Valid candidates are the normal state; only a blocked set earns a tile.
+    if invalid_count > 0 {
+        tiles.push(
+            KpiTile::new(
+                "Validation",
+                "Blocked",
+                format!(
+                    "{invalid_count} invalid value{}",
+                    if invalid_count == 1 { "" } else { "s" }
+                ),
+            )
+            .with_problem(Some(Problem::Failure)),
+        );
+    }
+    tiles.push(KpiTile::new(
+        "Baseline",
+        baseline_run.map_or_else(|| "—".to_owned(), |run| format!("Run {}", run.id)),
+        match (candidate_run, baseline_run) {
+            (Some(candidate), _) => format!("Candidate Run {}", candidate.id),
+            (None, Some(_)) => String::new(),
+            (None, None) => "Run the plan first".to_owned(),
+        },
+    ));
+    verification_kpi_strip(ui, &tiles);
 
     let width = ui.available_width();
     if width > VERIFY_KPI_BREAKPOINT {
@@ -744,19 +694,13 @@ fn tuning_variable_card(
 ) {
     let dirty = tuning_is_dirty(app);
     card(ui, "Exploration variables", |ui| {
-        status_dot(
-            ui,
-            if dirty {
-                Tokens::get(ui.ctx()).color.warn
-            } else {
-                Tokens::get(ui.ctx()).color.ok
-            },
-            if dirty {
-                "Provisional · not committed"
-            } else {
-                "Committed baseline"
-            },
-        );
+        if dirty {
+            ui.label(
+                egui::RichText::new("Uncommitted changes")
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
+        }
         if variables.is_empty() {
             ui.label("No design variables are configured. Add typed variables in Simulation Studio before tuning.");
             return;
@@ -799,16 +743,12 @@ fn tuning_variable_editor(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 egui::RichText::new(if proposed {
-                    format!("PROPOSED / {}", variable.quantity.label())
+                    format!("Proposed · {}", variable.quantity.label())
                 } else {
                     variable.quantity.label().to_owned()
                 })
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(if proposed {
-                    t.color.warn
-                } else {
-                    t.color.text_dim
-                }),
+                .color(t.color.text_dim),
             );
         });
     });
@@ -1047,15 +987,10 @@ fn tuning_specification_contract(
 ) {
     table_section_header(
         ui,
-        "Provisional measurement contract",
-        Some(if provisional {
-            "sandbox values · excluded from release evidence"
-        } else {
-            "committed retained evidence"
-        }),
+        "Specifications",
+        provisional.then_some("uncommitted"),
         None,
     );
-    let t = Tokens::get(ui.ctx());
     let baseline_run = tuning_baseline_run(app);
     let candidate_run = tuning_candidate_run(app);
     let headers = vec![
@@ -1086,22 +1021,13 @@ fn tuning_specification_contract(
                     "awaiting retained candidate".to_owned()
                 }),
                 TableCell::mono(limit_text(spec)),
-                TableCell::tone(
-                    if provisional || candidate_value.is_none() {
-                        "NOT EVALUATED"
-                    } else if passed {
-                        "PASS"
-                    } else {
-                        "FAIL"
-                    },
-                    if provisional || candidate_value.is_none() {
-                        t.color.warn
-                    } else if passed {
-                        t.color.ok
-                    } else {
-                        t.color.err
-                    },
-                ),
+                if provisional || candidate_value.is_none() {
+                    TableCell::absent("not evaluated")
+                } else if passed {
+                    TableCell::verdict("PASS", Verdict::Pass)
+                } else {
+                    TableCell::verdict("FAIL", Verdict::Fail)
+                },
             ]
         })
         .collect::<Vec<_>>();

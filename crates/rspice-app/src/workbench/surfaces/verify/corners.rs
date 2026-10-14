@@ -21,57 +21,27 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
     // is retained by the result schema.
     let configured_specifications = app.state.workspace.content.specs.len();
     let (elapsed, run_detail) = verification_run(app).map_or_else(
-        || {
-            (
-                "No dataset".to_owned(),
-                "No active immutable run".to_owned(),
-            )
-        },
+        || ("—".to_owned(), "No run selected".to_owned()),
         |run| {
             (
-                format!("{:.3} s", run.elapsed_time),
-                format!("Run {} · dataset {}", run.id, run.dataset_id),
+                format_value(run.elapsed_time, "s"),
+                format!("Run {}", run.id),
             )
         },
     );
-    let t = Tokens::get(ui.ctx());
     let items = [
-        (
-            "PVT points retained".to_owned(),
+        KpiTile::new(
+            "PVT points",
             point_count.to_string(),
             if point_count == 0 {
-                "No process-corner evidence".to_owned()
+                "No corner run".to_owned()
             } else {
                 run_detail
             },
-            if point_count == 0 {
-                t.color.warn
-            } else {
-                t.color.ok
-            },
         ),
-        (
-            "Signals retained".to_owned(),
-            signal_count.to_string(),
-            "source-attributed corner traces".to_owned(),
-            if signal_count == 0 {
-                t.color.warn
-            } else {
-                t.color.ok
-            },
-        ),
-        (
-            "Specifications configured".to_owned(),
-            configured_specifications.to_string(),
-            "No pointwise verdict payload retained".to_owned(),
-            t.color.warn,
-        ),
-        (
-            "Runtime".to_owned(),
-            elapsed,
-            "active immutable run".to_owned(),
-            t.color.text,
-        ),
+        KpiTile::new("Signals", signal_count.to_string(), ""),
+        KpiTile::new("Specifications", configured_specifications.to_string(), ""),
+        KpiTile::new("Runtime", elapsed, ""),
     ];
     verification_kpi_strip(ui, &items);
 
@@ -83,11 +53,11 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             .unwrap_or(&[]);
         if axis.is_empty() {
             card(ui, "Corner result integrity", |ui| {
-                ui.label("The retained corner result has no point axis. It is not presented as verification evidence.");
+                ui.label("Corner result has no sweep axis.");
             });
         } else {
             let mut headers = vec![("Signal".to_owned(), 0.24)];
-            let point_fraction = 0.64 / axis.len() as f32;
+            let point_fraction = 0.76 / axis.len() as f32;
             let point_labels = corner_point_labels(app, result);
             headers.extend(axis.iter().enumerate().map(|(index, value)| {
                 let label = point_labels
@@ -97,8 +67,6 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                     .unwrap_or_else(|| format!("P{:02} · {}", index + 1, format_scalar(*value)));
                 (label, point_fraction)
             }));
-            headers.push(("State".to_owned(), 0.12));
-            let t = Tokens::get(ui.ctx());
             let nominal_index = app
                 .state
                 .workbench
@@ -111,7 +79,14 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                 .iter()
                 .map(|waveform| {
                     let aligned = waveform.x.as_slice() == axis && waveform.y.len() == axis.len();
-                    let mut row = vec![TableCell::text(&waveform.name)];
+                    // A trace that does not share the sweep's points is the
+                    // finding; a trace that does is the normal state and says
+                    // nothing.
+                    let mut row = vec![if aligned {
+                        TableCell::text(&waveform.name)
+                    } else {
+                        TableCell::problem(&waveform.name, Problem::Failure)
+                    }];
                     if aligned {
                         let nominal = nominal_index
                             .and_then(|index| waveform.y.get(index))
@@ -119,27 +94,19 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                         row.extend(waveform.y.iter().map(|value| {
                             TableCell::mono(nominal.map_or_else(
                                 || format_scalar(*value),
-                                |nominal| format!("{:+.6e}", *value - nominal),
+                                |nominal| signed_scalar(*value - nominal),
                             ))
                         }));
                     } else {
                         row.extend((0..axis.len()).map(|_| TableCell::mono("—")));
                     }
-                    row.push(TableCell::tone(
-                        if aligned { "ALIGNED" } else { "INVALID" },
-                        if aligned { t.color.ok } else { t.color.err },
-                    ));
                     row
                 })
                 .collect::<Vec<_>>();
             table_section_header(
                 ui,
-                "Full PVT retained-value matrix",
-                Some(if nominal_index.is_some() {
-                    "exact delta from retained nominal point"
-                } else {
-                    "absolute source-attributed values"
-                }),
+                "PVT matrix",
+                nominal_index.is_some().then_some("delta from nominal"),
                 None,
             );
             render_data_table(
@@ -149,14 +116,14 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                 &rows,
                 Some((220.0 + axis.len() as f32 * 88.0).max(1_450.0)),
             );
-            corner_evidence_details(ui, app, result, point_count);
+            corner_evidence_details(ui, app, result);
             if let Some(run_id) = verification_run(app).map(|run| run.id) {
                 executed_deck_section(ui, &mut app.state, run_id);
             }
         }
     } else {
         card(ui, "Corner evidence", |ui| {
-            ui.label("No retained process-corner analysis is available for the active dataset. Run the configured corner plan to create evidence.");
+            ui.label("No corner run in the selected run.");
         });
     }
 }
@@ -353,82 +320,33 @@ pub(super) fn corner_nominal_index(app: &RSpiceApp) -> Option<usize> {
     labels.iter().position(|label| label == &exact_nominal)
 }
 
+/// What stands between this corner run and an exact reproduction of it.
+///
+/// Stated only when something does. The "Worst PVT points" table this
+/// replaced could hold nothing in this build — corner results carry no
+/// point-attributed measurements — so its only row was a placeholder; and a run
+/// that reproduces is the normal state, which needs no rows saying so.
 pub(super) fn corner_evidence_details(
     ui: &mut Ui,
     app: &RSpiceApp,
     result: &crate::state::AnalysisResult,
-    point_count: usize,
 ) {
-    let t = Tokens::get(ui.ctx());
-    let available = ui.available_width();
-    let split = available > 1_020.0;
-    let render_worst = |ui: &mut Ui| {
-        table_section_header(ui, "Worst PVT points", None, None);
-        let headers = vec![
-            ("Rank".to_owned(), 0.16),
-            ("Point".to_owned(), 0.28),
-            ("Limiting spec".to_owned(), 0.36),
-            ("Margin".to_owned(), 0.20),
-        ];
-        let rows = vec![vec![
-            TableCell::mono("—"),
-            TableCell::text("No pointwise evidence"),
-            TableCell::text("Point-attributed measurements not retained"),
-            TableCell::tone("NO VERDICT", t.color.warn),
-        ]];
-        render_data_table(ui, "verify-corner-worst-points", &headers, &rows, None);
-    };
-    let render_reproducibility = |ui: &mut Ui| {
-        table_section_header(ui, "Run reproducibility", None, None);
-        let run = verification_run(app);
-        property_row(
-            ui,
-            "Dataset",
-            &run.map_or_else(
-                || "unavailable".to_owned(),
-                |run| run.dataset_id.to_string(),
-            ),
-        );
-        property_row(
-            ui,
-            "Run provenance",
-            if run.and_then(|run| run.prepared_receipt()).is_some() {
-                "prepared snapshot retained"
-            } else {
-                "prepared snapshot unavailable"
-            },
-        );
-        property_row(
-            ui,
-            "Analysis provenance",
-            if result.provenance.is_some() {
-                "source identity retained"
-            } else {
-                "legacy / unattributed"
-            },
-        );
-        property_row(ui, "PVT points", &point_count.to_string());
-    };
-    ui.add_space(1.0);
-    if split {
-        let left = (available - 1.0) * 0.45;
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 1.0;
-            ui.allocate_ui_with_layout(
-                egui::vec2(left, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                render_worst,
-            );
-            ui.allocate_ui_with_layout(
-                egui::vec2(available - left - 1.0, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                render_reproducibility,
-            );
-        });
-    } else {
-        render_worst(ui);
-        ui.add_space(1.0);
-        render_reproducibility(ui);
+    let mut findings = Vec::new();
+    if verification_run(app)
+        .and_then(|run| run.prepared_receipt())
+        .is_none()
+    {
+        findings.push("This run kept no prepared snapshot, so it cannot be rerun exactly.");
+    }
+    if result.provenance.is_none() {
+        findings.push("This corner result predates source tracking.");
+    }
+    if findings.is_empty() {
+        return;
+    }
+    table_section_header(ui, "Run reproducibility", None, None);
+    for finding in findings {
+        crate::ui::widgets::problem_line(ui, Problem::Warning, finding);
     }
 }
 
@@ -473,12 +391,10 @@ pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     });
     if let Some(result) = latest_analysis(app, crate::state::AnalysisType::Optimization) {
-        let t = Tokens::get(ui.ctx());
         let headers = vec![
-            ("Trace".to_owned(), 0.38),
-            ("Samples".to_owned(), 0.18),
-            ("Final value".to_owned(), 0.26),
-            ("State".to_owned(), 0.18),
+            ("Trace".to_owned(), 0.46),
+            ("Samples".to_owned(), 0.22),
+            ("Final value".to_owned(), 0.32),
         ];
         let rows = result
             .waveforms
@@ -493,23 +409,14 @@ pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
                             .last()
                             .map_or_else(|| "—".to_owned(), |value| format_scalar(*value)),
                     ),
-                    TableCell::tone(
-                        if result.success { "RETAINED" } else { "FAILED" },
-                        if result.success {
-                            t.color.ok
-                        } else {
-                            t.color.err
-                        },
-                    ),
                 ]
             })
             .collect::<Vec<_>>();
-        table_section_header(
-            ui,
-            "Candidate traces",
-            Some("source-owned result evidence"),
-            None,
-        );
+        table_section_header(ui, "Candidate traces", None, None);
+        // The run's state, stated once rather than on every trace.
+        if !result.success {
+            crate::ui::widgets::problem_line(ui, Problem::Failure, "Run failed");
+        }
         render_data_table(ui, "verify-optimization-results", &headers, &rows, None);
     }
     action_receipt(ui, app);
@@ -550,7 +457,6 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
                 _ => None,
             }
         });
-    let t = Tokens::get(ui.ctx());
     let soa_headers = vec![
         ("Rule".to_owned(), 0.27),
         ("Device / net".to_owned(), 0.16),
@@ -593,7 +499,7 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
                 let evaluation = &evaluations[index];
                 let margin = (evaluation.limit_value - evaluation.worst_actual_value)
                     / evaluation.limit_value.abs();
-                let (_, color) = soa_rule_verdict_display(evaluation.verdict, &t);
+                let verdict = soa_rule_verdict(evaluation.verdict);
                 vec![
                     TableCell::mono(format!(
                         "{} · {}",
@@ -606,15 +512,15 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
                         &evaluation.unit,
                     )),
                     TableCell::mono(format_value(evaluation.limit_value, &evaluation.unit)),
-                    TableCell::tone(
+                    TableCell::verdict(
                         if evaluation.limit_value == 0.0 {
                             "—".to_owned()
                         } else {
                             format!("{:+.2}%", margin * 100.0)
                         },
-                        color,
+                        verdict,
                     ),
-                    TableCell::tone(format!("Open {}", evaluation.device_id), t.color.accent),
+                    TableCell::mono(format!("Open {}", evaluation.device_id)),
                 ]
             },
         );
@@ -794,15 +700,13 @@ pub(super) fn soa_parameter_display(parameter: crate::state::SoaParameterEvidenc
     }
 }
 
-pub(super) fn soa_rule_verdict_display(
-    verdict: crate::state::SoaRuleVerdictEvidence,
-    tokens: &Tokens,
-) -> (&'static str, egui::Color32) {
+/// The verdict an SOA rule's margin cell is painted with: a near-limit rule in
+/// the warning colour, a violated one in the error colour, a pass neutral.
+pub(super) fn soa_rule_verdict(verdict: crate::state::SoaRuleVerdictEvidence) -> Verdict {
     use crate::state::SoaRuleVerdictEvidence;
     match verdict {
-        SoaRuleVerdictEvidence::Pass => ("PASS", tokens.color.ok),
-        SoaRuleVerdictEvidence::Warning => ("WARNING", tokens.color.warn),
-        SoaRuleVerdictEvidence::Violation => ("VIOLATION", tokens.color.err),
-        SoaRuleVerdictEvidence::Critical => ("CRITICAL", tokens.color.err),
+        SoaRuleVerdictEvidence::Pass => Verdict::Pass,
+        SoaRuleVerdictEvidence::Warning => Verdict::Near,
+        SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => Verdict::Fail,
     }
 }

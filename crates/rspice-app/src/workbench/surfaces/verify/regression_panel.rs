@@ -141,44 +141,31 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
     let comparison_available = pair.is_some();
     let overall_pass = failures == 0 && unresolved == 0 && !targets.is_empty();
     let items = [
-        (
-            "Checks passing".to_owned(),
+        KpiTile::new(
+            "Checks passing",
             format!("{passed_checks} / {}", checks.len()),
             if comparison_available {
-                format!("{failures} blocking failures across all targets")
+                format!("{failures} failing")
             } else {
-                "retain two immutable runs before evaluation".to_owned()
+                "Select a baseline".to_owned()
             },
-            if checks.is_empty() {
-                t.color.text_dim
-            } else if failures == 0 {
-                t.color.ok
-            } else {
-                t.color.err
-            },
-        ),
-        (
-            "Waveform matches".to_owned(),
+        )
+        .with_problem((failures > 0).then_some(Problem::Failure)),
+        KpiTile::new(
+            "Waveform matches",
             format!("{passed_waveforms} / {}", waveforms.len()),
             if !regression_requires_waveforms(regression_policy) {
-                "excluded by the plan's limit-only regression policy".to_owned()
+                "Limits only: waveforms are not compared".to_owned()
             } else if comparison_available {
-                "configured envelope, skew, and window".to_owned()
+                String::new()
             } else {
-                "no source-aligned waveform pair".to_owned()
-            },
-            if waveforms.is_empty() {
-                t.color.text_dim
-            } else if passed_waveforms == waveforms.len() {
-                t.color.ok
-            } else {
-                t.color.warn
+                "No waveform pair".to_owned()
             },
         ),
-        (
-            "Worst normalized delta".to_owned(),
+        KpiTile::new(
+            "Worst normalized delta",
             worst_normalized.map_or_else(
-                || "No verdict".to_owned(),
+                || "—".to_owned(),
                 |value| {
                     if value.is_finite() {
                         format!("{value:.3} × limit")
@@ -187,41 +174,25 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
                     }
                 },
             ),
-            if !comparison_available {
-                "no retained comparison pair is available".to_owned()
-            } else if overall_pass {
-                "all evaluated targets pass".to_owned()
+            if !comparison_available || overall_pass {
+                String::new()
             } else {
                 format!("{unresolved} targets unresolved")
             },
-            if !comparison_available {
-                t.color.text_dim
-            } else if overall_pass {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
         ),
-        (
-            "Tolerance contract".to_owned(),
+        KpiTile::new(
+            "Tolerances",
             format!("{configured} / {}", targets.len()),
             if targets.is_empty() {
-                "no comparison targets available".to_owned()
+                "No comparison targets".to_owned()
             } else if regression_session
                 .regression_tolerance_drafts
                 .iter()
                 .any(|draft| draft.dirty)
             {
-                "pending edits apply on Run regression".to_owned()
+                "Unsaved. Applied on the next regression run.".to_owned()
             } else {
-                "persisted by active simulation plan".to_owned()
-            },
-            if targets.is_empty() {
-                t.color.text_dim
-            } else if configured == targets.len() {
-                t.color.ok
-            } else {
-                t.color.warn
+                String::new()
             },
         ),
     ];
@@ -302,14 +273,6 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         .zip(&check_verdicts)
         .map(|(check, verdict)| {
             let rule = regression_rule(&rules, &check.target);
-            let (status, color) = match verdict {
-                RegressionVerdict::Pass { .. } => ("PASS".to_owned(), t.color.ok),
-                RegressionVerdict::Fail { detail, .. } => (format!("FAIL · {detail}"), t.color.err),
-                RegressionVerdict::NotConfigured => ("NOT CONFIGURED".to_owned(), t.color.warn),
-                RegressionVerdict::NotEvaluated(detail) => {
-                    (format!("BLOCKED · {detail}"), t.color.err)
-                }
-            };
             vec![
                 TableCell::text(&check.name),
                 TableCell::text(format!(
@@ -319,11 +282,11 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
                 )),
                 TableCell::mono(format_scalar(check.baseline)),
                 TableCell::mono(format_scalar(check.current)),
-                TableCell::mono(format!("{:+.6e}", check.delta())),
+                TableCell::mono(signed_scalar(check.delta())),
                 TableCell::mono(
                     rule.map_or_else(|| "not configured".to_owned(), format_tolerance_rule),
                 ),
-                TableCell::tone(status, color),
+                regression_status_cell(verdict),
             ]
         })
         .collect::<Vec<_>>();
@@ -333,33 +296,19 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
             .zip(&waveform_verdicts)
             .map(|(pair, verdict)| {
                 let rule = regression_rule(&rules, &pair.target);
-                let (delta, allowed, status, color) = match verdict {
+                let (delta, allowed) = match verdict {
                     RegressionVerdict::Pass {
                         worst_delta,
                         allowed_delta,
-                    } => (*worst_delta, *allowed_delta, "PASS".to_owned(), t.color.ok),
-                    RegressionVerdict::Fail {
+                    }
+                    | RegressionVerdict::Fail {
                         worst_delta,
                         allowed_delta,
-                        detail,
-                    } => (
-                        *worst_delta,
-                        *allowed_delta,
-                        format!("FAIL · {detail}"),
-                        t.color.err,
-                    ),
-                    RegressionVerdict::NotConfigured => (
-                        f64::NAN,
-                        f64::NAN,
-                        "NOT CONFIGURED".to_owned(),
-                        t.color.warn,
-                    ),
-                    RegressionVerdict::NotEvaluated(detail) => (
-                        f64::NAN,
-                        f64::NAN,
-                        format!("BLOCKED · {detail}"),
-                        t.color.err,
-                    ),
+                        ..
+                    } => (*worst_delta, *allowed_delta),
+                    RegressionVerdict::NotConfigured | RegressionVerdict::NotEvaluated(_) => {
+                        (f64::NAN, f64::NAN)
+                    }
                 };
                 vec![
                     TableCell::text(format!("Waveform · {}", pair.current.name)),
@@ -367,21 +316,21 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
                     TableCell::mono(format!("{} samples", pair.baseline.y.len())),
                     TableCell::mono(format!("{} samples", pair.current.y.len())),
                     TableCell::mono(if delta.is_finite() {
-                        format!("max {delta:.6e}")
+                        format!("max {}", format_scalar(delta))
                     } else {
                         "—".to_owned()
                     }),
                     TableCell::mono(rule.map_or_else(
                         || {
                             if allowed.is_finite() {
-                                format!("{allowed:.6e}")
+                                format_scalar(allowed)
                             } else {
                                 "not configured".to_owned()
                             }
                         },
                         format_tolerance_rule,
                     )),
-                    TableCell::tone(status, color),
+                    regression_status_cell(verdict),
                 ]
             }),
     );
@@ -392,8 +341,8 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
             TableCell::mono("—"),
             TableCell::mono("—"),
             TableCell::mono("—"),
-            TableCell::mono("fail closed"),
-            TableCell::tone(format!("BLOCKED · {}", issue.detail), t.color.err),
+            TableCell::mono("—"),
+            TableCell::problem(format!("Blocked · {}", issue.detail), Problem::Warning),
         ]
     }));
     let orphan_targets = orphaned_regression_targets(&coverage_issues);
@@ -466,6 +415,22 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
             regression_session.regression_tolerance_drafts;
     }
     action_receipt(ui, app);
+}
+
+/// A regression check's verdict cell: a failure in the error colour, a pass
+/// neutral, an unconfigured tolerance plain, and a check that could not be
+/// evaluated behind a warning mark — blocked is not a failure.
+fn regression_status_cell(verdict: &RegressionVerdict) -> TableCell {
+    match verdict {
+        RegressionVerdict::Pass { .. } => TableCell::verdict("PASS", Verdict::Pass),
+        RegressionVerdict::Fail { detail, .. } => {
+            TableCell::verdict(format!("FAIL · {detail}"), Verdict::Fail)
+        }
+        RegressionVerdict::NotConfigured => TableCell::mono("not configured"),
+        RegressionVerdict::NotEvaluated(detail) => {
+            TableCell::problem(format!("Blocked · {detail}"), Problem::Warning)
+        }
+    }
 }
 
 pub(super) fn regression_baseline_contract_pane(
@@ -639,17 +604,15 @@ pub(super) fn regression_baseline_contract(
                     }
                 });
             let t = Tokens::get(ui.ctx());
+            // The error sits under the form it rejects. Saved is the normal
+            // state, and says nothing.
             if let Some(error) = &draft.validation_error {
                 ui.label(egui::RichText::new(error).color(t.color.err));
             } else if draft.dirty {
                 ui.label(
-                    egui::RichText::new(
-                        "Pending · Run regression validates and commits this contract",
-                    )
-                    .color(t.color.warn),
+                    egui::RichText::new("Unsaved. Applied on the next regression run.")
+                        .color(t.color.text_dim),
                 );
-            } else {
-                ui.label(egui::RichText::new("Persisted project contract").color(t.color.ok));
             }
         }
     } else {
@@ -660,10 +623,8 @@ pub(super) fn regression_baseline_contract(
             .inner_margin(egui::Margin::same(10))
             .show(ui, |ui| {
                 ui.set_min_width((available_width - 20.0).max(1.0));
-                status_dot(ui, t.color.warn, "No governed baseline selected");
-                ui.label(
-                    "Retain two immutable runs, then select the baseline used for exact comparison.",
-                );
+                ui.label(egui::RichText::new("No baseline selected.").color(t.color.text));
+                ui.label(egui::RichText::new("Select a baseline run.").color(t.color.text_dim));
             });
     }
 }
