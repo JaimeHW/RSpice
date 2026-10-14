@@ -350,6 +350,18 @@ pub fn resolve_veriloga_build_profile(
     }
 }
 
+/// Whether `value` is an include path a build profile accepts: a portable
+/// path relative to the source root, with no empty, `.` or `..` component.
+pub fn is_portable_include_path(value: &str) -> bool {
+    validate_portable_path(value, "include path").is_ok()
+}
+
+/// Whether `value` is a preprocessor symbol a build profile accepts: letters,
+/// digits and underscores, not starting with a digit.
+pub fn is_preprocessor_symbol(value: &str) -> bool {
+    validate_identifier(value, "preprocessor symbol").is_ok()
+}
+
 fn digest(bytes: &[u8]) -> ContentDigest {
     ContentDigest::from_bytes(Sha256::digest(bytes).into())
 }
