@@ -852,13 +852,17 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
     // wherever the other document last left one global selection.
     drive_frame(|ui| show(ui, &mut app, first));
     assert_eq!(
-        app.state.workbench.visualization_studio.active_pane,
-        Some(first_pane.get())
+        app.state.ui.results.session.persistent_document_pane(first),
+        Some(first_pane)
     );
     drive_frame(|ui| show(ui, &mut app, second));
     assert_eq!(
-        app.state.workbench.visualization_studio.active_pane,
-        Some(working_pane.get()),
+        app.state
+            .ui
+            .results
+            .session
+            .persistent_document_pane(second),
+        Some(working_pane),
         "the second document went back to the pane it was left on"
     );
 }

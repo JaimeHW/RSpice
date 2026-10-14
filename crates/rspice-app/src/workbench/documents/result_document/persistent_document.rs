@@ -128,7 +128,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     }
 
     // Which pane the reader is working in belongs to this document, not to
-    // whichever document last set the studio's global selection.
+    // whichever document was last shown.
     let requested_active_pane = app
         .state
         .ui
@@ -141,7 +141,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         page.panes.iter().map(|pane| pane.id.get()),
     )
     .expect("a non-empty persistent page always resolves an active pane");
-    app.state.workbench.visualization_studio.active_pane = Some(active_pane_id);
     let active_pane = page
         .panes
         .iter()
@@ -158,7 +157,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     }
     super::prepare_viewer_state(app);
     if let Some(viewer) = compatible_active_viewer(&app.state, &page.page.title, active_pane) {
-        select_global_viewer(&mut app.state, viewer);
+        app.state.ui.results.session.viewer = viewer;
     }
     let page_titles = document
         .pages
@@ -179,7 +178,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     }
     let active_viewer = compatible_active_viewer(&app.state, &page.page.title, active_pane);
     if let Some(viewer) = active_viewer {
-        select_global_viewer(&mut app.state, viewer);
+        app.state.ui.results.session.viewer = viewer;
         if let Err(reason) = project_pane_presentation(&mut app.state, active_pane, viewer) {
             unavailable_surface(ui, &active_pane.title, &reason);
             return;
@@ -223,7 +222,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .find(|pane| pane.id.get() == restored_pane_id)
         .expect("a pane activated from this page remains in this page");
     if select_pane_binding(&mut app.state, restored_pane).is_ok() {
-        app.state.workbench.visualization_studio.active_pane = Some(restored_pane_id);
         app.state
             .ui
             .results
@@ -236,16 +234,6 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         };
         if let Some(viewer) = restored_viewer {
             app.state.ui.results.session.viewer = viewer;
-            if let Some(viewer_document_id) = viewer.viewer_document_id() {
-                app.state
-                    .workbench
-                    .visualization_studio
-                    .selected_viewer_document = if activated_pane_id.is_some() {
-                    restored_pane.viewer_id.clone()
-                } else {
-                    viewer_document_id.to_owned()
-                };
-            }
         }
     }
     if let Some(fresh_pane) = projection(&app.state, document_id).and_then(|projection| {
@@ -343,16 +331,6 @@ fn compatible_active_viewer(
         super::family_allows_viewer(family_label, *viewer)
             && super::viewer_is_available(state, *viewer)
     })
-}
-
-fn select_global_viewer(state: &mut AppState, viewer: ResultViewer) {
-    state.ui.results.session.viewer = viewer;
-    if let Some(viewer_document_id) = viewer.viewer_document_id() {
-        state
-            .workbench
-            .visualization_studio
-            .selected_viewer_document = viewer_document_id.to_owned();
-    }
 }
 
 fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
@@ -591,7 +569,6 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     if select_pane_binding(state, &pane).is_err() {
         return false;
     }
-    state.workbench.visualization_studio.active_pane = Some(pane.id.get());
     state
         .ui
         .results
@@ -600,10 +577,6 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
         state.ui.results.session.viewer = viewer;
     }
-    state
-        .workbench
-        .visualization_studio
-        .selected_viewer_document = pane.viewer_id;
     true
 }
 
@@ -858,22 +831,14 @@ fn render_pane_viewer(
         );
         return;
     }
-    app.state
-        .workbench
-        .visualization_studio
-        .selected_viewer_document = if is_active {
-        let Some(viewer_document_id) = viewer.viewer_document_id() else {
-            unavailable_surface(
-                ui,
-                &pane.title,
-                "Dataset-native views cannot be retained as visualization panes.",
-            );
-            return;
-        };
-        viewer_document_id.to_owned()
-    } else {
-        pane.viewer_id.clone()
-    };
+    if is_active && viewer.viewer_document_id().is_none() {
+        unavailable_surface(
+            ui,
+            &pane.title,
+            "Dataset-native views cannot be retained as visualization panes.",
+        );
+        return;
+    }
     let family = match super::document_edit::family::pane_selection(&app.state, pane, viewer) {
         Ok(family) => family,
         Err(reason) => {
@@ -1096,13 +1061,13 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
     }
 }
 
-fn select_pane_context(state: &mut AppState, pane: &Pane) -> Result<(), String> {
+fn select_pane_context(state: &mut AppState, pane: &PaneProjection) -> Result<(), String> {
     select_pane_binding(state, pane)?;
-    state.workbench.visualization_studio.active_pane = Some(pane.id.get());
     state
-        .workbench
-        .visualization_studio
-        .selected_viewer_document = pane.viewer_id.clone();
+        .ui
+        .results
+        .session
+        .select_persistent_document_pane(pane.document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
         state.ui.results.session.viewer = bound_viewer_projection(state, viewer);
     }

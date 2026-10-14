@@ -80,7 +80,11 @@ fn results_export_selects_the_active_project_document_pane_authority() {
         .workbench
         .documents
         .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
-    app.state.workbench.visualization_studio.active_pane = Some(pane_id.get());
+    app.state
+        .ui
+        .results
+        .session
+        .select_persistent_document_pane(document_id, pane_id);
 
     let (source_key, scope) = active_retained_source_selection(&app).unwrap();
 

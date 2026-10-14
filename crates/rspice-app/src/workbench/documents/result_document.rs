@@ -1902,14 +1902,7 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
         .results
         .reconcile_retained_datasets(&app.state.simulation);
     let data_version = app.state.simulation.view.data_version;
-    // The user's display-cache budget is session state, and the cache is not,
-    // so applying it only where the setting is edited left a restored session
-    // running on the default until the reader happened to reopen that panel.
-    // Reasserting it each frame keeps the two in step by construction; it
-    // costs a comparison unless the budget actually shrank.
-    let budget = app.state.workbench.visualization_studio.tile_memory_mib;
     let results = &mut app.state.ui.results;
-    results.session.cache.set_memory_budget_mib(budget);
     results.synchronize_wave_caches(&app.state.simulation);
     if results.seen_version != data_version {
         results.seen_version = data_version;

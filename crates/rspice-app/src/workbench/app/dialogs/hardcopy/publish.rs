@@ -973,10 +973,12 @@ fn active_retained_source_selection(
             )) => {
                 let pane_id = app
                     .state
-                    .workbench
-                    .visualization_studio
-                    .active_pane
-                    .ok_or_else(|| "No result-document pane is active.".to_owned())?;
+                    .ui
+                    .results
+                    .session
+                    .persistent_document_pane(*document_id)
+                    .ok_or_else(|| "No result-document pane is active.".to_owned())?
+                    .get();
                 let needle = format!(":result-document:{document_id}:pane:{pane_id}");
                 candidates
                     .iter()

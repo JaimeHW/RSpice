@@ -190,14 +190,15 @@ fn resolve_visualization_pane(
         .or_else(|| document.pages().first().map(|page| page.id))
         .ok_or_else(|| "The active visualization document has no page.".to_owned())?;
     let pane = state
-        .workbench
-        .visualization_studio
-        .active_pane
+        .ui
+        .results
+        .session
+        .persistent_document_pane(document_id)
         .and_then(|pane_id| {
             document
                 .panes()
                 .iter()
-                .find(|pane| pane.id.get() == pane_id && pane.page_id == page_id)
+                .find(|pane| pane.id == pane_id && pane.page_id == page_id)
         })
         .or_else(|| {
             document

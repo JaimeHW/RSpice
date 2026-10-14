@@ -1278,15 +1278,11 @@ fn active_visualization_document_pane(
         .content
         .visualization_document(document_id)?;
     if let Some(pane) = state
-        .workbench
-        .visualization_studio
-        .active_pane
-        .and_then(|pane_id| {
-            document
-                .panes()
-                .iter()
-                .find(|pane| pane.id.get() == pane_id)
-        })
+        .ui
+        .results
+        .session
+        .persistent_document_pane(document_id)
+        .and_then(|pane_id| document.panes().iter().find(|pane| pane.id == pane_id))
         && let Some(page) = document.pages().iter().find(|page| page.id == pane.page_id)
     {
         return Some((document, page, pane));

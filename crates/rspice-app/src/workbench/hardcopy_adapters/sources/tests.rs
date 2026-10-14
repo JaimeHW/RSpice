@@ -2062,7 +2062,11 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
     let mut state = AppState::default();
     let project = &mut state.workspace.content;
     project.visualization_documents.push(document);
-    state.workbench.visualization_studio.active_pane = Some(second_pane.get());
+    state
+        .ui
+        .results
+        .session
+        .select_persistent_document_pane(document_id, second_pane);
 
     let (_, _, selected) = active_visualization_document_pane(&state, document_id).unwrap();
     assert_eq!(selected.id, second_pane);
