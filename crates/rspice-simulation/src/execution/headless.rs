@@ -15,7 +15,7 @@ use rspice_simulation_contract::saved_output::SavedOutput;
 use super::{
     ExecutionTargetCapabilities, HeadlessTaskRequest, PreparedRunSnapshot, PreparedTask,
     RunSourceReceipt, SavePolicy, SimulationRunIntent, SnapshotParts, TaskSourcePolicy,
-    TouchstoneExportPolicy, prepare_headless_tasks,
+    TouchstoneExportPolicy,
 };
 use crate::error::ServiceRunError;
 use crate::execution_identity::{manual_source_receipt_digest, sealed_dependency_closure_digest};
@@ -171,6 +171,10 @@ pub fn prepare_headless_run(
             "Reference temperature must be finite and above absolute zero",
         ));
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    let reads_files = matches!(input.resolver, HeadlessSourceResolver::Native { .. });
+    #[cfg(target_arch = "wasm32")]
+    let reads_files = false;
     let (origin, mut processor) = source_processor(input.origin, input.resolver)?;
     processor = processor.with_resource_limits(limits);
     let expanded = processor.expand_content_with_abort(input.source, &origin, abort)?;
@@ -246,7 +250,14 @@ pub fn prepare_headless_run(
         }
     }
 
-    let tasks = prepare_headless_tasks(input.tasks, input.source_revision, limits, abort)?;
+    let read_checkpoint = |name: &str| read_state_checkpoint(&origin, name, reads_files, limits);
+    let tasks = super::headless_tasks::prepare_headless_tasks_reading_checkpoints(
+        input.tasks,
+        input.source_revision,
+        limits,
+        &read_checkpoint,
+        abort,
+    )?;
     let tasks =
         super::task_preparation::attach_saved_output_contracts(tasks, &input.saved_outputs)?;
     super::preparation::reject_deferred_corner_model_sources(
@@ -379,6 +390,62 @@ fn captured_source_bundle(
     }
     check_abort(abort)?;
     Ok(SealedSourceBundle::try_new_with_edges(sources, edges)?)
+}
+
+/// The bytes of the checkpoint file a `CHECKPOINT=` card names: one file in
+/// the root circuit's directory, as `.OPTIONS RESTART FILE=` names one, read
+/// once here so the worker receives the state sealed with its task. A sealed
+/// source bundle carries circuit text only, so its caller seals the state
+/// with the request instead.
+fn read_state_checkpoint(
+    origin: &Path,
+    name: &str,
+    reads_files: bool,
+    limits: ResourceLimits,
+) -> Result<Vec<u8>, String> {
+    if !reads_files {
+        return Err(format!(
+            "its checkpoint file {name} is not in the sealed source bundle, which carries \
+             circuit text only; seal the state with the request"
+        ));
+    }
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['/', '\\', ':'])
+        || name.trim() != name
+    {
+        return Err(format!(
+            "its checkpoint file '{name}' is not one file name in the circuit's directory"
+        ));
+    }
+    let path = origin.parent().unwrap_or(origin).join(name);
+    let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+        format!(
+            "its checkpoint file {} cannot be read: {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        return Err(format!(
+            "its checkpoint file {} is not a regular file",
+            path.display()
+        ));
+    }
+    if metadata.len() > limits.max_external_data_bytes as u64 {
+        return Err(format!(
+            "its checkpoint file {} holds {} bytes, over the {}-byte external data limit",
+            path.display(),
+            metadata.len(),
+            limits.max_external_data_bytes
+        ));
+    }
+    std::fs::read(&path).map_err(|error| {
+        format!(
+            "its checkpoint file {} cannot be read: {error}",
+            path.display()
+        )
+    })
 }
 
 fn source_error(message: impl Into<String>) -> HeadlessPreparationError {

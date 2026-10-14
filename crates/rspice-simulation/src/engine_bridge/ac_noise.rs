@@ -139,7 +139,7 @@ impl EngineBridge {
         Self::finish_ac_run(netlist, frequencies, ac_results, abort)
     }
 
-    fn finish_ac_run(
+    pub(super) fn finish_ac_run(
         netlist: &rspice_core::Netlist,
         frequencies: Vec<f64>,
         ac_results: Vec<rspice_core::analysis::AcResult>,
@@ -258,6 +258,17 @@ impl EngineBridge {
                 )
                 .map_err(|e| self.translate_error(e))?
         };
+        Self::finish_noise_run(netlist, config, noise_results, abort)
+    }
+
+    /// Project a named, input-referred noise run onto its result, under the
+    /// request's contribution and integration policies.
+    pub(super) fn finish_noise_run(
+        netlist: &rspice_core::Netlist,
+        config: &NoiseAnalysisConfig,
+        noise_results: Vec<NoiseResult>,
+        abort: &dyn AbortSignal,
+    ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort)?;
 
         validate_noise_results(&noise_results)?;

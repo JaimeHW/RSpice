@@ -107,7 +107,15 @@ pub(super) fn run_spec_request_in_context(
         transient_checkpoint_observer,
     } = context;
     ensure_not_aborted(abort_flag)?;
+    // A small-signal card around a checkpoint's state carries the image it
+    // reads, and no schedule, as its transient checkpoint request.
+    let state_checkpoint = options.tran_checkpoint.as_ref().filter(|request| {
+        matches!(spec, AnalysisSpec::Ac { .. } | AnalysisSpec::Noise { .. })
+            && request.times.is_empty()
+            && options.mc_checkpoint.is_none()
+    });
     if options.tran_checkpoint.is_some()
+        && state_checkpoint.is_none()
         && (!matches!(spec, AnalysisSpec::Transient { .. }) || options.mc_checkpoint.is_some())
     {
         return Err(SimulationError::InvalidConfig("Transient checkpoint requires an ordinary transient request with no Monte Carlo checkpoint".into()));
@@ -152,6 +160,21 @@ pub(super) fn run_spec_request_in_context(
         .map_err(|error| SimulationError::InvalidConfig(error.to_string()))?;
 
     if let Some(config) = config::analysis_config_from_spec(&spec) {
+        if let Some(request) = state_checkpoint {
+            let checkpoint = request.resume.as_ref().ok_or_else(|| {
+                SimulationError::InvalidConfig(
+                    "A small-signal card around a checkpoint's state carries no image".into(),
+                )
+            })?;
+            return bridge.run_at_checkpoint_state(
+                &config,
+                netlist,
+                source_path,
+                environment,
+                checkpoint,
+                abort_flag,
+            );
+        }
         if let Some(request) = &options.tran_checkpoint {
             let no_publication = |_bytes: &[u8]| Ok(());
             let observer: &CheckpointObserver<'_> = match transient_checkpoint_observer {

@@ -26,6 +26,7 @@ mod parsing;
 mod pole_zero;
 mod recorded_fft;
 mod sensitivity;
+mod small_signal_state;
 mod transient;
 
 /// Bridge between UI and rspice-core engine
@@ -405,6 +406,13 @@ impl EngineBridge {
         abort_flag: &dyn AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         ensure_not_aborted(abort_flag)?;
+        // A card around a transient state runs through the engine's state
+        // entry rather than at the operating point.
+        if !netlist.small_signal_states.is_empty()
+            && let Some(result) = self.run_at_transient_state(config, netlist, abort_flag)
+        {
+            return result;
+        }
         match config {
             AnalysisConfig::DcOp(op_config) => self.run_dc_op(netlist, op_config, abort_flag),
             AnalysisConfig::DcSweep(dc_config) => self.run_dc_sweep(netlist, dc_config, abort_flag),

@@ -174,6 +174,103 @@ fn preserves_cancellation_and_graph_resource_classification() {
     ));
 }
 
+fn ac() -> HeadlessTaskRequest {
+    request(AnalysisSpec::Ac {
+        start_freq: 1.0,
+        stop_freq: 1e3,
+        points_per_unit: 10,
+        sweep: FrequencySweep::Decade,
+    })
+}
+
+/// A transient and a task whose card, `line`, names its state.
+fn state_task(mut task: HeadlessTaskRequest, line: &str) -> [HeadlessTaskRequest; 2] {
+    let mut parent = transient();
+    parent.analysis.analysis_line = ".tran 10m 1".to_owned();
+    task.analysis.analysis_line = line.to_owned();
+    task.dependencies.push(parent.instance_id);
+    [parent, task]
+}
+
+#[test]
+fn a_card_at_a_transient_state_carries_the_transient_it_names() {
+    for line in [
+        ".ac dec 10 1 1k actimes=0.5",
+        ".AC DEC 10 1 1K ACTIMES = [500m]",
+    ] {
+        let [parent, task] = state_task(ac(), line);
+        let (parent_id, id) = (parent.instance_id, task.instance_id);
+        let tasks = prepare(vec![task, parent]).unwrap();
+        assert_eq!(
+            tasks
+                .iter()
+                .map(PreparedTask::instance_id)
+                .collect::<Vec<_>>(),
+            [parent_id, id],
+            "{line}: the state runs after its transient"
+        );
+        assert_eq!(
+            tasks[1].queued_analysis().analysis_line,
+            format!(".tran 10m 1\n{line}"),
+            "{line}: the task's deck holds the transient it linearizes along"
+        );
+        assert_eq!(tasks[1].dependencies(), [parent_id]);
+    }
+    // A parameter that happens to share the name is not the keyword.
+    let mut task = ac();
+    task.analysis.analysis_line = ".ac dec 10 1 1k\n.param actimes_scale=2".to_owned();
+    assert!(prepare(vec![task]).is_ok());
+}
+
+#[test]
+fn a_card_at_a_transient_state_is_refused_rather_than_run_another_way() {
+    let disto = || {
+        request(AnalysisSpec::Disto {
+            start_freq: 1.0,
+            stop_freq: 1e3,
+            points_per_unit: 10,
+            sweep: FrequencySweep::Decade,
+            f2_over_f1: None,
+        })
+    };
+    for (graph, expected) in [
+        (
+            state_task(ac(), ".ac dec 10 1 1k actimes=0.25,0.5").to_vec(),
+            "give each time a task of its own",
+        ),
+        (
+            state_task(ac(), ".ac dec 5 1 1k actimes=0.5").to_vec(),
+            "is not the task's typed specification",
+        ),
+        (
+            state_task(ac(), ".ac dec 10 1 1k actimes=2").to_vec(),
+            "does not read with its transient's",
+        ),
+        (
+            state_task(ac(), ".ac dec 10 1 1k checkpoint=\"state.chk\"").to_vec(),
+            "CHECKPOINT=",
+        ),
+        (
+            state_task(disto(), ".disto dec 10 1 1k actimes=0.5").to_vec(),
+            "runs .AC and .NOISE cards around a state",
+        ),
+        (
+            vec![state_task(ac(), ".ac dec 10 1 1k actimes=0.5")[1].clone()]
+                .into_iter()
+                .chain([op()])
+                .collect(),
+            "references missing dependency",
+        ),
+    ] {
+        let error = prepare(graph).unwrap_err().to_string();
+        assert!(error.contains(expected), "{expected}: {error}");
+    }
+    let mut task = ac();
+    task.analysis.analysis_line = ".ac dec 10 1 1k actimes=0.5".to_owned();
+    let error = prepare(vec![task]).unwrap_err().to_string();
+    assert!(error.contains("as its one transient dependency"), "{error}");
+}
+
 #[test]
 fn rejects_invalid_specs_and_configurations_that_would_bypass_the_spec() {
     let invalid = request(AnalysisSpec::Ac {

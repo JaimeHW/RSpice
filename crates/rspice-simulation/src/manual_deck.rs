@@ -826,7 +826,7 @@ const fn resolved_transient_noise_seed(
     }
 }
 
-fn command_to_queue_item(
+pub(crate) fn command_to_queue_item(
     reference_temperature_celsius: f64,
     netlist: &Netlist,
     command: &AnalysisCommand,

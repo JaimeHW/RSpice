@@ -108,6 +108,24 @@ pub(super) fn route_resumes(
             }
             continue;
         };
+        // A small-signal card around a checkpoint's state carries the image
+        // it reads and no schedule; the engine validates the image against
+        // the task's deck when it restores it.
+        if matches!(
+            task.task.spec,
+            AnalysisSpec::Ac { .. } | AnalysisSpec::Noise { .. }
+        ) && request.times.is_empty()
+            && task.transient_resumes.is_empty()
+            && let Some(input) = &request.resume
+        {
+            routed_bytes = routed_bytes.saturating_add(input.byte_len());
+            PreparationError::check_limit(
+                rspice_core::ResourceKind::ExternalDataBytes,
+                routed_bytes,
+                limits.max_external_data_bytes,
+            )?;
+            continue;
+        }
         let AnalysisSpec::Transient { stop_time, .. } = task.task.spec else {
             return Err(invalid(
                 "Transient checkpoint requires an ordinary transient task",
