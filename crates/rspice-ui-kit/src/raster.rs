@@ -31,6 +31,10 @@
 
 use egui::{Color32, Rect, Vec2};
 
+mod measure;
+
+pub use measure::write_panel_review;
+
 /// A rasterized render, and the colour it was cleared to.
 #[derive(Clone)]
 pub struct Canvas {
@@ -290,9 +294,24 @@ fn render_at_pointer(
     theme: super::Theme,
     size: Vec2,
     pointer: Option<egui::Pos2>,
-    mut pass: impl FnMut(&mut egui::Ui, Color32),
+    pass: impl FnMut(&mut egui::Ui, Color32),
 ) -> Canvas {
+    render_with_output(theme, size, pointer, false, pass).0
+}
+
+/// [`render_at_pointer`], returning the rasterized pass's own output too, with
+/// the accessibility tree published when `accesskit` asks for it.
+fn render_with_output(
+    theme: super::Theme,
+    size: Vec2,
+    pointer: Option<egui::Pos2>,
+    accesskit: bool,
+    mut pass: impl FnMut(&mut egui::Ui, Color32),
+) -> (Canvas, egui::FullOutput) {
     let ctx = egui::Context::default();
+    if accesskit {
+        ctx.enable_accesskit();
+    }
     // egui otherwise takes the operating system from the compiling target,
     // and surfaces read it into what they paint (a shortcut keycap says
     // "Cmd K" on macOS and "Ctrl K" elsewhere). A render must come out the
@@ -356,7 +375,7 @@ fn render_at_pointer(
     for shape in &output.shapes {
         paint_text_regression_shape(&mut canvas, &shape.shape, shape.clip_rect);
     }
-    canvas
+    (canvas, output)
 }
 
 fn paint_text_regression_shape(canvas: &mut Canvas, shape: &egui::Shape, clip: Rect) {

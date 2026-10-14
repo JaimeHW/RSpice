@@ -1840,4 +1840,32 @@ mod tests {
             rspice_automation_protocol::MAX_WATCH_EXPRESSION_BYTES + 1
         )));
     }
+
+    /// The Automation inspector as PNGs, with its measured geometry beside
+    /// each, at the pane's default and minimum widths. `RSPICE_RASTER_DIR`
+    /// names the directory; the system temp directory otherwise.
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_the_automation_inspector_for_review() {
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        for width in [INTERNAL_INSPECTOR_WIDTH, INTERNAL_INSPECTOR_MIN_WIDTH] {
+            let mut app = RSpiceApp::test_instance();
+            app.state.ui.code_workspace.page =
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
+            crate::ui::raster::write_panel_review(
+                &directory,
+                &format!("automation-inspector-{width}"),
+                crate::ui::Theme::default(),
+                Vec2::new(width, 1800.0),
+                10.0,
+                |ui, _| {
+                    let panel = Tokens::get(ui.ctx()).color.bg_panel;
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE.fill(panel))
+                        .show(ui, |ui| inspector(ui, &mut app));
+                },
+            );
+        }
+    }
 }

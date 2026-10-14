@@ -1111,30 +1111,113 @@ fn the_waves_details_panel_states_ranges_status_and_method_as_rows_and_meta() {
     );
 }
 
-/// The Waves details panel as PNGs for a person to look at, at the
-/// inspector's default and minimum widths. `RSPICE_RASTER_DIR` names the
+/// A diode bound to its catalog model, selected on the Design sheet.
+fn design_component_app() -> RSpiceApp {
+    let (mut app, id) = catalog_test_diode("model=junction");
+    app.state.project_lifecycle.authority.open_session();
+    app.state.workbench.activate(Workspace::Design);
+    app.state
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_component(id);
+    app
+}
+
+/// A Verilog-A cell view open in Design whose module failed to compile, so
+/// the inspector's diagnostics section has findings to list.
+fn veriloga_inspector_app() -> RSpiceApp {
+    use crate::state::{
+        Cell, CellViewRef, Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner,
+        View, ViewType,
+    };
+    use crate::workbench::documents::code_workspace;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
+    let reference = CellViewRef::new("behavioral", "gain_cell", "veriloga");
+    let mut view = View::new("veriloga", ViewType::VerilogA);
+    view.metadata
+        .insert("veriloga.module".to_owned(), "gain_cell".to_owned());
+    view.metadata
+        .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
+    let mut cell = Cell::new("gain_cell");
+    cell.add_view(view);
+    let mut library = Library::new("behavioral");
+    library.add_cell(cell);
+    app.state.library_manager.add_library(library);
+    let source = "// Behavioral conductance.\nmodule gain_cell(p, n);\n  inout p, n;\n  \
+                  electrical p, n;\n  parameter real g = 1m;\n  analog I(p, n) <+ gain * V(p, n) \
+                  + offset;\nendmodule\n";
+    let bundle = ProjectSourceBundle::try_new(
+        ProjectSourceOwner::cell_view(reference.clone()),
+        ProjectSourceLanguage::VerilogA,
+        "models/gain_cell.va",
+        source.to_owned(),
+        [],
+        [],
+    )
+    .expect("a valid cell-view bundle");
+    app.state
+        .workspace
+        .content
+        .project_sources
+        .insert_bundle(bundle.clone())
+        .expect("one bundle per cell view");
+    app.state.open_workspace_view(reference);
+    app.state.workbench.activate(Workspace::Design);
+    let project = app.state.workspace.content.project.id();
+    let diagnostics =
+        code_workspace::compile_project_bundle_receipt(project, &bundle, Some("gain_cell"))
+            .err()
+            .expect("an undeclared identifier refuses the compile");
+    let veriloga = &mut app.state.ui.code_workspace.veriloga;
+    veriloga.last_failure = std::sync::Arc::new(
+        code_workspace::CodeDiagnosticCollection::try_new(diagnostics).expect("few findings"),
+    );
+    veriloga.last_failure_token = Some(
+        rspice_simulation::project_veriloga::VerilogASourceOperationToken::capture(
+            project,
+            &bundle,
+            Some("gain_cell"),
+        ),
+    );
+    app
+}
+
+/// The inspector's panels as PNGs, with their measured geometry beside each,
+/// at the dock's default and minimum widths. `RSPICE_RASTER_DIR` names the
 /// directory; the system temp directory otherwise.
 #[test]
 #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_waves_details_panel() {
+fn render_the_inspector_panels_for_review() {
     let directory = std::env::var("RSPICE_RASTER_DIR")
         .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let height = 1400.0;
-    for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {
-        let mut app = waves_details_app();
-        let canvas = crate::ui::raster::render(Vec2::new(width, height), |ui, _| {
-            // The dock's own fill, so the render reads the way the panel does.
-            let panel = Tokens::get(ui.ctx()).color.bg_panel;
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(panel))
-                .show(ui, |ui| show(ui, &mut app));
-        });
-        std::fs::write(
-            directory.join(format!("waves-details-{width}.png")),
-            canvas.png(height as usize),
-        )
-        .expect("write inspector render");
+    let panels: [(&str, fn() -> RSpiceApp); 3] = [
+        ("design-component", design_component_app),
+        ("veriloga-inspector", veriloga_inspector_app),
+        ("waves-details", waves_details_app),
+    ];
+    for (name, fixture) in panels {
+        for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {
+            let mut app = fixture();
+            crate::ui::raster::write_panel_review(
+                &directory,
+                &format!("{name}-{width}"),
+                crate::ui::Theme::default(),
+                Vec2::new(width, 1800.0),
+                10.0,
+                |ui, _| {
+                    // The dock's own fill, so the render reads the way the
+                    // panel does.
+                    let panel = Tokens::get(ui.ctx()).color.bg_panel;
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE.fill(panel))
+                        .show(ui, |ui| show(ui, &mut app));
+                },
+            );
+        }
     }
 }
 

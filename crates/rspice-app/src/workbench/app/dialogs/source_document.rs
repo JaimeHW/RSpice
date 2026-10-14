@@ -2285,6 +2285,40 @@ mod tests {
     }
 }
 
+/// The source-document inspector — the lifecycle body of the Automation
+/// workspace's root document — as PNGs with its measured geometry beside each,
+/// at the inspector dock's default and minimum widths. `RSPICE_RASTER_DIR`
+/// names the directory; the system temp directory otherwise.
+#[cfg(test)]
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_source_document_inspector_for_review() {
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    let messages =
+        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
+    for width in [312.0_f32, 278.0] {
+        let mut app = RSpiceApp::test_instance();
+        app.state.ui.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
+        let facts = document_facts(&app, messages).expect("the page states a document");
+        crate::ui::raster::write_panel_review(
+            &directory,
+            &format!("source-document-inspector-{width}"),
+            crate::ui::Theme::default(),
+            egui::vec2(width, 1800.0),
+            10.0,
+            |ui, _| {
+                let panel = Tokens::get(ui.ctx()).color.bg_panel;
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(panel))
+                    .show(ui, |ui| {
+                        let _ = lifecycle_body(ui, &mut app.state, &facts, messages);
+                    });
+            },
+        );
+    }
+}
+
 /// Offscreen renders of the include search chain, so the list's density can be
 /// looked at rather than only asserted about.
 ///
