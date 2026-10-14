@@ -283,10 +283,8 @@ fn at(
 #[derive(Clone)]
 struct BiasPoint {
     parameters: Vec<f64>,
-    /// One flag per declared port, all connected. That is the CFG level's own
-    /// convention — `$port_connected` folds to a constant one there, because a
-    /// device instantiated from this level always gets exactly the terminals its
-    /// descriptor declares — so a shorter vector would read as *unconnected* and
+    /// One flag per declared port, all connected, as a card that names every
+    /// terminal has them. A shorter vector would read as *unconnected* and
     /// state something the fixtures do not mean.
     port_connected: Vec<bool>,
     node_potentials: Vec<f64>,

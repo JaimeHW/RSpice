@@ -621,6 +621,176 @@ fn both_routes_keep_node_zero_for_a_module_that_reaches_a_port_single_ended() {
 }
 
 // ---------------------------------------------------------------------------
+// `$port_connected` — a card that leaves trailing terminals out
+//
+// Either route ties a terminal the card leaves out to node 0, and the `.va`
+// route reads it unconnected. The generated route folded `$port_connected` to
+// 1, so BSIM-SOI 4.7 with `tnodeout=1` and `t` left out took the 7-terminal
+// arm there, `Temp(t) <+ 0` on node 0, a singular system, where the `.va`
+// route took the `b` arm and tied `b`; and an X card that omitted a terminal
+// was refused outright.
+//
+// BSIM-SOI's generated crate is 914 KB of Rust and its `.va` compile is not a
+// debug build's work, so the rows carry their own `cfg` and run in a release
+// build that selects the model.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+const BSIMSOI47_SOURCE: &str = "models/veriloga/cmc/BSIM-SOI_4.7.0_05192025/code/bsimsoi.va";
+
+/// BSIM-SOI 4.7's source under the generated catalog's name for it.
+///
+/// The catalog calls the model `bsimsoi__18c250bc` and the source declares
+/// `bsimsoi`. Under one name, one X card takes the generated route when the
+/// deck includes nothing and the `.va` route when it includes this copy, since
+/// an authored source takes precedence over the catalog.
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+struct Bsimsoi47Source(std::path::PathBuf);
+
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+impl Bsimsoi47Source {
+    fn write(label: &str) -> Self {
+        let source = std::fs::read_to_string(model_source(BSIMSOI47_SOURCE))
+            .expect("BSIM-SOI 4.7's source is in the tree");
+        let renamed = source.replace("module bsimsoi(", "module bsimsoi__18c250bc(");
+        assert_ne!(renamed, source, "the source declares module bsimsoi");
+        let path = std::env::temp_dir().join(format!(
+            "rspice_port_connected_{label}_{}.va",
+            std::process::id()
+        ));
+        std::fs::write(&path, renamed).expect("write the renamed source");
+        Self(path)
+    }
+
+    fn runtime_deck(&self, label: &str, body: &str) -> String {
+        format!(
+            "* {label} runtime route\n.va \"{}\" bsimsoi__18c250bc\n{body}\n.end\n",
+            self.0.display().to_string().replace('\\', "/")
+        )
+    }
+}
+
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+impl Drop for Bsimsoi47Source {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The value an operating-point trace recorded for `key`.
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+fn traced(trace: &[Entry], key: &str) -> f64 {
+    trace
+        .iter()
+        .find(|entry| entry.key == key && entry.text.is_none())
+        .unwrap_or_else(|| panic!("{key} is not in the trace: {trace:?}"))
+        .value
+}
+
+/// With `tnodeout=1` and self-heating off, BSIM-SOI 4.7 puts its temperature
+/// node on the last terminal the card connects: a 6-terminal card leaves `t`
+/// out and the model ties `b` (`V(b) <+ 0`); a 7-terminal card gives `t` and
+/// the model ties it (`Temp(t) <+ 0`). The X card and the M card both take the
+/// generated route; the `.va` route takes the X card. Every route must tie the
+/// same node, exactly, and agree on the rest bit for bit.
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+#[test]
+fn bsimsoi_reads_an_omitted_thermal_terminal_unconnected_on_both_routes() {
+    let source = Bsimsoi47Source::write("omitted");
+    let supplies = "Vd d 0 0.1\nVg g 0 1.0\nVp vp 0 0.5\nRp vp p 1k\nVb vb 0 0.3\nRb vb b 1k\n\
+                    Vt vt 0 0.2\nRt vt t 1k";
+    let nodes = &["d", "g", "p", "b", "t"][..];
+    let branches = &["Vd", "Vp", "Vb", "Vt"][..];
+    for (terminals, tied, free) in [("d g 0 0 p b", "b", "t"), ("d g 0 0 p b t", "t", "b")] {
+        let label = format!("BSIM-SOI 4.7 on {terminals}");
+        let x_card = format!("{supplies}\nX1 {terminals} bsimsoi__18c250bc tnodeout=1");
+        let m_card = format!("{supplies}\nM1 {terminals} nch tnodeout=1\n.model nch bsimsoi47");
+        let runtime = operating_point_trace(&source.runtime_deck(&label, &x_card), nodes, branches);
+        assert!(!uses_generated_devices(
+            &source.runtime_deck(&label, &x_card)
+        ));
+        assert_eq!(
+            runtime[0].text.as_deref(),
+            Some("ok"),
+            "{label}: {runtime:?}"
+        );
+        assert_eq!(
+            traced(&runtime, &format!("op.v({tied})")).to_bits(),
+            0.0f64.to_bits(),
+            "{label}: the .va route ties {tied} to node 0"
+        );
+        assert_ne!(
+            traced(&runtime, &format!("op.v({free})")),
+            0.0,
+            "{label}: the .va route leaves {free} untied"
+        );
+        for (card, body) in [("M", &m_card), ("X", &x_card)] {
+            let deck = format!("* {label} generated {card} card\n{body}\n.end\n");
+            assert!(uses_generated_devices(&deck), "{label}: the {card} card");
+            let generated = operating_point_trace(&deck, nodes, branches);
+            assert_eq!(
+                generated[0].text.as_deref(),
+                Some("ok"),
+                "{label} {card} card: {generated:?}"
+            );
+            let bits = |trace: &[Entry]| {
+                trace
+                    .iter()
+                    .map(|entry| (entry.key.clone(), entry.text.clone(), entry.value.to_bits()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                bits(&generated),
+                bits(&runtime),
+                "{label}: the generated {card} card against the .va route\n\
+                 generated {generated:?}\nruntime {runtime:?}"
+            );
+        }
+    }
+}
+
+/// With `p`, `b` and `t` left out, `soimod=2` ties neither `p` nor `b`, and
+/// nothing else in the module reaches a connected port single-ended: a deck
+/// that names no node 0 takes its reference. The generated route read all
+/// three connected, tied `b` and `t` (each node 0 itself) and kept node 0 for
+/// those ties alone.
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+#[test]
+fn bsimsoi_takes_the_same_reference_on_both_routes_when_its_body_terminals_are_omitted() {
+    let source = Bsimsoi47Source::write("census");
+    let reference = |deck: &str| {
+        let netlist = Netlist::parse_validated(deck).unwrap_or_else(|err| panic!("{err}\n{deck}"));
+        Engine::default()
+            .build_circuit(&netlist)
+            .unwrap_or_else(|err| panic!("{err}\n{deck}"))
+            .get_node_by_name("ref")
+    };
+    let supplies = "Vd d ref 0.1\nVg g ref 1.0";
+    let x_card = format!("{supplies}\nX1 d g ref ref bsimsoi__18c250bc soimod=2");
+    let runtime = reference(&source.runtime_deck("census", &x_card));
+    assert_eq!(
+        runtime,
+        Some(0),
+        "the .va route connects nothing to node 0, so the deck takes `ref`"
+    );
+    for (card, body) in [
+        (
+            "M",
+            format!("{supplies}\nM1 d g ref ref nch soimod=2\n.model nch bsimsoi47"),
+        ),
+        ("X", x_card.clone()),
+    ] {
+        let deck = format!("* census generated {card} card\n{body}\n.end\n");
+        assert!(uses_generated_devices(&deck), "the {card} card");
+        assert_eq!(
+            reference(&deck),
+            runtime,
+            "the generated {card} card must take the reference the .va route takes"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // JUNCAP200 — junction charge storage, a second two-terminal generated family.
 //
 // Its generated crate is 289 KB of Rust. The feature is not in this lane's

@@ -340,6 +340,9 @@ pub(super) fn generate_state_file_with_extensions(
     ));
     out.push_str("    pub(crate) multiplicity: f64,\n");
     out.push_str(&format!(
+        "    pub(crate) port_connected: [bool; {terminal_count}],\n"
+    ));
+    out.push_str(&format!(
         "    pub(crate) stamp_state: Box<StampState<{ddt_state_count}, {idt_state_count}>>,\n"
     ));
     if idtmod_state_count > 0 {
@@ -377,6 +380,7 @@ pub(super) fn generate_state_file_with_extensions(
     out.push_str("            param_given: self.param_given.clone(),\n");
     out.push_str("            model_param_given: self.model_param_given.clone(),\n");
     out.push_str("            multiplicity: self.multiplicity,\n");
+    out.push_str("            port_connected: self.port_connected,\n");
     out.push_str("            stamp_state: self.stamp_state.clone(),\n");
     if idtmod_state_count > 0 {
         out.push_str("            idtmod_state: self.idtmod_state.clone(),\n");
@@ -500,6 +504,7 @@ pub(super) fn generate_state_file_with_extensions(
         "            model_param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),\n",
     );
     out.push_str("            multiplicity: 1.0,\n");
+    out.push_str("            port_connected: [true; Self::TERMINAL_COUNT],\n");
     out.push_str("            stamp_state: StampState::new_box(),\n");
     if idtmod_state_count > 0 {
         writeln!(out, "            idtmod_state: vec![GeneratedIdtModState::default(); {idtmod_state_count}].into_boxed_slice().try_into().expect(\"generated idtmod state shape\"),").unwrap();
@@ -1146,6 +1151,40 @@ pub(super) fn generate_state_file_with_extensions(
         "            Err(format!(\"instance multiplicity 'm' must be finite and > 0.0, got {}\", multiplicity))\n",
     );
     out.push_str("        }\n");
+    out.push_str("    }\n\n");
+    // `$port_connected` reads these flags. A card may leave trailing
+    // terminals out; the instance still has every terminal, the omitted ones
+    // on node 0, and reads them unconnected, as the `.va` route does.
+    out.push_str(
+        "    /// Mark the first `connected` external terminals as the ones the card connects.\n",
+    );
+    out.push_str(
+        "    pub fn set_connected_terminals(&mut self, connected: usize) -> Result<(), String> {\n",
+    );
+    out.push_str("        if connected > Self::TERMINAL_COUNT {\n");
+    out.push_str(
+        "            return Err(format!(\"a card connects {} terminals, but the module declares {}\", connected, Self::TERMINAL_COUNT));\n",
+    );
+    out.push_str("        }\n");
+    out.push_str("        let mut flags = [false; Self::TERMINAL_COUNT];\n");
+    out.push_str("        for (index, flag) in flags.iter_mut().enumerate() {\n");
+    out.push_str("            *flag = index < connected;\n");
+    out.push_str("        }\n");
+    out.push_str("        if flags != self.port_connected {\n");
+    out.push_str("            self.port_connected = flags;\n");
+    for line in extensions.set_multiplicity_hook.lines() {
+        if !line.trim().is_empty() {
+            out.push_str("            ");
+            out.push_str(line.trim_end());
+            out.push('\n');
+        }
+    }
+    out.push_str("        }\n");
+    out.push_str("        Ok(())\n");
+    out.push_str("    }\n\n");
+    out.push_str("    /// Whether the card connects external terminal `terminal`.\n");
+    out.push_str("    pub fn port_connected(&self, terminal: usize) -> Option<bool> {\n");
+    out.push_str("        self.port_connected.get(terminal).copied()\n");
     out.push_str("    }\n\n");
     out.push_str("    #[inline]\n");
     out.push_str(

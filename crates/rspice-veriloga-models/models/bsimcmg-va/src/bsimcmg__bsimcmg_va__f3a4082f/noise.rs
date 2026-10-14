@@ -25,10 +25,11 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 1098];
+		let mut prepared = [0.0; 1099];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),
@@ -38,6 +39,7 @@ impl Instance {
 		let produced = canonical_instance_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),
@@ -48,6 +50,7 @@ impl Instance {
 		let produced = canonical_temperature_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),
@@ -83,18 +86,18 @@ impl Instance {
 		let V=event_state[20];
 		let W=event_state[21];
 		let X=1f64;
-		let Y=staged[712]!=0.0;
+		let Y=staged[713]!=0.0;
 		let Z=4f64;
 		let AA=2f64;
 		let AB=1e-6f64;
 		let AC=parameters[0];
 		let AD=parameters[5];
-		let AI=staged[713]!=0.0;
-		let AM=staged[715]!=0.0;
+		let AI=staged[714]!=0.0;
+		let AM=staged[716]!=0.0;
 		let AN=staged[26]!=0.0;
 		let AO=staged[609]!=0.0;
 		let AP=parameters[43];
-		let AW=staged[718]!=0.0;
+		let AW=staged[719]!=0.0;
 		let AX=staged[405];
 		let BI=1e-38f64;
 		let BJ=parameters[3];
@@ -148,45 +151,45 @@ impl Instance {
 		let DF=staged[152];
 		let DG=staged[85];
 		let DK=staged[25]!=0.0;
-		let DL=staged[748]!=0.0;
-		let DM=staged[760];
-		let DN=staged[762];
-		let DO=staged[758];
-		let DP=staged[764];
-		let DQ=staged[759];
-		let DR=staged[761];
-		let DS=staged[765];
-		let DT=staged[763];
-		let DU=staged[766];
-		let DV=staged[752];
-		let DW=staged[753];
+		let DL=staged[749]!=0.0;
+		let DM=staged[761];
+		let DN=staged[763];
+		let DO=staged[759];
+		let DP=staged[765];
+		let DQ=staged[760];
+		let DR=staged[762];
+		let DS=staged[766];
+		let DT=staged[764];
+		let DU=staged[767];
+		let DV=staged[753];
+		let DW=staged[754];
 		let DX=staged[452];
-		let DY=staged[768]!=0.0;
+		let DY=staged[769]!=0.0;
 		let DZ=staged[668]!=0.0;
 		let EA=staged[189];
 		let EB=staged[136];
 		let EC=staged[448];
-		let ED=staged[1026]!=0.0;
-		let EE=staged[793]!=0.0;
+		let ED=staged[1027]!=0.0;
+		let EE=staged[794]!=0.0;
 		let EF=0.05f64;
 		let EG=0.01f64;
-		let EI=staged[800]!=0.0;
-		let EJ=staged[801]!=0.0;
+		let EI=staged[801]!=0.0;
+		let EJ=staged[802]!=0.0;
 		let EK=parameters[1682];
-		let EL=staged[802]!=0.0;
+		let EL=staged[803]!=0.0;
 		let EM=1.2f64;
 		let EN=staged[422];
 		let EO=staged[421];
 		let EP=staged[423];
 		let EQ=staged[425];
-		let ER=staged[841]!=0.0;
-		let ES=staged[843]!=0.0;
+		let ER=staged[842]!=0.0;
+		let ES=staged[844]!=0.0;
 		let ET=1e-3f64;
-		let EU=staged[853]!=0.0;
-		let EW=staged[864]!=0.0;
+		let EU=staged[854]!=0.0;
+		let EW=staged[865]!=0.0;
 		let EX=parameters[97];
 		let EY=1e-4f64;
-		let EZ=staged[883]!=0.0;
+		let EZ=staged[884]!=0.0;
 		let FA=0.5f64;
 		let FB=1e-7f64;
 		let FC=staged[469];
@@ -196,24 +199,24 @@ impl Instance {
 		let FG=300.15f64;
 		let FH=0.25f64;
 		let FI=6f64;
-		let FK=staged[968];
+		let FK=staged[969];
 		let FM=staged[71];
 		let FQ=8.617087e-5f64;
 		let FS=parameters[1786];
-		let FT=staged[969]!=0.0;
+		let FT=staged[970]!=0.0;
 		let FX=staged[73];
-		let GB=staged[970]!=0.0;
+		let GB=staged[971]!=0.0;
 		let GC=staged[75];
 		let GD=staged[76];
-		let GE=staged[972]!=0.0;
+		let GE=staged[973]!=0.0;
 		let GL=210f64;
-		let GQ=staged[974]!=0.0;
+		let GQ=staged[975]!=0.0;
 		let GV=staged[79];
 		let GW=staged[80];
-		let GX=staged[975]!=0.0;
+		let GX=staged[976]!=0.0;
 		let HM=parameters[1718];
 		let HU=parameters[105];
-		let IB=staged[971]!=0.0;
+		let IB=staged[972]!=0.0;
 		let IC=parameters[107];
 		let IL=-87.498233534f64;
 		let IV=staged[89];
@@ -221,7 +224,7 @@ impl Instance {
 		let JB=3.493821377127659e-68f64;
 		let JJ=-87.498233534f64;
 		let JO=staged[93];
-		let JW=staged[976]!=0.0;
+		let JW=staged[977]!=0.0;
 		let JX=staged[96];
 		let JY=staged[95];
 		let KB=staged[97];
@@ -235,7 +238,7 @@ impl Instance {
 		let KW=staged[109];
 		let KX=staged[108];
 		let LA=staged[111];
-		let LJ=staged[978]!=0.0;
+		let LJ=staged[979]!=0.0;
 		let LK=staged[116];
 		let LL=staged[114];
 		let LM=staged[113];
@@ -246,7 +249,7 @@ impl Instance {
 		let MB=staged[118];
 		let MF=staged[122];
 		let MO=1e3f64;
-		let MR=staged[757];
+		let MR=staged[758];
 		let NG=staged[126];
 		let NH=staged[124];
 		let NI=staged[123];
@@ -261,14 +264,14 @@ impl Instance {
 		let PC=staged[139];
 		let PD=parameters[452];
 		let PL=staged[140];
-		let PN=staged[977]!=0.0;
-		let PX=staged[979]!=0.0;
-		let RB=staged[981]!=0.0;
+		let PN=staged[978]!=0.0;
+		let PX=staged[980]!=0.0;
+		let RB=staged[982]!=0.0;
 		let RC=staged[149];
-		let RW=staged[982]!=0.0;
-		let RY=staged[983]!=0.0;
-		let SB=staged[984]!=0.0;
-		let SK=staged[985]!=0.0;
+		let RW=staged[983]!=0.0;
+		let RY=staged[984]!=0.0;
+		let SB=staged[985]!=0.0;
+		let SK=staged[986]!=0.0;
 		let TB=staged[165];
 		let TC=staged[164];
 		let TD=parameters[561];
@@ -294,17 +297,17 @@ impl Instance {
 		let XR=parameters[1747];
 		let XS=parameters[1748];
 		let XT=parameters[1749];
-		let YJ=staged[980]!=0.0;
-		let YS=staged[986]!=0.0;
+		let YJ=staged[981]!=0.0;
+		let YS=staged[987]!=0.0;
 		let YT=staged[196];
 		let YY=staged[200];
 		let ZP=staged[206];
 		let ZU=staged[210];
-		let AAR=staged[991]!=0.0;
+		let AAR=staged[992]!=0.0;
 		let AAV=staged[214];
-		let AAX=staged[992]!=0.0;
+		let AAX=staged[993]!=0.0;
 		let ABB=staged[215];
-		let ABH=staged[993]!=0.0;
+		let ABH=staged[994]!=0.0;
 		let ABI=staged[216];
 		let ABO=staged[219];
 		let ABP=staged[218];
@@ -317,29 +320,29 @@ impl Instance {
 		let ACT=staged[233];
 		let AFX=staged[240];
 		let AGC=staged[241];
-		let AGP=staged[994]!=0.0;
-		let AGR=staged[997]!=0.0;
+		let AGP=staged[995]!=0.0;
+		let AGR=staged[998]!=0.0;
 		let AGU=staged[247];
-		let AGV=staged[998]!=0.0;
-		let AHI=staged[999]!=0.0;
-		let AHL=staged[1000]!=0.0;
-		let AIC=staged[1001]!=0.0;
-		let AIT=staged[1002]!=0.0;
-		let AJC=staged[1003]!=0.0;
+		let AGV=staged[999]!=0.0;
+		let AHI=staged[1000]!=0.0;
+		let AHL=staged[1001]!=0.0;
+		let AIC=staged[1002]!=0.0;
+		let AIT=staged[1003]!=0.0;
+		let AJC=staged[1004]!=0.0;
 		let AJZ=staged[266];
-		let AKY=staged[1004]!=0.0;
-		let AKZ=staged[1006]!=0.0;
+		let AKY=staged[1005]!=0.0;
+		let AKZ=staged[1007]!=0.0;
 		let ALA=staged[271];
 		let ALB=staged[269];
 		let ALC=staged[268];
 		let AMA=staged[275];
 		let AMB=staged[273];
 		let AMC=staged[272];
-		let AMQ=staged[1005]!=0.0;
+		let AMQ=staged[1006]!=0.0;
 		let AMR=staged[278];
 		let AMS=staged[276];
 		let AMT=parameters[164];
-		let ANF=staged[767];
+		let ANF=staged[768];
 		let ANH=parameters[165];
 		let ANQ=staged[281];
 		let ANR=staged[279];
@@ -366,8 +369,8 @@ impl Instance {
 		let AQW=staged[345];
 		let AQZ=staged[349];
 		let ARC=staged[353];
-		let ARH=staged[1007]!=0.0;
-		let ARI=staged[1008]!=0.0;
+		let ARH=staged[1008]!=0.0;
+		let ARI=staged[1009]!=0.0;
 		let ARM=-87.498233534f64;
 		let ARW=-87.498233534f64;
 		let ASC=staged[394];
@@ -377,7 +380,7 @@ impl Instance {
 		let ATO=parameters[1106];
 		let ATW=-87.498233534f64;
 		let AUF=-87.498233534f64;
-		let AUS=staged[1015]!=0.0;
+		let AUS=staged[1016]!=0.0;
 		let AUT=0.333333333f64;
 		let AUV=node_potentials[11];
 		let AUW=node_potentials[6];
@@ -394,7 +397,7 @@ impl Instance {
 		let AZX=staged[437];
 		let AZY=staged[436];
 		let BAB=parameters[175];
-		let BAC=staged[1023]!=0.0;
+		let BAC=staged[1024]!=0.0;
 		let BAS=-87.498233534f64;
 		let BAZ=-87.498233534f64;
 		let BBD=staged[443];
@@ -461,28 +464,28 @@ impl Instance {
 		let BYW=-87.498233534f64;
 		let BZR=6.25e-4f64;
 		let BZT=parameters[603];
-		let BZU=staged[1024]!=0.0;
+		let BZU=staged[1025]!=0.0;
 		let CAB=-87.498233534f64;
 		let CAV=-87.498233534f64;
-		let CCM=staged[1025]!=0.0;
+		let CCM=staged[1026]!=0.0;
 		let CDW=parameters[887];
 		let CDX=staged[503];
 		let CEN=staged[504];
-		let CEV=staged[1029]!=0.0;
+		let CEV=staged[1030]!=0.0;
 		let CEX=staged[505];
 		let CFA=staged[506];
-		let CFC=staged[1030]!=0.0;
+		let CFC=staged[1031]!=0.0;
 		let CGK=-87.498233534f64;
 		let CGW=-87.498233534f64;
 		let CGX=staged[509];
 		let CHB=staged[511];
 		let CHC=staged[512];
 		let CHG=-87.498233534f64;
-		let CIG=staged[1032]!=0.0;
+		let CIG=staged[1033]!=0.0;
 		let CIZ=staged[517];
-		let CJE=staged[1033]!=0.0;
+		let CJE=staged[1034]!=0.0;
 		let CJI=-87.498233534f64;
-		let CJZ=staged[1034]!=0.0;
+		let CJZ=staged[1035]!=0.0;
 		let CKU=parameters[25];
 		let CLH=staged[572];
 		let CLP=staged[574];
@@ -490,7 +493,7 @@ impl Instance {
 		let CLW=staged[579];
 		let CMK=staged[581];
 		let CMP=staged[587];
-		let CNA=staged[1042]!=0.0;
+		let CNA=staged[1043]!=0.0;
 		let CNH=staged[595];
 		let CNL=parameters[1104];
 		let CNY=parameters[1105];
@@ -6236,6 +6239,7 @@ impl Instance {
 		let thermal_voltage = ctx.thermal_voltage();
 		let multiplicity = self.multiplicity;
 		let time = self.time;
+		let port_connected = &self.port_connected;
 		let event_state = &*self.event_state_accepted;
 		let node_potentials: [f64; 30] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22]), ctx.node_voltage(self.nodes[23]), ctx.node_voltage(self.nodes[24]), ctx.node_voltage(self.nodes[25]), ctx.node_voltage(self.nodes[26]), ctx.node_voltage(self.nodes[27]), ctx.node_voltage(self.nodes[28]), ctx.node_voltage(self.nodes[29])];
 		let branch_flows: [f64; 0] = [];

@@ -74,6 +74,14 @@ struct GeneratedCardRoute<'a> {
     model_def: Option<&'a ModelDef>,
 }
 
+/// The nodes a generated instance is built on, and how many of its leading
+/// terminals the card wrote: those the card connects, as `$port_connected`
+/// answers. The rest are node 0.
+struct CardTerminals<'a> {
+    nodes: &'a [String],
+    authored: usize,
+}
+
 impl GeneratedCardRoute<'_> {
     fn build(
         self,
@@ -87,7 +95,10 @@ impl GeneratedCardRoute<'_> {
             netlist,
             element,
             self.target,
-            &self.nodes,
+            CardTerminals {
+                nodes: &self.nodes,
+                authored: self.authored,
+            },
             self.model_def,
             context,
         )?;
@@ -668,7 +679,7 @@ fn add_generated_instance(
     netlist: &Netlist,
     element: &Element,
     target: GeneratedTarget,
-    nodes: &[String],
+    terminals: CardTerminals<'_>,
     model_def: Option<&ModelDef>,
     context: GeneratedRoutingContext<'_>,
 ) -> Result<(), SimulationError> {
@@ -712,11 +723,12 @@ fn add_generated_instance(
     let Some(mut device) = instantiate_builtin_scoped(
         target.model_name,
         &element.name,
-        nodes,
+        terminals.nodes,
         &params,
         &netlist.params,
         circuit,
         target.optional_internal_nodes,
+        terminals.authored,
     )?
     else {
         return Ok(());
@@ -1871,6 +1883,7 @@ mod card_keyword_tests {
             &netlist.params,
             &mut circuit,
             &[],
+            nodes.len(),
         )
         .expect_err("ekv_va declares no NRD")
         .to_string();

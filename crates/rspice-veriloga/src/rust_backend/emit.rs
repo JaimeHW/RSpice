@@ -91,6 +91,9 @@ pub(super) fn compact_generated_indentation(source: &str) -> String {
 pub struct EmitBindings {
     pub parameters: String,
     pub parameter_given: String,
+    /// One flag per external terminal: whether the instance's card connects
+    /// it, as `$port_connected` answers.
+    pub port_connected: String,
     pub event_state: String,
     pub node_potentials: String,
     pub branch_flows: String,
@@ -151,6 +154,7 @@ impl Default for EmitBindings {
         Self {
             parameters: "parameters".into(),
             parameter_given: "parameter_given".into(),
+            port_connected: "port_connected".into(),
             event_state: "event_state".into(),
             node_potentials: "node_potentials".into(),
             branch_flows: "branch_flows".into(),
@@ -1859,10 +1863,14 @@ impl Emitter<'_> {
                     format!("{given} as u8 as f64")
                 }
             }
-            // Ordinary generated-device CFG lowering retains its historical
-            // constant-connected contract; this leaf is emitted only by the
-            // runtime grouped-noise metadata entrypoint.
-            CfgValueKind::PortConnected(_) => "true".into(),
+            CfgValueKind::PortConnected(port) => {
+                let connected = format!("{}[{port}]", bindings.port_connected);
+                if self.function.value(value).value_type == CfgValueType::Boolean {
+                    connected
+                } else {
+                    format!("{connected} as u8 as f64")
+                }
+            }
             CfgValueKind::EventState(slot) | CfgValueKind::EvaluationInput(slot) => {
                 format!("{}[{slot}]", bindings.event_state)
             }

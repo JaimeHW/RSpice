@@ -1287,7 +1287,7 @@ impl<const DDT: usize, const IDT: usize> StampState<DDT, IDT> {
 	}
 }
 
-pub(crate) type CanonicalModelValues = [f64; 253];
+pub(crate) type CanonicalModelValues = [f64; 248];
 pub struct Instance {
 	pub nodes: [usize; 28],
 	pub branches: [usize; 0],
@@ -1296,6 +1296,7 @@ pub struct Instance {
 	pub(crate) param_given: Box<[bool; 1138]>,
 	model_param_given: Box<[bool; 1138]>,
 	pub(crate) multiplicity: f64,
+	pub(crate) port_connected: [bool; 5],
 	pub(crate) stamp_state: Box<StampState<16, 0>>,
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
@@ -1304,7 +1305,7 @@ pub struct Instance {
 	pub(crate) event_state_candidate: Box<[f64; 14]>,
 	pub(crate) canonical_reactive: Box<[f64; 147]>,
 	pub(crate) canonical_model_values: Option<std::sync::Arc<CanonicalModelValues>>,
-	pub(crate) canonical_staged: Box<[f64; 868]>,
+	pub(crate) canonical_staged: Box<[f64; 869]>,
 	pub(crate) canonical_instance_valid: bool,
 	pub(crate) canonical_temperature_valid: bool,
 	pub(crate) canonical_temperature: f64,
@@ -1322,6 +1323,7 @@ impl Clone for Instance {
 			param_given: self.param_given.clone(),
 			model_param_given: self.model_param_given.clone(),
 			multiplicity: self.multiplicity,
+			port_connected: self.port_connected,
 			stamp_state: self.stamp_state.clone(),
 			time: self.time,
 			timestep: self.timestep,
@@ -2525,6 +2527,7 @@ impl Instance {
 			param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
 			model_param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
 			multiplicity: 1.0,
+			port_connected: [true; Self::TERMINAL_COUNT],
 			stamp_state: StampState::new_box(),
 			time: 0.0,
 			timestep: 0.0,
@@ -4396,6 +4399,28 @@ impl Instance {
 		} else {
 			Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))
 		}
+	}
+
+	/// Mark the first `connected` external terminals as the ones the card connects.
+	pub fn set_connected_terminals(&mut self, connected: usize) -> Result<(), String> {
+		if connected > Self::TERMINAL_COUNT {
+			return Err(format!("a card connects {} terminals, but the module declares {}", connected, Self::TERMINAL_COUNT));
+		}
+		let mut flags = [false; Self::TERMINAL_COUNT];
+		for (index, flag) in flags.iter_mut().enumerate() {
+			*flag = index < connected;
+		}
+		if flags != self.port_connected {
+			self.port_connected = flags;
+			self.canonical_instance_valid = false;
+			self.canonical_temperature_valid = false;
+		}
+		Ok(())
+	}
+
+	/// Whether the card connects external terminal `terminal`.
+	pub fn port_connected(&self, terminal: usize) -> Option<bool> {
+		self.port_connected.get(terminal).copied()
 	}
 
 	#[inline]

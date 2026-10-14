@@ -1700,8 +1700,7 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
     plan.noise_exponents = noise_exponents;
     plan.validate_shape(model)
         .map_err(|error| refuse(CfgPlanRefusal::EquationsUnpaired, error.to_string()))?;
-    plan.one_step_dae_split_safe =
-        crate::canonical_ir::charge::one_step_dae_split_safe(artifact, true);
+    plan.one_step_dae_split_safe = crate::canonical_ir::charge::one_step_dae_split_safe(artifact);
     Ok(CfgModelPlan {
         plan,
         #[cfg(all(test, feature = "native"))]
@@ -1734,11 +1733,9 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
 /// `hypot` and `atan2`, including nested derivatives. Their binary-operator
 /// matches are exhaustive so a new operation cannot silently get zero tangents.
 ///
-/// * `$port_connected` folded to `1.0` because the generated backend builds
-///   every instance it evaluates. It is a runtime leaf for a backend that
-///   cannot promise that —
-///   [`CfgModel::from_hir_for_executable_backend`](crate::canonical_ir::CfgModel::from_hir_for_executable_backend)
-///   is where the two consumers part company. `$simparam` reads the shared
+/// * `$port_connected` folded to `1.0`. It is now a runtime leaf on every
+///   backend, the generated one included, and a card that omits a trailing
+///   terminal reads 0 for it on either route. `$simparam` reads the shared
 ///   simulator environment; explicit fallbacks follow runtime availability.
 /// * A **prologue-only definition** — a localparam or a declaration initializer
 ///   the body reads — took Verilog-AMS zero because the CFG had no definition of

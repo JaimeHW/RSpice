@@ -383,6 +383,44 @@ for (mode,gain) in [(0.0,3.0),(1.0,0.5),(2.0,1.0/7.0),(0.0,3.0)] {
     .unwrap_or_else(|report| panic!("{report}"));
 }
 
+/// `$port_connected` is the instance's own flag on the generated route too.
+///
+/// It used to fold to `1.0` there, so a card that left `opt` out took the
+/// connected arm on the generated route and the other one on the `.va` route.
+/// The flag is an instance-stage input, so changing it must also discard the
+/// staged conductance.
+#[test]
+fn generated_port_connected_reads_the_cards_terminals() {
+    let (state, stamp, noise) = generated_parts(
+        "module optional_port(p, n, opt); inout p, n, opt; electrical p, n, opt;
+         analog I(p, n) <+ ($port_connected(opt) ? 10.0 : 1.0) * V(p, n); endmodule",
+        "port connected",
+    );
+    run_generated_main(
+        "port connected",
+        &state,
+        &stamp,
+        &noise,
+        r#"
+let mut instance=device::state::Instance::new(&[0,1,2]);
+instance.finalize_parameters().unwrap();
+let bias=[1.0,0.0,0.0];
+let ctx=runtime::GeneratedEvalContext{voltages:&bias,temperature:300.15};
+for (connected,conductance) in [(3,10.0),(2,1.0),(0,1.0),(3,10.0)] {
+    instance.set_connected_terminals(connected).unwrap();
+    assert_eq!(instance.port_connected(2),Some(connected==3));
+    let mut sink=[0.0;32];
+    instance.stamp(&ctx,&mut runtime::GeneratedStamper{sink:Some(&mut sink)});
+    assert_eq!(sink[12],conductance,"{connected} connected terminals: {sink:?}");
+    assert!(!ctx.evaluation_failed());
+}
+assert!(instance.set_connected_terminals(4).is_err());
+assert_eq!(instance.port_connected(3),None);
+"#,
+    )
+    .unwrap_or_else(|report| panic!("{report}"));
+}
+
 #[test]
 fn generated_switch_discontinuities_follow_acceptance_and_rollback() {
     let (state, stamp, noise) = generated_parts(

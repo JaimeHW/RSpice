@@ -494,8 +494,8 @@ impl ExprEmitter<'_> {
             HirExprKind::SystemFunction { name, args }
                 if name.eq_ignore_ascii_case("$port_connected") =>
             {
-                self.expect_system_arity("$port_connected", args.as_slice(), 1)?;
-                Some("true".to_string())
+                let index = self.port_connected_index(args.as_slice())?;
+                Some(format!("self.port_connected[{index}]"))
             }
             HirExprKind::Call { name, args } if is_analysis_name(name.as_str()) => {
                 Some(self.analysis_condition(args.as_slice())?)
@@ -607,8 +607,8 @@ impl ExprEmitter<'_> {
                 format!("if self.param_given[{index}] {{ 1.0 }} else {{ 0.0 }}")
             }
             "$port_connected" => {
-                self.expect_system_arity(&normalized, args, 1)?;
-                "1.0".to_string()
+                let index = self.port_connected_index(args)?;
+                format!("if self.port_connected[{index}] {{ 1.0 }} else {{ 0.0 }}")
             }
             _ => return Err(self.unsupported(format!("system function '{name}'"))),
         };
@@ -722,6 +722,32 @@ impl ExprEmitter<'_> {
                         .any(|alias| alias.as_str().eq_ignore_ascii_case(name.as_str()))
             })
             .ok_or_else(|| self.unsupported(format!("unknown $param_given parameter '{name}'")))
+    }
+
+    /// The port `$port_connected` asks about, by its index in the module's
+    /// port list, which is where the instance keeps its flag.
+    fn port_connected_index(&self, args: &[ExprId]) -> Result<usize, RustBackendError> {
+        self.expect_system_arity("$port_connected", args, 1)?;
+        let expression = self
+            .artifact
+            .mir
+            .expressions
+            .get(usize::from(args[0]))
+            .ok_or_else(|| {
+                self.internal(format!(
+                    "port_connected argument {} is outside MIR arena",
+                    args[0]
+                ))
+            })?;
+        let HirExprKind::Identifier { name } = &expression.kind else {
+            return Err(self.unsupported("$port_connected port argument"));
+        };
+        self.artifact
+            .hir
+            .ports
+            .iter()
+            .position(|port| port.name == *name)
+            .ok_or_else(|| self.unsupported(format!("$port_connected of a non-port '{name}'")))
     }
 
     fn expect_system_arity(

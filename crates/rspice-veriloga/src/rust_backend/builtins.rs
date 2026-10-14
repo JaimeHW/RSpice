@@ -3041,6 +3041,50 @@ fn write_registry(
         out.push_str("        }\n");
     }
     out.push_str("    }\n\n");
+    out.push_str(
+        "    /// Mark the first `connected` external terminals as the ones the card\n    /// connects, as `$port_connected` answers; the rest sit on node 0.\n",
+    );
+    out.push_str(
+        "    pub fn set_connected_terminals(&mut self, connected: usize) -> Result<(), String> {\n",
+    );
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, connected);\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no terminals\")\n",
+        );
+    } else {
+        out.push_str("        let _ = &connected;\n");
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.set_connected_terminals(connected),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
+    out.push_str("    /// Whether the card connects external terminal `terminal`.\n");
+    out.push_str("    pub fn port_connected(&self, terminal: usize) -> Option<bool> {\n");
+    if devices.is_empty() {
+        out.push_str("        let _ = (self, terminal);\n");
+        out.push_str(
+            "        unreachable!(\"empty generated Verilog-A registry has no terminals\")\n",
+        );
+    } else {
+        out.push_str("        let _ = &terminal;\n");
+        out.push_str("        match self {\n");
+        for (index, feature) in feature_names.iter().enumerate() {
+            writeln!(
+                out,
+                "            #[cfg(feature = {feature:?})]\n            Self::Device{index}(device) => device.port_connected(terminal),"
+            )?;
+        }
+        out.push_str("            Self::__NonExhaustive(value) => match *value {},\n");
+        out.push_str("        }\n");
+    }
+    out.push_str("    }\n\n");
     out.push_str("    pub fn accepted_state_shape_identity(&self) -> super::GeneratedVerilogAAcceptedStateShapeIdentity {\n");
     if devices.is_empty() {
         out.push_str("        let _ = self;\n");

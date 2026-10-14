@@ -553,13 +553,8 @@ fn push_value(function: &mut CfgFunction, value_type: CfgValueType, kind: CfgVal
 /// Prove that replacing each contributed derivative by its weighted charge
 /// difference cannot change control, effects, state inputs or public readbacks.
 /// Failure selects the ordinary companion formulation; it does not refuse the model.
-pub(crate) fn one_step_dae_split_safe(
-    artifact: &super::CanonicalIrArtifact,
-    per_instance_ports: bool,
-) -> bool {
-    let Ok(mut cfg) =
-        super::CfgModel::from_hir_for_dae_proof(&artifact.hir, &artifact.mir, per_instance_ports)
-    else {
+pub(crate) fn one_step_dae_split_safe(artifact: &super::CanonicalIrArtifact) -> bool {
+    let Ok(mut cfg) = super::CfgModel::from_hir_for_dae_proof(&artifact.hir, &artifact.mir) else {
         return false;
     };
     let reaches = values_reaching_a_ddt(&cfg.function);
@@ -739,13 +734,7 @@ mod tests {
             let artifact = VerilogACompiler::default()
                 .compile_canonical_ir(&source)
                 .unwrap();
-            for runtime in [false, true] {
-                assert_eq!(
-                    one_step_dae_split_safe(&artifact, runtime),
-                    safe,
-                    "runtime={runtime}, source={body}"
-                );
-            }
+            assert_eq!(one_step_dae_split_safe(&artifact), safe, "source={body}");
         }
     }
 }

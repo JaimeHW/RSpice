@@ -3279,7 +3279,7 @@ impl VerilogADevice {
             not(all(feature = "wasm-jit", target_arch = "wasm32"))
         ))]
         let one_step_dae_split_safe = canonical_artifact.is_some_and(|artifact| {
-            crate::canonical_ir::charge::one_step_dae_split_safe(artifact, true)
+            crate::canonical_ir::charge::one_step_dae_split_safe(artifact)
         });
 
         let num_branch_unknowns = model.branch_sources.len();

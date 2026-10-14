@@ -38,6 +38,7 @@ impl Instance {
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),
@@ -48,6 +49,7 @@ impl Instance {
 		let produced = canonical_temperature_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),

@@ -54,10 +54,10 @@ impl Instance {
 		let E=173.14999999999998f64;
 		let H=1300f64;
 		let J=173.14999999999998f64;
-		let M=1f64;
-		let P=8.6170869e-5f64;
-		let T=parameters[22];
-		let U=parameters[21];
+		let O=8.6170869e-5f64;
+		let S=parameters[22];
+		let T=parameters[21];
+		let U=1f64;
 		let X=parameters[23];
 		let Y=parameters[0];
 		let AB=parameters[2];
@@ -171,29 +171,29 @@ impl Instance {
 		L=K;
 		MJ=MK;
 		}
-		let N=parameters[43]* parameters[42];
-		let O=parameters[25]+ 273.15f64;
-		let Q=P* L;
-		let OJ=MJ* P;
-		let R=L/ O;
-		let OK=MJ/ O;
-		let S=R.ln();
-		let OL=OK* (MG/ R);
-		let V=R- M;
-		let W=(U* V)/ Q;
-		let Z=((T* S)+ W).exp();
+		let M=parameters[43]* parameters[42];
+		let N=parameters[25]+ 273.15f64;
+		let P=O* L;
+		let OJ=MJ* O;
+		let Q=L/ N;
+		let OK=MJ/ N;
+		let R=Q.ln();
+		let OL=OK* (MG/ Q);
+		let V=Q- U;
+		let W=(T* V)/ P;
+		let Z=((S* R)+ W).exp();
 		let AA=Y* Z;
-		let OM=(((OL* T)+ (product_sum_div((OK* U),MG,OJ,(-W),Q)))* Z)* Y;
-		let AC=(X* S).exp();
+		let OM=(((OL* S)+ (product_sum_div((OK* T),MG,OJ,(-W),P)))* Z)* Y;
+		let AC=(X* R).exp();
 		let AD=AB* AC;
 		let ON=((OL* X)* AC)* AB;
-		let AG=AE* (M+ (AF* V));
+		let AG=AE* (U+ (AF* V));
 		let OO=(OK* AF)* AE;
-		let AJ=AH* (M+ (AI* V));
+		let AJ=AH* (U+ (AI* V));
 		let OP=(OK* AI)* AH;
-		let AM=AK* (M+ (AL* V));
+		let AM=AK* (U+ (AL* V));
 		let OQ=(OK* AL)* AK;
-		let AO=O/ AN;
+		let AO=N/ AN;
 		let AP=L/ AN;
 		let OR=MJ/ AN;
 		let AQ=7.02e-4f64* L;
@@ -201,7 +201,7 @@ impl Instance {
 		let AS=(AQ* L)/ AR;
 		let AU=AT* (L+ L);
 		let AV=(-(1.16f64- AS))/ AU;
-		let AW=-(Q+ Q);
+		let AW=-(P+ P);
 		let AY=(1.5f64* (AP.ln()))+ (AX* (AV+ 134544423989414690000f64));
 		let OT=((OR* (MG/ AP))* 1.5f64)+ ((product_sum_div((((product_sum_div((((MJ* 7.02e-4f64)* L)+ (MJ* AQ)),MG,MJ,(-AS),AR))* OS)* OS),MG,((MJ+ MJ)* AT),(-AV),AU))* AX);
 		let AZ=AW* AY;
@@ -209,12 +209,12 @@ impl Instance {
 		let BB=(BA- AZ)/ AO;
 		let OV=(OU* OS)/ AO;
 		let BC=(BA- BB)/ BB;
-		let BF=M+ (BD* ((BE* (O- AN))- BC));
+		let BF=U+ (BD* ((BE* (N- AN))- BC));
 		let BG=parameters[16]/ BF;
 		let BH=(AP* BB)+ AZ;
 		let OW=((OR* BB)+ (OV* AP))+ OU;
 		let BI=(BH- BB)/ BB;
-		let BJ=M+ (BD* ((BE* (L- AN))- BI));
+		let BJ=U+ (BD* ((BE* (L- AN))- BI));
 		let BK=BG* BJ;
 		let OX=((product_div((((product_sum_div((OV* OS),MG,OV,(-BC),BB))* OS)* BD),(-BG),BF))* BJ)+ ((((MJ* BE)- (product_sum_div((OW- OV),MG,OV,(-BI),BB)))* BD)* BG);
 		let BO=BM- BN;
@@ -233,11 +233,11 @@ impl Instance {
 		let DY;
 		let ML;
 		if BW{
-		let BY=BX* Q;
+		let BY=BX* P;
 		let BZ=BP/ BY;
 		let PF=(L3([0.0,OZ[0],OZ[1]])).product_sum_div(MG,L3([(OJ* BX),0.0,0.0]),(-BZ),BY);
 		let PG=OZ* OS;
-		let CB=CA* Q;
+		let CB=CA* P;
 		let PH=OJ* CA;
 		let CC=((-BP)- AJ)/ CB;
 		let PI=((L3([0.0,PG[0],PG[1]])- L3([OP,0.0,0.0]))).product_sum_div(MG,L3([PH,0.0,0.0]),(-CC),CB);
@@ -249,13 +249,13 @@ impl Instance {
 		let MM;
 		let MN;
 		if CF{
-		let CG=M+ (BZ- CE);
+		let CG=U+ (BZ- CE);
 		CH=CG;
 		CI=CE;
 		MM=PF;
 		MN=PE;
 		}else{
-		CH=M;
+		CH=U;
 		CI=BZ;
 		MM=PE;
 		MN=PF;
@@ -280,7 +280,7 @@ impl Instance {
 		MP=PM;
 		}else{
 		let CO=CC.exp();
-		let CP=CO+ M;
+		let CP=CO+ U;
 		let CQ=CP.ln();
 		let PL=(PI* CO)* (MG/ CP);
 		CY=CQ;
@@ -306,7 +306,7 @@ impl Instance {
 		MR=PO;
 		}else{
 		let CU=CD.exp();
-		let CV=CU+ M;
+		let CV=CU+ U;
 		let CW=CV.ln();
 		let PN=(PJ* CU)* (MG/ CV);
 		DA=CW;
@@ -316,11 +316,11 @@ impl Instance {
 		MQ=MR;
 		}
 		let DB=CX- CZ;
-		let DC=CK- M;
+		let DC=CK- U;
 		let DE=BP.abs();
 		let DF=DE.powf(AM);
 		let PS=(OZ* ((PQ* ((BP>= PP) as u8 as f64))- MG))* (AM* ((DE+ (((DE== PP) as u8 as f64)* PR)).powf((AM- MG))));
-		let DG=M+ (DD* DF);
+		let DG=U+ (DD* DF);
 		let DH=(AG* DB)/ DG;
 		let PT=((L3([(OO* DB),0.0,0.0])+ ((MO- L3([MQ,0.0,0.0]))* AG))).product_sum_div(MG,((L3([0.0,PS[0],PS[1]])+ L3([(OQ* (DF* (((if !(DE).is_nan()&&(DE>=PR||(PR).is_nan()){DE}else{PR}).ln())* ((DE> PP) as u8 as f64)))),0.0,0.0]))* DD),(-DH),DG);
 		let DI=(AA* DC)- DH;
@@ -338,7 +338,7 @@ impl Instance {
 		let DL=DK- BP;
 		let DM=if !(DL).is_nan()&&(DL>=1e-3f64||(1e-3f64).is_nan()){DL}else{1e-3f64};
 		let PV=(OZ* -1f64)* DK;
-		let DO=DN* Q;
+		let DO=DN* P;
 		let DP=DO* DM;
 		let PW=(if (DM== DL){(OZ* OS)}else{L2([0f64;2])})* DO;
 		let DQ=((-1f64* BP)* DK)/ DP;
@@ -349,19 +349,19 @@ impl Instance {
 		let MT;
 		let MU;
 		if DR{
-		let DS=M+ (DQ- CE);
+		let DS=U+ (DQ- CE);
 		DT=DS;
 		DU=CE;
 		MT=PX;
 		MU=PE;
 		}else{
-		DT=M;
+		DT=U;
 		DU=DQ;
 		MT=PE;
 		MU=PX;
 		}
 		let DV=DU.exp();
-		let DW=(DT* DV)- M;
+		let DW=(DT* DV)- U;
 		let DX=AD* DW;
 		let PY=L3([(ON* DW),0.0,0.0])+ (((MT* DV)+ ((MU* DV)* DT))* AD);
 		DZ=DX;
@@ -374,27 +374,27 @@ impl Instance {
 		let PZ=ML- MS;
 		let EC=BS/ EB;
 		let ED=EC.abs();
-		let EF=M+ (ED.powf(EE));
+		let EF=U+ (ED.powf(EE));
 		let EH=BV/ EG;
 		let EI=EH.abs();
-		let EK=M+ (EI.powf(EJ));
-		let EN=(S* EM).exp();
+		let EK=U+ (EI.powf(EJ));
+		let EN=(R* EM).exp();
 		let EO=EL* EN;
-		let EP=M/ EE;
+		let EP=U/ EE;
 		let EQ=EF.powf(EP);
 		let QA=(((PB/ EB)* ((PQ* ((EC>= PP) as u8 as f64))- MG))* (EE* ((ED+ (((ED== PP) as u8 as f64)* PR)).powf((EE- MG)))))* (EP* ((EF+ (((EF== PP) as u8 as f64)* PR)).powf((EP- MG))));
 		let ER=EO* EQ;
 		let QB=QA* EO;
 		let QC=L3([0.0,((((OL* EM)* EN)* EL)* EQ),0.0])+ L3([QB[0],0.0,QB[1]]);
-		let EU=(S* ET).exp();
+		let EU=(R* ET).exp();
 		let EV=ES* EU;
-		let EW=M/ EJ;
+		let EW=U/ EJ;
 		let EX=EK.powf(EW);
 		let QD=(((PD/ EG)* ((PQ* ((EH>= PP) as u8 as f64))- MG))* (EJ* ((EI+ (((EI== PP) as u8 as f64)* PR)).powf((EJ- MG)))))* (EW* ((EK+ (((EK== PP) as u8 as f64)* PR)).powf((EW- MG))));
 		let EY=EV* EX;
 		let QE=QD* EV;
 		let QF=L3([0.0,((((OL* ET)* EU)* ES)* EX),0.0])+ L3([QE[0],0.0,QE[1]]);
-		let FA=EZ== M;
+		let FA=EZ== U;
 		let FX;
 		let JC;
 		let MV;
@@ -416,16 +416,16 @@ impl Instance {
 		let QG=L2([1f64,0.0])- L2([0.0,1f64]);
 		let FH=FF/ FG;
 		let FI=FH.abs();
-		let FK=M+ (FI.powf(FJ));
-		let FL=M/ FJ;
+		let FK=U+ (FI.powf(FJ));
+		let FL=U/ FJ;
 		let QH=(((QG/ FG)* ((PQ* ((FH>= PP) as u8 as f64))- MG))* (FJ* ((FI+ (((FI== PP) as u8 as f64)* PR)).powf((FJ- MG)))))* (FL* ((FK+ (((FK== PP) as u8 as f64)* PR)).powf((FL- MG))));
-		let FO=FM* (M+ (FN* ((FK.powf(FL))- M)));
+		let FO=FM* (U+ (FN* ((FK.powf(FL))- U)));
 		let QI=(QH* FN)* FM;
 		let FP=FO* DY;
 		let QJ=QI* DY;
 		let QK=ML* FO;
 		let QL=L5([QJ[0],QJ[1],0.0,0.0,0.0])+ L5([0.0,0.0,QK[0],QK[1],QK[2]]);
-		let FQ=parameters[32]== M;
+		let FQ=parameters[32]== U;
 		let IQ;
 		let LF;
 		let LG;
@@ -454,7 +454,7 @@ impl Instance {
 		let QW=MI* LU;
 		let FW=A+ (FO* FV);
 		let FZ=(FT.abs())/ FY;
-		let GB=M+ (FZ.powf(GA));
+		let GB=U+ (FZ.powf(GA));
 		let GC=FX/ GB;
 		let QX=(L4([MV[0],MV[1],MV[2],0.0])).product_sum_div(MG,L4([0.0,0.0,0.0,(((MI* ((PQ* ((FT>= PP) as u8 as f64))- MG))/ FY)* (GA* ((FZ+ (((FZ== PP) as u8 as f64)* PR)).powf((GA- MG)))))]),(-GC),GB);
 		IQ=GC;
@@ -476,7 +476,7 @@ impl Instance {
 		LG=A;
 		LH=A;
 		LI=GD;
-		LT=M;
+		LT=U;
 		LW=A;
 		MX=QM;
 		MY=QN;
@@ -493,10 +493,10 @@ impl Instance {
 		let NC;
 		let ND;
 		if GG{
-		let GH=M- GE;
+		let GH=U- GE;
 		let GI=((-1f64- BD)* (GH.ln())).exp();
-		let GJ=M- ((GI* GH)* GH);
-		let GK=M- BD;
+		let GJ=U- ((GI* GH)* GH);
+		let GK=U- BD;
 		let GL=(BH* GJ)/ GK;
 		let GM=0.5f64* BD;
 		let GN=(GM* GF)/ BH;
@@ -509,11 +509,11 @@ impl Instance {
 		NC=RC;
 		ND=RB;
 		}else{
-		let GQ=M- BD;
+		let GQ=U- BD;
 		let GR=BP/ BH;
-		let GS=M- GR;
+		let GS=U- GR;
 		let GT=(GQ* (GS.ln())).exp();
-		let GU=M- GT;
+		let GU=U- GT;
 		let GV=(BH* GU)/ GQ;
 		let RA=(L3([(OW* GU),0.0,0.0])+ ((((((((QY).product_sum_div(MG,L3([OW,0.0,0.0]),(-GR),BH))* OS)* (MG/ GS))* GQ)* GT)* OS)* BH))/ GQ;
 		GW=GV;
@@ -525,7 +525,7 @@ impl Instance {
 		let GZ=BK* GY;
 		let RD=L3([(OX* GY),0.0,0.0])+ ((NC+ ND)* BK);
 		let HC=HB> A;
-		let HD=(HA== M)&& HC;
+		let HD=(HA== U)&& HC;
 		let KM;
 		let KR;
 		let KX;
@@ -565,7 +565,7 @@ impl Instance {
 		let HK=A+ HJ;
 		KM=A;
 		KR=A;
-		KX=M;
+		KX=U;
 		LB=HL;
 		LJ=HF;
 		LK=HG;
@@ -675,7 +675,7 @@ impl Instance {
 		LS=IE;
 		NX=RG;
 		}else{
-		KO=M;
+		KO=U;
 		KT=IG;
 		LD=IH;
 		LS=A;
@@ -683,7 +683,7 @@ impl Instance {
 		}
 		KN=KO;
 		KS=KT;
-		KY=M;
+		KY=U;
 		LC=LD;
 		LN=A;
 		LP=A;
@@ -732,15 +732,15 @@ impl Instance {
 		};
 		let SC=OY* IK;
 		let IL=A+ (IK* BO);
-		let IM=(EL+ (EZ* FB))/ N;
-		let IN=(ES+ (EZ* FD))/ N;
+		let IM=(EL+ (EZ* FB))/ M;
+		let IN=(ES+ (EZ* FD))/ M;
 		let IP=(IM> A)&& (IM>= IO);
 		let KA;
 		let KC;
 		let NY;
 		if IP{
-		let IR=IQ/ N;
-		let SE=MX/ N;
+		let IR=IQ/ M;
+		let SE=MX/ M;
 		let IS=IR> IO;
 		let IT;
 		let NZ;
@@ -768,7 +768,7 @@ impl Instance {
 		KC=IZ;
 		NY=OA;
 		}else{
-		KA=M;
+		KA=U;
 		KC=JA;
 		NY=SD;
 		}
@@ -777,8 +777,8 @@ impl Instance {
 		let KI;
 		let OB;
 		if JB{
-		let JD=JC/ N;
-		let SH=MW/ N;
+		let JD=JC/ M;
+		let SH=MW/ M;
 		let JE=JD> IO;
 		let JF;
 		let OC;
@@ -806,19 +806,19 @@ impl Instance {
 		KI=JL;
 		OB=OD;
 		}else{
-		KG=M;
+		KG=U;
 		KI=JM;
 		OB=SG;
 		}
-		let SJ=(PZ* BL)* N;
-		let JN=A+ ((BL* EA)* N);
-		let JO=(BL* GZ)* N;
-		let SK=(RD* BL)* N;
+		let SJ=(PZ* BL)* M;
+		let JN=A+ ((BL* EA)* M);
+		let JO=(BL* GZ)* M;
+		let SK=(RD* BL)* M;
 		let JP=ddt(4, JO);
 		let SL=L3(std::array::from_fn(|i| ddt_derivative(4,JP,(SK)[i])));
 		let JQ=A+ JP;
-		let JR=(BL* FP)* N;
-		let SM=(QL* BL)* N;
+		let JR=(BL* FP)* M;
+		let SM=(QL* BL)* M;
 		let JS=ddt(5, JR);
 		let SN=L5(std::array::from_fn(|i| ddt_derivative(5,JS,(SM)[i])));
 		let JT=A+ JS;

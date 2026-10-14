@@ -5,13 +5,14 @@ use super::state::{CanonicalModelValues, Instance, PARAMETER_MODEL_FLAGS};
 use rspice_veriloga_runtime::{GeneratedEvalContext, GeneratedReactiveStamper, GeneratedStamper, install_generated_stage_values, L2, L3, L4, L5, L6, L7, integer, arithmetic::product_div, arithmetic::product_sum_div, arithmetic::sum_products_div, arithmetic::sum_products_div_lanes, evaluate_generated_above, evaluate_generated_cross, evaluate_generated_timer, rspice_eval_ddt, rspice_eval_idt, rspice_limexp, rspice_limited_exp, rspice_limited_exp_derivative, GeneratedDdtCandidateError, evaluate_generated_ddt_derivative};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
-pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 118] = [252, 253, 107, 254, 0, 1, 2, 3, 237, 263, 103, 7, 122, 264, 265, 4, 266, 5, 267, 6, 276, 278, 280, 64, 8, 284, 226, 125, 235, 62, 127, 286, 289, 292, 290, 291, 10, 9, 11, 12, 13, 14, 302, 298, 299, 17, 19, 22, 68, 63, 67, 301, 157, 83, 82, 86, 87, 101, 104, 112, 109, 108, 111, 110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 128, 131, 303, 141, 150, 151, 152, 153, 154, 304, 155, 156, 305, 160, 161, 162, 165, 173, 176, 310, 182, 183, 185, 314, 198, 204, 315, 210, 316, 317, 318, 319, 321, 322, 328, 329, 323, 324, 325, 327, 330, 331, 332, 333, 243];
-pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 215] = [144, 255, 148, 256, 166, 257, 258, 171, 21, 300, 23, 16, 100, 98, 99, 259, 260, 76, 261, 262, 79, 89, 39, 94, 93, 66, 65, 90, 44, 43, 48, 45, 50, 49, 51, 26, 24, 28, 30, 32, 132, 34, 54, 56, 58, 60, 170, 72, 73, 167, 55, 196, 195, 197, 193, 194, 202, 201, 203, 200, 208, 207, 209, 206, 212, 227, 234, 59, 230, 233, 228, 57, 223, 224, 231, 225, 232, 215, 214, 216, 220, 219, 221, 147, 146, 145, 27, 158, 129, 134, 133, 159, 137, 136, 135, 169, 52, 163, 164, 36, 37, 38, 95, 96, 268, 269, 270, 271, 272, 273, 274, 275, 277, 279, 281, 282, 283, 91, 42, 149, 142, 285, 287, 288, 293, 294, 295, 61, 296, 15, 18, 20, 25, 29, 31, 33, 35, 40, 41, 46, 47, 53, 69, 70, 71, 74, 75, 77, 78, 80, 81, 84, 85, 88, 92, 97, 102, 124, 106, 105, 123, 126, 130, 138, 139, 140, 174, 177, 143, 306, 307, 308, 168, 309, 172, 175, 178, 311, 179, 180, 181, 184, 186, 187, 188, 189, 190, 192, 191, 199, 205, 211, 213, 217, 218, 222, 229, 236, 320, 239, 238, 312, 313, 240, 241, 242, 326, 244, 245, 246, 247, 248, 249, 250, 251];
-pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 1] = [297];
+pub(super) const CANONICAL_MODEL_STAGE_SLOTS: [u32; 118] = [253, 254, 107, 255, 0, 1, 2, 3, 237, 264, 103, 7, 122, 265, 266, 4, 267, 5, 268, 6, 277, 279, 281, 64, 8, 285, 226, 125, 235, 62, 127, 287, 290, 293, 291, 292, 10, 9, 11, 12, 13, 14, 303, 299, 300, 17, 19, 22, 68, 63, 67, 302, 157, 83, 82, 86, 87, 101, 104, 112, 109, 108, 111, 110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 128, 131, 304, 141, 150, 151, 152, 153, 154, 305, 155, 156, 306, 160, 161, 162, 165, 173, 176, 311, 182, 183, 185, 315, 198, 204, 316, 210, 317, 318, 319, 320, 322, 323, 329, 330, 324, 325, 326, 328, 331, 332, 333, 334, 243];
+pub(super) const CANONICAL_INSTANCE_STAGE_SLOTS: [u32; 216] = [252, 144, 256, 148, 257, 166, 258, 259, 171, 21, 301, 23, 16, 100, 98, 99, 260, 261, 76, 262, 263, 79, 89, 39, 94, 93, 66, 65, 90, 44, 43, 48, 45, 50, 49, 51, 26, 24, 28, 30, 32, 132, 34, 54, 56, 58, 60, 170, 72, 73, 167, 55, 196, 195, 197, 193, 194, 202, 201, 203, 200, 208, 207, 209, 206, 212, 227, 234, 59, 230, 233, 228, 57, 223, 224, 231, 225, 232, 215, 214, 216, 220, 219, 221, 147, 146, 145, 27, 158, 129, 134, 133, 159, 137, 136, 135, 169, 52, 163, 164, 36, 37, 38, 95, 96, 269, 270, 271, 272, 273, 274, 275, 276, 278, 280, 282, 283, 284, 91, 42, 149, 142, 286, 288, 289, 294, 295, 296, 61, 297, 15, 18, 20, 25, 29, 31, 33, 35, 40, 41, 46, 47, 53, 69, 70, 71, 74, 75, 77, 78, 80, 81, 84, 85, 88, 92, 97, 102, 124, 106, 105, 123, 126, 130, 138, 139, 140, 174, 177, 143, 307, 308, 309, 168, 310, 172, 175, 178, 312, 179, 180, 181, 184, 186, 187, 188, 189, 190, 192, 191, 199, 205, 211, 213, 217, 218, 222, 229, 236, 321, 239, 238, 313, 314, 240, 241, 242, 327, 244, 245, 246, 247, 248, 249, 250, 251];
+pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 1] = [298];
 
 pub(super) fn canonical_model_preprocess(
     parameters: &[f64],
     parameter_given: &[bool],
+    port_connected: &[bool],
     multiplicity: f64,
     staged: &[f64],
     temperature: f64,
@@ -328,636 +329,640 @@ pub(super) fn canonical_model_preprocess(
 pub(super) fn canonical_instance_preprocess(
     parameters: &[f64],
     parameter_given: &[bool],
+    port_connected: &[bool],
     multiplicity: f64,
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
     ctx: &GeneratedEvalContext<'_>,
-) -> [f64; 215] {
-	let A=staged[254]!=0.0;
-	let B=parameters[1];
-	let C=parameters[2];
-	let O=2f64;
-	let Q=0f64;
-	let Z=1e-6f64;
-	let AT=1f64;
-	let FU=staged[263]!=0.0;
-	let GA=staged[265]!=0.0;
-	let GL=staged[266]!=0.0;
-	let GV=staged[267]!=0.0;
-	let HO=0.03f64;
-	let IO=staged[7];
-	let IP=staged[8];
-	let IS=0.5f64;
-	let IV=staged[284]!=0.0;
-	let JC=staged[286]!=0.0;
-	let JK=1e-3f64;
-	let KA=staged[11];
-	let KC=parameters[315];
-	let KH=1e3f64;
-	let KJ=staged[298]!=0.0;
-	let KK=staged[299]!=0.0;
-	let KL=1f64;
-	let LA=staged[301]!=0.0;
-	let LQ=staged[103];
-	let LV=staged[303]!=0.0;
-	let LW=staged[141];
-	let MF=staged[310]!=0.0;
-	let MN=staged[22];
-	let MX=staged[314]!=0.0;
-	let NA=staged[315]!=0.0;
-	let ND=staged[86];
-	let NG=staged[316]!=0.0;
-	let mut oAU=false;
-	let mut oBF=false;
-	let mut oJS=false;
+) -> [f64; 216] {
+	let A=port_connected[4] as u8 as f64;
+	let B=1f64;
+	let D=staged[255]!=0.0;
+	let E=parameters[1];
+	let F=parameters[2];
+	let R=2f64;
+	let T=0f64;
+	let AC=1e-6f64;
+	let FW=staged[264]!=0.0;
+	let GC=staged[266]!=0.0;
+	let GN=staged[267]!=0.0;
+	let GX=staged[268]!=0.0;
+	let HQ=0.03f64;
+	let IQ=staged[7];
+	let IR=staged[8];
+	let IU=0.5f64;
+	let IX=staged[285]!=0.0;
+	let JE=staged[287]!=0.0;
+	let JM=1e-3f64;
+	let KC=staged[11];
+	let KE=parameters[315];
+	let KJ=1e3f64;
+	let KL=staged[299]!=0.0;
+	let KM=staged[300]!=0.0;
+	let KN=1f64;
+	let LC=staged[302]!=0.0;
+	let LS=staged[103];
+	let LX=staged[304]!=0.0;
+	let LY=staged[141];
+	let MH=staged[311]!=0.0;
+	let MP=staged[22];
+	let MZ=staged[315]!=0.0;
+	let NC=staged[316]!=0.0;
+	let NF=staged[86];
+	let NI=staged[317]!=0.0;
+	let mut oAW=false;
+	let mut oBH=false;
 	let mut oJU=false;
 	let mut oJW=false;
-	let mut oKQ=0.0;
-	let mut oKR=0.0;
-	let mut oLB=0.0;
-	let mut oLC=0.0;
-	let mut oLH=0.0;
-	let mut oLI=0.0;
-	let mut oLX=0.0;
-	let mut oMC=false;
-	let mut oME=0.0;
-	let mut oMH=0.0;
-	let mut oMI=0.0;
+	let mut oJY=false;
+	let mut oKS=0.0;
+	let mut oKT=0.0;
+	let mut oLD=0.0;
+	let mut oLE=0.0;
+	let mut oLJ=0.0;
+	let mut oLK=0.0;
+	let mut oLZ=0.0;
+	let mut oME=false;
+	let mut oMG=0.0;
 	let mut oMJ=0.0;
-	let mut oMZ=0.0;
+	let mut oMK=0.0;
+	let mut oML=0.0;
 	let mut oNB=0.0;
-	let mut oNC=0.0;
+	let mut oND=0.0;
 	let mut oNE=0.0;
-	let mut oNF=0.0;
+	let mut oNG=0.0;
 	let mut oNH=0.0;
-	let mut oNI=false;
-	let mut oNJ=false;
-	let mut oNM=0.0;
-	let E=if A{
-	let D=B/ C;
-	D
+	let mut oNJ=0.0;
+	let mut oNK=false;
+	let mut oNL=false;
+	let mut oNO=0.0;
+	let C=A== B;
+	let H=if D{
+	let G=E/ F;
+	G
 	}else{
-	B
+	E
 	};
-	let F=parameters[0]+ parameters[23];
-	let G=E+ parameters[24];
-	let H=F.powf(staged[0]);
-	let I=G.powf(staged[1]);
-	let J=H* I;
-	let K=F.powf(staged[2]);
-	let L=G.powf(staged[3]);
+	let I=parameters[0]+ parameters[23];
+	let J=H+ parameters[24];
+	let K=I.powf(staged[0]);
+	let L=J.powf(staged[1]);
 	let M=K* L;
-	let N=((parameters[31]+ (parameters[32]* K))+ (parameters[33]* L))+ (parameters[34]* M);
-	let P=F- (O* (((parameters[25]+ (parameters[26]* H))+ (parameters[27]* I))+ (parameters[28]* J)));
-	let R=P<= Q;
-	let S=G- (O* N);
-	let T=S<= Q;
-	let U=((parameters[41]+ (parameters[42]* K))+ (parameters[43]* L))+ (parameters[44]* M);
-	let V=F- (O* (((parameters[37]+ (parameters[38]* H))+ (parameters[39]* I))+ (parameters[40]* J)));
-	let W=V<= Q;
-	let X=G- (O* U);
-	let Y=X<= Q;
-	let AA=Z/ P;
-	let AB=Z/ S;
-	let AC=AA* AB;
-	let AD=((parameters[191]+ (parameters[319]* AA))+ (parameters[320]* AB))+ (parameters[321]* AC);
-	let AE=((parameters[199]+ (parameters[325]* AA))+ (parameters[326]* AB))+ (parameters[327]* AC);
-	let AF=((parameters[195]+ (parameters[322]* AA))+ (parameters[323]* AB))+ (parameters[324]* AC);
-	let AG=((parameters[202]+ (parameters[328]* AA))+ (parameters[329]* AB))+ (parameters[330]* AC);
-	let AH=((parameters[203]+ (parameters[331]* AA))+ (parameters[332]* AB))+ (parameters[333]* AC);
-	let AI=((parameters[204]+ (parameters[334]* AA))+ (parameters[335]* AB))+ (parameters[336]* AC);
-	let AJ=((parameters[57]+ (parameters[337]* AA))+ (parameters[338]* AB))+ (parameters[339]* AC);
-	let AK=((parameters[58]+ (parameters[340]* AA))+ (parameters[341]* AB))+ (parameters[342]* AC);
-	let AL=((parameters[51]+ (parameters[343]* AA))+ (parameters[344]* AB))+ (parameters[345]* AC);
-	let AM=((parameters[50]+ (parameters[346]* AA))+ (parameters[347]* AB))+ (parameters[348]* AC);
-	let AN=((parameters[63]+ (parameters[349]* AA))+ (parameters[350]* AB))+ (parameters[351]* AC);
-	let AO=((parameters[64]+ (parameters[352]* AA))+ (parameters[353]* AB))+ (parameters[354]* AC);
-	let AP=((parameters[65]+ (parameters[355]* AA))+ (parameters[356]* AB))+ (parameters[357]* AC);
-	let AQ=((parameters[68]+ (parameters[358]* AA))+ (parameters[359]* AB))+ (parameters[360]* AC);
-	let AR=((parameters[276]+ (parameters[361]* AA))+ (parameters[362]* AB))+ (parameters[363]* AC);
-	let AS=AR< Q;
-	let AV;
-	if AS{
-	AV=Q;
+	let N=I.powf(staged[2]);
+	let O=J.powf(staged[3]);
+	let P=N* O;
+	let Q=((parameters[31]+ (parameters[32]* N))+ (parameters[33]* O))+ (parameters[34]* P);
+	let S=I- (R* (((parameters[25]+ (parameters[26]* K))+ (parameters[27]* L))+ (parameters[28]* M)));
+	let U=S<= T;
+	let V=J- (R* Q);
+	let W=V<= T;
+	let X=((parameters[41]+ (parameters[42]* N))+ (parameters[43]* O))+ (parameters[44]* P);
+	let Y=I- (R* (((parameters[37]+ (parameters[38]* K))+ (parameters[39]* L))+ (parameters[40]* M)));
+	let Z=Y<= T;
+	let AA=J- (R* X);
+	let AB=AA<= T;
+	let AD=AC/ S;
+	let AE=AC/ V;
+	let AF=AD* AE;
+	let AG=((parameters[191]+ (parameters[319]* AD))+ (parameters[320]* AE))+ (parameters[321]* AF);
+	let AH=((parameters[199]+ (parameters[325]* AD))+ (parameters[326]* AE))+ (parameters[327]* AF);
+	let AI=((parameters[195]+ (parameters[322]* AD))+ (parameters[323]* AE))+ (parameters[324]* AF);
+	let AJ=((parameters[202]+ (parameters[328]* AD))+ (parameters[329]* AE))+ (parameters[330]* AF);
+	let AK=((parameters[203]+ (parameters[331]* AD))+ (parameters[332]* AE))+ (parameters[333]* AF);
+	let AL=((parameters[204]+ (parameters[334]* AD))+ (parameters[335]* AE))+ (parameters[336]* AF);
+	let AM=((parameters[57]+ (parameters[337]* AD))+ (parameters[338]* AE))+ (parameters[339]* AF);
+	let AN=((parameters[58]+ (parameters[340]* AD))+ (parameters[341]* AE))+ (parameters[342]* AF);
+	let AO=((parameters[51]+ (parameters[343]* AD))+ (parameters[344]* AE))+ (parameters[345]* AF);
+	let AP=((parameters[50]+ (parameters[346]* AD))+ (parameters[347]* AE))+ (parameters[348]* AF);
+	let AQ=((parameters[63]+ (parameters[349]* AD))+ (parameters[350]* AE))+ (parameters[351]* AF);
+	let AR=((parameters[64]+ (parameters[352]* AD))+ (parameters[353]* AE))+ (parameters[354]* AF);
+	let AS=((parameters[65]+ (parameters[355]* AD))+ (parameters[356]* AE))+ (parameters[357]* AF);
+	let AT=((parameters[68]+ (parameters[358]* AD))+ (parameters[359]* AE))+ (parameters[360]* AF);
+	let AU=((parameters[276]+ (parameters[361]* AD))+ (parameters[362]* AE))+ (parameters[363]* AF);
+	let AV=AU< T;
+	let AX;
+	if AV{
+	AX=T;
 	}else{
-	let AU=AR> AT;
-	oAU=AU;
-	let BE=if AU{
-	AT
+	let AW=AU> B;
+	oAW=AW;
+	let BG=if AW{
+	B
 	}else{
-	AR
+	AU
 	};
-	AV=BE;
+	AX=BG;
 	}
-	let AW=((parameters[277]+ (parameters[364]* AA))+ (parameters[365]* AB))+ (parameters[366]* AC);
-	let AX=((parameters[278]+ (parameters[367]* AA))+ (parameters[368]* AB))+ (parameters[369]* AC);
-	let AY=((parameters[275]+ (parameters[370]* AA))+ (parameters[371]* AB))+ (parameters[372]* AC);
-	let AZ=((parameters[272]+ (parameters[373]* AA))+ (parameters[374]* AB))+ (parameters[375]* AC);
-	let BA=((parameters[273]+ (parameters[376]* AA))+ (parameters[377]* AB))+ (parameters[378]* AC);
-	let BB=((parameters[274]+ (parameters[379]* AA))+ (parameters[380]* AB))+ (parameters[381]* AC);
-	let BC=((parameters[283]+ (parameters[382]* AA))+ (parameters[383]* AB))+ (parameters[384]* AC);
-	let BD=BC< Q;
-	let BG;
-	if BD{
-	BG=Q;
+	let AY=((parameters[277]+ (parameters[364]* AD))+ (parameters[365]* AE))+ (parameters[366]* AF);
+	let AZ=((parameters[278]+ (parameters[367]* AD))+ (parameters[368]* AE))+ (parameters[369]* AF);
+	let BA=((parameters[275]+ (parameters[370]* AD))+ (parameters[371]* AE))+ (parameters[372]* AF);
+	let BB=((parameters[272]+ (parameters[373]* AD))+ (parameters[374]* AE))+ (parameters[375]* AF);
+	let BC=((parameters[273]+ (parameters[376]* AD))+ (parameters[377]* AE))+ (parameters[378]* AF);
+	let BD=((parameters[274]+ (parameters[379]* AD))+ (parameters[380]* AE))+ (parameters[381]* AF);
+	let BE=((parameters[283]+ (parameters[382]* AD))+ (parameters[383]* AE))+ (parameters[384]* AF);
+	let BF=BE< T;
+	let BI;
+	if BF{
+	BI=T;
 	}else{
-	let BF=BC> AT;
-	oBF=BF;
-	let FV=if BF{
-	AT
+	let BH=BE> B;
+	oBH=BH;
+	let FX=if BH{
+	B
 	}else{
-	BC
+	BE
 	};
-	BG=FV;
+	BI=FX;
 	}
-	let BH=((parameters[284]+ (parameters[385]* AA))+ (parameters[386]* AB))+ (parameters[387]* AC);
-	let BI=((parameters[285]+ (parameters[388]* AA))+ (parameters[389]* AB))+ (parameters[390]* AC);
-	let BJ=((parameters[282]+ (parameters[391]* AA))+ (parameters[392]* AB))+ (parameters[393]* AC);
-	let BK=((parameters[279]+ (parameters[394]* AA))+ (parameters[395]* AB))+ (parameters[396]* AC);
-	let BL=((parameters[280]+ (parameters[397]* AA))+ (parameters[398]* AB))+ (parameters[399]* AC);
-	let BM=((parameters[281]+ (parameters[400]* AA))+ (parameters[401]* AB))+ (parameters[402]* AC);
-	let BN=((parameters[71]+ (parameters[403]* AA))+ (parameters[404]* AB))+ (parameters[405]* AC);
-	let BO=((parameters[72]+ (parameters[406]* AA))+ (parameters[407]* AB))+ (parameters[408]* AC);
-	let BP=((parameters[73]+ (parameters[409]* AA))+ (parameters[410]* AB))+ (parameters[411]* AC);
-	let BQ=((parameters[74]+ (parameters[412]* AA))+ (parameters[413]* AB))+ (parameters[414]* AC);
-	let BR=((parameters[75]+ (parameters[415]* AA))+ (parameters[416]* AB))+ (parameters[417]* AC);
-	let BS=((parameters[84]+ (parameters[418]* AA))+ (parameters[419]* AB))+ (parameters[420]* AC);
-	let BT=((parameters[76]+ (parameters[421]* AA))+ (parameters[422]* AB))+ (parameters[423]* AC);
-	let BU=((parameters[87]+ (parameters[430]* AA))+ (parameters[431]* AB))+ (parameters[432]* AC);
-	let BV=((parameters[88]+ (parameters[433]* AA))+ (parameters[434]* AB))+ (parameters[435]* AC);
-	let BW=((parameters[61]+ (parameters[436]* AA))+ (parameters[437]* AB))+ (parameters[438]* AC);
-	let BX=((parameters[62]+ (parameters[439]* AA))+ (parameters[440]* AB))+ (parameters[441]* AC);
-	let BY=((parameters[85]+ (parameters[424]* AA))+ (parameters[425]* AB))+ (parameters[426]* AC);
-	let BZ=((parameters[86]+ (parameters[427]* AA))+ (parameters[428]* AB))+ (parameters[429]* AC);
-	let CA=((parameters[113]+ (parameters[460]* AA))+ (parameters[461]* AB))+ (parameters[462]* AC);
-	let CB=((parameters[89]+ (parameters[442]* AA))+ (parameters[443]* AB))+ (parameters[444]* AC);
-	let CC=((parameters[90]+ (parameters[445]* AA))+ (parameters[446]* AB))+ (parameters[447]* AC);
-	let CD=((parameters[91]+ (parameters[448]* AA))+ (parameters[449]* AB))+ (parameters[450]* AC);
-	let CE=((parameters[92]+ (parameters[451]* AA))+ (parameters[452]* AB))+ (parameters[453]* AC);
-	let CF=((parameters[93]+ (parameters[454]* AA))+ (parameters[455]* AB))+ (parameters[456]* AC);
-	let CG=((parameters[94]+ (parameters[457]* AA))+ (parameters[458]* AB))+ (parameters[459]* AC);
-	let CH=((parameters[116]+ (parameters[463]* AA))+ (parameters[464]* AB))+ (parameters[465]* AC);
-	let CI=((parameters[123]+ (parameters[466]* AA))+ (parameters[467]* AB))+ (parameters[468]* AC);
-	let CJ=((parameters[124]+ (parameters[469]* AA))+ (parameters[470]* AB))+ (parameters[471]* AC);
-	let CK=((parameters[122]+ (parameters[472]* AA))+ (parameters[473]* AB))+ (parameters[474]* AC);
-	let CL=((parameters[135]+ (parameters[475]* AA))+ (parameters[476]* AB))+ (parameters[477]* AC);
-	let CM=((parameters[139]+ (parameters[478]* AA))+ (parameters[479]* AB))+ (parameters[480]* AC);
-	let CN=((parameters[145]+ (parameters[481]* AA))+ (parameters[482]* AB))+ (parameters[483]* AC);
-	let CO=((parameters[148]+ (parameters[484]* AA))+ (parameters[485]* AB))+ (parameters[486]* AC);
-	let CP=((parameters[155]+ (parameters[487]* AA))+ (parameters[488]* AB))+ (parameters[489]* AC);
-	let CQ=((parameters[142]+ (parameters[490]* AA))+ (parameters[491]* AB))+ (parameters[492]* AC);
-	let CR=((parameters[163]+ (parameters[493]* AA))+ (parameters[494]* AB))+ (parameters[495]* AC);
-	let CS=((parameters[157]+ (parameters[496]* AA))+ (parameters[497]* AB))+ (parameters[498]* AC);
-	let CT=((parameters[156]+ (parameters[499]* AA))+ (parameters[500]* AB))+ (parameters[501]* AC);
-	let CU=((parameters[158]+ (parameters[502]* AA))+ (parameters[503]* AB))+ (parameters[504]* AC);
-	let CV=((parameters[160]+ (parameters[505]* AA))+ (parameters[506]* AB))+ (parameters[507]* AC);
-	let CW=((parameters[161]+ (parameters[508]* AA))+ (parameters[509]* AB))+ (parameters[510]* AC);
-	let CX=((parameters[136]+ (parameters[511]* AA))+ (parameters[512]* AB))+ (parameters[513]* AC);
-	let CY=((parameters[166]+ (parameters[514]* AA))+ (parameters[515]* AB))+ (parameters[516]* AC);
-	let CZ=((parameters[167]+ (parameters[517]* AA))+ (parameters[518]* AB))+ (parameters[519]* AC);
-	let DA=((parameters[173]+ (parameters[520]* AA))+ (parameters[521]* AB))+ (parameters[522]* AC);
-	let DB=((parameters[176]+ (parameters[523]* AA))+ (parameters[524]* AB))+ (parameters[525]* AC);
-	let DC=((parameters[182]+ (parameters[526]* AA))+ (parameters[527]* AB))+ (parameters[528]* AC);
-	let DD=((parameters[170]+ (parameters[529]* AA))+ (parameters[530]* AB))+ (parameters[531]* AC);
-	let DE=((parameters[183]+ (parameters[532]* AA))+ (parameters[533]* AB))+ (parameters[534]* AC);
-	let DF=((parameters[186]+ (parameters[535]* AA))+ (parameters[536]* AB))+ (parameters[537]* AC);
-	let DG=((parameters[119]+ (parameters[538]* AA))+ (parameters[539]* AB))+ (parameters[540]* AC);
-	let DH=((parameters[130]+ (parameters[541]* AA))+ (parameters[542]* AB))+ (parameters[543]* AC);
-	let DI=((parameters[205]+ (parameters[544]* AA))+ (parameters[545]* AB))+ (parameters[546]* AC);
-	let DJ=((parameters[305]+ (parameters[547]* AA))+ (parameters[548]* AB))+ (parameters[549]* AC);
-	let DK=((parameters[306]+ (parameters[550]* AA))+ (parameters[551]* AB))+ (parameters[552]* AC);
-	let DL=((parameters[307]+ (parameters[553]* AA))+ (parameters[554]* AB))+ (parameters[555]* AC);
-	let DM=((parameters[308]+ (parameters[556]* AA))+ (parameters[557]* AB))+ (parameters[558]* AC);
-	let DN=((parameters[210]+ (parameters[559]* AA))+ (parameters[560]* AB))+ (parameters[561]* AC);
-	let DO=((parameters[214]+ (parameters[562]* AA))+ (parameters[563]* AB))+ (parameters[564]* AC);
-	let DP=((parameters[208]+ (parameters[565]* AA))+ (parameters[566]* AB))+ (parameters[567]* AC);
-	let DQ=((parameters[206]+ (parameters[568]* AA))+ (parameters[569]* AB))+ (parameters[570]* AC);
-	let DR=((parameters[207]+ (parameters[571]* AA))+ (parameters[572]* AB))+ (parameters[573]* AC);
-	let DS=((parameters[209]+ (parameters[574]* AA))+ (parameters[575]* AB))+ (parameters[576]* AC);
-	let DT=((parameters[256]+ (parameters[577]* AA))+ (parameters[578]* AB))+ (parameters[579]* AC);
-	let DU=((parameters[257]+ (parameters[580]* AA))+ (parameters[581]* AB))+ (parameters[582]* AC);
-	let DV=((parameters[258]+ (parameters[583]* AA))+ (parameters[584]* AB))+ (parameters[585]* AC);
-	let DW=((parameters[217]+ (AA* parameters[706]))+ (AB* parameters[707]))+ (AC* parameters[708]);
-	let DX=((parameters[218]+ (AA* parameters[709]))+ (AB* parameters[710]))+ (AC* parameters[711]);
-	let DY=((parameters[219]+ (AA* parameters[712]))+ (AB* parameters[713]))+ (AC* parameters[714]);
-	let DZ=((parameters[220]+ (AA* parameters[715]))+ (AB* parameters[716]))+ (AC* parameters[717]);
-	let EA=((parameters[221]+ (AA* parameters[718]))+ (AB* parameters[719]))+ (AC* parameters[720]);
-	let EB=((parameters[222]+ (AA* parameters[721]))+ (AB* parameters[722]))+ (AC* parameters[723]);
-	let EC=((parameters[223]+ (AA* parameters[724]))+ (AB* parameters[725]))+ (AC* parameters[726]);
-	let ED=((parameters[224]+ (AA* parameters[727]))+ (AB* parameters[728]))+ (AC* parameters[729]);
-	let EE=((parameters[225]+ (AA* parameters[730]))+ (AB* parameters[731]))+ (AC* parameters[732]);
-	let EF=((parameters[226]+ (parameters[586]* AA))+ (parameters[587]* AB))+ (parameters[588]* AC);
-	let EG=((parameters[227]+ (parameters[589]* AA))+ (parameters[590]* AB))+ (parameters[591]* AC);
-	let EH=((parameters[228]+ (parameters[592]* AA))+ (parameters[593]* AB))+ (parameters[594]* AC);
-	let EI=((parameters[230]+ (parameters[595]* AA))+ (parameters[596]* AB))+ (parameters[597]* AC);
-	let EJ=((parameters[229]+ (parameters[598]* AA))+ (parameters[599]* AB))+ (parameters[600]* AC);
-	let EK=((parameters[247]+ (parameters[610]* AA))+ (parameters[611]* AB))+ (parameters[612]* AC);
-	let EL=((parameters[250]+ (parameters[619]* AA))+ (parameters[620]* AB))+ (parameters[621]* AC);
-	let EM=((parameters[251]+ (parameters[622]* AA))+ (parameters[623]* AB))+ (parameters[624]* AC);
-	let EN=((parameters[252]+ (parameters[625]* AA))+ (parameters[626]* AB))+ (parameters[627]* AC);
-	let EO=((parameters[253]+ (parameters[628]* AA))+ (parameters[629]* AB))+ (parameters[630]* AC);
-	let EP=((parameters[244]+ (parameters[601]* AA))+ (parameters[602]* AB))+ (parameters[603]* AC);
-	let EQ=((parameters[245]+ (parameters[604]* AA))+ (parameters[605]* AB))+ (parameters[606]* AC);
-	let ER=((parameters[246]+ (parameters[607]* AA))+ (parameters[608]* AB))+ (parameters[609]* AC);
-	let ES=((parameters[248]+ (parameters[613]* AA))+ (parameters[614]* AB))+ (parameters[615]* AC);
-	let ET=((parameters[254]+ (parameters[631]* AA))+ (parameters[632]* AB))+ (parameters[633]* AC);
-	let EU=((parameters[249]+ (parameters[616]* AA))+ (parameters[617]* AB))+ (parameters[618]* AC);
-	let EV=((parameters[255]+ (parameters[634]* AA))+ (parameters[635]* AB))+ (parameters[636]* AC);
-	let EW=((parameters[231]+ (parameters[637]* AA))+ (parameters[638]* AB))+ (parameters[639]* AC);
-	let EX=((parameters[232]+ (parameters[643]* AA))+ (parameters[644]* AB))+ (parameters[645]* AC);
-	let EY=((parameters[233]+ (parameters[649]* AA))+ (parameters[650]* AB))+ (parameters[651]* AC);
-	let EZ=((parameters[242]+ (parameters[655]* AA))+ (parameters[656]* AB))+ (parameters[657]* AC);
-	let FA=((parameters[236]+ (parameters[640]* AA))+ (parameters[641]* AB))+ (parameters[642]* AC);
-	let FB=((parameters[237]+ (parameters[646]* AA))+ (parameters[647]* AB))+ (parameters[648]* AC);
-	let FC=((parameters[238]+ (parameters[652]* AA))+ (parameters[653]* AB))+ (parameters[654]* AC);
-	let FD=((parameters[243]+ (parameters[658]* AA))+ (parameters[659]* AB))+ (parameters[660]* AC);
-	let FE=((parameters[240]+ (parameters[661]* AA))+ (parameters[662]* AB))+ (parameters[663]* AC);
-	let FF=((parameters[241]+ (parameters[664]* AA))+ (parameters[665]* AB))+ (parameters[666]* AC);
-	let FG=((parameters[259]+ (parameters[667]* AA))+ (parameters[668]* AB))+ (parameters[669]* AC);
-	let FH=((parameters[260]+ (parameters[670]* AA))+ (parameters[671]* AB))+ (parameters[672]* AC);
-	let FI=((parameters[261]+ (parameters[673]* AA))+ (parameters[674]* AB))+ (parameters[675]* AC);
-	let FJ=((parameters[262]+ (parameters[676]* AA))+ (parameters[677]* AB))+ (parameters[678]* AC);
-	let FK=((parameters[100]+ (parameters[679]* AA))+ (parameters[680]* AB))+ (parameters[681]* AC);
-	let FL=((parameters[129]+ (parameters[682]* AA))+ (parameters[683]* AB))+ (parameters[684]* AC);
-	let FM=((parameters[103]+ (parameters[685]* AA))+ (parameters[686]* AB))+ (parameters[687]* AC);
-	let FN=((parameters[106]+ (parameters[688]* AA))+ (parameters[689]* AB))+ (parameters[690]* AC);
-	let FO=((parameters[110]+ (parameters[691]* AA))+ (parameters[692]* AB))+ (parameters[693]* AC);
-	let FP=((parameters[111]+ (parameters[694]* AA))+ (parameters[695]* AB))+ (parameters[696]* AC);
-	let FQ=((parameters[112]+ (parameters[697]* AA))+ (parameters[698]* AB))+ (parameters[699]* AC);
-	let FR=((parameters[137]+ (parameters[700]* AA))+ (parameters[701]* AB))+ (parameters[702]* AC);
-	let FS=((parameters[187]+ (parameters[703]* AA))+ (parameters[704]* AB))+ (parameters[705]* AC);
-	let FT=((parameters[95]+ (parameters[739]* AA))+ (parameters[740]* AB))+ (parameters[741]* AC);
-	let FY;
-	let FZ;
-	if FU{
-	let FW=((parameters[317]+ (parameters[733]* AA))+ (parameters[734]* AB))+ (parameters[735]* AC);
-	let FX=((parameters[318]+ (parameters[736]* AA))+ (parameters[737]* AB))+ (parameters[738]* AC);
-	FY=FW;
-	FZ=FX;
+	let BJ=((parameters[284]+ (parameters[385]* AD))+ (parameters[386]* AE))+ (parameters[387]* AF);
+	let BK=((parameters[285]+ (parameters[388]* AD))+ (parameters[389]* AE))+ (parameters[390]* AF);
+	let BL=((parameters[282]+ (parameters[391]* AD))+ (parameters[392]* AE))+ (parameters[393]* AF);
+	let BM=((parameters[279]+ (parameters[394]* AD))+ (parameters[395]* AE))+ (parameters[396]* AF);
+	let BN=((parameters[280]+ (parameters[397]* AD))+ (parameters[398]* AE))+ (parameters[399]* AF);
+	let BO=((parameters[281]+ (parameters[400]* AD))+ (parameters[401]* AE))+ (parameters[402]* AF);
+	let BP=((parameters[71]+ (parameters[403]* AD))+ (parameters[404]* AE))+ (parameters[405]* AF);
+	let BQ=((parameters[72]+ (parameters[406]* AD))+ (parameters[407]* AE))+ (parameters[408]* AF);
+	let BR=((parameters[73]+ (parameters[409]* AD))+ (parameters[410]* AE))+ (parameters[411]* AF);
+	let BS=((parameters[74]+ (parameters[412]* AD))+ (parameters[413]* AE))+ (parameters[414]* AF);
+	let BT=((parameters[75]+ (parameters[415]* AD))+ (parameters[416]* AE))+ (parameters[417]* AF);
+	let BU=((parameters[84]+ (parameters[418]* AD))+ (parameters[419]* AE))+ (parameters[420]* AF);
+	let BV=((parameters[76]+ (parameters[421]* AD))+ (parameters[422]* AE))+ (parameters[423]* AF);
+	let BW=((parameters[87]+ (parameters[430]* AD))+ (parameters[431]* AE))+ (parameters[432]* AF);
+	let BX=((parameters[88]+ (parameters[433]* AD))+ (parameters[434]* AE))+ (parameters[435]* AF);
+	let BY=((parameters[61]+ (parameters[436]* AD))+ (parameters[437]* AE))+ (parameters[438]* AF);
+	let BZ=((parameters[62]+ (parameters[439]* AD))+ (parameters[440]* AE))+ (parameters[441]* AF);
+	let CA=((parameters[85]+ (parameters[424]* AD))+ (parameters[425]* AE))+ (parameters[426]* AF);
+	let CB=((parameters[86]+ (parameters[427]* AD))+ (parameters[428]* AE))+ (parameters[429]* AF);
+	let CC=((parameters[113]+ (parameters[460]* AD))+ (parameters[461]* AE))+ (parameters[462]* AF);
+	let CD=((parameters[89]+ (parameters[442]* AD))+ (parameters[443]* AE))+ (parameters[444]* AF);
+	let CE=((parameters[90]+ (parameters[445]* AD))+ (parameters[446]* AE))+ (parameters[447]* AF);
+	let CF=((parameters[91]+ (parameters[448]* AD))+ (parameters[449]* AE))+ (parameters[450]* AF);
+	let CG=((parameters[92]+ (parameters[451]* AD))+ (parameters[452]* AE))+ (parameters[453]* AF);
+	let CH=((parameters[93]+ (parameters[454]* AD))+ (parameters[455]* AE))+ (parameters[456]* AF);
+	let CI=((parameters[94]+ (parameters[457]* AD))+ (parameters[458]* AE))+ (parameters[459]* AF);
+	let CJ=((parameters[116]+ (parameters[463]* AD))+ (parameters[464]* AE))+ (parameters[465]* AF);
+	let CK=((parameters[123]+ (parameters[466]* AD))+ (parameters[467]* AE))+ (parameters[468]* AF);
+	let CL=((parameters[124]+ (parameters[469]* AD))+ (parameters[470]* AE))+ (parameters[471]* AF);
+	let CM=((parameters[122]+ (parameters[472]* AD))+ (parameters[473]* AE))+ (parameters[474]* AF);
+	let CN=((parameters[135]+ (parameters[475]* AD))+ (parameters[476]* AE))+ (parameters[477]* AF);
+	let CO=((parameters[139]+ (parameters[478]* AD))+ (parameters[479]* AE))+ (parameters[480]* AF);
+	let CP=((parameters[145]+ (parameters[481]* AD))+ (parameters[482]* AE))+ (parameters[483]* AF);
+	let CQ=((parameters[148]+ (parameters[484]* AD))+ (parameters[485]* AE))+ (parameters[486]* AF);
+	let CR=((parameters[155]+ (parameters[487]* AD))+ (parameters[488]* AE))+ (parameters[489]* AF);
+	let CS=((parameters[142]+ (parameters[490]* AD))+ (parameters[491]* AE))+ (parameters[492]* AF);
+	let CT=((parameters[163]+ (parameters[493]* AD))+ (parameters[494]* AE))+ (parameters[495]* AF);
+	let CU=((parameters[157]+ (parameters[496]* AD))+ (parameters[497]* AE))+ (parameters[498]* AF);
+	let CV=((parameters[156]+ (parameters[499]* AD))+ (parameters[500]* AE))+ (parameters[501]* AF);
+	let CW=((parameters[158]+ (parameters[502]* AD))+ (parameters[503]* AE))+ (parameters[504]* AF);
+	let CX=((parameters[160]+ (parameters[505]* AD))+ (parameters[506]* AE))+ (parameters[507]* AF);
+	let CY=((parameters[161]+ (parameters[508]* AD))+ (parameters[509]* AE))+ (parameters[510]* AF);
+	let CZ=((parameters[136]+ (parameters[511]* AD))+ (parameters[512]* AE))+ (parameters[513]* AF);
+	let DA=((parameters[166]+ (parameters[514]* AD))+ (parameters[515]* AE))+ (parameters[516]* AF);
+	let DB=((parameters[167]+ (parameters[517]* AD))+ (parameters[518]* AE))+ (parameters[519]* AF);
+	let DC=((parameters[173]+ (parameters[520]* AD))+ (parameters[521]* AE))+ (parameters[522]* AF);
+	let DD=((parameters[176]+ (parameters[523]* AD))+ (parameters[524]* AE))+ (parameters[525]* AF);
+	let DE=((parameters[182]+ (parameters[526]* AD))+ (parameters[527]* AE))+ (parameters[528]* AF);
+	let DF=((parameters[170]+ (parameters[529]* AD))+ (parameters[530]* AE))+ (parameters[531]* AF);
+	let DG=((parameters[183]+ (parameters[532]* AD))+ (parameters[533]* AE))+ (parameters[534]* AF);
+	let DH=((parameters[186]+ (parameters[535]* AD))+ (parameters[536]* AE))+ (parameters[537]* AF);
+	let DI=((parameters[119]+ (parameters[538]* AD))+ (parameters[539]* AE))+ (parameters[540]* AF);
+	let DJ=((parameters[130]+ (parameters[541]* AD))+ (parameters[542]* AE))+ (parameters[543]* AF);
+	let DK=((parameters[205]+ (parameters[544]* AD))+ (parameters[545]* AE))+ (parameters[546]* AF);
+	let DL=((parameters[305]+ (parameters[547]* AD))+ (parameters[548]* AE))+ (parameters[549]* AF);
+	let DM=((parameters[306]+ (parameters[550]* AD))+ (parameters[551]* AE))+ (parameters[552]* AF);
+	let DN=((parameters[307]+ (parameters[553]* AD))+ (parameters[554]* AE))+ (parameters[555]* AF);
+	let DO=((parameters[308]+ (parameters[556]* AD))+ (parameters[557]* AE))+ (parameters[558]* AF);
+	let DP=((parameters[210]+ (parameters[559]* AD))+ (parameters[560]* AE))+ (parameters[561]* AF);
+	let DQ=((parameters[214]+ (parameters[562]* AD))+ (parameters[563]* AE))+ (parameters[564]* AF);
+	let DR=((parameters[208]+ (parameters[565]* AD))+ (parameters[566]* AE))+ (parameters[567]* AF);
+	let DS=((parameters[206]+ (parameters[568]* AD))+ (parameters[569]* AE))+ (parameters[570]* AF);
+	let DT=((parameters[207]+ (parameters[571]* AD))+ (parameters[572]* AE))+ (parameters[573]* AF);
+	let DU=((parameters[209]+ (parameters[574]* AD))+ (parameters[575]* AE))+ (parameters[576]* AF);
+	let DV=((parameters[256]+ (parameters[577]* AD))+ (parameters[578]* AE))+ (parameters[579]* AF);
+	let DW=((parameters[257]+ (parameters[580]* AD))+ (parameters[581]* AE))+ (parameters[582]* AF);
+	let DX=((parameters[258]+ (parameters[583]* AD))+ (parameters[584]* AE))+ (parameters[585]* AF);
+	let DY=((parameters[217]+ (AD* parameters[706]))+ (AE* parameters[707]))+ (AF* parameters[708]);
+	let DZ=((parameters[218]+ (AD* parameters[709]))+ (AE* parameters[710]))+ (AF* parameters[711]);
+	let EA=((parameters[219]+ (AD* parameters[712]))+ (AE* parameters[713]))+ (AF* parameters[714]);
+	let EB=((parameters[220]+ (AD* parameters[715]))+ (AE* parameters[716]))+ (AF* parameters[717]);
+	let EC=((parameters[221]+ (AD* parameters[718]))+ (AE* parameters[719]))+ (AF* parameters[720]);
+	let ED=((parameters[222]+ (AD* parameters[721]))+ (AE* parameters[722]))+ (AF* parameters[723]);
+	let EE=((parameters[223]+ (AD* parameters[724]))+ (AE* parameters[725]))+ (AF* parameters[726]);
+	let EF=((parameters[224]+ (AD* parameters[727]))+ (AE* parameters[728]))+ (AF* parameters[729]);
+	let EG=((parameters[225]+ (AD* parameters[730]))+ (AE* parameters[731]))+ (AF* parameters[732]);
+	let EH=((parameters[226]+ (parameters[586]* AD))+ (parameters[587]* AE))+ (parameters[588]* AF);
+	let EI=((parameters[227]+ (parameters[589]* AD))+ (parameters[590]* AE))+ (parameters[591]* AF);
+	let EJ=((parameters[228]+ (parameters[592]* AD))+ (parameters[593]* AE))+ (parameters[594]* AF);
+	let EK=((parameters[230]+ (parameters[595]* AD))+ (parameters[596]* AE))+ (parameters[597]* AF);
+	let EL=((parameters[229]+ (parameters[598]* AD))+ (parameters[599]* AE))+ (parameters[600]* AF);
+	let EM=((parameters[247]+ (parameters[610]* AD))+ (parameters[611]* AE))+ (parameters[612]* AF);
+	let EN=((parameters[250]+ (parameters[619]* AD))+ (parameters[620]* AE))+ (parameters[621]* AF);
+	let EO=((parameters[251]+ (parameters[622]* AD))+ (parameters[623]* AE))+ (parameters[624]* AF);
+	let EP=((parameters[252]+ (parameters[625]* AD))+ (parameters[626]* AE))+ (parameters[627]* AF);
+	let EQ=((parameters[253]+ (parameters[628]* AD))+ (parameters[629]* AE))+ (parameters[630]* AF);
+	let ER=((parameters[244]+ (parameters[601]* AD))+ (parameters[602]* AE))+ (parameters[603]* AF);
+	let ES=((parameters[245]+ (parameters[604]* AD))+ (parameters[605]* AE))+ (parameters[606]* AF);
+	let ET=((parameters[246]+ (parameters[607]* AD))+ (parameters[608]* AE))+ (parameters[609]* AF);
+	let EU=((parameters[248]+ (parameters[613]* AD))+ (parameters[614]* AE))+ (parameters[615]* AF);
+	let EV=((parameters[254]+ (parameters[631]* AD))+ (parameters[632]* AE))+ (parameters[633]* AF);
+	let EW=((parameters[249]+ (parameters[616]* AD))+ (parameters[617]* AE))+ (parameters[618]* AF);
+	let EX=((parameters[255]+ (parameters[634]* AD))+ (parameters[635]* AE))+ (parameters[636]* AF);
+	let EY=((parameters[231]+ (parameters[637]* AD))+ (parameters[638]* AE))+ (parameters[639]* AF);
+	let EZ=((parameters[232]+ (parameters[643]* AD))+ (parameters[644]* AE))+ (parameters[645]* AF);
+	let FA=((parameters[233]+ (parameters[649]* AD))+ (parameters[650]* AE))+ (parameters[651]* AF);
+	let FB=((parameters[242]+ (parameters[655]* AD))+ (parameters[656]* AE))+ (parameters[657]* AF);
+	let FC=((parameters[236]+ (parameters[640]* AD))+ (parameters[641]* AE))+ (parameters[642]* AF);
+	let FD=((parameters[237]+ (parameters[646]* AD))+ (parameters[647]* AE))+ (parameters[648]* AF);
+	let FE=((parameters[238]+ (parameters[652]* AD))+ (parameters[653]* AE))+ (parameters[654]* AF);
+	let FF=((parameters[243]+ (parameters[658]* AD))+ (parameters[659]* AE))+ (parameters[660]* AF);
+	let FG=((parameters[240]+ (parameters[661]* AD))+ (parameters[662]* AE))+ (parameters[663]* AF);
+	let FH=((parameters[241]+ (parameters[664]* AD))+ (parameters[665]* AE))+ (parameters[666]* AF);
+	let FI=((parameters[259]+ (parameters[667]* AD))+ (parameters[668]* AE))+ (parameters[669]* AF);
+	let FJ=((parameters[260]+ (parameters[670]* AD))+ (parameters[671]* AE))+ (parameters[672]* AF);
+	let FK=((parameters[261]+ (parameters[673]* AD))+ (parameters[674]* AE))+ (parameters[675]* AF);
+	let FL=((parameters[262]+ (parameters[676]* AD))+ (parameters[677]* AE))+ (parameters[678]* AF);
+	let FM=((parameters[100]+ (parameters[679]* AD))+ (parameters[680]* AE))+ (parameters[681]* AF);
+	let FN=((parameters[129]+ (parameters[682]* AD))+ (parameters[683]* AE))+ (parameters[684]* AF);
+	let FO=((parameters[103]+ (parameters[685]* AD))+ (parameters[686]* AE))+ (parameters[687]* AF);
+	let FP=((parameters[106]+ (parameters[688]* AD))+ (parameters[689]* AE))+ (parameters[690]* AF);
+	let FQ=((parameters[110]+ (parameters[691]* AD))+ (parameters[692]* AE))+ (parameters[693]* AF);
+	let FR=((parameters[111]+ (parameters[694]* AD))+ (parameters[695]* AE))+ (parameters[696]* AF);
+	let FS=((parameters[112]+ (parameters[697]* AD))+ (parameters[698]* AE))+ (parameters[699]* AF);
+	let FT=((parameters[137]+ (parameters[700]* AD))+ (parameters[701]* AE))+ (parameters[702]* AF);
+	let FU=((parameters[187]+ (parameters[703]* AD))+ (parameters[704]* AE))+ (parameters[705]* AF);
+	let FV=((parameters[95]+ (parameters[739]* AD))+ (parameters[740]* AE))+ (parameters[741]* AF);
+	let GA;
+	let GB;
+	if FW{
+	let FY=((parameters[317]+ (parameters[733]* AD))+ (parameters[734]* AE))+ (parameters[735]* AF);
+	let FZ=((parameters[318]+ (parameters[736]* AD))+ (parameters[737]* AE))+ (parameters[738]* AF);
+	GA=FY;
+	GB=FZ;
 	}else{
-	FY=Q;
-	FZ=Q;
+	GA=T;
+	GB=T;
 	}
-	let GD=if GA{
-	let GB=CL* (AT- (FR* (P.powf(staged[4]))));
-	GB
-	}else{
-	let GC=CL* (AT- FR);
-	GC
-	};
-	let GE=-P;
-	let GF=CM+ (parameters[140]* (rspice_limited_exp((GE/ parameters[141]))));
-	let GG=CN+ (parameters[146]* (rspice_limited_exp((GE/ parameters[147]))));
-	let GH=parameters[151]+ (parameters[152]* (rspice_limited_exp((GE/ parameters[153]))));
-	let GI=CO+ (parameters[149]* (rspice_limited_exp((GE/ parameters[150]))));
-	let GJ=CQ+ (parameters[143]* (rspice_limited_exp((GE/ parameters[144]))));
-	let GK=CR+ (parameters[164]* (rspice_limited_exp((GE/ parameters[165]))));
-	let GO=if GL{
-	let GM=CY* (AT- (FS* (P.powf(staged[5]))));
-	GM
-	}else{
-	let GN=CY* (AT- FS);
-	GN
-	};
-	let GP=CZ+ (parameters[168]* (rspice_limited_exp((GE/ parameters[169]))));
-	let GQ=DA+ (parameters[174]* (rspice_limited_exp((GE/ parameters[175]))));
-	let GR=parameters[179]+ (parameters[180]* (rspice_limited_exp((GE/ parameters[181]))));
-	let GS=DB+ (parameters[177]* (rspice_limited_exp((GE/ parameters[178]))));
-	let GT=DD+ (parameters[171]* (rspice_limited_exp((GE/ parameters[172]))));
-	let GU=DE+ (parameters[184]* (rspice_limited_exp((GE/ parameters[185]))));
-	let GZ;
-	let HA;
-	let HB;
-	if GV{
-	let GW=AF+ (parameters[196]* (rspice_limited_exp((GE/ parameters[197]))));
-	let GX=AE+ (parameters[200]* (rspice_limited_exp((GE/ parameters[201]))));
-	GZ=AD;
-	HA=GW;
-	HB=GX;
-	}else{
-	let GY=AD+ (parameters[192]* (rspice_limited_exp((GE/ parameters[193]))));
-	GZ=GY;
-	HA=AF;
-	HB=AE;
-	}
-	let HC=DN+ (parameters[211]* (rspice_limited_exp((GE/ parameters[212]))));
-	let HD=CA+ (parameters[114]* ((P* 1e6f64).powf(staged[6])));
-	let HE=CH+ (parameters[117]* (rspice_limited_exp((GE/ parameters[118]))));
-	let HF=CI+ (parameters[125]* (rspice_limited_exp((GE/ parameters[126]))));
-	let HG=CJ+ (parameters[127]* (rspice_limited_exp((GE/ parameters[128]))));
-	let HH=FK+ (parameters[101]* (rspice_limited_exp((GE/ parameters[102]))));
-	let HI=FL+ (parameters[132]* (rspice_limited_exp((GE/ parameters[133]))));
-	let HJ=FM+ (parameters[104]* (rspice_limited_exp((GE/ parameters[105]))));
-	let HK=FN+ (parameters[107]* (rspice_limited_exp((GE/ parameters[108]))));
-	let HL=parameters[77]+ (parameters[79]* (rspice_limited_exp((GE/ parameters[80]))));
-	let HM=parameters[78]+ (parameters[81]* (rspice_limited_exp((GE/ parameters[82]))));
-	let HN=GD< Q;
-	let HP=if HN{
-	HO
-	}else{
+	let GF=if GC{
+	let GD=CN* (B- (FT* (S.powf(staged[4]))));
 	GD
+	}else{
+	let GE=CN* (B- FT);
+	GE
 	};
-	let HQ=GF< Q;
-	let HR=if HQ{
-	Q
+	let GG=-S;
+	let GH=CO+ (parameters[140]* (rspice_limited_exp((GG/ parameters[141]))));
+	let GI=CP+ (parameters[146]* (rspice_limited_exp((GG/ parameters[147]))));
+	let GJ=parameters[151]+ (parameters[152]* (rspice_limited_exp((GG/ parameters[153]))));
+	let GK=CQ+ (parameters[149]* (rspice_limited_exp((GG/ parameters[150]))));
+	let GL=CS+ (parameters[143]* (rspice_limited_exp((GG/ parameters[144]))));
+	let GM=CT+ (parameters[164]* (rspice_limited_exp((GG/ parameters[165]))));
+	let GQ=if GN{
+	let GO=DA* (B- (FU* (S.powf(staged[5]))));
+	GO
+	}else{
+	let GP=DA* (B- FU);
+	GP
+	};
+	let GR=DB+ (parameters[168]* (rspice_limited_exp((GG/ parameters[169]))));
+	let GS=DC+ (parameters[174]* (rspice_limited_exp((GG/ parameters[175]))));
+	let GT=parameters[179]+ (parameters[180]* (rspice_limited_exp((GG/ parameters[181]))));
+	let GU=DD+ (parameters[177]* (rspice_limited_exp((GG/ parameters[178]))));
+	let GV=DF+ (parameters[171]* (rspice_limited_exp((GG/ parameters[172]))));
+	let GW=DG+ (parameters[184]* (rspice_limited_exp((GG/ parameters[185]))));
+	let HB;
+	let HC;
+	let HD;
+	if GX{
+	let GY=AI+ (parameters[196]* (rspice_limited_exp((GG/ parameters[197]))));
+	let GZ=AH+ (parameters[200]* (rspice_limited_exp((GG/ parameters[201]))));
+	HB=AG;
+	HC=GY;
+	HD=GZ;
+	}else{
+	let HA=AG+ (parameters[192]* (rspice_limited_exp((GG/ parameters[193]))));
+	HB=HA;
+	HC=AI;
+	HD=AH;
+	}
+	let HE=DP+ (parameters[211]* (rspice_limited_exp((GG/ parameters[212]))));
+	let HF=CC+ (parameters[114]* ((S* 1e6f64).powf(staged[6])));
+	let HG=CJ+ (parameters[117]* (rspice_limited_exp((GG/ parameters[118]))));
+	let HH=CK+ (parameters[125]* (rspice_limited_exp((GG/ parameters[126]))));
+	let HI=CL+ (parameters[127]* (rspice_limited_exp((GG/ parameters[128]))));
+	let HJ=FM+ (parameters[101]* (rspice_limited_exp((GG/ parameters[102]))));
+	let HK=FN+ (parameters[132]* (rspice_limited_exp((GG/ parameters[133]))));
+	let HL=FO+ (parameters[104]* (rspice_limited_exp((GG/ parameters[105]))));
+	let HM=FP+ (parameters[107]* (rspice_limited_exp((GG/ parameters[108]))));
+	let HN=parameters[77]+ (parameters[79]* (rspice_limited_exp((GG/ parameters[80]))));
+	let HO=parameters[78]+ (parameters[81]* (rspice_limited_exp((GG/ parameters[82]))));
+	let HP=GF< T;
+	let HR=if HP{
+	HQ
 	}else{
 	GF
 	};
-	let HS=GJ< Q;
+	let HS=GH< T;
 	let HT=if HS{
-	Q
+	T
 	}else{
-	GJ
+	GH
 	};
-	let HU=GI< Q;
+	let HU=GL< T;
 	let HV=if HU{
-	Q
+	T
 	}else{
-	GI
+	GL
 	};
-	let HW=CP< Q;
+	let HW=GK< T;
 	let HX=if HW{
-	Q
+	T
 	}else{
-	CP
+	GK
 	};
-	let HY=HI< Q;
+	let HY=CR< T;
 	let HZ=if HY{
-	Q
+	T
 	}else{
-	HI
+	CR
 	};
-	let IA=BO<= Q;
-	let IB=BT<= Q;
-	let IC=GZ< Q;
-	let ID=if IC{
-	Q
+	let IA=HK< T;
+	let IB=if IA{
+	T
 	}else{
-	GZ
+	HK
 	};
-	let IE=HA< Q;
+	let IC=BQ<= T;
+	let ID=BV<= T;
+	let IE=HB< T;
 	let IF=if IE{
-	Q
-	}else{
-	HA
-	};
-	let IG=HB< Q;
-	let IH=if IG{
-	Q
+	T
 	}else{
 	HB
 	};
-	let II=AG< Q;
-	let IJ=if II{
-	Q
+	let IG=HC< T;
+	let IH=if IG{
+	T
 	}else{
-	AG
+	HC
 	};
-	let IK=HD< O;
-	let IL=if IK{
-	O
+	let II=HD< T;
+	let IJ=if II{
+	T
 	}else{
 	HD
 	};
-	let IM=((AT+ (BZ/ P)).sqrt())- AT;
-	let IN=AT/ IL;
-	let IQ=if !(((IO* parameters[3])+ (IP* (if !((parameters[5]- B)).is_nan()&&((parameters[5]- B)>=Q||(Q).is_nan()){(parameters[5]- B)}else{Q})))).is_nan()&&(((IO* parameters[3])+ (IP* (if !((parameters[5]- B)).is_nan()&&((parameters[5]- B)>=Q||(Q).is_nan()){(parameters[5]- B)}else{Q})))>=1e-20f64||(1e-20f64).is_nan()){((IO* parameters[3])+ (IP* (if !((parameters[5]- B)).is_nan()&&((parameters[5]- B)>=Q||(Q).is_nan()){(parameters[5]- B)}else{Q})))}else{1e-20f64};
-	let IR=if !(((IO* parameters[4])+ (IP* (if !((parameters[6]- B)).is_nan()&&((parameters[6]- B)>=Q||(Q).is_nan()){(parameters[6]- B)}else{Q})))).is_nan()&&(((IO* parameters[4])+ (IP* (if !((parameters[6]- B)).is_nan()&&((parameters[6]- B)>=Q||(Q).is_nan()){(parameters[6]- B)}else{Q})))>=1e-20f64||(1e-20f64).is_nan()){((IO* parameters[4])+ (IP* (if !((parameters[6]- B)).is_nan()&&((parameters[6]- B)>=Q||(Q).is_nan()){(parameters[6]- B)}else{Q})))}else{1e-20f64};
-	let IT=IS* CX;
-	let IU=IS* DF;
-	let IY;
-	let IZ;
-	if IV{
-	let IW=0.3333333333333333f64* CX;
-	let IX=0.3333333333333333f64* DF;
-	IY=IW;
-	IZ=IX;
+	let IK=AJ< T;
+	let IL=if IK{
+	T
 	}else{
-	IY=IT;
-	IZ=IU;
-	}
-	let JA=AT/ (((S* 1e6f64).powf(AI))* C);
-	let JB=parameters[296]>= (P/ O);
-	let JG;
-	let JH;
-	if JC{
-	let JD=parameters[312]+ (S* C);
-	let JE=JD/ parameters[310];
-	let JF=parameters[311]* JD;
-	JG=JE;
-	JH=JF;
-	}else{
-	JG=AT;
-	JH=Q;
-	}
-	let JI=parameters[215]* parameters[7];
-	let JJ=parameters[216]* parameters[8];
-	let JL=JI<= JK;
-	let JM=if JL{
-	JK
-	}else{
-	JI
+	AJ
 	};
-	let JN=JJ<= JK;
+	let IM=HF< R;
+	let IN=if IM{
+	R
+	}else{
+	HF
+	};
+	let IO=((B+ (CB/ S)).sqrt())- B;
+	let IP=B/ IN;
+	let IS=if !(((IQ* parameters[3])+ (IR* (if !((parameters[5]- E)).is_nan()&&((parameters[5]- E)>=T||(T).is_nan()){(parameters[5]- E)}else{T})))).is_nan()&&(((IQ* parameters[3])+ (IR* (if !((parameters[5]- E)).is_nan()&&((parameters[5]- E)>=T||(T).is_nan()){(parameters[5]- E)}else{T})))>=1e-20f64||(1e-20f64).is_nan()){((IQ* parameters[3])+ (IR* (if !((parameters[5]- E)).is_nan()&&((parameters[5]- E)>=T||(T).is_nan()){(parameters[5]- E)}else{T})))}else{1e-20f64};
+	let IT=if !(((IQ* parameters[4])+ (IR* (if !((parameters[6]- E)).is_nan()&&((parameters[6]- E)>=T||(T).is_nan()){(parameters[6]- E)}else{T})))).is_nan()&&(((IQ* parameters[4])+ (IR* (if !((parameters[6]- E)).is_nan()&&((parameters[6]- E)>=T||(T).is_nan()){(parameters[6]- E)}else{T})))>=1e-20f64||(1e-20f64).is_nan()){((IQ* parameters[4])+ (IR* (if !((parameters[6]- E)).is_nan()&&((parameters[6]- E)>=T||(T).is_nan()){(parameters[6]- E)}else{T})))}else{1e-20f64};
+	let IV=IU* CZ;
+	let IW=IU* DH;
+	let JA;
+	let JB;
+	if IX{
+	let IY=0.3333333333333333f64* CZ;
+	let IZ=0.3333333333333333f64* DH;
+	JA=IY;
+	JB=IZ;
+	}else{
+	JA=IV;
+	JB=IW;
+	}
+	let JC=B/ (((V* 1e6f64).powf(AL))* F);
+	let JD=parameters[296]>= (S/ R);
+	let JI;
+	let JJ;
+	if JE{
+	let JF=parameters[312]+ (V* F);
+	let JG=JF/ parameters[310];
+	let JH=parameters[311]* JF;
+	JI=JG;
+	JJ=JH;
+	}else{
+	JI=B;
+	JJ=T;
+	}
+	let JK=parameters[215]* parameters[7];
+	let JL=parameters[216]* parameters[8];
+	let JN=JK<= JM;
 	let JO=if JN{
+	JM
+	}else{
 	JK
-	}else{
-	JJ
 	};
-	let JP;
-	let JQ;
+	let JP=JL<= JM;
+	let JQ=if JP{
+	JM
+	}else{
+	JL
+	};
 	let JR;
-	if GV{
-	let JS=IF<= Q;
-	oJS=JS;
-	let JT=if JS{
-	Q
-	}else{
-	IF
-	};
-	let JU=IH<= Q;
+	let JS;
+	let JT;
+	if GX{
+	let JU=IH<= T;
 	oJU=JU;
 	let JV=if JU{
-	Q
+	T
 	}else{
 	IH
 	};
-	JP=ID;
-	JQ=JT;
-	JR=JV;
-	}else{
-	let JW=ID<= Q;
+	let JW=IJ<= T;
 	oJW=JW;
 	let JX=if JW{
-	Q
+	T
 	}else{
-	ID
+	IJ
 	};
-	JP=JX;
-	JQ=IF;
-	JR=IH;
-	}
-	let JY=parameters[99]* FF;
-	let JZ=(rspice_limited_exp((FE* staged[9])))/ staged[10];
-	let KB=(S* KA)* ((rspice_limited_exp((FE* ((if !((parameters[239]/ JY)).is_nan()&&((parameters[239]/ JY)>=1e-38f64||(1e-38f64).is_nan()){(parameters[239]/ JY)}else{1e-38f64}).ln()))))/ (JY* JY));
-	let KD=(parameters[316]* (parameters[313]+ ((S/ 3f64)/ KC)))/ ((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, KC, C)))* (F- parameters[314]));
-	let KE=KD> JK;
-	let KG=if KE{
-	let KF=AT/ KD;
-	KF
+	JR=IF;
+	JS=JV;
+	JT=JX;
 	}else{
+	let JY=IF<= T;
+	oJY=JY;
+	let JZ=if JY{
+	T
+	}else{
+	IF
+	};
+	JR=JZ;
+	JS=IH;
+	JT=IJ;
+	}
+	let KA=parameters[99]* FH;
+	let KB=(rspice_limited_exp((FG* staged[9])))/ staged[10];
+	let KD=(V* KC)* ((rspice_limited_exp((FG* ((if !((parameters[239]/ KA)).is_nan()&&((parameters[239]/ KA)>=1e-38f64||(1e-38f64).is_nan()){(parameters[239]/ KA)}else{1e-38f64}).ln()))))/ (KA* KA));
+	let KF=(parameters[316]* (parameters[313]+ ((V/ 3f64)/ KE)))/ ((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, KE, F)))* (I- parameters[314]));
+	let KG=KF> JM;
+	let KI=if KG{
+	let KH=B/ KF;
 	KH
-	};
-	let KI=AL* AM;
-	if KJ{
-	if KK{
-	let KQ=AK- staged[17];
-	oKQ=KQ;
 	}else{
-	let KR=AK+ staged[19];
-	oKR=KR;
+	KJ
+	};
+	let KK=AO* AP;
+	if KL{
+	if KM{
+	let KS=AN- staged[17];
+	oKS=KS;
+	}else{
+	let KT=AN+ staged[19];
+	oKT=KT;
 	}
 	}
-	let KM=CT- KL;
-	let KN=CV- KL;
-	let KO=CW- KL;
-	let KP=DG* (AT+ (AA* parameters[120]));
-	let KS=DH* (AT+ (AA* parameters[131]));
-	let KT=-CD;
-	let KU=(4f64* KT)* Z;
-	let KV=parameters[301]+ (parameters[302]/ P);
-	let KW=DJ- KL;
-	let KX=BO* P;
-	let KY=BT* P;
-	let KZ=DP* P;
-	let LD;
-	let LE;
+	let KO=CV- KN;
+	let KP=CX- KN;
+	let KQ=CY- KN;
+	let KR=DI* (B+ (AD* parameters[120]));
+	let KU=DJ* (B+ (AD* parameters[131]));
+	let KV=-CF;
+	let KW=(4f64* KV)* AC;
+	let KX=parameters[301]+ (parameters[302]/ S);
+	let KY=DL- KN;
+	let KZ=BQ* S;
+	let LA=BV* S;
+	let LB=DR* S;
 	let LF;
 	let LG;
-	if LA{
-	let LB=AY* P;
-	oLB=LB;
-	let LH=IS* BA;
-	oLH=LH;
-	LD=BB;
-	LE=AW;
-	LF=AX;
-	LG=AV;
+	let LH;
+	let LI;
+	if LC{
+	let LD=BA* S;
+	oLD=LD;
+	let LJ=IU* BC;
+	oLJ=LJ;
+	LF=BD;
+	LG=AY;
+	LH=AZ;
+	LI=AX;
 	}else{
-	let LC=BJ* P;
-	oLC=LC;
-	let LI=IS* BL;
-	oLI=LI;
-	LD=BM;
-	LE=BH;
-	LF=BI;
-	LG=BG;
+	let LE=BL* S;
+	oLE=LE;
+	let LK=IU* BN;
+	oLK=LK;
+	LF=BO;
+	LG=BJ;
+	LH=BK;
+	LI=BI;
 	}
-	let LJ=-LF;
-	let LK=(4f64* LJ)* 0.01f64;
-	let LL=staged[87]* LG;
-	let LM=-BN;
-	let LN=HM- KL;
-	let LO=(-BU)/ (P+ BV);
-	let LP=staged[101]+ AN;
-	let LR=((1.60219e-19f64* AM)* parameters[49])/ LQ;
-	let LS=LR* staged[104];
-	let LT=parameters[303]+ (parameters[304]/ P);
-	let LU=DC- KL;
-	if !GV{
-	if !LV{
-	let LX=(JM+ JO)+ LW;
-	oLX=LX;
+	let LL=-LH;
+	let LM=(4f64* LL)* 0.01f64;
+	let LN=staged[87]* LI;
+	let LO=-BP;
+	let LP=HO- KN;
+	let LQ=(-BW)/ (S+ BX);
+	let LR=staged[101]+ AQ;
+	let LT=((1.60219e-19f64* AP)* parameters[49])/ LS;
+	let LU=LT* staged[104];
+	let LV=parameters[303]+ (parameters[304]/ S);
+	let LW=DE- KN;
+	if !GX{
+	if !LX{
+	let LZ=(JO+ JQ)+ LY;
+	oLZ=LZ;
 	}
 	}
-	let LY=IN- KL;
-	let LZ=HT- KL;
-	let MA=DS> Q;
-	let MB=HC> Q;
-	if MB{
-	let MC=parameters[213]< Q;
-	oMC=MC;
-	if MC{
-	let ME=AT/ HC;
+	let MA=IP- KN;
+	let MB=HV- KN;
+	let MC=DU> T;
+	let MD=HE> T;
+	if MD{
+	let ME=parameters[213]< T;
 	oME=ME;
+	if ME{
+	let MG=B/ HE;
+	oMG=MG;
 	}
 	}
-	let MD=DO> Q;
-	if !GV{
-	let MI;
-	let MJ;
-	if MF{
-	let MH=(JM+ JO)+ LW;
-	oMH=MH;
-	MI=Q;
-	MJ=Q;
-	}else{
-	MI=JO;
-	MJ=JM;
-	}
-	oMI=MI;
+	let MF=DQ> T;
+	if !GX{
+	let MK;
+	let ML;
+	if MH{
+	let MJ=(JO+ JQ)+ LY;
 	oMJ=MJ;
+	MK=T;
+	ML=T;
+	}else{
+	MK=JQ;
+	ML=JO;
 	}
-	let MG=FT> Q;
-	let MK=X* V;
-	let ML=(X* FG)* LQ;
-	let MM=(X* FH)* LQ;
-	let MO=MN* X;
-	let MP=MO* parameters[263];
-	let MQ=MO* parameters[264];
-	let MR=X* FI;
-	let MS=X* FJ;
-	let MT=MN* IQ;
-	let MU=MN* IR;
-	let MV=(DT+ (DU* P))/ P;
-	let MW=MV<= Q;
-	if MX{
-	let MY=S* P;
-	let MZ=(MY* 3.75956e-7f64)* JZ;
-	oMZ=MZ;
-	let NB=(MY* 4.97232e-7f64)* JZ;
+	oMK=MK;
+	oML=ML;
+	}
+	let MI=FV> T;
+	let MM=AA* Y;
+	let MN=(AA* FI)* LS;
+	let MO=(AA* FJ)* LS;
+	let MQ=MP* AA;
+	let MR=MQ* parameters[263];
+	let MS=MQ* parameters[264];
+	let MT=AA* FK;
+	let MU=AA* FL;
+	let MV=MP* IS;
+	let MW=MP* IT;
+	let MX=(DV+ (DW* S))/ S;
+	let MY=MX<= T;
+	if MZ{
+	let NA=V* S;
+	let NB=(NA* 3.75956e-7f64)* KB;
 	oNB=NB;
+	let ND=(NA* 4.97232e-7f64)* KB;
+	oND=ND;
 	}
-	if NA{
-	let NC=((S* P)* KA)* JZ;
-	oNC=NC;
-	let NE=EZ* ND;
+	if NC{
+	let NE=((V* S)* KC)* KB;
 	oNE=NE;
-	let NF=staged[210]* FF;
-	oNF=NF;
-	let NH=FD* ND;
+	let NG=FB* NF;
+	oNG=NG;
+	let NH=staged[210]* FH;
 	oNH=NH;
-	}
-	if NG{
-	let NI=EP<= Q;
-	oNI=NI;
-	let NJ=EL<= Q;
+	let NJ=FF* NF;
 	oNJ=NJ;
 	}
-	let NK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, MN, C));
-	let NL=(staged[237]!=0.0)&& (FY!= Q);
-	if NL{
-	let NM=C* FY;
-	oNM=NM;
+	if NI{
+	let NK=ER<= T;
+	oNK=NK;
+	let NL=EN<= T;
+	oNL=NL;
 	}
-	let NN=if NL{
-	Q
+	let NM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Mul, MP, F));
+	let NN=(staged[237]!=0.0)&& (GA!= T);
+	if NN{
+	let NO=F* GA;
+	oNO=NO;
+	}
+	let NP=if NN{
+	T
 	}else{
-	AT
+	B
 	};
-    [P, R as u8 as f64, S, T as u8 as f64, V, W as u8 as f64, Y as u8 as f64, AH, AJ, AK, AL, AM, AO, AP, AQ, AS as u8 as f64, oAU as u8 as f64, AZ, BD as u8 as f64, oBF as u8 as f64, BK, BP, BQ, BR, BS, BW, BX, BY, CB, CC, CD, CE, CF, CG, CK, CS, CT, CU, CV, CW, DC, DI, DJ, DK, DL, DM, DO, DQ, DR, DS, DV, DW, DX, DY, DZ, EA, EB, EC, ED, EE, EF, EG, EH, EI, EJ, EK, EL, EM, EN, EO, EP, EQ, ER, ES, ET, EU, EV, EW, EX, EY, FA, FB, FC, FO, FP, FQ, GG, GH, GK, GP, GQ, GR, GS, GT, GU, HC, HE, HF, HG, HH, HJ, HK, HL, HM, HN as u8 as f64, HQ as u8 as f64, HS as u8 as f64, HU as u8 as f64, HW as u8 as f64, HY as u8 as f64, IA as u8 as f64, IB as u8 as f64, IC as u8 as f64, IE as u8 as f64, IG as u8 as f64, II as u8 as f64, IK as u8 as f64, IM, IL, IN, JA, JB as u8 as f64, JL as u8 as f64, JN as u8 as f64, oJS as u8 as f64, oJU as u8 as f64, oJW as u8 as f64, KB, KE as u8 as f64, KI, oKQ, oKR, HP, HR, HV, HX, KP, KS, HZ, KT, KU, KV, KX, KY, KZ, oLB, oLH, oLC, oLI, LD, LE, LJ, LK, LL, LM, LO, LP, LR, LS, LT, IY, IZ, HT, GO, IJ, JP, JM, JO, oLX, MA as u8 as f64, MB as u8 as f64, oMC as u8 as f64, oME, MD as u8 as f64, JQ, JR, oMH, MG as u8 as f64, MK, ML, MM, MP, MQ, MR, MS, MT, MU, MV, MW as u8 as f64, oMZ, oNB, oNC, oNE, oNF, oNH, oNI as u8 as f64, oNJ as u8 as f64, NK, NL as u8 as f64, oNM, FZ, oMI, oMJ, KG, JG, JH, NN, KM, KN, KO, KW, LN, LU, LY, LZ]
+    [C as u8 as f64, S, U as u8 as f64, V, W as u8 as f64, Y, Z as u8 as f64, AB as u8 as f64, AK, AM, AN, AO, AP, AR, AS, AT, AV as u8 as f64, oAW as u8 as f64, BB, BF as u8 as f64, oBH as u8 as f64, BM, BR, BS, BT, BU, BY, BZ, CA, CD, CE, CF, CG, CH, CI, CM, CU, CV, CW, CX, CY, DE, DK, DL, DM, DN, DO, DQ, DS, DT, DU, DX, DY, DZ, EA, EB, EC, ED, EE, EF, EG, EH, EI, EJ, EK, EL, EM, EN, EO, EP, EQ, ER, ES, ET, EU, EV, EW, EX, EY, EZ, FA, FC, FD, FE, FQ, FR, FS, GI, GJ, GM, GR, GS, GT, GU, GV, GW, HE, HG, HH, HI, HJ, HL, HM, HN, HO, HP as u8 as f64, HS as u8 as f64, HU as u8 as f64, HW as u8 as f64, HY as u8 as f64, IA as u8 as f64, IC as u8 as f64, ID as u8 as f64, IE as u8 as f64, IG as u8 as f64, II as u8 as f64, IK as u8 as f64, IM as u8 as f64, IO, IN, IP, JC, JD as u8 as f64, JN as u8 as f64, JP as u8 as f64, oJU as u8 as f64, oJW as u8 as f64, oJY as u8 as f64, KD, KG as u8 as f64, KK, oKS, oKT, HR, HT, HX, HZ, KR, KU, IB, KV, KW, KX, KZ, LA, LB, oLD, oLJ, oLE, oLK, LF, LG, LL, LM, LN, LO, LQ, LR, LT, LU, LV, JA, JB, HV, GQ, IL, JR, JO, JQ, oLZ, MC as u8 as f64, MD as u8 as f64, oME as u8 as f64, oMG, MF as u8 as f64, JS, JT, oMJ, MI as u8 as f64, MM, MN, MO, MR, MS, MT, MU, MV, MW, MX, MY as u8 as f64, oNB, oND, oNE, oNG, oNH, oNJ, oNK as u8 as f64, oNL as u8 as f64, NM, NN as u8 as f64, oNO, GB, oMK, oML, KI, JI, JJ, NP, KO, KP, KQ, KY, LP, LW, MA, MB]
 }
 
 pub(super) fn canonical_temperature_preprocess(
     parameters: &[f64],
     parameter_given: &[bool],
+    port_connected: &[bool],
     multiplicity: f64,
     staged: &[f64],
     temperature: f64,
     thermal_voltage: f64,
 ) -> [f64; 1] {
-	let A=staged[286]!=0.0;
+	let A=staged[287]!=0.0;
 	let mut oB=0.0;
 	if !A{
 	let B=temperature+ parameters[9];
@@ -1028,6 +1033,7 @@ impl Instance {
         let produced: CanonicalModelValues = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
+            &self.port_connected[..],
             self.multiplicity,
             &self.canonical_staged[..],
             ctx.temperature(),
@@ -1046,6 +1052,7 @@ impl Instance {
         let produced = canonical_instance_preprocess(
             &self.params.values,
             &self.param_given[..],
+            &self.port_connected[..],
             self.multiplicity,
             &self.canonical_staged[..],
             ctx.temperature(),
@@ -1069,6 +1076,7 @@ impl Instance {
         let produced = canonical_temperature_preprocess(
             &self.params.values,
             &self.param_given[..],
+            &self.port_connected[..],
             self.multiplicity,
             &self.canonical_staged[..],
             ctx.temperature(),
@@ -1141,18 +1149,18 @@ impl Instance {
                 0.0
             }
         };
-		let A=staged[255]!=0.0;
+		let A=staged[256]!=0.0;
 		let B=0f64;
-		let D=staged[256]!=0.0;
-		let F=staged[257]!=0.0;
-		let H=staged[258]!=0.0;
-		let J=staged[267]!=0.0;
-		let K=staged[274]!=0.0;
-		let M=staged[275]!=0.0;
-		let O=staged[286]!=0.0;
+		let D=staged[257]!=0.0;
+		let F=staged[258]!=0.0;
+		let H=staged[259]!=0.0;
+		let J=staged[268]!=0.0;
+		let K=staged[275]!=0.0;
+		let M=staged[276]!=0.0;
+		let O=staged[287]!=0.0;
 		let P=node_potentials[4];
 		let R=1f64;
-		let S=staged[297];
+		let S=staged[298];
 		let T=0f64;
 		let W=staged[12];
 		let AA=2f64;
@@ -1165,9 +1173,9 @@ impl Instance {
 		let AW=parameters[54];
 		let AY=2f64;
 		let BJ=1e-38f64;
-		let CD=staged[298]!=0.0;
-		let CE=staged[299]!=0.0;
-		let CF=staged[300];
+		let CD=staged[299]!=0.0;
+		let CE=staged[300]!=0.0;
+		let CF=staged[301];
 		let CL=staged[21];
 		let CM=staged[22];
 		let DB=staged[24];
@@ -1236,9 +1244,9 @@ impl Instance {
 		let NL=L5([0f64;5]);
 		let OB=staged[72];
 		let OF=staged[73];
-		let OM=staged[301]!=0.0;
+		let OM=staged[302]!=0.0;
 		let OV=staged[80];
-		let PB=staged[302]!=0.0;
+		let PB=staged[303]!=0.0;
 		let PU=staged[82];
 		let PZ=staged[83];
 		let QD=L3([0f64;3]);
@@ -1308,7 +1316,7 @@ impl Instance {
 		let ATN=staged[136];
 		let ATT=staged[137];
 		let AUB=staged[138];
-		let AUQ=staged[303]!=0.0;
+		let AUQ=staged[304]!=0.0;
 		let AUU=staged[144];
 		let AUX=staged[145];
 		let AUZ=staged[146];
@@ -1326,11 +1334,11 @@ impl Instance {
 		let BLR=staged[152];
 		let BOS=staged[153];
 		let BRT=staged[154];
-		let BUO=staged[304]!=0.0;
+		let BUO=staged[305]!=0.0;
 		let BUP=staged[155];
 		let BUR=parameters[162];
 		let BUW=staged[156];
-		let BVB=staged[305]!=0.0;
+		let BVB=staged[306]!=0.0;
 		let BVC=staged[157];
 		let BVE=parameters[189];
 		let BWK=staged[158];
@@ -1341,22 +1349,22 @@ impl Instance {
 		let BZF=staged[163];
 		let BZH=staged[164];
 		let BZW=staged[166];
-		let BZZ=staged[306]!=0.0;
+		let BZZ=staged[307]!=0.0;
 		let CAA=staged[167];
-		let CAZ=staged[307]!=0.0;
-		let CBA=staged[308]!=0.0;
-		let CBF=staged[309]!=0.0;
+		let CAZ=staged[308]!=0.0;
+		let CBA=staged[309]!=0.0;
+		let CBF=staged[310]!=0.0;
 		let CBG=parameters[213];
 		let CBK=staged[169];
 		let CBX=staged[170];
 		let CDM=staged[171];
 		let CDS=staged[172];
 		let CEI=staged[175];
-		let CFD=staged[310]!=0.0;
+		let CFD=staged[311]!=0.0;
 		let CFU=0.16666666666666666f64;
 		let CFX=0.16666666666666666f64;
-		let CGI=staged[312];
-		let CGJ=staged[313];
+		let CGI=staged[313];
+		let CGJ=staged[314];
 		let CGK=L4([0f64;4]);
 		let CGL=L4([0f64;4]);
 		let CGY=staged[180];
@@ -1374,7 +1382,7 @@ impl Instance {
 		let CIJ=staged[188];
 		let CIP=staged[189];
 		let CIS=staged[190];
-		let CIZ=staged[314]!=0.0;
+		let CIZ=staged[315]!=0.0;
 		let CJB=staged[192];
 		let CJI=1.804851387e-35f64;
 		let CJN=staged[194];
@@ -1384,7 +1392,7 @@ impl Instance {
 		let CKB=staged[199];
 		let CKN=staged[200];
 		let CKS=L3([0f64;3]);
-		let CLP=staged[315]!=0.0;
+		let CLP=staged[316]!=0.0;
 		let CLS=0.08f64;
 		let CMD=staged[201];
 		let CME=staged[203];
@@ -1400,7 +1408,7 @@ impl Instance {
 		let COM=staged[214];
 		let CON=staged[216];
 		let COP=staged[217];
-		let CPD=staged[316]!=0.0;
+		let CPD=staged[317]!=0.0;
 		let CPE=parameters[234];
 		let CPY=staged[218];
 		let CQE=staged[219];
@@ -1411,11 +1419,11 @@ impl Instance {
 		let CTC=staged[233];
 		let CTF=staged[234];
 		let CTS=staged[236];
-		let CUI=staged[320]!=0.0;
+		let CUI=staged[321]!=0.0;
 		let CUJ=staged[238];
 		let CUL=staged[239];
 		let CWJ=staged[243];
-		let CXO=staged[321]!=0.0;
+		let CXO=staged[322]!=0.0;
 		let CXQ=1e-12f64;
 		let CYY=0f64;
 		let CYZ=0f64;
@@ -1427,7 +1435,7 @@ impl Instance {
 		let CZR=0f64;
 		let CZT=true;
 		let CZW=0f64;
-		let DAA=staged[322]!=0.0;
+		let DAA=staged[323]!=0.0;
 		let DAG=0f64;
 		let DAH=L6([0f64;6]);
 		let DAK=0f64;
@@ -1440,18 +1448,18 @@ impl Instance {
 		let DBB=0f64;
 		let DBD=0f64;
 		let DBF=0f64;
-		let DBL=staged[323]!=0.0;
+		let DBL=staged[324]!=0.0;
 		let DBM=L7([0f64;7]);
 		let DCX=staged[241];
 		let DDA=staged[242];
 		let DDK=node_potentials[9];
-		let DDM=staged[324];
+		let DDM=staged[325];
 		let DDV=node_potentials[10];
-		let DDX=staged[325];
+		let DDX=staged[326];
 		let DEG=node_potentials[11];
-		let DEI=staged[326];
+		let DEI=staged[327];
 		let DER=node_potentials[12];
-		let DET=staged[327];
+		let DET=staged[328];
 		if A{
 		analog_finish(68, time, B);
 		}
@@ -4979,11 +4987,11 @@ impl Instance {
 		let DKU=CXM[0];
 		let DKV=CXM[1];
 		let DKW=DBW;
-        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[324]; }
-        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[325]; }
-        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[326]; }
-        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[327]; }
-        if (staged[333] != 0.0) {
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[0] = staged[325]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[1] = staged[326]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[2] = staged[327]; }
+        if ctx.dynamic_operators_enabled() { self.event_state_candidate[3] = staged[328]; }
+        if (staged[334] != 0.0) {
             stamper.stamp_potential_branch_local(Some(4), None, 0, multiplicity);
         } else {
             stamper.stamp_inactive_potential_branch_local(0);
@@ -5181,7 +5189,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(6),
-            multiplicity * (staged[328]),
+            multiplicity * (staged[329]),
             [],
             [],
             [],
@@ -5191,7 +5199,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(5),
             Some(6),
-            multiplicity * (staged[329]),
+            multiplicity * (staged[330]),
             [],
             [],
             [],
@@ -5241,7 +5249,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(6),
-            multiplicity * (staged[330]),
+            multiplicity * (staged[331]),
             [],
             [],
             [],
@@ -5251,7 +5259,7 @@ impl Instance {
         stamper.stamp_current_sparse_local::<0, 0>(
             Some(8),
             Some(5),
-            multiplicity * (staged[331]),
+            multiplicity * (staged[332]),
             [],
             [],
             [],
@@ -5298,10 +5306,10 @@ impl Instance {
             [],
             multiplicity,
         );
-        if staged[333] != 0.0 {
+        if staged[334] != 0.0 {
         stamper.stamp_potential_sparse_local::<0, 0>(
             0,
-            staged[332],
+            staged[333],
             [],
             [],
             [],
@@ -5434,20 +5442,20 @@ impl Instance {
         self.canonical_reactive[43] = CXL;
         self.canonical_reactive[44] = DKU;
         self.canonical_reactive[45] = DKV;
-        self.canonical_reactive[46] = staged[328];
-        self.canonical_reactive[47] = staged[329];
+        self.canonical_reactive[46] = staged[329];
+        self.canonical_reactive[47] = staged[330];
         self.canonical_reactive[48] = DAV;
         self.canonical_reactive[49] = DAW;
         self.canonical_reactive[50] = DAX;
         self.canonical_reactive[51] = DAY;
-        self.canonical_reactive[52] = staged[330];
-        self.canonical_reactive[53] = staged[331];
+        self.canonical_reactive[52] = staged[331];
+        self.canonical_reactive[53] = staged[332];
         self.canonical_reactive[54] = DBN;
         self.canonical_reactive[55] = DBO;
         self.canonical_reactive[56] = DBP;
         self.canonical_reactive[57] = DBR;
         self.canonical_reactive[58] = DKW;
-        self.canonical_reactive[59] = staged[332];
+        self.canonical_reactive[59] = staged[333];
         self.canonical_reactive[60] = DDL;
         self.canonical_reactive[61] = DDU;
         self.canonical_reactive[62] = DDW;

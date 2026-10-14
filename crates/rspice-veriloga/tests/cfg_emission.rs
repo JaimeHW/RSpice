@@ -880,9 +880,9 @@ fn scratch(name: &str) -> PathBuf {
 #[derive(Clone)]
 struct Bias {
     parameters: Vec<f64>,
-    /// One flag per declared port, all connected — the CFG level's own
-    /// convention, where `$port_connected` folds to a constant one. A shorter
-    /// vector would read as *unconnected*, which these fixtures do not mean.
+    /// One flag per declared port, all connected, as a card that names every
+    /// terminal has them. A shorter vector would read as *unconnected*, which
+    /// these fixtures do not mean.
     port_connected: Vec<bool>,
     node_potentials: Vec<f64>,
     branch_flows: Vec<f64>,

@@ -89,8 +89,7 @@ pub(crate) fn build_model_plan_with_canonical_ir(
     validate_canonical_artifact_for_model(model, artifact)?;
     let mut plan =
         build_model_plan_inner(model, Some(artifact), AssignmentRootPolicy::PostfixEntries)?;
-    plan.one_step_dae_split_safe =
-        crate::canonical_ir::charge::one_step_dae_split_safe(artifact, true);
+    plan.one_step_dae_split_safe = crate::canonical_ir::charge::one_step_dae_split_safe(artifact);
     Ok(plan)
 }
 

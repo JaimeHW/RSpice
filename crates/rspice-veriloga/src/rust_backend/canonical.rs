@@ -1177,7 +1177,7 @@ impl ModelPlan {
         // sections, whose predicates must be correct without inflating the
         // executable stamp with solver-invisible Hessians.
         let mut one_step_dae_split_safe =
-            crate::canonical_ir::charge::one_step_dae_split_safe(artifact, false)
+            crate::canonical_ir::charge::one_step_dae_split_safe(artifact)
                 && idt_slots.is_empty()
                 && idtmod_slots.is_empty()
                 && !ddt_controls_flow
@@ -2725,6 +2725,7 @@ impl ModelPlan {
             "pub(super) fn {name}(\n\
              \x20   parameters: &[f64],\n\
              \x20   parameter_given: &[bool],\n\
+             \x20   port_connected: &[bool],\n\
              \x20   multiplicity: f64,\n\
              \x20   staged: &[f64],\n\
              \x20   temperature: f64,\n\
@@ -2804,6 +2805,7 @@ impl ModelPlan {
                 "        let produced = {}(\n\
                  \x20           &self.params.values,\n\
                  \x20           &self.param_given[..],\n\
+                 \x20           &self.port_connected[..],\n\
                  \x20           self.multiplicity,\n\
                  \x20           &self.canonical_staged[..],\n\
                  \x20           ctx.temperature(),\n\
@@ -2929,6 +2931,7 @@ impl ModelPlan {
              \x20       let produced: CanonicalModelValues = canonical_model_preprocess(\n\
              \x20           &self.params.values,\n\
              \x20           &self.param_given[..],\n\
+             \x20           &self.port_connected[..],\n\
              \x20           self.multiplicity,\n\
              \x20           &self.canonical_staged[..],\n\
              \x20           ctx.temperature(),\n\
@@ -3369,6 +3372,7 @@ impl ModelPlan {
                     "        let produced = {}(\n\
                      \x20           &self.params.values,\n\
                      \x20           &self.param_given[..],\n\
+                     \x20           &self.port_connected[..],\n\
                      \x20           self.multiplicity,\n\
                      \x20           &prepared[..],\n\
                      \x20           ctx.temperature(),\n\
@@ -3529,6 +3533,9 @@ impl ModelPlan {
         }
         if wants.parameter_given {
             out.push_str("        let parameter_given = &*self.param_given;\n");
+        }
+        if wants.port_connected {
+            out.push_str("        let port_connected = &self.port_connected;\n");
         }
         if wants.event_state {
             out.push_str("        let event_state = if ctx.dynamic_operators_enabled() { &*self.event_state_accepted } else { &*self.event_state_candidate };\n");
@@ -3912,6 +3919,9 @@ impl ModelPlan {
         }
         if wants.parameter_given {
             let _ = writeln!(out, "{pad}let parameter_given = &*self.param_given;");
+        }
+        if wants.port_connected {
+            let _ = writeln!(out, "{pad}let port_connected = &self.port_connected;");
         }
         if wants.event_state {
             let _ = writeln!(
@@ -5387,6 +5397,7 @@ struct Wants {
     analog_tasks: bool,
     parameters: bool,
     parameter_given: bool,
+    port_connected: bool,
     event_state: bool,
     node_potentials: bool,
     branch_unknown_flows: bool,
@@ -5421,6 +5432,7 @@ impl Wants {
             }
             CfgValueKind::Parameter(_) => self.parameters = true,
             CfgValueKind::ParameterGiven(_) => self.parameter_given = true,
+            CfgValueKind::PortConnected(_) => self.port_connected = true,
             CfgValueKind::EventState(_)
             | CfgValueKind::EvaluationInput(_)
             | CfgValueKind::EvaluationInputIndexed { .. } => self.event_state = true,

@@ -550,6 +550,7 @@ pub struct Instance {
 	pub(crate) param_given: Box<[bool; 296]>,
 	model_param_given: Box<[bool; 296]>,
 	pub(crate) multiplicity: f64,
+	pub(crate) port_connected: [bool; 6],
 	pub(crate) stamp_state: Box<StampState<15, 0>>,
 	pub(crate) time: f64,
 	pub(crate) timestep: f64,
@@ -570,6 +571,7 @@ impl Clone for Instance {
 			param_given: self.param_given.clone(),
 			model_param_given: self.model_param_given.clone(),
 			multiplicity: self.multiplicity,
+			port_connected: self.port_connected,
 			stamp_state: self.stamp_state.clone(),
 			time: self.time,
 			timestep: self.timestep,
@@ -925,6 +927,7 @@ impl Instance {
 			param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
 			model_param_given: boxed_zero_bool_array::<{ Self::PARAMETER_COUNT }>(),
 			multiplicity: 1.0,
+			port_connected: [true; Self::TERMINAL_COUNT],
 			stamp_state: StampState::new_box(),
 			time: 0.0,
 			timestep: 0.0,
@@ -1353,6 +1356,26 @@ impl Instance {
 		} else {
 			Err(format!("instance multiplicity 'm' must be finite and > 0.0, got {}", multiplicity))
 		}
+	}
+
+	/// Mark the first `connected` external terminals as the ones the card connects.
+	pub fn set_connected_terminals(&mut self, connected: usize) -> Result<(), String> {
+		if connected > Self::TERMINAL_COUNT {
+			return Err(format!("a card connects {} terminals, but the module declares {}", connected, Self::TERMINAL_COUNT));
+		}
+		let mut flags = [false; Self::TERMINAL_COUNT];
+		for (index, flag) in flags.iter_mut().enumerate() {
+			*flag = index < connected;
+		}
+		if flags != self.port_connected {
+			self.port_connected = flags;
+		}
+		Ok(())
+	}
+
+	/// Whether the card connects external terminal `terminal`.
+	pub fn port_connected(&self, terminal: usize) -> Option<bool> {
+		self.port_connected.get(terminal).copied()
 	}
 
 	#[inline]

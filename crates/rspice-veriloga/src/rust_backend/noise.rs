@@ -569,6 +569,14 @@ pub(super) fn grouped_noise_extension(
          \x20       let multiplicity = self.multiplicity;\n\
          \x20       let time = self.time;\n",
     );
+    if plan
+        .function
+        .values
+        .iter()
+        .any(|value| matches!(value.kind, CfgValueKind::PortConnected(_)))
+    {
+        out.push_str("        let port_connected = &self.port_connected;\n");
+    }
     if artifact.hir.body.iter().any(|region| {
         matches!(
             region,

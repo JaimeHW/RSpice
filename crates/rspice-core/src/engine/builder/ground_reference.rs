@@ -337,8 +337,8 @@ fn module_references_ground(
 
 /// Note a generated model's instance: the generator recorded its module's
 /// answer from the same canonical IR, and the instance decides it with its
-/// own parameter values. Every port of a generated device is connected, as
-/// its `$port_connected` answers.
+/// own parameter values and the terminals its card connected, as its
+/// `$port_connected` answers and as the `.va` route answers the same card.
 #[cfg(feature = "veriloga-builtins-base")]
 pub(super) fn note_generated(
     circuit: &mut CircuitData,

@@ -7,6 +7,7 @@ impl Instance {
     pub fn stamp(&mut self, ctx: &GeneratedEvalContext<'_>, stamper: &mut GeneratedStamper<'_>) {
         let parameters = &self.params.values;
         let parameter_given = &*self.param_given;
+        let port_connected = &self.port_connected;
         let multiplicity = self.multiplicity;
         let temperature = ctx.temperature();
         let node_potentials = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12]), ctx.node_voltage(self.nodes[13]), ctx.node_voltage(self.nodes[14]), ctx.node_voltage(self.nodes[15]), ctx.node_voltage(self.nodes[16]), ctx.node_voltage(self.nodes[17]), ctx.node_voltage(self.nodes[18]), ctx.node_voltage(self.nodes[19]), ctx.node_voltage(self.nodes[20]), ctx.node_voltage(self.nodes[21]), ctx.node_voltage(self.nodes[22]), ctx.node_voltage(self.nodes[23]), ctx.node_voltage(self.nodes[24]), ctx.node_voltage(self.nodes[25]), ctx.node_voltage(self.nodes[26]), ctx.node_voltage(self.nodes[27]), ctx.node_voltage(self.nodes[28]), ctx.node_voltage(self.nodes[29]), ctx.node_voltage(self.nodes[30])];
@@ -51,8 +52,8 @@ impl Instance {
             }
         };
 		let A=0f64;
-		let B=1f64;
-		let C=parameters[54];
+		let B=parameters[54];
+		let C=1f64;
 		let E=0f64;
 		let F=parameter_given[268] as u8 as f64;
 		let G=parameter_given[269] as u8 as f64;
@@ -1515,12 +1516,12 @@ impl Instance {
 		let BPIA=L2([0f64;2]);
 		let BPIB=L2([0f64;2]);
 		let BPIS=0f64;
-		let D=C== A;
+		let D=B== A;
 		let UPN;
 		let UPY;
 		if D{
 		UPN=E;
-		UPY=B;
+		UPY=C;
 		}else{
 		UPN=A;
 		UPY=A;
@@ -1554,9 +1555,9 @@ impl Instance {
 		}else{
 		X
 		};
-		let AF=AE> B;
+		let AF=AE> C;
 		let TTL=if AF{
-		B
+		C
 		}else{
 		AE
 		};
@@ -1592,9 +1593,9 @@ impl Instance {
 		}else{
 		DP
 		};
-		let DS=DD< B;
+		let DS=DD< C;
 		let DT=if DS{
-		B
+		C
 		}else{
 		DD
 		};
@@ -1676,7 +1677,7 @@ impl Instance {
 		BRD=BRF;
 		}
 		let EK=DA!= A;
-		let EO=(U* EN)> B;
+		let EO=(U* EN)> C;
 		let EQ=EP< Y;
 		let ER=if EQ{
 		Y
@@ -1835,51 +1836,51 @@ impl Instance {
 		let EFY;
 		let EGA;
 		if EK{
-		let KN=GG* (B+ (parameters[341]/ (GR.powf(parameters[342]))));
+		let KN=GG* (C+ (parameters[341]/ (GR.powf(parameters[342]))));
 		let KP=KN< KO;
 		let VZ=if KP{
 		KO
 		}else{
 		KN
 		};
-		let KQ=parameters[367]* (B+ (parameters[368]/ (GR.powf(parameters[369]))));
-		let KR=parameters[360]* (B+ (parameters[361]/ (GR.powf(parameters[362]))));
+		let KQ=parameters[367]* (C+ (parameters[368]/ (GR.powf(parameters[369]))));
+		let KR=parameters[360]* (C+ (parameters[361]/ (GR.powf(parameters[362]))));
 		let KS=KR< A;
 		let ECF=if KS{
 		A
 		}else{
 		KR
 		};
-		let KT=parameters[346]* (B+ (parameters[347]/ (GR.powf(parameters[348]))));
-		let KU=KT< B;
+		let KT=parameters[346]* (C+ (parameters[347]/ (GR.powf(parameters[348]))));
+		let KU=KT< C;
 		let WO=if KU{
-		B
+		C
 		}else{
 		KT
 		};
-		let KV=parameters[349]* (B+ (parameters[350]/ (GR.powf(parameters[351]))));
+		let KV=parameters[349]* (C+ (parameters[350]/ (GR.powf(parameters[351]))));
 		let KW=KV< A;
 		let EEJ=if KW{
 		A
 		}else{
 		KV
 		};
-		let KX=parameters[354]* (B+ (parameters[356]/ (GR.powf(parameters[357]))));
+		let KX=parameters[354]* (C+ (parameters[356]/ (GR.powf(parameters[357]))));
 		let KY=KX< A;
 		let EFZ=if KY{
 		A
 		}else{
 		KX
 		};
-		let KZ=parameters[355]* (B+ (parameters[358]/ (GR.powf(parameters[359]))));
+		let KZ=parameters[355]* (C+ (parameters[358]/ (GR.powf(parameters[359]))));
 		let LA=KZ< A;
 		let EGB=if LA{
 		A
 		}else{
 		KZ
 		};
-		let LB=parameters[370]* (B+ (parameters[372]/ (GR.powf(parameters[373]))));
-		let LE=LC* (B+ (parameters[374]/ (GR.powf(parameters[375]))));
+		let LB=parameters[370]* (C+ (parameters[372]/ (GR.powf(parameters[373]))));
+		let LE=LC* (C+ (parameters[374]/ (GR.powf(parameters[375]))));
 		let LF=LE< BZ;
 		let ECC=if LF{
 		BZ
@@ -1907,30 +1908,30 @@ impl Instance {
 		EGA=A;
 		}
 		let KYN=if EO{
-		let LK=B/ EN;
+		let LK=C/ EN;
 		LK
 		}else{
 		U
 		};
 		let LL=parameters[19]> A;
 		let LM=parameters[18]> A;
-		let LN=(R== B)&& ((LL&& (HB== A))|| (LM&& (HC== A)));
+		let LN=(R== C)&& ((LL&& (HB== A))|| (LM&& (HC== A)));
 		let LO=if LN{
 		A
 		}else{
 		R
 		};
-		let LP=LO== B;
+		let LP=LO== C;
 		let TOV;
 		let TSD;
 		if LP{
 		let LQ=if LL{
-		B
+		C
 		}else{
 		A
 		};
 		let LR=if LM{
-		B
+		C
 		}else{
 		A
 		};
@@ -1946,13 +1947,13 @@ impl Instance {
 		}else{
 		let LU=(((AK* LT)* GK)+ (((JQ+ JY)* (((CG* JW)* CO)+ JU))* (((CI* CM)* CO)+ CN)))> A;
 		let LV=if LU{
-		B
+		C
 		}else{
 		A
 		};
 		let LX=(((AM* LW)* GK)+ ((KA* (((CH* JW)* CO)+ JU))* (((CJ* CM)* CO)+ CN)))> A;
 		let LY=if LX{
-		B
+		C
 		}else{
 		A
 		};
@@ -1991,7 +1992,7 @@ impl Instance {
 		let NB=AR!= A;
 		let NC=NA|| NB;
 		let ND=if NC{
-		B
+		C
 		}else{
 		A
 		};
@@ -1999,7 +2000,7 @@ impl Instance {
 		let BKA=if NE{
 		A
 		}else{
-		B
+		C
 		};
 		let NF=GS* GR;
 		let NG=parameters[289]* CO;
@@ -2012,14 +2013,14 @@ impl Instance {
 		BOD=A;
 		BOF=A;
 		}else{
-		let NL=((B+ (B/ GR)).powf(parameters[153]))* HN;
-		BOD=B;
+		let NL=((C+ (C/ GR)).powf(parameters[153]))* HN;
+		BOD=C;
 		BOF=NL;
 		}
-		let NM=B+ ((GR.powf(parameters[229]))* parameters[230]);
+		let NM=C+ ((GR.powf(parameters[229]))* parameters[230]);
 		let NN=J* GJ;
-		let NO=BK/ ((B/ (parameters[118]+ NN))+ (B/ (parameters[119]+ NN)));
-		let NS=((NP> A)&& (NQ> A))&& ((GK== B)|| ((GK> B)&& (NR> A)));
+		let NO=BK/ ((C/ (parameters[118]+ NN))+ (C/ (parameters[119]+ NN)));
+		let NS=((NP> A)&& (NQ> A))&& ((GK== C)|| ((GK> C)&& (NR> A)));
 		let OG;
 		if NS{
 		let mut NT=A;
@@ -2030,8 +2031,8 @@ impl Instance {
 		break;
 		}
 		let NW=NT* (NR+ GJ);
-		let NX=(NV+ (B/ ((NP+ NN)+ NW)))+ (B/ ((NQ+ NN)+ NW));
-		let NY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NT, B));
+		let NX=(NV+ (C/ ((NP+ NN)+ NW)))+ (C/ ((NQ+ NN)+ NW));
+		let NY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NT, C));
 		NT=NY;
 		NV=NX;
 		}
@@ -2040,13 +2041,13 @@ impl Instance {
 		}else{
 		OG=A;
 		}
-		let OA=(parameters[32]== B)&& parameter_given[12];
+		let OA=(parameters[32]== C)&& parameter_given[12];
 		let OE;
 		let PN;
 		let PO;
 		let QO;
 		if OA{
-		let OB=HS* ((parameters[282]* ((LZ.ln())- (MA.ln())))+ B);
+		let OB=HS* ((parameters[282]* ((LZ.ln())- (MA.ln())))+ C);
 		let OC=(MB+ LZ)- MA;
 		let OD=(MQ+ LZ)- MA;
 		OE=OB;
@@ -2059,16 +2060,16 @@ impl Instance {
 		PO=MA;
 		QO=MQ;
 		}
-		let OF=((OE* (B+ (parameters[162]/ (GS.powf(parameters[163])))))* (B+ (parameters[164]/ (GR.powf(parameters[165])))))* (B+ (parameters[167]/ (NF.powf(parameters[168]))));
+		let OF=((OE* (C+ (parameters[162]/ (GS.powf(parameters[163])))))* (C+ (parameters[164]/ (GR.powf(parameters[165])))))* (C+ (parameters[167]/ (NF.powf(parameters[168]))));
 		let OH=OG> A;
 		let OL=if OH{
-		let OI=B/ (B+ IP);
-		let OJ=(OF* (B+ (OI* ((MG/ OG).powf(IQ)))))/ (B+ (OI* ((MG/ NO).powf(IQ))));
+		let OI=C/ (C+ IP);
+		let OJ=(OF* (C+ (OI* ((MG/ OG).powf(IQ)))))/ (C+ (OI* ((MG/ NO).powf(IQ))));
 		OJ
 		}else{
 		OF
 		};
-		let OK=(parameters[171]* (B+ (parameters[173]/ (GR.powf(parameters[176])))))* (B+ (parameters[174]/ (GS.powf(parameters[175]))));
+		let OK=(parameters[171]* (C+ (parameters[173]/ (GR.powf(parameters[176])))))* (C+ (parameters[174]/ (GS.powf(parameters[175]))));
 		let ON=OL< OM;
 		let OO=if ON{
 		OM
@@ -2084,8 +2085,8 @@ impl Instance {
 		let OR=GR.powf(parameters[156]);
 		let OT=((HO* OR)/ (OR+ parameters[155]))/ OS;
 		let OU=HP/ OS;
-		let OV=(parameters[319]* (B+ (parameters[320]/ (GR.powf(parameters[321])))))* (B+ (parameters[322]/ (GS.powf(parameters[323]))));
-		let OW=(B+ (parameters[386]/ (GR.powf(parameters[387]))))* (B+ (parameters[388]/ (GS.powf(parameters[389]))));
+		let OV=(parameters[319]* (C+ (parameters[320]/ (GR.powf(parameters[321])))))* (C+ (parameters[322]/ (GS.powf(parameters[323]))));
+		let OW=(C+ (parameters[386]/ (GR.powf(parameters[387]))))* (C+ (parameters[388]/ (GS.powf(parameters[389]))));
 		let OX=parameters[384]* OW;
 		let OY=parameters[385]* OW;
 		let OZ=EU/ (GO.powf(ET));
@@ -2096,14 +2097,14 @@ impl Instance {
 		let PE=GL- ((AH+ OZ)+ (EN+ OZ));
 		let PF=GL+ (parameters[124]/ (NF.powf(parameters[125])));
 		let PG=HD/ (NF.powf(parameters[127]));
-		let PH=(IK* (B+ (parameters[206]/ ((PF* CO).powf(parameters[207])))))* (B+ (parameters[208]/ (GS.powf(parameters[209]))));
+		let PH=(IK* (C+ (parameters[206]/ ((PF* CO).powf(parameters[207])))))* (C+ (parameters[208]/ (GS.powf(parameters[209]))));
 		let PI=GM- (BK* PB);
 		let PJ=GM- (BK* PC);
 		let PK=GM- (BK* PD);
 		let PL=PI* GK;
 		let PM=PK* GK;
-		let PP=(PO* (B+ (parameters[233]/ (GS.powf(parameters[234])))))* DN;
-		let PQ=(PN* (B+ (parameters[142]/ (GS.powf(parameters[143])))))* DN;
+		let PP=(PO* (C+ (parameters[233]/ (GS.powf(parameters[234])))))* DN;
+		let PQ=(PN* (C+ (parameters[142]/ (GS.powf(parameters[143])))))* DN;
 		let PS=PP< PR;
 		let PT=if PS{
 		PR
@@ -2119,8 +2120,8 @@ impl Instance {
 		};
 		let PX=PW/ DN;
 		let QB=if OH{
-		let PY=B/ (B+ IS);
-		let PZ=(PX* (B+ (PY* ((MF/ OG).powf(IT)))))/ (B+ (PY* ((MF/ NO).powf(IT))));
+		let PY=C/ (C+ IS);
+		let PZ=(PX* (C+ (PY* ((MF/ OG).powf(IT)))))/ (C+ (PY* ((MF/ NO).powf(IT))));
 		PZ
 		}else{
 		PX
@@ -2139,7 +2140,7 @@ impl Instance {
 		}else{
 		QI
 		};
-		let QK=B/ ((B/ (BN+ (J* (QF+ (((QF* QF)+ QJ).sqrt())))))+ (B/ parameters[220]));
+		let QK=C/ ((C/ (BN+ (J* (QF+ (((QF* QF)+ QJ).sqrt())))))+ (C/ parameters[220]));
 		let QL=A>= QK;
 		let QM=if QL{
 		A
@@ -2158,24 +2159,24 @@ impl Instance {
 		A
 		};
 		let QW=((3.2043836e-19f64* MC)* OS).sqrt();
-		let QX=B/ (MC* MC);
-		let QY=(B+ (KC/ (GR.powf(parameters[231]))))* (B+ (parameters[238]/ (NF.powf(parameters[239]))));
+		let QX=C/ (MC* MC);
+		let QY=(C+ (KC/ (GR.powf(parameters[231]))))* (C+ (parameters[238]/ (NF.powf(parameters[239]))));
 		let RA=0.051702525384001115f64* ((QP/ QZ).ln());
 		let RB=0.051702525384001115f64* ((PU/ QZ).ln());
-		let RC=parameters[51]== B;
+		let RC=parameters[51]== C;
 		let UKM;
 		if RC{
 		let RE=(AN* (parameters[5]+ (PI/ (Q* RD))))/ ((RD* GN)* GK);
 		let RF=RE> CA;
 		let UKN=if RF{
-		let RG=B/ RE;
+		let RG=C/ RE;
 		RG
 		}else{
 		RI
 		};
 		UKM=UKN;
 		}else{
-		let RK=B/ RJ;
+		let RK=C/ RJ;
 		UKM=RK;
 		}
 		let RL=AK> A;
@@ -2206,11 +2207,11 @@ impl Instance {
 		let ZS;
 		let ABH;
 		if RQ{
-		let RR=B+ (parameters[309]/ (NF.powf(parameters[310])));
+		let RR=C+ (parameters[309]/ (NF.powf(parameters[310])));
 		let RS=MU!= A;
 		let ABI;
 		if RS{
-		let RT=B+ (parameters[303]/ (NF.powf(parameters[304])));
+		let RT=C+ (parameters[303]/ (NF.powf(parameters[304])));
 		let RU=(-parameters[301])* (GR.powf(parameters[302]));
 		let RW=RU> RV;
 		let RX=if RW{
@@ -2232,7 +2233,7 @@ impl Instance {
 		let RZ=MS!= A;
 		let EIK;
 		if RZ{
-		let SA=B+ (parameters[307]/ (NF.powf(parameters[308])));
+		let SA=C+ (parameters[307]/ (NF.powf(parameters[308])));
 		let SB=(-parameters[305])* (GR.powf(parameters[306]));
 		let SC=SB> RV;
 		let SD=if SC{
@@ -2258,9 +2259,9 @@ impl Instance {
 		let SH=SG* SG;
 		let SI=(SH+ (EN* EN)).sqrt();
 		let SJ=(SH+ (AH* AH)).sqrt();
-		let SK=B+ (parameters[424]/ (GS.powf(parameters[425])));
-		let SL=B+ (parameters[426]/ (GR.powf(parameters[427])));
-		let SM=B+ (parameters[428]/ (GR.powf(parameters[429])));
+		let SK=C+ (parameters[424]/ (GS.powf(parameters[425])));
+		let SL=C+ (parameters[426]/ (GR.powf(parameters[427])));
+		let SM=C+ (parameters[428]/ (GR.powf(parameters[429])));
 		ZR=A;
 		ABG=A;
 		EIJ=A;
@@ -2282,7 +2283,7 @@ impl Instance {
 		LKW=A;
 		TZQ=A;
 		}
-		let SR=SQ== B;
+		let SR=SQ== C;
 		let UKR;
 		let UKU;
 		let UKX;
@@ -2291,21 +2292,21 @@ impl Instance {
 		let UKY=if ST{
 		SU
 		}else{
-		let SW=SV+ (B/ SS);
+		let SW=SV+ (C/ SS);
 		SW
 		};
 		let SY=SX< CA;
 		let UKS=if SY{
 		SZ
 		}else{
-		let TA=SV+ (B/ SX);
+		let TA=SV+ (C/ SX);
 		TA
 		};
 		let TC=TB< CA;
 		let UKV=if TC{
 		TD
 		}else{
-		let TE=SV+ (B/ TB);
+		let TE=SV+ (C/ TB);
 		TE
 		};
 		UKR=UKS;
@@ -2326,7 +2327,7 @@ impl Instance {
 		}else{
 		TH
 		};
-		let TK=((TJ* BR)/ (TJ+ BR))+ B;
+		let TK=((TJ* BR)/ (TJ+ BR))+ C;
 		TP=TK;
 		}else{
 		let TL=BU* GR;
@@ -2358,12 +2359,12 @@ impl Instance {
 		let TAO;
 		if TR!=0.0{
 		let TS=PI.powf(EZ);
-		let TT=(IB* (B+ (EY/ (GL.powf(EX)))))* (TS/ (TS+ FA));
-		let TU=IA* (B+ (FC/ (GL.powf(FB))));
-		let TV=FH* (B+ (FE/ (GL.powf(FD))));
-		let TW=B+ (FG/ (GL.powf(FF)));
+		let TT=(IB* (C+ (EY/ (GL.powf(EX)))))* (TS/ (TS+ FA));
+		let TU=IA* (C+ (FC/ (GL.powf(FB))));
+		let TV=FH* (C+ (FE/ (GL.powf(FD))));
+		let TW=C+ (FG/ (GL.powf(FF)));
 		let TX=HX* TW;
-		let TY=B+ (FI/ GL);
+		let TY=C+ (FI/ GL);
 		let TZ=HY* TY;
 		let TAM;
 		let TAP;
@@ -2376,7 +2377,7 @@ impl Instance {
 		TAM=TX;
 		TAP=TZ;
 		}
-		let UD=parameters[72]* (B+ (parameters[102]/ (GR.powf(parameters[103]))));
+		let UD=parameters[72]* (C+ (parameters[102]/ (GR.powf(parameters[103]))));
 		KVJ=TT;
 		KVS=TU;
 		KXA=TV;
@@ -2403,12 +2404,12 @@ impl Instance {
 		}
 		let UE=JK!= A;
 		let UG=if UE{
-		let UF=JK* (B+ (parameters[279]/ (GR.powf(parameters[280]))));
+		let UF=JK* (C+ (parameters[279]/ (GR.powf(parameters[280]))));
 		UF
 		}else{
 		A
 		};
-		let UH=(2.1983327444149834e-11f64* PM)* ((B+ (parameters[225]/ Y)).ln());
+		let UH=(2.1983327444149834e-11f64* PM)* ((C+ (parameters[225]/ Y)).ln());
 		let UJ=if NB{
 		let UI=((CO* PM)* AR)/ (GR.powf(parameters[135]));
 		UI
@@ -2418,10 +2419,10 @@ impl Instance {
 		let UK=BF* (GR.powf((-parameters[286])));
 		let UL=parameters[290]* (GR.powf((-parameters[291])));
 		let UM=BJ* ((GR+ NG).powf((-parameters[288])));
-		let UN=B+ (parameters[317]/ (GR.powf(parameters[318])));
-		let UO=B+ (parameters[315]/ (GS.powf(parameters[316])));
+		let UN=C+ (parameters[317]/ (GR.powf(parameters[318])));
+		let UO=C+ (parameters[315]/ (GS.powf(parameters[316])));
 		let UP=FX* PL;
-		let UQ=B/ (GK.powf(parameters[327]));
+		let UQ=C/ (GK.powf(parameters[327]));
 		let UR=(((MV/ PL)* UN)* UO)* UQ;
 		let US=((UQ/ PL)* UN)* UO;
 		let UU=(UT== A)|| (MV== A);
@@ -2518,13 +2519,13 @@ impl Instance {
 		let VF=VE.ln();
 		let VG=(NH- (GX* VC))- (GY* VD);
 		let VH=VG.sqrt();
-		let VI=B/ UY;
-		let VJ=B/ GI;
+		let VI=C/ UY;
+		let VJ=C/ GI;
 		let VN=((NH+ VK)+ (VL* (VI- VJ)))+ (VM* ((VI* VI)- (VJ* VJ)));
 		let VO=VN.sqrt();
 		let VP=VN* VO;
 		let VR=QQ/ (VQ* UY);
-		let VS=B/ VR;
+		let VS=C/ VR;
 		let VT=VR* VR;
 		let VU=QQ/ (VQ* GI);
 		let VV=(QZ* ((VF* AW).exp()))* (((((-VG)/ BK)* VR)+ ((NH/ BK)* VU)).exp());
@@ -2545,7 +2546,7 @@ impl Instance {
 		let WC=(BK* VS)* ((VY/ VV).ln());
 		let WD=VS* ((((VY* PU)/ VV)/ VV).ln());
 		let WJ=((VF* WE).exp())/ WF;
-		let WL=MY/ (((AZ+ (I* VE))+ ((BZ* VE)* VE))- (WK* (B- VE)));
+		let WL=MY/ (((AZ+ (I* VE))+ ((BZ* VE)* VE))- (WK* (C- VE)));
 		let WM=WL< RH;
 		let AOT=if WM{
 		RH
@@ -2579,7 +2580,7 @@ impl Instance {
 		let WW=(BK* VS)* ((VY/ VV).ln());
 		let WX=VS* ((((VY* PU)/ VV)/ VV).ln());
 		let WY=((VF* WE).exp())/ WF;
-		let WZ=MY/ (((AZ+ (I* VE))+ ((BZ* VE)* VE))- (WK* (B- VE)));
+		let WZ=MY/ (((AZ+ (I* VE))+ ((BZ* VE)* VE))- (WK* (C- VE)));
 		let XA=WZ< RH;
 		let AOV=if XA{
 		RH
@@ -2587,7 +2588,7 @@ impl Instance {
 		WZ
 		};
 		let XB=WN/ (VE.powf(WP));
-		let XD=DC+ (XC* (VE- B));
+		let XD=DC+ (XC* (VE- C));
 		ZI=WU;
 		AOU=AOV;
 		APA=XB;
@@ -2619,30 +2620,30 @@ impl Instance {
 		}
 		let XG=XF* VS;
 		let XH=(AZ+ (I* VE))+ ((BZ* VE)* VE);
-		let XI=B- VE;
+		let XI=C- VE;
 		let XJ=XH- (HT* XI);
 		let XL=XK!= BK;
 		let XQ=if XL{
-		let XO=((QY* MH)/ XJ)* ((B+ (XM* UZ))+ (XN* VB));
+		let XO=((QY* MH)/ XJ)* ((C+ (XM* UZ))+ (XN* VB));
 		XO
 		}else{
-		let XP=((QY* MH)/ XJ)* ((B+ (XM* VC))+ (XN* VD));
+		let XP=((QY* MH)/ XJ)* ((C+ (XM* VC))+ (XN* VD));
 		XP
 		};
 		let YD;
 		let YF;
 		let YH;
 		if XL{
-		let XT=OV* ((B+ (XR* UZ))+ (XS* VB));
-		let XW=(B+ (XU* UZ))+ (XV* VB);
+		let XT=OV* ((C+ (XR* UZ))+ (XS* VB));
+		let XW=(C+ (XU* UZ))+ (XV* VB);
 		let XX=OX* XW;
 		let XY=OY* XW;
 		YD=XT;
 		YF=XX;
 		YH=XY;
 		}else{
-		let XZ=OV* ((B+ (XR* VC))+ (XS* VD));
-		let YA=(B+ (XU* VC))+ (XV* VD);
+		let XZ=OV* ((C+ (XR* VC))+ (XS* VD));
+		let YA=(C+ (XU* VC))+ (XV* VD);
 		let YB=OX* YA;
 		let YC=OY* YA;
 		YD=XZ;
@@ -2686,13 +2687,13 @@ impl Instance {
 		}else{
 		YP
 		};
-		let YR=(B- (A+ (J* (YM+ (((YM* YM)+ YQ).sqrt())))))- BE;
+		let YR=(C- (A+ (J* (YM+ (((YM* YM)+ YQ).sqrt())))))- BE;
 		let YV=if YT{
 		YS
 		}else{
 		YU
 		};
-		let YW=B- (J* (YR+ (((YR* YR)+ YV).sqrt())));
+		let YW=C- (J* (YR+ (((YR* YR)+ YV).sqrt())));
 		let YX=(BK* VS)* ((QP/ VV).ln());
 		let YZ=(YY/ QP).sqrt();
 		let ZA=(YY/ PN).sqrt();
@@ -2755,7 +2756,7 @@ impl Instance {
 		let BAM;
 		if ZQ{
 		let ZT=(ZR* (((CG* JW)* CO)+ JU))* (((CI* CM)* CO)+ CN);
-		let ZU=XK== B;
+		let ZU=XK== C;
 		let BAN;
 		if ZU{
 		let ZW=ZV* JQ;
@@ -2794,7 +2795,7 @@ impl Instance {
 		let BAE;
 		if AAM{
 		let AAN=(ZR* (((CH* JW)* CO)+ JU))* (((CJ* CM)* CO)+ CN);
-		let AAO=XK== B;
+		let AAO=XK== C;
 		let BAF;
 		if AAO{
 		let AAP=ZV* KA;
@@ -2834,7 +2835,7 @@ impl Instance {
 		let BDF;
 		if ABF{
 		let ABJ=(ABG* (((CG* JW)* CO)+ JU))* (((CI* CM)* CO)+ CN);
-		let ABK=B- JV;
+		let ABK=C- JV;
 		let ABM=(ABK* ABL)* CO;
 		let ABN=J* (CL+ (((CL* CL)+ 4.0000000000000015e-12f64).sqrt()));
 		let ABO=ABN< A;
@@ -2844,7 +2845,7 @@ impl Instance {
 		ABN
 		};
 		let ABQ=(-CK)/ ABP;
-		let ABR=((((((ABQ* ABL)* CO)+ B)+ CK)* ABJ)- ABJ)- LI;
+		let ABR=((((((ABQ* ABL)* CO)+ C)+ CK)* ABJ)- ABJ)- LI;
 		let ABS=(BH* ABJ)* LI;
 		let ABT=ABS> A;
 		let ABV=if ABT{
@@ -2853,7 +2854,7 @@ impl Instance {
 		let ABU=-ABS;
 		ABU
 		};
-		let ABW=CK+ B;
+		let ABW=CK+ C;
 		let ABX=ABJ* ABW;
 		let ABY=(ABX- (ABJ+ (J* (ABR+ (((ABR* ABR)+ ABV).sqrt())))))- LG;
 		let ABZ=(BH* ABX)* LG;
@@ -2871,7 +2872,7 @@ impl Instance {
 		ACG
 		};
 		let ACI=A+ (J* (ACD+ (((ACD* ACD)+ ACH).sqrt())));
-		let ACJ=(XK== A)|| (XK== B);
+		let ACJ=(XK== A)|| (XK== C);
 		let BCY;
 		if ACJ{
 		let ACK=ZV* MU;
@@ -2904,7 +2905,7 @@ impl Instance {
 		}
 		let ADA=(ABG* (((CH* JW)* CO)+ JU))* (((CJ* CM)* CO)+ CN);
 		let ADC=(ABK* ADB)* CO;
-		let ADD=((((((ABQ* ADB)* CO)+ B)+ CK)* ADA)- ADA)- LI;
+		let ADD=((((((ABQ* ADB)* CO)+ C)+ CK)* ADA)- ADA)- LI;
 		let ADE=(BH* ADA)* LI;
 		let ADF=ADE> A;
 		let ADH=if ADF{
@@ -3116,9 +3117,9 @@ impl Instance {
 		let SCX;
 		if AGZ{
 		let AHA=KF/ VR;
-		let AHB=AHA* ((((KH* AFJ)/ (AGY+ OM))+ B).ln());
-		let AHD=((VE- B)* AHC).exp();
-		let AHE=B/ AHA;
+		let AHB=AHA* ((((KH* AFJ)/ (AGY+ OM))+ C).ln());
+		let AHD=((VE- C)* AHC).exp();
+		let AHE=C/ AHA;
 		let AHF=(AHB* AHE).exp();
 		SBO=AHE;
 		SBU=AHD;
@@ -3204,9 +3205,9 @@ impl Instance {
 		let SHE;
 		if AIS{
 		let AIT=KK/ VR;
-		let AIU=AIT* ((((KM* AFJ)/ (AIR+ OM))+ B).ln());
-		let AIW=((VE- B)* AIV).exp();
-		let AIX=B/ AIT;
+		let AIU=AIT* ((((KM* AFJ)/ (AIR+ OM))+ C).ln());
+		let AIW=((VE- C)* AIV).exp();
+		let AIX=C/ AIT;
 		let AIY=(AIU* AIX).exp();
 		SFV=AIX;
 		SGB=AIW;
@@ -3218,17 +3219,17 @@ impl Instance {
 		SGS=A;
 		SHE=A;
 		}
-		let AJB=(AIZ* AGC)* (B+ (AJA* VC));
+		let AJB=(AIZ* AGC)* (C+ (AJA* VC));
 		let AJC=AGA> PL;
 		let AJL;
 		let AJN;
 		if AJC{
-		let AJF=(AJD* (AGA- PL))* (B+ (AJE* VC));
-		let AJI=(AJG* PL)* (B+ (AJH* VC));
+		let AJF=(AJD* (AGA- PL))* (C+ (AJE* VC));
+		let AJI=(AJG* PL)* (C+ (AJH* VC));
 		AJL=AJF;
 		AJN=AJI;
 		}else{
-		let AJJ=(AJG* AGA)* (B+ (AJH* VC));
+		let AJJ=(AJG* AGA)* (C+ (AJH* VC));
 		AJL=A;
 		AJN=AJJ;
 		}
@@ -3271,17 +3272,17 @@ impl Instance {
 		}else{
 		AJX
 		};
-		let AKD=(AKB* AHV)* (B+ (AKC* VC));
+		let AKD=(AKB* AHV)* (C+ (AKC* VC));
 		let AKE=AHT> PL;
 		let AKN;
 		let AKP;
 		if AKE{
-		let AKH=(AKF* (AHT- PL))* (B+ (AKG* VC));
-		let AKK=(AKI* PL)* (B+ (AKJ* VC));
+		let AKH=(AKF* (AHT- PL))* (C+ (AKG* VC));
+		let AKK=(AKI* PL)* (C+ (AKJ* VC));
 		AKN=AKH;
 		AKP=AKK;
 		}else{
-		let AKL=(AKI* AHT)* (B+ (AKJ* VC));
+		let AKL=(AKI* AHT)* (C+ (AKJ* VC));
 		AKN=A;
 		AKP=AKL;
 		}
@@ -3574,7 +3575,7 @@ impl Instance {
 		EIL=ALO;
 		EJA=ALN;
 		EJP=ALP;
-		RNJ=B;
+		RNJ=C;
 		URI=A;
 		URJ=YZR;
 		URK=ALD;
@@ -3745,9 +3746,9 @@ impl Instance {
 		let AWBE=((AOAF* GX)* AWAO)- (AWBB* GY);
 		let ANJ=ANI.sqrt();
 		let AWBF=AWBE* (ANYF/ (AWAY* ANJ));
-		let ANK=B/ ANA;
+		let ANK=C/ ANA;
 		let AWBG=product_div(AOAF,(-ANK),ANA);
-		let ANL=B/ GI;
+		let ANL=C/ GI;
 		let AWBH=AWBG* ANK;
 		let ANM=((NH+ VK)+ (VL* (ANK- ANL)))+ (VM* ((ANK* ANK)- (ANL* ANL)));
 		let AWBI=(AWBG* VL)+ ((AWBH+ AWBH)* VM);
@@ -3758,7 +3759,7 @@ impl Instance {
 		let ANP=VQ* ANA;
 		let ANQ=QQ/ ANP;
 		let AWBL=product_div((AOAF* VQ),(-ANQ),ANP);
-		let ANR=B/ ANQ;
+		let ANR=C/ ANQ;
 		let AWBM=product_div(AWBL,(-ANR),ANQ);
 		let ANS=ANQ* ANQ;
 		let AWBN=AWBL* ANQ;
@@ -3813,7 +3814,7 @@ impl Instance {
 		let AOO=AON/ WF;
 		let AWCI=((AWBD* WE)* AON)/ WF;
 		let AOP=BZ* ANG;
-		let AOQ=((AZ+ (I* ANG))+ (AOP* ANG))- (WK* (B- ANG));
+		let AOQ=((AZ+ (I* ANG))+ (AOP* ANG))- (WK* (C- ANG));
 		let AOW=AOR/ AOQ;
 		let AWCJ=product_div((((AWBC* I)+ (((AWBC* BZ)* ANG)+ (AWBC* AOP)))- ((AWBC* AWAO)* WK)),(-AOW),AOQ);
 		let AOX=AOW< RH;
@@ -3890,7 +3891,7 @@ impl Instance {
 		let APU=APT/ WF;
 		let AWBX=((AWBD* WE)* APT)/ WF;
 		let APV=BZ* ANG;
-		let APW=((AZ+ (I* ANG))+ (APV* ANG))- (WK* (B- ANG));
+		let APW=((AZ+ (I* ANG))+ (APV* ANG))- (WK* (C- ANG));
 		let APX=AOR/ APW;
 		let AWBY=product_div((((AWBC* I)+ (((AWBC* BZ)* ANG)+ (AWBC* APV)))- ((AWBC* AWAO)* WK)),(-APX),APW);
 		let APY=APX< RH;
@@ -3907,7 +3908,7 @@ impl Instance {
 		let AQA=AOY/ APZ;
 		let AWCB=product_div((AWBC* (WP* ((ANG+ (((ANG== AWBZ) as u8 as f64)* AWCA)).powf((WP- ANYF))))),(-AQA),APZ);
 		let AWCC=AWBC* XC;
-		let AQB=DC+ (XC* (ANG- B));
+		let AQB=DC+ (XC* (ANG- C));
 		ASH=APJ;
 		AYT=APO;
 		AZC=APS;
@@ -3969,21 +3970,21 @@ impl Instance {
 		let AQG=XF* ANR;
 		let AWCN=AWBM* XF;
 		let AQH=BZ* ANG;
-		let AQI=((AZ+ (I* ANG))+ (AQH* ANG))- (HT* (B- ANG));
+		let AQI=((AZ+ (I* ANG))+ (AQH* ANG))- (HT* (C- ANG));
 		let AWCO=((AWBC* I)+ (((AWBC* BZ)* ANG)+ (AWBC* AQH)))- ((AWBC* AWAO)* HT);
 		let AQJ=XK!= BK;
 		let AQQ;
 		let AOAZ;
 		if AQJ{
 		let AQK=(QY* MH)/ AQI;
-		let AQL=(B+ (XM* ANB))+ (XN* AND);
+		let AQL=(C+ (XM* ANB))+ (XN* AND);
 		let AQM=AQK* AQL;
 		let AWCQ=(product_div(AWCO,(-AQK),AQI))* AQL;
 		AQQ=AQM;
 		AOAZ=AWCQ;
 		}else{
 		let AQN=(QY* MH)/ AQI;
-		let AQO=(B+ (XM* ANE))+ (XN* ANF);
+		let AQO=(C+ (XM* ANE))+ (XN* ANF);
 		let AQP=AQN* AQO;
 		let AWCP=((product_div(AWCO,(-AQN),AQI))* AQO)+ (((AOAF* XM)+ (AWBB* XN))* AQN);
 		AQQ=AQP;
@@ -3996,8 +3997,8 @@ impl Instance {
 		let AOBB;
 		let AOBC;
 		if AQJ{
-		let AQR=OV* ((B+ (XR* ANB))+ (XS* AND));
-		let AQS=(B+ (XU* ANB))+ (XV* AND);
+		let AQR=OV* ((C+ (XR* ANB))+ (XS* AND));
+		let AQS=(C+ (XU* ANB))+ (XV* AND);
 		let AQT=OX* AQS;
 		let AQU=OY* AQS;
 		AQZ=AQR;
@@ -4007,9 +4008,9 @@ impl Instance {
 		AOBB=AWAV;
 		AOBC=AWAV;
 		}else{
-		let AQV=OV* ((B+ (XR* ANE))+ (XS* ANF));
+		let AQV=OV* ((C+ (XR* ANE))+ (XS* ANF));
 		let AWCR=((AOAF* XR)+ (AWBB* XS))* OV;
-		let AQW=(B+ (XU* ANE))+ (XV* ANF);
+		let AQW=(C+ (XU* ANE))+ (XV* ANF);
 		let AWCS=(AOAF* XU)+ (AWBB* XV);
 		let AQX=OX* AQW;
 		let AWCT=AWCS* OX;
@@ -4071,13 +4072,13 @@ impl Instance {
 		}else{
 		ARK
 		};
-		let ARM=(B- (A+ (J* (ARH+ (((ARH* ARH)+ ARL).sqrt())))))- BE;
+		let ARM=(C- (A+ (J* (ARH+ (((ARH* ARH)+ ARL).sqrt())))))- BE;
 		let ARQ=if ARO{
 		ARN
 		}else{
 		ARP
 		};
-		let ARR=B- (J* (ARM+ (((ARM* ARM)+ ARQ).sqrt())));
+		let ARR=C- (J* (ARM+ (((ARM* ARM)+ ARQ).sqrt())));
 		let ARS=BK* ANR;
 		let ART=QP/ ANY;
 		let ARU=ART.ln();
@@ -4189,7 +4190,7 @@ impl Instance {
 		let AOBS;
 		if ASU{
 		let ASV=(ZR* (((CG* JW)* CO)+ JU))* (((CI* CM)* CO)+ CN);
-		let ASW=XK== B;
+		let ASW=XK== C;
 		let BAJ;
 		let AOBT;
 		if ASW{
@@ -4238,7 +4239,7 @@ impl Instance {
 		let AOBU;
 		if ATO{
 		let ATP=(ZR* (((CH* JW)* CO)+ JU))* (((CJ* CM)* CO)+ CN);
-		let ATQ=XK== B;
+		let ATQ=XK== C;
 		let BAB;
 		let AOBV;
 		if ATQ{
@@ -4289,7 +4290,7 @@ impl Instance {
 		let AOBX;
 		if AUI{
 		let AUJ=(ABG* (((CG* JW)* CO)+ JU))* (((CI* CM)* CO)+ CN);
-		let AUK=B- JV;
+		let AUK=C- JV;
 		let AUL=(AUK* ABL)* CO;
 		let AUM=J* (CL+ (((CL* CL)+ 4.0000000000000015e-12f64).sqrt()));
 		let AUN=AUM< A;
@@ -4299,7 +4300,7 @@ impl Instance {
 		AUM
 		};
 		let AUP=(-CK)/ AUO;
-		let AUQ=((((((AUP* ABL)* CO)+ B)+ CK)* AUJ)- AUJ)- LI;
+		let AUQ=((((((AUP* ABL)* CO)+ C)+ CK)* AUJ)- AUJ)- LI;
 		let AUR=(BH* AUJ)* LI;
 		let AUS=AUR> A;
 		let AUU=if AUS{
@@ -4308,7 +4309,7 @@ impl Instance {
 		let AUT=-AUR;
 		AUT
 		};
-		let AUV=CK+ B;
+		let AUV=CK+ C;
 		let AUW=AUJ* AUV;
 		let AUX=(AUW- (AUJ+ (J* (AUQ+ (((AUQ* AUQ)+ AUU).sqrt())))))- LG;
 		let AUY=(BH* AUW)* LG;
@@ -4326,7 +4327,7 @@ impl Instance {
 		AVF
 		};
 		let AVH=A+ (J* (AVC+ (((AVC* AVC)+ AVG).sqrt())));
-		let AVI=(XK== A)|| (XK== B);
+		let AVI=(XK== A)|| (XK== C);
 		let BCU;
 		let AOBY;
 		if AVI{
@@ -4366,7 +4367,7 @@ impl Instance {
 		}
 		let AWA=(ABG* (((CH* JW)* CO)+ JU))* (((CJ* CM)* CO)+ CN);
 		let AWB=(AUK* ADB)* CO;
-		let AWC=((((((AUP* ADB)* CO)+ B)+ CK)* AWA)- AWA)- LI;
+		let AWC=((((((AUP* ADB)* CO)+ C)+ CK)* AWA)- AWA)- LI;
 		let AWD=(BH* AWA)* LI;
 		let AWE=AWD> A;
 		let AWG=if AWE{
@@ -4649,7 +4650,7 @@ impl Instance {
 		}
 		let AXT=PJ* GK;
 		let AXW=NI/ Y;
-		let AXX=B/ AXW;
+		let AXX=C/ AXW;
 		let AXZ=NI/ AXY;
 		let AYA=ALD* parameters[434];
 		let AWDV=ANYU* AWAO;
@@ -4773,9 +4774,9 @@ impl Instance {
 		let BAO=(AZY> A)|| (BAG> A);
 		let BCG;
 		if BAO{
-		let BAP=T== B;
+		let BAP=T== C;
 		let BCJ=if BAP{
-		B
+		C
 		}else{
 		A
 		};
@@ -4795,7 +4796,7 @@ impl Instance {
 		}else{
 		BCG=A;
 		}
-		let BAS=C== B;
+		let BAS=B== C;
 		let BAT=MD* (FO+ MD);
 		let BAU=BAT> A;
 		let BAV=(LP&& BAS)&& BAU;
@@ -4831,7 +4832,7 @@ impl Instance {
 		let BBF=0.16666666666666666f64+ (BBA* BBE);
 		let BBG=0.5f64+ (BBA* BBF);
 		let AWEG=(AWEF* BBG)+ (((AWEF* BBF)+ (((AWEF* BBE)+ (((AWEF* BBD)+ (((AWEF* BBC)+ ((AWEF* BBB)* BBA))* BBA))* BBA))* BBA))* BBA);
-		let BBH=B+ (BBA* BBG);
+		let BBH=C+ (BBA* BBG);
 		let BBJ=AYD/ BBH;
 		let AWEH=(AWEG).product_div((-BBJ),BBH);
 		let BBL=BBJ< BBK;
@@ -4885,7 +4886,7 @@ impl Instance {
 		AOCK=AWEB;
 		}
 		let BCK=BCG== Q;
-		let BCL=(BCG== B)|| BCK;
+		let BCL=(BCG== C)|| BCK;
 		let LKG;
 		let UDB;
 		let UDD;
@@ -4912,7 +4913,7 @@ impl Instance {
 		BDI=ALN;
 		BDV=ALO;
 		BDX=ALP;
-		BEB=B;
+		BEB=C;
 		BED=A;
 		BGL=ALZ;
 		AOCS=AVZW;
@@ -4932,7 +4933,7 @@ impl Instance {
 		BDV=BCO;
 		BDX=BCP;
 		BEB=A;
-		BED=B;
+		BED=C;
 		BGL=BCQ;
 		AOCS=AWER;
 		AOCT=AWES;
@@ -4955,7 +4956,7 @@ impl Instance {
 		let BDO=0.16666666666666666f64+ (BDJ* BDN);
 		let BDP=0.5f64+ (BDJ* BDO);
 		let AWFB=(AWFA* BDP)+ (((AWFA* BDO)+ (((AWFA* BDN)+ (((AWFA* BDM)+ (((AWFA* BDL)+ ((AWFA* BDK)* BDJ))* BDJ))* BDJ))* BDJ))* BDJ);
-		let BDQ=B+ (BDJ* BDP);
+		let BDQ=C+ (BDJ* BDP);
 		let BDR=AYD/ BDQ;
 		let AWFC=(AWFB).product_div((-BDR),BDQ);
 		let BDS=BDR< BBK;
@@ -4974,8 +4975,8 @@ impl Instance {
 		let AWFE=AOCT+ L3([AOCZ[0],AOCZ[1],0.0]);
 		let BDY=BDX+ BDT;
 		let AWFF=AOCU+ L3([AOCZ[0],AOCZ[1],0.0]);
-		let BEA=BDZ== B;
-		let BEC=BEA|| (BEB== B);
+		let BEA=BDZ== C;
+		let BEC=BEA|| (BEB== C);
 		let BHD;
 		let AODA;
 		if BEC{
@@ -4990,7 +4991,7 @@ impl Instance {
 		}else{
 		BEG
 		};
-		let BEJ=B+ (JZ* (B- (BDW/ BEI)));
+		let BEJ=C+ (JZ* (C- (BDW/ BEI)));
 		let AWFJ=AWFI* BEJ;
 		let AWFK=(((AWFE/ BEI)* AWAO)* JZ)* BEF;
 		let AWFL=L4([AWFI[0],AWFI[1],AWFI[2],0.0]);
@@ -5012,7 +5013,7 @@ impl Instance {
 		}
 		let AWFP=AWFM* BEK;
 		let BEP=((BEK* BEK)+ BEO).sqrt();
-		let BEQ=B+ JZ;
+		let BEQ=C+ JZ;
 		let BER=BEF* BEQ;
 		let AWFQ=AWFI* BEQ;
 		let AWFR=L4([AWFQ[0],AWFQ[1],AWFQ[2],0.0]);
@@ -5036,7 +5037,7 @@ impl Instance {
 		let BEY=((BES* BES)+ BEX).sqrt();
 		let BEZ=BER- (J* (BES+ BEY));
 		let AWFW=AWFR- ((AWFS+ (((AWFV+ AWFV)+ L4([AODC[0],AODC[1],AODC[2],0.0]))* (ANYF/ (AWAY* BEY))))* J);
-		let BFA=B- (JX* BDY);
+		let BFA=C- (JX* BDY);
 		let AWFX=(AWFF* JX)* AWAO;
 		let AWFY=AWFX* BFA;
 		let BFB=((BFA* BFA)+ 4.0000000000000015e-12f64).sqrt();
@@ -5066,7 +5067,7 @@ impl Instance {
 		}
 		let BFH=(BEB* AZY)+ (BED* BAG);
 		let AWGE=(ANYX* BEB)+ (ANYY* BED);
-		let BFI=BEA|| (BED== B);
+		let BFI=BEA|| (BED== C);
 		let BHE;
 		let AODE;
 		if BFI{
@@ -5074,7 +5075,7 @@ impl Instance {
 		let BFK=BFH+ (((BEB* BCZ)+ (BED* BCR))* BFJ);
 		let AWGG=AWGE+ (((ANZA* BEB)+ (ANYZ* BED))* BFJ);
 		let BFL=CB+ OM;
-		let BFM=B+ (JZ* (B- (BDW/ BFL)));
+		let BFM=C+ (JZ* (C- (BDW/ BFL)));
 		let AWGH=(((AWFE/ BFL)* AWAO)* JZ)* BFK;
 		let AWGI=L4([0.0,0.0,AWGG,0.0]);
 		let AWGJ=(L4([0.0,0.0,(AWGG* BFM),0.0])+ L4([AWGH[0],AWGH[1],0.0,AWGH[2]]))- AWGI;
@@ -5095,7 +5096,7 @@ impl Instance {
 		}
 		let AWGM=AWGJ* BFN;
 		let BFS=((BFN* BFN)+ BFR).sqrt();
-		let BFT=B+ JZ;
+		let BFT=C+ JZ;
 		let BFU=BFK* BFT;
 		let AWGN=AWGG* BFT;
 		let AWGO=L4([0.0,0.0,AWGN,0.0]);
@@ -5119,7 +5120,7 @@ impl Instance {
 		let BGB=((BFV* BFV)+ BGA).sqrt();
 		let BGC=BFU- (J* (BFV+ BGB));
 		let AWGT=AWGO- ((AWGP+ (((AWGS+ AWGS)+ L4([0.0,0.0,AODG,0.0]))* (ANYF/ (AWAY* BGB))))* J);
-		let BGD=B- (JX* BDY);
+		let BGD=C- (JX* BDY);
 		let AWGU=(AWFF* JX)* AWAO;
 		let AWGV=AWGU* BGD;
 		let BGE=((BGD* BGD)+ 4.0000000000000015e-12f64).sqrt();
@@ -5297,18 +5298,18 @@ impl Instance {
 		let AWIJ=(AWIF* BHW)+ (AWID* ZAB);
 		let ZAF=ZAD* BHW;
 		let AWIK=(AWIH* BHW)+ (AWID* ZAD);
-		let BHX=(((B+ BHV)+ BHW)+ (BHW* BHV))+ (BHW* BHW);
+		let BHX=(((C+ BHV)+ BHW)+ (BHW* BHV))+ (BHW* BHW);
 		let AWIL=((AWHZ+ AWID)+ ((AWID* BHV)+ (AWHZ* BHW)))+ (AWII+ AWII);
 		let ZAG=((YZY+ ZAB)+ ((ZAB* BHV)+ (YZY* BHW)))+ (ZAE+ ZAE);
 		let ZAH=((YZZ+ ZAD)+ ((ZAD* BHV)+ (YZZ* BHW)))+ (ZAF+ ZAF);
-		let BHY=B/ BHX;
+		let BHY=C/ BHX;
 		let AWIM=-BHY;
 		let AWIN=((AWIL).product_div(AWIM,BHX))* AWAO;
 		let ZAI=product_div(AWIM,ZAG,BHX);
 		let AWIO=-ZAI;
 		let ZAJ=product_div(AWIM,ZAH,BHX);
 		let AWIP=-ZAJ;
-		let BHZ=B- BHY;
+		let BHZ=C- BHY;
 		let AWIQ=(L4(sum_products_div_lanes(&[(&AWIN.0,ZAG),(&(((L4([AWIA,0.0,0.0,0.0])+ AWIF)+ (((AWIF* BHV)+ (AWHZ* ZAB))+ (L4([(AWIA* BHW),0.0,0.0,0.0])+ (AWID* YZY))))+ (AWIJ+ AWIJ)).0,AWIM),(&AWIL.0,AWIO)],BHX)))* AWAO;
 		let AWIR=(L4(sum_products_div_lanes(&[(&AWIN.0,ZAH),(&(((L4([AWIB,0.0,0.0,0.0])+ AWIH)+ (((AWIH* BHV)+ (AWHZ* ZAD))+ (L4([(AWIB* BHW),0.0,0.0,0.0])+ (AWID* YZZ))))+ (AWIK+ AWIK)).0,AWIM),(&AWIL.0,AWIP)],BHX)))* AWAO;
 		let ZAK=AWIO* BHU;
@@ -5317,7 +5318,7 @@ impl Instance {
 		let AWIT=(AWIR* BHU)+ L4([(AWHY* AWIP),0.0,0.0,0.0]);
 		let BIA=AZT+ (BHU* BHZ);
 		let AWIU=AWHW+ (L4([(AWHY* BHZ),0.0,0.0,0.0])+ (AWIN* BHU));
-		let BIB=B/ BHU;
+		let BIB=C/ BHU;
 		let AWIV=product_div(AWHY,(-BIB),BHU);
 		let BIC=BHT* BIB;
 		let AWIW=(AWHX* BIB)+ L4([(AWIV* BHT),0.0,0.0,0.0]);
@@ -5336,7 +5337,7 @@ impl Instance {
 		let AWJD=L4([(AWIY* BIC),0.0,0.0,0.0])+ (AWIW* ZAN);
 		let ZAR=ZAQ+ ZAQ;
 		let AWJE=AWJD+ AWJD;
-		let BIE=B+ BIC;
+		let BIE=C+ BIC;
 		let BIF=BIE+ BID;
 		let AWJF=AWIW+ AWJA;
 		let ZAS=ZAM+ ZAP;
@@ -5360,14 +5361,14 @@ impl Instance {
 		let ZBA=ZAV* BIG;
 		let AWJN=((AWJH+ (((AWJE* BIF)+ (AWJF* ZAR))+ (((AWJH+ AWJE)* BID)+ (AWJA* ZAT))))* BIG)+ (AWJI* ZAV);
 		let ZBB=ZBA+ ZBA;
-		let BIJ=(((B+ (BK* BIC))+ (Q* BID))+ (BIH* BID))/ BII;
+		let BIJ=(((C+ (BK* BIC))+ (Q* BID))+ (BIH* BID))/ BII;
 		let AWJO=-BIJ;
 		let AWJP=((((AWIW* BK)+ (AWJA* Q))+ ((AWJJ* BID)+ (AWJA* BIH)))).product_sum_div(ANYF,AWJL,AWJO,BII);
 		let AWJQ=AWJP* AWAO;
-		let ZBC=product_sum_div((((ZAM* BK)+ (ZAP* Q))+ ((ZAW* BID)+ (ZAP* BIH))),B,AWJO,ZAZ,BII);
-		let AWJR=L4(sum_products_div_lanes(&[(&((L4([(AWIX* BK),0.0,0.0,0.0])+ (AWJC* Q))+ ((L4([((AWIX* BH)* BID),0.0,0.0,0.0])+ (AWJA* ZAW))+ ((AWJC* BIH)+ (AWJJ* ZAP)))).0,B),(&AWJQ.0,ZAZ),(&(AWJM+ AWJM).0,AWJO),(&AWJL.0,(-ZBC))],BII));
-		let ZBD=product_sum_div((((ZAN* BK)+ (ZAR* Q))+ ((ZAX* BID)+ (ZAR* BIH))),B,AWJO,ZBB,BII);
-		let AWJS=L4(sum_products_div_lanes(&[(&((L4([(AWIY* BK),0.0,0.0,0.0])+ (AWJE* Q))+ ((L4([((AWIY* BH)* BID),0.0,0.0,0.0])+ (AWJA* ZAX))+ ((AWJE* BIH)+ (AWJJ* ZAR)))).0,B),(&AWJQ.0,ZBB),(&(AWJN+ AWJN).0,AWJO),(&AWJL.0,(-ZBD))],BII));
+		let ZBC=product_sum_div((((ZAM* BK)+ (ZAP* Q))+ ((ZAW* BID)+ (ZAP* BIH))),C,AWJO,ZAZ,BII);
+		let AWJR=L4(sum_products_div_lanes(&[(&((L4([(AWIX* BK),0.0,0.0,0.0])+ (AWJC* Q))+ ((L4([((AWIX* BH)* BID),0.0,0.0,0.0])+ (AWJA* ZAW))+ ((AWJC* BIH)+ (AWJJ* ZAP)))).0,C),(&AWJQ.0,ZAZ),(&(AWJM+ AWJM).0,AWJO),(&AWJL.0,(-ZBC))],BII));
+		let ZBD=product_sum_div((((ZAN* BK)+ (ZAR* Q))+ ((ZAX* BID)+ (ZAR* BIH))),C,AWJO,ZBB,BII);
+		let AWJS=L4(sum_products_div_lanes(&[(&((L4([(AWIY* BK),0.0,0.0,0.0])+ (AWJE* Q))+ ((L4([((AWIY* BH)* BID),0.0,0.0,0.0])+ (AWJA* ZAX))+ ((AWJE* BIH)+ (AWJJ* ZAR)))).0,C),(&AWJQ.0,ZBB),(&(AWJN+ AWJN).0,AWJO),(&AWJL.0,(-ZBD))],BII));
 		BIK=BIJ;
 		BIW=BIA;
 		URO=ZBC;
@@ -5382,7 +5383,7 @@ impl Instance {
 		AODR=AWIT;
 		}else{
 		let AWHV=L4([0.0,ANYN[0],ANYN[1],ANYN[2]]);
-		BIK=B;
+		BIK=C;
 		BIW=BHR;
 		URO=A;
 		URP=A;
@@ -5431,7 +5432,7 @@ impl Instance {
 		let ZBQ=(ZBE* BIS)+ (ZBO* BIM);
 		let AWKI=((((AWJY* BIR)+ (AWKC* ZBF))+ (((((AWJY* BIQ)+ (AWKB* ZBF))+ (AWKE+ (AWJW* ZBL)))* BIM)+ (AWJW* ZBN)))* BIM)+ (AWJW* ZBP);
 		let ZBR=(ZBF* BIS)+ (ZBP* BIM);
-		let BIT=B+ (BIM* BIS);
+		let BIT=C+ (BIM* BIS);
 		let BIU=AYD/ BIT;
 		let AWKJ=-BIU;
 		let AWKK=(AWKG).product_div(AWKJ,BIT);
@@ -5488,7 +5489,7 @@ impl Instance {
 		let AWKY=(AODQ* AWAO)* BJE;
 		let ZCB=(URN- URR)* BJE;
 		let AWKZ=(AODR* AWAO)* BJE;
-		let BJH=B+ (BJE* ((BJD- (B/ BJF))- BIW));
+		let BJH=C+ (BJE* ((BJD- (C/ BJF))- BIW));
 		let AWLA=AWKX* BJH;
 		let ZCC=ZCA* BJH;
 		let AWLB=AWKY* BJH;
@@ -5501,7 +5502,7 @@ impl Instance {
 		let BJI=((BJH* BJH)+ 4e-6f64).sqrt();
 		let AWLF=(AWLA+ AWLA)* (ANYF/ (AWAY* BJI));
 		let ZCG=BK* BJI;
-		let ZCH=B/ ZCG;
+		let ZCH=C/ ZCG;
 		let AWLG=((AWLF* BK)).product_div((-ZCH),ZCG);
 		let BJJ=J* (BJH+ BJI);
 		let AWLH=(AWKX+ AWLF)* J;
@@ -5534,14 +5535,14 @@ impl Instance {
 		let BJM=(BJL+ OM).sqrt();
 		let AWLL=AODV* (ANYF/ (AWAY* BJM));
 		let ZCK=BK* BJM;
-		let ZCL=B/ ZCK;
+		let ZCL=C/ ZCK;
 		let AWLM=((AWLL* BK)).product_div((-ZCL),ZCK);
 		let AWLN=(((AODW* ZCL)+ (AWLM* URU))* AWAO)* BJC;
 		let AWLO=(((AODX* ZCL)+ (AWLM* URV))* AWAO)* BJC;
 		let AWLP=AWKV+ ((AWLL* AWAO)* BJC);
 		let ZCM=URM+ ((-(URU* ZCL))* BJC);
 		let ZCN=URN+ ((-(URV* ZCL))* BJC);
-		let BJN=(((BJD+ (BJC* (B- BJM)))- RB)- BZ)- BE;
+		let BJN=(((BJD+ (BJC* (C- BJM)))- RB)- BZ)- BE;
 		let BJR=if BJP{
 		BJO
 		}else{
@@ -5557,7 +5558,7 @@ impl Instance {
 		let BJS=((BJN* BJN)+ BJR).sqrt();
 		let AWLT=(AWLQ+ AWLQ)* (ANYF/ (AWAY* BJS));
 		let ZCS=BK* BJS;
-		let ZCT=B/ ZCS;
+		let ZCT=C/ ZCS;
 		let AWLU=((AWLT* BK)).product_div((-ZCT),ZCS);
 		let AWLV=(AWLP+ AWLT)* J;
 		let ZCU=(ZCM+ (ZCP* ZCT))* J;
@@ -5568,9 +5569,9 @@ impl Instance {
 		let AWLX=L5([0.0,ANYO[0],0.0,ANYO[1],0.0]);
 		let AWLY=(AWLX).product_sum_div(ANYF,AWLV,AWLW,BJT);
 		let AWLZ=AWLY* AWAO;
-		let ZCW=product_sum_div(URK,B,AWLW,ZCU,BJT);
+		let ZCW=product_sum_div(URK,C,AWLW,ZCU,BJT);
 		let AWMA=L5(sum_products_div_lanes(&[(&AWLZ.0,ZCU),(&((AWLN+ (((AWLR+ AWLR)* ZCT)+ (AWLU* ZCP)))* J).0,AWLW),(&AWLV.0,(-ZCW))],BJT));
-		let ZCX=product_sum_div(URL,B,AWLW,ZCV,BJT);
+		let ZCX=product_sum_div(URL,C,AWLW,ZCV,BJT);
 		let AWMB=L5(sum_products_div_lanes(&[(&AWLZ.0,ZCV),(&((AWLO+ (((AWLS+ AWLS)* ZCT)+ (AWLU* ZCR)))* J).0,AWLW),(&AWLV.0,(-ZCX))],BJT));
 		let BJV=BJU* BJU;
 		let AWMC=AWLY* BJU;
@@ -5588,18 +5589,18 @@ impl Instance {
 		let AWMJ=(AWMF* BJV)+ (AWMD* ZCZ);
 		let ZDD=ZDB* BJV;
 		let AWMK=(AWMH* BJV)+ (AWMD* ZDB);
-		let BJW=(((B+ BJU)+ BJV)+ (BJV* BJU))+ (BJV* BJV);
+		let BJW=(((C+ BJU)+ BJV)+ (BJV* BJU))+ (BJV* BJV);
 		let AWML=((AWLY+ AWMD)+ ((AWMD* BJU)+ (AWLY* BJV)))+ (AWMI+ AWMI);
 		let ZDE=((ZCW+ ZCZ)+ ((ZCZ* BJU)+ (ZCW* BJV)))+ (ZDC+ ZDC);
 		let ZDF=((ZCX+ ZDB)+ ((ZDB* BJU)+ (ZCX* BJV)))+ (ZDD+ ZDD);
-		let BJX=B/ BJW;
+		let BJX=C/ BJW;
 		let AWMM=-BJX;
 		let AWMN=((AWML).product_div(AWMM,BJW))* AWAO;
 		let ZDG=product_div(AWMM,ZDE,BJW);
 		let AWMO=-ZDG;
 		let ZDH=product_div(AWMM,ZDF,BJW);
 		let AWMP=-ZDH;
-		let BJY=B- BJX;
+		let BJY=C- BJX;
 		let BJZ=BJY* BJY;
 		let AWMQ=AWMN* BJY;
 		let AWMR=AWMQ+ AWMQ;
@@ -5617,7 +5618,7 @@ impl Instance {
 		let BKE=if BKB{
 		A
 		}else{
-		B
+		C
 		};
 		let BKC=RA+ HE;
 		let BKD=BKC+ (((QT* RA).sqrt())* AXX);
@@ -5678,7 +5679,7 @@ impl Instance {
 		let BKJ=((BKI* BKI)+ 4.0000000000000007e-22f64).sqrt();
 		let AWND=(AWNA+ AWNA)* (ANYF/ (AWAY* BKJ));
 		let ZDS=BK* BKJ;
-		let ZDT=B/ ZDS;
+		let ZDT=C/ ZDS;
 		let AWNE=((AWND* BK)).product_div((-ZDT),ZDS);
 		let BKK=J* (BKI+ BKJ);
 		let AWNF=(AWMZ+ AWND)* J;
@@ -5709,7 +5710,7 @@ impl Instance {
 		AOEJ=AWNH;
 		}
 		let BKN=BKM+ OM;
-		let BKO=B/ BKN;
+		let BKO=C/ BKN;
 		let AWNJ=-BKO;
 		let AWNK=(AOEH).product_div(AWNJ,BKN);
 		let AWNL=AWNK* AWAO;
@@ -5738,7 +5739,7 @@ impl Instance {
 		USF=A;
 		AOEK=AWNI;
 		}
-		let BKT=B/ BKS;
+		let BKT=C/ BKS;
 		let AWNP=-BKT;
 		let AWNQ=(AOEK).product_div(AWNP,BKS);
 		let AWNR=AWNQ* AWAO;
@@ -5796,7 +5797,7 @@ impl Instance {
 		let BLA=((BKU* BKU)+ BKZ).sqrt();
 		let AWOG=((AWOD+ AWOD)+ AOEL)* (ANYF/ (AWAY* BLA));
 		let ZEM=BK* BLA;
-		let ZEN=B/ ZEM;
+		let ZEN=C/ ZEM;
 		let AWOH=((AWOG* BK)).product_div((-ZEN),ZEM);
 		let AWOI=(AWNQ- ((AWNU+ AWOG)* J))* BM;
 		let ZEO=(ZEA- ((ZEC+ (ZEK* ZEN))* J))* BM;
@@ -5891,7 +5892,7 @@ impl Instance {
 		let BLK=(QT* (RA- BIY)).sqrt();
 		let AWPM=(AWPJ* QT)* (ANYF/ (AWAY* BLK));
 		let ZFC=BK* BLK;
-		let ZFD=B/ ZFC;
+		let ZFD=C/ ZFC;
 		let AWPN=((AWPM* BK)).product_div((-ZFD),ZFC);
 		let ZFE=ZFA* ZFD;
 		let AWPO=((AWPK* QT)* ZFD)+ (AWPN* ZFA);
@@ -5913,11 +5914,11 @@ impl Instance {
 		let AWQB=(L5([AWPX[0],AWPX[1],0.0,AWPX[2],AWPX[3]])+ L5([0.0,AWPY[0],AWPY[1],AWPY[2],AWPY[3]]))+ (L5([0.0,AWPZ[0],AWPZ[1],AWPZ[2],AWPZ[3]])+ L5([AWQA[0],AWQA[1],0.0,AWQA[2],AWQA[3]]));
 		let BLO=(BKC+ (BLK* BLL))+ BLM;
 		let AWQC=(L5([AWPQ[0],AWPQ[1],0.0,AWPQ[2],AWPQ[3]])+ L5([0.0,AWPR[0],AWPR[1],AWPR[2],AWPR[3]]))+ L5([ANZC,0.0,0.0,0.0,0.0]);
-		let BLP=DA> B;
+		let BLP=DA> C;
 		let BLQ=if BLP{
 		A
 		}else{
-		B
+		C
 		};
 		let BLR=0.95f64* RA;
 		let AWQD=(AWKO* BLQ)* AWAO;
@@ -5936,7 +5937,7 @@ impl Instance {
 		let BLT=((BLS* BLS)+ ((3.8f64* RA)* CA)).sqrt();
 		let AWQJ=(AWQG+ AWQG)* (ANYF/ (AWAY* BLT));
 		let ZFO=BK* BLT;
-		let ZFP=B/ ZFO;
+		let ZFP=C/ ZFO;
 		let AWQK=((AWQJ* BK)).product_div((-ZFP),ZFO);
 		let BLU=BLR- (J* (BLS+ BLT));
 		let AWQL=((AWQD+ AWQJ)* J)* AWAO;
@@ -5944,7 +5945,7 @@ impl Instance {
 		let AWQM=((AWQE+ (((AWQH+ AWQH)* ZFP)+ (AWQK* ZFL)))* J)* AWAO;
 		let ZFR=-((ZFJ+ (ZFN* ZFP))* J);
 		let AWQN=((AWQF+ (((AWQI+ AWQI)* ZFP)+ (AWQK* ZFN)))* J)* AWAO;
-		let BLV=DA== B;
+		let BLV=DA== C;
 		let BLY;
 		let USK;
 		let USL;
@@ -5981,7 +5982,7 @@ impl Instance {
 		let BMA=BLZ.sqrt();
 		let AWQU=AWQR* (ANYF/ (AWAY* BMA));
 		let ZFW=BK* BMA;
-		let ZFX=B/ ZFW;
+		let ZFX=C/ ZFW;
 		let AWQV=((AWQU* BK)).product_div((-ZFX),ZFW);
 		let ZFY=ZFU* ZFX;
 		let AWQW=(AWQS* ZFX)+ (AWQV* ZFU);
@@ -6006,13 +6007,13 @@ impl Instance {
 		let BMD=((BMC* BMC)+ 4e-3f64).sqrt();
 		let AWRB=(AWQY+ AWQY)* (ANYF/ (AWAY* BMD));
 		let ZGE=BK* BMD;
-		let ZGF=B/ ZGE;
+		let ZGF=C/ ZGE;
 		let AWRC=((AWRB* BK)).product_div((-ZGF),ZGE);
 		let BME=J* (BMC+ BMD);
 		let AWRD=(AWPJ+ AWRB)* J;
 		let ZGG=(ZEY+ (ZGB* ZGF))* J;
 		let ZGH=(ZEZ+ (ZGD* ZGF))* J;
-		let BMF=B/ BME;
+		let BMF=C/ BME;
 		let AWRE=-BMF;
 		let AWRF=(AWRD).product_div(AWRE,BME);
 		let AWRG=AWRF* AWAO;
@@ -6043,14 +6044,14 @@ impl Instance {
 		let BMM=((BMH* BMH)+ BML).sqrt();
 		let AWRN=(AWRK+ AWRK)* (ANYF/ (AWAY* BMM));
 		let ZGQ=BK* BMM;
-		let ZGR=B/ ZGQ;
+		let ZGR=C/ ZGQ;
 		let AWRO=((AWRN* BK)).product_div((-ZGR),ZGQ);
 		let ZGS=(-(-((ZGK+ (ZGN* ZGR))* J)))* QT;
 		let ZGT=(-(-((ZGL+ (ZGP* ZGR))* J)))* QT;
 		let BMN=(QT* (RA- (BMG- (J* (BMH+ BMM))))).sqrt();
 		let AWRP=(((((AWRH+ AWRN)* J)* AWAO)* AWAO)* QT)* (ANYF/ (AWAY* BMN));
 		let ZGU=BK* BMN;
-		let ZGV=B/ ZGU;
+		let ZGV=C/ ZGU;
 		let AWRQ=((AWRP* BK)).product_div((-ZGV),ZGU);
 		let BMO=BLK- BMN;
 		let AWRR=AWPM- AWRP;
@@ -6072,7 +6073,7 @@ impl Instance {
 		let BMQ=(BMP* (RB- BIY)).sqrt();
 		let AWSC=(AWPJ* BMP)* (ANYF/ (AWAY* BMQ));
 		let ZHA=BK* BMQ;
-		let ZHB=B/ ZHA;
+		let ZHB=C/ ZHA;
 		let AWSD=((AWSC* BK)).product_div((-ZHB),ZHA);
 		let ZHC=ZGY* ZHB;
 		let ZHD=ZGZ* ZHB;
@@ -6086,7 +6087,7 @@ impl Instance {
 		let AWSL=AODY* ZHD;
 		let AWSM=AOEC* BMQ;
 		let AWSN=AWSC* URX;
-		let BMT=B/ (AV* AV);
+		let BMT=C/ (AV* AV);
 		let BMU=BK* (AS- RA);
 		let BMV=((BMU* (OS* BLL))* BMR)* BMT;
 		let AWSO=(((AODY* OS)* BMU)* BMR)* BMT;
@@ -6164,7 +6165,7 @@ impl Instance {
 		AOEW=AWLK;
 		}
 		let BNG=GL- AU;
-		let BNH=B/ (BNG* BNG);
+		let BNH=C/ (BNG* BNG);
 		let BNI=BK* (AS- RA);
 		let BNJ=(BNI* (OS* BLL))* BNE;
 		let AWTW=((AODY* OS)* BNI)* BNE;
@@ -6198,7 +6199,7 @@ impl Instance {
 		let AWUM=AWQR* BB;
 		let ZIE=ZFU* BB;
 		let ZIF=ZFV* BB;
-		let BNO=B+ (BB* BLZ);
+		let BNO=C+ (BB* BLZ);
 		let BNP=(HK+ (BNM* BLZ))+ (BNN* BNO);
 		let AWUN=(AWQR* BNM)+ ((AWUL* BNO)+ (AWUM* BNN));
 		let ZIG=(ZFU* BNM)+ ((ZIC* BNO)+ (ZIE* BNN));
@@ -6210,14 +6211,14 @@ impl Instance {
 		let AWUR=((AWQS* BNM)+ ((((AWKR* HL)* BNO)+ (AWUM* ZIC))+ (((AWQS* BB)* BNN)+ (AWUL* ZIE))))* BNL;
 		let AWUS=AWUN* ZIB;
 		let AWUT=((AWQT* BNM)+ ((((AWKS* HL)* BNO)+ (AWUM* ZID))+ (((AWQT* BB)* BNN)+ (AWUL* ZIF))))* BNL;
-		let BNS=B/ BNR;
+		let BNS=C/ BNR;
 		let AWUU=-BNS;
 		let AWUV=(AODZ).product_div(AWUU,BNR);
 		let AWUW=AWUV* AWAO;
 		let ZII=product_div(AWUU,URY,BNR);
 		let ZIJ=product_div(AWUU,URZ,BNR);
 		let BNT=BNR+ (MI/ PI);
-		let BNU=B/ BNT;
+		let BNU=C/ BNT;
 		let AWUX=-BNU;
 		let AWUY=(AODZ).product_div(AWUX,BNT);
 		let AWUZ=AWUY* AWAO;
@@ -6279,7 +6280,7 @@ impl Instance {
 		let AWWH=(AWWC* BOB)+ (AWVY* ZIV);
 		let ZIZ=ZIY+ ZIY;
 		let AWWI=AWWH+ AWWH;
-		let BOE=BOD== B;
+		let BOE=BOD== C;
 		let BQT;
 		let USO;
 		let USP;
@@ -6322,7 +6323,7 @@ impl Instance {
 		let AWXB=AODU* BOL;
 		let AWXC=(AODU* BOK)* BOG;
 		let ZJL=(ZBZ* BOL)+ (ZJJ* BOG);
-		let BOM=B+ (BOG* BOL);
+		let BOM=C+ (BOG* BOL);
 		let AWXD=(AWKW* BOM)+ (AWWY* BOG);
 		let AWXE=AODT* BOM;
 		let ZJM=(ZBY* BOM)+ (ZJK* BOG);
@@ -6330,7 +6331,7 @@ impl Instance {
 		let AWXG=AODU* BOM;
 		let ZJN=(ZBZ* BOM)+ (ZJL* BOG);
 		let AWXH=(L5([AWXG[0],AWXG[1],0.0,AWXG[2],AWXG[3]])+ (AWWY* ZBZ))+ ((((L5([AWXB[0],AWXB[1],0.0,AWXB[2],AWXB[3]])+ (AWWX* ZBZ))+ (L5([AWXC[0],AWXC[1],0.0,AWXC[2],AWXC[3]])+ (AWKW* ZJJ)))* BOG)+ (AWKW* ZJL));
-		let BON=B+ (BOG* BOM);
+		let BON=C+ (BOG* BOM);
 		BOU=BON;
 		USS=ZJM;
 		UST=ZJN;
@@ -6355,7 +6356,7 @@ impl Instance {
 		let ZJE=(ZBY* BOQ)+ (ZJC* BOG);
 		let AWWR=AODU* BOQ;
 		let ZJF=(ZBZ* BOQ)+ (ZJD* BOG);
-		let BOR=B+ (BOG* BOQ);
+		let BOR=C+ (BOG* BOQ);
 		let AWWS=(AWKW* BOR)+ (AWWP* BOG);
 		let AWWT=AODT* BOR;
 		let ZJG=(ZBY* BOR)+ (ZJE* BOG);
@@ -6363,7 +6364,7 @@ impl Instance {
 		let AWWV=AODU* BOR;
 		let ZJH=(ZBZ* BOR)+ (ZJF* BOG);
 		let AWWW=(L5([AWWV[0],AWWV[1],0.0,AWWV[2],AWWV[3]])+ (AWWP* ZBZ))+ ((((L5([AWWR[0],AWWR[1],0.0,AWWR[2],AWWR[3]])+ (AWWK* ZBZ))+ ((((L5([AWWN[0],AWWN[1],0.0,AWWN[2],AWWN[3]])+ (AWWJ* ZBZ))+ (L5([AWWO[0],AWWO[1],0.0,AWWO[2],AWWO[3]])+ (AWKW* ZJB)))* BOG)+ (AWKW* ZJD)))* BOG)+ (AWKW* ZJF));
-		let BOS=B+ (BOG* BOR);
+		let BOS=C+ (BOG* BOR);
 		BOU=BOS;
 		USS=ZJG;
 		UST=ZJH;
@@ -6378,7 +6379,7 @@ impl Instance {
 		AOFB=AOFE;
 		AOFC=AOFF;
 		}
-		let BOV=BOT- B;
+		let BOV=BOT- C;
 		let AWXI=AOFA* BOV;
 		let ZJO=USQ* BOV;
 		let AWXJ=(AOFB* BOV)+ (AOFA* USQ);
@@ -6389,7 +6390,7 @@ impl Instance {
 		let BOW=((BOV* BOV)+ 0.010000000000000002f64).sqrt();
 		let AWXL=(AWXI+ AWXI)* (ANYF/ (AWAY* BOW));
 		let ZJS=BK* BOW;
-		let ZJT=B/ ZJS;
+		let ZJT=C/ ZJS;
 		let AWXM=((AWXL* BK)).product_div((-ZJT),ZJS);
 		let BOX=J* (BOV+ BOW);
 		let AWXN=(AOFA+ AWXL)* J;
@@ -6424,7 +6425,7 @@ impl Instance {
 		let AWXR=(AOFH* BOF)* AWAO;
 		let ZJX=-(USV* BOF);
 		let AWXS=(AOFI* BOF)* AWAO;
-		let BPA=(B- (BOZ* BOF))- BE;
+		let BPA=(C- (BOZ* BOF))- BE;
 		let BPE=if BPC{
 		BPB
 		}else{
@@ -6440,9 +6441,9 @@ impl Instance {
 		let BPF=((BPA* BPA)+ BPE).sqrt();
 		let AWXW=(AWXT+ AWXT)* (ANYF/ (AWAY* BPF));
 		let ZKC=BK* BPF;
-		let ZKD=B/ ZKC;
+		let ZKD=C/ ZKC;
 		let AWXX=((AWXW* BK)).product_div((-ZKD),ZKC);
-		let BPG=B- (J* (BPA+ BPF));
+		let BPG=C- (J* (BPA+ BPF));
 		let AWXY=((AWXQ+ AWXW)* J)* AWAO;
 		let ZKE=-((ZJW+ (ZJZ* ZKD))* J);
 		let AWXZ=((AWXR+ (((AWXU+ AWXU)* ZKD)+ (AWXX* ZJZ)))* J)* AWAO;
@@ -6528,18 +6529,18 @@ impl Instance {
 		let AWYW=(AWYS* BPN)+ (AWYQ* ZKJ);
 		let ZKN=ZKL* BPN;
 		let AWYX=(AWYU* BPN)+ (AWYQ* ZKL);
-		let BPO=(((B+ BPM)+ BPN)+ (BPN* BPM))+ (BPN* BPN);
+		let BPO=(((C+ BPM)+ BPN)+ (BPN* BPM))+ (BPN* BPN);
 		let AWYY=((AWYM+ AWYQ)+ ((AWYQ* BPM)+ (AWYM* BPN)))+ (AWYV+ AWYV);
 		let ZKO=((ZKG+ ZKJ)+ ((ZKJ* BPM)+ (ZKG* BPN)))+ (ZKM+ ZKM);
 		let ZKP=((ZKH+ ZKL)+ ((ZKL* BPM)+ (ZKH* BPN)))+ (ZKN+ ZKN);
-		let BPP=B/ BPO;
+		let BPP=C/ BPO;
 		let AWYZ=-BPP;
 		let AWZA=((AWYY).product_div(AWYZ,BPO))* AWAO;
 		let ZKQ=product_div(AWYZ,ZKO,BPO);
 		let AWZB=-ZKQ;
 		let ZKR=product_div(AWYZ,ZKP,BPO);
 		let AWZC=-ZKR;
-		let BPQ=B- BPP;
+		let BPQ=C- BPP;
 		let AWZD=(L4(sum_products_div_lanes(&[(&AWZA.0,ZKO),(&(((L4([AWYN,0.0,0.0,0.0])+ AWYS)+ (((AWYS* BPM)+ (AWYM* ZKJ))+ (L4([(AWYN* BPN),0.0,0.0,0.0])+ (AWYQ* ZKG))))+ (AWYW+ AWYW)).0,AWYZ),(&AWYY.0,AWZB)],BPO)))* AWAO;
 		let AWZE=(L4(sum_products_div_lanes(&[(&AWZA.0,ZKP),(&(((L4([AWYO,0.0,0.0,0.0])+ AWYU)+ (((AWYU* BPM)+ (AWYM* ZKL))+ (L4([(AWYO* BPN),0.0,0.0,0.0])+ (AWYQ* ZKH))))+ (AWYX+ AWYX)).0,AWYZ),(&AWYY.0,AWZC)],BPO)))* AWAO;
 		let ZKS=AWZB* BPL;
@@ -6548,7 +6549,7 @@ impl Instance {
 		let AWZG=(AWZE* BPL)+ L4([(AWYL* AWZC),0.0,0.0,0.0]);
 		let BPR=BPI+ (BPL* BPQ);
 		let AWZH=AWYJ+ (L4([(AWYL* BPQ),0.0,0.0,0.0])+ (AWZA* BPL));
-		let BPS=B/ BPL;
+		let BPS=C/ BPL;
 		let AWZI=product_div(AWYL,(-BPS),BPL);
 		let BPT=BPK* BPS;
 		let AWZJ=(AWYK* BPS)+ L4([(AWZI* BPK),0.0,0.0,0.0]);
@@ -6567,7 +6568,7 @@ impl Instance {
 		let AWZQ=L4([(AWZL* BPT),0.0,0.0,0.0])+ (AWZJ* ZKV);
 		let ZKZ=ZKY+ ZKY;
 		let AWZR=AWZQ+ AWZQ;
-		let BPV=B+ BPT;
+		let BPV=C+ BPT;
 		let BPW=BPV+ BPU;
 		let AWZS=AWZJ+ AWZN;
 		let ZLA=ZKU+ ZKX;
@@ -6591,14 +6592,14 @@ impl Instance {
 		let ZLI=ZLD* BPX;
 		let AXAA=((AWZU+ (((AWZR* BPW)+ (AWZS* ZKZ))+ (((AWZU+ AWZR)* BPU)+ (AWZN* ZLB))))* BPX)+ (AWZV* ZLD);
 		let ZLJ=ZLI+ ZLI;
-		let BQA=(((B+ (BK* BPT))+ (Q* BPU))+ (BPY* BPU))/ BPZ;
+		let BQA=(((C+ (BK* BPT))+ (Q* BPU))+ (BPY* BPU))/ BPZ;
 		let AXAB=-BQA;
 		let AXAC=((((AWZJ* BK)+ (AWZN* Q))+ ((AWZW* BPU)+ (AWZN* BPY)))).product_sum_div(ANYF,AWZY,AXAB,BPZ);
 		let AXAD=AXAC* AWAO;
-		let ZLK=product_sum_div((((ZKU* BK)+ (ZKX* Q))+ ((ZLE* BPU)+ (ZKX* BPY))),B,AXAB,ZLH,BPZ);
-		let AXAE=L4(sum_products_div_lanes(&[(&((L4([(AWZK* BK),0.0,0.0,0.0])+ (AWZP* Q))+ ((L4([((AWZK* BH)* BPU),0.0,0.0,0.0])+ (AWZN* ZLE))+ ((AWZP* BPY)+ (AWZW* ZKX)))).0,B),(&AXAD.0,ZLH),(&(AWZZ+ AWZZ).0,AXAB),(&AWZY.0,(-ZLK))],BPZ));
-		let ZLL=product_sum_div((((ZKV* BK)+ (ZKZ* Q))+ ((ZLF* BPU)+ (ZKZ* BPY))),B,AXAB,ZLJ,BPZ);
-		let AXAF=L4(sum_products_div_lanes(&[(&((L4([(AWZL* BK),0.0,0.0,0.0])+ (AWZR* Q))+ ((L4([((AWZL* BH)* BPU),0.0,0.0,0.0])+ (AWZN* ZLF))+ ((AWZR* BPY)+ (AWZW* ZKZ)))).0,B),(&AXAD.0,ZLJ),(&(AXAA+ AXAA).0,AXAB),(&AWZY.0,(-ZLL))],BPZ));
+		let ZLK=product_sum_div((((ZKU* BK)+ (ZKX* Q))+ ((ZLE* BPU)+ (ZKX* BPY))),C,AXAB,ZLH,BPZ);
+		let AXAE=L4(sum_products_div_lanes(&[(&((L4([(AWZK* BK),0.0,0.0,0.0])+ (AWZP* Q))+ ((L4([((AWZK* BH)* BPU),0.0,0.0,0.0])+ (AWZN* ZLE))+ ((AWZP* BPY)+ (AWZW* ZKX)))).0,C),(&AXAD.0,ZLH),(&(AWZZ+ AWZZ).0,AXAB),(&AWZY.0,(-ZLK))],BPZ));
+		let ZLL=product_sum_div((((ZKV* BK)+ (ZKZ* Q))+ ((ZLF* BPU)+ (ZKZ* BPY))),C,AXAB,ZLJ,BPZ);
+		let AXAF=L4(sum_products_div_lanes(&[(&((L4([(AWZL* BK),0.0,0.0,0.0])+ (AWZR* Q))+ ((L4([((AWZL* BH)* BPU),0.0,0.0,0.0])+ (AWZN* ZLF))+ ((AWZR* BPY)+ (AWZW* ZKZ)))).0,C),(&AXAD.0,ZLJ),(&(AXAA+ AXAA).0,AXAB),(&AWZY.0,(-ZLL))],BPZ));
 		let AXAG=L5([AWZJ[0],AWZJ[1],0.0,AWZJ[2],AWZJ[3]]);
 		let AXAH=L5([AWZK,0.0,0.0,0.0,0.0]);
 		let AXAI=L5([AWZL,0.0,0.0,0.0,0.0]);
@@ -6625,7 +6626,7 @@ impl Instance {
 		let AWYG=L5([0.0,AWVD[0],AWVD[1],AWVD[2],AWVD[3]]);
 		let AWYH=L5([0.0,AWVF[0],AWVF[1],AWVF[2],AWVF[3]]);
 		let AWYI=L5([0.0,AWVH[0],AWVH[1],AWVH[2],AWVH[3]]);
-		BQC=B;
+		BQC=C;
 		BQO=BHR;
 		RRY=BNV;
 		UTC=A;
@@ -6667,7 +6668,7 @@ impl Instance {
 		let AWYC=L5([0.0,AWVD[0],AWVD[1],AWVD[2],AWVD[3]]);
 		let AWYD=L5([0.0,AWVF[0],AWVF[1],AWVF[2],AWVF[3]]);
 		let AWYE=L5([0.0,AWVH[0],AWVH[1],AWVH[2],AWVH[3]]);
-		BQB=B;
+		BQB=C;
 		BQN=BHR;
 		RRX=BNV;
 		USW=A;
@@ -6722,7 +6723,7 @@ impl Instance {
 		let ZLY=(ZLM* BQJ)+ (ZLW* BQD);
 		let AXAY=((((AXAO* BQI)+ (AXAS* ZLN))+ (((((AXAO* BQH)+ (AXAR* ZLN))+ (AXAU+ (AXAM* ZLT)))* BQD)+ (AXAM* ZLV)))* BQD)+ (AXAM* ZLX);
 		let ZLZ=(ZLN* BQJ)+ (ZLX* BQD);
-		let BQK=B+ (BQD* BQJ);
+		let BQK=C+ (BQD* BQJ);
 		let BQL=AYD/ BQK;
 		let AXAZ=-BQL;
 		let AXBA=(AXAW).product_div(AXAZ,BQK);
@@ -6954,8 +6955,8 @@ impl Instance {
 		let BRL=2.069886e-10f64/ BRA;
 		let BRM=BRA/ 2.069886e-10f64;
 		let BRN=VY/ PU;
-		let BRO=B+ BRN;
-		let BRP=B/ BRO;
+		let BRO=C+ BRN;
+		let BRP=C/ BRO;
 		let BRR=BQU+ 2.220446049250313e-8f64;
 		let BRS=BNR* BNR;
 		let BERP=AODZ* BNR;
@@ -6998,7 +6999,7 @@ impl Instance {
 		let BSB=(BSA* ((-BQN)+ AZA)).sqrt();
 		let BESE=(((AOFK* AWAO)+ BESD)* BSA)* (ANYF/ (AWAY* BSB));
 		let AFFF=BK* BSB;
-		let AFFG=B/ AFFF;
+		let AFFG=C/ AFFF;
 		let BESF=((BESE* BK)).product_div((-AFFG),AFFF);
 		let AFFH=AFFD* AFFG;
 		let BESG=(((AOFO* AMF)* BSA)* AFFG)+ (BESF* AFFD);
@@ -7034,7 +7035,7 @@ impl Instance {
 		let AOJQ;
 		if BSC{
 		let BSD=A- ((BRJ* BRD)* BRD);
-		let mut BSE=B;
+		let mut BSE=C;
 		let mut BSH=BSD;
 		let mut BUO=A;
 		let mut BVG=A;
@@ -7057,7 +7058,7 @@ impl Instance {
 		if BSO{
 		let BSY;
 		if BSP{
-		BSY=B;
+		BSY=C;
 		}else{
 		let BSZ;
 		if BSQ{
@@ -7086,7 +7087,7 @@ impl Instance {
 		break;
 		}
 		let BSW=BSV.sqrt();
-		let BSX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BST, B));
+		let BSX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BST, C));
 		BST=BSX;
 		BSV=BSW;
 		}
@@ -7101,14 +7102,14 @@ impl Instance {
 		};
 		BTF=BTE;
 		}
-		let BTG=B/ BTF;
+		let BTG=C/ BTF;
 		let BTH=(1.0000000000000001e-40f64* BTG)/ BSN;
 		let BTI=BSJ+ ((BSL* AQ)* BTG);
 		BUL=BTI;
 		BUM=BTH;
 		}else{
 		BUL=BSI;
-		BUM=B;
+		BUM=C;
 		}
 		let BTJ=(BSH- BQN)+ AZA;
 		let BTK=(BTJ< 0.1f64)&& true;
@@ -7122,7 +7123,7 @@ impl Instance {
 		if BTO{
 		let BTY;
 		if BTP{
-		BTY=B;
+		BTY=C;
 		}else{
 		let BTZ;
 		if BTQ{
@@ -7151,7 +7152,7 @@ impl Instance {
 		break;
 		}
 		let BTW=BTV.sqrt();
-		let BTX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BTT, B));
+		let BTX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BTT, C));
 		BTT=BTX;
 		BTV=BTW;
 		}
@@ -7166,14 +7167,14 @@ impl Instance {
 		};
 		BUF=BUE;
 		}
-		let BUG=B/ BUF;
+		let BUG=C/ BUF;
 		let BUH=(1.0000000000000006e-5f64* BUG)/ BTN;
 		let BUI=0.1f64- ((BTL* BZ)* BUG);
 		BUJ=BUI;
 		BUN=BUH;
 		}else{
 		BUJ=BTJ;
-		BUN=B;
+		BUN=C;
 		}
 		let BUK=(BRL* BUJ).sqrt();
 		let BUP=((BNR* BUO)+ (BUL* BQX))+ ((-BUK)* BRA);
@@ -7182,21 +7183,21 @@ impl Instance {
 		let BUS=BNR- (A* BUQ);
 		let BUT=-0f64/ BUS;
 		let BUU=BNR/ BUS;
-		let BUV=((B/ BUS)* BUP)+ (((-BUQ)/ BUS)* BUR);
+		let BUV=((C/ BUS)* BUP)+ (((-BUQ)/ BUS)* BUR);
 		let BUW=(BUV.abs())> J;
 		let BVF;
 		let BVH;
 		if BUW{
 		let BUX=BUV>= A;
 		let BUY=if BUX{
-		B
+		C
 		}else{
 		AMF
 		};
 		let BUZ=BUO- (J* BUY);
 		let BVA=((BUT* BUP)+ (BUU* BUR))>= A;
 		let BVB=if BVA{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -7215,7 +7216,7 @@ impl Instance {
 		}else{
 		BSE
 		};
-		let BVL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BVK, B));
+		let BVL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BVK, C));
 		BSE=BVL;
 		BSH=BVH;
 		BUO=BVF;
@@ -7229,7 +7230,7 @@ impl Instance {
 		let BVP=BRR> BUO;
 		let CIK;
 		if BVP{
-		CIK=B;
+		CIK=C;
 		}else{
 		let BVQ=BRR> BVO;
 		let CIL=if BVQ{
@@ -7295,7 +7296,7 @@ impl Instance {
 		let BESS=((((BESH* BRJ)* BSB)+ (BESE* AFFQ))+ ((BESH* BVU)+ (BESP* AFFI)))+ BESN;
 		let BVW=BRR> A;
 		let CIM=if BVW{
-		B
+		C
 		}else{
 		BK
 		};
@@ -7358,7 +7359,7 @@ impl Instance {
 		let BEZH=(BEZG* BRR)+ (AXBL* BWE);
 		let AFKM=(AFKK* BRR)+ (ZMI* BWE);
 		let AFKN=(AFKL* BRR)+ (ZMJ* BWE);
-		let AFKO=B/ BWF;
+		let AFKO=C/ BWF;
 		let BEZI=(BEZH).product_div((-AFKO),BWF);
 		let BEZJ=(((((((BERX* BRR)+ (AXBL* AFEV))+ ((AXBM* BRU)+ (BERW* ZMI)))* BRR)+ (AXBL* AFKK))+ ((AXBM* BWE)+ (BEZG* ZMI)))* AFKO)+ (BEZI* AFKM);
 		let BEZK=(((((((BERY* BRR)+ (AXBL* AFEW))+ ((AXBN* BRU)+ (BERW* ZMJ)))* BRR)+ (AXBL* AFKL))+ ((AXBN* BWE)+ (BEZG* ZMJ)))* AFKO)+ (BEZI* AFKN);
@@ -7374,10 +7375,10 @@ impl Instance {
 		let BEZP=-BWK;
 		let BEZQ=((BEZH* (ANYF/ BWF))).product_sum_div(ANYF,BEZO,BEZP,BWJ);
 		let BEZR=BEZQ* AWAO;
-		let AFKR=product_sum_div((AFKM* AFKO),B,BEZP,AFKP,BWJ);
-		let BEZS=L5(sum_products_div_lanes(&[(&BEZJ.0,B),(&BEZR.0,AFKP),(&(L5(sum_products_div_lanes(&[(&BEZN.0,ZMI),(&AXBM.0,BEZL),(&AXBL.0,(-AFKP))],BRR))).0,BEZP),(&BEZO.0,(-AFKR))],BWJ));
-		let AFKS=product_sum_div((AFKN* AFKO),B,BEZP,AFKQ,BWJ);
-		let BEZT=L5(sum_products_div_lanes(&[(&BEZK.0,B),(&BEZR.0,AFKQ),(&(L5(sum_products_div_lanes(&[(&BEZN.0,ZMJ),(&AXBN.0,BEZL),(&AXBL.0,(-AFKQ))],BRR))).0,BEZP),(&BEZO.0,(-AFKS))],BWJ));
+		let AFKR=product_sum_div((AFKM* AFKO),C,BEZP,AFKP,BWJ);
+		let BEZS=L5(sum_products_div_lanes(&[(&BEZJ.0,C),(&BEZR.0,AFKP),(&(L5(sum_products_div_lanes(&[(&BEZN.0,ZMI),(&AXBM.0,BEZL),(&AXBL.0,(-AFKP))],BRR))).0,BEZP),(&BEZO.0,(-AFKR))],BWJ));
+		let AFKS=product_sum_div((AFKN* AFKO),C,BEZP,AFKQ,BWJ);
+		let BEZT=L5(sum_products_div_lanes(&[(&BEZK.0,C),(&BEZR.0,AFKQ),(&(L5(sum_products_div_lanes(&[(&BEZN.0,ZMJ),(&AXBN.0,BEZL),(&AXBL.0,(-AFKQ))],BRR))).0,BEZP),(&BEZO.0,(-AFKS))],BWJ));
 		let BWL=BWK+ A;
 		let BWM=BWL< 1.0000000000000001e-7f64;
 		let CAP;
@@ -7516,16 +7517,16 @@ impl Instance {
 		let BXD=(BXB- (BXC* BWZ)).sqrt();
 		let BEWF=(BEVX- ((BEWC* BWZ)+ (BEVS* BXC)))* (ANYF/ (AWAY* BXD));
 		let AFIM=BK* BXD;
-		let AFIN=B/ AFIM;
+		let AFIN=C/ AFIM;
 		let BEWG=((BEWF* BK)).product_div((-AFIN),AFIM);
 		let BXE=((BXA+ BXD)/ BK)/ BRU;
 		let BEWH=-BXE;
 		let BEWI=(((BEVT+ BEWF)/ BK)).product_sum_div(ANYF,BERW,BEWH,BRU);
 		let BEWJ=BEWI* AWAO;
-		let AFIO=product_sum_div(((AFIC+ (AFIK* AFIN))/ BK),B,BEWH,AFEV,BRU);
-		let BEWK=L5(sum_products_div_lanes(&[(&((BEVU+ (((BEVZ- (((BEWD* BWZ)+ (BEVS* AFII))+ (((BEVN- L5([BEVQ[0],BEVQ[1],0.0,BEVQ[2],BEVQ[3]]))* BXC)+ (BEWC* AFIA))))* AFIN)+ (BEWG* AFIK)))/ BK).0,B),(&BEWJ.0,AFEV),(&BERX.0,BEWH),(&BERW.0,(-AFIO))],BRU));
-		let AFIP=product_sum_div(((AFID+ (AFIL* AFIN))/ BK),B,BEWH,AFEW,BRU);
-		let BEWL=L5(sum_products_div_lanes(&[(&((BEVV+ (((BEWB- (((BEWE* BWZ)+ (BEVS* AFIJ))+ (((BEVO- L5([BEVR[0],BEVR[1],0.0,BEVR[2],BEVR[3]]))* BXC)+ (BEWC* AFIB))))* AFIN)+ (BEWG* AFIL)))/ BK).0,B),(&BEWJ.0,AFEW),(&BERY.0,BEWH),(&BERW.0,(-AFIP))],BRU));
+		let AFIO=product_sum_div(((AFIC+ (AFIK* AFIN))/ BK),C,BEWH,AFEV,BRU);
+		let BEWK=L5(sum_products_div_lanes(&[(&((BEVU+ (((BEVZ- (((BEWD* BWZ)+ (BEVS* AFII))+ (((BEVN- L5([BEVQ[0],BEVQ[1],0.0,BEVQ[2],BEVQ[3]]))* BXC)+ (BEWC* AFIA))))* AFIN)+ (BEWG* AFIK)))/ BK).0,C),(&BEWJ.0,AFEV),(&BERX.0,BEWH),(&BERW.0,(-AFIO))],BRU));
+		let AFIP=product_sum_div(((AFID+ (AFIL* AFIN))/ BK),C,BEWH,AFEW,BRU);
+		let BEWL=L5(sum_products_div_lanes(&[(&((BEVV+ (((BEWB- (((BEWE* BWZ)+ (BEVS* AFIJ))+ (((BEVO- L5([BEVR[0],BEVR[1],0.0,BEVR[2],BEVR[3]]))* BXC)+ (BEWC* AFIB))))* AFIN)+ (BEWG* AFIL)))/ BK).0,C),(&BEWJ.0,AFEW),(&BERY.0,BEWH),(&BERW.0,(-AFIP))],BRU));
 		let BXF=BVX- 1e-9f64;
 		let BXG=BXE> BXF;
 		let BXH;
@@ -7560,7 +7561,7 @@ impl Instance {
 		let BXI=(BRI* (BWY- BXH)).sqrt();
 		let BEWS=((BEWP- AOKM)* BRI)* (ANYF/ (AWAY* BXI));
 		let AFIS=BK* BXI;
-		let AFIT=B/ AFIS;
+		let AFIT=C/ AFIS;
 		let BEWT=((BEWS* BK)).product_div((-AFIT),AFIS);
 		let AFIU=AFIQ* AFIT;
 		let BEWU=(((BEWQ- AOKN)* BRI)* AFIT)+ (BEWT* AFIQ);
@@ -7571,7 +7572,7 @@ impl Instance {
 		let BXK=(BRI* (BWY- BXJ)).sqrt();
 		let BEWW=((AOJH- AOJI)* BRI)* (ANYF/ (AWAY* BXK));
 		let AFIY=BK* BXK;
-		let AFIZ=B/ AFIY;
+		let AFIZ=C/ AFIY;
 		let BEWX=((BEWW* BK)).product_div((-AFIZ),AFIY);
 		let AFJA=AFIW* AFIZ;
 		let BEWY=(((AOJN- AOJP)* BRI)* AFIZ)+ (BEWX* AFIW);
@@ -7594,7 +7595,7 @@ impl Instance {
 		if BXL{
 		let BEXB=L5([BEWY[0],BEWY[1],0.0,BEWY[2],BEWY[3]]);
 		let BEXC=L5([BEWZ[0],BEWZ[1],0.0,BEWZ[2],BEWZ[3]]);
-		let mut BXM=B;
+		let mut BXM=C;
 		let mut BXO=BXI;
 		let mut BXP=BXK;
 		let mut BXW=BWY;
@@ -7636,7 +7637,7 @@ impl Instance {
 		let BEXH=BEXG* AWAO;
 		let AFJE=product_div(BEXF,UVS,BXO);
 		let AFJF=product_div(BEXF,UVT,BXO);
-		let BXS=(BXQ* (B- (BRN/ BRO)))/ BXP;
+		let BXS=(BXQ* (C- (BRN/ BRO)))/ BXP;
 		let BEXI=-BXS;
 		let BEXJ=(AOKW).product_div(BEXI,BXP);
 		let BEXK=BEXJ* AWAO;
@@ -7661,7 +7662,7 @@ impl Instance {
 		if BXV{
 		let BXX=BXU>= A;
 		let BXY=if BXX{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -7674,14 +7675,14 @@ impl Instance {
 		AOLJ=AOLE;
 		}else{
 		let BEXQ=BEXP* AWAO;
-		let AFJK=product_sum_div(AFJC,B,BEXO,AFJI,BXT);
-		let AFJL=product_sum_div(AFJD,B,BEXO,AFJJ,BXT);
+		let AFJK=product_sum_div(AFJC,C,BEXO,AFJI,BXT);
+		let AFJL=product_sum_div(AFJD,C,BEXO,AFJJ,BXT);
 		let BYA=BXW- BXU;
 		let BEXR=AOKX- BEXP;
 		let AFJM=UVW- AFJK;
-		let BEXS=AOLD- (L5(sum_products_div_lanes(&[(&BEXD.0,B),(&BEXQ.0,AFJI),(&BEXM.0,BEXO),(&BEXL.0,(-AFJK))],BXT)));
+		let BEXS=AOLD- (L5(sum_products_div_lanes(&[(&BEXD.0,C),(&BEXQ.0,AFJI),(&BEXM.0,BEXO),(&BEXL.0,(-AFJK))],BXT)));
 		let AFJN=UVX- AFJL;
-		let BEXT=AOLE- (L5(sum_products_div_lanes(&[(&BEXE.0,B),(&BEXQ.0,AFJJ),(&BEXN.0,BEXO),(&BEXL.0,(-AFJL))],BXT)));
+		let BEXT=AOLE- (L5(sum_products_div_lanes(&[(&BEXE.0,C),(&BEXQ.0,AFJJ),(&BEXN.0,BEXO),(&BEXL.0,(-AFJL))],BXT)));
 		BYB=BYA;
 		UWA=AFJM;
 		UWB=AFJN;
@@ -7738,16 +7739,16 @@ impl Instance {
 		let BYI=BYG.sqrt();
 		let BEYI=BEYA* (ANYF/ (AWAY* BYI));
 		let AFJU=BK* BYI;
-		let AFJV=B/ AFJU;
+		let AFJV=C/ AFJU;
 		let BEYJ=((BEYI* BK)).product_div((-AFJV),AFJU);
 		let BYJ=((BXA+ BYI)/ BK)/ BRU;
 		let BEYK=-BYJ;
 		let BEYL=(((BEVT+ BEYI)/ BK)).product_sum_div(ANYF,BERW,BEYK,BRU);
 		let BEYM=BEYL* AWAO;
-		let AFJW=product_sum_div(((AFIC+ (AFJQ* AFJV))/ BK),B,BEYK,AFEV,BRU);
-		let BEYN=L5(sum_products_div_lanes(&[(&((BEVU+ ((BEYB* AFJV)+ (BEYJ* AFJQ)))/ BK).0,B),(&BEYM.0,AFEV),(&BERX.0,BEYK),(&BERW.0,(-AFJW))],BRU));
-		let AFJX=product_sum_div(((AFID+ (AFJR* AFJV))/ BK),B,BEYK,AFEW,BRU);
-		let BEYO=L5(sum_products_div_lanes(&[(&((BEVV+ ((BEYC* AFJV)+ (BEYJ* AFJR)))/ BK).0,B),(&BEYM.0,AFEW),(&BERY.0,BEYK),(&BERW.0,(-AFJX))],BRU));
+		let AFJW=product_sum_div(((AFIC+ (AFJQ* AFJV))/ BK),C,BEYK,AFEV,BRU);
+		let BEYN=L5(sum_products_div_lanes(&[(&((BEVU+ ((BEYB* AFJV)+ (BEYJ* AFJQ)))/ BK).0,C),(&BEYM.0,AFEV),(&BERX.0,BEYK),(&BERW.0,(-AFJW))],BRU));
+		let AFJX=product_sum_div(((AFID+ (AFJR* AFJV))/ BK),C,BEYK,AFEW,BRU);
+		let BEYO=L5(sum_products_div_lanes(&[(&((BEVV+ ((BEYC* AFJV)+ (BEYJ* AFJR)))/ BK).0,C),(&BEYM.0,AFEW),(&BERY.0,BEYK),(&BERW.0,(-AFJX))],BRU));
 		BYL=BYJ;
 		UWE=AFJW;
 		UWF=AFJX;
@@ -7759,10 +7760,10 @@ impl Instance {
 		let BEYD=-BYK;
 		let BEYE=((BEVT/ BK)).product_sum_div(ANYF,BERW,BEYD,BRU);
 		let BEYF=BEYE* AWAO;
-		let AFJS=product_sum_div((AFIC/ BK),B,BEYD,AFEV,BRU);
-		let BEYG=L5(sum_products_div_lanes(&[(&(BEVU/ BK).0,B),(&BEYF.0,AFEV),(&BERX.0,BEYD),(&BERW.0,(-AFJS))],BRU));
-		let AFJT=product_sum_div((AFID/ BK),B,BEYD,AFEW,BRU);
-		let BEYH=L5(sum_products_div_lanes(&[(&(BEVV/ BK).0,B),(&BEYF.0,AFEW),(&BERY.0,BEYD),(&BERW.0,(-AFJT))],BRU));
+		let AFJS=product_sum_div((AFIC/ BK),C,BEYD,AFEV,BRU);
+		let BEYG=L5(sum_products_div_lanes(&[(&(BEVU/ BK).0,C),(&BEYF.0,AFEV),(&BERX.0,BEYD),(&BERW.0,(-AFJS))],BRU));
+		let AFJT=product_sum_div((AFID/ BK),C,BEYD,AFEW,BRU);
+		let BEYH=L5(sum_products_div_lanes(&[(&(BEVV/ BK).0,C),(&BEYF.0,AFEW),(&BERY.0,BEYD),(&BERW.0,(-AFJT))],BRU));
 		BYL=BYK;
 		UWE=AFJS;
 		UWF=AFJT;
@@ -7826,7 +7827,7 @@ impl Instance {
 		let BYR=(BRI* (BYE- BYQ)).sqrt();
 		let BEYS=((AOLK- AOLT)* BRI)* (ANYF/ (AWAY* BYR));
 		let AFKA=BK* BYR;
-		let AFKB=B/ AFKA;
+		let AFKB=C/ AFKA;
 		let BEYT=((BEYS* BK)).product_div((-AFKB),AFKA);
 		let AFKC=AFJY* AFKB;
 		let BEYU=(((AOLL- AOLU)* BRI)* AFKB)+ (BEYT* AFJY);
@@ -7837,7 +7838,7 @@ impl Instance {
 		let BYS=(BRI* (BYE- ((((BRN* BYE)+ BQN)- AZA)/ BRO))).sqrt();
 		let BEYW=((AOLK- ((((AOLK* BRN)+ AXBO)- BEXU)/ BRO))* BRI)* (ANYF/ (AWAY* BYS));
 		let AFKG=BK* BYS;
-		let AFKH=B/ AFKG;
+		let AFKH=C/ AFKG;
 		let BEYX=((BEYW* BK)).product_div((-AFKH),AFKG);
 		let AFKI=AFKE* AFKH;
 		let BEYY=(((AOLL- (((AOLL* BRN)+ L5([AOFO[0],AOFO[1],0.0,AOFO[2],AOFO[3]]))/ BRO))* BRI)* AFKH)+ (BEYX* AFKE);
@@ -7849,7 +7850,7 @@ impl Instance {
 		}else{
 		BYW
 		};
-		let BYX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BYV, B));
+		let BYX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, BYV, C));
 		BXM=BYX;
 		BXO=BYR;
 		BXP=BYS;
@@ -7929,8 +7930,8 @@ impl Instance {
 		let BESY=L5([BESU[0],BESU[1],0.0,BESU[2],BESU[3]]);
 		let BESZ=(BESA).product_sum_div(ANYF,BESY,BESX,BYY);
 		let BETA=BESZ* AWAO;
-		let AFFX=product_sum_div(AFFB,B,BESX,AFFV,BYY);
-		let AFFY=product_sum_div(AFFC,B,BESX,AFFW,BYY);
+		let AFFX=product_sum_div(AFFB,C,BESX,AFFV,BYY);
+		let AFFY=product_sum_div(AFFC,C,BESX,AFFW,BYY);
 		let BZA=BYZ* BRR;
 		let BETB=(BESZ* BRR)+ (AXBL* BYZ);
 		let AFFZ=(AFFX* BRR)+ (ZMI* BYZ);
@@ -7938,10 +7939,10 @@ impl Instance {
 		let BZB=BZA* BRR;
 		let BETC=(BETB* BRR)+ (AXBL* BZA);
 		let AFGB=(AFFZ* BRR)+ (ZMI* BZA);
-		let BETD=((((((L5(sum_products_div_lanes(&[(&BESB.0,B),(&BETA.0,AFFV),(&L5([BESV[0],BESV[1],0.0,BESV[2],BESV[3]]).0,BESX),(&BESY.0,(-AFFX))],BYY)))* BRR)+ (AXBL* AFFX))+ ((AXBM* BYZ)+ (BESZ* ZMI)))* BRR)+ (AXBL* AFFZ))+ ((AXBM* BZA)+ (BETB* ZMI));
+		let BETD=((((((L5(sum_products_div_lanes(&[(&BESB.0,C),(&BETA.0,AFFV),(&L5([BESV[0],BESV[1],0.0,BESV[2],BESV[3]]).0,BESX),(&BESY.0,(-AFFX))],BYY)))* BRR)+ (AXBL* AFFX))+ ((AXBM* BYZ)+ (BESZ* ZMI)))* BRR)+ (AXBL* AFFZ))+ ((AXBM* BZA)+ (BETB* ZMI));
 		let AFGC=(AFGA* BRR)+ (ZMJ* BZA);
-		let BETE=((((((L5(sum_products_div_lanes(&[(&BESC.0,B),(&BETA.0,AFFW),(&L5([BESW[0],BESW[1],0.0,BESW[2],BESW[3]]).0,BESX),(&BESY.0,(-AFFY))],BYY)))* BRR)+ (AXBL* AFFY))+ ((AXBN* BYZ)+ (BESZ* ZMJ)))* BRR)+ (AXBL* AFGA))+ ((AXBN* BZA)+ (BETB* ZMJ));
-		let AFGD=B/ BZB;
+		let BETE=((((((L5(sum_products_div_lanes(&[(&BESC.0,C),(&BETA.0,AFFW),(&L5([BESW[0],BESW[1],0.0,BESW[2],BESW[3]]).0,BESX),(&BESY.0,(-AFFY))],BYY)))* BRR)+ (AXBL* AFFY))+ ((AXBN* BYZ)+ (BESZ* ZMJ)))* BRR)+ (AXBL* AFGA))+ ((AXBN* BZA)+ (BETB* ZMJ));
+		let AFGD=C/ BZB;
 		let BETF=(BETC).product_div((-AFGD),BZB);
 		let BZC=BK/ BRR;
 		let BETG=-BZC;
@@ -7955,10 +7956,10 @@ impl Instance {
 		let BETK=-BZE;
 		let BETL=((BETC* (ANYF/ BZB))).product_sum_div(ANYF,BETJ,BETK,BZD);
 		let BETM=BETL* AWAO;
-		let AFGG=product_sum_div((AFGB* AFGD),B,BETK,AFGE,BZD);
-		let BETN=L5(sum_products_div_lanes(&[(&((BETD* AFGD)+ (BETF* AFGB)).0,B),(&BETM.0,AFGE),(&(L5(sum_products_div_lanes(&[(&BETI.0,ZMI),(&AXBM.0,BETG),(&AXBL.0,(-AFGE))],BRR))).0,BETK),(&BETJ.0,(-AFGG))],BZD));
-		let AFGH=product_sum_div((AFGC* AFGD),B,BETK,AFGF,BZD);
-		let BETO=L5(sum_products_div_lanes(&[(&((BETE* AFGD)+ (BETF* AFGC)).0,B),(&BETM.0,AFGF),(&(L5(sum_products_div_lanes(&[(&BETI.0,ZMJ),(&AXBN.0,BETG),(&AXBL.0,(-AFGF))],BRR))).0,BETK),(&BETJ.0,(-AFGH))],BZD));
+		let AFGG=product_sum_div((AFGB* AFGD),C,BETK,AFGE,BZD);
+		let BETN=L5(sum_products_div_lanes(&[(&((BETD* AFGD)+ (BETF* AFGB)).0,C),(&BETM.0,AFGE),(&(L5(sum_products_div_lanes(&[(&BETI.0,ZMI),(&AXBM.0,BETG),(&AXBL.0,(-AFGE))],BRR))).0,BETK),(&BETJ.0,(-AFGG))],BZD));
+		let AFGH=product_sum_div((AFGC* AFGD),C,BETK,AFGF,BZD);
+		let BETO=L5(sum_products_div_lanes(&[(&((BETE* AFGD)+ (BETF* AFGC)).0,C),(&BETM.0,AFGF),(&(L5(sum_products_div_lanes(&[(&BETI.0,ZMJ),(&AXBN.0,BETG),(&AXBL.0,(-AFGF))],BRR))).0,BETK),(&BETJ.0,(-AFGH))],BZD));
 		let BETP=L5([AOJH[0],AOJH[1],0.0,AOJH[2],AOJH[3]]);
 		let BETQ=L5([AOJN[0],AOJN[1],0.0,AOJN[2],AOJN[3]]);
 		let BETR=L5([AOJO[0],AOJO[1],0.0,AOJO[2],AOJO[3]]);
@@ -7967,7 +7968,7 @@ impl Instance {
 		let BZF=(BRI* (BWY- BZE)).sqrt();
 		let BETS=((BETP- BETL)* BRI)* (ANYF/ (AWAY* BZF));
 		let AFGK=BK* BZF;
-		let AFGL=B/ AFGK;
+		let AFGL=C/ AFGK;
 		let BETT=((BETS* BK)).product_div((-AFGL),AFGK);
 		let AFGM=AFGI* AFGL;
 		let BETU=(((BETQ- BETN)* BRI)* AFGL)+ (BETT* AFGI);
@@ -7978,7 +7979,7 @@ impl Instance {
 		let BZG=(BRI* (BWY- BXJ)).sqrt();
 		let BETW=((AOJH- AOJI)* BRI)* (ANYF/ (AWAY* BZG));
 		let AFGQ=BK* BZG;
-		let AFGR=B/ AFGQ;
+		let AFGR=C/ AFGQ;
 		let BETX=((BETW* BK)).product_div((-AFGR),AFGQ);
 		let AFGS=AFGO* AFGR;
 		let BETY=(((AOJN- AOJP)* BRI)* AFGR)+ (BETX* AFGO);
@@ -7995,7 +7996,7 @@ impl Instance {
 		if BZH{
 		let BEUB=L5([BETY[0],BETY[1],0.0,BETY[2],BETY[3]]);
 		let BEUC=L5([BETZ[0],BETZ[1],0.0,BETZ[2],BETZ[3]]);
-		let mut BZI=B;
+		let mut BZI=C;
 		let mut BZK=BZF;
 		let mut BZL=BZG;
 		let mut BZS=BWY;
@@ -8031,7 +8032,7 @@ impl Instance {
 		let BEUH=BEUG* AWAO;
 		let AFGW=product_div(BEUF,UWM,BZK);
 		let AFGX=product_div(BEUF,UWN,BZK);
-		let BZO=(BZM* (B- (BRN/ BRO)))/ BZL;
+		let BZO=(BZM* (C- (BRN/ BRO)))/ BZL;
 		let BEUI=-BZO;
 		let BEUJ=(AOMA).product_div(BEUI,BZL);
 		let BEUK=BEUJ* AWAO;
@@ -8056,7 +8057,7 @@ impl Instance {
 		if BZR{
 		let BZT=BZQ>= A;
 		let BZU=if BZT{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -8069,14 +8070,14 @@ impl Instance {
 		AOMK=AOMH;
 		}else{
 		let BEUQ=BEUP* AWAO;
-		let AFHC=product_sum_div(AFGU,B,BEUO,AFHA,BZP);
-		let AFHD=product_sum_div(AFGV,B,BEUO,AFHB,BZP);
+		let AFHC=product_sum_div(AFGU,C,BEUO,AFHA,BZP);
+		let AFHD=product_sum_div(AFGV,C,BEUO,AFHB,BZP);
 		let BZW=BZS- BZQ;
 		let BEUR=AOMB- BEUP;
 		let AFHE=UWQ- AFHC;
-		let BEUS=AOMG- (L5(sum_products_div_lanes(&[(&BEUD.0,B),(&BEUQ.0,AFHA),(&BEUM.0,BEUO),(&BEUL.0,(-AFHC))],BZP)));
+		let BEUS=AOMG- (L5(sum_products_div_lanes(&[(&BEUD.0,C),(&BEUQ.0,AFHA),(&BEUM.0,BEUO),(&BEUL.0,(-AFHC))],BZP)));
 		let AFHF=UWR- AFHD;
-		let BEUT=AOMH- (L5(sum_products_div_lanes(&[(&BEUE.0,B),(&BEUQ.0,AFHB),(&BEUN.0,BEUO),(&BEUL.0,(-AFHD))],BZP)));
+		let BEUT=AOMH- (L5(sum_products_div_lanes(&[(&BEUE.0,C),(&BEUQ.0,AFHB),(&BEUN.0,BEUO),(&BEUL.0,(-AFHD))],BZP)));
 		BZX=BZW;
 		UWS=AFHE;
 		UWT=AFHF;
@@ -8117,7 +8118,7 @@ impl Instance {
 		let CAB=(BRI* (CAA- BZE)).sqrt();
 		let BEUZ=((AOML- BETL)* BRI)* (ANYF/ (AWAY* CAB));
 		let AFHI=BK* CAB;
-		let AFHJ=B/ AFHI;
+		let AFHJ=C/ AFHI;
 		let BEVA=((BEUZ* BK)).product_div((-AFHJ),AFHI);
 		let AFHK=AFHG* AFHJ;
 		let BEVB=(((AOMM- BETN)* BRI)* AFHJ)+ (BEVA* AFHG);
@@ -8128,7 +8129,7 @@ impl Instance {
 		let CAC=(BRI* (CAA- ((((BRN* CAA)+ BQN)- AZA)/ BRO))).sqrt();
 		let BEVD=((AOML- ((((AOML* BRN)+ AXBO)- BEUU)/ BRO))* BRI)* (ANYF/ (AWAY* CAC));
 		let AFHO=BK* CAC;
-		let AFHP=B/ AFHO;
+		let AFHP=C/ AFHO;
 		let BEVE=((BEVD* BK)).product_div((-AFHP),AFHO);
 		let AFHQ=AFHM* AFHP;
 		let BEVF=(((AOMM- (((AOMM* BRN)+ L5([AOFO[0],AOFO[1],0.0,AOFO[2],AOFO[3]]))/ BRO))* BRI)* AFHP)+ (BEVE* AFHM);
@@ -8140,7 +8141,7 @@ impl Instance {
 		}else{
 		BZI
 		};
-		let CAH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CAG, B));
+		let CAH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CAG, C));
 		BZI=CAH;
 		BZK=CAB;
 		BZL=CAC;
@@ -8215,7 +8216,7 @@ impl Instance {
 		AOJV=AOKE;
 		AOJW=AOKF;
 		}
-		let mut CAU=B;
+		let mut CAU=C;
 		let mut CAW=CAI;
 		let mut CDX=CAO;
 		let mut CHV=CAO;
@@ -8306,7 +8307,7 @@ impl Instance {
 		if CBE{
 		let CBO;
 		if CBF{
-		CBO=B;
+		CBO=C;
 		}else{
 		let CBP;
 		if CBG{
@@ -8342,13 +8343,13 @@ impl Instance {
 		let CBM=CBL.sqrt();
 		let BRJM=AONG* (ANYF/ (AWAY* CBM));
 		let ANYB=BK* CBM;
-		let ANYC=B/ ANYB;
+		let ANYC=C/ ANYB;
 		let BRJN=((BRJM* BK)).product_div((-ANYC),ANYB);
 		let ANYD=UXI* ANYC;
 		let BRJO=(AONH* ANYC)+ (BRJN* UXI);
 		let ANYE=UXJ* ANYC;
 		let BRJP=(AONI* ANYC)+ (BRJN* UXJ);
-		let CBN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CBJ, B));
+		let CBN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CBJ, C));
 		CBJ=CBN;
 		CBL=CBM;
 		UXI=ANYD;
@@ -8403,7 +8404,7 @@ impl Instance {
 		AONE=AONK;
 		AONF=AONL;
 		}
-		let CBX=B/ CBW;
+		let CBX=C/ CBW;
 		let BRAE=-CBX;
 		let BRAF=(AOND).product_div(BRAE,CBW);
 		let BRAG=BRAF* AWAO;
@@ -8419,10 +8420,10 @@ impl Instance {
 		let BRAK=-CCA;
 		let BRAL=((BRAF* CBZ)).product_sum_div(ANYF,BQZV,BRAK,CBD);
 		let BRAM=BRAL* AWAO;
-		let ANQT=product_sum_div((ANQP* CBZ),B,BRAK,ANQH,CBD);
-		let BRAN=L5(sum_products_div_lanes(&[(&(BRAH* CBZ).0,B),(&BRAM.0,ANQH),(&BQZX.0,BRAK),(&BQZV.0,(-ANQT))],CBD));
-		let ANQU=product_sum_div((ANQQ* CBZ),B,BRAK,ANQJ,CBD);
-		let BRAO=L5(sum_products_div_lanes(&[(&(BRAI* CBZ).0,B),(&BRAM.0,ANQJ),(&BQZZ.0,BRAK),(&BQZV.0,(-ANQU))],CBD));
+		let ANQT=product_sum_div((ANQP* CBZ),C,BRAK,ANQH,CBD);
+		let BRAN=L5(sum_products_div_lanes(&[(&(BRAH* CBZ).0,C),(&BRAM.0,ANQH),(&BQZX.0,BRAK),(&BQZV.0,(-ANQT))],CBD));
+		let ANQU=product_sum_div((ANQQ* CBZ),C,BRAK,ANQJ,CBD);
+		let BRAO=L5(sum_products_div_lanes(&[(&(BRAI* CBZ).0,C),(&BRAM.0,ANQJ),(&BQZZ.0,BRAK),(&BQZV.0,(-ANQU))],CBD));
 		let CCB=0.1f64- (CBY* CBX);
 		let BRAP=((BRAJ* CBX)+ (BRAF* CBY))* AWAO;
 		let ANQV=-((ANQR* CBX)+ (ANQP* CBY));
@@ -8443,7 +8444,7 @@ impl Instance {
 		AONC=BRAO;
 		}else{
 		CCC=CAZ;
-		CDL=B;
+		CDL=C;
 		UXC=ANPY;
 		UXD=ANPZ;
 		UXE=A;
@@ -8460,7 +8461,7 @@ impl Instance {
 		let CCD=(BRI* CCC).sqrt();
 		let BRAS=(AOMX* BRI)* (ANYF/ (AWAY* CCD));
 		let ANQZ=BK* CCD;
-		let ANRA=B/ ANQZ;
+		let ANRA=C/ ANQZ;
 		let BRAT=((BRAS* BK)).product_div((-ANRA),ANQZ);
 		let ANRB=ANQX* ANRA;
 		let BRAU=((AOMZ* BRI)* ANRA)+ (BRAT* ANQX);
@@ -8511,7 +8512,7 @@ impl Instance {
 		if CCJ{
 		let CCT;
 		if CCK{
-		CCT=B;
+		CCT=C;
 		}else{
 		let CCU;
 		if CCL{
@@ -8547,13 +8548,13 @@ impl Instance {
 		let CCR=CCQ.sqrt();
 		let BRJI=AONV* (ANYF/ (AWAY* CCR));
 		let ANXX=BK* CCR;
-		let ANXY=B/ ANXX;
+		let ANXY=C/ ANXX;
 		let BRJJ=((BRJI* BK)).product_div((-ANXY),ANXX);
 		let ANXZ=UXS* ANXY;
 		let BRJK=(AONW* ANXY)+ (BRJJ* UXS);
 		let ANYA=UXT* ANXY;
 		let BRJL=(AONX* ANXY)+ (BRJJ* UXT);
-		let CCS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CCO, B));
+		let CCS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CCO, C));
 		CCO=CCS;
 		CCQ=CCR;
 		UXS=ANXZ;
@@ -8608,7 +8609,7 @@ impl Instance {
 		AONT=AONZ;
 		AONU=AOOA;
 		}
-		let CDC=B/ CDB;
+		let CDC=C/ CDB;
 		let BRBK=-CDC;
 		let BRBL=(AONS).product_div(BRBK,CDB);
 		let BRBM=BRBL* AWAO;
@@ -8629,10 +8630,10 @@ impl Instance {
 		let BRBT=-CDF;
 		let BRBU=((BRBL* CDE)).product_sum_div(ANYF,BRBB,BRBT,CCI);
 		let BRBV=BRBU* AWAO;
-		let ANRW=product_sum_div((ANRQ* CDE),B,BRBT,ANRI,CCI);
-		let BRBW=L5(sum_products_div_lanes(&[(&(BRBN* CDE).0,B),(&BRBV.0,ANRI),(&BRBD.0,BRBT),(&BRBB.0,(-ANRW))],CCI));
-		let ANRX=product_sum_div((ANRR* CDE),B,BRBT,ANRK,CCI);
-		let BRBX=L5(sum_products_div_lanes(&[(&(BRBO* CDE).0,B),(&BRBV.0,ANRK),(&BRBF.0,BRBT),(&BRBB.0,(-ANRX))],CCI));
+		let ANRW=product_sum_div((ANRQ* CDE),C,BRBT,ANRI,CCI);
+		let BRBW=L5(sum_products_div_lanes(&[(&(BRBN* CDE).0,C),(&BRBV.0,ANRI),(&BRBD.0,BRBT),(&BRBB.0,(-ANRW))],CCI));
+		let ANRX=product_sum_div((ANRR* CDE),C,BRBT,ANRK,CCI);
+		let BRBX=L5(sum_products_div_lanes(&[(&(BRBO* CDE).0,C),(&BRBV.0,ANRK),(&BRBF.0,BRBT),(&BRBB.0,(-ANRX))],CCI));
 		let CDG=CCE+ (CDD* CDC);
 		CDI=CDG;
 		CDN=CDF;
@@ -8648,7 +8649,7 @@ impl Instance {
 		AONR=BRBX;
 		}else{
 		CDI=CCD;
-		CDN=B;
+		CDN=C;
 		UXM=ANRB;
 		UXN=ANRC;
 		UXO=A;
@@ -8665,7 +8666,7 @@ impl Instance {
 		let CDH=(BRL* ((CAX- BQN)+ AZA)).sqrt();
 		let BRBY=(((BQZH- AXBO)+ BQZG)* BRL)* (ANYF/ (AWAY* CDH));
 		let ANSA=BK* CDH;
-		let ANSB=B/ ANSA;
+		let ANSB=C/ ANSA;
 		let BRBZ=((BRBY* BK)).product_div((-ANSB),ANSA);
 		let ANSC=ANRY* ANSB;
 		let BRCA=(((BQZI- BQZE)* BRL)* ANSB)+ (BRBZ* ANRY);
@@ -8804,10 +8805,10 @@ impl Instance {
 		let BRFB=ANZB* AWAO;
 		let ANUY=ANTO- ANTM;
 		let ANUZ=ANTP- ANTN;
-		let CEO=(((CEK- B)- CEJ)+ CEN).sqrt();
+		let CEO=(((CEK- C)- CEJ)+ CEN).sqrt();
 		let BRFC=(BRDX- BRDU)* (ANYF/ (AWAY* CEO));
 		let ANVA=BK* CEO;
-		let ANVB=B/ ANVA;
+		let ANVB=C/ ANVA;
 		let BRFD=((BRFC* BK)).product_div((-ANVB),ANVA);
 		let ANVC=ANUY* ANVB;
 		let ANVD=ANUZ* ANVB;
@@ -8889,10 +8890,10 @@ impl Instance {
 		let CFB=CIB* CFA;
 		let ANUE=(ANTO- ANTM)+ (ANUC* CIB);
 		let ANUF=(ANTP- ANTN)+ (ANUD* CIB);
-		let CFC=((((CEK- B)- CEJ)+ CEN)+ CFB).sqrt();
+		let CFC=((((CEK- C)- CEJ)+ CEN)+ CFB).sqrt();
 		let BREH=((BRDX- BRDU)+ (L5([(ANZF* CFA),0.0,0.0,0.0,0.0])+ ((BREB- BREE)* CIB)))* (ANYF/ (AWAY* CFC));
 		let ANUG=BK* CFC;
-		let ANUH=B/ ANUG;
+		let ANUH=C/ ANUG;
 		let BREI=((BREH* BK)).product_div((-ANUH),ANUG);
 		let ANUI=ANUE* ANUH;
 		let ANUJ=ANUF* ANUH;
@@ -9011,7 +9012,7 @@ impl Instance {
 		if CFT{
 		let CGD;
 		if CFU{
-		CGD=B;
+		CGD=C;
 		}else{
 		let CGE;
 		if CFV{
@@ -9047,13 +9048,13 @@ impl Instance {
 		let CGB=CGA.sqrt();
 		let BRJE=AOOT* (ANYF/ (AWAY* CGB));
 		let ANXT=BK* CGB;
-		let ANXU=B/ ANXT;
+		let ANXU=C/ ANXT;
 		let BRJF=((BRJE* BK)).product_div((-ANXU),ANXT);
 		let ANXV=UYI* ANXU;
 		let BRJG=(AOOU* ANXU)+ (BRJF* UYI);
 		let ANXW=UYJ* ANXU;
 		let BRJH=(AOOV* ANXU)+ (BRJF* UYJ);
-		let CGC=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CFY, B));
+		let CGC=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CFY, C));
 		CFY=CGC;
 		CGA=CGB;
 		UYI=ANXV;
@@ -9108,7 +9109,7 @@ impl Instance {
 		AOOR=AOOX;
 		AOOS=AOOY;
 		}
-		let CGM=B/ CGL;
+		let CGM=C/ CGL;
 		let BRGJ=-CGM;
 		let BRGK=(AOOQ).product_div(BRGJ,CGL);
 		let BRGL=BRGK* AWAO;
@@ -9129,10 +9130,10 @@ impl Instance {
 		let BRGS=-CGP;
 		let BRGT=((BRGK* CGO)).product_sum_div(ANYF,BRGC,BRGS,CFS);
 		let BRGU=BRGT* AWAO;
-		let ANWL=product_sum_div((ANWF* CGO),B,BRGS,ANVY,CFS);
-		let BRGV=L5(sum_products_div_lanes(&[(&(BRGM* CGO).0,B),(&BRGU.0,ANVY),(&BRGD.0,BRGS),(&BRGC.0,(-ANWL))],CFS));
-		let ANWM=product_sum_div((ANWG* CGO),B,BRGS,ANVZ,CFS);
-		let BRGW=L5(sum_products_div_lanes(&[(&(BRGN* CGO).0,B),(&BRGU.0,ANVZ),(&BRGE.0,BRGS),(&BRGC.0,(-ANWM))],CFS));
+		let ANWL=product_sum_div((ANWF* CGO),C,BRGS,ANVY,CFS);
+		let BRGV=L5(sum_products_div_lanes(&[(&(BRGM* CGO).0,C),(&BRGU.0,ANVY),(&BRGD.0,BRGS),(&BRGC.0,(-ANWL))],CFS));
+		let ANWM=product_sum_div((ANWG* CGO),C,BRGS,ANVZ,CFS);
+		let BRGW=L5(sum_products_div_lanes(&[(&(BRGN* CGO).0,C),(&BRGU.0,ANVZ),(&BRGE.0,BRGS),(&BRGC.0,(-ANWM))],CFS));
 		let CGQ=-0.12f64+ (CGN* CGM);
 		CGR=CGQ;
 		CGU=CGP;
@@ -9148,7 +9149,7 @@ impl Instance {
 		AOOP=BRGW;
 		}else{
 		CGR=CEB;
-		CGU=B;
+		CGU=C;
 		UYC=ANTE;
 		UYD=ANTF;
 		UYE=A;
@@ -9180,7 +9181,7 @@ impl Instance {
 		let BRHE=BRDR* CAY;
 		let ANWT=ANTI* CAY;
 		let ANWU=ANTJ* CAY;
-		let CGX=B- (CGW* CGU);
+		let CGX=C- (CGW* CGU);
 		let BRHF=((BRHE* CGU)+ (AOOL* CGW))* AWAO;
 		let ANWV=-((ANWT* CGU)+ (UYE* CGW));
 		let BRHG=((((BRDS* CAY)* CGU)+ (AOOL* ANWT))+ ((AOOO* CGW)+ (BRHE* UYE)))* AWAO;
@@ -9226,34 +9227,34 @@ impl Instance {
 		let BRID=-CHG;
 		let BRIE=(BRHX).product_sum_div(ANYF,BRIA,BRID,CHF);
 		let BRIF=BRIE* AWAO;
-		let ANXH=product_sum_div(ANXD,B,BRID,ANXF,CHF);
-		let BRIG=L5(sum_products_div_lanes(&[(&BRHY.0,B),(&BRIF.0,ANXF),(&BRIB.0,BRID),(&BRIA.0,(-ANXH))],CHF));
-		let ANXI=product_sum_div(ANXE,B,BRID,ANXG,CHF);
-		let BRIH=L5(sum_products_div_lanes(&[(&BRHZ.0,B),(&BRIF.0,ANXG),(&BRIC.0,BRID),(&BRIA.0,(-ANXI))],CHF));
+		let ANXH=product_sum_div(ANXD,C,BRID,ANXF,CHF);
+		let BRIG=L5(sum_products_div_lanes(&[(&BRHY.0,C),(&BRIF.0,ANXF),(&BRIB.0,BRID),(&BRIA.0,(-ANXH))],CHF));
+		let ANXI=product_sum_div(ANXE,C,BRID,ANXG,CHF);
+		let BRIH=L5(sum_products_div_lanes(&[(&BRHZ.0,C),(&BRIF.0,ANXG),(&BRIC.0,BRID),(&BRIA.0,(-ANXI))],CHF));
 		let CHH=(-CGX)/ CHF;
 		let BRII=-CHH;
 		let BRIJ=((BRHF* AWAO)).product_sum_div(ANYF,BRIA,BRII,CHF);
 		let BRIK=BRIJ* AWAO;
-		let ANXJ=product_sum_div((ANWV* AMF),B,BRII,ANXF,CHF);
-		let BRIL=L5(sum_products_div_lanes(&[(&(BRHG* AMF).0,B),(&BRIK.0,ANXF),(&BRIB.0,BRII),(&BRIA.0,(-ANXJ))],CHF));
-		let ANXK=product_sum_div((ANWW* AMF),B,BRII,ANXG,CHF);
-		let BRIM=L5(sum_products_div_lanes(&[(&(BRHH* AMF).0,B),(&BRIK.0,ANXG),(&BRIC.0,BRII),(&BRIA.0,(-ANXK))],CHF));
+		let ANXJ=product_sum_div((ANWV* AMF),C,BRII,ANXF,CHF);
+		let BRIL=L5(sum_products_div_lanes(&[(&(BRHG* AMF).0,C),(&BRIK.0,ANXF),(&BRIB.0,BRII),(&BRIA.0,(-ANXJ))],CHF));
+		let ANXK=product_sum_div((ANWW* AMF),C,BRII,ANXG,CHF);
+		let BRIM=L5(sum_products_div_lanes(&[(&(BRHH* AMF).0,C),(&BRIK.0,ANXG),(&BRIC.0,BRII),(&BRIA.0,(-ANXK))],CHF));
 		let CHI=(-CHC)/ CHF;
 		let BRIN=-CHI;
 		let BRIO=((BRHU* AWAO)).product_sum_div(ANYF,BRIA,BRIN,CHF);
 		let BRIP=BRIO* AWAO;
-		let ANXL=product_sum_div((ANXB* AMF),B,BRIN,ANXF,CHF);
-		let BRIQ=L5(sum_products_div_lanes(&[(&(BRHV* AMF).0,B),(&BRIP.0,ANXF),(&BRIB.0,BRIN),(&BRIA.0,(-ANXL))],CHF));
-		let ANXM=product_sum_div((ANXC* AMF),B,BRIN,ANXG,CHF);
-		let BRIR=L5(sum_products_div_lanes(&[(&(BRHW* AMF).0,B),(&BRIP.0,ANXG),(&BRIC.0,BRIN),(&BRIA.0,(-ANXM))],CHF));
+		let ANXL=product_sum_div((ANXB* AMF),C,BRIN,ANXF,CHF);
+		let BRIQ=L5(sum_products_div_lanes(&[(&(BRHV* AMF).0,C),(&BRIP.0,ANXF),(&BRIB.0,BRIN),(&BRIA.0,(-ANXL))],CHF));
+		let ANXM=product_sum_div((ANXC* AMF),C,BRIN,ANXG,CHF);
+		let BRIR=L5(sum_products_div_lanes(&[(&(BRHW* AMF).0,C),(&BRIP.0,ANXG),(&BRIC.0,BRIN),(&BRIA.0,(-ANXM))],CHF));
 		let CHJ=CGV/ CHF;
 		let BRIS=-CHJ;
 		let BRIT=(BRHB).product_sum_div(ANYF,BRIA,BRIS,CHF);
 		let BRIU=BRIT* AWAO;
-		let ANXN=product_sum_div(ANWR,B,BRIS,ANXF,CHF);
-		let BRIV=L5(sum_products_div_lanes(&[(&BRHC.0,B),(&BRIU.0,ANXF),(&BRIB.0,BRIS),(&BRIA.0,(-ANXN))],CHF));
-		let ANXO=product_sum_div(ANWS,B,BRIS,ANXG,CHF);
-		let BRIW=L5(sum_products_div_lanes(&[(&BRHD.0,B),(&BRIU.0,ANXG),(&BRIC.0,BRIS),(&BRIA.0,(-ANXO))],CHF));
+		let ANXN=product_sum_div(ANWR,C,BRIS,ANXF,CHF);
+		let BRIV=L5(sum_products_div_lanes(&[(&BRHC.0,C),(&BRIU.0,ANXF),(&BRIB.0,BRIS),(&BRIA.0,(-ANXN))],CHF));
+		let ANXO=product_sum_div(ANWS,C,BRIS,ANXG,CHF);
+		let BRIW=L5(sum_products_div_lanes(&[(&BRHD.0,C),(&BRIU.0,ANXG),(&BRIC.0,BRIS),(&BRIA.0,(-ANXO))],CHF));
 		let CHK=(CHI* CGS)+ (CHJ* CHA);
 		let BRIX=((BRIO* CGS)+ (BRGX* CHI))+ ((BRIT* CHA)+ (BRHO* CHJ));
 		let CHL=(CHK.abs())> J;
@@ -9272,14 +9273,14 @@ impl Instance {
 		if CHL{
 		let CHM=((CHG* CGS)+ (CHH* CHA))>= A;
 		let CHN=if CHM{
-		B
+		C
 		}else{
 		AMF
 		};
 		let CHO=CDX- (J* CHN);
 		let CHP=CHK>= A;
 		let CHQ=if CHP{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -9328,7 +9329,7 @@ impl Instance {
 		}else{
 		CAU
 		};
-		let CIA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CHZ, B));
+		let CIA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CHZ, C));
 		CAU=CIA;
 		CAW=CHW;
 		CDX=CHU;
@@ -9403,7 +9404,7 @@ impl Instance {
 		if CIU{
 		let CJE;
 		if CIV{
-		CJE=B;
+		CJE=C;
 		}else{
 		let CJF;
 		if CIW{
@@ -9439,13 +9440,13 @@ impl Instance {
 		let CJC=CJB.sqrt();
 		let BQZA=AOPO* (ANYF/ (AWAY* CJC));
 		let ANPS=BK* CJC;
-		let ANPT=B/ ANPS;
+		let ANPT=C/ ANPS;
 		let BQZB=((BQZA* BK)).product_div((-ANPT),ANPS);
 		let ANPU=UYW* ANPT;
 		let BQZC=(AOPP* ANPT)+ (BQZB* UYW);
 		let ANPV=UYX* ANPT;
 		let BQZD=(AOPQ* ANPT)+ (BQZB* UYX);
-		let CJD=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CIZ, B));
+		let CJD=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CIZ, C));
 		CIZ=CJD;
 		CJB=CJC;
 		UYW=ANPU;
@@ -9500,7 +9501,7 @@ impl Instance {
 		AOPM=AOPS;
 		AOPN=AOPT;
 		}
-		let CJN=B/ CJM;
+		let CJN=C/ CJM;
 		let BFAL=-CJN;
 		let BFAM=(AOPL).product_div(BFAL,CJM);
 		let BFAN=BFAM* AWAO;
@@ -9610,10 +9611,10 @@ impl Instance {
 		let BFEZ=ANZB* AWAO;
 		let AFPY=AFLU- AFLS;
 		let AFPZ=AFLV- AFLT;
-		let CJY=(((CJV- B)- CJU)+ CEN).sqrt();
+		let CJY=(((CJV- C)- CJU)+ CEN).sqrt();
 		let BFFA=(BFBB- BFAY)* (ANYF/ (AWAY* CJY));
 		let AFQA=BK* CJY;
-		let AFQB=B/ AFQA;
+		let AFQB=C/ AFQA;
 		let BFFB=((BFFA* BK)).product_div((-AFQB),AFQA);
 		let AFQC=AFPY* AFQB;
 		let AFQD=AFPZ* AFQB;
@@ -9628,7 +9629,7 @@ impl Instance {
 		let CKA=(BRI* (CJQ- CJS)).sqrt();
 		let BFFF=((AOPF- BFAV)* BRI)* (ANYF/ (AWAY* CKA));
 		let AFQI=BK* CKA;
-		let AFQJ=B/ AFQI;
+		let AFQJ=C/ AFQI;
 		let BFFG=((BFFF* BK)).product_div((-AFQJ),AFQI);
 		let AFQK=AFQG* AFQJ;
 		let BFFH=(((AOPG- BFAW)* BRI)* AFQJ)+ (BFFG* AFQG);
@@ -9673,7 +9674,7 @@ impl Instance {
 		if CKG{
 		let CKQ;
 		if CKH{
-		CKQ=B;
+		CKQ=C;
 		}else{
 		let CKR;
 		if CKI{
@@ -9709,13 +9710,13 @@ impl Instance {
 		let CKO=CKN.sqrt();
 		let BQYW=AOQS* (ANYF/ (AWAY* CKO));
 		let ANPO=BK* CKO;
-		let ANPP=B/ ANPO;
+		let ANPP=C/ ANPO;
 		let BQYX=((BQYW* BK)).product_div((-ANPP),ANPO);
 		let ANPQ=UZQ* ANPP;
 		let BQYY=(AOQT* ANPP)+ (BQYX* UZQ);
 		let ANPR=UZR* ANPP;
 		let BQYZ=(AOQU* ANPP)+ (BQYX* UZR);
-		let CKP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CKL, B));
+		let CKP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CKL, C));
 		CKL=CKP;
 		CKN=CKO;
 		UZQ=ANPQ;
@@ -9770,7 +9771,7 @@ impl Instance {
 		AOQQ=AOQW;
 		AOQR=AOQX;
 		}
-		let CKZ=B/ CKY;
+		let CKZ=C/ CKY;
 		let BFFX=-CKZ;
 		let BFFY=(AOQP).product_div(BFFX,CKY);
 		let BFFZ=BFFY* AWAO;
@@ -9805,7 +9806,7 @@ impl Instance {
 		let CLC=(BRL* ((CJS- BQN)+ AZA)).sqrt();
 		let BFGE=(((BFAV- AXBO)+ BFAU)* BRL)* (ANYF/ (AWAY* CLC));
 		let AFRH=BK* CLC;
-		let AFRI=B/ AFRH;
+		let AFRI=C/ AFRH;
 		let BFGF=((BFGE* BK)).product_div((-AFRI),AFRH);
 		let CLE=CLD* BQX;
 		let BFGG=AOQM* BQX;
@@ -9872,7 +9873,7 @@ impl Instance {
 		let AFMD=AFMB* CLG;
 		let CLK=(CLG* CLJ).exp();
 		let BFBG=(L5([(BFBE* CLJ),0.0,0.0,0.0,0.0])+ ((AOPF- AXBO)* CLG))* CLK;
-		let CLL=(CJV- B)- CJU;
+		let CLL=(CJV- C)- CJU;
 		let BFBH=BFBB- BFAY;
 		let AFME=AFLU- AFLS;
 		let BFBI=BFBC- BFAZ;
@@ -9894,7 +9895,7 @@ impl Instance {
 		let CLO=((CLL+ CLN)+ CEN).sqrt();
 		let BFBP=(BFBH+ BFBM)* (ANYF/ (AWAY* CLO));
 		let AFMM=BK* CLO;
-		let AFMN=B/ AFMM;
+		let AFMN=C/ AFMM;
 		let BFBQ=((BFBP* BK)).product_div((-AFMN),AFMM);
 		let AFMO=AFMK* AFMN;
 		let AFMP=AFML* AFMN;
@@ -9941,14 +9942,14 @@ impl Instance {
 		let CLR=(CLQ+ CLN).sqrt();
 		let BFBX=(BFBU+ BFBM)* (ANYF/ (AWAY* CLR));
 		let AFMW=BK* CLR;
-		let AFMX=B/ AFMW;
+		let AFMX=C/ AFMW;
 		let BFBY=((BFBX* BK)).product_div((-AFMX),AFMW);
 		let AFMY=AFMU* AFMX;
 		let AFMZ=AFMV* AFMX;
 		let CLS=CLQ.sqrt();
 		let BFBZ=BFBU* (ANYF/ (AWAY* CLS));
 		let AFNA=BK* CLS;
-		let AFNB=B/ AFNA;
+		let AFNB=C/ AFNA;
 		let BFCA=((BFBZ* BK)).product_div((-AFNB),AFNA);
 		let AFNC=AFMS* AFNB;
 		let AFND=AFMT* AFNB;
@@ -9961,7 +9962,7 @@ impl Instance {
 		let CLU=(CLL+ CEN).sqrt();
 		let BFCE=BFBH* (ANYF/ (AWAY* CLU));
 		let AFNG=BK* CLU;
-		let AFNH=B/ AFNG;
+		let AFNH=C/ AFNG;
 		let BFCF=((BFCE* BK)).product_div((-AFNH),AFNG);
 		let AFNI=AFME* AFNH;
 		let AFNJ=AFMF* AFNH;
@@ -10033,7 +10034,7 @@ impl Instance {
 		if CMB{
 		let CML;
 		if CMC{
-		CML=B;
+		CML=C;
 		}else{
 		let CMM;
 		if CMD{
@@ -10069,13 +10070,13 @@ impl Instance {
 		let CMJ=CMI.sqrt();
 		let BFEV=AORK* (ANYF/ (AWAY* CMJ));
 		let AFPU=BK* CMJ;
-		let AFPV=B/ AFPU;
+		let AFPV=C/ AFPU;
 		let BFEW=((BFEV* BK)).product_div((-AFPV),AFPU);
 		let AFPW=VAC* AFPV;
 		let BFEX=(AORL* AFPV)+ (BFEW* VAC);
 		let AFPX=VAD* AFPV;
 		let BFEY=(AORM* AFPV)+ (BFEW* VAD);
-		let CMK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CMG, B));
+		let CMK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CMG, C));
 		CMG=CMK;
 		CMI=CMJ;
 		VAC=AFPW;
@@ -10130,7 +10131,7 @@ impl Instance {
 		AORI=AORO;
 		AORJ=AORP;
 		}
-		let CMU=B/ CMT;
+		let CMU=C/ CMT;
 		let BFDD=-CMU;
 		let BFDE=(AORH).product_div(BFDD,CMT);
 		let BFDF=BFDE* AWAO;
@@ -10165,7 +10166,7 @@ impl Instance {
 		let CMY=(BRI* CMX).sqrt();
 		let BFDK=(AORE* BRI)* (ANYF/ (AWAY* CMY));
 		let AFOL=BK* CMY;
-		let AFOM=B/ AFOL;
+		let AFOM=C/ AFOL;
 		let BFDL=((BFDK* BK)).product_div((-AFOM),AFOL);
 		let AFON=AFOJ* AFOM;
 		let BFDM=((AORF* BRI)* AFOM)+ (BFDL* AFOJ);
@@ -10210,7 +10211,7 @@ impl Instance {
 		if CNE{
 		let CNO;
 		if CNF{
-		CNO=B;
+		CNO=C;
 		}else{
 		let CNP;
 		if CNG{
@@ -10246,13 +10247,13 @@ impl Instance {
 		let CNM=CNL.sqrt();
 		let BFER=AORW* (ANYF/ (AWAY* CNM));
 		let AFPQ=BK* CNM;
-		let AFPR=B/ AFPQ;
+		let AFPR=C/ AFPQ;
 		let BFES=((BFER* BK)).product_div((-AFPR),AFPQ);
 		let AFPS=VAK* AFPR;
 		let BFET=(AORX* AFPR)+ (BFES* VAK);
 		let AFPT=VAL* AFPR;
 		let BFEU=(AORY* AFPR)+ (BFES* VAL);
-		let CNN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CNJ, B));
+		let CNN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CNJ, C));
 		CNJ=CNN;
 		CNL=CNM;
 		VAK=AFPS;
@@ -10307,7 +10308,7 @@ impl Instance {
 		AORU=AOSA;
 		AORV=AOSB;
 		}
-		let CNX=B/ CNW;
+		let CNX=C/ CNW;
 		let BFEC=-CNX;
 		let BFED=(AORT).product_div(BFEC,CNW);
 		let BFEE=BFED* AWAO;
@@ -10342,7 +10343,7 @@ impl Instance {
 		let COA=(BRL* ((CJS- BQN)+ AZA)).sqrt();
 		let BFEJ=(((BFAV- AXBO)+ BFAU)* BRL)* (ANYF/ (AWAY* COA));
 		let AFPK=BK* COA;
-		let AFPL=B/ AFPK;
+		let AFPL=C/ AFPK;
 		let BFEK=((BFEJ* BK)).product_div((-AFPL),AFPK);
 		let COC=COB* BQX;
 		let BFEL=AORQ* BQX;
@@ -10442,7 +10443,7 @@ impl Instance {
 		if COJ{
 		let COT;
 		if COK{
-		COT=B;
+		COT=C;
 		}else{
 		let COU;
 		if COL{
@@ -10478,13 +10479,13 @@ impl Instance {
 		let COR=COQ.sqrt();
 		let BQYS=AOSI* (ANYF/ (AWAY* COR));
 		let ANPK=BK* COR;
-		let ANPL=B/ ANPK;
+		let ANPL=C/ ANPK;
 		let BQYT=((BQYS* BK)).product_div((-ANPL),ANPK);
 		let ANPM=VAS* ANPL;
 		let BQYU=(AOSJ* ANPL)+ (BQYT* VAS);
 		let ANPN=VAT* ANPL;
 		let BQYV=(AOSK* ANPL)+ (BQYT* VAT);
-		let COS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, COO, B));
+		let COS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, COO, C));
 		COO=COS;
 		COQ=COR;
 		VAS=ANPM;
@@ -10539,7 +10540,7 @@ impl Instance {
 		AOSG=AOSM;
 		AOSH=AOSN;
 		}
-		let CPC=B/ CPB;
+		let CPC=C/ CPB;
 		let BFHG=-CPC;
 		let BFHH=(AOSF).product_div(BFHG,CPB);
 		let BFHI=BFHH* AWAO;
@@ -10574,7 +10575,7 @@ impl Instance {
 		let CPG=(BRI* CPF).sqrt();
 		let BFHN=(AOSC* BRI)* (ANYF/ (AWAY* CPG));
 		let AFSM=BK* CPG;
-		let AFSN=B/ AFSM;
+		let AFSN=C/ AFSM;
 		let BFHO=((BFHN* BK)).product_div((-AFSN),AFSM);
 		let AFSO=AFSK* AFSN;
 		let BFHP=((AOSD* BRI)* AFSN)+ (BFHO* AFSK);
@@ -10619,7 +10620,7 @@ impl Instance {
 		if CPM{
 		let CPW;
 		if CPN{
-		CPW=B;
+		CPW=C;
 		}else{
 		let CPX;
 		if CPO{
@@ -10655,13 +10656,13 @@ impl Instance {
 		let CPU=CPT.sqrt();
 		let BQYO=AOSU* (ANYF/ (AWAY* CPU));
 		let ANPG=BK* CPU;
-		let ANPH=B/ ANPG;
+		let ANPH=C/ ANPG;
 		let BQYP=((BQYO* BK)).product_div((-ANPH),ANPG);
 		let ANPI=VBA* ANPH;
 		let BQYQ=(AOSV* ANPH)+ (BQYP* VBA);
 		let ANPJ=VBB* ANPH;
 		let BQYR=(AOSW* ANPH)+ (BQYP* VBB);
-		let CPV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CPR, B));
+		let CPV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CPR, C));
 		CPR=CPV;
 		CPT=CPU;
 		VBA=ANPI;
@@ -10716,7 +10717,7 @@ impl Instance {
 		AOSS=AOSY;
 		AOST=AOSZ;
 		}
-		let CQF=B/ CQE;
+		let CQF=C/ CQE;
 		let BFIF=-CQF;
 		let BFIG=(AOSR).product_div(BFIF,CQE);
 		let BFIH=BFIG* AWAO;
@@ -10795,7 +10796,7 @@ impl Instance {
 		if CQN{
 		let CQX;
 		if CQO{
-		CQX=B;
+		CQX=C;
 		}else{
 		let CQY;
 		if CQP{
@@ -10831,13 +10832,13 @@ impl Instance {
 		let CQV=CQU.sqrt();
 		let BQYK=AOTG* (ANYF/ (AWAY* CQV));
 		let ANPC=BK* CQV;
-		let ANPD=B/ ANPC;
+		let ANPD=C/ ANPC;
 		let BQYL=((BQYK* BK)).product_div((-ANPD),ANPC);
 		let ANPE=VBI* ANPD;
 		let BQYM=(AOTH* ANPD)+ (BQYL* VBI);
 		let ANPF=VBJ* ANPD;
 		let BQYN=(AOTI* ANPD)+ (BQYL* VBJ);
-		let CQW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CQS, B));
+		let CQW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CQS, C));
 		CQS=CQW;
 		CQU=CQV;
 		VBI=ANPE;
@@ -10892,7 +10893,7 @@ impl Instance {
 		AOTE=AOTK;
 		AOTF=AOTL;
 		}
-		let CRG=B/ CRF;
+		let CRG=C/ CRF;
 		let BFJG=-CRG;
 		let BFJH=(AOTD).product_div(BFJG,CRF);
 		let BFJI=BFJH* AWAO;
@@ -10927,7 +10928,7 @@ impl Instance {
 		let CRK=(BRI* CRJ).sqrt();
 		let BFJN=(AOTA* BRI)* (ANYF/ (AWAY* CRK));
 		let AFUI=BK* CRK;
-		let AFUJ=B/ AFUI;
+		let AFUJ=C/ AFUI;
 		let BFJO=((BFJN* BK)).product_div((-AFUJ),AFUI);
 		let CRM=(BRD- CRL)- CRK;
 		let BFJP=(AOSO* AWAO)- BFJN;
@@ -10978,7 +10979,7 @@ impl Instance {
 		if CRS{
 		let CSC;
 		if CRT{
-		CSC=B;
+		CSC=C;
 		}else{
 		let CSD;
 		if CRU{
@@ -11014,13 +11015,13 @@ impl Instance {
 		let CSA=CRZ.sqrt();
 		let BQYG=AOTS* (ANYF/ (AWAY* CSA));
 		let ANOY=BK* CSA;
-		let ANOZ=B/ ANOY;
+		let ANOZ=C/ ANOY;
 		let BQYH=((BQYG* BK)).product_div((-ANOZ),ANOY);
 		let ANPA=VBQ* ANOZ;
 		let BQYI=(AOTT* ANOZ)+ (BQYH* VBQ);
 		let ANPB=VBR* ANOZ;
 		let BQYJ=(AOTU* ANOZ)+ (BQYH* VBR);
-		let CSB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CRX, B));
+		let CSB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CRX, C));
 		CRX=CSB;
 		CRZ=CSA;
 		VBQ=ANPA;
@@ -11075,7 +11076,7 @@ impl Instance {
 		AOTQ=AOTW;
 		AOTR=AOTX;
 		}
-		let CSL=B/ CSK;
+		let CSL=C/ CSK;
 		let BFKJ=-CSL;
 		let BFKK=(AOTP).product_div(BFKJ,CSK);
 		let BFKL=BFKK* AWAO;
@@ -11156,7 +11157,7 @@ impl Instance {
 		if CSU{
 		let CTE;
 		if CSV{
-		CTE=B;
+		CTE=C;
 		}else{
 		let CTF;
 		if CSW{
@@ -11192,13 +11193,13 @@ impl Instance {
 		let CTC=CTB.sqrt();
 		let BQYC=AOUH* (ANYF/ (AWAY* CTC));
 		let ANOU=BK* CTC;
-		let ANOV=B/ ANOU;
+		let ANOV=C/ ANOU;
 		let BQYD=((BQYC* BK)).product_div((-ANOV),ANOU);
 		let ANOW=VCA* ANOV;
 		let BQYE=(AOUI* ANOV)+ (BQYD* VCA);
 		let ANOX=VCB* ANOV;
 		let BQYF=(AOUJ* ANOV)+ (BQYD* VCB);
-		let CTD=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CSZ, B));
+		let CTD=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CSZ, C));
 		CSZ=CTD;
 		CTB=CTC;
 		VCA=ANOW;
@@ -11253,7 +11254,7 @@ impl Instance {
 		AOUF=AOUL;
 		AOUG=AOUM;
 		}
-		let CTN=B/ CTM;
+		let CTN=C/ CTM;
 		let BFMG=-CTN;
 		let BFMH=(AOUE).product_div(BFMG,CTM);
 		let BFMI=BFMH* AWAO;
@@ -11328,7 +11329,7 @@ impl Instance {
 		if CTV{
 		let CUF;
 		if CTW{
-		CUF=B;
+		CUF=C;
 		}else{
 		let CUG;
 		if CTX{
@@ -11364,13 +11365,13 @@ impl Instance {
 		let CUD=CUC.sqrt();
 		let BFLO=AOUT* (ANYF/ (AWAY* CUD));
 		let AFWC=BK* CUD;
-		let AFWD=B/ AFWC;
+		let AFWD=C/ AFWC;
 		let BFLP=((BFLO* BK)).product_div((-AFWD),AFWC);
 		let AFWE=VCI* AFWD;
 		let BFLQ=(AOUU* AFWD)+ (BFLP* VCI);
 		let AFWF=VCJ* AFWD;
 		let BFLR=(AOUV* AFWD)+ (BFLP* VCJ);
-		let CUE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CUA, B));
+		let CUE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CUA, C));
 		CUA=CUE;
 		CUC=CUD;
 		VCI=AFWE;
@@ -11425,7 +11426,7 @@ impl Instance {
 		AOUR=AOUX;
 		AOUS=AOUY;
 		}
-		let CUO=B/ CUN;
+		let CUO=C/ CUN;
 		let BFLH=-CUO;
 		let BFLI=(AOUQ).product_div(BFLH,CUN);
 		let BFLJ=BFLI* AWAO;
@@ -11520,7 +11521,7 @@ impl Instance {
 		if CVD{
 		let CVN;
 		if CVE{
-		CVN=B;
+		CVN=C;
 		}else{
 		let CVO;
 		if CVF{
@@ -11556,13 +11557,13 @@ impl Instance {
 		let CVL=CVK.sqrt();
 		let BQXY=AOVF* (ANYF/ (AWAY* CVL));
 		let ANOQ=BK* CVL;
-		let ANOR=B/ ANOQ;
+		let ANOR=C/ ANOQ;
 		let BQXZ=((BQXY* BK)).product_div((-ANOR),ANOQ);
 		let ANOS=VCQ* ANOR;
 		let BQYA=(AOVG* ANOR)+ (BQXZ* VCQ);
 		let ANOT=VCR* ANOR;
 		let BQYB=(AOVH* ANOR)+ (BQXZ* VCR);
-		let CVM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CVI, B));
+		let CVM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CVI, C));
 		CVI=CVM;
 		CVK=CVL;
 		VCQ=ANOS;
@@ -11617,7 +11618,7 @@ impl Instance {
 		AOVD=AOVJ;
 		AOVE=AOVK;
 		}
-		let CVW=B/ CVV;
+		let CVW=C/ CVV;
 		let BFNJ=-CVW;
 		let BFNK=(AOVC).product_div(BFNJ,CVV);
 		let BFNL=BFNK* AWAO;
@@ -11659,10 +11660,10 @@ impl Instance {
 		let AFYD=(AFYB* CWB)- AFYB;
 		let CWC=-BKG;
 		let BFNU=ANZB* AWAO;
-		let CWD=(((CWB- B)- CWA)+ 2.220446049250313e-15f64).sqrt();
+		let CWD=(((CWB- C)- CWA)+ 2.220446049250313e-15f64).sqrt();
 		let BFNV=(BFNT- BFNQ)* (ANYF/ (AWAY* CWD));
 		let AFYE=BK* CWD;
-		let AFYF=B/ AFYE;
+		let AFYF=C/ AFYE;
 		let BFNW=((BFNV* BK)).product_div((-AFYF),AFYE);
 		let AFYG=AFYC* AFYF;
 		let AFYH=AFYD* AFYF;
@@ -11675,7 +11676,7 @@ impl Instance {
 		let CWF=BWG* BZ;
 		let BFOA=ANZE* BZ;
 		let CWG=CWF.exp();
-		let CWH=((CWG- B)- CWF).sqrt();
+		let CWH=((CWG- C)- CWF).sqrt();
 		let CWI=BKG* CWH;
 		let BFOB=(ANZB* CWH)+ ((((BFOA* CWG)- BFOA)* (ANYF/ (AWAY* CWH)))* BKG);
 		let CWJ=BIL> DN;
@@ -11716,7 +11717,7 @@ impl Instance {
 		let BFOR=BFOJ* AFYN;
 		let AFYR=(AFYP* CWO)+ (AFYN* CWP);
 		let BFOS=(L5([0.0,BFOQ[0],BFOQ[1],BFOQ[2],BFOQ[3]])+ (BFOH* AFYP))+ (((AXBN- L5([AXBG[0],AXBG[1],0.0,AXBG[2],AXBG[3]]))* CWP)+ L5([0.0,BFOR[0],BFOR[1],BFOR[2],BFOR[3]]));
-		let CWQ=B+ (CWP* CWO);
+		let CWQ=C+ (CWP* CWO);
 		let CWR=(CWQ< 2f64)&& true;
 		let CXR;
 		let VCW;
@@ -11760,7 +11761,7 @@ impl Instance {
 		if CWV{
 		let CXF;
 		if CWW{
-		CXF=B;
+		CXF=C;
 		}else{
 		let CXG;
 		if CWX{
@@ -11796,13 +11797,13 @@ impl Instance {
 		let CXD=CXC.sqrt();
 		let BQXU=AOVU* (ANYF/ (AWAY* CXD));
 		let ANOM=BK* CXD;
-		let ANON=B/ ANOM;
+		let ANON=C/ ANOM;
 		let BQXV=((BQXU* BK)).product_div((-ANON),ANOM);
 		let ANOO=VDA* ANON;
 		let BQXW=(AOVV* ANON)+ (BQXV* VDA);
 		let ANOP=VDB* ANON;
 		let BQXX=(AOVW* ANON)+ (BQXV* VDB);
-		let CXE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CXA, B));
+		let CXE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CXA, C));
 		CXA=CXE;
 		CXC=CXD;
 		VDA=ANOO;
@@ -11857,7 +11858,7 @@ impl Instance {
 		AOVS=AOVY;
 		AOVT=AOVZ;
 		}
-		let CXO=B/ CXN;
+		let CXO=C/ CXN;
 		let BFPK=-CXO;
 		let BFPL=(AOVR).product_div(BFPK,CXN);
 		let BFPM=BFPL* AWAO;
@@ -11890,9 +11891,9 @@ impl Instance {
 		let CXS=(CXR+ OM).sqrt();
 		let BFPR=AOVO* (ANYF/ (AWAY* CXS));
 		let AFZN=BK* CXS;
-		let AFZO=B/ AFZN;
+		let AFZO=C/ AFZN;
 		let BFPS=((BFPR* BK)).product_div((-AFZO),AFZN);
-		let CXT=B- CXS;
+		let CXT=C- CXS;
 		let BFPT=BFPR* AWAO;
 		let AFZP=-(VCW* AFZO);
 		let AFZQ=-(VCX* AFZO);
@@ -11960,7 +11961,7 @@ impl Instance {
 		if CYC{
 		let CYM;
 		if CYD{
-		CYM=B;
+		CYM=C;
 		}else{
 		let CYN;
 		if CYE{
@@ -11996,13 +11997,13 @@ impl Instance {
 		let CYK=CYJ.sqrt();
 		let BQXQ=AOWG* (ANYF/ (AWAY* CYK));
 		let ANOI=BK* CYK;
-		let ANOJ=B/ ANOI;
+		let ANOJ=C/ ANOI;
 		let BQXR=((BQXQ* BK)).product_div((-ANOJ),ANOI);
 		let ANOK=VDI* ANOJ;
 		let BQXS=(AOWH* ANOJ)+ (BQXR* VDI);
 		let ANOL=VDJ* ANOJ;
 		let BQXT=(AOWI* ANOJ)+ (BQXR* VDJ);
-		let CYL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CYH, B));
+		let CYL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CYH, C));
 		CYH=CYL;
 		CYJ=CYK;
 		VDI=ANOK;
@@ -12057,7 +12058,7 @@ impl Instance {
 		AOWE=AOWK;
 		AOWF=AOWL;
 		}
-		let CYV=B/ CYU;
+		let CYV=C/ CYU;
 		let BFQX=-CYV;
 		let BFQY=(AOWD).product_div(BFQX,CYU);
 		let BFQZ=BFQY* AWAO;
@@ -12092,9 +12093,9 @@ impl Instance {
 		let BFRE=-CZA;
 		let BFRF=(AWLX).product_sum_div(ANYF,AOWA,BFRE,CYZ);
 		let BFRG=BFRF* AWAO;
-		let AGAS=product_sum_div(URK,B,BFRE,VDE,CYZ);
+		let AGAS=product_sum_div(URK,C,BFRE,VDE,CYZ);
 		let BFRH=L5(sum_products_div_lanes(&[(&BFRG.0,VDE),(&AOWB.0,BFRE),(&AOWA.0,(-AGAS))],CYZ));
-		let AGAT=product_sum_div(URL,B,BFRE,VDF,CYZ);
+		let AGAT=product_sum_div(URL,C,BFRE,VDF,CYZ);
 		let BFRI=L5(sum_products_div_lanes(&[(&BFRG.0,VDF),(&AOWC.0,BFRE),(&AOWA.0,(-AGAT))],CYZ));
 		let CZB=CZA== A;
 		let CZF;
@@ -12111,10 +12112,10 @@ impl Instance {
 		AOWN=AWLK;
 		AOWO=AWLK;
 		}else{
-		let CZD=CZC- B;
+		let CZD=CZC- C;
 		let CZE=CZA.powf(CZD);
 		let BFRJ=BFRF* (CZD* ((CZA+ (((CZA== AWBZ) as u8 as f64)* AWCA)).powf((CZD- ANYF))));
-		let AGAU=CZD- B;
+		let AGAU=CZD- C;
 		let AGAV=CZA+ ((CZB as u8 as f64)* ZNW);
 		let BFRK=AGAU* ((AGAV+ (((AGAV== AWBZ) as u8 as f64)* AWCA)).powf((AGAU- ANYF)));
 		let AGAW=CZD* (AGAV.powf(AGAU));
@@ -12134,7 +12135,7 @@ impl Instance {
 		let BFRO=((AOWN* CZA)+ (BFRF* VDM))+ ((BFRH* CZF)+ (AOWM* AGAS));
 		let AGBA=(VDN* CZA)+ (AGAT* CZF);
 		let BFRP=((AOWO* CZA)+ (BFRF* VDN))+ ((BFRI* CZF)+ (AOWM* AGAT));
-		let CZG=B+ (CZF* CZA);
+		let CZG=C+ (CZF* CZA);
 		let CZH=CZG== A;
 		let CZK;
 		let VDO;
@@ -12150,10 +12151,10 @@ impl Instance {
 		AOWQ=AWLK;
 		AOWR=AWLK;
 		}else{
-		let CZI=(B/ CZC)- B;
+		let CZI=(C/ CZC)- C;
 		let CZJ=CZG.powf(CZI);
 		let BFRQ=BFRN* (CZI* ((CZG+ (((CZG== AWBZ) as u8 as f64)* AWCA)).powf((CZI- ANYF))));
-		let AGBB=CZI- B;
+		let AGBB=CZI- C;
 		let AGBC=CZG+ ((CZH as u8 as f64)* ZNW);
 		let BFRR=AGBB* ((AGBC+ (((AGBC== AWBZ) as u8 as f64)* AWCA)).powf((AGBB- ANYF)));
 		let AGBD=CZI* (AGBC.powf(AGBB));
@@ -12176,9 +12177,9 @@ impl Instance {
 		let BFRV=-CZM;
 		let BFRW=(AWLX).product_sum_div(ANYF,BFRU,BFRV,CZL);
 		let BFRX=BFRW* AWAO;
-		let AGBI=product_sum_div(URK,B,BFRV,AGBG,CZL);
+		let AGBI=product_sum_div(URK,C,BFRV,AGBG,CZL);
 		let BFRY=L5(sum_products_div_lanes(&[(&BFRX.0,AGBG),(&(((AOWQ* CZG)+ (BFRN* VDO))+ ((BFRO* CZK)+ (AOWP* AGAZ))).0,BFRV),(&BFRU.0,(-AGBI))],CZL));
-		let AGBJ=product_sum_div(URL,B,BFRV,AGBH,CZL);
+		let AGBJ=product_sum_div(URL,C,BFRV,AGBH,CZL);
 		let BFRZ=L5(sum_products_div_lanes(&[(&BFRX.0,AGBH),(&(((AOWR* CZG)+ (BFRN* VDP))+ ((BFRP* CZK)+ (AOWP* AGBA))).0,BFRV),(&BFRU.0,(-AGBJ))],CZL));
 		let CZN=(BRR< 0.5f64)&& true;
 		let DAN;
@@ -12223,7 +12224,7 @@ impl Instance {
 		if CZR{
 		let DAB;
 		if CZS{
-		DAB=B;
+		DAB=C;
 		}else{
 		let DAC;
 		if CZT{
@@ -12259,13 +12260,13 @@ impl Instance {
 		let CZZ=CZY.sqrt();
 		let BQXM=AOWY* (ANYF/ (AWAY* CZZ));
 		let ANOE=BK* CZZ;
-		let ANOF=B/ ANOE;
+		let ANOF=C/ ANOE;
 		let BQXN=((BQXM* BK)).product_div((-ANOF),ANOE);
 		let ANOG=VDU* ANOF;
 		let BQXO=(AOWZ* ANOF)+ (BQXN* VDU);
 		let ANOH=VDV* ANOF;
 		let BQXP=(AOXA* ANOF)+ (BQXN* VDV);
-		let DAA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CZW, B));
+		let DAA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, CZW, C));
 		CZW=DAA;
 		CZY=CZZ;
 		VDU=ANOG;
@@ -12320,7 +12321,7 @@ impl Instance {
 		AOWW=AOXC;
 		AOWX=AOXD;
 		}
-		let DAK=B/ DAJ;
+		let DAK=C/ DAJ;
 		let BFSR=-DAK;
 		let BFSS=(AOWV).product_div(BFSR,DAJ);
 		let BFST=BFSS* AWAO;
@@ -12415,7 +12416,7 @@ impl Instance {
 		if DAV{
 		let DBF;
 		if DAW{
-		DBF=B;
+		DBF=C;
 		}else{
 		let DBG;
 		if DAX{
@@ -12451,13 +12452,13 @@ impl Instance {
 		let DBD=DBC.sqrt();
 		let BQXI=AOXK* (ANYF/ (AWAY* DBD));
 		let ANOA=BK* DBD;
-		let ANOB=B/ ANOA;
+		let ANOB=C/ ANOA;
 		let BQXJ=((BQXI* BK)).product_div((-ANOB),ANOA);
 		let ANOC=VEC* ANOB;
 		let BQXK=(AOXL* ANOB)+ (BQXJ* VEC);
 		let ANOD=VED* ANOB;
 		let BQXL=(AOXM* ANOB)+ (BQXJ* VED);
-		let DBE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DBA, B));
+		let DBE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DBA, C));
 		DBA=DBE;
 		DBC=DBD;
 		VEC=ANOC;
@@ -12512,7 +12513,7 @@ impl Instance {
 		AOXI=AOXO;
 		AOXJ=AOXP;
 		}
-		let DBO=B/ DBN;
+		let DBO=C/ DBN;
 		let BFUA=-DBO;
 		let BFUB=(AOXH).product_div(BFUA,DBN);
 		let BFUC=BFUB* AWAO;
@@ -12664,7 +12665,7 @@ impl Instance {
 		let DCB=(BSA* ((DBR- BQN)+ AZA)).sqrt();
 		let BFUJ=(((AOVL- AXBO)+ BFAU)* BSA)* (ANYF/ (AWAY* DCB));
 		let AGDK=BK* DCB;
-		let AGDL=B/ AGDK;
+		let AGDL=C/ AGDK;
 		let BFUK=((BFUJ* BK)).product_div((-AGDL),AGDK);
 		let AGDM=AGDI* AGDL;
 		let BFUL=(((AOVM- BFAS)* BSA)* AGDL)+ (BFUK* AGDI);
@@ -12700,7 +12701,7 @@ impl Instance {
 		let AOYZ;
 		if DCC{
 		let DCD=DBR- ((BRJ* BRD)* BRD);
-		let mut DCE=B;
+		let mut DCE=C;
 		let mut DCG=DCD;
 		let mut DEM=DBR;
 		let mut DFE=DBR;
@@ -12722,7 +12723,7 @@ impl Instance {
 		if DCM{
 		let DCW;
 		if DCN{
-		DCW=B;
+		DCW=C;
 		}else{
 		let DCX;
 		if DCO{
@@ -12751,7 +12752,7 @@ impl Instance {
 		break;
 		}
 		let DCU=DCT.sqrt();
-		let DCV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DCR, B));
+		let DCV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DCR, C));
 		DCR=DCV;
 		DCT=DCU;
 		}
@@ -12766,14 +12767,14 @@ impl Instance {
 		};
 		DDD=DDC;
 		}
-		let DDE=B/ DDD;
+		let DDE=C/ DDD;
 		let DDF=(1.0000000000000001e-40f64* DDE)/ DCL;
 		let DDG=CPH+ ((DCJ* AQ)* DDE);
 		DEJ=DDG;
 		DEK=DDF;
 		}else{
 		DEJ=DCH;
-		DEK=B;
+		DEK=C;
 		}
 		let DDH=(DCG- BQN)+ AZA;
 		let DDI=(DDH< 0.1f64)&& true;
@@ -12787,7 +12788,7 @@ impl Instance {
 		if DDM{
 		let DDW;
 		if DDN{
-		DDW=B;
+		DDW=C;
 		}else{
 		let DDX;
 		if DDO{
@@ -12816,7 +12817,7 @@ impl Instance {
 		break;
 		}
 		let DDU=DDT.sqrt();
-		let DDV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DDR, B));
+		let DDV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DDR, C));
 		DDR=DDV;
 		DDT=DDU;
 		}
@@ -12831,14 +12832,14 @@ impl Instance {
 		};
 		DED=DEC;
 		}
-		let DEE=B/ DED;
+		let DEE=C/ DED;
 		let DEF=(1.0000000000000006e-5f64* DEE)/ DDL;
 		let DEG=0.1f64- ((DDJ* BZ)* DEE);
 		DEH=DEG;
 		DEL=DEF;
 		}else{
 		DEH=DDH;
-		DEL=B;
+		DEL=C;
 		}
 		let DEI=(BRL* DEH).sqrt();
 		let DEN=((BNR* (DEM- DBR))+ (DEJ* BQX))+ ((-DEI)* BRA);
@@ -12847,21 +12848,21 @@ impl Instance {
 		let DEQ=BNR- (A* DEO);
 		let DER=-0f64/ DEQ;
 		let DES=BNR/ DEQ;
-		let DET=((B/ DEQ)* DEN)+ (((-DEO)/ DEQ)* DEP);
+		let DET=((C/ DEQ)* DEN)+ (((-DEO)/ DEQ)* DEP);
 		let DEU=(DET.abs())> J;
 		let DFD;
 		let DFF;
 		if DEU{
 		let DEV=DET>= A;
 		let DEW=if DEV{
-		B
+		C
 		}else{
 		AMF
 		};
 		let DEX=DEM- (J* DEW);
 		let DEY=((DER* DEN)+ (DES* DEP))>= A;
 		let DEZ=if DEY{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -12880,7 +12881,7 @@ impl Instance {
 		}else{
 		DCE
 		};
-		let DFJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DFI, B));
+		let DFJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DFI, C));
 		DCE=DFJ;
 		DCG=DFF;
 		DEM=DFD;
@@ -12894,7 +12895,7 @@ impl Instance {
 		let DFN=BRR> DEM;
 		let DQH;
 		if DFN{
-		DQH=B;
+		DQH=C;
 		}else{
 		let DFO=BRR> DFM;
 		let DQI=if DFO{
@@ -12961,7 +12962,7 @@ impl Instance {
 		let BFUX=((((BFUM* BRJ)* DCB)+ (BFUJ* AGDV))+ ((BFUM* DFS)+ (BFUU* AGDN)))+ BFUS;
 		let DFU=BRR> DBR;
 		let DQJ=if DFU{
-		B
+		C
 		}else{
 		BK
 		};
@@ -13023,7 +13024,7 @@ impl Instance {
 		let BFYH=(BFYG* BRR)+ (AXBL* DGB);
 		let AGGS=(AGGQ* BRR)+ (ZMI* DGB);
 		let AGGT=(AGGR* BRR)+ (ZMJ* DGB);
-		let AGGU=B/ DGC;
+		let AGGU=C/ DGC;
 		let BFYI=(BFYH).product_div((-AGGU),DGC);
 		let BFYJ=(((((((BERX* BRR)+ (AXBL* AFEV))+ ((AXBM* BRU)+ (BERW* ZMI)))* BRR)+ (AXBL* AGGQ))+ ((AXBM* DGB)+ (BFYG* ZMI)))* AGGU)+ (BFYI* AGGS);
 		let BFYK=(((((((BERY* BRR)+ (AXBL* AFEW))+ ((AXBN* BRU)+ (BERW* ZMJ)))* BRR)+ (AXBL* AGGR))+ ((AXBN* DGB)+ (BFYG* ZMJ)))* AGGU)+ (BFYI* AGGT);
@@ -13039,14 +13040,14 @@ impl Instance {
 		let BFYP=-DGF;
 		let BFYQ=((BFYH* (ANYF/ DGC))).product_sum_div(ANYF,BFYO,BFYP,DGE);
 		let BFYR=BFYQ* AWAO;
-		let AGGX=product_sum_div((AGGS* AGGU),B,BFYP,AGGV,DGE);
-		let AGGY=product_sum_div((AGGT* AGGU),B,BFYP,AGGW,DGE);
+		let AGGX=product_sum_div((AGGS* AGGU),C,BFYP,AGGV,DGE);
+		let AGGY=product_sum_div((AGGT* AGGU),C,BFYP,AGGW,DGE);
 		let DGG=DGF+ DBR;
 		let BFYS=BFYQ+ AOVL;
 		let AGGZ=AGGX+ VCU;
-		let BFYT=(L5(sum_products_div_lanes(&[(&BFYJ.0,B),(&BFYR.0,AGGV),(&(L5(sum_products_div_lanes(&[(&BFYN.0,ZMI),(&AXBM.0,BFYL),(&AXBL.0,(-AGGV))],BRR))).0,BFYP),(&BFYO.0,(-AGGX))],DGE)))+ AOVM;
+		let BFYT=(L5(sum_products_div_lanes(&[(&BFYJ.0,C),(&BFYR.0,AGGV),(&(L5(sum_products_div_lanes(&[(&BFYN.0,ZMI),(&AXBM.0,BFYL),(&AXBL.0,(-AGGV))],BRR))).0,BFYP),(&BFYO.0,(-AGGX))],DGE)))+ AOVM;
 		let AGHA=AGGY+ VCV;
-		let BFYU=(L5(sum_products_div_lanes(&[(&BFYK.0,B),(&BFYR.0,AGGW),(&(L5(sum_products_div_lanes(&[(&BFYN.0,ZMJ),(&AXBN.0,BFYL),(&AXBL.0,(-AGGW))],BRR))).0,BFYP),(&BFYO.0,(-AGGY))],DGE)))+ AOVN;
+		let BFYU=(L5(sum_products_div_lanes(&[(&BFYK.0,C),(&BFYR.0,AGGW),(&(L5(sum_products_div_lanes(&[(&BFYN.0,ZMJ),(&AXBN.0,BFYL),(&AXBL.0,(-AGGW))],BRR))).0,BFYP),(&BFYO.0,(-AGGY))],DGE)))+ AOVN;
 		let DGH=DBR+ BRQ;
 		let DGI=DGG< DGH;
 		let DIY;
@@ -13179,7 +13180,7 @@ impl Instance {
 		let DGY=(DGW- (DGX* DGU)).sqrt();
 		let BFVV=(BFVN- ((BFVS* DGU)+ (BFVI* DGX)))* (ANYF/ (AWAY* DGY));
 		let AGES=BK* DGY;
-		let AGET=B/ AGES;
+		let AGET=C/ AGES;
 		let BFVW=((BFVV* BK)).product_div((-AGET),AGES);
 		let BFVX=BFVK+ (((BFVP- (((BFVT* DGU)+ (BFVI* AGEO))+ (((BFVG- ((AOYW* BWG)+ L5([(ANZE* VFA),0.0,0.0,0.0,0.0])))* DGX)+ (BFVS* AGEG))))* AGET)+ (BFVW* AGEQ));
 		let BFVY=BFVL+ (((BFVR- (((BFVU* DGU)+ (BFVI* AGEP))+ (((BFVH- ((AOYX* BWG)+ L5([(ANZE* VFB),0.0,0.0,0.0,0.0])))* DGX)+ (BFVS* AGEH))))* AGET)+ (BFVW* AGER));
@@ -13187,10 +13188,10 @@ impl Instance {
 		let BFVZ=-DGZ;
 		let BFWA=(((BFVJ+ BFVV)/ BK)).product_sum_div(ANYF,BERW,BFVZ,BRU);
 		let BFWB=BFWA* AWAO;
-		let AGEU=product_sum_div(((AGEI+ (AGEQ* AGET))/ BK),B,BFVZ,AFEV,BRU);
-		let BFWC=L5(sum_products_div_lanes(&[(&(BFVX/ BK).0,B),(&BFWB.0,AFEV),(&BERX.0,BFVZ),(&BERW.0,(-AGEU))],BRU));
-		let AGEV=product_sum_div(((AGEJ+ (AGER* AGET))/ BK),B,BFVZ,AFEW,BRU);
-		let BFWD=L5(sum_products_div_lanes(&[(&(BFVY/ BK).0,B),(&BFWB.0,AFEW),(&BERY.0,BFVZ),(&BERW.0,(-AGEV))],BRU));
+		let AGEU=product_sum_div(((AGEI+ (AGEQ* AGET))/ BK),C,BFVZ,AFEV,BRU);
+		let BFWC=L5(sum_products_div_lanes(&[(&(BFVX/ BK).0,C),(&BFWB.0,AFEV),(&BERX.0,BFVZ),(&BERW.0,(-AGEU))],BRU));
+		let AGEV=product_sum_div(((AGEJ+ (AGER* AGET))/ BK),C,BFVZ,AFEW,BRU);
+		let BFWD=L5(sum_products_div_lanes(&[(&(BFVY/ BK).0,C),(&BFWB.0,AFEW),(&BERY.0,BFVZ),(&BERW.0,(-AGEV))],BRU));
 		let DHA=DFV- BRQ;
 		let DHB=DGZ> DHA;
 		let DHC;
@@ -13219,7 +13220,7 @@ impl Instance {
 		let DHD=(BRI* (DGT- DHC)).sqrt();
 		let BFWE=((AOYQ- AOZV)* BRI)* (ANYF/ (AWAY* DHD));
 		let AGEY=BK* DHD;
-		let AGEZ=B/ AGEY;
+		let AGEZ=C/ AGEY;
 		let BFWF=((BFWE* BK)).product_div((-AGEZ),AGEY);
 		let AGFA=AGEW* AGEZ;
 		let BFWG=(((AOYW- AOZW)* BRI)* AGEZ)+ (BFWF* AGEW);
@@ -13230,7 +13231,7 @@ impl Instance {
 		let DHF=(BRI* (DGT- DHE)).sqrt();
 		let BFWI=((AOYQ- AOYR)* BRI)* (ANYF/ (AWAY* DHF));
 		let AGFE=BK* DHF;
-		let AGFF=B/ AGFE;
+		let AGFF=C/ AGFE;
 		let BFWJ=((BFWI* BK)).product_div((-AGFF),AGFE);
 		let AGFG=AGFC* AGFF;
 		let BFWK=(((AOYW- AOYY)* BRI)* AGFF)+ (BFWJ* AGFC);
@@ -13250,7 +13251,7 @@ impl Instance {
 		let APAC;
 		let APAD;
 		if DHG{
-		let mut DHH=B;
+		let mut DHH=C;
 		let mut DHJ=DHD;
 		let mut DHK=DHF;
 		let mut DHR=DGT;
@@ -13292,7 +13293,7 @@ impl Instance {
 		let BFWQ=BFWP* AWAO;
 		let AGFK=product_div(BFWO,VFY,DHJ);
 		let AGFL=product_div(BFWO,VFZ,DHJ);
-		let DHN=(DHL* (B- (BRN/ BRO)))/ DHK;
+		let DHN=(DHL* (C- (BRN/ BRO)))/ DHK;
 		let BFWR=-DHN;
 		let BFWS=(APAF).product_div(BFWR,DHK);
 		let BFWT=BFWS* AWAO;
@@ -13317,7 +13318,7 @@ impl Instance {
 		if DHQ{
 		let DHS=DHP>= A;
 		let DHT=if DHS{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -13330,14 +13331,14 @@ impl Instance {
 		APAS=APAN;
 		}else{
 		let BFWZ=BFWY* AWAO;
-		let AGFQ=product_sum_div(AGFI,B,BFWX,AGFO,DHO);
-		let AGFR=product_sum_div(AGFJ,B,BFWX,AGFP,DHO);
+		let AGFQ=product_sum_div(AGFI,C,BFWX,AGFO,DHO);
+		let AGFR=product_sum_div(AGFJ,C,BFWX,AGFP,DHO);
 		let DHV=DHR- DHP;
 		let BFXA=APAG- BFWY;
 		let AGFS=VGC- AGFQ;
-		let BFXB=APAM- (L5(sum_products_div_lanes(&[(&BFWM.0,B),(&BFWZ.0,AGFO),(&BFWV.0,BFWX),(&BFWU.0,(-AGFQ))],DHO)));
+		let BFXB=APAM- (L5(sum_products_div_lanes(&[(&BFWM.0,C),(&BFWZ.0,AGFO),(&BFWV.0,BFWX),(&BFWU.0,(-AGFQ))],DHO)));
 		let AGFT=VGD- AGFR;
-		let BFXC=APAN- (L5(sum_products_div_lanes(&[(&BFWN.0,B),(&BFWZ.0,AGFP),(&BFWW.0,BFWX),(&BFWU.0,(-AGFR))],DHO)));
+		let BFXC=APAN- (L5(sum_products_div_lanes(&[(&BFWN.0,C),(&BFWZ.0,AGFP),(&BFWW.0,BFWX),(&BFWU.0,(-AGFR))],DHO)));
 		DHW=DHV;
 		VGG=AGFS;
 		VGH=AGFT;
@@ -13391,16 +13392,16 @@ impl Instance {
 		let DID=DIB.sqrt();
 		let BFXO=BFXG* (ANYF/ (AWAY* DID));
 		let AGGA=BK* DID;
-		let AGGB=B/ AGGA;
+		let AGGB=C/ AGGA;
 		let BFXP=((BFXO* BK)).product_div((-AGGB),AGGA);
 		let DIE=((DGV+ DID)/ BK)/ BRU;
 		let BFXQ=-DIE;
 		let BFXR=(((BFVJ+ BFXO)/ BK)).product_sum_div(ANYF,BERW,BFXQ,BRU);
 		let BFXS=BFXR* AWAO;
-		let AGGC=product_sum_div(((AGEI+ (AGFW* AGGB))/ BK),B,BFXQ,AFEV,BRU);
-		let BFXT=L5(sum_products_div_lanes(&[(&((BFVK+ ((BFXH* AGGB)+ (BFXP* AGFW)))/ BK).0,B),(&BFXS.0,AFEV),(&BERX.0,BFXQ),(&BERW.0,(-AGGC))],BRU));
-		let AGGD=product_sum_div(((AGEJ+ (AGFX* AGGB))/ BK),B,BFXQ,AFEW,BRU);
-		let BFXU=L5(sum_products_div_lanes(&[(&((BFVL+ ((BFXI* AGGB)+ (BFXP* AGFX)))/ BK).0,B),(&BFXS.0,AFEW),(&BERY.0,BFXQ),(&BERW.0,(-AGGD))],BRU));
+		let AGGC=product_sum_div(((AGEI+ (AGFW* AGGB))/ BK),C,BFXQ,AFEV,BRU);
+		let BFXT=L5(sum_products_div_lanes(&[(&((BFVK+ ((BFXH* AGGB)+ (BFXP* AGFW)))/ BK).0,C),(&BFXS.0,AFEV),(&BERX.0,BFXQ),(&BERW.0,(-AGGC))],BRU));
+		let AGGD=product_sum_div(((AGEJ+ (AGFX* AGGB))/ BK),C,BFXQ,AFEW,BRU);
+		let BFXU=L5(sum_products_div_lanes(&[(&((BFVL+ ((BFXI* AGGB)+ (BFXP* AGFX)))/ BK).0,C),(&BFXS.0,AFEW),(&BERY.0,BFXQ),(&BERW.0,(-AGGD))],BRU));
 		DIG=DIE;
 		VGK=AGGC;
 		VGL=AGGD;
@@ -13412,10 +13413,10 @@ impl Instance {
 		let BFXJ=-DIF;
 		let BFXK=((BFVJ/ BK)).product_sum_div(ANYF,BERW,BFXJ,BRU);
 		let BFXL=BFXK* AWAO;
-		let AGFY=product_sum_div((AGEI/ BK),B,BFXJ,AFEV,BRU);
-		let BFXM=L5(sum_products_div_lanes(&[(&(BFVK/ BK).0,B),(&BFXL.0,AFEV),(&BERX.0,BFXJ),(&BERW.0,(-AGFY))],BRU));
-		let AGFZ=product_sum_div((AGEJ/ BK),B,BFXJ,AFEW,BRU);
-		let BFXN=L5(sum_products_div_lanes(&[(&(BFVL/ BK).0,B),(&BFXL.0,AFEW),(&BERY.0,BFXJ),(&BERW.0,(-AGFZ))],BRU));
+		let AGFY=product_sum_div((AGEI/ BK),C,BFXJ,AFEV,BRU);
+		let BFXM=L5(sum_products_div_lanes(&[(&(BFVK/ BK).0,C),(&BFXL.0,AFEV),(&BERX.0,BFXJ),(&BERW.0,(-AGFY))],BRU));
+		let AGFZ=product_sum_div((AGEJ/ BK),C,BFXJ,AFEW,BRU);
+		let BFXN=L5(sum_products_div_lanes(&[(&(BFVL/ BK).0,C),(&BFXL.0,AFEW),(&BERY.0,BFXJ),(&BERW.0,(-AGFZ))],BRU));
 		DIG=DIF;
 		VGK=AGFY;
 		VGL=AGFZ;
@@ -13476,7 +13477,7 @@ impl Instance {
 		let DIM=(BRI* (DHZ- DIL)).sqrt();
 		let BFXV=((APAT- APBC)* BRI)* (ANYF/ (AWAY* DIM));
 		let AGGG=BK* DIM;
-		let AGGH=B/ AGGG;
+		let AGGH=C/ AGGG;
 		let BFXW=((BFXV* BK)).product_div((-AGGH),AGGG);
 		let AGGI=AGGE* AGGH;
 		let BFXX=(((APAU- APBD)* BRI)* AGGH)+ (BFXW* AGGE);
@@ -13487,7 +13488,7 @@ impl Instance {
 		let DIN=(BRI* (DHZ- ((((BRN* DHZ)+ BQN)- AZA)/ BRO))).sqrt();
 		let BFXZ=((APAT- ((((APAT* BRN)+ AXBO)- BFAU)/ BRO))* BRI)* (ANYF/ (AWAY* DIN));
 		let AGGM=BK* DIN;
-		let AGGN=B/ AGGM;
+		let AGGN=C/ AGGM;
 		let BFYA=((BFXZ* BK)).product_div((-AGGN),AGGM);
 		let AGGO=AGGK* AGGN;
 		let BFYB=(((APAU- (((APAU* BRN)+ BFAS)/ BRO))* BRI)* AGGN)+ (BFYA* AGGK);
@@ -13499,7 +13500,7 @@ impl Instance {
 		}else{
 		DIR
 		};
-		let DIS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DIQ, B));
+		let DIS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DIQ, C));
 		DHH=DIS;
 		DHJ=DIM;
 		DHK=DIN;
@@ -13605,7 +13606,7 @@ impl Instance {
 		AOZE=AOZN;
 		AOZF=AOZO;
 		}
-		let mut DJD=B;
+		let mut DJD=C;
 		let mut DJF=DIT;
 		let mut DMF=DIX;
 		let mut DQA=DIX;
@@ -13687,7 +13688,7 @@ impl Instance {
 		if DJN{
 		let DJX;
 		if DJO{
-		DJX=B;
+		DJX=C;
 		}else{
 		let DJY;
 		if DJP{
@@ -13723,13 +13724,13 @@ impl Instance {
 		let DJV=DJU.sqrt();
 		let BGRM=APBU* (ANYF/ (AWAY* DJV));
 		let AGXV=BK* DJV;
-		let AGXW=B/ AGXV;
+		let AGXW=C/ AGXV;
 		let BGRN=((BGRM* BK)).product_div((-AGXW),AGXV);
 		let AGXX=VHA* AGXW;
 		let BGRO=(APBV* AGXW)+ (BGRN* VHA);
 		let AGXY=VHB* AGXW;
 		let BGRP=(APBW* AGXW)+ (BGRN* VHB);
-		let DJW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DJS, B));
+		let DJW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DJS, C));
 		DJS=DJW;
 		DJU=DJV;
 		VHA=AGXX;
@@ -13784,7 +13785,7 @@ impl Instance {
 		APBS=APBY;
 		APBT=APBZ;
 		}
-		let DKG=B/ DKF;
+		let DKG=C/ DKF;
 		let BGIC=-DKG;
 		let BGID=(APBR).product_div(BGIC,DKF);
 		let BGIE=BGID* AWAO;
@@ -13800,10 +13801,10 @@ impl Instance {
 		let BGII=-DKJ;
 		let BGIJ=((BGID* DKI)).product_sum_div(ANYF,BGHT,BGII,DJM);
 		let BGIK=BGIJ* AWAO;
-		let AGQL=product_sum_div((AGQH* DKI),B,BGII,AGPZ,DJM);
-		let BGIL=L5(sum_products_div_lanes(&[(&(BGIF* DKI).0,B),(&BGIK.0,AGPZ),(&BGHV.0,BGII),(&BGHT.0,(-AGQL))],DJM));
-		let AGQM=product_sum_div((AGQI* DKI),B,BGII,AGQB,DJM);
-		let BGIM=L5(sum_products_div_lanes(&[(&(BGIG* DKI).0,B),(&BGIK.0,AGQB),(&BGHX.0,BGII),(&BGHT.0,(-AGQM))],DJM));
+		let AGQL=product_sum_div((AGQH* DKI),C,BGII,AGPZ,DJM);
+		let BGIL=L5(sum_products_div_lanes(&[(&(BGIF* DKI).0,C),(&BGIK.0,AGPZ),(&BGHV.0,BGII),(&BGHT.0,(-AGQL))],DJM));
+		let AGQM=product_sum_div((AGQI* DKI),C,BGII,AGQB,DJM);
+		let BGIM=L5(sum_products_div_lanes(&[(&(BGIG* DKI).0,C),(&BGIK.0,AGQB),(&BGHX.0,BGII),(&BGHT.0,(-AGQM))],DJM));
 		let DKK=0.1f64- (DKH* DKG);
 		let BGIN=((BGIH* DKG)+ (BGID* DKH))* AWAO;
 		let AGQN=-((AGQJ* DKG)+ (AGQH* DKH));
@@ -13824,7 +13825,7 @@ impl Instance {
 		APBQ=BGIM;
 		}else{
 		DKL=DJI;
-		DLT=B;
+		DLT=C;
 		VGU=AGPQ;
 		VGV=AGPR;
 		VGW=A;
@@ -13841,7 +13842,7 @@ impl Instance {
 		let DKM=(BRI* DKL).sqrt();
 		let BGIQ=(APBL* BRI)* (ANYF/ (AWAY* DKM));
 		let AGQR=BK* DKM;
-		let AGQS=B/ AGQR;
+		let AGQS=C/ AGQR;
 		let BGIR=((BGIQ* BK)).product_div((-AGQS),AGQR);
 		let AGQT=AGQP* AGQS;
 		let BGIS=((APBN* BRI)* AGQS)+ (BGIR* AGQP);
@@ -13891,7 +13892,7 @@ impl Instance {
 		if DKR{
 		let DLB;
 		if DKS{
-		DLB=B;
+		DLB=C;
 		}else{
 		let DLC;
 		if DKT{
@@ -13927,13 +13928,13 @@ impl Instance {
 		let DKZ=DKY.sqrt();
 		let BGRI=APCJ* (ANYF/ (AWAY* DKZ));
 		let AGXR=BK* DKZ;
-		let AGXS=B/ AGXR;
+		let AGXS=C/ AGXR;
 		let BGRJ=((BGRI* BK)).product_div((-AGXS),AGXR);
 		let AGXT=VHK* AGXS;
 		let BGRK=(APCK* AGXS)+ (BGRJ* VHK);
 		let AGXU=VHL* AGXS;
 		let BGRL=(APCL* AGXS)+ (BGRJ* VHL);
-		let DLA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DKW, B));
+		let DLA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DKW, C));
 		DKW=DLA;
 		DKY=DKZ;
 		VHK=AGXT;
@@ -13988,7 +13989,7 @@ impl Instance {
 		APCH=APCN;
 		APCI=APCO;
 		}
-		let DLK=B/ DLJ;
+		let DLK=C/ DLJ;
 		let BGJI=-DLK;
 		let BGJJ=(APCG).product_div(BGJI,DLJ);
 		let BGJK=BGJJ* AWAO;
@@ -14009,10 +14010,10 @@ impl Instance {
 		let BGJR=-DLN;
 		let BGJS=((BGJJ* DLM)).product_sum_div(ANYF,BGIZ,BGJR,DKQ);
 		let BGJT=BGJS* AWAO;
-		let AGRO=product_sum_div((AGRI* DLM),B,BGJR,AGRA,DKQ);
-		let BGJU=L5(sum_products_div_lanes(&[(&(BGJL* DLM).0,B),(&BGJT.0,AGRA),(&BGJB.0,BGJR),(&BGIZ.0,(-AGRO))],DKQ));
-		let AGRP=product_sum_div((AGRJ* DLM),B,BGJR,AGRC,DKQ);
-		let BGJV=L5(sum_products_div_lanes(&[(&(BGJM* DLM).0,B),(&BGJT.0,AGRC),(&BGJD.0,BGJR),(&BGIZ.0,(-AGRP))],DKQ));
+		let AGRO=product_sum_div((AGRI* DLM),C,BGJR,AGRA,DKQ);
+		let BGJU=L5(sum_products_div_lanes(&[(&(BGJL* DLM).0,C),(&BGJT.0,AGRA),(&BGJB.0,BGJR),(&BGIZ.0,(-AGRO))],DKQ));
+		let AGRP=product_sum_div((AGRJ* DLM),C,BGJR,AGRC,DKQ);
+		let BGJV=L5(sum_products_div_lanes(&[(&(BGJM* DLM).0,C),(&BGJT.0,AGRC),(&BGJD.0,BGJR),(&BGIZ.0,(-AGRP))],DKQ));
 		let DLO=CPH+ (DLL* DLK);
 		DLQ=DLO;
 		DLV=DLN;
@@ -14028,7 +14029,7 @@ impl Instance {
 		APCF=BGJV;
 		}else{
 		DLQ=DKM;
-		DLV=B;
+		DLV=C;
 		VHE=AGQT;
 		VHF=AGQU;
 		VHG=A;
@@ -14045,7 +14046,7 @@ impl Instance {
 		let DLP=(BRL* ((DJG- BQN)+ AZA)).sqrt();
 		let BGJW=(((BGHF- AXBO)+ BFAU)* BRL)* (ANYF/ (AWAY* DLP));
 		let AGRS=BK* DLP;
-		let AGRT=B/ AGRS;
+		let AGRT=C/ AGRS;
 		let BGJX=((BGJW* BK)).product_div((-AGRT),AGRS);
 		let AGRU=AGRQ* AGRT;
 		let BGJY=(((BGHG- BFAS)* BRL)* AGRT)+ (BGJX* AGRQ);
@@ -14182,10 +14183,10 @@ impl Instance {
 		if DMT{
 		let AGUQ=AGTG- AGTE;
 		let AGUR=AGTH- AGTF;
-		let DMU=(((DMS- B)- DMR)+ CEN).sqrt();
+		let DMU=(((DMS- C)- DMR)+ CEN).sqrt();
 		let BGMZ=(BGLV- BGLS)* (ANYF/ (AWAY* DMU));
 		let AGUS=BK* DMU;
-		let AGUT=B/ AGUS;
+		let AGUT=C/ AGUS;
 		let BGNA=((BGMZ* BK)).product_div((-AGUT),AGUS);
 		let AGUU=AGUQ* AGUT;
 		let AGUV=AGUR* AGUT;
@@ -14266,10 +14267,10 @@ impl Instance {
 		let AGTV=AGTN- AGTT;
 		let AGTW=(AGTG- AGTE)+ (AGTU* CIB);
 		let AGTX=(AGTH- AGTF)+ (AGTV* CIB);
-		let DNH=((((DMS- B)- DMR)+ (CIB* DNG))+ CEN).sqrt();
+		let DNH=((((DMS- C)- DMR)+ (CIB* DNG))+ CEN).sqrt();
 		let BGMF=((BGLV- BGLS)+ (L5([(ANZF* DNG),0.0,0.0,0.0,0.0])+ ((BGLZ- BGMC)* CIB)))* (ANYF/ (AWAY* DNH));
 		let AGTY=BK* DNH;
-		let AGTZ=B/ AGTY;
+		let AGTZ=C/ AGTY;
 		let BGMG=((BGMF* BK)).product_div((-AGTZ),AGTY);
 		let AGUA=AGTW* AGTZ;
 		let AGUB=AGTX* AGTZ;
@@ -14393,7 +14394,7 @@ impl Instance {
 		if DNY{
 		let DOI;
 		if DNZ{
-		DOI=B;
+		DOI=C;
 		}else{
 		let DOJ;
 		if DOA{
@@ -14429,13 +14430,13 @@ impl Instance {
 		let DOG=DOF.sqrt();
 		let BGRE=APDH* (ANYF/ (AWAY* DOG));
 		let AGXN=BK* DOG;
-		let AGXO=B/ AGXN;
+		let AGXO=C/ AGXN;
 		let BGRF=((BGRE* BK)).product_div((-AGXO),AGXN);
 		let AGXP=VIA* AGXO;
 		let BGRG=(APDI* AGXO)+ (BGRF* VIA);
 		let AGXQ=VIB* AGXO;
 		let BGRH=(APDJ* AGXO)+ (BGRF* VIB);
-		let DOH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DOD, B));
+		let DOH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DOD, C));
 		DOD=DOH;
 		DOF=DOG;
 		VIA=AGXP;
@@ -14490,7 +14491,7 @@ impl Instance {
 		APDF=APDL;
 		APDG=APDM;
 		}
-		let DOR=B/ DOQ;
+		let DOR=C/ DOQ;
 		let BGOJ=-DOR;
 		let BGOK=(APDE).product_div(BGOJ,DOQ);
 		let BGOL=BGOK* AWAO;
@@ -14506,10 +14507,10 @@ impl Instance {
 		let BGOP=-DOU;
 		let BGOQ=((BGOK* DOT)).product_sum_div(ANYF,BGOC,BGOP,DNX);
 		let BGOR=BGOQ* AWAO;
-		let AGWD=product_sum_div((AGVZ* DOT),B,BGOP,AGVS,DNX);
-		let BGOS=L5(sum_products_div_lanes(&[(&(BGOM* DOT).0,B),(&BGOR.0,AGVS),(&BGOD.0,BGOP),(&BGOC.0,(-AGWD))],DNX));
-		let AGWE=product_sum_div((AGWA* DOT),B,BGOP,AGVT,DNX);
-		let BGOT=L5(sum_products_div_lanes(&[(&(BGON* DOT).0,B),(&BGOR.0,AGVT),(&BGOE.0,BGOP),(&BGOC.0,(-AGWE))],DNX));
+		let AGWD=product_sum_div((AGVZ* DOT),C,BGOP,AGVS,DNX);
+		let BGOS=L5(sum_products_div_lanes(&[(&(BGOM* DOT).0,C),(&BGOR.0,AGVS),(&BGOD.0,BGOP),(&BGOC.0,(-AGWD))],DNX));
+		let AGWE=product_sum_div((AGWA* DOT),C,BGOP,AGVT,DNX);
+		let BGOT=L5(sum_products_div_lanes(&[(&(BGON* DOT).0,C),(&BGOR.0,AGVT),(&BGOE.0,BGOP),(&BGOC.0,(-AGWE))],DNX));
 		let DOV=DNR+ (DOS* DOR);
 		let BGOU=AOVL+ ((BGOO* DOR)+ (BGOK* DOS));
 		let AGWF=VCU+ ((AGWB* DOR)+ (AGVZ* DOS));
@@ -14530,7 +14531,7 @@ impl Instance {
 		APDD=BGOT;
 		}else{
 		DOW=DMJ;
-		DOZ=B;
+		DOZ=C;
 		VHU=AGSW;
 		VHV=AGSX;
 		VHW=A;
@@ -14562,7 +14563,7 @@ impl Instance {
 		let BGPE=BGLP* DJH;
 		let AGWN=AGTA* DJH;
 		let AGWO=AGTB* DJH;
-		let DPC=B- (DPB* DOZ);
+		let DPC=C- (DPB* DOZ);
 		let BGPF=((BGPE* DOZ)+ (APCZ* DPB))* AWAO;
 		let AGWP=-((AGWN* DOZ)+ (VHW* DPB));
 		let BGPG=((((BGLQ* DJH)* DOZ)+ (APCZ* AGWN))+ ((APDC* DPB)+ (BGPE* VHW)))* AWAO;
@@ -14608,34 +14609,34 @@ impl Instance {
 		let BGQD=-DPL;
 		let BGQE=(BGPX).product_sum_div(ANYF,BGQA,BGQD,DPK);
 		let BGQF=BGQE* AWAO;
-		let AGXB=product_sum_div(AGWX,B,BGQD,AGWZ,DPK);
-		let BGQG=L5(sum_products_div_lanes(&[(&BGPY.0,B),(&BGQF.0,AGWZ),(&BGQB.0,BGQD),(&BGQA.0,(-AGXB))],DPK));
-		let AGXC=product_sum_div(AGWY,B,BGQD,AGXA,DPK);
-		let BGQH=L5(sum_products_div_lanes(&[(&BGPZ.0,B),(&BGQF.0,AGXA),(&BGQC.0,BGQD),(&BGQA.0,(-AGXC))],DPK));
+		let AGXB=product_sum_div(AGWX,C,BGQD,AGWZ,DPK);
+		let BGQG=L5(sum_products_div_lanes(&[(&BGPY.0,C),(&BGQF.0,AGWZ),(&BGQB.0,BGQD),(&BGQA.0,(-AGXB))],DPK));
+		let AGXC=product_sum_div(AGWY,C,BGQD,AGXA,DPK);
+		let BGQH=L5(sum_products_div_lanes(&[(&BGPZ.0,C),(&BGQF.0,AGXA),(&BGQC.0,BGQD),(&BGQA.0,(-AGXC))],DPK));
 		let DPM=(-DPC)/ DPK;
 		let BGQI=-DPM;
 		let BGQJ=((BGPF* AWAO)).product_sum_div(ANYF,BGQA,BGQI,DPK);
 		let BGQK=BGQJ* AWAO;
-		let AGXD=product_sum_div((AGWP* AMF),B,BGQI,AGWZ,DPK);
-		let BGQL=L5(sum_products_div_lanes(&[(&(BGPG* AMF).0,B),(&BGQK.0,AGWZ),(&BGQB.0,BGQI),(&BGQA.0,(-AGXD))],DPK));
-		let AGXE=product_sum_div((AGWQ* AMF),B,BGQI,AGXA,DPK);
-		let BGQM=L5(sum_products_div_lanes(&[(&(BGPH* AMF).0,B),(&BGQK.0,AGXA),(&BGQC.0,BGQI),(&BGQA.0,(-AGXE))],DPK));
+		let AGXD=product_sum_div((AGWP* AMF),C,BGQI,AGWZ,DPK);
+		let BGQL=L5(sum_products_div_lanes(&[(&(BGPG* AMF).0,C),(&BGQK.0,AGWZ),(&BGQB.0,BGQI),(&BGQA.0,(-AGXD))],DPK));
+		let AGXE=product_sum_div((AGWQ* AMF),C,BGQI,AGXA,DPK);
+		let BGQM=L5(sum_products_div_lanes(&[(&(BGPH* AMF).0,C),(&BGQK.0,AGXA),(&BGQC.0,BGQI),(&BGQA.0,(-AGXE))],DPK));
 		let DPN=(-DPH)/ DPK;
 		let BGQN=-DPN;
 		let BGQO=((BGPU* AWAO)).product_sum_div(ANYF,BGQA,BGQN,DPK);
 		let BGQP=BGQO* AWAO;
-		let AGXF=product_sum_div((AGWV* AMF),B,BGQN,AGWZ,DPK);
-		let BGQQ=L5(sum_products_div_lanes(&[(&(BGPV* AMF).0,B),(&BGQP.0,AGWZ),(&BGQB.0,BGQN),(&BGQA.0,(-AGXF))],DPK));
-		let AGXG=product_sum_div((AGWW* AMF),B,BGQN,AGXA,DPK);
-		let BGQR=L5(sum_products_div_lanes(&[(&(BGPW* AMF).0,B),(&BGQP.0,AGXA),(&BGQC.0,BGQN),(&BGQA.0,(-AGXG))],DPK));
+		let AGXF=product_sum_div((AGWV* AMF),C,BGQN,AGWZ,DPK);
+		let BGQQ=L5(sum_products_div_lanes(&[(&(BGPV* AMF).0,C),(&BGQP.0,AGWZ),(&BGQB.0,BGQN),(&BGQA.0,(-AGXF))],DPK));
+		let AGXG=product_sum_div((AGWW* AMF),C,BGQN,AGXA,DPK);
+		let BGQR=L5(sum_products_div_lanes(&[(&(BGPW* AMF).0,C),(&BGQP.0,AGXA),(&BGQC.0,BGQN),(&BGQA.0,(-AGXG))],DPK));
 		let DPO=DPA/ DPK;
 		let BGQS=-DPO;
 		let BGQT=(BGPB).product_sum_div(ANYF,BGQA,BGQS,DPK);
 		let BGQU=BGQT* AWAO;
-		let AGXH=product_sum_div(AGWL,B,BGQS,AGWZ,DPK);
-		let BGQV=L5(sum_products_div_lanes(&[(&BGPC.0,B),(&BGQU.0,AGWZ),(&BGQB.0,BGQS),(&BGQA.0,(-AGXH))],DPK));
-		let AGXI=product_sum_div(AGWM,B,BGQS,AGXA,DPK);
-		let BGQW=L5(sum_products_div_lanes(&[(&BGPD.0,B),(&BGQU.0,AGXA),(&BGQC.0,BGQS),(&BGQA.0,(-AGXI))],DPK));
+		let AGXH=product_sum_div(AGWL,C,BGQS,AGWZ,DPK);
+		let BGQV=L5(sum_products_div_lanes(&[(&BGPC.0,C),(&BGQU.0,AGWZ),(&BGQB.0,BGQS),(&BGQA.0,(-AGXH))],DPK));
+		let AGXI=product_sum_div(AGWM,C,BGQS,AGXA,DPK);
+		let BGQW=L5(sum_products_div_lanes(&[(&BGPD.0,C),(&BGQU.0,AGXA),(&BGQC.0,BGQS),(&BGQA.0,(-AGXI))],DPK));
 		let DPP=(DPN* DOX)+ (DPO* DPF);
 		let BGQX=((BGQO* DOX)+ (BGOX* DPN))+ ((BGQT* DPF)+ (BGPO* DPO));
 		let DPQ=(DPP.abs())> J;
@@ -14654,14 +14655,14 @@ impl Instance {
 		if DPQ{
 		let DPR=((DPL* DOX)+ (DPM* DPF))>= A;
 		let DPS=if DPR{
-		B
+		C
 		}else{
 		AMF
 		};
 		let DPT=DMF- (J* DPS);
 		let DPU=DPP>= A;
 		let DPV=if DPU{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -14710,7 +14711,7 @@ impl Instance {
 		}else{
 		DJD
 		};
-		let DQF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DQE, B));
+		let DQF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DQE, C));
 		DJD=DQF;
 		DJF=DQB;
 		DMF=DPZ;
@@ -14779,7 +14780,7 @@ impl Instance {
 		if DQQ{
 		let DRA;
 		if DQR{
-		DRA=B;
+		DRA=C;
 		}else{
 		let DRB;
 		if DQS{
@@ -14815,13 +14816,13 @@ impl Instance {
 		let DQY=DQX.sqrt();
 		let BGHB=APEC* (ANYF/ (AWAY* DQY));
 		let AGPK=BK* DQY;
-		let AGPL=B/ AGPK;
+		let AGPL=C/ AGPK;
 		let BGHC=((BGHB* BK)).product_div((-AGPL),AGPK);
 		let AGPM=VIO* AGPL;
 		let BGHD=(APED* AGPL)+ (BGHC* VIO);
 		let AGPN=VIP* AGPL;
 		let BGHE=(APEE* AGPL)+ (BGHC* VIP);
-		let DQZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DQV, B));
+		let DQZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DQV, C));
 		DQV=DQZ;
 		DQX=DQY;
 		VIO=AGPM;
@@ -14876,7 +14877,7 @@ impl Instance {
 		APEA=APEG;
 		APEB=APEH;
 		}
-		let DRJ=B/ DRI;
+		let DRJ=C/ DRI;
 		let BFZM=-DRJ;
 		let BFZN=(APDZ).product_div(BFZM,DRI);
 		let BFZO=BFZN* AWAO;
@@ -14981,10 +14982,10 @@ impl Instance {
 		if DRS{
 		let AGMG=AGIC- AGIA;
 		let AGMH=AGID- AGIB;
-		let DRT=(((DRR- B)- DRQ)+ CEN).sqrt();
+		let DRT=(((DRR- C)- DRQ)+ CEN).sqrt();
 		let BGDX=(BFZZ- BFZW)* (ANYF/ (AWAY* DRT));
 		let AGMI=BK* DRT;
-		let AGMJ=B/ AGMI;
+		let AGMJ=C/ AGMI;
 		let BGDY=((BGDX* BK)).product_div((-AGMJ),AGMI);
 		let AGMK=AGMG* AGMJ;
 		let AGML=AGMH* AGMJ;
@@ -14999,7 +15000,7 @@ impl Instance {
 		let DRV=(BRI* (DRM- DRO)).sqrt();
 		let BGEC=((APDT- BFZT)* BRI)* (ANYF/ (AWAY* DRV));
 		let AGMQ=BK* DRV;
-		let AGMR=B/ AGMQ;
+		let AGMR=C/ AGMQ;
 		let BGED=((BGEC* BK)).product_div((-AGMR),AGMQ);
 		let AGMS=AGMO* AGMR;
 		let BGEE=(((APDU- BFZU)* BRI)* AGMR)+ (BGED* AGMO);
@@ -15043,7 +15044,7 @@ impl Instance {
 		if DSA{
 		let DSK;
 		if DSB{
-		DSK=B;
+		DSK=C;
 		}else{
 		let DSL;
 		if DSC{
@@ -15079,13 +15080,13 @@ impl Instance {
 		let DSI=DSH.sqrt();
 		let BGGX=APFG* (ANYF/ (AWAY* DSI));
 		let AGPG=BK* DSI;
-		let AGPH=B/ AGPG;
+		let AGPH=C/ AGPG;
 		let BGGY=((BGGX* BK)).product_div((-AGPH),AGPG);
 		let AGPI=VJI* AGPH;
 		let BGGZ=(APFH* AGPH)+ (BGGY* VJI);
 		let AGPJ=VJJ* AGPH;
 		let BGHA=(APFI* AGPH)+ (BGGY* VJJ);
-		let DSJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DSF, B));
+		let DSJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DSF, C));
 		DSF=DSJ;
 		DSH=DSI;
 		VJI=AGPI;
@@ -15140,7 +15141,7 @@ impl Instance {
 		APFE=APFK;
 		APFF=APFL;
 		}
-		let DST=B/ DSS;
+		let DST=C/ DSS;
 		let BGEU=-DST;
 		let BGEV=(APFD).product_div(BGEU,DSS);
 		let BGEW=BGEV* AWAO;
@@ -15175,7 +15176,7 @@ impl Instance {
 		let DSW=(BRL* ((DRO- BQN)+ AZA)).sqrt();
 		let BGFB=(((BFZT- AXBO)+ BFAU)* BRL)* (ANYF/ (AWAY* DSW));
 		let AGNP=BK* DSW;
-		let AGNQ=B/ AGNP;
+		let AGNQ=C/ AGNP;
 		let BGFC=((BGFB* BK)).product_div((-AGNQ),AGNP);
 		let DSY=DSX* BQX;
 		let BGFD=APFA* BQX;
@@ -15242,7 +15243,7 @@ impl Instance {
 		let AGIL=AGIJ* DTA;
 		let DTE=(DTA* DTD).exp();
 		let BGAE=(L5([(BGAC* DTD),0.0,0.0,0.0,0.0])+ ((APDT- AXBO)* DTA))* DTE;
-		let DTF=(DRR- B)- DRQ;
+		let DTF=(DRR- C)- DRQ;
 		let BGAF=BFZZ- BFZW;
 		let AGIM=AGIC- AGIA;
 		let BGAG=BGAA- BFZX;
@@ -15264,7 +15265,7 @@ impl Instance {
 		let DTI=((DTF+ DTH)+ CEN).sqrt();
 		let BGAN=(BGAF+ BGAK)* (ANYF/ (AWAY* DTI));
 		let AGIU=BK* DTI;
-		let AGIV=B/ AGIU;
+		let AGIV=C/ AGIU;
 		let BGAO=((BGAN* BK)).product_div((-AGIV),AGIU);
 		let AGIW=AGIS* AGIV;
 		let AGIX=AGIT* AGIV;
@@ -15311,14 +15312,14 @@ impl Instance {
 		let DTL=(DTK+ DTH).sqrt();
 		let BGAV=(BGAS+ BGAK)* (ANYF/ (AWAY* DTL));
 		let AGJE=BK* DTL;
-		let AGJF=B/ AGJE;
+		let AGJF=C/ AGJE;
 		let BGAW=((BGAV* BK)).product_div((-AGJF),AGJE);
 		let AGJG=AGJC* AGJF;
 		let AGJH=AGJD* AGJF;
 		let DTM=DTK.sqrt();
 		let BGAX=BGAS* (ANYF/ (AWAY* DTM));
 		let AGJI=BK* DTM;
-		let AGJJ=B/ AGJI;
+		let AGJJ=C/ AGJI;
 		let BGAY=((BGAX* BK)).product_div((-AGJJ),AGJI);
 		let AGJK=AGJA* AGJJ;
 		let AGJL=AGJB* AGJJ;
@@ -15331,7 +15332,7 @@ impl Instance {
 		let DTO=(DTF+ CEN).sqrt();
 		let BGBC=BGAF* (ANYF/ (AWAY* DTO));
 		let AGJO=BK* DTO;
-		let AGJP=B/ AGJO;
+		let AGJP=C/ AGJO;
 		let BGBD=((BGBC* BK)).product_div((-AGJP),AGJO);
 		let AGJQ=AGIM* AGJP;
 		let AGJR=AGIN* AGJP;
@@ -15403,7 +15404,7 @@ impl Instance {
 		if DTV{
 		let DUF;
 		if DTW{
-		DUF=B;
+		DUF=C;
 		}else{
 		let DUG;
 		if DTX{
@@ -15439,13 +15440,13 @@ impl Instance {
 		let DUD=DUC.sqrt();
 		let BGDT=APFY* (ANYF/ (AWAY* DUD));
 		let AGMC=BK* DUD;
-		let AGMD=B/ AGMC;
+		let AGMD=C/ AGMC;
 		let BGDU=((BGDT* BK)).product_div((-AGMD),AGMC);
 		let AGME=VJU* AGMD;
 		let BGDV=(APFZ* AGMD)+ (BGDU* VJU);
 		let AGMF=VJV* AGMD;
 		let BGDW=(APGA* AGMD)+ (BGDU* VJV);
-		let DUE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DUA, B));
+		let DUE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DUA, C));
 		DUA=DUE;
 		DUC=DUD;
 		VJU=AGME;
@@ -15500,7 +15501,7 @@ impl Instance {
 		APFW=APGC;
 		APFX=APGD;
 		}
-		let DUO=B/ DUN;
+		let DUO=C/ DUN;
 		let BGCB=-DUO;
 		let BGCC=(APFV).product_div(BGCB,DUN);
 		let BGCD=BGCC* AWAO;
@@ -15535,7 +15536,7 @@ impl Instance {
 		let DUS=(BRI* DUR).sqrt();
 		let BGCI=(APFS* BRI)* (ANYF/ (AWAY* DUS));
 		let AGKT=BK* DUS;
-		let AGKU=B/ AGKT;
+		let AGKU=C/ AGKT;
 		let BGCJ=((BGCI* BK)).product_div((-AGKU),AGKT);
 		let AGKV=AGKR* AGKU;
 		let BGCK=((APFT* BRI)* AGKU)+ (BGCJ* AGKR);
@@ -15579,7 +15580,7 @@ impl Instance {
 		if DUX{
 		let DVH;
 		if DUY{
-		DVH=B;
+		DVH=C;
 		}else{
 		let DVI;
 		if DUZ{
@@ -15615,13 +15616,13 @@ impl Instance {
 		let DVF=DVE.sqrt();
 		let BGDP=APGK* (ANYF/ (AWAY* DVF));
 		let AGLY=BK* DVF;
-		let AGLZ=B/ AGLY;
+		let AGLZ=C/ AGLY;
 		let BGDQ=((BGDP* BK)).product_div((-AGLZ),AGLY);
 		let AGMA=VKC* AGLZ;
 		let BGDR=(APGL* AGLZ)+ (BGDQ* VKC);
 		let AGMB=VKD* AGLZ;
 		let BGDS=(APGM* AGLZ)+ (BGDQ* VKD);
-		let DVG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DVC, B));
+		let DVG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DVC, C));
 		DVC=DVG;
 		DVE=DVF;
 		VKC=AGMA;
@@ -15676,7 +15677,7 @@ impl Instance {
 		APGI=APGO;
 		APGJ=APGP;
 		}
-		let DVQ=B/ DVP;
+		let DVQ=C/ DVP;
 		let BGDA=-DVQ;
 		let BGDB=(APGH).product_div(BGDA,DVP);
 		let BGDC=BGDB* AWAO;
@@ -15711,7 +15712,7 @@ impl Instance {
 		let DVT=(BRL* ((DRO- BQN)+ AZA)).sqrt();
 		let BGDH=(((BFZT- AXBO)+ BFAU)* BRL)* (ANYF/ (AWAY* DVT));
 		let AGLS=BK* DVT;
-		let AGLT=B/ AGLS;
+		let AGLT=C/ AGLS;
 		let BGDI=((BGDH* BK)).product_div((-AGLT),AGLS);
 		let DVV=DVU* BQX;
 		let BGDJ=APGE* BQX;
@@ -15807,7 +15808,7 @@ impl Instance {
 		if DWC{
 		let DWM;
 		if DWD{
-		DWM=B;
+		DWM=C;
 		}else{
 		let DWN;
 		if DWE{
@@ -15843,13 +15844,13 @@ impl Instance {
 		let DWK=DWJ.sqrt();
 		let BGGT=APGW* (ANYF/ (AWAY* DWK));
 		let AGPC=BK* DWK;
-		let AGPD=B/ AGPC;
+		let AGPD=C/ AGPC;
 		let BGGU=((BGGT* BK)).product_div((-AGPD),AGPC);
 		let AGPE=VKK* AGPD;
 		let BGGV=(APGX* AGPD)+ (BGGU* VKK);
 		let AGPF=VKL* AGPD;
 		let BGGW=(APGY* AGPD)+ (BGGU* VKL);
-		let DWL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DWH, B));
+		let DWL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DWH, C));
 		DWH=DWL;
 		DWJ=DWK;
 		VKK=AGPE;
@@ -15904,7 +15905,7 @@ impl Instance {
 		APGU=APHA;
 		APGV=APHB;
 		}
-		let DWV=B/ DWU;
+		let DWV=C/ DWU;
 		let BGGD=-DWV;
 		let BGGE=(APGT).product_div(BGGD,DWU);
 		let BGGF=BGGE* AWAO;
@@ -15948,10 +15949,10 @@ impl Instance {
 		let BGGN=BGGK* DXA;
 		let AGOU=(AGOS* DXA)- AGOS;
 		let AGOV=(AGOT* DXA)- AGOT;
-		let DXB=(((DXA- B)- DWZ)+ 2.220446049250313e-15f64).sqrt();
+		let DXB=(((DXA- C)- DWZ)+ 2.220446049250313e-15f64).sqrt();
 		let BGGO=(BGGN- BGGK)* (ANYF/ (AWAY* DXB));
 		let AGOW=BK* DXB;
-		let AGOX=B/ AGOW;
+		let AGOX=C/ AGOW;
 		let BGGP=((BGGO* BK)).product_div((-AGOX),AGOW);
 		let AGOY=AGOU* AGOX;
 		let AGOZ=AGOV* AGOX;
@@ -16070,7 +16071,7 @@ impl Instance {
 		if DXP{
 		let DXZ;
 		if DXQ{
-		DXZ=B;
+		DXZ=C;
 		}else{
 		let DYA;
 		if DXR{
@@ -16106,13 +16107,13 @@ impl Instance {
 		let DXX=DXW.sqrt();
 		let BQXE=APHI* (ANYF/ (AWAY* DXX));
 		let ANNW=BK* DXX;
-		let ANNX=B/ ANNW;
+		let ANNX=C/ ANNW;
 		let BQXF=((BQXE* BK)).product_div((-ANNX),ANNW);
 		let ANNY=VKS* ANNX;
 		let BQXG=(APHJ* ANNX)+ (BQXF* VKS);
 		let ANNZ=VKT* ANNX;
 		let BQXH=(APHK* ANNX)+ (BQXF* VKT);
-		let DXY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DXU, B));
+		let DXY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, DXU, C));
 		DXU=DXY;
 		DXW=DXX;
 		VKS=ANNY;
@@ -16167,7 +16168,7 @@ impl Instance {
 		APHG=APHM;
 		APHH=APHN;
 		}
-		let DYI=B/ DYH;
+		let DYI=C/ DYH;
 		let BGSQ=-DYI;
 		let BGSR=(APHF).product_div(BGSQ,DYH);
 		let BGSS=BGSR* AWAO;
@@ -16219,15 +16220,15 @@ impl Instance {
 		let BGTF=(BGRR* DYR)+ L5([(ANZH* AGXZ),0.0,0.0,0.0,0.0]);
 		let AGZF=AGYA* DYR;
 		let BGTG=(BGRS* DYR)+ L5([(ANZH* AGYA),0.0,0.0,0.0,0.0]);
-		let DYV=B+ (DXE* DYR);
+		let DYV=C+ (DXE* DYR);
 		let DYW=(DYQ* DYP)/ DYV;
 		let BGTH=-DYW;
 		let BGTI=((BGTB* DYQ)).product_sum_div(ANYF,BGTE,BGTH,DYV);
 		let BGTJ=BGTI* AWAO;
-		let AGZG=product_sum_div((AGZC* DYQ),B,BGTH,AGZE,DYV);
-		let BGTK=L5(sum_products_div_lanes(&[(&(BGTC* DYQ).0,B),(&BGTJ.0,AGZE),(&BGTF.0,BGTH),(&BGTE.0,(-AGZG))],DYV));
-		let AGZH=product_sum_div((AGZD* DYQ),B,BGTH,AGZF,DYV);
-		let BGTL=L5(sum_products_div_lanes(&[(&(BGTD* DYQ).0,B),(&BGTJ.0,AGZF),(&BGTG.0,BGTH),(&BGTE.0,(-AGZH))],DYV));
+		let AGZG=product_sum_div((AGZC* DYQ),C,BGTH,AGZE,DYV);
+		let BGTK=L5(sum_products_div_lanes(&[(&(BGTC* DYQ).0,C),(&BGTJ.0,AGZE),(&BGTF.0,BGTH),(&BGTE.0,(-AGZG))],DYV));
+		let AGZH=product_sum_div((AGZD* DYQ),C,BGTH,AGZF,DYV);
+		let BGTL=L5(sum_products_div_lanes(&[(&(BGTD* DYQ).0,C),(&BGTJ.0,AGZF),(&BGTG.0,BGTH),(&BGTE.0,(-AGZH))],DYV));
 		let DYX=DYW== A;
 		let DZA;
 		let VKW;
@@ -16243,10 +16244,10 @@ impl Instance {
 		APHP=AWLK;
 		APHQ=AWLK;
 		}else{
-		let DYY=AX- B;
+		let DYY=AX- C;
 		let DYZ=DYW.powf(DYY);
 		let BGTM=BGTI* (DYY* ((DYW+ (((DYW== AWBZ) as u8 as f64)* AWCA)).powf((DYY- ANYF))));
-		let AGZI=DYY- B;
+		let AGZI=DYY- C;
 		let AGZJ=DYW+ ((DYX as u8 as f64)* ZNW);
 		let BGTN=AGZI* ((AGZJ+ (((AGZJ== AWBZ) as u8 as f64)* AWCA)).powf((AGZI- ANYF)));
 		let AGZK=DYY* (AGZJ.powf(AGZI));
@@ -16281,10 +16282,10 @@ impl Instance {
 		APHS=AWLK;
 		APHT=AWLK;
 		}else{
-		let DZC=OQ- B;
+		let DZC=OQ- C;
 		let DZD=DYW.powf(DZC);
 		let BGTT=BGTI* (DZC* ((DYW+ (((DYW== AWBZ) as u8 as f64)* AWCA)).powf((DZC- ANYF))));
-		let AGZP=DZC- B;
+		let AGZP=DZC- C;
 		let AGZQ=DYW+ ((DYX as u8 as f64)* ZNW);
 		let BGTU=AGZP* ((AGZQ+ (((AGZQ== AWBZ) as u8 as f64)* AWCA)).powf((AGZP- ANYF)));
 		let AGZR=DZC* (AGZQ.powf(AGZP));
@@ -16303,7 +16304,7 @@ impl Instance {
 		let AGZU=((AGZC/ DZF)* HR)/ DZG;
 		let AGZV=((AGZD/ DZF)* HR)/ DZG;
 		let DZH=(HQ+ ((HR* (DYP/ DZF))/ DZG))+ OM;
-		let DZI=B/ DZH;
+		let DZI=C/ DZH;
 		let BGTY=-DZI;
 		let BGTZ=(BGTX).product_div(BGTY,DZH);
 		let BGUA=BGTZ* AWAO;
@@ -16315,7 +16316,7 @@ impl Instance {
 		let BGUC=((L5(sum_products_div_lanes(&[(&BGUA.0,AGZU),(&(((BGTC/ DZF)* HR)/ DZG).0,BGTY),(&BGTX.0,(-AGZW))],DZH)))+ ((BGTR* DZJ)+ L5([(ANZI* AGZN),0.0,0.0,0.0,0.0])))+ ((((APHS* DYW)+ (BGTI* VKY))+ ((BGTK* DZE)+ (APHR* AGZG)))/ HV);
 		let AGZZ=(AGZX+ (AGZO* DZJ))+ (((VKZ* DYW)+ (AGZH* DZE))/ HV);
 		let BGUD=((L5(sum_products_div_lanes(&[(&BGUA.0,AGZV),(&(((BGTD/ DZF)* HR)/ DZG).0,BGTY),(&BGTX.0,(-AGZX))],DZH)))+ ((BGTS* DZJ)+ L5([(ANZI* AGZO),0.0,0.0,0.0,0.0])))+ ((((APHT* DYW)+ (BGTI* VKZ))+ ((BGTL* DZE)+ (APHR* AGZH)))/ HV);
-		let DZM=B/ DZL;
+		let DZM=C/ DZL;
 		let BGUE=-DZM;
 		let BGUF=(BGUB).product_div(BGUE,DZL);
 		let BGUG=BGUF* AWAO;
@@ -16332,7 +16333,7 @@ impl Instance {
 		let BGUK=(L5([(ANZE* DZO),0.0,0.0,0.0,0.0])+ (BGTB* BWG))* PE;
 		let AHAE=(AGZC* BWG)* PE;
 		let AHAF=(AGZD* BWG)* PE;
-		let DZQ=B/ DZP;
+		let DZQ=C/ DZP;
 		let BGUL=-DZQ;
 		let BGUM=(BGUK).product_div(BGUL,DZP);
 		let BGUN=BGUM* AWAO;
@@ -16365,7 +16366,7 @@ impl Instance {
 		let DZT=((DZR* DZR)+ (DZS* DZS)).sqrt();
 		let BGVA=((BGUS+ BGUS)+ (BGUX+ BGUX))* (ANYF/ (AWAY* DZT));
 		let AHAS=BK* DZT;
-		let AHAT=B/ AHAS;
+		let AHAT=C/ AHAS;
 		let BGVB=((BGVA* BK)).product_div((-AHAT),AHAS);
 		let AHAU=AHAQ* AHAT;
 		let AHAV=AHAR* AHAT;
@@ -16384,7 +16385,7 @@ impl Instance {
 		let APHV;
 		let APHW;
 		if DZW{
-		EAC=B;
+		EAC=C;
 		VLA=A;
 		VLB=A;
 		APHU=AWLK;
@@ -16421,10 +16422,10 @@ impl Instance {
 		APIB=AWLK;
 		APIC=AWLK;
 		}else{
-		let DZZ=DZV- B;
+		let DZZ=DZV- C;
 		let EAA=DZU.powf(DZZ);
 		let BGVG=BGVD* (DZZ* ((DZU+ (((DZU== AWBZ) as u8 as f64)* AWCA)).powf((DZZ- ANYF))));
-		let AHAY=DZZ- B;
+		let AHAY=DZZ- C;
 		let AHAZ=DZU+ ((DZY as u8 as f64)* ZNW);
 		let BGVH=AHAY* ((AHAZ+ (((AHAZ== AWBZ) as u8 as f64)* AWCA)).powf((AHAY- ANYF)));
 		let AHBA=DZZ* (AHAZ.powf(AHAY));
@@ -16458,7 +16459,7 @@ impl Instance {
 		let BGVL=((BGVE* EAC)+ (APHU* AHAW))+ ((APHV* DZU)+ (BGVD* VLA));
 		let AHBE=(AHAX* EAC)+ (VLB* DZU);
 		let BGVM=((BGVF* EAC)+ (APHU* AHAX))+ ((APHW* DZU)+ (BGVD* VLB));
-		let EAE=B+ (DZU* EAC);
+		let EAE=C+ (DZU* EAC);
 		let EAF=(0.9999999999999978f64<= DZV)&& (DZV<= 1.0000000000000022f64);
 		let EAP;
 		let VLG;
@@ -16467,7 +16468,7 @@ impl Instance {
 		let APIE;
 		let APIF;
 		if EAF{
-		let EAG=B/ EAE;
+		let EAG=C/ EAE;
 		let BGWB=-EAG;
 		let BGWC=(BGVK).product_div(BGWB,EAE);
 		let BGWD=BGWC* AWAO;
@@ -16493,11 +16494,11 @@ impl Instance {
 		let EAI=EAE.sqrt();
 		let BGVU=BGVK* (ANYF/ (AWAY* EAI));
 		let AHBM=BK* EAI;
-		let AHBN=B/ AHBM;
+		let AHBN=C/ AHBM;
 		let BGVV=((BGVU* BK)).product_div((-AHBN),AHBM);
 		let AHBO=AHBD* AHBN;
 		let AHBP=AHBE* AHBN;
-		let EAJ=B/ EAI;
+		let EAJ=C/ EAI;
 		let BGVW=-EAJ;
 		let BGVX=(BGVU).product_div(BGVW,EAI);
 		let BGVY=BGVX* AWAO;
@@ -16527,10 +16528,10 @@ impl Instance {
 		APIK=AWLK;
 		APIL=AWLK;
 		}else{
-		let EAL=(-1f64/ DZV)- B;
+		let EAL=(-1f64/ DZV)- C;
 		let EAM=EAE.powf(EAL);
 		let BGVN=BGVK* (EAL* ((EAE+ (((EAE== AWBZ) as u8 as f64)* AWCA)).powf((EAL- ANYF))));
-		let AHBF=EAL- B;
+		let AHBF=EAL- C;
 		let AHBG=EAE+ ((EAK as u8 as f64)* ZNW);
 		let BGVO=AHBF* ((AHBG+ (((AHBG== AWBZ) as u8 as f64)* AWCA)).powf((AHBF- ANYF)));
 		let AHBH=EAL* (AHBG.powf(AHBF));
@@ -16607,7 +16608,7 @@ impl Instance {
 		let BGWY=BGWQ* AHBZ;
 		let AHCD=(AHCB* EAV)+ (AHBZ* EAW);
 		let BGWZ=(L5([0.0,BGWX[0],BGWX[1],BGWX[2],BGWX[3]])+ (BGWO* AHCB))+ (((AXBN- L5([AXBG[0],AXBG[1],0.0,AXBG[2],AXBG[3]]))* EAW)+ L5([0.0,BGWY[0],BGWY[1],BGWY[2],BGWY[3]]));
-		let EAX=B+ (EAW* EAV);
+		let EAX=C+ (EAW* EAV);
 		let EAY=(EAX< 2f64)&& true;
 		let EBY;
 		let VLO;
@@ -16651,7 +16652,7 @@ impl Instance {
 		if EBC{
 		let EBM;
 		if EBD{
-		EBM=B;
+		EBM=C;
 		}else{
 		let EBN;
 		if EBE{
@@ -16687,13 +16688,13 @@ impl Instance {
 		let EBK=EBJ.sqrt();
 		let BQXA=APIV* (ANYF/ (AWAY* EBK));
 		let ANNS=BK* EBK;
-		let ANNT=B/ ANNS;
+		let ANNT=C/ ANNS;
 		let BQXB=((BQXA* BK)).product_div((-ANNT),ANNS);
 		let ANNU=VLS* ANNT;
 		let BQXC=(APIW* ANNT)+ (BQXB* VLS);
 		let ANNV=VLT* ANNT;
 		let BQXD=(APIX* ANNT)+ (BQXB* VLT);
-		let EBL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EBH, B));
+		let EBL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EBH, C));
 		EBH=EBL;
 		EBJ=EBK;
 		VLS=ANNU;
@@ -16748,7 +16749,7 @@ impl Instance {
 		APIT=APIZ;
 		APIU=APJA;
 		}
-		let EBV=B/ EBU;
+		let EBV=C/ EBU;
 		let BGXR=-EBV;
 		let BGXS=(APIS).product_div(BGXR,EBU);
 		let BGXT=BGXS* AWAO;
@@ -16781,9 +16782,9 @@ impl Instance {
 		let EBZ=(EBY+ OM).sqrt();
 		let BGXY=APIP* (ANYF/ (AWAY* EBZ));
 		let AHCZ=BK* EBZ;
-		let AHDA=B/ AHCZ;
+		let AHDA=C/ AHCZ;
 		let BGXZ=((BGXY* BK)).product_div((-AHDA),AHCZ);
-		let ECA=B- EBZ;
+		let ECA=C- EBZ;
 		let BGYA=BGXY* AWAO;
 		let AHDB=-(VLO* AHDA);
 		let AHDC=-(VLP* AHDA);
@@ -16852,7 +16853,7 @@ impl Instance {
 		if ECN{
 		let ECX;
 		if ECO{
-		ECX=B;
+		ECX=C;
 		}else{
 		let ECY;
 		if ECP{
@@ -16888,13 +16889,13 @@ impl Instance {
 		let ECV=ECU.sqrt();
 		let BQWW=APJH* (ANYF/ (AWAY* ECV));
 		let ANNO=BK* ECV;
-		let ANNP=B/ ANNO;
+		let ANNP=C/ ANNO;
 		let BQWX=((BQWW* BK)).product_div((-ANNP),ANNO);
 		let ANNQ=VMA* ANNP;
 		let BQWY=(APJI* ANNP)+ (BQWX* VMA);
 		let ANNR=VMB* ANNP;
 		let BQWZ=(APJJ* ANNP)+ (BQWX* VMB);
-		let ECW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ECS, B));
+		let ECW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ECS, C));
 		ECS=ECW;
 		ECU=ECV;
 		VMA=ANNQ;
@@ -16949,7 +16950,7 @@ impl Instance {
 		APJF=APJL;
 		APJG=APJM;
 		}
-		let EDG=B/ EDF;
+		let EDG=C/ EDF;
 		let BGZE=-EDG;
 		let BGZF=(APJE).product_div(BGZE,EDF);
 		let BGZG=BGZF* AWAO;
@@ -16983,9 +16984,9 @@ impl Instance {
 		let BGZL=-EDK;
 		let BGZM=(AWLX).product_sum_div(ANYF,APJB,BGZL,EDJ);
 		let BGZN=BGZM* AWAO;
-		let AHEE=product_sum_div(URK,B,BGZL,VLW,EDJ);
+		let AHEE=product_sum_div(URK,C,BGZL,VLW,EDJ);
 		let BGZO=L5(sum_products_div_lanes(&[(&BGZN.0,VLW),(&APJC.0,BGZL),(&APJB.0,(-AHEE))],EDJ));
-		let AHEF=product_sum_div(URL,B,BGZL,VLX,EDJ);
+		let AHEF=product_sum_div(URL,C,BGZL,VLX,EDJ);
 		let BGZP=L5(sum_products_div_lanes(&[(&BGZN.0,VLX),(&APJD.0,BGZL),(&APJB.0,(-AHEF))],EDJ));
 		let EDL=EDK== A;
 		let EDO;
@@ -17002,10 +17003,10 @@ impl Instance {
 		APJO=AWLK;
 		APJP=AWLK;
 		}else{
-		let EDM=CZC- B;
+		let EDM=CZC- C;
 		let EDN=EDK.powf(EDM);
 		let BGZQ=BGZM* (EDM* ((EDK+ (((EDK== AWBZ) as u8 as f64)* AWCA)).powf((EDM- ANYF))));
-		let AHEG=EDM- B;
+		let AHEG=EDM- C;
 		let AHEH=EDK+ ((EDL as u8 as f64)* ZNW);
 		let BGZR=AHEG* ((AHEH+ (((AHEH== AWBZ) as u8 as f64)* AWCA)).powf((AHEG- ANYF)));
 		let AHEI=EDM* (AHEH.powf(AHEG));
@@ -17025,7 +17026,7 @@ impl Instance {
 		let BGZV=((APJO* EDK)+ (BGZM* VME))+ ((BGZO* EDO)+ (APJN* AHEE));
 		let AHEM=(VMF* EDK)+ (AHEF* EDO);
 		let BGZW=((APJP* EDK)+ (BGZM* VMF))+ ((BGZP* EDO)+ (APJN* AHEF));
-		let EDP=B+ (EDO* EDK);
+		let EDP=C+ (EDO* EDK);
 		let EDQ=EDP== A;
 		let EDT;
 		let VMG;
@@ -17041,10 +17042,10 @@ impl Instance {
 		APJR=AWLK;
 		APJS=AWLK;
 		}else{
-		let EDR=(B/ CZC)- B;
+		let EDR=(C/ CZC)- C;
 		let EDS=EDP.powf(EDR);
 		let BGZX=BGZU* (EDR* ((EDP+ (((EDP== AWBZ) as u8 as f64)* AWCA)).powf((EDR- ANYF))));
-		let AHEN=EDR- B;
+		let AHEN=EDR- C;
 		let AHEO=EDP+ ((EDQ as u8 as f64)* ZNW);
 		let BGZY=AHEN* ((AHEO+ (((AHEO== AWBZ) as u8 as f64)* AWCA)).powf((AHEN- ANYF)));
 		let AHEP=EDR* (AHEO.powf(AHEN));
@@ -17067,9 +17068,9 @@ impl Instance {
 		let BHAC=-EDV;
 		let BHAD=(AWLX).product_sum_div(ANYF,BHAB,BHAC,EDU);
 		let BHAE=BHAD* AWAO;
-		let AHEU=product_sum_div(URK,B,BHAC,AHES,EDU);
+		let AHEU=product_sum_div(URK,C,BHAC,AHES,EDU);
 		let BHAF=L5(sum_products_div_lanes(&[(&BHAE.0,AHES),(&(((APJR* EDP)+ (BGZU* VMG))+ ((BGZV* EDT)+ (APJQ* AHEL))).0,BHAC),(&BHAB.0,(-AHEU))],EDU));
-		let AHEV=product_sum_div(URL,B,BHAC,AHET,EDU);
+		let AHEV=product_sum_div(URL,C,BHAC,AHET,EDU);
 		let BHAG=L5(sum_products_div_lanes(&[(&BHAE.0,AHET),(&(((APJS* EDP)+ (BGZU* VMH))+ ((BGZW* EDT)+ (APJQ* AHEM))).0,BHAC),(&BHAB.0,(-AHEV))],EDU));
 		EEV=EDV;
 		VLM=AHEU;
@@ -17095,10 +17096,10 @@ impl Instance {
 		let BHAK=-EDX;
 		let BHAL=(BHAH).product_sum_div(ANYF,BGTE,BHAK,DYV);
 		let BHAM=BHAL* AWAO;
-		let AHEY=product_sum_div(AHEW,B,BHAK,AGZE,DYV);
-		let BHAN=L5(sum_products_div_lanes(&[(&BHAI.0,B),(&BHAM.0,AGZE),(&BGTF.0,BHAK),(&BGTE.0,(-AHEY))],DYV));
-		let AHEZ=product_sum_div(AHEX,B,BHAK,AGZF,DYV);
-		let BHAO=L5(sum_products_div_lanes(&[(&BHAJ.0,B),(&BHAM.0,AGZF),(&BGTG.0,BHAK),(&BGTE.0,(-AHEZ))],DYV));
+		let AHEY=product_sum_div(AHEW,C,BHAK,AGZE,DYV);
+		let BHAN=L5(sum_products_div_lanes(&[(&BHAI.0,C),(&BHAM.0,AGZE),(&BGTF.0,BHAK),(&BGTE.0,(-AHEY))],DYV));
+		let AHEZ=product_sum_div(AHEX,C,BHAK,AGZF,DYV);
+		let BHAO=L5(sum_products_div_lanes(&[(&BHAJ.0,C),(&BHAM.0,AGZF),(&BGTG.0,BHAK),(&BGTE.0,(-AHEZ))],DYV));
 		let EDY=EDX== A;
 		let EEC;
 		let VMI;
@@ -17114,10 +17115,10 @@ impl Instance {
 		APJU=AWLK;
 		APJV=AWLK;
 		}else{
-		let EEA=EDZ- B;
+		let EEA=EDZ- C;
 		let EEB=EDX.powf(EEA);
 		let BHAP=BHAL* (EEA* ((EDX+ (((EDX== AWBZ) as u8 as f64)* AWCA)).powf((EEA- ANYF))));
-		let AHFA=EEA- B;
+		let AHFA=EEA- C;
 		let AHFB=EDX+ ((EDY as u8 as f64)* ZNW);
 		let BHAQ=AHFA* ((AHFB+ (((AHFB== AWBZ) as u8 as f64)* AWCA)).powf((AHFA- ANYF)));
 		let AHFC=EEA* (AHFB.powf(AHFA));
@@ -17139,7 +17140,7 @@ impl Instance {
 		let AHFI=((AHEX/ EEE)* EEI)/ DZG;
 		let BHAT=L5([ANZJ,0.0,0.0,0.0,0.0])+ (((BHAH/ EEE)* EEI)/ DZG);
 		let EEK=(EEF+ ((EEI* (EDW/ EEE))/ DZG))+ OM;
-		let EEL=B/ EEK;
+		let EEL=C/ EEK;
 		let BHAU=-EEL;
 		let BHAV=(BHAT).product_div(BHAU,EEK);
 		let BHAW=BHAV* AWAO;
@@ -17151,7 +17152,7 @@ impl Instance {
 		let BHAY=(L5(sum_products_div_lanes(&[(&BHAW.0,AHFH),(&(((BHAI/ EEE)* EEI)/ DZG).0,BHAU),(&BHAT.0,(-AHFJ))],EEK)))+ (((((APJU* EDX)+ (BHAL* VMI))+ ((BHAN* EEC)+ (APJT* AHEY)))* EEM)+ L5([(ANZK* AHFF),0.0,0.0,0.0,0.0]));
 		let AHFM=AHFK+ (AHFG* EEM);
 		let BHAZ=(L5(sum_products_div_lanes(&[(&BHAW.0,AHFI),(&(((BHAJ/ EEE)* EEI)/ DZG).0,BHAU),(&BHAT.0,(-AHFK))],EEK)))+ (((((APJV* EDX)+ (BHAL* VMJ))+ ((BHAO* EEC)+ (APJT* AHEZ)))* EEM)+ L5([(ANZK* AHFG),0.0,0.0,0.0,0.0]));
-		let EET=B/ EES;
+		let EET=C/ EES;
 		let BHBA=-EET;
 		let BHBB=(BHAX).product_div(BHBA,EES);
 		let BHBC=BHBB* AWAO;
@@ -17193,7 +17194,7 @@ impl Instance {
 		}else{
 		let EFF=EFC.powf(EFE);
 		let BHBN=BHBK* (EFE* ((EFC+ (((EFC== AWBZ) as u8 as f64)* AWCA)).powf((EFE- ANYF))));
-		let AHFV=EFE- B;
+		let AHFV=EFE- C;
 		let AHFW=EFC+ ((EFD as u8 as f64)* ZNW);
 		let BHBO=AHFV* ((AHFW+ (((AHFW== AWBZ) as u8 as f64)* AWCA)).powf((AHFV- ANYF)));
 		let AHFX=EFE* (AHFW.powf(AHFV));
@@ -17208,7 +17209,7 @@ impl Instance {
 		APJX=BHBP;
 		APJY=BHBQ;
 		}
-		let EFH=B+ EFG;
+		let EFH=C+ EFG;
 		let EFI=EFH== A;
 		let EFL;
 		let VMM;
@@ -17224,10 +17225,10 @@ impl Instance {
 		APKA=AWLK;
 		APKB=AWLK;
 		}else{
-		let EFJ=B/ EFE;
+		let EFJ=C/ EFE;
 		let EFK=EFH.powf(EFJ);
 		let BHBR=APJW* (EFJ* ((EFH+ (((EFH== AWBZ) as u8 as f64)* AWCA)).powf((EFJ- ANYF))));
-		let AHGA=EFJ- B;
+		let AHGA=EFJ- C;
 		let AHGB=EFH+ ((EFI as u8 as f64)* ZNW);
 		let BHBS=AHGA* ((AHGB+ (((AHGB== AWBZ) as u8 as f64)* AWCA)).powf((AHGA- ANYF)));
 		let AHGC=EFJ* (AHGB.powf(AHGA));
@@ -17246,8 +17247,8 @@ impl Instance {
 		let BHBV=-EFM;
 		let BHBW=(BHBD).product_sum_div(ANYF,APJZ,BHBV,EFL);
 		let BHBX=BHBW* AWAO;
-		let AHGF=product_sum_div(AHFP,B,BHBV,VMM,EFL);
-		let AHGG=product_sum_div(AHFQ,B,BHBV,VMN,EFL);
+		let AHGF=product_sum_div(AHFP,C,BHBV,VMM,EFL);
+		let AHGG=product_sum_div(AHFQ,C,BHBV,VMN,EFL);
 		let EFN=PL* EDW;
 		let BHBY=BHAH* PL;
 		let AHGH=AHEW* PL;
@@ -17258,10 +17259,10 @@ impl Instance {
 		let AHGK=(AHGI* EFM)+ (AHGG* EFN);
 		let EFP=EFO* EEW;
 		let BHCA=(BHBZ* EEW)+ (BHBG* EFO);
-		let BHCB=(((((BHAI* PL)* EFM)+ (BHBW* AHGH))+ (((L5(sum_products_div_lanes(&[(&BHBE.0,B),(&BHBX.0,VMM),(&APKA.0,BHBV),(&APJZ.0,(-AHGF))],EFL)))* EFN)+ (BHBY* AHGF)))* EEW)+ (BHBG* AHGJ);
+		let BHCB=(((((BHAI* PL)* EFM)+ (BHBW* AHGH))+ (((L5(sum_products_div_lanes(&[(&BHBE.0,C),(&BHBX.0,VMM),(&APKA.0,BHBV),(&APJZ.0,(-AHGF))],EFL)))* EFN)+ (BHBY* AHGF)))* EEW)+ (BHBG* AHGJ);
 		let AHGL=(AHGJ* EEW)+ (AHFR* EFO);
 		let BHCC=BHCB+ ((BHBH* EFO)+ (BHBZ* AHFR));
-		let BHCD=(((((BHAJ* PL)* EFM)+ (BHBW* AHGI))+ (((L5(sum_products_div_lanes(&[(&BHBF.0,B),(&BHBX.0,VMN),(&APKB.0,BHBV),(&APJZ.0,(-AHGG))],EFL)))* EFN)+ (BHBY* AHGG)))* EEW)+ (BHBG* AHGK);
+		let BHCD=(((((BHAJ* PL)* EFM)+ (BHBW* AHGI))+ (((L5(sum_products_div_lanes(&[(&BHBF.0,C),(&BHBX.0,VMN),(&APKB.0,BHBV),(&APJZ.0,(-AHGG))],EFL)))* EFN)+ (BHBY* AHGG)))* EEW)+ (BHBG* AHGK);
 		let AHGM=(AHGK* EEW)+ (AHFS* EFO);
 		let BHCE=BHCD+ ((BHBI* EFO)+ (BHBZ* AHFS));
 		let EFQ=-CUX;
@@ -17274,10 +17275,10 @@ impl Instance {
 		let BHCI=-EFR;
 		let BHCJ=(BHCF).product_sum_div(ANYF,BGTE,BHCI,DYV);
 		let BHCK=BHCJ* AWAO;
-		let AHGP=product_sum_div(AHGN,B,BHCI,AGZE,DYV);
-		let BHCL=L5(sum_products_div_lanes(&[(&BHCG.0,B),(&BHCK.0,AGZE),(&BGTF.0,BHCI),(&BGTE.0,(-AHGP))],DYV));
-		let AHGQ=product_sum_div(AHGO,B,BHCI,AGZF,DYV);
-		let BHCM=L5(sum_products_div_lanes(&[(&BHCH.0,B),(&BHCK.0,AGZF),(&BGTG.0,BHCI),(&BGTE.0,(-AHGQ))],DYV));
+		let AHGP=product_sum_div(AHGN,C,BHCI,AGZE,DYV);
+		let BHCL=L5(sum_products_div_lanes(&[(&BHCG.0,C),(&BHCK.0,AGZE),(&BGTF.0,BHCI),(&BGTE.0,(-AHGP))],DYV));
+		let AHGQ=product_sum_div(AHGO,C,BHCI,AGZF,DYV);
+		let BHCM=L5(sum_products_div_lanes(&[(&BHCH.0,C),(&BHCK.0,AGZF),(&BGTG.0,BHCI),(&BGTE.0,(-AHGQ))],DYV));
 		let EFS=EFR== A;
 		let EFV;
 		let VMO;
@@ -17293,10 +17294,10 @@ impl Instance {
 		APKD=AWLK;
 		APKE=AWLK;
 		}else{
-		let EFT=EDZ- B;
+		let EFT=EDZ- C;
 		let EFU=EFR.powf(EFT);
 		let BHCN=BHCJ* (EFT* ((EFR+ (((EFR== AWBZ) as u8 as f64)* AWCA)).powf((EFT- ANYF))));
-		let AHGR=EFT- B;
+		let AHGR=EFT- C;
 		let AHGS=EFR+ ((EFS as u8 as f64)* ZNW);
 		let BHCO=AHGR* ((AHGS+ (((AHGS== AWBZ) as u8 as f64)* AWCA)).powf((AHGR- ANYF)));
 		let AHGT=EFT* (AHGS.powf(AHGR));
@@ -17318,7 +17319,7 @@ impl Instance {
 		let AHGY=((AHGN/ EFX)* EGA)/ DZG;
 		let AHGZ=((AHGO/ EFX)* EGA)/ DZG;
 		let EGC=(EFY+ ((EGA* (EFQ/ EFX))/ DZG))+ OM;
-		let EGD=B/ EGC;
+		let EGD=C/ EGC;
 		let BHCS=-EGD;
 		let BHCT=(BHCR).product_div(BHCS,EGC);
 		let BHCU=BHCT* AWAO;
@@ -17330,7 +17331,7 @@ impl Instance {
 		let BHCW=(L5(sum_products_div_lanes(&[(&BHCU.0,AHGY),(&(((BHCG/ EFX)* EGA)/ DZG).0,BHCS),(&BHCR.0,(-AHHA))],EGC)))+ (((((APKD* EFR)+ (BHCJ* VMO))+ ((BHCL* EFV)+ (APKC* AHGP)))* EEM)+ L5([(ANZK* AHGW),0.0,0.0,0.0,0.0]));
 		let AHHD=AHHB+ (AHGX* EEM);
 		let BHCX=(L5(sum_products_div_lanes(&[(&BHCU.0,AHGZ),(&(((BHCH/ EFX)* EGA)/ DZG).0,BHCS),(&BHCR.0,(-AHHB))],EGC)))+ (((((APKE* EFR)+ (BHCJ* VMP))+ ((BHCM* EFV)+ (APKC* AHGQ)))* EEM)+ L5([(ANZK* AHGX),0.0,0.0,0.0,0.0]));
-		let EGF=B/ EGE;
+		let EGF=C/ EGE;
 		let BHCY=-EGF;
 		let BHCZ=(BHCV).product_div(BHCY,EGE);
 		let BHDA=BHCZ* AWAO;
@@ -17365,7 +17366,7 @@ impl Instance {
 		}else{
 		let EGJ=EGH.powf(EFE);
 		let BHDH=BHDE* (EFE* ((EGH+ (((EGH== AWBZ) as u8 as f64)* AWCA)).powf((EFE- ANYF))));
-		let AHHK=EFE- B;
+		let AHHK=EFE- C;
 		let AHHL=EGH+ ((EGI as u8 as f64)* ZNW);
 		let BHDI=AHHK* ((AHHL+ (((AHHL== AWBZ) as u8 as f64)* AWCA)).powf((AHHK- ANYF)));
 		let AHHM=EFE* (AHHL.powf(AHHK));
@@ -17380,7 +17381,7 @@ impl Instance {
 		APKG=BHDJ;
 		APKH=BHDK;
 		}
-		let EGL=B+ EGK;
+		let EGL=C+ EGK;
 		let EGM=EGL== A;
 		let EGP;
 		let VMS;
@@ -17396,10 +17397,10 @@ impl Instance {
 		APKJ=AWLK;
 		APKK=AWLK;
 		}else{
-		let EGN=B/ EFE;
+		let EGN=C/ EFE;
 		let EGO=EGL.powf(EGN);
 		let BHDL=APKF* (EGN* ((EGL+ (((EGL== AWBZ) as u8 as f64)* AWCA)).powf((EGN- ANYF))));
-		let AHHP=EGN- B;
+		let AHHP=EGN- C;
 		let AHHQ=EGL+ ((EGM as u8 as f64)* ZNW);
 		let BHDM=AHHP* ((AHHQ+ (((AHHQ== AWBZ) as u8 as f64)* AWCA)).powf((AHHP- ANYF)));
 		let AHHR=EGN* (AHHQ.powf(AHHP));
@@ -17418,8 +17419,8 @@ impl Instance {
 		let BHDP=-EGQ;
 		let BHDQ=(BHDB).product_sum_div(ANYF,APKI,BHDP,EGP);
 		let BHDR=BHDQ* AWAO;
-		let AHHU=product_sum_div(AHHG,B,BHDP,VMS,EGP);
-		let AHHV=product_sum_div(AHHH,B,BHDP,VMT,EGP);
+		let AHHU=product_sum_div(AHHG,C,BHDP,VMS,EGP);
+		let AHHV=product_sum_div(AHHH,C,BHDP,VMT,EGP);
 		let EGR=PL* EFQ;
 		let BHDS=BHCF* PL;
 		let AHHW=AHGN* PL;
@@ -17428,8 +17429,8 @@ impl Instance {
 		let BHDT=(BHDS* EGQ)+ (BHDQ* EGR);
 		let AHHY=(AHHW* EGQ)+ (AHHU* EGR);
 		let AHHZ=(AHHX* EGQ)+ (AHHV* EGR);
-		let BHDU=(((((BHCG* PL)* EGQ)+ (BHDQ* AHHW))+ (((L5(sum_products_div_lanes(&[(&BHDC.0,B),(&BHDR.0,VMS),(&APKJ.0,BHDP),(&APKI.0,(-AHHU))],EGP)))* EGR)+ (BHDS* AHHU)))* EEW)+ (BHBG* AHHY);
-		let BHDV=(((((BHCH* PL)* EGQ)+ (BHDQ* AHHX))+ (((L5(sum_products_div_lanes(&[(&BHDD.0,B),(&BHDR.0,VMT),(&APKK.0,BHDP),(&APKI.0,(-AHHV))],EGP)))* EGR)+ (BHDS* AHHV)))* EEW)+ (BHBG* AHHZ);
+		let BHDU=(((((BHCG* PL)* EGQ)+ (BHDQ* AHHW))+ (((L5(sum_products_div_lanes(&[(&BHDC.0,C),(&BHDR.0,VMS),(&APKJ.0,BHDP),(&APKI.0,(-AHHU))],EGP)))* EGR)+ (BHDS* AHHU)))* EEW)+ (BHBG* AHHY);
+		let BHDV=(((((BHCH* PL)* EGQ)+ (BHDQ* AHHX))+ (((L5(sum_products_div_lanes(&[(&BHDD.0,C),(&BHDR.0,VMT),(&APKK.0,BHDP),(&APKI.0,(-AHHV))],EGP)))* EGR)+ (BHDS* AHHV)))* EEW)+ (BHBG* AHHZ);
 		let EGT=(PL* CWM)/ PE;
 		let BHDW=(ANZG* PL)/ PE;
 		let EGU=EGT* DYO;
@@ -17489,7 +17490,7 @@ impl Instance {
 		let AHIQ=(AHIE* EHD)+ (AHIO* EGX);
 		let BHEN=((((BHED* EHC)+ (BHEH* AHIF))+ (((((BHED* EHB)+ (BHEG* AHIF))+ (BHEJ+ (BHEB* AHIL)))* EGX)+ (BHEB* AHIN)))* EGX)+ (BHEB* AHIP);
 		let AHIR=(AHIF* EHD)+ (AHIP* EGX);
-		let EHE=B+ (EGX* EHD);
+		let EHE=C+ (EGX* EHD);
 		let EHF=LI/ EHE;
 		let BHEO=-EHF;
 		let BHEP=(BHEL).product_div(BHEO,EHE);
@@ -17518,7 +17519,7 @@ impl Instance {
 		let EHJ=((EHI* EHI)+ 0.010000000000000002f64).sqrt();
 		let BHFA=(BHEX+ BHEX)* (ANYF/ (AWAY* EHJ));
 		let AHJC=BK* EHJ;
-		let AHJD=B/ AHJC;
+		let AHJD=C/ AHJC;
 		let BHFB=((BHFA* BK)).product_div((-AHJD),AHJC);
 		let EHK=J* (EHI+ EHJ);
 		let BHFC=(BHEU+ BHFA)* J;
@@ -17560,7 +17561,7 @@ impl Instance {
 		let BHFJ=AOEE* EHO;
 		let EHQ=EHN.powf(BG);
 		let BHFK=APKR* (BG* ((EHN+ (((EHN== AWBZ) as u8 as f64)* AWCA)).powf((BG- ANYF))));
-		let AHJI=BG- B;
+		let AHJI=BG- C;
 		let AHJJ=EHN+ (((EHN== A) as u8 as f64)* ZNW);
 		let BHFL=AHJI* ((AHJJ+ (((AHJJ== AWBZ) as u8 as f64)* AWCA)).powf((AHJI- ANYF)));
 		let AHJK=BG* (AHJJ.powf(AHJI));
@@ -17586,7 +17587,7 @@ impl Instance {
 		let BHFU=BHFR* AHJP;
 		let BHFV=(AXBI* UL)* EHS;
 		let BHFW=BHFR* AHJQ;
-		let EHU=(B+ (BQR* BI))+ (EHT* EHS);
+		let EHU=(C+ (BQR* BI))+ (EHT* EHS);
 		let BHFX=L5([BHFN[0],BHFN[1],0.0,BHFN[2],BHFN[3]])+ (L5([BHFS[0],BHFS[1],0.0,BHFS[2],BHFS[3]])+ (BHFQ* EHT));
 		let AHJT=(ZME* BI)+ ((AHJR* EHS)+ (AHJP* EHT));
 		let BHFY=L5([BHFO[0],BHFO[1],0.0,BHFO[2],BHFO[3]])+ ((L5([BHFT[0],BHFT[1],0.0,BHFT[2],BHFT[3]])+ (BHFQ* AHJR))+ (((BHES- L5([AXBF[0],AXBF[1],0.0,AXBF[2],AXBF[3]]))* EHT)+ L5([BHFU[0],BHFU[1],0.0,BHFU[2],BHFU[3]])));
@@ -17735,7 +17736,7 @@ impl Instance {
 		};
 		let BHHE=BHHD* EIM;
 		let EIR=((EIM* EIM)+ EIQ).sqrt();
-		let EIS=EIJ* (BV+ B);
+		let EIS=EIJ* (BV+ C);
 		let BHHF=((BHHD+ ((BHHE+ BHHE)* (ANYF/ (AWAY* EIR))))* J)* AWAO;
 		let EIT=(EIS- (EIJ+ (J* (EIM+ EIR))))- 1e-4f64;
 		let EIU=(BH* EIS)* 1e-4f64;
@@ -17770,7 +17771,7 @@ impl Instance {
 		let EJO;
 		let APLG;
 		if EJD{
-		let EJE=BW- B;
+		let EJE=BW- C;
 		let EJF=J* BW;
 		let EJG=((EJF* (21f64.powf(EJE)))/ BL)* (BBK.powf((BW- BK)));
 		let EJH=EJG* EJC;
@@ -17805,7 +17806,7 @@ impl Instance {
 		let BHHU=APKZ* EJR;
 		let BHHV=BHHO* VND;
 		let EJU=BIL+ BBK;
-		let EJV=B/ EJU;
+		let EJV=C/ EJU;
 		let BHHW=-EJV;
 		let BHHX=(ANYO).product_div(BHHW,EJU);
 		let BHHY=BHHX* AWAO;
@@ -17819,8 +17820,8 @@ impl Instance {
 		let BHID=BHHX* AHKK;
 		let BHIE=((BHHY).product_sum_div(URL,ANYO,(-AHKM),EJU))* EJT;
 		let AHKO=(AHKK* EJV)+ (AHKM* EJT);
-		let EJW=B+ (EJT* EJV);
-		let EJX=B/ EJW;
+		let EJW=C+ (EJT* EJV);
+		let EJX=C/ EJW;
 		let BHIF=-EJX;
 		let BHIG=(BHIA).product_div(BHIF,EJW);
 		let BHIH=BHIG* AWAO;
@@ -17877,7 +17878,7 @@ impl Instance {
 		let BHIW=AOQD* AMF;
 		let EKS=(EKR< OM)|| (EKP< OM);
 		let LCU=if EKS{
-		B
+		C
 		}else{
 		A
 		};
@@ -18019,7 +18020,7 @@ impl Instance {
 		let EKX=2.069886e-10f64/ EKU;
 		let EKY=2.069886e-10f64/ EKV;
 		let EKZ=VY/ PU;
-		let ELA=B/ (B+ EKZ);
+		let ELA=C/ (C+ EKZ);
 		let ELB=BNR* BNR;
 		let BCAG=AODZ* BNR;
 		let BCAH=BCAG+ BCAG;
@@ -18108,7 +18109,7 @@ impl Instance {
 		if ELP{
 		let ELZ;
 		if ELQ{
-		ELZ=B;
+		ELZ=C;
 		}else{
 		let EMA;
 		if ELR{
@@ -18144,13 +18145,13 @@ impl Instance {
 		let ELX=ELW.sqrt();
 		let BERL=APMS* (ANYF/ (AWAY* ELX));
 		let AFEL=BK* ELX;
-		let AFEM=B/ AFEL;
+		let AFEM=C/ AFEL;
 		let BERM=((BERL* BK)).product_div((-AFEM),AFEL);
 		let AFEN=VNY* AFEM;
 		let BERN=(APMT* AFEM)+ (BERM* VNY);
 		let AFEO=VNZ* AFEM;
 		let BERO=(APMU* AFEM)+ (BERM* VNZ);
-		let ELY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ELU, B));
+		let ELY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ELU, C));
 		ELU=ELY;
 		ELW=ELX;
 		VNY=AFEN;
@@ -18205,7 +18206,7 @@ impl Instance {
 		APMQ=APMW;
 		APMR=APMX;
 		}
-		let EMI=B/ EMH;
+		let EMI=C/ EMH;
 		let BCBT=-EMI;
 		let BCBU=(APMP).product_div(BCBT,EMH);
 		let BCBV=BCBU* AWAO;
@@ -18244,7 +18245,7 @@ impl Instance {
 		let EMN=EMM.sqrt();
 		let BCCD=BCCA* (ANYF/ (AWAY* EMN));
 		let ADCX=BK* EMN;
-		let ADCY=B/ ADCX;
+		let ADCY=C/ ADCX;
 		let BCCE=((BCCD* BK)).product_div((-ADCY),ADCX);
 		let ADCZ=ADCV* ADCY;
 		let BCCF=(BCCB* ADCY)+ (BCCE* ADCV);
@@ -18263,7 +18264,7 @@ impl Instance {
 		let ADDC=(-(URL* EMO))* BRD;
 		let EMQ=CA* BRD;
 		let EMR=BZ* BRD;
-		let EMS=((BRD* (B- (EMO* BIL)))- EMR)- EMQ;
+		let EMS=((BRD* (C- (EMO* BIL)))- EMR)- EMQ;
 		let EMT=(BH* EMR)* EMQ;
 		let EMU=EMT> A;
 		let EMW=if EMU{
@@ -18282,7 +18283,7 @@ impl Instance {
 		let EMX=((EMS* EMS)+ EMW).sqrt();
 		let BCCL=(BCCI+ BCCI)* (ANYF/ (AWAY* EMX));
 		let ADDH=BK* EMX;
-		let ADDI=B/ ADDH;
+		let ADDI=C/ ADDH;
 		let BCCM=((BCCL* BK)).product_div((-ADDI),ADDH);
 		let EMY=BK* BRD;
 		let BCCN=((BCCH+ BCCL)* J)* AWAO;
@@ -18309,7 +18310,7 @@ impl Instance {
 		let ENE=((EMZ* EMZ)+ END).sqrt();
 		let BCCT=(BCCQ+ BCCQ)* (ANYF/ (AWAY* ENE));
 		let ADDP=BK* ENE;
-		let ADDQ=B/ ADDP;
+		let ADDQ=C/ ADDP;
 		let BCCU=((BCCT* BK)).product_div((-ADDQ),ADDP);
 		let ENF=EMY- (J* (EMZ+ ENE));
 		let BCCV=((BCCN+ BCCT)* J)* AWAO;
@@ -18377,7 +18378,7 @@ impl Instance {
 		let ENN=((ENI* ENI)+ ENM).sqrt();
 		let BCDH=(BCDE+ BCDE)* (ANYF/ (AWAY* ENN));
 		let ADDZ=BK* ENN;
-		let ADEA=B/ ADDZ;
+		let ADEA=C/ ADDZ;
 		let BCDI=((BCDH* BK)).product_div((-ADEA),ADDZ);
 		let ENO=BQN- AZA;
 		let BCDJ=AOFK- BCAU;
@@ -18434,7 +18435,7 @@ impl Instance {
 		let ENU=((ENP* ENP)+ ENT).sqrt();
 		let BCDZ=((BCDW+ BCDW)+ L5([APNE[0],APNE[1],0.0,APNE[2],APNE[3]]))* (ANYF/ (AWAY* ENU));
 		let ADEL=BK* ENU;
-		let ADEM=B/ ADEL;
+		let ADEM=C/ ADEL;
 		let BCEA=((BCDZ* BK)).product_div((-ADEM),ADEL);
 		let ENV=ENO+ (J* (ENP+ ENU));
 		let BCEB=BCDK+ ((BCDL+ BCDZ)* J);
@@ -18448,7 +18449,7 @@ impl Instance {
 		let ADEQ=VOD- VOF;
 		let BCEG=L4([0.0,APNA[0],APNA[1],0.0])- APND;
 		let ENX=(ENG- ENW)+ CEN;
-		let mut ENY=B;
+		let mut ENY=C;
 		let mut EOB=A;
 		let mut EQZ=ENV;
 		let mut EUZ=A;
@@ -18548,7 +18549,7 @@ impl Instance {
 		if EOJ{
 		let EOT;
 		if EOK{
-		EOT=B;
+		EOT=C;
 		}else{
 		let EOU;
 		if EOL{
@@ -18584,13 +18585,13 @@ impl Instance {
 		let EOR=EOQ.sqrt();
 		let BERH=APOF* (ANYF/ (AWAY* EOR));
 		let AFEH=BK* EOR;
-		let AFEI=B/ AFEH;
+		let AFEI=C/ AFEH;
 		let BERI=((BERH* BK)).product_div((-AFEI),AFEH);
 		let AFEJ=VOY* AFEI;
 		let BERJ=(APOG* AFEI)+ (BERI* VOY);
 		let AFEK=VOZ* AFEI;
 		let BERK=(APOH* AFEI)+ (BERI* VOZ);
-		let EOS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EOO, B));
+		let EOS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EOO, C));
 		EOO=EOS;
 		EOQ=EOR;
 		VOY=AFEJ;
@@ -18645,7 +18646,7 @@ impl Instance {
 		APOD=APOJ;
 		APOE=APOK;
 		}
-		let EPC=B/ EPB;
+		let EPC=C/ EPB;
 		let BEFC=-EPC;
 		let BEFD=(APOC).product_div(BEFC,EPB);
 		let BEFE=BEFD* AWAO;
@@ -18661,10 +18662,10 @@ impl Instance {
 		let BEFI=-EPF;
 		let BEFJ=((BEFD* EPE)).product_sum_div(ANYF,BEET,BEFI,EOI);
 		let BEFK=BEFJ* AWAO;
-		let AEVA=product_sum_div((AEUW* EPE),B,BEFI,AEUO,EOI);
-		let BEFL=L5(sum_products_div_lanes(&[(&(BEFF* EPE).0,B),(&BEFK.0,AEUO),(&BEEV.0,BEFI),(&BEET.0,(-AEVA))],EOI));
-		let AEVB=product_sum_div((AEUX* EPE),B,BEFI,AEUQ,EOI);
-		let BEFM=L5(sum_products_div_lanes(&[(&(BEFG* EPE).0,B),(&BEFK.0,AEUQ),(&BEEX.0,BEFI),(&BEET.0,(-AEVB))],EOI));
+		let AEVA=product_sum_div((AEUW* EPE),C,BEFI,AEUO,EOI);
+		let BEFL=L5(sum_products_div_lanes(&[(&(BEFF* EPE).0,C),(&BEFK.0,AEUO),(&BEEV.0,BEFI),(&BEET.0,(-AEVA))],EOI));
+		let AEVB=product_sum_div((AEUX* EPE),C,BEFI,AEUQ,EOI);
+		let BEFM=L5(sum_products_div_lanes(&[(&(BEFG* EPE).0,C),(&BEFK.0,AEUQ),(&BEEX.0,BEFI),(&BEET.0,(-AEVB))],EOI));
 		let EPG=0.1f64- (EPD* EPC);
 		let BEFN=((BEFH* EPC)+ (BEFD* EPD))* AWAO;
 		let AEVC=-((AEUY* EPC)+ (AEUW* EPD));
@@ -18685,7 +18686,7 @@ impl Instance {
 		APOB=BEFM;
 		}else{
 		EPH=EOE;
-		EQP=B;
+		EQP=C;
 		VOS=AEUF;
 		VOT=AEUG;
 		VOU=A;
@@ -18702,7 +18703,7 @@ impl Instance {
 		let EPI=(EKX* EPH).sqrt();
 		let BEFQ=(APNW* EKX)* (ANYF/ (AWAY* EPI));
 		let AEVG=BK* EPI;
-		let AEVH=B/ AEVG;
+		let AEVH=C/ AEVG;
 		let BEFR=((BEFQ* BK)).product_div((-AEVH),AEVG);
 		let AEVI=AEVE* AEVH;
 		let BEFS=((APNY* EKX)* AEVH)+ (BEFR* AEVE);
@@ -18761,7 +18762,7 @@ impl Instance {
 		if EPO{
 		let EPY;
 		if EPP{
-		EPY=B;
+		EPY=C;
 		}else{
 		let EPZ;
 		if EPQ{
@@ -18797,13 +18798,13 @@ impl Instance {
 		let EPW=EPV.sqrt();
 		let BERD=APOU* (ANYF/ (AWAY* EPW));
 		let AFED=BK* EPW;
-		let AFEE=B/ AFED;
+		let AFEE=C/ AFED;
 		let BERE=((BERD* BK)).product_div((-AFEE),AFED);
 		let AFEF=VPI* AFEE;
 		let BERF=(APOV* AFEE)+ (BERE* VPI);
 		let AFEG=VPJ* AFEE;
 		let BERG=(APOW* AFEE)+ (BERE* VPJ);
-		let EPX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EPT, B));
+		let EPX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EPT, C));
 		EPT=EPX;
 		EPV=EPW;
 		VPI=AFEF;
@@ -18858,7 +18859,7 @@ impl Instance {
 		APOS=APOY;
 		APOT=APOZ;
 		}
-		let EQH=B/ EQG;
+		let EQH=C/ EQG;
 		let BEGO=-EQH;
 		let BEGP=(APOR).product_div(BEGO,EQG);
 		let BEGQ=BEGP* AWAO;
@@ -18874,10 +18875,10 @@ impl Instance {
 		let BEGU=-EQK;
 		let BEGV=((BEGP* EQJ)).product_sum_div(ANYF,BEGF,BEGU,EPN);
 		let BEGW=BEGV* AWAO;
-		let AEWD=product_sum_div((AEVZ* EQJ),B,BEGU,AEVR,EPN);
-		let BEGX=L5(sum_products_div_lanes(&[(&(BEGR* EQJ).0,B),(&BEGW.0,AEVR),(&BEGH.0,BEGU),(&BEGF.0,(-AEWD))],EPN));
-		let AEWE=product_sum_div((AEWA* EQJ),B,BEGU,AEVT,EPN);
-		let BEGY=L5(sum_products_div_lanes(&[(&(BEGS* EQJ).0,B),(&BEGW.0,AEVT),(&BEGJ.0,BEGU),(&BEGF.0,(-AEWE))],EPN));
+		let AEWD=product_sum_div((AEVZ* EQJ),C,BEGU,AEVR,EPN);
+		let BEGX=L5(sum_products_div_lanes(&[(&(BEGR* EQJ).0,C),(&BEGW.0,AEVR),(&BEGH.0,BEGU),(&BEGF.0,(-AEWD))],EPN));
+		let AEWE=product_sum_div((AEWA* EQJ),C,BEGU,AEVT,EPN);
+		let BEGY=L5(sum_products_div_lanes(&[(&(BEGS* EQJ).0,C),(&BEGW.0,AEVT),(&BEGJ.0,BEGU),(&BEGF.0,(-AEWE))],EPN));
 		let EQL=EPJ+ (EQI* EQH);
 		let BEGZ=BEFU+ ((BEGT* EQH)+ (BEGP* EQI));
 		let AEWF=VOC+ ((AEWB* EQH)+ (AEVZ* EQI));
@@ -18898,7 +18899,7 @@ impl Instance {
 		APOQ=BEGY;
 		}else{
 		EQM=EPI;
-		EQR=B;
+		EQR=C;
 		VPC=AEVI;
 		VPD=AEVJ;
 		VPE=A;
@@ -19010,15 +19011,15 @@ impl Instance {
 		let BEIA=-ERD;
 		let BEIB=(L5([0.0,APMY[0],0.0,APMY[1],0.0])).product_sum_div(ANYF,APOL,BEIA,EQM);
 		let BEIC=BEIB* AWAO;
-		let AEWZ=product_sum_div(VOC,B,BEIA,VPC,EQM);
-		let AEXA=product_sum_div(VOD,B,BEIA,VPD,EQM);
-		let ERE=B- EOD;
+		let AEWZ=product_sum_div(VOC,C,BEIA,VPC,EQM);
+		let AEXA=product_sum_div(VOD,C,BEIA,VPD,EQM);
+		let ERE=C- EOD;
 		let ERF=(EQP- (ERD* EQP))* ERE;
 		let BEID=(APNX- ((BEIB* EQP)+ (APNX* ERD)))* ERE;
 		let AEXB=(VOU- ((AEWZ* EQP)+ (VOU* ERD)))* ERE;
-		let BEIE=(APOA- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APMZ[0],0.0,APMZ[1],0.0]).0,B),(&BEIC.0,VPC),(&APON.0,BEIA),(&APOL.0,(-AEWZ))],EQM)))* EQP)+ (APNX* AEWZ))+ ((APOA* ERD)+ (BEIB* VOU))))* ERE;
+		let BEIE=(APOA- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APMZ[0],0.0,APMZ[1],0.0]).0,C),(&BEIC.0,VPC),(&APON.0,BEIA),(&APOL.0,(-AEWZ))],EQM)))* EQP)+ (APNX* AEWZ))+ ((APOA* ERD)+ (BEIB* VOU))))* ERE;
 		let AEXC=(VOV- ((AEXA* EQP)+ (VOV* ERD)))* ERE;
-		let BEIF=(APOB- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APNA[0],0.0,APNA[1],0.0]).0,B),(&BEIC.0,VPD),(&APOO.0,BEIA),(&APOL.0,(-AEXA))],EQM)))* EQP)+ (APNX* AEXA))+ ((APOB* ERD)+ (BEIB* VOV))))* ERE;
+		let BEIF=(APOB- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APNA[0],0.0,APNA[1],0.0]).0,C),(&BEIC.0,VPD),(&APOO.0,BEIA),(&APOL.0,(-AEXA))],EQM)))* EQP)+ (APNX* AEXA))+ ((APOB* ERD)+ (BEIB* VOV))))* ERE;
 		ERG=ERC;
 		ESM=ERF;
 		VPM=AEWX;
@@ -19086,7 +19087,7 @@ impl Instance {
 		if ERN{
 		let ERX;
 		if ERO{
-		ERX=B;
+		ERX=C;
 		}else{
 		let ERY;
 		if ERP{
@@ -19122,13 +19123,13 @@ impl Instance {
 		let ERV=ERU.sqrt();
 		let BEQZ=APPP* (ANYF/ (AWAY* ERV));
 		let AFDZ=BK* ERV;
-		let AFEA=B/ AFDZ;
+		let AFEA=C/ AFDZ;
 		let BERA=((BEQZ* BK)).product_div((-AFEA),AFDZ);
 		let AFEB=VPW* AFEA;
 		let BERB=(APPQ* AFEA)+ (BERA* VPW);
 		let AFEC=VPX* AFEA;
 		let BERC=(APPR* AFEA)+ (BERA* VPX);
-		let ERW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ERS, B));
+		let ERW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ERS, C));
 		ERS=ERW;
 		ERU=ERV;
 		VPW=AFEB;
@@ -19183,7 +19184,7 @@ impl Instance {
 		APPN=APPT;
 		APPO=APPU;
 		}
-		let ESG=B/ ESF;
+		let ESG=C/ ESF;
 		let BEJK=-ESG;
 		let BEJL=(APPM).product_div(BEJK,ESF);
 		let BEJM=BEJL* AWAO;
@@ -19204,10 +19205,10 @@ impl Instance {
 		let BEJT=-ESJ;
 		let BEJU=((BEJL* ESI)).product_sum_div(ANYF,BEJD,BEJT,ERM);
 		let BEJV=BEJU* AWAO;
-		let AEYE=product_sum_div((AEXY* ESI),B,BEJT,AEXR,ERM);
-		let BEJW=L5(sum_products_div_lanes(&[(&(BEJN* ESI).0,B),(&BEJV.0,AEXR),(&BEJE.0,BEJT),(&BEJD.0,(-AEYE))],ERM));
-		let AEYF=product_sum_div((AEXZ* ESI),B,BEJT,AEXS,ERM);
-		let BEJX=L5(sum_products_div_lanes(&[(&(BEJO* ESI).0,B),(&BEJV.0,AEXS),(&BEJF.0,BEJT),(&BEJD.0,(-AEYF))],ERM));
+		let AEYE=product_sum_div((AEXY* ESI),C,BEJT,AEXR,ERM);
+		let BEJW=L5(sum_products_div_lanes(&[(&(BEJN* ESI).0,C),(&BEJV.0,AEXR),(&BEJE.0,BEJT),(&BEJD.0,(-AEYE))],ERM));
+		let AEYF=product_sum_div((AEXZ* ESI),C,BEJT,AEXS,ERM);
+		let BEJX=L5(sum_products_div_lanes(&[(&(BEJO* ESI).0,C),(&BEJV.0,AEXS),(&BEJF.0,BEJT),(&BEJD.0,(-AEYF))],ERM));
 		let ESK=-0.2f64+ (ESH* ESG);
 		ESL=ESJ;
 		EVH=ESK;
@@ -19222,7 +19223,7 @@ impl Instance {
 		APPK=BEJR;
 		APPL=BEJS;
 		}else{
-		ESL=B;
+		ESL=C;
 		EVH=ERG;
 		VPQ=A;
 		VPR=A;
@@ -19296,7 +19297,7 @@ impl Instance {
 		if EST{
 		let ETD;
 		if ESU{
-		ETD=B;
+		ETD=C;
 		}else{
 		let ETE;
 		if ESV{
@@ -19332,13 +19333,13 @@ impl Instance {
 		let ETB=ETA.sqrt();
 		let BEQV=APQE* (ANYF/ (AWAY* ETB));
 		let AFDV=BK* ETB;
-		let AFDW=B/ AFDV;
+		let AFDW=C/ AFDV;
 		let BEQW=((BEQV* BK)).product_div((-AFDW),AFDV);
 		let AFDX=VQG* AFDW;
 		let BEQX=(APQF* AFDW)+ (BEQW* VQG);
 		let AFDY=VQH* AFDW;
 		let BEQY=(APQG* AFDW)+ (BEQW* VQH);
-		let ETC=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ESY, B));
+		let ETC=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ESY, C));
 		ESY=ETC;
 		ETA=ETB;
 		VQG=AFDX;
@@ -19393,7 +19394,7 @@ impl Instance {
 		APQC=APQI;
 		APQD=APQJ;
 		}
-		let ETM=B/ ETL;
+		let ETM=C/ ETL;
 		let BEKV=-ETM;
 		let BEKW=(APQB).product_div(BEKV,ETL);
 		let BEKX=BEKW* AWAO;
@@ -19409,10 +19410,10 @@ impl Instance {
 		let BELB=-ETP;
 		let BELC=((BEKW* ETO)).product_sum_div(ANYF,BEKM,BELB,ESS);
 		let BELD=BELC* AWAO;
-		let AEZD=product_sum_div((AEYZ* ETO),B,BELB,AEYR,ESS);
-		let BELE=L5(sum_products_div_lanes(&[(&(BEKY* ETO).0,B),(&BELD.0,AEYR),(&BEKO.0,BELB),(&BEKM.0,(-AEZD))],ESS));
-		let AEZE=product_sum_div((AEZA* ETO),B,BELB,AEYT,ESS);
-		let BELF=L5(sum_products_div_lanes(&[(&(BEKZ* ETO).0,B),(&BELD.0,AEYT),(&BEKQ.0,BELB),(&BEKM.0,(-AEZE))],ESS));
+		let AEZD=product_sum_div((AEYZ* ETO),C,BELB,AEYR,ESS);
+		let BELE=L5(sum_products_div_lanes(&[(&(BEKY* ETO).0,C),(&BELD.0,AEYR),(&BEKO.0,BELB),(&BEKM.0,(-AEZD))],ESS));
+		let AEZE=product_sum_div((AEZA* ETO),C,BELB,AEYT,ESS);
+		let BELF=L5(sum_products_div_lanes(&[(&(BEKZ* ETO).0,C),(&BELD.0,AEYT),(&BEKQ.0,BELB),(&BEKM.0,(-AEZE))],ESS));
 		let ETQ=0.1f64- (ETN* ETM);
 		let BELG=((BELA* ETM)+ (BEKW* ETN))* AWAO;
 		let AEZF=-((AEZB* ETM)+ (AEYZ* ETN));
@@ -19433,7 +19434,7 @@ impl Instance {
 		APQA=BELF;
 		}else{
 		ETR=ESO;
-		ETV=B;
+		ETV=C;
 		VQA=AEYI;
 		VQB=AEYJ;
 		VQC=A;
@@ -19450,7 +19451,7 @@ impl Instance {
 		let ETS=(EKY* ETR).sqrt();
 		let BELJ=(APPV* EKY)* (ANYF/ (AWAY* ETS));
 		let AEZJ=BK* ETS;
-		let AEZK=B/ AEZJ;
+		let AEZK=C/ AEZJ;
 		let BELK=((BELJ* BK)).product_div((-AEZK),AEZJ);
 		let AEZL=AEZH* AEZK;
 		let BELL=((APPX* EKY)* AEZK)+ (BELK* AEZH);
@@ -19513,10 +19514,10 @@ impl Instance {
 		let BEND=ANZB* AWAO;
 		let AFBH=AEZX- AEZV;
 		let AFBI=AEZY- AEZW;
-		let EUC=(((ETZ- B)- ETY)+ CEN).sqrt();
+		let EUC=(((ETZ- C)- ETY)+ CEN).sqrt();
 		let BENE=(BELZ- BELW)* (ANYF/ (AWAY* EUC));
 		let AFBJ=BK* EUC;
-		let AFBK=B/ AFBJ;
+		let AFBK=C/ AFBJ;
 		let BENF=((BENE* BK)).product_div((-AFBK),AFBJ);
 		let AFBL=AFBH* AFBK;
 		let AFBM=AFBI* AFBK;
@@ -19597,10 +19598,10 @@ impl Instance {
 		let AFAM=AFAE- AFAK;
 		let AFAN=(AEZX- AEZV)+ (AFAL* CIB);
 		let AFAO=(AEZY- AEZW)+ (AFAM* CIB);
-		let EUP=((((ETZ- B)- ETY)+ (CIB* EUO))+ CEN).sqrt();
+		let EUP=((((ETZ- C)- ETY)+ (CIB* EUO))+ CEN).sqrt();
 		let BEMJ=((BELZ- BELW)+ (L5([(ANZF* EUO),0.0,0.0,0.0,0.0])+ ((BEMD- BEMG)* CIB)))* (ANYF/ (AWAY* EUP));
 		let AFAP=BK* EUP;
-		let AFAQ=B/ AFAP;
+		let AFAQ=C/ AFAP;
 		let BEMK=((BEMJ* BK)).product_div((-AFAQ),AFAP);
 		let AFAR=AFAN* AFAQ;
 		let AFAS=AFAO* AFAQ;
@@ -19736,7 +19737,7 @@ impl Instance {
 		let BEOP=APPI* AMF;
 		let AFCI=VPR* AMF;
 		let BEOQ=APPJ* AMF;
-		let EVK=B- ESN;
+		let EVK=C- ESN;
 		let BEOR=BEJY* AWAO;
 		let AFCJ=-AEYG;
 		let BEOS=BEJZ* AWAO;
@@ -19757,7 +19758,7 @@ impl Instance {
 		let APRB;
 		if EVM{
 		let EVN=EVL+ OM;
-		let EVO=B/ EVN;
+		let EVO=C/ EVN;
 		let BEPC=-EVO;
 		let BEPD=(BEOU).product_div(BEPC,EVN);
 		let BEPE=BEPD* AWAO;
@@ -19773,7 +19774,7 @@ impl Instance {
 		APRB=BEPG;
 		}else{
 		let EVP=EVL- OM;
-		let EVQ=B/ EVP;
+		let EVQ=C/ EVP;
 		let BEOX=-EVQ;
 		let BEOY=(BEOU).product_div(BEOX,EVP);
 		let BEOZ=BEOY* AWAO;
@@ -19828,7 +19829,7 @@ impl Instance {
 		let BEPX=((BEPL* EVX)+ (BEPS* AFCW))+ ((BEPU* EVU)+ (BEPJ* AFDC));
 		let EVZ=EVW.abs();
 		let BEPY=BEPP* ((AWAY* ((EVW>= AWBZ) as u8 as f64))- ANYF);
-		let AFDF=(BK* ((EVW>= A) as u8 as f64))- B;
+		let AFDF=(BK* ((EVW>= A) as u8 as f64))- C;
 		let AFDG=AFCZ* AFDF;
 		let BEPZ=BEPQ* AFDF;
 		let AFDH=AFDA* AFDF;
@@ -19843,7 +19844,7 @@ impl Instance {
 		let APRD;
 		let APRE;
 		if EWB{
-		let AFDI=(BK* ((EVY>= A) as u8 as f64))- B;
+		let AFDI=(BK* ((EVY>= A) as u8 as f64))- C;
 		let AFDJ=AFDD* AFDI;
 		let BEQC=BEPW* AFDI;
 		let AFDK=AFDE* AFDI;
@@ -19924,7 +19925,7 @@ impl Instance {
 		}
 		let EWH=EWC< BBK;
 		let EWR=if EWH{
-		B
+		C
 		}else{
 		EUZ
 		};
@@ -19955,7 +19956,7 @@ impl Instance {
 		APQX=BEQQ;
 		APQY=BEQR;
 		}
-		let EWN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EWM, B));
+		let EWN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EWM, C));
 		ENY=EWN;
 		EOB=EWO;
 		EQZ=EWP;
@@ -20045,10 +20046,10 @@ impl Instance {
 		}else{
 		let ADEX=ADEV- ADET;
 		let ADEY=ADEW- ADEU;
-		let EWX=(((EWU- B)- EWT)+ CEN).sqrt();
+		let EWX=(((EWU- C)- EWT)+ CEN).sqrt();
 		let BCEN=(BCEK- BCEH)* (ANYF/ (AWAY* EWX));
 		let ADEZ=BK* EWX;
-		let ADFA=B/ ADEZ;
+		let ADFA=C/ ADEZ;
 		let BCEO=((BCEN* BK)).product_div((-ADFA),ADEZ);
 		let ADFB=ADEX* ADFA;
 		let ADFC=ADEY* ADFA;
@@ -20104,14 +20105,14 @@ impl Instance {
 		let EXG=(EWZ+ (CIB* EXF)).sqrt();
 		let BCFA=(BCES+ (L5([(ANZF* EXF),0.0,0.0,0.0,0.0])+ ((BCEW- BCEX)* CIB)))* (ANYF/ (AWAY* EXG));
 		let ADFT=BK* EXG;
-		let ADFU=B/ ADFT;
+		let ADFU=C/ ADFT;
 		let BCFB=((BCFA* BK)).product_div((-ADFU),ADFT);
 		let ADFV=ADFR* ADFU;
 		let ADFW=ADFS* ADFU;
 		let EXH=EWZ.sqrt();
 		let BCFC=BCES* (ANYF/ (AWAY* EXH));
 		let ADFX=BK* EXH;
-		let ADFY=B/ ADFX;
+		let ADFY=C/ ADFX;
 		let BCFD=((BCFC* BK)).product_div((-ADFY),ADFX);
 		let ADFZ=ADFF* ADFY;
 		let ADGA=ADFG* ADFY;
@@ -20200,7 +20201,7 @@ impl Instance {
 		if EXP{
 		let EXZ;
 		if EXQ{
-		EXZ=B;
+		EXZ=C;
 		}else{
 		let EYA;
 		if EXR{
@@ -20236,13 +20237,13 @@ impl Instance {
 		let EXX=EXW.sqrt();
 		let BEEA=APSD* (ANYF/ (AWAY* EXX));
 		let AETZ=BK* EXX;
-		let AEUA=B/ AETZ;
+		let AEUA=C/ AETZ;
 		let BEEB=((BEEA* BK)).product_div((-AEUA),AETZ);
 		let AEUB=VRO* AEUA;
 		let BEEC=(APSE* AEUA)+ (BEEB* VRO);
 		let AEUC=VRP* AEUA;
 		let BEED=(APSF* AEUA)+ (BEEB* VRP);
-		let EXY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EXU, B));
+		let EXY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EXU, C));
 		EXU=EXY;
 		EXW=EXX;
 		VRO=AEUB;
@@ -20297,7 +20298,7 @@ impl Instance {
 		APSB=APSH;
 		APSC=APSI;
 		}
-		let EYI=B/ EYH;
+		let EYI=C/ EYH;
 		let BCGC=-EYI;
 		let BCGD=(APSA).product_div(BCGC,EYH);
 		let BCGE=BCGD* AWAO;
@@ -20339,10 +20340,10 @@ impl Instance {
 		let ADHF=(ADHD* EYN)- ADHD;
 		let EYO=-BKG;
 		let BCGN=ANZB* AWAO;
-		let EYP=(((EYN- B)- EYM)+ CEN).sqrt();
+		let EYP=(((EYN- C)- EYM)+ CEN).sqrt();
 		let BCGO=(BCGM- BCGJ)* (ANYF/ (AWAY* EYP));
 		let ADHG=BK* EYP;
-		let ADHH=B/ ADHG;
+		let ADHH=C/ ADHG;
 		let BCGP=((BCGO* BK)).product_div((-ADHH),ADHG);
 		let ADHI=ADHE* ADHH;
 		let ADHJ=ADHF* ADHH;
@@ -20372,8 +20373,8 @@ impl Instance {
 		let BCGZ=BCAQ* ZMJ;
 		let ADHN=(ADBT* EYS)+ (ZMJ* ELD);
 		let BCHA=(L5([0.0,BCGY[0],BCGY[1],BCGY[2],BCGY[3]])+ (AXBL* ADBT))+ ((AXBN* ELD)+ L5([0.0,BCGZ[0],BCGZ[1],BCGZ[2],BCGZ[3]]));
-		let EYT=B+ (ELD* EYS);
-		let EYU=B+ ELD;
+		let EYT=C+ (ELD* EYS);
+		let EYU=C+ ELD;
 		let EYV=A+ EYU;
 		let EYW=(EYT< EYV)&& (EYU>= A);
 		let EZX;
@@ -20438,7 +20439,7 @@ impl Instance {
 		if EZB{
 		let EZL;
 		if EZC{
-		EZL=B;
+		EZL=C;
 		}else{
 		let EZM;
 		if EZD{
@@ -20474,13 +20475,13 @@ impl Instance {
 		let EZJ=EZI.sqrt();
 		let BEDW=APSS* (ANYF/ (AWAY* EZJ));
 		let AETV=BK* EZJ;
-		let AETW=B/ AETV;
+		let AETW=C/ AETV;
 		let BEDX=((BEDW* BK)).product_div((-AETW),AETV);
 		let AETX=VRY* AETW;
 		let BEDY=(APST* AETW)+ (BEDX* VRY);
 		let AETY=VRZ* AETW;
 		let BEDZ=(APSU* AETW)+ (BEDX* VRZ);
-		let EZK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EZG, B));
+		let EZK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, EZG, C));
 		EZG=EZK;
 		EZI=EZJ;
 		VRY=AETX;
@@ -20535,7 +20536,7 @@ impl Instance {
 		APSQ=APSW;
 		APSR=APSX;
 		}
-		let EZU=B/ EZT;
+		let EZU=C/ EZT;
 		let BCIF=-EZU;
 		let BCIG=(APSP).product_div(BCIF,EZT);
 		let BCIH=BCIG* AWAO;
@@ -20575,9 +20576,9 @@ impl Instance {
 		let EZY=EZX.sqrt();
 		let BCIT=APSM* (ANYF/ (AWAY* EZY));
 		let ADIP=BK* EZY;
-		let ADIQ=B/ ADIP;
+		let ADIQ=C/ ADIP;
 		let BCIU=((BCIT* BK)).product_div((-ADIQ),ADIP);
-		let EZZ=B- EZY;
+		let EZZ=C- EZY;
 		let BCIV=BCIT* AWAO;
 		let ADIR=-(VRU* ADIQ);
 		let ADIS=-(VRV* ADIQ);
@@ -20635,7 +20636,7 @@ impl Instance {
 		if FAF{
 		let FAP;
 		if FAG{
-		FAP=B;
+		FAP=C;
 		}else{
 		let FAQ;
 		if FAH{
@@ -20671,13 +20672,13 @@ impl Instance {
 		let FAN=FAM.sqrt();
 		let BEDS=APTE* (ANYF/ (AWAY* FAN));
 		let AETR=BK* FAN;
-		let AETS=B/ AETR;
+		let AETS=C/ AETR;
 		let BEDT=((BEDS* BK)).product_div((-AETS),AETR);
 		let AETT=VSG* AETS;
 		let BEDU=(APTF* AETS)+ (BEDT* VSG);
 		let AETU=VSH* AETS;
 		let BEDV=(APTG* AETS)+ (BEDT* VSH);
-		let FAO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FAK, B));
+		let FAO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FAK, C));
 		FAK=FAO;
 		FAM=FAN;
 		VSG=AETT;
@@ -20732,7 +20733,7 @@ impl Instance {
 		APTC=APTI;
 		APTD=APTJ;
 		}
-		let FAY=B/ FAX;
+		let FAY=C/ FAX;
 		let BCJV=-FAY;
 		let BCJW=(APTB).product_div(BCJV,FAX);
 		let BCJX=BCJW* AWAO;
@@ -20762,9 +20763,9 @@ impl Instance {
 		let BCKB=-FBB;
 		let BCKC=(AWLX).product_sum_div(ANYF,APSY,BCKB,FBA);
 		let BCKD=BCKC* AWAO;
-		let ADJO=product_sum_div(URK,B,BCKB,VSC,FBA);
+		let ADJO=product_sum_div(URK,C,BCKB,VSC,FBA);
 		let BCKE=L5(sum_products_div_lanes(&[(&BCKD.0,VSC),(&APSZ.0,BCKB),(&APSY.0,(-ADJO))],FBA));
-		let ADJP=product_sum_div(URL,B,BCKB,VSD,FBA);
+		let ADJP=product_sum_div(URL,C,BCKB,VSD,FBA);
 		let BCKF=L5(sum_products_div_lanes(&[(&BCKD.0,VSD),(&APTA.0,BCKB),(&APSY.0,(-ADJP))],FBA));
 		let FBC=FBB== A;
 		let FBF;
@@ -20781,10 +20782,10 @@ impl Instance {
 		APTL=AWLK;
 		APTM=AWLK;
 		}else{
-		let FBD=CZC- B;
+		let FBD=CZC- C;
 		let FBE=FBB.powf(FBD);
 		let BCKG=BCKC* (FBD* ((FBB+ (((FBB== AWBZ) as u8 as f64)* AWCA)).powf((FBD- ANYF))));
-		let ADJQ=FBD- B;
+		let ADJQ=FBD- C;
 		let ADJR=FBB+ ((FBC as u8 as f64)* ZNW);
 		let BCKH=ADJQ* ((ADJR+ (((ADJR== AWBZ) as u8 as f64)* AWCA)).powf((ADJQ- ANYF)));
 		let ADJS=FBD* (ADJR.powf(ADJQ));
@@ -20804,7 +20805,7 @@ impl Instance {
 		let BCKL=((APTL* FBB)+ (BCKC* VSK))+ ((BCKE* FBF)+ (APTK* ADJO));
 		let ADJW=(VSL* FBB)+ (ADJP* FBF);
 		let BCKM=((APTM* FBB)+ (BCKC* VSL))+ ((BCKF* FBF)+ (APTK* ADJP));
-		let FBG=B+ (FBF* FBB);
+		let FBG=C+ (FBF* FBB);
 		let FBH=FBG== A;
 		let FBK;
 		let VSM;
@@ -20820,10 +20821,10 @@ impl Instance {
 		APTO=AWLK;
 		APTP=AWLK;
 		}else{
-		let FBI=(B/ CZC)- B;
+		let FBI=(C/ CZC)- C;
 		let FBJ=FBG.powf(FBI);
 		let BCKN=BCKK* (FBI* ((FBG+ (((FBG== AWBZ) as u8 as f64)* AWCA)).powf((FBI- ANYF))));
-		let ADJX=FBI- B;
+		let ADJX=FBI- C;
 		let ADJY=FBG+ ((FBH as u8 as f64)* ZNW);
 		let BCKO=ADJX* ((ADJY+ (((ADJY== AWBZ) as u8 as f64)* AWCA)).powf((ADJX- ANYF)));
 		let ADJZ=FBI* (ADJY.powf(ADJX));
@@ -20846,9 +20847,9 @@ impl Instance {
 		let BCKS=-FBM;
 		let BCKT=(AWLX).product_sum_div(ANYF,BCKR,BCKS,FBL);
 		let BCKU=BCKT* AWAO;
-		let ADKE=product_sum_div(URK,B,BCKS,ADKC,FBL);
+		let ADKE=product_sum_div(URK,C,BCKS,ADKC,FBL);
 		let BCKV=L5(sum_products_div_lanes(&[(&BCKU.0,ADKC),(&(((APTO* FBG)+ (BCKK* VSM))+ ((BCKL* FBK)+ (APTN* ADJV))).0,BCKS),(&BCKR.0,(-ADKE))],FBL));
-		let ADKF=product_sum_div(URL,B,BCKS,ADKD,FBL);
+		let ADKF=product_sum_div(URL,C,BCKS,ADKD,FBL);
 		let BCKW=L5(sum_products_div_lanes(&[(&BCKU.0,ADKD),(&(((APTP* FBG)+ (BCKK* VSN))+ ((BCKM* FBK)+ (APTN* ADJW))).0,BCKS),(&BCKR.0,(-ADKF))],FBL));
 		FBN=FBM;
 		RVA=FBM;
@@ -21009,7 +21010,7 @@ impl Instance {
 		let FCA=((FBV* FBV)+ FBZ).sqrt();
 		let BCLM=((BCLJ+ BCLJ)+ APUL)* (ANYF/ (AWAY* FCA));
 		let ADKS=BK* FCA;
-		let ADKT=B/ ADKS;
+		let ADKT=C/ ADKS;
 		let BCLN=((BCLM* BK)).product_div((-ADKT),ADKS);
 		let BCLO=(BCKX- ((BCLA+ BCLM)* J))- BCDK;
 		let ADKU=(ADKG- ((ADKI+ (ADKQ* ADKT))* J))- USY;
@@ -21054,7 +21055,7 @@ impl Instance {
 		let FCE=((FCB* FCB)+ FCD).sqrt();
 		let BCLX=((BCLU+ BCLU)+ L5([APUO[0],APUO[1],0.0,APUO[2],APUO[3]]))* (ANYF/ (AWAY* FCE));
 		let ADLC=BK* FCE;
-		let ADLD=B/ ADLC;
+		let ADLD=C/ ADLC;
 		let BCLY=((BCLX* BK)).product_div((-ADLD),ADLC);
 		let FCF=ENO+ (J* (FCB+ FCE));
 		let BCLZ=BCDK+ ((BCLO+ BCLX)* J);
@@ -21062,7 +21063,7 @@ impl Instance {
 		let BCMA=BCDM+ ((BCLP+ ((((BCLV+ BCLV)+ L5([APUP[0],APUP[1],0.0,APUP[2],APUP[3]]))* ADLD)+ (BCLY* ADLA)))* J);
 		let ADLF=USZ+ ((ADKV+ (ADLB* ADLD))* J);
 		let BCMB=BCDO+ ((BCLQ+ ((((BCLW+ BCLW)+ L5([APUQ[0],APUQ[1],0.0,APUQ[2],APUQ[3]]))* ADLD)+ (BCLY* ADLB)))* J);
-		let mut FCI=B;
+		let mut FCI=C;
 		let mut FCK=FBN;
 		let mut FFH=FCF;
 		let mut FJH=A;
@@ -21162,7 +21163,7 @@ impl Instance {
 		if FCS{
 		let FDC;
 		if FCT{
-		FDC=B;
+		FDC=C;
 		}else{
 		let FDD;
 		if FCU{
@@ -21198,13 +21199,13 @@ impl Instance {
 		let FDA=FCZ.sqrt();
 		let BDBZ=APVP* (ANYF/ (AWAY* FDA));
 		let ADYN=BK* FDA;
-		let ADYO=B/ ADYN;
+		let ADYO=C/ ADYN;
 		let BDCA=((BDBZ* BK)).product_div((-ADYO),ADYN);
 		let ADYP=VTW* ADYO;
 		let BDCB=(APVQ* ADYO)+ (BDCA* VTW);
 		let ADYQ=VTX* ADYO;
 		let BDCC=(APVR* ADYO)+ (BDCA* VTX);
-		let FDB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FCX, B));
+		let FDB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FCX, C));
 		FCX=FDB;
 		FCZ=FDA;
 		VTW=ADYP;
@@ -21259,7 +21260,7 @@ impl Instance {
 		APVN=APVT;
 		APVO=APVU;
 		}
-		let FDL=B/ FDK;
+		let FDL=C/ FDK;
 		let BCPS=-FDL;
 		let BCPT=(APVM).product_div(BCPS,FDK);
 		let BCPU=BCPT* AWAO;
@@ -21275,10 +21276,10 @@ impl Instance {
 		let BCPY=-FDO;
 		let BCPZ=((BCPT* FDN)).product_sum_div(ANYF,BCPJ,BCPY,FCR);
 		let BCQA=BCPZ* AWAO;
-		let ADPE=product_sum_div((ADPA* FDN),B,BCPY,ADOS,FCR);
-		let BCQB=L5(sum_products_div_lanes(&[(&(BCPV* FDN).0,B),(&BCQA.0,ADOS),(&BCPL.0,BCPY),(&BCPJ.0,(-ADPE))],FCR));
-		let ADPF=product_sum_div((ADPB* FDN),B,BCPY,ADOU,FCR);
-		let BCQC=L5(sum_products_div_lanes(&[(&(BCPW* FDN).0,B),(&BCQA.0,ADOU),(&BCPN.0,BCPY),(&BCPJ.0,(-ADPF))],FCR));
+		let ADPE=product_sum_div((ADPA* FDN),C,BCPY,ADOS,FCR);
+		let BCQB=L5(sum_products_div_lanes(&[(&(BCPV* FDN).0,C),(&BCQA.0,ADOS),(&BCPL.0,BCPY),(&BCPJ.0,(-ADPE))],FCR));
+		let ADPF=product_sum_div((ADPB* FDN),C,BCPY,ADOU,FCR);
+		let BCQC=L5(sum_products_div_lanes(&[(&(BCPW* FDN).0,C),(&BCQA.0,ADOU),(&BCPN.0,BCPY),(&BCPJ.0,(-ADPF))],FCR));
 		let FDP=0.1f64- (FDM* FDL);
 		let BCQD=((BCPX* FDL)+ (BCPT* FDM))* AWAO;
 		let ADPG=-((ADPC* FDL)+ (ADPA* FDM));
@@ -21299,7 +21300,7 @@ impl Instance {
 		APVL=BCQC;
 		}else{
 		FDQ=FCN;
-		FEY=B;
+		FEY=C;
 		VTQ=ADOJ;
 		VTR=ADOK;
 		VTS=A;
@@ -21316,7 +21317,7 @@ impl Instance {
 		let FDR=(EKX* FDQ).sqrt();
 		let BCQG=(APVG* EKX)* (ANYF/ (AWAY* FDR));
 		let ADPK=BK* FDR;
-		let ADPL=B/ ADPK;
+		let ADPL=C/ ADPK;
 		let BCQH=((BCQG* BK)).product_div((-ADPL),ADPK);
 		let ADPM=ADPI* ADPL;
 		let BCQI=((APVI* EKX)* ADPL)+ (BCQH* ADPI);
@@ -21375,7 +21376,7 @@ impl Instance {
 		if FDX{
 		let FEH;
 		if FDY{
-		FEH=B;
+		FEH=C;
 		}else{
 		let FEI;
 		if FDZ{
@@ -21411,13 +21412,13 @@ impl Instance {
 		let FEF=FEE.sqrt();
 		let BDBV=APWE* (ANYF/ (AWAY* FEF));
 		let ADYJ=BK* FEF;
-		let ADYK=B/ ADYJ;
+		let ADYK=C/ ADYJ;
 		let BDBW=((BDBV* BK)).product_div((-ADYK),ADYJ);
 		let ADYL=VUG* ADYK;
 		let BDBX=(APWF* ADYK)+ (BDBW* VUG);
 		let ADYM=VUH* ADYK;
 		let BDBY=(APWG* ADYK)+ (BDBW* VUH);
-		let FEG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FEC, B));
+		let FEG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FEC, C));
 		FEC=FEG;
 		FEE=FEF;
 		VUG=ADYL;
@@ -21472,7 +21473,7 @@ impl Instance {
 		APWC=APWI;
 		APWD=APWJ;
 		}
-		let FEQ=B/ FEP;
+		let FEQ=C/ FEP;
 		let BCRE=-FEQ;
 		let BCRF=(APWB).product_div(BCRE,FEP);
 		let BCRG=BCRF* AWAO;
@@ -21488,10 +21489,10 @@ impl Instance {
 		let BCRK=-FET;
 		let BCRL=((BCRF* FES)).product_sum_div(ANYF,BCQV,BCRK,FDW);
 		let BCRM=BCRL* AWAO;
-		let ADQH=product_sum_div((ADQD* FES),B,BCRK,ADPV,FDW);
-		let BCRN=L5(sum_products_div_lanes(&[(&(BCRH* FES).0,B),(&BCRM.0,ADPV),(&BCQX.0,BCRK),(&BCQV.0,(-ADQH))],FDW));
-		let ADQI=product_sum_div((ADQE* FES),B,BCRK,ADPX,FDW);
-		let BCRO=L5(sum_products_div_lanes(&[(&(BCRI* FES).0,B),(&BCRM.0,ADPX),(&BCQZ.0,BCRK),(&BCQV.0,(-ADQI))],FDW));
+		let ADQH=product_sum_div((ADQD* FES),C,BCRK,ADPV,FDW);
+		let BCRN=L5(sum_products_div_lanes(&[(&(BCRH* FES).0,C),(&BCRM.0,ADPV),(&BCQX.0,BCRK),(&BCQV.0,(-ADQH))],FDW));
+		let ADQI=product_sum_div((ADQE* FES),C,BCRK,ADPX,FDW);
+		let BCRO=L5(sum_products_div_lanes(&[(&(BCRI* FES).0,C),(&BCRM.0,ADPX),(&BCQZ.0,BCRK),(&BCQV.0,(-ADQI))],FDW));
 		let FEU=FDS+ (FER* FEQ);
 		let BCRP=BCQK+ ((BCRJ* FEQ)+ (BCRF* FER));
 		let ADQJ=VOC+ ((ADQF* FEQ)+ (ADQD* FER));
@@ -21512,7 +21513,7 @@ impl Instance {
 		APWA=BCRO;
 		}else{
 		FEV=FDR;
-		FFA=B;
+		FFA=C;
 		VUA=ADPM;
 		VUB=ADPN;
 		VUC=A;
@@ -21624,15 +21625,15 @@ impl Instance {
 		let BCSQ=-FFL;
 		let BCSR=(L5([0.0,APMY[0],0.0,APMY[1],0.0])).product_sum_div(ANYF,APVV,BCSQ,FEV);
 		let BCSS=BCSR* AWAO;
-		let ADRD=product_sum_div(VOC,B,BCSQ,VUA,FEV);
-		let ADRE=product_sum_div(VOD,B,BCSQ,VUB,FEV);
-		let FFM=B- FCM;
+		let ADRD=product_sum_div(VOC,C,BCSQ,VUA,FEV);
+		let ADRE=product_sum_div(VOD,C,BCSQ,VUB,FEV);
+		let FFM=C- FCM;
 		let FFN=(FEY- (FFL* FEY))* FFM;
 		let BCST=(APVH- ((BCSR* FEY)+ (APVH* FFL)))* FFM;
 		let ADRF=(VTS- ((ADRD* FEY)+ (VTS* FFL)))* FFM;
-		let BCSU=(APVK- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APMZ[0],0.0,APMZ[1],0.0]).0,B),(&BCSS.0,VUA),(&APVX.0,BCSQ),(&APVV.0,(-ADRD))],FEV)))* FEY)+ (APVH* ADRD))+ ((APVK* FFL)+ (BCSR* VTS))))* FFM;
+		let BCSU=(APVK- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APMZ[0],0.0,APMZ[1],0.0]).0,C),(&BCSS.0,VUA),(&APVX.0,BCSQ),(&APVV.0,(-ADRD))],FEV)))* FEY)+ (APVH* ADRD))+ ((APVK* FFL)+ (BCSR* VTS))))* FFM;
 		let ADRG=(VTT- ((ADRE* FEY)+ (VTT* FFL)))* FFM;
-		let BCSV=(APVL- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APNA[0],0.0,APNA[1],0.0]).0,B),(&BCSS.0,VUB),(&APVY.0,BCSQ),(&APVV.0,(-ADRE))],FEV)))* FEY)+ (APVH* ADRE))+ ((APVL* FFL)+ (BCSR* VTT))))* FFM;
+		let BCSV=(APVL- ((((L5(sum_products_div_lanes(&[(&L5([0.0,APNA[0],0.0,APNA[1],0.0]).0,C),(&BCSS.0,VUB),(&APVY.0,BCSQ),(&APVV.0,(-ADRE))],FEV)))* FEY)+ (APVH* ADRE))+ ((APVL* FFL)+ (BCSR* VTT))))* FFM;
 		FFO=FFK;
 		FGV=FFN;
 		VUK=ADRB;
@@ -21706,7 +21707,7 @@ impl Instance {
 		if FFW{
 		let FGG;
 		if FFX{
-		FGG=B;
+		FGG=C;
 		}else{
 		let FGH;
 		if FFY{
@@ -21742,13 +21743,13 @@ impl Instance {
 		let FGE=FGD.sqrt();
 		let BDBR=APWZ* (ANYF/ (AWAY* FGE));
 		let ADYF=BK* FGE;
-		let ADYG=B/ ADYF;
+		let ADYG=C/ ADYF;
 		let BDBS=((BDBR* BK)).product_div((-ADYG),ADYF);
 		let ADYH=VUU* ADYG;
 		let BDBT=(APXA* ADYG)+ (BDBS* VUU);
 		let ADYI=VUV* ADYG;
 		let BDBU=(APXB* ADYG)+ (BDBS* VUV);
-		let FGF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FGB, B));
+		let FGF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FGB, C));
 		FGB=FGF;
 		FGD=FGE;
 		VUU=ADYH;
@@ -21803,7 +21804,7 @@ impl Instance {
 		APWX=APXD;
 		APWY=APXE;
 		}
-		let FGP=B/ FGO;
+		let FGP=C/ FGO;
 		let BCUD=-FGP;
 		let BCUE=(APWW).product_div(BCUD,FGO);
 		let BCUF=BCUE* AWAO;
@@ -21819,10 +21820,10 @@ impl Instance {
 		let BCUJ=-FGS;
 		let BCUK=((BCUE* FGR)).product_sum_div(ANYF,BCTW,BCUJ,FFV);
 		let BCUL=BCUK* AWAO;
-		let ADSI=product_sum_div((ADSE* FGR),B,BCUJ,ADRX,FFV);
-		let BCUM=L5(sum_products_div_lanes(&[(&(BCUG* FGR).0,B),(&BCUL.0,ADRX),(&BCTX.0,BCUJ),(&BCTW.0,(-ADSI))],FFV));
-		let ADSJ=product_sum_div((ADSF* FGR),B,BCUJ,ADRY,FFV);
-		let BCUN=L5(sum_products_div_lanes(&[(&(BCUH* FGR).0,B),(&BCUL.0,ADRY),(&BCTY.0,BCUJ),(&BCTW.0,(-ADSJ))],FFV));
+		let ADSI=product_sum_div((ADSE* FGR),C,BCUJ,ADRX,FFV);
+		let BCUM=L5(sum_products_div_lanes(&[(&(BCUG* FGR).0,C),(&BCUL.0,ADRX),(&BCTX.0,BCUJ),(&BCTW.0,(-ADSI))],FFV));
+		let ADSJ=product_sum_div((ADSF* FGR),C,BCUJ,ADRY,FFV);
+		let BCUN=L5(sum_products_div_lanes(&[(&(BCUH* FGR).0,C),(&BCUL.0,ADRY),(&BCTY.0,BCUJ),(&BCTW.0,(-ADSJ))],FFV));
 		let FGT=FFP+ (FGQ* FGP);
 		let BCUO=APSJ+ ((BCUI* FGP)+ (BCUE* FGQ));
 		let ADSK=VRS+ ((ADSG* FGP)+ (ADSE* FGQ));
@@ -21842,7 +21843,7 @@ impl Instance {
 		APWU=BCUP;
 		APWV=BCUQ;
 		}else{
-		FGU=B;
+		FGU=C;
 		FJP=FFO;
 		VUO=A;
 		VUP=A;
@@ -21916,7 +21917,7 @@ impl Instance {
 		if FHC{
 		let FHM;
 		if FHD{
-		FHM=B;
+		FHM=C;
 		}else{
 		let FHN;
 		if FHE{
@@ -21952,13 +21953,13 @@ impl Instance {
 		let FHK=FHJ.sqrt();
 		let BDBN=APXO* (ANYF/ (AWAY* FHK));
 		let ADYB=BK* FHK;
-		let ADYC=B/ ADYB;
+		let ADYC=C/ ADYB;
 		let BDBO=((BDBN* BK)).product_div((-ADYC),ADYB);
 		let ADYD=VVE* ADYC;
 		let BDBP=(APXP* ADYC)+ (BDBO* VVE);
 		let ADYE=VVF* ADYC;
 		let BDBQ=(APXQ* ADYC)+ (BDBO* VVF);
-		let FHL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FHH, B));
+		let FHL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FHH, C));
 		FHH=FHL;
 		FHJ=FHK;
 		VVE=ADYD;
@@ -22013,7 +22014,7 @@ impl Instance {
 		APXM=APXS;
 		APXN=APXT;
 		}
-		let FHV=B/ FHU;
+		let FHV=C/ FHU;
 		let BCVO=-FHV;
 		let BCVP=(APXL).product_div(BCVO,FHU);
 		let BCVQ=BCVP* AWAO;
@@ -22029,10 +22030,10 @@ impl Instance {
 		let BCVU=-FHY;
 		let BCVV=((BCVP* FHX)).product_sum_div(ANYF,BCVF,BCVU,FHB);
 		let BCVW=BCVV* AWAO;
-		let ADTJ=product_sum_div((ADTF* FHX),B,BCVU,ADSX,FHB);
-		let BCVX=L5(sum_products_div_lanes(&[(&(BCVR* FHX).0,B),(&BCVW.0,ADSX),(&BCVH.0,BCVU),(&BCVF.0,(-ADTJ))],FHB));
-		let ADTK=product_sum_div((ADTG* FHX),B,BCVU,ADSZ,FHB);
-		let BCVY=L5(sum_products_div_lanes(&[(&(BCVS* FHX).0,B),(&BCVW.0,ADSZ),(&BCVJ.0,BCVU),(&BCVF.0,(-ADTK))],FHB));
+		let ADTJ=product_sum_div((ADTF* FHX),C,BCVU,ADSX,FHB);
+		let BCVX=L5(sum_products_div_lanes(&[(&(BCVR* FHX).0,C),(&BCVW.0,ADSX),(&BCVH.0,BCVU),(&BCVF.0,(-ADTJ))],FHB));
+		let ADTK=product_sum_div((ADTG* FHX),C,BCVU,ADSZ,FHB);
+		let BCVY=L5(sum_products_div_lanes(&[(&(BCVS* FHX).0,C),(&BCVW.0,ADSZ),(&BCVJ.0,BCVU),(&BCVF.0,(-ADTK))],FHB));
 		let FHZ=0.1f64- (FHW* FHV);
 		let BCVZ=((BCVT* FHV)+ (BCVP* FHW))* AWAO;
 		let ADTL=-((ADTH* FHV)+ (ADTF* FHW));
@@ -22053,7 +22054,7 @@ impl Instance {
 		APXK=BCVY;
 		}else{
 		FIA=FGX;
-		FIE=B;
+		FIE=C;
 		VUY=ADSO;
 		VUZ=ADSP;
 		VVA=A;
@@ -22070,7 +22071,7 @@ impl Instance {
 		let FIB=(EKY* FIA).sqrt();
 		let BCWC=(APXF* EKY)* (ANYF/ (AWAY* FIB));
 		let ADTP=BK* FIB;
-		let ADTQ=B/ ADTP;
+		let ADTQ=C/ ADTP;
 		let BCWD=((BCWC* BK)).product_div((-ADTQ),ADTP);
 		let ADTR=ADTN* ADTQ;
 		let BCWE=((APXH* EKY)* ADTQ)+ (BCWD* ADTN);
@@ -22131,10 +22132,10 @@ impl Instance {
 		if FIJ{
 		let ADVN=ADUD- ADUB;
 		let ADVO=ADUE- ADUC;
-		let FIK=(((FII- B)- FIH)+ CEN).sqrt();
+		let FIK=(((FII- C)- FIH)+ CEN).sqrt();
 		let BCXW=(BCWS- BCWP)* (ANYF/ (AWAY* FIK));
 		let ADVP=BK* FIK;
-		let ADVQ=B/ ADVP;
+		let ADVQ=C/ ADVP;
 		let BCXX=((BCXW* BK)).product_div((-ADVQ),ADVP);
 		let ADVR=ADVN* ADVQ;
 		let ADVS=ADVO* ADVQ;
@@ -22215,10 +22216,10 @@ impl Instance {
 		let ADUS=ADUK- ADUQ;
 		let ADUT=(ADUD- ADUB)+ (ADUR* CIB);
 		let ADUU=(ADUE- ADUC)+ (ADUS* CIB);
-		let FIX=((((FII- B)- FIH)+ (CIB* FIW))+ CEN).sqrt();
+		let FIX=((((FII- C)- FIH)+ (CIB* FIW))+ CEN).sqrt();
 		let BCXC=((BCWS- BCWP)+ (L5([(ANZF* FIW),0.0,0.0,0.0,0.0])+ ((BCWW- BCWZ)* CIB)))* (ANYF/ (AWAY* FIX));
 		let ADUV=BK* FIX;
-		let ADUW=B/ ADUV;
+		let ADUW=C/ ADUV;
 		let BCXD=((BCXC* BK)).product_div((-ADUW),ADUV);
 		let ADUX=ADUT* ADUW;
 		let ADUY=ADUU* ADUW;
@@ -22354,7 +22355,7 @@ impl Instance {
 		let BCZH=APWS* AMF;
 		let ADWO=VUP* AMF;
 		let BCZI=APWT* AMF;
-		let FJS=B- FGW;
+		let FJS=C- FGW;
 		let BCZJ=BCUR* AWAO;
 		let ADWP=-ADSM;
 		let BCZK=BCUS* AWAO;
@@ -22375,7 +22376,7 @@ impl Instance {
 		let APYL;
 		if FJU{
 		let FJV=FJT+ OM;
-		let FJW=B/ FJV;
+		let FJW=C/ FJV;
 		let BCZU=-FJW;
 		let BCZV=(BCZM).product_div(BCZU,FJV);
 		let BCZW=BCZV* AWAO;
@@ -22391,7 +22392,7 @@ impl Instance {
 		APYL=BCZY;
 		}else{
 		let FJX=FJT- OM;
-		let FJY=B/ FJX;
+		let FJY=C/ FJX;
 		let BCZP=-FJY;
 		let BCZQ=(BCZM).product_div(BCZP,FJX);
 		let BCZR=BCZQ* AWAO;
@@ -22446,7 +22447,7 @@ impl Instance {
 		let BDAP=((BDAD* FKF)+ (BDAK* ADXC))+ ((BDAM* FKC)+ (BDAB* ADXI));
 		let FKH=FKE.abs();
 		let BDAQ=BDAH* ((AWAY* ((FKE>= AWBZ) as u8 as f64))- ANYF);
-		let ADXL=(BK* ((FKE>= A) as u8 as f64))- B;
+		let ADXL=(BK* ((FKE>= A) as u8 as f64))- C;
 		let ADXM=ADXF* ADXL;
 		let BDAR=BDAI* ADXL;
 		let ADXN=ADXG* ADXL;
@@ -22461,7 +22462,7 @@ impl Instance {
 		let APYN;
 		let APYO;
 		if FKJ{
-		let ADXO=(BK* ((FKG>= A) as u8 as f64))- B;
+		let ADXO=(BK* ((FKG>= A) as u8 as f64))- C;
 		let ADXP=ADXJ* ADXO;
 		let BDAU=BDAO* ADXO;
 		let ADXQ=ADXK* ADXO;
@@ -22542,7 +22543,7 @@ impl Instance {
 		}
 		let FKP=FKK< BBK;
 		let FKZ=if FKP{
-		B
+		C
 		}else{
 		FJH
 		};
@@ -22573,7 +22574,7 @@ impl Instance {
 		APYH=BDBI;
 		APYI=BDBJ;
 		}
-		let FKV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FKU, B));
+		let FKV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FKU, C));
 		FCI=FKV;
 		FCK=FKW;
 		FFH=FKX;
@@ -22663,10 +22664,10 @@ impl Instance {
 		}else{
 		let ADLM=ADLK- ADLI;
 		let ADLN=ADLL- ADLJ;
-		let FLF=(((FLC- B)- FLB)+ CEN).sqrt();
+		let FLF=(((FLC- C)- FLB)+ CEN).sqrt();
 		let BCMI=(BCMF- BCMC)* (ANYF/ (AWAY* FLF));
 		let ADLO=BK* FLF;
-		let ADLP=B/ ADLO;
+		let ADLP=C/ ADLO;
 		let BCMJ=((BCMI* BK)).product_div((-ADLP),ADLO);
 		let ADLQ=ADLM* ADLP;
 		let ADLR=ADLN* ADLP;
@@ -22722,14 +22723,14 @@ impl Instance {
 		let FLO=(FLH+ (CIB* FLN)).sqrt();
 		let BCMV=(BCMN+ (L5([(ANZF* FLN),0.0,0.0,0.0,0.0])+ ((BCMR- BCMS)* CIB)))* (ANYF/ (AWAY* FLO));
 		let ADMI=BK* FLO;
-		let ADMJ=B/ ADMI;
+		let ADMJ=C/ ADMI;
 		let BCMW=((BCMV* BK)).product_div((-ADMJ),ADMI);
 		let ADMK=ADMG* ADMJ;
 		let ADML=ADMH* ADMJ;
 		let FLP=FLH.sqrt();
 		let BCMX=BCMN* (ANYF/ (AWAY* FLP));
 		let ADMM=BK* FLP;
-		let ADMN=B/ ADMM;
+		let ADMN=C/ ADMM;
 		let BCMY=((BCMX* BK)).product_div((-ADMN),ADMM);
 		let ADMO=ADLU* ADMN;
 		let ADMP=ADLV* ADMN;
@@ -22820,7 +22821,7 @@ impl Instance {
 		if FLY{
 		let FMI;
 		if FLZ{
-		FMI=B;
+		FMI=C;
 		}else{
 		let FMJ;
 		if FMA{
@@ -22856,13 +22857,13 @@ impl Instance {
 		let FMG=FMF.sqrt();
 		let BCOQ=APZN* (ANYF/ (AWAY* FMG));
 		let ADOD=BK* FMG;
-		let ADOE=B/ ADOD;
+		let ADOE=C/ ADOD;
 		let BCOR=((BCOQ* BK)).product_div((-ADOE),ADOD);
 		let ADOF=VWM* ADOE;
 		let BCOS=(APZO* ADOE)+ (BCOR* VWM);
 		let ADOG=VWN* ADOE;
 		let BCOT=(APZP* ADOE)+ (BCOR* VWN);
-		let FMH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FMD, B));
+		let FMH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FMD, C));
 		FMD=FMH;
 		FMF=FMG;
 		VWM=ADOF;
@@ -22917,7 +22918,7 @@ impl Instance {
 		APZL=APZR;
 		APZM=APZS;
 		}
-		let FMR=B/ FMQ;
+		let FMR=C/ FMQ;
 		let BCOA=-FMR;
 		let BCOB=(APZK).product_div(BCOA,FMQ);
 		let BCOC=BCOB* AWAO;
@@ -22961,10 +22962,10 @@ impl Instance {
 		let BCOK=BCOH* FMW;
 		let ADNV=(ADNT* FMW)- ADNT;
 		let ADNW=(ADNU* FMW)- ADNU;
-		let FMX=(((FMW- B)- FMV)+ CEN).sqrt();
+		let FMX=(((FMW- C)- FMV)+ CEN).sqrt();
 		let BCOL=(BCOK- BCOH)* (ANYF/ (AWAY* FMX));
 		let ADNX=BK* FMX;
-		let ADNY=B/ ADNX;
+		let ADNY=C/ ADNX;
 		let BCOM=((BCOL* BK)).product_div((-ADNY),ADNX);
 		let ADNZ=ADNV* ADNY;
 		let ADOA=ADNW* ADNY;
@@ -23057,7 +23058,7 @@ impl Instance {
 		let ADZF=(ADYT* FNJ)+ (ADZD* FND);
 		let BDCS=((((BDCI* FNI)+ (BDCM* ADYU))+ (((((BDCI* FNH)+ (BDCL* ADYU))+ (BDCO+ (BDCG* ADZA)))* FND)+ (BDCG* ADZC)))* FND)+ (BDCG* ADZE);
 		let ADZG=(ADYU* FNJ)+ (ADZE* FND);
-		let FNK=B+ (FND* FNJ);
+		let FNK=C+ (FND* FNJ);
 		let FNL=FNC/ FNK;
 		let BDCT=-FNL;
 		let BDCU=(BDCQ).product_div(BDCT,FNK);
@@ -23108,7 +23109,7 @@ impl Instance {
 		if FNQ{
 		let FOA;
 		if FNR{
-		FOA=B;
+		FOA=C;
 		}else{
 		let FOB;
 		if FNS{
@@ -23144,13 +23145,13 @@ impl Instance {
 		let FNY=FNX.sqrt();
 		let BEDO=APZZ* (ANYF/ (AWAY* FNY));
 		let AETN=BK* FNY;
-		let AETO=B/ AETN;
+		let AETO=C/ AETN;
 		let BEDP=((BEDO* BK)).product_div((-AETO),AETN);
 		let AETP=VWU* AETO;
 		let BEDQ=(AQAA* AETO)+ (BEDP* VWU);
 		let AETQ=VWV* AETO;
 		let BEDR=(AQAB* AETO)+ (BEDP* VWV);
-		let FNZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FNV, B));
+		let FNZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FNV, C));
 		FNV=FNZ;
 		FNX=FNY;
 		VWU=AETP;
@@ -23205,7 +23206,7 @@ impl Instance {
 		APZX=AQAD;
 		APZY=AQAE;
 		}
-		let FOJ=B/ FOI;
+		let FOJ=C/ FOI;
 		let BDDQ=-FOJ;
 		let BDDR=(APZW).product_div(BDDQ,FOI);
 		let BDDS=BDDR* AWAO;
@@ -23294,7 +23295,7 @@ impl Instance {
 		if FOV{
 		let FPF;
 		if FOW{
-		FPF=B;
+		FPF=C;
 		}else{
 		let FPG;
 		if FOX{
@@ -23330,13 +23331,13 @@ impl Instance {
 		let FPD=FPC.sqrt();
 		let BEDK=AQAL* (ANYF/ (AWAY* FPD));
 		let AETJ=BK* FPD;
-		let AETK=B/ AETJ;
+		let AETK=C/ AETJ;
 		let BEDL=((BEDK* BK)).product_div((-AETK),AETJ);
 		let AETL=VXC* AETK;
 		let BEDM=(AQAM* AETK)+ (BEDL* VXC);
 		let AETM=VXD* AETK;
 		let BEDN=(AQAN* AETK)+ (BEDL* VXD);
-		let FPE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FPA, B));
+		let FPE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FPA, C));
 		FPA=FPE;
 		FPC=FPD;
 		VXC=AETL;
@@ -23391,7 +23392,7 @@ impl Instance {
 		AQAJ=AQAP;
 		AQAK=AQAQ;
 		}
-		let FPO=B/ FPN;
+		let FPO=C/ FPN;
 		let BDEV=-FPO;
 		let BDEW=(AQAI).product_div(BDEV,FPN);
 		let BDEX=BDEW* AWAO;
@@ -23431,10 +23432,10 @@ impl Instance {
 		let BDFF=BDFC* FPT;
 		let AEBF=(AEBD* FPT)- AEBD;
 		let AEBG=(AEBE* FPT)- AEBE;
-		let FPU=(((FPT- B)- FPS)+ CEN).sqrt();
+		let FPU=(((FPT- C)- FPS)+ CEN).sqrt();
 		let BDFG=(BDFF- BDFC)* (ANYF/ (AWAY* FPU));
 		let AEBH=BK* FPU;
-		let AEBI=B/ AEBH;
+		let AEBI=C/ AEBH;
 		let BDFH=((BDFG* BK)).product_div((-AEBI),AEBH);
 		let AEBJ=AEBF* AEBI;
 		let AEBK=AEBG* AEBI;
@@ -23482,8 +23483,8 @@ impl Instance {
 		let AEBQ=AEBP+ AEBP;
 		let BDFQ=BDFP+ BDFP;
 		let mut FPZ=A;
-		let mut FQB=B;
-		let mut FQD=B;
+		let mut FQB=C;
+		let mut FQD=C;
 		let mut VXK=A;
 		let mut VXL=A;
 		let mut AQAX=AWLK;
@@ -23501,7 +23502,7 @@ impl Instance {
 		let AEHI=(VXL* FPY)+ (AEBQ* FQB);
 		let BDMN=((AQAZ* FPY)+ (BDFM* VXL))+ ((BDFQ* FQB)+ (AQAX* AEBQ));
 		let FQE=FQD* 0.010000000000000002f64;
-		let FQF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FPZ, B));
+		let FQF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FPZ, C));
 		FPZ=FQF;
 		FQB=FQC;
 		FQD=FQE;
@@ -23521,7 +23522,7 @@ impl Instance {
 		if FQH{
 		let FQR;
 		if FQI{
-		FQR=B;
+		FQR=C;
 		}else{
 		let FQS;
 		if FQJ{
@@ -23557,13 +23558,13 @@ impl Instance {
 		let FQP=FQO.sqrt();
 		let BDMH=AQBD* (ANYF/ (AWAY* FQP));
 		let AEHD=BK* FQP;
-		let AEHE=B/ AEHD;
+		let AEHE=C/ AEHD;
 		let BDMI=((BDMH* BK)).product_div((-AEHE),AEHD);
 		let AEHF=VXO* AEHE;
 		let BDMJ=(AQBE* AEHE)+ (BDMI* VXO);
 		let AEHG=VXP* AEHE;
 		let BDMK=(AQBF* AEHE)+ (BDMI* VXP);
-		let FQQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FQM, B));
+		let FQQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FQM, C));
 		FQM=FQQ;
 		FQO=FQP;
 		VXO=AEHF;
@@ -23618,7 +23619,7 @@ impl Instance {
 		AQBB=AQBH;
 		AQBC=AQBI;
 		}
-		let FRA=B/ FQZ;
+		let FRA=C/ FQZ;
 		let BDFV=-FRA;
 		let BDFW=(AQBA).product_div(BDFV,FQZ);
 		let BDFX=BDFW* AWAO;
@@ -23681,8 +23682,8 @@ impl Instance {
 		let BDGN=ANYV* ELF;
 		let BDGO=BDGN+ BDGN;
 		let mut FRJ=A;
-		let mut FRL=B;
-		let mut FRN=B;
+		let mut FRL=C;
+		let mut FRN=C;
 		let mut VXU=A;
 		let mut VXV=A;
 		let mut AQBM=AWLK;
@@ -23702,7 +23703,7 @@ impl Instance {
 		let BDMF=((AQBP* FRH)+ (BDGI* VXV))+ ((BDGM* FRL)+ (AQBM* AECJ));
 		let FRO=FRN* FRI;
 		let BDMG=(AQBN* FRI)+ (BDGO* FRN);
-		let FRP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FRJ, B));
+		let FRP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FRJ, C));
 		FRJ=FRP;
 		FRL=FRM;
 		FRN=FRO;
@@ -23724,7 +23725,7 @@ impl Instance {
 		if FRR{
 		let FSB;
 		if FRS{
-		FSB=B;
+		FSB=C;
 		}else{
 		let FSC;
 		if FRT{
@@ -23760,13 +23761,13 @@ impl Instance {
 		let FRZ=FRY.sqrt();
 		let BDLZ=AQBT* (ANYF/ (AWAY* FRZ));
 		let AEGX=BK* FRZ;
-		let AEGY=B/ AEGX;
+		let AEGY=C/ AEGX;
 		let BDMA=((BDLZ* BK)).product_div((-AEGY),AEGX);
 		let AEGZ=VXY* AEGY;
 		let BDMB=(AQBU* AEGY)+ (BDMA* VXY);
 		let AEHA=VXZ* AEGY;
 		let BDMC=(AQBV* AEGY)+ (BDMA* VXZ);
-		let FSA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FRW, B));
+		let FSA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FRW, C));
 		FRW=FSA;
 		FRY=FRZ;
 		VXY=AEGZ;
@@ -23821,7 +23822,7 @@ impl Instance {
 		AQBR=AQBX;
 		AQBS=AQBY;
 		}
-		let FSK=B/ FSJ;
+		let FSK=C/ FSJ;
 		let BDGU=-FSK;
 		let BDGV=(AQBQ).product_div(BDGU,FSJ);
 		let BDGW=BDGV* AWAO;
@@ -23851,7 +23852,7 @@ impl Instance {
 		AQBK=BDGD;
 		AQBL=BDGE;
 		}
-		let mut FSN=B;
+		let mut FSN=C;
 		let mut FSP=FUC;
 		let mut FTM=A;
 		let mut VYC=VXI;
@@ -23892,10 +23893,10 @@ impl Instance {
 		if FSS{
 		let AEGB=AEEX- AEEV;
 		let AEGC=AEEY- AEEW;
-		let FST=(((FSR- B)- FSQ)+ CEN).sqrt();
+		let FST=(((FSR- C)- FSQ)+ CEN).sqrt();
 		let BDKV=(BDJZ- BDJW)* (ANYF/ (AWAY* FST));
 		let AEGD=BK* FST;
-		let AEGE=B/ AEGD;
+		let AEGE=C/ AEGD;
 		let BDKW=((BDKV* BK)).product_div((-AEGE),AEGD);
 		let AEGF=AEGB* AEGE;
 		let AEGG=AEGC* AEGE;
@@ -23962,10 +23963,10 @@ impl Instance {
 		let AEFK=AEFE- (AEFI* FTD);
 		let AEFL=(AEEX- AEEV)+ (AEFJ* CIB);
 		let AEFM=(AEEY- AEEW)+ (AEFK* CIB);
-		let FTF=((((FSR- B)- FSQ)+ (CIB* FTE))+ CEN).sqrt();
+		let FTF=((((FSR- C)- FSQ)+ (CIB* FTE))+ CEN).sqrt();
 		let BDKJ=((BDJZ- BDJW)+ (L5([(ANZF* FTE),0.0,0.0,0.0,0.0])+ ((BDKD- L5([BDKG[0],BDKG[1],0.0,BDKG[2],BDKG[3]]))* CIB)))* (ANYF/ (AWAY* FTF));
 		let AEFN=BK* FTF;
-		let AEFO=B/ AEFN;
+		let AEFO=C/ AEFN;
 		let BDKK=((BDKJ* BK)).product_div((-AEFO),AEFN);
 		let AEFP=AEFL* AEFO;
 		let AEFQ=AEFM* AEFO;
@@ -24046,10 +24047,10 @@ impl Instance {
 		let BDLR=-FTR;
 		let BDLS=((((L5([0.0,BDLI[0],BDLI[1],BDLI[2],BDLI[3]])+ (BDLH* BNR))+ AQCC)* AWAO)).product_sum_div(ANYF,BDLQ,BDLR,FTQ);
 		let BDLT=BDLS* AWAO;
-		let AEGT=product_sum_div(((((URY* FTN)+ (AEGP* BNR))+ VYE)* AMF),B,BDLR,AEGR,FTQ);
-		let BDLU=L5(sum_products_div_lanes(&[(&((((L5([0.0,BDLJ[0],BDLJ[1],BDLJ[2],BDLJ[3]])+ (BDLH* URY))+ (((AQBK- AQCA)* BNR)+ L5([0.0,BDLK[0],BDLK[1],BDLK[2],BDLK[3]])))+ AQCE)* AMF).0,B),(&BDLT.0,AEGR),(&(L5([0.0,BDLO[0],BDLO[1],BDLO[2],BDLO[3]])+ AQCG).0,BDLR),(&BDLQ.0,(-AEGT))],FTQ));
-		let AEGU=product_sum_div(((((URZ* FTN)+ (AEGQ* BNR))+ VYF)* AMF),B,BDLR,AEGS,FTQ);
-		let BDLV=L5(sum_products_div_lanes(&[(&((((L5([0.0,BDLL[0],BDLL[1],BDLL[2],BDLL[3]])+ (BDLH* URZ))+ (((AQBL- AQCB)* BNR)+ L5([0.0,BDLM[0],BDLM[1],BDLM[2],BDLM[3]])))+ AQCF)* AMF).0,B),(&BDLT.0,AEGS),(&(L5([0.0,BDLP[0],BDLP[1],BDLP[2],BDLP[3]])+ AQCH).0,BDLR),(&BDLQ.0,(-AEGU))],FTQ));
+		let AEGT=product_sum_div(((((URY* FTN)+ (AEGP* BNR))+ VYE)* AMF),C,BDLR,AEGR,FTQ);
+		let BDLU=L5(sum_products_div_lanes(&[(&((((L5([0.0,BDLJ[0],BDLJ[1],BDLJ[2],BDLJ[3]])+ (BDLH* URY))+ (((AQBK- AQCA)* BNR)+ L5([0.0,BDLK[0],BDLK[1],BDLK[2],BDLK[3]])))+ AQCE)* AMF).0,C),(&BDLT.0,AEGR),(&(L5([0.0,BDLO[0],BDLO[1],BDLO[2],BDLO[3]])+ AQCG).0,BDLR),(&BDLQ.0,(-AEGT))],FTQ));
+		let AEGU=product_sum_div(((((URZ* FTN)+ (AEGQ* BNR))+ VYF)* AMF),C,BDLR,AEGS,FTQ);
+		let BDLV=L5(sum_products_div_lanes(&[(&((((L5([0.0,BDLL[0],BDLL[1],BDLL[2],BDLL[3]])+ (BDLH* URZ))+ (((AQBL- AQCB)* BNR)+ L5([0.0,BDLM[0],BDLM[1],BDLM[2],BDLM[3]])))+ AQCF)* AMF).0,C),(&BDLT.0,AEGS),(&(L5([0.0,BDLP[0],BDLP[1],BDLP[2],BDLP[3]])+ AQCH).0,BDLR),(&BDLQ.0,(-AEGU))],FTQ));
 		let FTS=(FTR.abs())< 1e-8f64;
 		let FTW;
 		let FUF;
@@ -24060,7 +24061,7 @@ impl Instance {
 		let AQCN;
 		if FTS{
 		FTW=FTR;
-		FUF=B;
+		FUF=C;
 		VYK=AEGT;
 		VYL=AEGU;
 		AQCL=BDLS;
@@ -24134,7 +24135,7 @@ impl Instance {
 		AQCJ=BDLX;
 		AQCK=BDLY;
 		}
-		let FUB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FUA, B));
+		let FUB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FUA, C));
 		FSN=FUB;
 		FSP=FUD;
 		FTM=FUE;
@@ -24167,7 +24168,7 @@ impl Instance {
 		let FUM=(FUL* FUJ).sqrt();
 		let BDHJ=(L4([(BDHI* FUJ),0.0,0.0,0.0])+ (BDHF* FUL))* (ANYF/ (AWAY* FUM));
 		let AEDF=BK* FUM;
-		let AEDG=B/ AEDF;
+		let AEDG=C/ AEDF;
 		let BDHK=((BDHJ* BK)).product_div((-AEDG),AEDF);
 		let FUN=FUK* FUM;
 		let BDHL=BDHJ* FUK;
@@ -24185,16 +24186,16 @@ impl Instance {
 		let BDHQ=(BDHO+ BDHP)/ BK;
 		let AEDL=((AEDH* FUO)+ (AEDJ* FUP))/ BK;
 		let AEDM=((AEDI* FUO)+ (AEDK* FUP))/ BK;
-		let AEDN=B/ FUQ;
+		let AEDN=C/ FUQ;
 		let BDHR=(BDHQ).product_div((-AEDN),FUQ);
 		let FUR=(FUQ.ln())/ FUJ;
 		let BDHS=-FUR;
 		let BDHT=((BDHQ* (ANYF/ FUQ))).product_sum_div(ANYF,BDHF,BDHS,FUJ);
 		let BDHU=BDHT* AWAO;
-		let AEDO=product_sum_div((AEDL* AEDN),B,BDHS,AEDB,FUJ);
-		let BDHV=L4(sum_products_div_lanes(&[(&((((((BDHM* FUO)+ (BDHO* AEDH))+ (((BDHM* AMF)* FUP)+ (BDHP* AEDJ)))/ BK)* AEDN)+ (BDHR* AEDL)).0,B),(&BDHU.0,AEDB),(&BDHG.0,BDHS),(&BDHF.0,(-AEDO))],FUJ));
-		let AEDP=product_sum_div((AEDM* AEDN),B,BDHS,AEDC,FUJ);
-		let BDHW=L4(sum_products_div_lanes(&[(&((((((BDHN* FUO)+ (BDHO* AEDI))+ (((BDHN* AMF)* FUP)+ (BDHP* AEDK)))/ BK)* AEDN)+ (BDHR* AEDM)).0,B),(&BDHU.0,AEDC),(&BDHH.0,BDHS),(&BDHF.0,(-AEDP))],FUJ));
+		let AEDO=product_sum_div((AEDL* AEDN),C,BDHS,AEDB,FUJ);
+		let BDHV=L4(sum_products_div_lanes(&[(&((((((BDHM* FUO)+ (BDHO* AEDH))+ (((BDHM* AMF)* FUP)+ (BDHP* AEDJ)))/ BK)* AEDN)+ (BDHR* AEDL)).0,C),(&BDHU.0,AEDB),(&BDHG.0,BDHS),(&BDHF.0,(-AEDO))],FUJ));
+		let AEDP=product_sum_div((AEDM* AEDN),C,BDHS,AEDC,FUJ);
+		let BDHW=L4(sum_products_div_lanes(&[(&((((((BDHN* FUO)+ (BDHO* AEDI))+ (((BDHN* AMF)* FUP)+ (BDHP* AEDK)))/ BK)* AEDN)+ (BDHR* AEDM)).0,C),(&BDHU.0,AEDC),(&BDHH.0,BDHS),(&BDHF.0,(-AEDP))],FUJ));
 		let FUS=FUR* FUH;
 		let BDHX=BDHT* FUH;
 		let BDHY=L5([BDHX[0],BDHX[1],0.0,BDHX[2],BDHX[3]])+ (BDHB* FUR);
@@ -24252,7 +24253,7 @@ impl Instance {
 		let BDII=BDHY/ BK;
 		let AEEA=AEDQ/ BK;
 		let AEEB=AEDR/ BK;
-		let FUY=B+ (FUS/ BK);
+		let FUY=C+ (FUS/ BK);
 		let FUZ=FUS* FUY;
 		let BDIJ=(BDHY* FUY)+ (BDII* FUS);
 		let AEEC=(AEDQ* FUY)+ (AEEA* FUS);
@@ -24283,18 +24284,18 @@ impl Instance {
 		let AQCY;
 		let AQCZ;
 		if FVC{
-		let FVD=B+ FVB;
-		let AEEM=B/ FVD;
+		let FVD=C+ FVB;
+		let AEEM=C/ FVD;
 		let BDJH=(AQCU).product_div((-AEEM),FVD);
 		let FVE=(FVD.ln())/ FUR;
 		let BDJI=-FVE;
 		let BDJJ=L5([BDHT[0],BDHT[1],0.0,BDHT[2],BDHT[3]]);
 		let BDJK=((AQCU* (ANYF/ FVD))).product_sum_div(ANYF,BDJJ,BDJI,FUR);
 		let BDJL=BDJK* AWAO;
-		let AEEN=product_sum_div((VYQ* AEEM),B,BDJI,AEDO,FUR);
-		let BDJM=L5(sum_products_div_lanes(&[(&((AQCV* AEEM)+ (BDJH* VYQ)).0,B),(&BDJL.0,AEDO),(&L5([BDHV[0],BDHV[1],0.0,BDHV[2],BDHV[3]]).0,BDJI),(&BDJJ.0,(-AEEN))],FUR));
-		let AEEO=product_sum_div((VYR* AEEM),B,BDJI,AEDP,FUR);
-		let BDJN=L5(sum_products_div_lanes(&[(&((AQCW* AEEM)+ (BDJH* VYR)).0,B),(&BDJL.0,AEDP),(&L5([BDHW[0],BDHW[1],0.0,BDHW[2],BDHW[3]]).0,BDJI),(&BDJJ.0,(-AEEO))],FUR));
+		let AEEN=product_sum_div((VYQ* AEEM),C,BDJI,AEDO,FUR);
+		let BDJM=L5(sum_products_div_lanes(&[(&((AQCV* AEEM)+ (BDJH* VYQ)).0,C),(&BDJL.0,AEDO),(&L5([BDHV[0],BDHV[1],0.0,BDHV[2],BDHV[3]]).0,BDJI),(&BDJJ.0,(-AEEN))],FUR));
+		let AEEO=product_sum_div((VYR* AEEM),C,BDJI,AEDP,FUR);
+		let BDJN=L5(sum_products_div_lanes(&[(&((AQCW* AEEM)+ (BDJH* VYR)).0,C),(&BDJL.0,AEDP),(&L5([BDHW[0],BDHW[1],0.0,BDHW[2],BDHW[3]]).0,BDJI),(&BDJJ.0,(-AEEO))],FUR));
 		FVG=FVE;
 		VYS=AEEN;
 		VYT=AEEO;
@@ -24307,10 +24308,10 @@ impl Instance {
 		let BDJC=L5([BDHT[0],BDHT[1],0.0,BDHT[2],BDHT[3]]);
 		let BDJD=(AQCU).product_sum_div(ANYF,BDJC,BDJB,FUR);
 		let BDJE=BDJD* AWAO;
-		let AEEK=product_sum_div(VYQ,B,BDJB,AEDO,FUR);
-		let BDJF=L5(sum_products_div_lanes(&[(&AQCV.0,B),(&BDJE.0,AEDO),(&L5([BDHV[0],BDHV[1],0.0,BDHV[2],BDHV[3]]).0,BDJB),(&BDJC.0,(-AEEK))],FUR));
-		let AEEL=product_sum_div(VYR,B,BDJB,AEDP,FUR);
-		let BDJG=L5(sum_products_div_lanes(&[(&AQCW.0,B),(&BDJE.0,AEDP),(&L5([BDHW[0],BDHW[1],0.0,BDHW[2],BDHW[3]]).0,BDJB),(&BDJC.0,(-AEEL))],FUR));
+		let AEEK=product_sum_div(VYQ,C,BDJB,AEDO,FUR);
+		let BDJF=L5(sum_products_div_lanes(&[(&AQCV.0,C),(&BDJE.0,AEDO),(&L5([BDHV[0],BDHV[1],0.0,BDHV[2],BDHV[3]]).0,BDJB),(&BDJC.0,(-AEEK))],FUR));
+		let AEEL=product_sum_div(VYR,C,BDJB,AEDP,FUR);
+		let BDJG=L5(sum_products_div_lanes(&[(&AQCW.0,C),(&BDJE.0,AEDP),(&L5([BDHW[0],BDHW[1],0.0,BDHW[2],BDHW[3]]).0,BDJB),(&BDJC.0,(-AEEL))],FUR));
 		FVG=FVF;
 		VYS=AEEK;
 		VYT=AEEL;
@@ -24340,7 +24341,7 @@ impl Instance {
 		let FVK=((FVJ* FVH)/ EKU).sqrt();
 		let BDJP=((BDJO* FVJ)/ EKU)* (ANYF/ (AWAY* FVK));
 		let AEER=BK* FVK;
-		let AEES=B/ AEER;
+		let AEES=C/ AEER;
 		let BDJQ=((BDJP* BK)).product_div((-AEES),AEER);
 		let AEET=AEEP* AEES;
 		let BDJR=((((BDHC- AQCY)* FVJ)/ EKU)* AEES)+ (BDJQ* AEEP);
@@ -24508,7 +24509,7 @@ impl Instance {
 		let FWB=((FWA* FWA)+ AYD).sqrt();
 		let BDNH=(BDNE+ BDNE)* (ANYF/ (AWAY* FWB));
 		let AEHX=BK* FWB;
-		let AEHY=B/ AEHX;
+		let AEHY=C/ AEHX;
 		let BDNI=((BDNH* BK)).product_div((-AEHY),AEHX);
 		let AEHZ=AEHU* AEHY;
 		let AEIA=AEHW* AEHY;
@@ -24516,15 +24517,15 @@ impl Instance {
 		let BDNJ=(BDNH* DYR)+ L5([(ANZH* FWC),0.0,0.0,0.0,0.0]);
 		let AEIB=AEHZ* DYR;
 		let AEIC=AEIA* DYR;
-		let FWD=B+ (FWC* DYR);
+		let FWD=C+ (FWC* DYR);
 		let FWE=(FVZ* FVY)/ FWD;
 		let BDNK=-FWE;
 		let BDNL=((BDNB* FVZ)).product_sum_div(ANYF,BDNJ,BDNK,FWD);
 		let BDNM=BDNL* AWAO;
-		let AEID=product_sum_div((AEHR* FVZ),B,BDNK,AEIB,FWD);
-		let BDNN=L5(sum_products_div_lanes(&[(&(BDNC* FVZ).0,B),(&BDNM.0,AEIB),(&(((((BDNF+ BDNF)* AEHY)+ (BDNI* AEHU))* DYR)+ L5([(ANZH* AEHZ),0.0,0.0,0.0,0.0])).0,BDNK),(&BDNJ.0,(-AEID))],FWD));
-		let AEIE=product_sum_div((AEHS* FVZ),B,BDNK,AEIC,FWD);
-		let BDNO=L5(sum_products_div_lanes(&[(&(BDND* FVZ).0,B),(&BDNM.0,AEIC),(&(((((BDNG+ BDNG)* AEHY)+ (BDNI* AEHW))* DYR)+ L5([(ANZH* AEIA),0.0,0.0,0.0,0.0])).0,BDNK),(&BDNJ.0,(-AEIE))],FWD));
+		let AEID=product_sum_div((AEHR* FVZ),C,BDNK,AEIB,FWD);
+		let BDNN=L5(sum_products_div_lanes(&[(&(BDNC* FVZ).0,C),(&BDNM.0,AEIB),(&(((((BDNF+ BDNF)* AEHY)+ (BDNI* AEHU))* DYR)+ L5([(ANZH* AEHZ),0.0,0.0,0.0,0.0])).0,BDNK),(&BDNJ.0,(-AEID))],FWD));
+		let AEIE=product_sum_div((AEHS* FVZ),C,BDNK,AEIC,FWD);
+		let BDNO=L5(sum_products_div_lanes(&[(&(BDND* FVZ).0,C),(&BDNM.0,AEIC),(&(((((BDNG+ BDNG)* AEHY)+ (BDNI* AEHW))* DYR)+ L5([(ANZH* AEIA),0.0,0.0,0.0,0.0])).0,BDNK),(&BDNJ.0,(-AEIE))],FWD));
 		let FWF=FWE== A;
 		let FWI;
 		let VZG;
@@ -24540,10 +24541,10 @@ impl Instance {
 		AQDT=AWLK;
 		AQDU=AWLK;
 		}else{
-		let FWG=AX- B;
+		let FWG=AX- C;
 		let FWH=FWE.powf(FWG);
 		let BDNP=BDNL* (FWG* ((FWE+ (((FWE== AWBZ) as u8 as f64)* AWCA)).powf((FWG- ANYF))));
-		let AEIF=FWG- B;
+		let AEIF=FWG- C;
 		let AEIG=FWE+ ((FWF as u8 as f64)* ZNW);
 		let BDNQ=AEIF* ((AEIG+ (((AEIG== AWBZ) as u8 as f64)* AWCA)).powf((AEIF- ANYF)));
 		let AEIH=FWG* (AEIG.powf(AEIF));
@@ -24578,10 +24579,10 @@ impl Instance {
 		AQDW=AWLK;
 		AQDX=AWLK;
 		}else{
-		let FWK=OQ- B;
+		let FWK=OQ- C;
 		let FWL=FWE.powf(FWK);
 		let BDNW=BDNL* (FWK* ((FWE+ (((FWE== AWBZ) as u8 as f64)* AWCA)).powf((FWK- ANYF))));
-		let AEIM=FWK- B;
+		let AEIM=FWK- C;
 		let AEIN=FWE+ ((FWF as u8 as f64)* ZNW);
 		let BDNX=AEIM* ((AEIN+ (((AEIN== AWBZ) as u8 as f64)* AWCA)).powf((AEIM- ANYF)));
 		let AEIO=FWK* (AEIN.powf(AEIM));
@@ -24600,7 +24601,7 @@ impl Instance {
 		let AEIR=((AEHR/ FWN)* HR)/ DZG;
 		let AEIS=((AEHS/ FWN)* HR)/ DZG;
 		let FWO=HQ+ ((HR* (FVY/ FWN))/ DZG);
-		let FWP=B/ FWO;
+		let FWP=C/ FWO;
 		let BDOB=-FWP;
 		let BDOC=(BDOA).product_div(BDOB,FWO);
 		let BDOD=BDOC* AWAO;
@@ -24612,7 +24613,7 @@ impl Instance {
 		let BDOF=((L5(sum_products_div_lanes(&[(&BDOD.0,AEIR),(&(((BDNC/ FWN)* HR)/ DZG).0,BDOB),(&BDOA.0,(-AEIT))],FWO)))+ ((BDNU* DZJ)+ L5([(ANZI* AEIK),0.0,0.0,0.0,0.0])))+ ((((AQDW* FWE)+ (BDNL* VZI))+ ((BDNN* FWM)+ (AQDV* AEID)))/ HV);
 		let AEIW=(AEIU+ (AEIL* DZJ))+ (((VZJ* FWE)+ (AEIE* FWM))/ HV);
 		let BDOG=((L5(sum_products_div_lanes(&[(&BDOD.0,AEIS),(&(((BDND/ FWN)* HR)/ DZG).0,BDOB),(&BDOA.0,(-AEIU))],FWO)))+ ((BDNV* DZJ)+ L5([(ANZI* AEIL),0.0,0.0,0.0,0.0])))+ ((((AQDX* FWE)+ (BDNL* VZJ))+ ((BDNO* FWM)+ (AQDV* AEIE)))/ HV);
-		let FWR=B/ FWQ;
+		let FWR=C/ FWQ;
 		let BDOH=-FWR;
 		let BDOI=(BDOE).product_div(BDOH,FWQ);
 		let BDOJ=BDOI* AWAO;
@@ -24629,7 +24630,7 @@ impl Instance {
 		let BDON=(L5([(ANZE* FWT),0.0,0.0,0.0,0.0])+ (BDNB* BWG))* PE;
 		let AEJB=(AEHR* BWG)* PE;
 		let AEJC=(AEHS* BWG)* PE;
-		let FWV=B/ FWU;
+		let FWV=C/ FWU;
 		let BDOO=-FWV;
 		let BDOP=(BDON).product_div(BDOO,FWU);
 		let BDOQ=BDOP* AWAO;
@@ -24662,7 +24663,7 @@ impl Instance {
 		let FWZ=((FWX* FWX)+ (FWY* FWY)).sqrt();
 		let BDPD=((BDOV+ BDOV)+ (BDPA+ BDPA))* (ANYF/ (AWAY* FWZ));
 		let AEJP=BK* FWZ;
-		let AEJQ=B/ AEJP;
+		let AEJQ=C/ AEJP;
 		let BDPE=((BDPD* BK)).product_div((-AEJQ),AEJP);
 		let AEJR=AEJN* AEJQ;
 		let AEJS=AEJO* AEJQ;
@@ -24681,7 +24682,7 @@ impl Instance {
 		let AQDZ;
 		let AQEA;
 		if FXB{
-		FXH=B;
+		FXH=C;
 		VZK=A;
 		VZL=A;
 		AQDY=AWLK;
@@ -24718,10 +24719,10 @@ impl Instance {
 		AQEF=AWLK;
 		AQEG=AWLK;
 		}else{
-		let FXE=DZV- B;
+		let FXE=DZV- C;
 		let FXF=FXA.powf(FXE);
 		let BDPJ=BDPG* (FXE* ((FXA+ (((FXA== AWBZ) as u8 as f64)* AWCA)).powf((FXE- ANYF))));
-		let AEJV=FXE- B;
+		let AEJV=FXE- C;
 		let AEJW=FXA+ ((FXD as u8 as f64)* ZNW);
 		let BDPK=AEJV* ((AEJW+ (((AEJW== AWBZ) as u8 as f64)* AWCA)).powf((AEJV- ANYF)));
 		let AEJX=FXE* (AEJW.powf(AEJV));
@@ -24755,7 +24756,7 @@ impl Instance {
 		let BDPO=((BDPH* FXH)+ (AQDY* AEJT))+ ((AQDZ* FXA)+ (BDPG* VZK));
 		let AEKB=(AEJU* FXH)+ (VZL* FXA);
 		let BDPP=((BDPI* FXH)+ (AQDY* AEJU))+ ((AQEA* FXA)+ (BDPG* VZL));
-		let FXJ=B+ (FXA* FXH);
+		let FXJ=C+ (FXA* FXH);
 		let FXK=(0.9999999999999978f64<= DZV)&& (DZV<= 1.0000000000000022f64);
 		let FXU;
 		let VZQ;
@@ -24764,7 +24765,7 @@ impl Instance {
 		let AQEI;
 		let AQEJ;
 		if FXK{
-		let FXL=B/ FXJ;
+		let FXL=C/ FXJ;
 		let BDQE=-FXL;
 		let BDQF=(BDPN).product_div(BDQE,FXJ);
 		let BDQG=BDQF* AWAO;
@@ -24790,11 +24791,11 @@ impl Instance {
 		let FXN=FXJ.sqrt();
 		let BDPX=BDPN* (ANYF/ (AWAY* FXN));
 		let AEKJ=BK* FXN;
-		let AEKK=B/ AEKJ;
+		let AEKK=C/ AEKJ;
 		let BDPY=((BDPX* BK)).product_div((-AEKK),AEKJ);
 		let AEKL=AEKA* AEKK;
 		let AEKM=AEKB* AEKK;
-		let FXO=B/ FXN;
+		let FXO=C/ FXN;
 		let BDPZ=-FXO;
 		let BDQA=(BDPX).product_div(BDPZ,FXN);
 		let BDQB=BDQA* AWAO;
@@ -24824,10 +24825,10 @@ impl Instance {
 		AQEO=AWLK;
 		AQEP=AWLK;
 		}else{
-		let FXQ=(-1f64/ DZV)- B;
+		let FXQ=(-1f64/ DZV)- C;
 		let FXR=FXJ.powf(FXQ);
 		let BDPQ=BDPN* (FXQ* ((FXJ+ (((FXJ== AWBZ) as u8 as f64)* AWCA)).powf((FXQ- ANYF))));
-		let AEKC=FXQ- B;
+		let AEKC=FXQ- C;
 		let AEKD=FXJ+ ((FXP as u8 as f64)* ZNW);
 		let BDPR=AEKC* ((AEKD+ (((AEKD== AWBZ) as u8 as f64)* AWCA)).powf((AEKC- ANYF)));
 		let AEKE=FXQ* (AEKD.powf(AEKC));
@@ -24892,8 +24893,8 @@ impl Instance {
 		let BDQW=BCAQ* AEKU;
 		let AEKW=(ADBT* FXY)+ (AEKU* ELD);
 		let BDQX=(L5([0.0,BDQV[0],BDQV[1],BDQV[2],BDQV[3]])+ (BDQP* ADBT))+ (((AXBN- L5([BDQO[0],BDQO[1],0.0,BDQO[2],BDQO[3]]))* ELD)+ L5([0.0,BDQW[0],BDQW[1],BDQW[2],BDQW[3]]));
-		let FXZ=B+ (ELD* FXY);
-		let FYA=B+ ELD;
+		let FXZ=C+ (ELD* FXY);
+		let FYA=C+ ELD;
 		let FYB=A+ FYA;
 		let FYC=(FXZ< FYB)&& (FYA>= A);
 		let FZD;
@@ -24958,7 +24959,7 @@ impl Instance {
 		if FYH{
 		let FYR;
 		if FYI{
-		FYR=B;
+		FYR=C;
 		}else{
 		let FYS;
 		if FYJ{
@@ -24994,13 +24995,13 @@ impl Instance {
 		let FYP=FYO.sqrt();
 		let BEDG=AQEZ* (ANYF/ (AWAY* FYP));
 		let AETF=BK* FYP;
-		let AETG=B/ AETF;
+		let AETG=C/ AETF;
 		let BEDH=((BEDG* BK)).product_div((-AETG),AETF);
 		let AETH=WAC* AETG;
 		let BEDI=(AQFA* AETG)+ (BEDH* WAC);
 		let AETI=WAD* AETG;
 		let BEDJ=(AQFB* AETG)+ (BEDH* WAD);
-		let FYQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FYM, B));
+		let FYQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FYM, C));
 		FYM=FYQ;
 		FYO=FYP;
 		WAC=AETH;
@@ -25055,7 +25056,7 @@ impl Instance {
 		AQEX=AQFD;
 		AQEY=AQFE;
 		}
-		let FZA=B/ FYZ;
+		let FZA=C/ FYZ;
 		let BDSC=-FZA;
 		let BDSD=(AQEW).product_div(BDSC,FYZ);
 		let BDSE=BDSD* AWAO;
@@ -25095,9 +25096,9 @@ impl Instance {
 		let FZE=FZD.sqrt();
 		let BDSQ=AQET* (ANYF/ (AWAY* FZE));
 		let AELY=BK* FZE;
-		let AELZ=B/ AELY;
+		let AELZ=C/ AELY;
 		let BDSR=((BDSQ* BK)).product_div((-AELZ),AELY);
-		let FZF=B- FZE;
+		let FZF=C- FZE;
 		let BDSS=BDSQ* AWAO;
 		let AEMA=-(VZY* AELZ);
 		let AEMB=-(VZZ* AELZ);
@@ -25156,7 +25157,7 @@ impl Instance {
 		if FZM{
 		let FZW;
 		if FZN{
-		FZW=B;
+		FZW=C;
 		}else{
 		let FZX;
 		if FZO{
@@ -25192,13 +25193,13 @@ impl Instance {
 		let FZU=FZT.sqrt();
 		let BEDC=AQFL* (ANYF/ (AWAY* FZU));
 		let AETB=BK* FZU;
-		let AETC=B/ AETB;
+		let AETC=C/ AETB;
 		let BEDD=((BEDC* BK)).product_div((-AETC),AETB);
 		let AETD=WAK* AETC;
 		let BEDE=(AQFM* AETC)+ (BEDD* WAK);
 		let AETE=WAL* AETC;
 		let BEDF=(AQFN* AETC)+ (BEDD* WAL);
-		let FZV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FZR, B));
+		let FZV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, FZR, C));
 		FZR=FZV;
 		FZT=FZU;
 		WAK=AETD;
@@ -25253,7 +25254,7 @@ impl Instance {
 		AQFJ=AQFP;
 		AQFK=AQFQ;
 		}
-		let GAF=B/ GAE;
+		let GAF=C/ GAE;
 		let BDTS=-GAF;
 		let BDTT=(AQFI).product_div(BDTS,GAE);
 		let BDTU=BDTT* AWAO;
@@ -25287,9 +25288,9 @@ impl Instance {
 		let BDTZ=-GAJ;
 		let BDUA=(AWLX).product_sum_div(ANYF,AQFF,BDTZ,GAI);
 		let BDUB=BDUA* AWAO;
-		let AEMZ=product_sum_div(URK,B,BDTZ,WAG,GAI);
+		let AEMZ=product_sum_div(URK,C,BDTZ,WAG,GAI);
 		let BDUC=L5(sum_products_div_lanes(&[(&BDUB.0,WAG),(&AQFG.0,BDTZ),(&AQFF.0,(-AEMZ))],GAI));
-		let AENA=product_sum_div(URL,B,BDTZ,WAH,GAI);
+		let AENA=product_sum_div(URL,C,BDTZ,WAH,GAI);
 		let BDUD=L5(sum_products_div_lanes(&[(&BDUB.0,WAH),(&AQFH.0,BDTZ),(&AQFF.0,(-AENA))],GAI));
 		let GAK=GAJ== A;
 		let GAO;
@@ -25306,10 +25307,10 @@ impl Instance {
 		AQFS=AWLK;
 		AQFT=AWLK;
 		}else{
-		let GAM=GAL- B;
+		let GAM=GAL- C;
 		let GAN=GAJ.powf(GAM);
 		let BDUE=BDUA* (GAM* ((GAJ+ (((GAJ== AWBZ) as u8 as f64)* AWCA)).powf((GAM- ANYF))));
-		let AENB=GAM- B;
+		let AENB=GAM- C;
 		let AENC=GAJ+ ((GAK as u8 as f64)* ZNW);
 		let BDUF=AENB* ((AENC+ (((AENC== AWBZ) as u8 as f64)* AWCA)).powf((AENB- ANYF)));
 		let AEND=GAM* (AENC.powf(AENB));
@@ -25329,7 +25330,7 @@ impl Instance {
 		let BDUJ=((AQFS* GAJ)+ (BDUA* WAO))+ ((BDUC* GAO)+ (AQFR* AEMZ));
 		let AENH=(WAP* GAJ)+ (AENA* GAO);
 		let BDUK=((AQFT* GAJ)+ (BDUA* WAP))+ ((BDUD* GAO)+ (AQFR* AENA));
-		let GAP=B+ (GAO* GAJ);
+		let GAP=C+ (GAO* GAJ);
 		let GAQ=GAP== A;
 		let GAT;
 		let WAQ;
@@ -25345,10 +25346,10 @@ impl Instance {
 		AQFV=AWLK;
 		AQFW=AWLK;
 		}else{
-		let GAR=(B/ GAL)- B;
+		let GAR=(C/ GAL)- C;
 		let GAS=GAP.powf(GAR);
 		let BDUL=BDUI* (GAR* ((GAP+ (((GAP== AWBZ) as u8 as f64)* AWCA)).powf((GAR- ANYF))));
-		let AENI=GAR- B;
+		let AENI=GAR- C;
 		let AENJ=GAP+ ((GAQ as u8 as f64)* ZNW);
 		let BDUM=AENI* ((AENJ+ (((AENJ== AWBZ) as u8 as f64)* AWCA)).powf((AENI- ANYF)));
 		let AENK=GAR* (AENJ.powf(AENI));
@@ -25371,9 +25372,9 @@ impl Instance {
 		let BDUQ=-GAV;
 		let BDUR=(AWLX).product_sum_div(ANYF,BDUP,BDUQ,GAU);
 		let BDUS=BDUR* AWAO;
-		let AENP=product_sum_div(URK,B,BDUQ,AENN,GAU);
+		let AENP=product_sum_div(URK,C,BDUQ,AENN,GAU);
 		let BDUT=L5(sum_products_div_lanes(&[(&BDUS.0,AENN),(&(((AQFV* GAP)+ (BDUI* WAQ))+ ((BDUJ* GAT)+ (AQFU* AENG))).0,BDUQ),(&BDUP.0,(-AENP))],GAU));
-		let AENQ=product_sum_div(URL,B,BDUQ,AENO,GAU);
+		let AENQ=product_sum_div(URL,C,BDUQ,AENO,GAU);
 		let BDUU=L5(sum_products_div_lanes(&[(&BDUS.0,AENO),(&(((AQFW* GAP)+ (BDUI* WAR))+ ((BDUK* GAT)+ (AQFU* AENH))).0,BDUQ),(&BDUP.0,(-AENQ))],GAU));
 		GCK=GAV;
 		VZW=AENP;
@@ -25440,7 +25441,7 @@ impl Instance {
 		if GBB{
 		let GBL;
 		if GBC{
-		GBL=B;
+		GBL=C;
 		}else{
 		let GBM;
 		if GBD{
@@ -25476,13 +25477,13 @@ impl Instance {
 		let GBJ=GBI.sqrt();
 		let BECY=AQGD* (ANYF/ (AWAY* GBJ));
 		let AESX=BK* GBJ;
-		let AESY=B/ AESX;
+		let AESY=C/ AESX;
 		let BECZ=((BECY* BK)).product_div((-AESY),AESX);
 		let AESZ=WAW* AESY;
 		let BEDA=(AQGE* AESY)+ (BECZ* WAW);
 		let AETA=WAX* AESY;
 		let BEDB=(AQGF* AESY)+ (BECZ* WAX);
-		let GBK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GBG, B));
+		let GBK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GBG, C));
 		GBG=GBK;
 		GBI=GBJ;
 		WAW=AESZ;
@@ -25537,7 +25538,7 @@ impl Instance {
 		AQGB=AQGH;
 		AQGC=AQGI;
 		}
-		let GBU=B/ GBT;
+		let GBU=C/ GBT;
 		let BDVT=-GBU;
 		let BDVU=(AQGA).product_div(BDVT,GBT);
 		let BDVV=BDVU* AWAO;
@@ -25572,10 +25573,10 @@ impl Instance {
 		let BDWC=L5([0.0,APMY[0],0.0,APMY[1],0.0]);
 		let BDWD=(AQFX).product_sum_div(ANYF,BDWC,BDWB,ENG);
 		let BDWE=BDWD* AWAO;
-		let AEOM=product_sum_div(WAS,B,BDWB,VOC,ENG);
-		let BDWF=L5(sum_products_div_lanes(&[(&AQFY.0,B),(&BDWE.0,VOC),(&L5([0.0,APMZ[0],0.0,APMZ[1],0.0]).0,BDWB),(&BDWC.0,(-AEOM))],ENG));
-		let AEON=product_sum_div(WAT,B,BDWB,VOD,ENG);
-		let BDWG=L5(sum_products_div_lanes(&[(&AQFZ.0,B),(&BDWE.0,VOD),(&L5([0.0,APNA[0],0.0,APNA[1],0.0]).0,BDWB),(&BDWC.0,(-AEON))],ENG));
+		let AEOM=product_sum_div(WAS,C,BDWB,VOC,ENG);
+		let BDWF=L5(sum_products_div_lanes(&[(&AQFY.0,C),(&BDWE.0,VOC),(&L5([0.0,APMZ[0],0.0,APMZ[1],0.0]).0,BDWB),(&BDWC.0,(-AEOM))],ENG));
+		let AEON=product_sum_div(WAT,C,BDWB,VOD,ENG);
+		let BDWG=L5(sum_products_div_lanes(&[(&AQFZ.0,C),(&BDWE.0,VOD),(&L5([0.0,APNA[0],0.0,APNA[1],0.0]).0,BDWB),(&BDWC.0,(-AEON))],ENG));
 		let GBY=GBX== A;
 		let GCB;
 		let WBA;
@@ -25591,10 +25592,10 @@ impl Instance {
 		AQGK=AWLK;
 		AQGL=AWLK;
 		}else{
-		let GBZ=parameters[353]- B;
+		let GBZ=parameters[353]- C;
 		let GCA=GBX.powf(GBZ);
 		let BDWH=BDWD* (GBZ* ((GBX+ (((GBX== AWBZ) as u8 as f64)* AWCA)).powf((GBZ- ANYF))));
-		let AEOO=GBZ- B;
+		let AEOO=GBZ- C;
 		let AEOP=GBX+ ((GBY as u8 as f64)* ZNW);
 		let BDWI=AEOO* ((AEOP+ (((AEOP== AWBZ) as u8 as f64)* AWCA)).powf((AEOO- ANYF)));
 		let AEOQ=GBZ* (AEOP.powf(AEOO));
@@ -25610,14 +25611,14 @@ impl Instance {
 		AQGL=BDWK;
 		}
 		let GCC=EEF+ OM;
-		let GCD=B/ GCC;
+		let GCD=C/ GCC;
 		let GCG=(GCB* GBX)/ GCE;
 		let BDWL=L5([ANZN,0.0,0.0,0.0,0.0]);
 		let AEOT=((WBA* GBX)+ (AEOM* GCB))/ GCE;
 		let AEOU=((WBB* GBX)+ (AEON* GCB))/ GCE;
 		let GCH=GCD+ GCG;
 		let BDWM=L5([(product_div(ANZJ,(-GCD),GCC)),0.0,0.0,0.0,0.0])+ ((((AQGJ* GBX)+ (BDWD* GCB))).product_sum_div(ANYF,BDWL,(-GCG),GCE));
-		let GCI=B/ GCH;
+		let GCI=C/ GCH;
 		let BDWN=-GCI;
 		let BDWO=(BDWM).product_div(BDWN,GCH);
 		let BDWP=BDWO* AWAO;
@@ -25676,7 +25677,7 @@ impl Instance {
 		}else{
 		let GCS=GCQ.powf(EFE);
 		let BDXH=BDXE* (EFE* ((GCQ+ (((GCQ== AWBZ) as u8 as f64)* AWCA)).powf((EFE- ANYF))));
-		let AEPK=EFE- B;
+		let AEPK=EFE- C;
 		let AEPL=GCQ+ ((GCR as u8 as f64)* ZNW);
 		let BDXI=AEPK* ((AEPL+ (((AEPL== AWBZ) as u8 as f64)* AWCA)).powf((AEPK- ANYF)));
 		let AEPM=EFE* (AEPL.powf(AEPK));
@@ -25691,7 +25692,7 @@ impl Instance {
 		AQGN=BDXJ;
 		AQGO=BDXK;
 		}
-		let GCU=B+ GCT;
+		let GCU=C+ GCT;
 		let GCV=GCU== A;
 		let GCY;
 		let WBE;
@@ -25707,10 +25708,10 @@ impl Instance {
 		AQGQ=AWLK;
 		AQGR=AWLK;
 		}else{
-		let GCW=B/ EFE;
+		let GCW=C/ EFE;
 		let GCX=GCU.powf(GCW);
 		let BDXL=AQGM* (GCW* ((GCU+ (((GCU== AWBZ) as u8 as f64)* AWCA)).powf((GCW- ANYF))));
-		let AEPP=GCW- B;
+		let AEPP=GCW- C;
 		let AEPQ=GCU+ ((GCV as u8 as f64)* ZNW);
 		let BDXM=AEPP* ((AEPQ+ (((AEPQ== AWBZ) as u8 as f64)* AWCA)).powf((AEPP- ANYF)));
 		let AEPR=GCW* (AEPQ.powf(AEPP));
@@ -25729,8 +25730,8 @@ impl Instance {
 		let BDXP=-GCZ;
 		let BDXQ=(BDWQ).product_sum_div(ANYF,AQGP,BDXP,GCY);
 		let BDXR=BDXQ* AWAO;
-		let AEPU=product_sum_div(AEOX,B,BDXP,WBE,GCY);
-		let AEPV=product_sum_div(AEOY,B,BDXP,WBF,GCY);
+		let AEPU=product_sum_div(AEOX,C,BDXP,WBE,GCY);
+		let AEPV=product_sum_div(AEOY,C,BDXP,WBF,GCY);
 		let GDB=PL* (-(((-GDA)* QQ)* VY));
 		let BDXS=((((AQDG* AWAO)* QQ)* VY)* AWAO)* PL;
 		let AEPW=((((VYY* AMF)* QQ)* VY)* AMF)* PL;
@@ -25738,9 +25739,9 @@ impl Instance {
 		let GDC=GDB* GCZ;
 		let BDXT=(BDXS* GCZ)+ (BDXQ* GDB);
 		let AEPY=(AEPW* GCZ)+ (AEPU* GDB);
-		let BDXU=(((((((AQDH* AMF)* QQ)* VY)* AMF)* PL)* GCZ)+ (BDXQ* AEPW))+ (((L5(sum_products_div_lanes(&[(&BDWR.0,B),(&BDXR.0,WBE),(&AQGQ.0,BDXP),(&AQGP.0,(-AEPU))],GCY)))* GDB)+ (BDXS* AEPU));
+		let BDXU=(((((((AQDH* AMF)* QQ)* VY)* AMF)* PL)* GCZ)+ (BDXQ* AEPW))+ (((L5(sum_products_div_lanes(&[(&BDWR.0,C),(&BDXR.0,WBE),(&AQGQ.0,BDXP),(&AQGP.0,(-AEPU))],GCY)))* GDB)+ (BDXS* AEPU));
 		let AEPZ=(AEPX* GCZ)+ (AEPV* GDB);
-		let BDXV=(((((((AQDI* AMF)* QQ)* VY)* AMF)* PL)* GCZ)+ (BDXQ* AEPX))+ (((L5(sum_products_div_lanes(&[(&BDWS.0,B),(&BDXR.0,WBF),(&AQGR.0,BDXP),(&AQGP.0,(-AEPV))],GCY)))* GDB)+ (BDXS* AEPV));
+		let BDXV=(((((((AQDI* AMF)* QQ)* VY)* AMF)* PL)* GCZ)+ (BDXQ* AEPX))+ (((L5(sum_products_div_lanes(&[(&BDWS.0,C),(&BDXR.0,WBF),(&AQGR.0,BDXP),(&AQGP.0,(-AEPV))],GCY)))* GDB)+ (BDXS* AEPV));
 		let GDD=(PL* CWM)/ PE;
 		let BDXW=(ANZG* PL)/ PE;
 		let GDE=GDD* FWW;
@@ -25800,7 +25801,7 @@ impl Instance {
 		let AEQQ=(AEQE* GDN)+ (AEQO* GDH);
 		let BDYN=((((BDYD* GDM)+ (BDYH* AEQF))+ (((((BDYD* GDL)+ (BDYG* AEQF))+ (BDYJ+ (BDYB* AEQL)))* GDH)+ (BDYB* AEQN)))* GDH)+ (BDYB* AEQP);
 		let AEQR=(AEQF* GDN)+ (AEQP* GDH);
-		let GDO=B+ (GDH* GDN);
+		let GDO=C+ (GDH* GDN);
 		let GDP=LI/ GDO;
 		let BDYO=-GDP;
 		let BDYP=(BDYL).product_div(BDYO,GDO);
@@ -25829,7 +25830,7 @@ impl Instance {
 		let GDS=((GDR* GDR)+ 0.010000000000000002f64).sqrt();
 		let BDZA=(BDYX+ BDYX)* (ANYF/ (AWAY* GDS));
 		let AERC=BK* GDS;
-		let AERD=B/ AERC;
+		let AERD=C/ AERC;
 		let BDZB=((BDZA* BK)).product_div((-AERD),AERC);
 		let GDT=J* (GDR+ GDS);
 		let BDZC=(BDYU+ BDZA)* J;
@@ -25871,7 +25872,7 @@ impl Instance {
 		let BDZJ=AOEE* GDX;
 		let GDZ=GDW.powf(BG);
 		let BDZK=AQGY* (BG* ((GDW+ (((GDW== AWBZ) as u8 as f64)* AWCA)).powf((BG- ANYF))));
-		let AERI=BG- B;
+		let AERI=BG- C;
 		let AERJ=GDW+ (((GDW== A) as u8 as f64)* ZNW);
 		let BDZL=AERI* ((AERJ+ (((AERJ== AWBZ) as u8 as f64)* AWCA)).powf((AERI- ANYF)));
 		let AERK=BG* (AERJ.powf(AERI));
@@ -25897,7 +25898,7 @@ impl Instance {
 		let BDZU=BDZR* AERP;
 		let BDZV=(AXBI* UL)* GEB;
 		let BDZW=BDZR* AERQ;
-		let GED=(B+ (BQR* BI))+ (GEC* GEB);
+		let GED=(C+ (BQR* BI))+ (GEC* GEB);
 		let BDZX=L5([BDZN[0],BDZN[1],0.0,BDZN[2],BDZN[3]])+ (L5([BDZS[0],BDZS[1],0.0,BDZS[2],BDZS[3]])+ (BDZQ* GEC));
 		let AERT=(ZME* BI)+ ((AERR* GEB)+ (AERP* GEC));
 		let BDZY=L5([BDZO[0],BDZO[1],0.0,BDZO[2],BDZO[3]])+ ((L5([BDZT[0],BDZT[1],0.0,BDZT[2],BDZT[3]])+ (BDZQ* AERR))+ (((BDYS- L5([AXBF[0],AXBF[1],0.0,AXBF[2],AXBF[3]]))* GEC)+ L5([BDZU[0],BDZU[1],0.0,BDZU[2],BDZU[3]])));
@@ -26046,7 +26047,7 @@ impl Instance {
 		};
 		let BEBE=BEBD* GES;
 		let GEX=((GES* GES)+ GEW).sqrt();
-		let GEY=EIJ* (BV+ B);
+		let GEY=EIJ* (BV+ C);
 		let BEBF=((BEBD+ ((BEBE+ BEBE)* (ANYF/ (AWAY* GEX))))* J)* AWAO;
 		let GEZ=(GEY- (EIJ+ (J* (GES+ GEX))))- 1e-4f64;
 		let GFA=(BH* GEY)* 1e-4f64;
@@ -26081,7 +26082,7 @@ impl Instance {
 		let GFT;
 		let AQHN;
 		if GFI{
-		let GFJ=BW- B;
+		let GFJ=BW- C;
 		let GFK=J* BW;
 		let GFL=((GFK* (21f64.powf(GFJ)))/ BL)* (BBK.powf((BW- BK)));
 		let GFM=GFL* GFH;
@@ -26116,7 +26117,7 @@ impl Instance {
 		let BEBU=AQHG* GFV;
 		let BEBV=BEBO* WBP;
 		let GFY=BIL+ BBK;
-		let GFZ=B/ GFY;
+		let GFZ=C/ GFY;
 		let BEBW=-GFZ;
 		let BEBX=(ANYO).product_div(BEBW,GFY);
 		let BEBY=BEBX* AWAO;
@@ -26130,8 +26131,8 @@ impl Instance {
 		let BECD=BEBX* AESK;
 		let BECE=((BEBY).product_sum_div(URL,ANYO,(-AESM),GFY))* GFX;
 		let AESO=(AESK* GFZ)+ (AESM* GFX);
-		let GGA=B+ (GFX* GFZ);
-		let GGB=B/ GGA;
+		let GGA=C+ (GFX* GFZ);
+		let GGB=C/ GGA;
 		let BECF=-GGB;
 		let BECG=(BECA).product_div(BECF,GGA);
 		let BECH=BECG* AWAO;
@@ -26188,7 +26189,7 @@ impl Instance {
 		let BECW=APRR* AMF;
 		let GGW=(GGV< OM)|| (GGT< OM);
 		let LCW=if GGW{
-		B
+		C
 		}else{
 		A
 		};
@@ -26328,7 +26329,7 @@ impl Instance {
 		let GGZ=GGY* OS;
 		let GHA=2.069886e-10f64/ GGY;
 		let GHB=VY/ PU;
-		let GHC=B/ (B+ GHB);
+		let GHC=C/ (C+ GHB);
 		let GHD=BNR* BNR;
 		let AZAL=AODZ* BNR;
 		let AZAM=AZAL+ AZAL;
@@ -26370,7 +26371,7 @@ impl Instance {
 		if GHN{
 		let GHX;
 		if GHO{
-		GHX=B;
+		GHX=C;
 		}else{
 		let GHY;
 		if GHP{
@@ -26399,7 +26400,7 @@ impl Instance {
 		break;
 		}
 		let GHV=GHU.sqrt();
-		let GHW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GHS, B));
+		let GHW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GHS, C));
 		GHS=GHW;
 		GHU=GHV;
 		}
@@ -26414,7 +26415,7 @@ impl Instance {
 		};
 		GIE=GID;
 		}
-		let GIF=2.1f64- ((GHK* BZ)* (B/ GIE));
+		let GIF=2.1f64- ((GHK* BZ)* (C/ GIE));
 		HRI=GIF;
 		}else{
 		HRI=GHI;
@@ -26444,7 +26445,7 @@ impl Instance {
 		let GIM=((GIH* GIH)+ GIL).sqrt();
 		let AZBG=(AZBD+ AZBD)* (ANYF/ (AWAY* GIM));
 		let AAWP=BK* GIM;
-		let AAWQ=B/ AAWP;
+		let AAWQ=C/ AAWP;
 		let AZBH=((AZBG* BK)).product_div((-AAWQ),AAWP);
 		let GIN=BQN- AZA;
 		let AZBI=L4([ANYW,0.0,0.0,0.0]);
@@ -26502,7 +26503,7 @@ impl Instance {
 		let GIT=((GIO* GIO)+ GIS).sqrt();
 		let AZBZ=((AZBW+ AZBW)+ L5([AQIT[0],AQIT[1],0.0,AQIT[2],AQIT[3]]))* (ANYF/ (AWAY* GIT));
 		let AAXB=BK* GIT;
-		let AAXC=B/ AAXB;
+		let AAXC=C/ AAXB;
 		let AZCA=((AZBZ* BK)).product_div((-AAXC),AAXB);
 		let GIU=GIN+ (J* (GIO+ GIT));
 		let AZCB=AZBK+ ((AZBL+ AZBZ)* J);
@@ -26561,7 +26562,7 @@ impl Instance {
 		if GJB{
 		let GJL;
 		if GJC{
-		GJL=B;
+		GJL=C;
 		}else{
 		let GJM;
 		if GJD{
@@ -26597,13 +26598,13 @@ impl Instance {
 		let GJJ=GJI.sqrt();
 		let BCAC=AQJC* (ANYF/ (AWAY* GJJ));
 		let ADBI=BK* GJJ;
-		let ADBJ=B/ ADBI;
+		let ADBJ=C/ ADBI;
 		let BCAD=((BCAC* BK)).product_div((-ADBJ),ADBI);
 		let ADBK=WCM* ADBJ;
 		let BCAE=(AQJD* ADBJ)+ (BCAD* WCM);
 		let ADBL=WCN* ADBJ;
 		let BCAF=(AQJE* ADBJ)+ (BCAD* WCN);
-		let GJK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GJG, B));
+		let GJK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GJG, C));
 		GJG=GJK;
 		GJI=GJJ;
 		WCM=ADBK;
@@ -26658,7 +26659,7 @@ impl Instance {
 		AQJA=AQJG;
 		AQJB=AQJH;
 		}
-		let GJU=B/ GJT;
+		let GJU=C/ GJT;
 		let AZDB=-GJU;
 		let AZDC=(AQIZ).product_div(AZDB,GJT);
 		let AZDD=AZDC* AWAO;
@@ -26697,7 +26698,7 @@ impl Instance {
 		let GJY=(GHA* GJX).sqrt();
 		let AZDI=(AQIW* GHA)* (ANYF/ (AWAY* GJY));
 		let AAYG=BK* GJY;
-		let AAYH=B/ AAYG;
+		let AAYH=C/ AAYG;
 		let AZDJ=((AZDI* BK)).product_div((-AAYH),AAYG);
 		let AAYI=AAYE* AAYH;
 		let AZDK=((AQIX* GHA)* AAYH)+ (AZDJ* AAYE);
@@ -26721,7 +26722,7 @@ impl Instance {
 		if GKE{
 		let GKO;
 		if GKF{
-		GKO=B;
+		GKO=C;
 		}else{
 		let GKP;
 		if GKG{
@@ -26752,7 +26753,7 @@ impl Instance {
 		}
 		let GKM=GKL.sqrt();
 		let BCAB=AQJK* (ANYF/ (AWAY* GKM));
-		let GKN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GKJ, B));
+		let GKN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GKJ, C));
 		GKJ=GKN;
 		GKL=GKM;
 		AQJK=BCAB;
@@ -26775,7 +26776,7 @@ impl Instance {
 		GKV=GKU;
 		AQJJ=AQJL;
 		}
-		let GKW=B/ GKV;
+		let GKW=C/ GKV;
 		let GKX=GKB* CA;
 		let GKY=1e-3f64- (GKX* GKW);
 		let AZDS=(((AZDN* CA)* GKW)+ ((product_div(AQJJ,(-GKW),GKV))* GKX))* AWAO;
@@ -26800,7 +26801,7 @@ impl Instance {
 		let AAYL=(-(URL* EMO))* BRD;
 		let GLC=CA* BRD;
 		let GLD=BZ* BRD;
-		let GLE=((BRD* (B- (EMO* BIL)))- GLD)- GLC;
+		let GLE=((BRD* (C- (EMO* BIL)))- GLD)- GLC;
 		let GLF=(BH* GLD)* GLC;
 		let GLG=GLF> A;
 		let GLI=if GLG{
@@ -26819,7 +26820,7 @@ impl Instance {
 		let GLJ=((GLE* GLE)+ GLI).sqrt();
 		let AZDZ=(AZDW+ AZDW)* (ANYF/ (AWAY* GLJ));
 		let AAYQ=BK* GLJ;
-		let AAYR=B/ AAYQ;
+		let AAYR=C/ AAYQ;
 		let AZEA=((AZDZ* BK)).product_div((-AAYR),AAYQ);
 		let GLK=BK* BRD;
 		let AZEB=((AZDV+ AZDZ)* J)* AWAO;
@@ -26846,7 +26847,7 @@ impl Instance {
 		let GLQ=((GLL* GLL)+ GLP).sqrt();
 		let AZEH=(AZEE+ AZEE)* (ANYF/ (AWAY* GLQ));
 		let AAYY=BK* GLQ;
-		let AAYZ=B/ AAYY;
+		let AAYZ=C/ AAYY;
 		let AZEI=((AZEH* BK)).product_div((-AAYZ),AAYY);
 		let GLR=GLK- (J* (GLL+ GLQ));
 		let AZEJ=((AZEB+ AZEH)* J)* AWAO;
@@ -26913,7 +26914,7 @@ impl Instance {
 		if GMC{
 		let GMM;
 		if GMD{
-		GMM=B;
+		GMM=C;
 		}else{
 		let GMN;
 		if GME{
@@ -26949,13 +26950,13 @@ impl Instance {
 		let GMK=GMJ.sqrt();
 		let BBZX=AQJV* (ANYF/ (AWAY* GMK));
 		let ADBE=BK* GMK;
-		let ADBF=B/ ADBE;
+		let ADBF=C/ ADBE;
 		let BBZY=((BBZX* BK)).product_div((-ADBF),ADBE);
 		let ADBG=WCW* ADBF;
 		let BBZZ=(AQJW* ADBF)+ (BBZY* WCW);
 		let ADBH=WCX* ADBF;
 		let BCAA=(AQJX* ADBF)+ (BBZY* WCX);
-		let GML=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GMH, B));
+		let GML=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GMH, C));
 		GMH=GML;
 		GMJ=GMK;
 		WCW=ADBG;
@@ -27010,7 +27011,7 @@ impl Instance {
 		AQJT=AQJZ;
 		AQJU=AQKA;
 		}
-		let GMV=B/ GMU;
+		let GMV=C/ GMU;
 		let AZFD=-GMV;
 		let AZFE=(AQJS).product_div(AZFD,GMU);
 		let AZFF=AZFE* AWAO;
@@ -27077,7 +27078,7 @@ impl Instance {
 		if GNC{
 		let GNM;
 		if GND{
-		GNM=B;
+		GNM=C;
 		}else{
 		let GNN;
 		if GNE{
@@ -27113,13 +27114,13 @@ impl Instance {
 		let GNK=GNJ.sqrt();
 		let BBZT=AQKH* (ANYF/ (AWAY* GNK));
 		let ADBA=BK* GNK;
-		let ADBB=B/ ADBA;
+		let ADBB=C/ ADBA;
 		let BBZU=((BBZT* BK)).product_div((-ADBB),ADBA);
 		let ADBC=WDE* ADBB;
 		let BBZV=(AQKI* ADBB)+ (BBZU* WDE);
 		let ADBD=WDF* ADBB;
 		let BBZW=(AQKJ* ADBB)+ (BBZU* WDF);
-		let GNL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GNH, B));
+		let GNL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GNH, C));
 		GNH=GNL;
 		GNJ=GNK;
 		WDE=ADBC;
@@ -27174,7 +27175,7 @@ impl Instance {
 		AQKF=AQKL;
 		AQKG=AQKM;
 		}
-		let GNV=B/ GNU;
+		let GNV=C/ GNU;
 		let AZGC=-GNV;
 		let AZGD=(AQKE).product_div(AZGC,GNU);
 		let AZGE=AZGD* AWAO;
@@ -27214,16 +27215,16 @@ impl Instance {
 		let AZGM=L4([AQKB[0],AQKB[1],AQKB[2],0.0]);
 		let AZGN=(AQJP).product_sum_div(ANYF,AZGM,AZGL,GOB);
 		let AZGO=AZGN* AWAO;
-		let ABAM=product_sum_div(WCS,B,AZGL,WDA,GOB);
-		let ABAN=product_sum_div(WCT,B,AZGL,WDB,GOB);
+		let ABAM=product_sum_div(WCS,C,AZGL,WDA,GOB);
+		let ABAN=product_sum_div(WCT,C,AZGL,WDB,GOB);
 		let AZGP=AZGN* GNZ;
 		let ABAO=ABAM* GNZ;
-		let AZGQ=(L4(sum_products_div_lanes(&[(&AQJQ.0,B),(&AZGO.0,WDA),(&L4([AQKC[0],AQKC[1],AQKC[2],0.0]).0,AZGL),(&AZGM.0,(-ABAM))],GOB)))* GNZ;
+		let AZGQ=(L4(sum_products_div_lanes(&[(&AQJQ.0,C),(&AZGO.0,WDA),(&L4([AQKC[0],AQKC[1],AQKC[2],0.0]).0,AZGL),(&AZGM.0,(-ABAM))],GOB)))* GNZ;
 		let ABAP=ABAN* GNZ;
-		let AZGR=(L4(sum_products_div_lanes(&[(&AQJR.0,B),(&AZGO.0,WDB),(&L4([AQKD[0],AQKD[1],AQKD[2],0.0]).0,AZGL),(&AZGM.0,(-ABAN))],GOB)))* GNZ;
+		let AZGR=(L4(sum_products_div_lanes(&[(&AQJR.0,C),(&AZGO.0,WDB),(&L4([AQKD[0],AQKD[1],AQKD[2],0.0]).0,AZGL),(&AZGM.0,(-ABAN))],GOB)))* GNZ;
 		let GOD=(GNZ* GOC)+ GNY;
 		let GOE=GHC* GHB;
-		let mut GOF=B;
+		let mut GOF=C;
 		let mut GOH=A;
 		let mut GQT=GIU;
 		let mut GUO=A;
@@ -27303,7 +27304,7 @@ impl Instance {
 		if GON{
 		let GOX;
 		if GOO{
-		GOX=B;
+		GOX=C;
 		}else{
 		let GOY;
 		if GOP{
@@ -27339,13 +27340,13 @@ impl Instance {
 		let GOV=GOU.sqrt();
 		let BBZP=AQLF* (ANYF/ (AWAY* GOV));
 		let ADAW=BK* GOV;
-		let ADAX=B/ ADAW;
+		let ADAX=C/ ADAW;
 		let BBZQ=((BBZP* BK)).product_div((-ADAX),ADAW);
 		let ADAY=WDU* ADAX;
 		let BBZR=(AQLG* ADAX)+ (BBZQ* WDU);
 		let ADAZ=WDV* ADAX;
 		let BBZS=(AQLH* ADAX)+ (BBZQ* WDV);
-		let GOW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GOS, B));
+		let GOW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GOS, C));
 		GOS=GOW;
 		GOU=GOV;
 		WDU=ADAY;
@@ -27400,7 +27401,7 @@ impl Instance {
 		AQLD=AQLJ;
 		AQLE=AQLK;
 		}
-		let GPG=B/ GPF;
+		let GPG=C/ GPF;
 		let BBOL=-GPG;
 		let BBOM=(AQLC).product_div(BBOL,GPF);
 		let BBON=BBOM* AWAO;
@@ -27416,10 +27417,10 @@ impl Instance {
 		let BBOR=-GPJ;
 		let BBOS=((BBOM* GPI)).product_sum_div(ANYF,BBOC,BBOR,GOM);
 		let BBOT=BBOS* AWAO;
-		let ACSI=product_sum_div((ACSE* GPI),B,BBOR,ACRW,GOM);
-		let BBOU=L5(sum_products_div_lanes(&[(&(BBOO* GPI).0,B),(&BBOT.0,ACRW),(&BBOE.0,BBOR),(&BBOC.0,(-ACSI))],GOM));
-		let ACSJ=product_sum_div((ACSF* GPI),B,BBOR,ACRY,GOM);
-		let BBOV=L5(sum_products_div_lanes(&[(&(BBOP* GPI).0,B),(&BBOT.0,ACRY),(&BBOG.0,BBOR),(&BBOC.0,(-ACSJ))],GOM));
+		let ACSI=product_sum_div((ACSE* GPI),C,BBOR,ACRW,GOM);
+		let BBOU=L5(sum_products_div_lanes(&[(&(BBOO* GPI).0,C),(&BBOT.0,ACRW),(&BBOE.0,BBOR),(&BBOC.0,(-ACSI))],GOM));
+		let ACSJ=product_sum_div((ACSF* GPI),C,BBOR,ACRY,GOM);
+		let BBOV=L5(sum_products_div_lanes(&[(&(BBOP* GPI).0,C),(&BBOT.0,ACRY),(&BBOG.0,BBOR),(&BBOC.0,(-ACSJ))],GOM));
 		let GPK=1e-3f64- (GPH* GPG);
 		let BBOW=((BBOQ* GPG)+ (BBOM* GPH))* AWAO;
 		let ACSK=-((ACSG* GPG)+ (ACSE* GPH));
@@ -27440,7 +27441,7 @@ impl Instance {
 		AQLB=BBOV;
 		}else{
 		GPL=GOI;
-		GQQ=B;
+		GQQ=C;
 		WDO=ACRN;
 		WDP=ACRO;
 		WDQ=A;
@@ -27457,7 +27458,7 @@ impl Instance {
 		let GPM=(GHA* GPL).sqrt();
 		let BBOZ=(AQKW* GHA)* (ANYF/ (AWAY* GPM));
 		let ACSO=BK* GPM;
-		let ACSP=B/ ACSO;
+		let ACSP=C/ ACSO;
 		let BBPA=((BBOZ* BK)).product_div((-ACSP),ACSO);
 		let ACSQ=ACSM* ACSP;
 		let BBPB=((AQKY* GHA)* ACSP)+ (BBPA* ACSM);
@@ -27516,7 +27517,7 @@ impl Instance {
 		if GPS{
 		let GQC;
 		if GPT{
-		GQC=B;
+		GQC=C;
 		}else{
 		let GQD;
 		if GPU{
@@ -27552,13 +27553,13 @@ impl Instance {
 		let GQA=GPZ.sqrt();
 		let BBZL=AQLU* (ANYF/ (AWAY* GQA));
 		let ADAS=BK* GQA;
-		let ADAT=B/ ADAS;
+		let ADAT=C/ ADAS;
 		let BBZM=((BBZL* BK)).product_div((-ADAT),ADAS);
 		let ADAU=WEE* ADAT;
 		let BBZN=(AQLV* ADAT)+ (BBZM* WEE);
 		let ADAV=WEF* ADAT;
 		let BBZO=(AQLW* ADAT)+ (BBZM* WEF);
-		let GQB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GPX, B));
+		let GQB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GPX, C));
 		GPX=GQB;
 		GPZ=GQA;
 		WEE=ADAU;
@@ -27613,7 +27614,7 @@ impl Instance {
 		AQLS=AQLY;
 		AQLT=AQLZ;
 		}
-		let GQL=B/ GQK;
+		let GQL=C/ GQK;
 		let BBPX=-GQL;
 		let BBPY=(AQLR).product_div(BBPX,GQK);
 		let BBPZ=BBPY* AWAO;
@@ -27629,10 +27630,10 @@ impl Instance {
 		let BBQD=-GQO;
 		let BBQE=((BBPY* GQN)).product_sum_div(ANYF,BBPO,BBQD,GPR);
 		let BBQF=BBQE* AWAO;
-		let ACTL=product_sum_div((ACTH* GQN),B,BBQD,ACSZ,GPR);
-		let BBQG=L5(sum_products_div_lanes(&[(&(BBQA* GQN).0,B),(&BBQF.0,ACSZ),(&BBPQ.0,BBQD),(&BBPO.0,(-ACTL))],GPR));
-		let ACTM=product_sum_div((ACTI* GQN),B,BBQD,ACTB,GPR);
-		let BBQH=L5(sum_products_div_lanes(&[(&(BBQB* GQN).0,B),(&BBQF.0,ACTB),(&BBPS.0,BBQD),(&BBPO.0,(-ACTM))],GPR));
+		let ACTL=product_sum_div((ACTH* GQN),C,BBQD,ACSZ,GPR);
+		let BBQG=L5(sum_products_div_lanes(&[(&(BBQA* GQN).0,C),(&BBQF.0,ACSZ),(&BBPQ.0,BBQD),(&BBPO.0,(-ACTL))],GPR));
+		let ACTM=product_sum_div((ACTI* GQN),C,BBQD,ACTB,GPR);
+		let BBQH=L5(sum_products_div_lanes(&[(&(BBQB* GQN).0,C),(&BBQF.0,ACTB),(&BBPS.0,BBQD),(&BBPO.0,(-ACTM))],GPR));
 		let GQP=GPN+ (GQM* GQL);
 		let BBQI=BBPD+ ((BBQC* GQL)+ (BBPY* GQM));
 		let ACTN=WCQ+ ((ACTJ* GQL)+ (ACTH* GQM));
@@ -27652,7 +27653,7 @@ impl Instance {
 		AQLP=BBQJ;
 		AQLQ=BBQK;
 		}else{
-		GQR=B;
+		GQR=C;
 		GQU=GPM;
 		WDY=A;
 		WDZ=A;
@@ -27696,15 +27697,15 @@ impl Instance {
 		let BBRB=-GQX;
 		let BBRC=(L5([0.0,AQJM[0],0.0,AQJM[1],0.0])).product_sum_div(ANYF,AQLM,BBRB,GQU);
 		let BBRD=BBRC* AWAO;
-		let ACTX=product_sum_div(WCQ,B,BBRB,WEA,GQU);
-		let ACTY=product_sum_div(WCR,B,BBRB,WEB,GQU);
-		let GQY=B- GOE;
+		let ACTX=product_sum_div(WCQ,C,BBRB,WEA,GQU);
+		let ACTY=product_sum_div(WCR,C,BBRB,WEB,GQU);
+		let GQY=C- GOE;
 		let GQZ=(GQS- (GQX* GQS))* GQY;
 		let BBRE=(BBQL- ((BBRC* GQS)+ (BBQL* GQX)))* GQY;
 		let ACTZ=(ACTP- ((ACTX* GQS)+ (ACTP* GQX)))* GQY;
-		let BBRF=(BBQM- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJN[0],0.0,AQJN[1],0.0]).0,B),(&BBRD.0,WEA),(&AQLP.0,BBRB),(&AQLM.0,(-ACTX))],GQU)))* GQS)+ (BBQL* ACTX))+ ((BBQM* GQX)+ (BBRC* ACTP))))* GQY;
+		let BBRF=(BBQM- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJN[0],0.0,AQJN[1],0.0]).0,C),(&BBRD.0,WEA),(&AQLP.0,BBRB),(&AQLM.0,(-ACTX))],GQU)))* GQS)+ (BBQL* ACTX))+ ((BBQM* GQX)+ (BBRC* ACTP))))* GQY;
 		let ACUA=(ACTQ- ((ACTY* GQS)+ (ACTQ* GQX)))* GQY;
-		let BBRG=(BBQN- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJO[0],0.0,AQJO[1],0.0]).0,B),(&BBRD.0,WEB),(&AQLQ.0,BBRB),(&AQLM.0,(-ACTY))],GQU)))* GQS)+ (BBQL* ACTY))+ ((BBQN* GQX)+ (BBRC* ACTQ))))* GQY;
+		let BBRG=(BBQN- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJO[0],0.0,AQJO[1],0.0]).0,C),(&BBRD.0,WEB),(&AQLQ.0,BBRB),(&AQLM.0,(-ACTY))],GQU)))* GQS)+ (BBQL* ACTY))+ ((BBQN* GQX)+ (BBRC* ACTQ))))* GQY;
 		let GRB=A- GRA;
 		let GRC=(GQW> GRB)&& (GRA>= A);
 		let GSI;
@@ -27762,7 +27763,7 @@ impl Instance {
 		if GRK{
 		let GRU;
 		if GRL{
-		GRU=B;
+		GRU=C;
 		}else{
 		let GRV;
 		if GRM{
@@ -27798,13 +27799,13 @@ impl Instance {
 		let GRS=GRR.sqrt();
 		let BBZH=AQMJ* (ANYF/ (AWAY* GRS));
 		let ADAO=BK* GRS;
-		let ADAP=B/ ADAO;
+		let ADAP=C/ ADAO;
 		let BBZI=((BBZH* BK)).product_div((-ADAP),ADAO);
 		let ADAQ=WEO* ADAP;
 		let BBZJ=(AQMK* ADAP)+ (BBZI* WEO);
 		let ADAR=WEP* ADAP;
 		let BBZK=(AQML* ADAP)+ (BBZI* WEP);
-		let GRT=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GRP, B));
+		let GRT=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GRP, C));
 		GRP=GRT;
 		GRR=GRS;
 		WEO=ADAQ;
@@ -27859,7 +27860,7 @@ impl Instance {
 		AQMH=AQMN;
 		AQMI=AQMO;
 		}
-		let GSD=B/ GSC;
+		let GSD=C/ GSC;
 		let BBRZ=-GSD;
 		let BBSA=(AQMG).product_div(BBRZ,GSC);
 		let BBSB=BBSA* AWAO;
@@ -27881,10 +27882,10 @@ impl Instance {
 		let BBSI=-GSG;
 		let BBSJ=((BBSA* GSF)).product_sum_div(ANYF,BBRS,BBSI,GRJ);
 		let BBSK=BBSJ* AWAO;
-		let ACUY=product_sum_div((ACUS* GSF),B,BBSI,ACUL,GRJ);
-		let BBSL=L5(sum_products_div_lanes(&[(&(BBSC* GSF).0,B),(&BBSK.0,ACUL),(&BBRT.0,BBSI),(&BBRS.0,(-ACUY))],GRJ));
-		let ACUZ=product_sum_div((ACUT* GSF),B,BBSI,ACUM,GRJ);
-		let BBSM=L5(sum_products_div_lanes(&[(&(BBSD* GSF).0,B),(&BBSK.0,ACUM),(&BBRU.0,BBSI),(&BBRS.0,(-ACUZ))],GRJ));
+		let ACUY=product_sum_div((ACUS* GSF),C,BBSI,ACUL,GRJ);
+		let BBSL=L5(sum_products_div_lanes(&[(&(BBSC* GSF).0,C),(&BBSK.0,ACUL),(&BBRT.0,BBSI),(&BBRS.0,(-ACUY))],GRJ));
+		let ACUZ=product_sum_div((ACUT* GSF),C,BBSI,ACUM,GRJ);
+		let BBSM=L5(sum_products_div_lanes(&[(&(BBSD* GSF).0,C),(&BBSK.0,ACUM),(&BBRU.0,BBSI),(&BBRS.0,(-ACUZ))],GRJ));
 		let GSH=GRB+ (GSE* GSD);
 		GSI=GSG;
 		GVB=GSH;
@@ -27899,7 +27900,7 @@ impl Instance {
 		AQME=BBSG;
 		AQMF=BBSH;
 		}else{
-		GSI=B;
+		GSI=C;
 		GVB=GQW;
 		WEI=A;
 		WEJ=A;
@@ -27933,7 +27934,7 @@ impl Instance {
 		let BBSU=(BBSR* GSM)+ (BBST* ACVE);
 		let ACVH=ACVF* GSM;
 		let BBSV=(BBSS* GSM)+ (BBST* ACVF);
-		let GSN=GSM- B;
+		let GSN=GSM- C;
 		let GSO=GSN- GSL;
 		let BBSW=BBST- BBSQ;
 		let ACVI=ACVG- ACVE;
@@ -27965,7 +27966,7 @@ impl Instance {
 		let GSR=GSO.sqrt();
 		let BBVR=BBSW* (ANYF/ (AWAY* GSR));
 		let ACYE=BK* GSR;
-		let ACYF=B/ ACYE;
+		let ACYF=C/ ACYE;
 		let BBVS=((BBVR* BK)).product_div((-ACYF),ACYE);
 		let ACYG=ACVI* ACYF;
 		let ACYH=ACVJ* ACYF;
@@ -27994,7 +27995,7 @@ impl Instance {
 		let BBWE=BBST* AWAO;
 		let ACYO=ACVG* AMF;
 		let ACYP=ACVH* AMF;
-		let GSX=(-GSM)+ B;
+		let GSX=(-GSM)+ C;
 		let GSY=GSV* GSX;
 		let BBWF=(BBVX* GSX)+ (BBWE* GSV);
 		let ACYQ=(ACYK* GSX)+ (ACYO* GSV);
@@ -28081,7 +28082,7 @@ impl Instance {
 		let GTI=(GSO+ (CIB* GTH)).sqrt();
 		let BBUY=(BBSW+ (L5([(ANZF* GTH),0.0,0.0,0.0,0.0])+ (((BBUS- BBUV)+ BBSQ)* CIB)))* (ANYF/ (AWAY* GTI));
 		let ACXM=BK* GTI;
-		let ACXN=B/ ACXM;
+		let ACXN=C/ ACXM;
 		let BBUZ=((BBUY* BK)).product_div((-ACXN),ACXM);
 		let ACXO=ACXK* ACXN;
 		let ACXP=ACXL* ACXN;
@@ -28103,7 +28104,7 @@ impl Instance {
 		let BBVH=L5(sum_products_div_lanes(&[(&BBVF.0,ACXR),(&BBVC.0,BBVD),(&BBVA.0,(-ACXT))],GTJ));
 		let ACXU=ACXA* AMF;
 		let ACXV=ACXB* AMF;
-		let GTN=(-GTE)+ B;
+		let GTN=(-GTE)+ C;
 		let GTO=GSN+ (CIB* GTN);
 		let BBVI=BBST+ (L5([(ANZF* GTN),0.0,0.0,0.0,0.0])+ ((BBUS* AWAO)* CIB));
 		let ACXW=ACVG+ (ACXU* CIB);
@@ -28114,8 +28115,8 @@ impl Instance {
 		let BBVK=((BBVG* GTO)+ (BBVI* ACXS))+ (((BBSU+ (((BBUT* AMF)* CIB)+ L5([(ANZF* ACXU),0.0,0.0,0.0,0.0])))* GTM)+ (BBVE* ACXW));
 		let ACXZ=(ACXT* GTO)+ (ACXX* GTM);
 		let BBVL=((BBVH* GTO)+ (BBVI* ACXT))+ (((BBSV+ (((BBUU* AMF)* CIB)+ L5([(ANZF* ACXV),0.0,0.0,0.0,0.0])))* GTM)+ (BBVE* ACXX));
-		let GTQ=GTG- B;
-		let GTR=((-GSM)+ B)+ (CIB* GTQ);
+		let GTQ=GTG- C;
+		let GTR=((-GSM)+ C)+ (CIB* GTQ);
 		let BBVM=(BBST* AWAO)+ (L5([(ANZF* GTQ),0.0,0.0,0.0,0.0])+ (BBUV* CIB));
 		let ACYA=(ACVG* AMF)+ (ACXG* CIB);
 		let ACYB=(ACVH* AMF)+ (ACXH* CIB);
@@ -28166,10 +28167,10 @@ impl Instance {
 		if GTT{
 		let ACWC=(ACVE* GTU)* J;
 		let ACWD=(ACVF* GTU)* J;
-		let GTV=(J* (B+ (GSL* GTU))).sqrt();
+		let GTV=(J* (C+ (GSL* GTU))).sqrt();
 		let BBTS=((BBSQ* GTU)* J)* (ANYF/ (AWAY* GTV));
 		let ACWE=BK* GTV;
-		let ACWF=B/ ACWE;
+		let ACWF=C/ ACWE;
 		let BBTT=((BBTS* BK)).product_div((-ACWF),ACWE);
 		let ACWG=ACWC* ACWF;
 		let BBTU=(((BBSR* GTU)* J)* ACWF)+ (BBTT* ACWC);
@@ -28193,17 +28194,17 @@ impl Instance {
 		let BBUC=-GUB;
 		let BBUD=((BBSQ/ GUA)).product_sum_div(ANYF,BBTS,BBUC,GTV);
 		let BBUE=BBUD* AWAO;
-		let ACWM=product_sum_div((ACVE/ GUA),B,BBUC,ACWG,GTV);
-		let ACWN=product_sum_div((ACVF/ GUA),B,BBUC,ACWH,GTV);
+		let ACWM=product_sum_div((ACVE/ GUA),C,BBUC,ACWG,GTV);
+		let ACWN=product_sum_div((ACVF/ GUA),C,BBUC,ACWH,GTV);
 		let GUC=GTV+ GUB;
 		let ACWO=ACWG+ ACWM;
 		let ACWP=ACWH+ ACWN;
 		let GUD=GTZ* GUC;
 		let BBUF=L5([(BBUB* GUC),0.0,0.0,0.0,0.0])+ ((BBTS+ BBUD)* GTZ);
 		let ACWQ=ACWO* GTZ;
-		let BBUG=((BBTU+ (L5(sum_products_div_lanes(&[(&(BBSR/ GUA).0,B),(&BBUE.0,ACWG),(&BBTU.0,BBUC),(&BBTS.0,(-ACWM))],GTV))))* GTZ)+ L5([(BBUB* ACWO),0.0,0.0,0.0,0.0]);
+		let BBUG=((BBTU+ (L5(sum_products_div_lanes(&[(&(BBSR/ GUA).0,C),(&BBUE.0,ACWG),(&BBTU.0,BBUC),(&BBTS.0,(-ACWM))],GTV))))* GTZ)+ L5([(BBUB* ACWO),0.0,0.0,0.0,0.0]);
 		let ACWR=ACWP* GTZ;
-		let BBUH=((BBTV+ (L5(sum_products_div_lanes(&[(&(BBSS/ GUA).0,B),(&BBUE.0,ACWH),(&BBTV.0,BBUC),(&BBTS.0,(-ACWN))],GTV))))* GTZ)+ L5([(BBUB* ACWP),0.0,0.0,0.0,0.0]);
+		let BBUH=((BBTV+ (L5(sum_products_div_lanes(&[(&(BBSS/ GUA).0,C),(&BBUE.0,ACWH),(&BBTV.0,BBUC),(&BBTS.0,(-ACWN))],GTV))))* GTZ)+ L5([(BBUB* ACWP),0.0,0.0,0.0,0.0]);
 		let GUE=-GUD;
 		let BBUI=BBUF* AWAO;
 		let ACWS=ACWQ* AMF;
@@ -28231,10 +28232,10 @@ impl Instance {
 		}else{
 		let ACVK=(ACVE* GTU)* J;
 		let ACVL=(ACVF* GTU)* J;
-		let GUF=(J* (B+ (GSL* GTU))).sqrt();
+		let GUF=(J* (C+ (GSL* GTU))).sqrt();
 		let BBSZ=((BBSQ* GTU)* J)* (ANYF/ (AWAY* GUF));
 		let ACVM=BK* GUF;
-		let ACVN=B/ ACVM;
+		let ACVN=C/ ACVM;
 		let BBTA=((BBSZ* BK)).product_div((-ACVN),ACVM);
 		let ACVO=ACVK* ACVN;
 		let BBTB=(((BBSR* GTU)* J)* ACVN)+ (BBTA* ACVK);
@@ -28258,17 +28259,17 @@ impl Instance {
 		let BBTJ=-GUK;
 		let BBTK=((BBSQ/ GUA)).product_sum_div(ANYF,BBSZ,BBTJ,GUF);
 		let BBTL=BBTK* AWAO;
-		let ACVU=product_sum_div((ACVE/ GUA),B,BBTJ,ACVO,GUF);
-		let ACVV=product_sum_div((ACVF/ GUA),B,BBTJ,ACVP,GUF);
+		let ACVU=product_sum_div((ACVE/ GUA),C,BBTJ,ACVO,GUF);
+		let ACVV=product_sum_div((ACVF/ GUA),C,BBTJ,ACVP,GUF);
 		let GUL=GUF+ GUK;
 		let ACVW=ACVO+ ACVU;
 		let ACVX=ACVP+ ACVV;
 		let GUM=GUJ* GUL;
 		let BBTM=L5([(BBTI* GUL),0.0,0.0,0.0,0.0])+ ((BBSZ+ BBTK)* GUJ);
 		let ACVY=ACVW* GUJ;
-		let BBTN=((BBTB+ (L5(sum_products_div_lanes(&[(&(BBSR/ GUA).0,B),(&BBTL.0,ACVO),(&BBTB.0,BBTJ),(&BBSZ.0,(-ACVU))],GUF))))* GUJ)+ L5([(BBTI* ACVW),0.0,0.0,0.0,0.0]);
+		let BBTN=((BBTB+ (L5(sum_products_div_lanes(&[(&(BBSR/ GUA).0,C),(&BBTL.0,ACVO),(&BBTB.0,BBTJ),(&BBSZ.0,(-ACVU))],GUF))))* GUJ)+ L5([(BBTI* ACVW),0.0,0.0,0.0,0.0]);
 		let ACVZ=ACVX* GUJ;
-		let BBTO=((BBTC+ (L5(sum_products_div_lanes(&[(&(BBSS/ GUA).0,B),(&BBTL.0,ACVP),(&BBTC.0,BBTJ),(&BBSZ.0,(-ACVV))],GUF))))* GUJ)+ L5([(BBTI* ACVX),0.0,0.0,0.0,0.0]);
+		let BBTO=((BBTC+ (L5(sum_products_div_lanes(&[(&(BBSS/ GUA).0,C),(&BBTL.0,ACVP),(&BBTC.0,BBTJ),(&BBSZ.0,(-ACVV))],GUF))))* GUJ)+ L5([(BBTI* ACVX),0.0,0.0,0.0,0.0]);
 		let GUN=-GUM;
 		let BBTP=BBTM* AWAO;
 		let ACWA=ACVY* AMF;
@@ -28398,7 +28399,7 @@ impl Instance {
 		let BBXB=AQMC* AMF;
 		let ACZB=WEJ* AMF;
 		let BBXC=AQMD* AMF;
-		let GVE=B- GSJ;
+		let GVE=C- GSJ;
 		let BBXD=BBSN* AWAO;
 		let ACZC=-ACVA;
 		let BBXE=BBSO* AWAO;
@@ -28419,7 +28420,7 @@ impl Instance {
 		let AQNY;
 		if GVG{
 		let GVH=GVF+ OM;
-		let GVI=B/ GVH;
+		let GVI=C/ GVH;
 		let BBXO=-GVI;
 		let BBXP=(BBXG).product_div(BBXO,GVH);
 		let BBXQ=BBXP* AWAO;
@@ -28435,7 +28436,7 @@ impl Instance {
 		AQNY=BBXS;
 		}else{
 		let GVJ=GVF- OM;
-		let GVK=B/ GVJ;
+		let GVK=C/ GVJ;
 		let BBXJ=-GVK;
 		let BBXK=(BBXG).product_div(BBXJ,GVJ);
 		let BBXL=BBXK* AWAO;
@@ -28490,7 +28491,7 @@ impl Instance {
 		let BBYJ=((BBXX* GVR)+ (BBYE* ACZP))+ ((BBYG* GVO)+ (BBXV* ACZV));
 		let GVT=GVQ.abs();
 		let BBYK=BBYB* ((AWAY* ((GVQ>= AWBZ) as u8 as f64))- ANYF);
-		let ACZY=(BK* ((GVQ>= A) as u8 as f64))- B;
+		let ACZY=(BK* ((GVQ>= A) as u8 as f64))- C;
 		let ACZZ=ACZS* ACZY;
 		let BBYL=BBYC* ACZY;
 		let ADAA=ACZT* ACZY;
@@ -28505,7 +28506,7 @@ impl Instance {
 		let AQOA;
 		let AQOB;
 		if GVV{
-		let ADAB=(BK* ((GVS>= A) as u8 as f64))- B;
+		let ADAB=(BK* ((GVS>= A) as u8 as f64))- C;
 		let ADAC=ACZW* ADAB;
 		let BBYO=BBYI* ADAB;
 		let ADAD=ACZX* ADAB;
@@ -28586,7 +28587,7 @@ impl Instance {
 		}
 		let GWB=GVW< QE;
 		let GWL=if GWB{
-		B
+		C
 		}else{
 		GUO
 		};
@@ -28617,7 +28618,7 @@ impl Instance {
 		AQNU=BBZC;
 		AQNV=BBZD;
 		}
-		let GWH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GWG, B));
+		let GWH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GWG, C));
 		GOF=GWH;
 		GOH=GWI;
 		GQT=GWJ;
@@ -28655,7 +28656,7 @@ impl Instance {
 		let AZGX=((AZGT* GWO)+ (AZGV* ABAS))- AZGT;
 		let ABAV=(ABAT* GWO)- ABAT;
 		let AZGY=((AZGU* GWO)+ (AZGV* ABAT))- AZGU;
-		let GWP=((GWO- B)- GWN)+ CEN;
+		let GWP=((GWO- C)- GWN)+ CEN;
 		let GWQ=GWN> A;
 		let GWW;
 		let WFW;
@@ -28669,7 +28670,7 @@ impl Instance {
 		let GWS=GWP.sqrt();
 		let AZHF=AZGW* (ANYF/ (AWAY* GWS));
 		let ABBC=BK* GWS;
-		let ABBD=B/ ABBC;
+		let ABBD=C/ ABBC;
 		let AZHG=((AZHF* BK)).product_div((-ABBD),ABBC);
 		let ABBE=ABAU* ABBD;
 		let ABBF=ABAV* ABBD;
@@ -28689,7 +28690,7 @@ impl Instance {
 		let GWU=GWP.sqrt();
 		let AZGZ=AZGW* (ANYF/ (AWAY* GWU));
 		let ABAW=BK* GWU;
-		let ABAX=B/ ABAW;
+		let ABAX=C/ ABAW;
 		let AZHA=((AZGZ* BK)).product_div((-ABAX),ABAW);
 		let ABAY=ABAU* ABAX;
 		let ABAZ=ABAV* ABAX;
@@ -28778,7 +28779,7 @@ impl Instance {
 		if GXJ{
 		let GXT;
 		if GXK{
-		GXT=B;
+		GXT=C;
 		}else{
 		let GXU;
 		if GXL{
@@ -28814,13 +28815,13 @@ impl Instance {
 		let GXR=GXQ.sqrt();
 		let BBNN=AQOU* (ANYF/ (AWAY* GXR));
 		let ACRJ=BK* GXR;
-		let ACRK=B/ ACRJ;
+		let ACRK=C/ ACRJ;
 		let BBNO=((BBNN* BK)).product_div((-ACRK),ACRJ);
 		let ACRL=WGE* ACRK;
 		let BBNP=(AQOV* ACRK)+ (BBNO* WGE);
 		let ACRM=WGF* ACRK;
 		let BBNQ=(AQOW* ACRK)+ (BBNO* WGF);
-		let GXS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GXO, B));
+		let GXS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, GXO, C));
 		GXO=GXS;
 		GXQ=GXR;
 		WGE=ACRL;
@@ -28875,7 +28876,7 @@ impl Instance {
 		AQOS=AQOY;
 		AQOT=AQOZ;
 		}
-		let GYC=B/ GYB;
+		let GYC=C/ GYB;
 		let AZIJ=-GYC;
 		let AZIK=(AQOR).product_div(AZIJ,GYB);
 		let AZIL=AZIK* AWAO;
@@ -28917,10 +28918,10 @@ impl Instance {
 		let ABCQ=(ABCO* GYH)- ABCO;
 		let GYI=-BKG;
 		let AZIU=ANZB* AWAO;
-		let GYJ=(((GYH- B)- GYG)+ CEN).sqrt();
+		let GYJ=(((GYH- C)- GYG)+ CEN).sqrt();
 		let AZIV=(AZIT- AZIQ)* (ANYF/ (AWAY* GYJ));
 		let ABCR=BK* GYJ;
-		let ABCS=B/ ABCR;
+		let ABCS=C/ ABCR;
 		let AZIW=((AZIV* BK)).product_div((-ABCS),ABCR);
 		let ABCT=ABCP* ABCS;
 		let ABCU=ABCQ* ABCS;
@@ -28961,7 +28962,7 @@ impl Instance {
 		let AZMX=AZAV* AAWI;
 		let ABFK=(AAWG* GIG)+ (AAWI* GHF);
 		let AZMY=(L5([0.0,AZMW[0],AZMW[1],AZMW[2],AZMW[3]])+ (AZAZ* AAWG))+ ((AXBN* GHF)+ L5([0.0,AZMX[0],AZMX[1],AZMX[2],AZMX[3]]));
-		let GYM=B+ (GHF* GIG);
+		let GYM=C+ (GHF* GIG);
 		let GYN=GYM> A;
 		let GYR;
 		let WGK;
@@ -28973,7 +28974,7 @@ impl Instance {
 		let GYO=GYM.sqrt();
 		let AZNE=AZMS* (ANYF/ (AWAY* GYO));
 		let ABFR=BK* GYO;
-		let ABFS=B/ ABFR;
+		let ABFS=C/ ABFR;
 		let AZNF=((AZNE* BK)).product_div((-ABFS),ABFR);
 		let ABFT=ABFJ* ABFS;
 		let AZNG=(AZMV* ABFS)+ (AZNF* ABFJ);
@@ -28991,7 +28992,7 @@ impl Instance {
 		let GYP=(-GYM).sqrt();
 		let AZMZ=(AZMS* AWAO)* (ANYF/ (AWAY* GYP));
 		let ABFN=BK* GYP;
-		let ABFO=B/ ABFN;
+		let ABFO=C/ ABFN;
 		let AZNA=((AZMZ* BK)).product_div((-ABFO),ABFN);
 		let GYQ=-GYP;
 		let AZNB=AZMZ* AWAO;
@@ -29006,7 +29007,7 @@ impl Instance {
 		AQPE=AZNC;
 		AQPF=AZND;
 		}
-		let GYS=B- GYR;
+		let GYS=C- GYR;
 		let AZNI=AQPD* AWAO;
 		let ABFV=-WGK;
 		let ABFW=-WGL;
@@ -29021,7 +29022,7 @@ impl Instance {
 		let ABFY=AAWI+ ((AAWE* GYS)+ (ABFW* GHE));
 		let AZNQ=AXBN+ ((L5([0.0,AZNM[0],AZNM[1],AZNM[2],AZNM[3]])+ (AZNI* AAWE))+ (((AQPF* AWAO)* GHE)+ L5([0.0,AZNN[0],AZNN[1],AZNN[2],AZNN[3]])));
 		let GYU=(GIG+ (GHE* GYS))+ GYT;
-		let mut GYV=B;
+		let mut GYV=C;
 		let mut GYY=GYU;
 		let mut GZN=A;
 		let mut WGM=ABFX;
@@ -29053,10 +29054,10 @@ impl Instance {
 		let BBMH=(product_div(ANZE,(-GZB),BWG))* (ANYF/ (AWAY* GZC));
 		let ACQJ=ACQH- ACQF;
 		let ACQK=ACQI- ACQG;
-		let GZD=(((GZA- GYZ)- B)+ CEN).sqrt();
+		let GZD=(((GZA- GYZ)- C)+ CEN).sqrt();
 		let BBMI=(BBME- BBMB)* (ANYF/ (AWAY* GZD));
 		let ACQL=BK* GZD;
-		let ACQM=B/ ACQL;
+		let ACQM=C/ ACQL;
 		let BBMJ=((BBMI* BK)).product_div((-ACQM),ACQL);
 		let ACQN=ACQJ* ACQM;
 		let ACQO=ACQK* ACQM;
@@ -29105,7 +29106,7 @@ impl Instance {
 		let BBMT=BBME* AWAO;
 		let ACQV=ACQH* AMF;
 		let ACQW=ACQI* AMF;
-		let GZL=(-GZA)+ B;
+		let GZL=(-GZA)+ C;
 		let GZM=GZK* GZL;
 		let BBMU=(BBMR* GZL)+ (BBMT* GZK);
 		let ACQX=(ACQT* GZL)+ (ACQV* GZK);
@@ -29151,10 +29152,10 @@ impl Instance {
 		let BBNF=-GZR;
 		let BBNG=((((L5([0.0,BBMZ[0],BBMZ[1],BBMZ[2],BBMZ[3]])+ (BBMY* GZO))+ AQPJ)* AWAO)).product_sum_div(ANYF,BBNE,BBNF,GZQ);
 		let BBNH=BBNG* AWAO;
-		let ACRF=product_sum_div(((((ACQZ* GZP)+ (ACRB* GZO))+ WGO)* AMF),B,BBNF,ACRD,GZQ);
-		let BBNI=L5(sum_products_div_lanes(&[(&((((L5([0.0,BBNA[0],BBNA[1],BBNA[2],BBNA[3]])+ (BBMY* ACQZ))+ (((AXBM- AQPH)* GZO)+ L5([0.0,BBNB[0],BBNB[1],BBNB[2],BBNB[3]])))+ AQPK)* AMF).0,B),(&BBNH.0,ACRD),(&(L5([0.0,AOED[0],AOED[1],AOED[2],AOED[3]])+ BBMV).0,BBNF),(&BBNE.0,(-ACRF))],GZQ));
-		let ACRG=product_sum_div(((((ACRA* GZP)+ (ACRC* GZO))+ WGP)* AMF),B,BBNF,ACRE,GZQ);
-		let BBNJ=L5(sum_products_div_lanes(&[(&((((L5([0.0,BBNC[0],BBNC[1],BBNC[2],BBNC[3]])+ (BBMY* ACRA))+ (((AXBN- AQPI)* GZO)+ L5([0.0,BBND[0],BBND[1],BBND[2],BBND[3]])))+ AQPL)* AMF).0,B),(&BBNH.0,ACRE),(&(L5([0.0,AOEE[0],AOEE[1],AOEE[2],AOEE[3]])+ BBMW).0,BBNF),(&BBNE.0,(-ACRG))],GZQ));
+		let ACRF=product_sum_div(((((ACQZ* GZP)+ (ACRB* GZO))+ WGO)* AMF),C,BBNF,ACRD,GZQ);
+		let BBNI=L5(sum_products_div_lanes(&[(&((((L5([0.0,BBNA[0],BBNA[1],BBNA[2],BBNA[3]])+ (BBMY* ACQZ))+ (((AXBM- AQPH)* GZO)+ L5([0.0,BBNB[0],BBNB[1],BBNB[2],BBNB[3]])))+ AQPK)* AMF).0,C),(&BBNH.0,ACRD),(&(L5([0.0,AOED[0],AOED[1],AOED[2],AOED[3]])+ BBMV).0,BBNF),(&BBNE.0,(-ACRF))],GZQ));
+		let ACRG=product_sum_div(((((ACRA* GZP)+ (ACRC* GZO))+ WGP)* AMF),C,BBNF,ACRE,GZQ);
+		let BBNJ=L5(sum_products_div_lanes(&[(&((((L5([0.0,BBNC[0],BBNC[1],BBNC[2],BBNC[3]])+ (BBMY* ACRA))+ (((AXBN- AQPI)* GZO)+ L5([0.0,BBND[0],BBND[1],BBND[2],BBND[3]])))+ AQPL)* AMF).0,C),(&BBNH.0,ACRE),(&(L5([0.0,AOEE[0],AOEE[1],AOEE[2],AOEE[3]])+ BBMW).0,BBNF),(&BBNE.0,(-ACRG))],GZQ));
 		let GZS=(GZR.abs())< QE;
 		let GZW;
 		let HAE;
@@ -29165,7 +29166,7 @@ impl Instance {
 		let AQPR;
 		if GZS{
 		GZW=GZR;
-		HAE=B;
+		HAE=C;
 		WGS=ACRF;
 		WGT=ACRG;
 		AQPP=BBNG;
@@ -29239,7 +29240,7 @@ impl Instance {
 		AQPN=BBNL;
 		AQPO=BBNM;
 		}
-		let HAB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HAA, B));
+		let HAB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HAA, C));
 		GYV=HAB;
 		GYY=HAC;
 		GZN=HAD;
@@ -29259,7 +29260,7 @@ impl Instance {
 		let HAG=((GYY* GYY)+ ((BH* HAF)* HAF)).sqrt();
 		let AZNU=(AZNR+ AZNR)* (ANYF/ (AWAY* HAG));
 		let ABGD=BK* HAG;
-		let ABGE=B/ ABGD;
+		let ABGE=C/ ABGD;
 		let AZNV=((AZNU* BK)).product_div((-ABGE),ABGD);
 		let HAH=J* (GYY+ HAG);
 		let AZNW=(AQPG+ AZNU)* J;
@@ -29306,8 +29307,8 @@ impl Instance {
 		let AZJG=AZAV* AAWI;
 		let ABCY=(AAWG* GIG)+ (AAWI* GHF);
 		let AZJH=(L5([0.0,AZJF[0],AZJF[1],AZJF[2],AZJF[3]])+ (AZAZ* AAWG))+ ((AXBN* GHF)+ L5([0.0,AZJG[0],AZJG[1],AZJG[2],AZJG[3]]));
-		let HAJ=B+ (GHF* GIG);
-		let HAK=B+ GHF;
+		let HAJ=C+ (GHF* GIG);
+		let HAK=C+ GHF;
 		let HAL=A+ HAK;
 		let HAM=(HAJ< HAL)&& (HAK>= A);
 		let HBN;
@@ -29372,7 +29373,7 @@ impl Instance {
 		if HAR{
 		let HBB;
 		if HAS{
-		HBB=B;
+		HBB=C;
 		}else{
 		let HBC;
 		if HAT{
@@ -29408,13 +29409,13 @@ impl Instance {
 		let HAZ=HAY.sqrt();
 		let AZMN=AQQH* (ANYF/ (AWAY* HAZ));
 		let ABFF=BK* HAZ;
-		let ABFG=B/ ABFF;
+		let ABFG=C/ ABFF;
 		let AZMO=((AZMN* BK)).product_div((-ABFG),ABFF);
 		let ABFH=WHE* ABFG;
 		let AZMP=(AQQI* ABFG)+ (AZMO* WHE);
 		let ABFI=WHF* ABFG;
 		let AZMQ=(AQQJ* ABFG)+ (AZMO* WHF);
-		let HBA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HAW, B));
+		let HBA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HAW, C));
 		HAW=HBA;
 		HAY=HAZ;
 		WHE=ABFH;
@@ -29469,7 +29470,7 @@ impl Instance {
 		AQQF=AQQL;
 		AQQG=AQQM;
 		}
-		let HBK=B/ HBJ;
+		let HBK=C/ HBJ;
 		let AZKM=-HBK;
 		let AZKN=(AQQE).product_div(AZKM,HBJ);
 		let AZKO=AZKN* AWAO;
@@ -29509,9 +29510,9 @@ impl Instance {
 		let HBO=HBN.sqrt();
 		let AZLA=AQQB* (ANYF/ (AWAY* HBO));
 		let ABEA=BK* HBO;
-		let ABEB=B/ ABEA;
+		let ABEB=C/ ABEA;
 		let AZLB=((AZLA* BK)).product_div((-ABEB),ABEA);
-		let HBP=B- HBO;
+		let HBP=C- HBO;
 		let AZLC=AZLA* AWAO;
 		let ABEC=-(WHA* ABEB);
 		let ABED=-(WHB* ABEB);
@@ -29571,7 +29572,7 @@ impl Instance {
 		if HBX{
 		let HCH;
 		if HBY{
-		HCH=B;
+		HCH=C;
 		}else{
 		let HCI;
 		if HBZ{
@@ -29607,13 +29608,13 @@ impl Instance {
 		let HCF=HCE.sqrt();
 		let AZMJ=AQQT* (ANYF/ (AWAY* HCF));
 		let ABFB=BK* HCF;
-		let ABFC=B/ ABFB;
+		let ABFC=C/ ABFB;
 		let AZMK=((AZMJ* BK)).product_div((-ABFC),ABFB);
 		let ABFD=WHM* ABFC;
 		let AZML=(AQQU* ABFC)+ (AZMK* WHM);
 		let ABFE=WHN* ABFC;
 		let AZMM=(AQQV* ABFC)+ (AZMK* WHN);
-		let HCG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HCC, B));
+		let HCG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HCC, C));
 		HCC=HCG;
 		HCE=HCF;
 		WHM=ABFD;
@@ -29668,7 +29669,7 @@ impl Instance {
 		AQQR=AQQX;
 		AQQS=AQQY;
 		}
-		let HCQ=B/ HCP;
+		let HCQ=C/ HCP;
 		let AZMC=-HCQ;
 		let AZMD=(AQQQ).product_div(AZMC,HCP);
 		let AZME=AZMD* AWAO;
@@ -29709,9 +29710,9 @@ impl Instance {
 		let AZNZ=-HCW;
 		let AZOA=(AWLX).product_sum_div(ANYF,AQPA,AZNZ,HCT);
 		let AZOB=AZOA* AWAO;
-		let ABGH=product_sum_div(URK,B,AZNZ,WGI,HCT);
+		let ABGH=product_sum_div(URK,C,AZNZ,WGI,HCT);
 		let AZOC=L5(sum_products_div_lanes(&[(&AZOB.0,WGI),(&AQPB.0,AZNZ),(&AQPA.0,(-ABGH))],HCT));
-		let ABGI=product_sum_div(URL,B,AZNZ,WGJ,HCT);
+		let ABGI=product_sum_div(URL,C,AZNZ,WGJ,HCT);
 		let AZOD=L5(sum_products_div_lanes(&[(&AZOB.0,WGJ),(&AQPC.0,AZNZ),(&AQPA.0,(-ABGI))],HCT));
 		let HCX=HCW== A;
 		let HCZ;
@@ -29730,7 +29731,7 @@ impl Instance {
 		}else{
 		let HCY=HCW.powf(CZC);
 		let AZOE=AZOA* (CZC* ((HCW+ (((HCW== AWBZ) as u8 as f64)* AWCA)).powf((CZC- ANYF))));
-		let ABGJ=CZC- B;
+		let ABGJ=CZC- C;
 		let ABGK=HCW+ ((HCX as u8 as f64)* ZNW);
 		let AZOF=ABGJ* ((ABGK+ (((ABGK== AWBZ) as u8 as f64)* AWCA)).powf((ABGJ- ANYF)));
 		let ABGL=CZC* (ABGK.powf(ABGJ));
@@ -29745,7 +29746,7 @@ impl Instance {
 		AQRA=AZOG;
 		AQRB=AZOH;
 		}
-		let HDA=B+ HCZ;
+		let HDA=C+ HCZ;
 		let HDB=HDA== A;
 		let HDE;
 		let WHS;
@@ -29761,10 +29762,10 @@ impl Instance {
 		AQRD=AWLK;
 		AQRE=AWLK;
 		}else{
-		let HDC=B/ CZC;
+		let HDC=C/ CZC;
 		let HDD=HDA.powf(HDC);
 		let AZOI=AQQZ* (HDC* ((HDA+ (((HDA== AWBZ) as u8 as f64)* AWCA)).powf((HDC- ANYF))));
-		let ABGO=HDC- B;
+		let ABGO=HDC- C;
 		let ABGP=HDA+ ((HDB as u8 as f64)* ZNW);
 		let AZOJ=ABGO* ((ABGP+ (((ABGP== AWBZ) as u8 as f64)* AWCA)).powf((ABGO- ANYF)));
 		let ABGQ=HDC* (ABGP.powf(ABGO));
@@ -29783,9 +29784,9 @@ impl Instance {
 		let AZOM=-HDF;
 		let AZON=(AWLX).product_sum_div(ANYF,AQRC,AZOM,HDE);
 		let AZOO=AZON* AWAO;
-		let ABGT=product_sum_div(URK,B,AZOM,WHS,HDE);
+		let ABGT=product_sum_div(URK,C,AZOM,WHS,HDE);
 		let AZOP=L5(sum_products_div_lanes(&[(&AZOO.0,WHS),(&AQRD.0,AZOM),(&AQRC.0,(-ABGT))],HDE));
-		let ABGU=product_sum_div(URL,B,AZOM,WHT,HDE);
+		let ABGU=product_sum_div(URL,C,AZOM,WHT,HDE);
 		let AZOQ=L5(sum_products_div_lanes(&[(&AZOO.0,WHT),(&AQRE.0,AZOM),(&AQRC.0,(-ABGU))],HDE));
 		let HDG=HDF< A;
 		let HNW;
@@ -29894,7 +29895,7 @@ impl Instance {
 		let HDO=((HDJ* HDJ)+ HDN).sqrt();
 		let AZPG=((AZPD+ AZPD)+ AQRR)* (ANYF/ (AWAY* HDO));
 		let ABHH=BK* HDO;
-		let ABHI=B/ ABHH;
+		let ABHI=C/ ABHH;
 		let AZPH=((AZPG* BK)).product_div((-ABHI),ABHH);
 		let AZPI=(AZOR- ((AZOU+ AZPG)* J))- AZBK;
 		let ABHJ=(ABGV- ((ABGX+ (ABHF* ABHI))* J))- USY;
@@ -29939,7 +29940,7 @@ impl Instance {
 		let HDS=((HDP* HDP)+ HDR).sqrt();
 		let AZPR=((AZPO+ AZPO)+ L5([AQRU[0],AQRU[1],0.0,AQRU[2],AQRU[3]]))* (ANYF/ (AWAY* HDS));
 		let ABHR=BK* HDS;
-		let ABHS=B/ ABHR;
+		let ABHS=C/ ABHR;
 		let AZPS=((AZPR* BK)).product_div((-ABHS),ABHR);
 		let HDT=GIN+ (J* (HDP+ HDS));
 		let AZPT=AZBK+ ((AZPI+ AZPR)* J);
@@ -29947,7 +29948,7 @@ impl Instance {
 		let AZPU=AZBM+ ((AZPJ+ ((((AZPP+ AZPP)+ L5([AQRV[0],AQRV[1],0.0,AQRV[2],AQRV[3]]))* ABHS)+ (AZPS* ABHP)))* J);
 		let ABHU=USZ+ ((ABHK+ (ABHQ* ABHS))* J);
 		let AZPV=AZBO+ ((AZPK+ ((((AZPQ+ AZPQ)+ L5([AQRW[0],AQRW[1],0.0,AQRW[2],AQRW[3]]))* ABHS)+ (AZPS* ABHQ)))* J);
-		let mut HDU=B;
+		let mut HDU=C;
 		let mut HDW=HDF;
 		let mut HGI=HDT;
 		let mut HJZ=A;
@@ -30027,7 +30028,7 @@ impl Instance {
 		if HEC{
 		let HEM;
 		if HED{
-		HEM=B;
+		HEM=C;
 		}else{
 		let HEN;
 		if HEE{
@@ -30063,13 +30064,13 @@ impl Instance {
 		let HEK=HEJ.sqrt();
 		let BAEM=AQSP* (ANYF/ (AWAY* HEK));
 		let ABTT=BK* HEK;
-		let ABTU=B/ ABTT;
+		let ABTU=C/ ABTT;
 		let BAEN=((BAEM* BK)).product_div((-ABTU),ABTT);
 		let ABTV=WIS* ABTU;
 		let BAEO=(AQSQ* ABTU)+ (BAEN* WIS);
 		let ABTW=WIT* ABTU;
 		let BAEP=(AQSR* ABTU)+ (BAEN* WIT);
-		let HEL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HEH, B));
+		let HEL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HEH, C));
 		HEH=HEL;
 		HEJ=HEK;
 		WIS=ABTV;
@@ -30124,7 +30125,7 @@ impl Instance {
 		AQSN=AQST;
 		AQSO=AQSU;
 		}
-		let HEV=B/ HEU;
+		let HEV=C/ HEU;
 		let AZTF=-HEV;
 		let AZTG=(AQSM).product_div(AZTF,HEU);
 		let AZTH=AZTG* AWAO;
@@ -30140,10 +30141,10 @@ impl Instance {
 		let AZTL=-HEY;
 		let AZTM=((AZTG* HEX)).product_sum_div(ANYF,AZSW,AZTL,HEB);
 		let AZTN=AZTM* AWAO;
-		let ABLD=product_sum_div((ABKZ* HEX),B,AZTL,ABKR,HEB);
-		let AZTO=L5(sum_products_div_lanes(&[(&(AZTI* HEX).0,B),(&AZTN.0,ABKR),(&AZSY.0,AZTL),(&AZSW.0,(-ABLD))],HEB));
-		let ABLE=product_sum_div((ABLA* HEX),B,AZTL,ABKT,HEB);
-		let AZTP=L5(sum_products_div_lanes(&[(&(AZTJ* HEX).0,B),(&AZTN.0,ABKT),(&AZTA.0,AZTL),(&AZSW.0,(-ABLE))],HEB));
+		let ABLD=product_sum_div((ABKZ* HEX),C,AZTL,ABKR,HEB);
+		let AZTO=L5(sum_products_div_lanes(&[(&(AZTI* HEX).0,C),(&AZTN.0,ABKR),(&AZSY.0,AZTL),(&AZSW.0,(-ABLD))],HEB));
+		let ABLE=product_sum_div((ABLA* HEX),C,AZTL,ABKT,HEB);
+		let AZTP=L5(sum_products_div_lanes(&[(&(AZTJ* HEX).0,C),(&AZTN.0,ABKT),(&AZTA.0,AZTL),(&AZSW.0,(-ABLE))],HEB));
 		let HEZ=1e-3f64- (HEW* HEV);
 		let AZTQ=((AZTK* HEV)+ (AZTG* HEW))* AWAO;
 		let ABLF=-((ABLB* HEV)+ (ABKZ* HEW));
@@ -30164,7 +30165,7 @@ impl Instance {
 		AQSL=AZTP;
 		}else{
 		HFA=HDX;
-		HGF=B;
+		HGF=C;
 		WIM=ABKI;
 		WIN=ABKJ;
 		WIO=A;
@@ -30181,7 +30182,7 @@ impl Instance {
 		let HFB=(GHA* HFA).sqrt();
 		let AZTT=(AQSG* GHA)* (ANYF/ (AWAY* HFB));
 		let ABLJ=BK* HFB;
-		let ABLK=B/ ABLJ;
+		let ABLK=C/ ABLJ;
 		let AZTU=((AZTT* BK)).product_div((-ABLK),ABLJ);
 		let ABLL=ABLH* ABLK;
 		let AZTV=((AQSI* GHA)* ABLK)+ (AZTU* ABLH);
@@ -30240,7 +30241,7 @@ impl Instance {
 		if HFH{
 		let HFR;
 		if HFI{
-		HFR=B;
+		HFR=C;
 		}else{
 		let HFS;
 		if HFJ{
@@ -30276,13 +30277,13 @@ impl Instance {
 		let HFP=HFO.sqrt();
 		let BAEI=AQTE* (ANYF/ (AWAY* HFP));
 		let ABTP=BK* HFP;
-		let ABTQ=B/ ABTP;
+		let ABTQ=C/ ABTP;
 		let BAEJ=((BAEI* BK)).product_div((-ABTQ),ABTP);
 		let ABTR=WJC* ABTQ;
 		let BAEK=(AQTF* ABTQ)+ (BAEJ* WJC);
 		let ABTS=WJD* ABTQ;
 		let BAEL=(AQTG* ABTQ)+ (BAEJ* WJD);
-		let HFQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HFM, B));
+		let HFQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HFM, C));
 		HFM=HFQ;
 		HFO=HFP;
 		WJC=ABTR;
@@ -30337,7 +30338,7 @@ impl Instance {
 		AQTC=AQTI;
 		AQTD=AQTJ;
 		}
-		let HGA=B/ HFZ;
+		let HGA=C/ HFZ;
 		let AZUR=-HGA;
 		let AZUS=(AQTB).product_div(AZUR,HFZ);
 		let AZUT=AZUS* AWAO;
@@ -30353,10 +30354,10 @@ impl Instance {
 		let AZUX=-HGD;
 		let AZUY=((AZUS* HGC)).product_sum_div(ANYF,AZUI,AZUX,HFG);
 		let AZUZ=AZUY* AWAO;
-		let ABMG=product_sum_div((ABMC* HGC),B,AZUX,ABLU,HFG);
-		let AZVA=L5(sum_products_div_lanes(&[(&(AZUU* HGC).0,B),(&AZUZ.0,ABLU),(&AZUK.0,AZUX),(&AZUI.0,(-ABMG))],HFG));
-		let ABMH=product_sum_div((ABMD* HGC),B,AZUX,ABLW,HFG);
-		let AZVB=L5(sum_products_div_lanes(&[(&(AZUV* HGC).0,B),(&AZUZ.0,ABLW),(&AZUM.0,AZUX),(&AZUI.0,(-ABMH))],HFG));
+		let ABMG=product_sum_div((ABMC* HGC),C,AZUX,ABLU,HFG);
+		let AZVA=L5(sum_products_div_lanes(&[(&(AZUU* HGC).0,C),(&AZUZ.0,ABLU),(&AZUK.0,AZUX),(&AZUI.0,(-ABMG))],HFG));
+		let ABMH=product_sum_div((ABMD* HGC),C,AZUX,ABLW,HFG);
+		let AZVB=L5(sum_products_div_lanes(&[(&(AZUV* HGC).0,C),(&AZUZ.0,ABLW),(&AZUM.0,AZUX),(&AZUI.0,(-ABMH))],HFG));
 		let HGE=HFC+ (HGB* HGA);
 		let AZVC=AZTX+ ((AZUW* HGA)+ (AZUS* HGB));
 		let ABMI=WCQ+ ((ABME* HGA)+ (ABMC* HGB));
@@ -30376,7 +30377,7 @@ impl Instance {
 		AQSZ=AZVD;
 		AQTA=AZVE;
 		}else{
-		HGG=B;
+		HGG=C;
 		HGJ=HFB;
 		WIW=A;
 		WIX=A;
@@ -30420,15 +30421,15 @@ impl Instance {
 		let AZVV=-HGM;
 		let AZVW=(L5([0.0,AQJM[0],0.0,AQJM[1],0.0])).product_sum_div(ANYF,AQSW,AZVV,HGJ);
 		let AZVX=AZVW* AWAO;
-		let ABMS=product_sum_div(WCQ,B,AZVV,WIY,HGJ);
-		let ABMT=product_sum_div(WCR,B,AZVV,WIZ,HGJ);
-		let HGN=B- GOE;
+		let ABMS=product_sum_div(WCQ,C,AZVV,WIY,HGJ);
+		let ABMT=product_sum_div(WCR,C,AZVV,WIZ,HGJ);
+		let HGN=C- GOE;
 		let HGO=(HGH- (HGM* HGH))* HGN;
 		let AZVY=(AZVF- ((AZVW* HGH)+ (AZVF* HGM)))* HGN;
 		let ABMU=(ABMK- ((ABMS* HGH)+ (ABMK* HGM)))* HGN;
-		let AZVZ=(AZVG- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJN[0],0.0,AQJN[1],0.0]).0,B),(&AZVX.0,WIY),(&AQSZ.0,AZVV),(&AQSW.0,(-ABMS))],HGJ)))* HGH)+ (AZVF* ABMS))+ ((AZVG* HGM)+ (AZVW* ABMK))))* HGN;
+		let AZVZ=(AZVG- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJN[0],0.0,AQJN[1],0.0]).0,C),(&AZVX.0,WIY),(&AQSZ.0,AZVV),(&AQSW.0,(-ABMS))],HGJ)))* HGH)+ (AZVF* ABMS))+ ((AZVG* HGM)+ (AZVW* ABMK))))* HGN;
 		let ABMV=(ABML- ((ABMT* HGH)+ (ABML* HGM)))* HGN;
-		let AZWA=(AZVH- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJO[0],0.0,AQJO[1],0.0]).0,B),(&AZVX.0,WIZ),(&AQTA.0,AZVV),(&AQSW.0,(-ABMT))],HGJ)))* HGH)+ (AZVF* ABMT))+ ((AZVH* HGM)+ (AZVW* ABML))))* HGN;
+		let AZWA=(AZVH- ((((L5(sum_products_div_lanes(&[(&L5([0.0,AQJO[0],0.0,AQJO[1],0.0]).0,C),(&AZVX.0,WIZ),(&AQTA.0,AZVV),(&AQSW.0,(-ABMT))],HGJ)))* HGH)+ (AZVF* ABMT))+ ((AZVH* HGM)+ (AZVW* ABML))))* HGN;
 		let HGP=HDF- GRA;
 		let HGQ=(HGL> HGP)&& (GRA>= A);
 		let HHW;
@@ -30491,7 +30492,7 @@ impl Instance {
 		if HGY{
 		let HHI;
 		if HGZ{
-		HHI=B;
+		HHI=C;
 		}else{
 		let HHJ;
 		if HHA{
@@ -30527,13 +30528,13 @@ impl Instance {
 		let HHG=HHF.sqrt();
 		let BAEE=AQTT* (ANYF/ (AWAY* HHG));
 		let ABTL=BK* HHG;
-		let ABTM=B/ ABTL;
+		let ABTM=C/ ABTL;
 		let BAEF=((BAEE* BK)).product_div((-ABTM),ABTL);
 		let ABTN=WJM* ABTM;
 		let BAEG=(AQTU* ABTM)+ (BAEF* WJM);
 		let ABTO=WJN* ABTM;
 		let BAEH=(AQTV* ABTM)+ (BAEF* WJN);
-		let HHH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HHD, B));
+		let HHH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HHD, C));
 		HHD=HHH;
 		HHF=HHG;
 		WJM=ABTN;
@@ -30588,7 +30589,7 @@ impl Instance {
 		AQTR=AQTX;
 		AQTS=AQTY;
 		}
-		let HHR=B/ HHQ;
+		let HHR=C/ HHQ;
 		let AZWW=-HHR;
 		let AZWX=(AQTQ).product_div(AZWW,HHQ);
 		let AZWY=AZWX* AWAO;
@@ -30605,10 +30606,10 @@ impl Instance {
 		let AZXC=-HHU;
 		let AZXD=((AZWX* HHT)).product_sum_div(ANYF,AZWP,AZXC,HGX);
 		let AZXE=AZXD* AWAO;
-		let ABNT=product_sum_div((ABNP* HHT),B,AZXC,ABNI,HGX);
-		let AZXF=L5(sum_products_div_lanes(&[(&(AZWZ* HHT).0,B),(&AZXE.0,ABNI),(&AZWQ.0,AZXC),(&AZWP.0,(-ABNT))],HGX));
-		let ABNU=product_sum_div((ABNQ* HHT),B,AZXC,ABNJ,HGX);
-		let AZXG=L5(sum_products_div_lanes(&[(&(AZXA* HHT).0,B),(&AZXE.0,ABNJ),(&AZWR.0,AZXC),(&AZWP.0,(-ABNU))],HGX));
+		let ABNT=product_sum_div((ABNP* HHT),C,AZXC,ABNI,HGX);
+		let AZXF=L5(sum_products_div_lanes(&[(&(AZWZ* HHT).0,C),(&AZXE.0,ABNI),(&AZWQ.0,AZXC),(&AZWP.0,(-ABNT))],HGX));
+		let ABNU=product_sum_div((ABNQ* HHT),C,AZXC,ABNJ,HGX);
+		let AZXG=L5(sum_products_div_lanes(&[(&(AZXA* HHT).0,C),(&AZXE.0,ABNJ),(&AZWR.0,AZXC),(&AZWP.0,(-ABNU))],HGX));
 		let HHV=HGP+ (HHS* HHR);
 		let AZXH=AZON+ ((AZXB* HHR)+ (AZWX* HHS));
 		let ABNV=ABGT+ ((ABNR* HHR)+ (ABNP* HHS));
@@ -30628,7 +30629,7 @@ impl Instance {
 		AQTO=AZXI;
 		AQTP=AZXJ;
 		}else{
-		HHW=B;
+		HHW=C;
 		HKM=HGL;
 		WJG=A;
 		WJH=A;
@@ -30662,7 +30663,7 @@ impl Instance {
 		let AZXR=(AZXO* HIA)+ (AZXQ* ABOB);
 		let ABOE=ABOC* HIA;
 		let AZXS=(AZXP* HIA)+ (AZXQ* ABOC);
-		let HIB=HIA- B;
+		let HIB=HIA- C;
 		let HIC=HIB- HHZ;
 		let AZXT=AZXQ- AZXN;
 		let ABOF=ABOD- ABOB;
@@ -30694,7 +30695,7 @@ impl Instance {
 		let HIF=HIC.sqrt();
 		let BAAO=AZXT* (ANYF/ (AWAY* HIF));
 		let ABRB=BK* HIF;
-		let ABRC=B/ ABRB;
+		let ABRC=C/ ABRB;
 		let BAAP=((BAAO* BK)).product_div((-ABRC),ABRB);
 		let ABRD=ABOF* ABRC;
 		let ABRE=ABOG* ABRC;
@@ -30723,7 +30724,7 @@ impl Instance {
 		let BABB=AZXQ* AWAO;
 		let ABRL=ABOD* AMF;
 		let ABRM=ABOE* AMF;
-		let HIL=(-HIA)+ B;
+		let HIL=(-HIA)+ C;
 		let HIM=HIJ* HIL;
 		let BABC=(BAAU* HIL)+ (BABB* HIJ);
 		let ABRN=(ABRH* HIL)+ (ABRL* HIJ);
@@ -30810,7 +30811,7 @@ impl Instance {
 		let HIV=(HIC+ (CIB* HIU)).sqrt();
 		let AZZV=(AZXT+ (L5([(ANZF* HIU),0.0,0.0,0.0,0.0])+ (((AZZP- AZZS)+ AZXN)* CIB)))* (ANYF/ (AWAY* HIV));
 		let ABQJ=BK* HIV;
-		let ABQK=B/ ABQJ;
+		let ABQK=C/ ABQJ;
 		let AZZW=((AZZV* BK)).product_div((-ABQK),ABQJ);
 		let ABQL=ABQH* ABQK;
 		let ABQM=ABQI* ABQK;
@@ -30832,7 +30833,7 @@ impl Instance {
 		let BAAE=L5(sum_products_div_lanes(&[(&BAAC.0,ABQO),(&AZZZ.0,BAAA),(&AZZX.0,(-ABQQ))],HIW));
 		let ABQR=ABPX* AMF;
 		let ABQS=ABPY* AMF;
-		let HJA=(-HIR)+ B;
+		let HJA=(-HIR)+ C;
 		let HJB=HIB+ (CIB* HJA);
 		let BAAF=AZXQ+ (L5([(ANZF* HJA),0.0,0.0,0.0,0.0])+ ((AZZP* AWAO)* CIB));
 		let ABQT=ABOD+ (ABQR* CIB);
@@ -30843,8 +30844,8 @@ impl Instance {
 		let BAAH=((BAAD* HJB)+ (BAAF* ABQP))+ (((AZXR+ (((AZZQ* AMF)* CIB)+ L5([(ANZF* ABQR),0.0,0.0,0.0,0.0])))* HIZ)+ (BAAB* ABQT));
 		let ABQW=(ABQQ* HJB)+ (ABQU* HIZ);
 		let BAAI=((BAAE* HJB)+ (BAAF* ABQQ))+ (((AZXS+ (((AZZR* AMF)* CIB)+ L5([(ANZF* ABQS),0.0,0.0,0.0,0.0])))* HIZ)+ (BAAB* ABQU));
-		let HJD=HIT- B;
-		let HJE=((-HIA)+ B)+ (CIB* HJD);
+		let HJD=HIT- C;
+		let HJE=((-HIA)+ C)+ (CIB* HJD);
 		let BAAJ=(AZXQ* AWAO)+ (L5([(ANZF* HJD),0.0,0.0,0.0,0.0])+ (AZZS* CIB));
 		let ABQX=(ABOD* AMF)+ (ABQD* CIB);
 		let ABQY=(ABOE* AMF)+ (ABQE* CIB);
@@ -30895,10 +30896,10 @@ impl Instance {
 		if HJG{
 		let ABOZ=(ABOB* GTU)* J;
 		let ABPA=(ABOC* GTU)* J;
-		let HJH=(J* (B+ (HHZ* GTU))).sqrt();
+		let HJH=(J* (C+ (HHZ* GTU))).sqrt();
 		let AZYP=((AZXN* GTU)* J)* (ANYF/ (AWAY* HJH));
 		let ABPB=BK* HJH;
-		let ABPC=B/ ABPB;
+		let ABPC=C/ ABPB;
 		let AZYQ=((AZYP* BK)).product_div((-ABPC),ABPB);
 		let ABPD=ABOZ* ABPC;
 		let AZYR=(((AZXO* GTU)* J)* ABPC)+ (AZYQ* ABOZ);
@@ -30922,17 +30923,17 @@ impl Instance {
 		let AZYZ=-HJM;
 		let AZZA=((AZXN/ GUA)).product_sum_div(ANYF,AZYP,AZYZ,HJH);
 		let AZZB=AZZA* AWAO;
-		let ABPJ=product_sum_div((ABOB/ GUA),B,AZYZ,ABPD,HJH);
-		let ABPK=product_sum_div((ABOC/ GUA),B,AZYZ,ABPE,HJH);
+		let ABPJ=product_sum_div((ABOB/ GUA),C,AZYZ,ABPD,HJH);
+		let ABPK=product_sum_div((ABOC/ GUA),C,AZYZ,ABPE,HJH);
 		let HJN=HJH+ HJM;
 		let ABPL=ABPD+ ABPJ;
 		let ABPM=ABPE+ ABPK;
 		let HJO=HJL* HJN;
 		let AZZC=L5([(AZYY* HJN),0.0,0.0,0.0,0.0])+ ((AZYP+ AZZA)* HJL);
 		let ABPN=ABPL* HJL;
-		let AZZD=((AZYR+ (L5(sum_products_div_lanes(&[(&(AZXO/ GUA).0,B),(&AZZB.0,ABPD),(&AZYR.0,AZYZ),(&AZYP.0,(-ABPJ))],HJH))))* HJL)+ L5([(AZYY* ABPL),0.0,0.0,0.0,0.0]);
+		let AZZD=((AZYR+ (L5(sum_products_div_lanes(&[(&(AZXO/ GUA).0,C),(&AZZB.0,ABPD),(&AZYR.0,AZYZ),(&AZYP.0,(-ABPJ))],HJH))))* HJL)+ L5([(AZYY* ABPL),0.0,0.0,0.0,0.0]);
 		let ABPO=ABPM* HJL;
-		let AZZE=((AZYS+ (L5(sum_products_div_lanes(&[(&(AZXP/ GUA).0,B),(&AZZB.0,ABPE),(&AZYS.0,AZYZ),(&AZYP.0,(-ABPK))],HJH))))* HJL)+ L5([(AZYY* ABPM),0.0,0.0,0.0,0.0]);
+		let AZZE=((AZYS+ (L5(sum_products_div_lanes(&[(&(AZXP/ GUA).0,C),(&AZZB.0,ABPE),(&AZYS.0,AZYZ),(&AZYP.0,(-ABPK))],HJH))))* HJL)+ L5([(AZYY* ABPM),0.0,0.0,0.0,0.0]);
 		let HJP=-HJO;
 		let AZZF=AZZC* AWAO;
 		let ABPP=ABPN* AMF;
@@ -30960,10 +30961,10 @@ impl Instance {
 		}else{
 		let ABOH=(ABOB* GTU)* J;
 		let ABOI=(ABOC* GTU)* J;
-		let HJQ=(J* (B+ (HHZ* GTU))).sqrt();
+		let HJQ=(J* (C+ (HHZ* GTU))).sqrt();
 		let AZXW=((AZXN* GTU)* J)* (ANYF/ (AWAY* HJQ));
 		let ABOJ=BK* HJQ;
-		let ABOK=B/ ABOJ;
+		let ABOK=C/ ABOJ;
 		let AZXX=((AZXW* BK)).product_div((-ABOK),ABOJ);
 		let ABOL=ABOH* ABOK;
 		let AZXY=(((AZXO* GTU)* J)* ABOK)+ (AZXX* ABOH);
@@ -30987,17 +30988,17 @@ impl Instance {
 		let AZYG=-HJV;
 		let AZYH=((AZXN/ GUA)).product_sum_div(ANYF,AZXW,AZYG,HJQ);
 		let AZYI=AZYH* AWAO;
-		let ABOR=product_sum_div((ABOB/ GUA),B,AZYG,ABOL,HJQ);
-		let ABOS=product_sum_div((ABOC/ GUA),B,AZYG,ABOM,HJQ);
+		let ABOR=product_sum_div((ABOB/ GUA),C,AZYG,ABOL,HJQ);
+		let ABOS=product_sum_div((ABOC/ GUA),C,AZYG,ABOM,HJQ);
 		let HJW=HJQ+ HJV;
 		let ABOT=ABOL+ ABOR;
 		let ABOU=ABOM+ ABOS;
 		let HJX=HJU* HJW;
 		let AZYJ=L5([(AZYF* HJW),0.0,0.0,0.0,0.0])+ ((AZXW+ AZYH)* HJU);
 		let ABOV=ABOT* HJU;
-		let AZYK=((AZXY+ (L5(sum_products_div_lanes(&[(&(AZXO/ GUA).0,B),(&AZYI.0,ABOL),(&AZXY.0,AZYG),(&AZXW.0,(-ABOR))],HJQ))))* HJU)+ L5([(AZYF* ABOT),0.0,0.0,0.0,0.0]);
+		let AZYK=((AZXY+ (L5(sum_products_div_lanes(&[(&(AZXO/ GUA).0,C),(&AZYI.0,ABOL),(&AZXY.0,AZYG),(&AZXW.0,(-ABOR))],HJQ))))* HJU)+ L5([(AZYF* ABOT),0.0,0.0,0.0,0.0]);
 		let ABOW=ABOU* HJU;
-		let AZYL=((AZXZ+ (L5(sum_products_div_lanes(&[(&(AZXP/ GUA).0,B),(&AZYI.0,ABOM),(&AZXZ.0,AZYG),(&AZXW.0,(-ABOS))],HJQ))))* HJU)+ L5([(AZYF* ABOU),0.0,0.0,0.0,0.0]);
+		let AZYL=((AZXZ+ (L5(sum_products_div_lanes(&[(&(AZXP/ GUA).0,C),(&AZYI.0,ABOM),(&AZXZ.0,AZYG),(&AZXW.0,(-ABOS))],HJQ))))* HJU)+ L5([(AZYF* ABOU),0.0,0.0,0.0,0.0]);
 		let HJY=-HJX;
 		let AZYM=AZYJ* AWAO;
 		let ABOX=ABOV* AMF;
@@ -31127,7 +31128,7 @@ impl Instance {
 		let BABY=AQTM* AMF;
 		let ABRY=WJH* AMF;
 		let BABZ=AQTN* AMF;
-		let HKP=B- HHX;
+		let HKP=C- HHX;
 		let BACA=AZXK* AWAO;
 		let ABRZ=-ABNX;
 		let BACB=AZXL* AWAO;
@@ -31148,7 +31149,7 @@ impl Instance {
 		let AQVI;
 		if HKR{
 		let HKS=HKQ+ OM;
-		let HKT=B/ HKS;
+		let HKT=C/ HKS;
 		let BACL=-HKT;
 		let BACM=(BACD).product_div(BACL,HKS);
 		let BACN=BACM* AWAO;
@@ -31164,7 +31165,7 @@ impl Instance {
 		AQVI=BACP;
 		}else{
 		let HKU=HKQ- OM;
-		let HKV=B/ HKU;
+		let HKV=C/ HKU;
 		let BACG=-HKV;
 		let BACH=(BACD).product_div(BACG,HKU);
 		let BACI=BACH* AWAO;
@@ -31219,7 +31220,7 @@ impl Instance {
 		let BADG=((BACU* HLC)+ (BADB* ABSM))+ ((BADD* HKZ)+ (BACS* ABSS));
 		let HLE=HLB.abs();
 		let BADH=BACY* ((AWAY* ((HLB>= AWBZ) as u8 as f64))- ANYF);
-		let ABSV=(BK* ((HLB>= A) as u8 as f64))- B;
+		let ABSV=(BK* ((HLB>= A) as u8 as f64))- C;
 		let ABSW=ABSP* ABSV;
 		let BADI=BACZ* ABSV;
 		let ABSX=ABSQ* ABSV;
@@ -31234,7 +31235,7 @@ impl Instance {
 		let AQVK;
 		let AQVL;
 		if HLG{
-		let ABSY=(BK* ((HLD>= A) as u8 as f64))- B;
+		let ABSY=(BK* ((HLD>= A) as u8 as f64))- C;
 		let ABSZ=ABST* ABSY;
 		let BADL=BADF* ABSY;
 		let ABTA=ABSU* ABSY;
@@ -31315,7 +31316,7 @@ impl Instance {
 		}
 		let HLM=HLH< QE;
 		let HLW=if HLM{
-		B
+		C
 		}else{
 		HJZ
 		};
@@ -31346,7 +31347,7 @@ impl Instance {
 		AQVE=BADZ;
 		AQVF=BAEA;
 		}
-		let HLS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HLR, B));
+		let HLS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HLR, C));
 		HDU=HLS;
 		HDW=HLT;
 		HGI=HLU;
@@ -31384,7 +31385,7 @@ impl Instance {
 		let AZQB=((AZPX* HLZ)+ (AZPZ* ABHX))- AZPX;
 		let ABIA=(ABHY* HLZ)- ABHY;
 		let AZQC=((AZPY* HLZ)+ (AZPZ* ABHY))- AZPY;
-		let HMA=((HLZ- B)- HLY)+ CEN;
+		let HMA=((HLZ- C)- HLY)+ CEN;
 		let HMB=HGI> HDW;
 		let HMH;
 		let WKU;
@@ -31398,7 +31399,7 @@ impl Instance {
 		let HMD=HMA.sqrt();
 		let AZQJ=AZQA* (ANYF/ (AWAY* HMD));
 		let ABIH=BK* HMD;
-		let ABII=B/ ABIH;
+		let ABII=C/ ABIH;
 		let AZQK=((AZQJ* BK)).product_div((-ABII),ABIH);
 		let ABIJ=ABHZ* ABII;
 		let ABIK=ABIA* ABII;
@@ -31418,7 +31419,7 @@ impl Instance {
 		let HMF=HMA.sqrt();
 		let AZQD=AZQA* (ANYF/ (AWAY* HMF));
 		let ABIB=BK* HMF;
-		let ABIC=B/ ABIB;
+		let ABIC=C/ ABIB;
 		let AZQE=((AZQD* BK)).product_div((-ABIC),ABIB);
 		let ABID=ABHZ* ABIC;
 		let ABIE=ABIA* ABIC;
@@ -31509,7 +31510,7 @@ impl Instance {
 		if HMU{
 		let HNE;
 		if HMV{
-		HNE=B;
+		HNE=C;
 		}else{
 		let HNF;
 		if HMW{
@@ -31545,13 +31546,13 @@ impl Instance {
 		let HNC=HNB.sqrt();
 		let AZSH=AQWE* (ANYF/ (AWAY* HNC));
 		let ABKE=BK* HNC;
-		let ABKF=B/ ABKE;
+		let ABKF=C/ ABKE;
 		let AZSI=((AZSH* BK)).product_div((-ABKF),ABKE);
 		let ABKG=WLC* ABKF;
 		let AZSJ=(AQWF* ABKF)+ (AZSI* WLC);
 		let ABKH=WLD* ABKF;
 		let AZSK=(AQWG* ABKF)+ (AZSI* WLD);
-		let HND=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HMZ, B));
+		let HND=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HMZ, C));
 		HMZ=HND;
 		HNB=HNC;
 		WLC=ABKG;
@@ -31606,7 +31607,7 @@ impl Instance {
 		AQWC=AQWI;
 		AQWD=AQWJ;
 		}
-		let HNN=B/ HNM;
+		let HNN=C/ HNM;
 		let AZRQ=-HNN;
 		let AZRR=(AQWB).product_div(AZRQ,HNM);
 		let AZRS=AZRR* AWAO;
@@ -31652,10 +31653,10 @@ impl Instance {
 		let ABJX=(ABJV* HNS)- ABJV;
 		let HNT=-BKG;
 		let AZSB=ANZB* AWAO;
-		let HNU=(((HNS- B)- HNR)+ CEN).sqrt();
+		let HNU=(((HNS- C)- HNR)+ CEN).sqrt();
 		let AZSC=(AZSA- AZRX)* (ANYF/ (AWAY* HNU));
 		let ABJY=BK* HNU;
-		let ABJZ=B/ ABJY;
+		let ABJZ=C/ ABJY;
 		let AZSD=((AZSC* BK)).product_div((-ABJZ),ABJY);
 		let ABKA=ABJW* ABJZ;
 		let ABKB=ABJX* ABJZ;
@@ -31719,7 +31720,7 @@ impl Instance {
 		let HOE=0.16666666666666666f64+ (HNZ* HOD);
 		let HOF=0.5f64+ (HNZ* HOE);
 		let BAEU=(BAET* HOF)+ (((BAET* HOE)+ (((BAET* HOD)+ (((BAET* HOC)+ (((BAET* HOB)+ ((BAET* HOA)* HNZ))* HNZ))* HNZ))* HNZ))* HNZ);
-		let HOG=B+ (HNZ* HOF);
+		let HOG=C+ (HNZ* HOF);
 		let HOH=HNY/ HOG;
 		let BAEV=(BAEU).product_div((-HOH),HOG);
 		let HOI=(HOH< 4.440892098500626e-15f64)&& true;
@@ -31738,7 +31739,7 @@ impl Instance {
 		if HOM{
 		let HOW;
 		if HON{
-		HOW=B;
+		HOW=C;
 		}else{
 		let HOX;
 		if HOO{
@@ -31769,7 +31770,7 @@ impl Instance {
 		}
 		let HOU=HOT.sqrt();
 		let BBLZ=AQWM* (ANYF/ (AWAY* HOU));
-		let HOV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HOR, B));
+		let HOV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HOR, C));
 		HOR=HOV;
 		HOT=HOU;
 		AQWM=BBLZ;
@@ -31792,7 +31793,7 @@ impl Instance {
 		HPD=HPC;
 		AQWL=AQWN;
 		}
-		let HPE=B/ HPD;
+		let HPE=C/ HPD;
 		let HPG=HOJ* HPF;
 		let HPH=4.440892098500626e-15f64- (HPG* HPE);
 		let BAFB=(((BAEW* HPF)* HPE)+ (((AQWL).product_div((-HPE),HPD))* HPG))* AWAO;
@@ -31827,7 +31828,7 @@ impl Instance {
 		if HPU{
 		let HQE;
 		if HPV{
-		HQE=B;
+		HQE=C;
 		}else{
 		let HQF;
 		if HPW{
@@ -31858,7 +31859,7 @@ impl Instance {
 		}
 		let HQC=HQB.sqrt();
 		let BBLY=AQWQ* (ANYF/ (AWAY* HQC));
-		let HQD=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HPZ, B));
+		let HQD=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HPZ, C));
 		HPZ=HQD;
 		HQB=HQC;
 		AQWQ=BBLY;
@@ -31881,7 +31882,7 @@ impl Instance {
 		HQM=HQL;
 		AQWP=AQWR;
 		}
-		let HQN=B/ HQM;
+		let HQN=C/ HQM;
 		let HQO=HPM* GWY;
 		let HQP=HPK- (HQO* HQN);
 		let BAFJ=(((BAFD* GWY)* HQN)+ (((AQWP).product_div((-HQN),HQM))* HQO))* AWAO;
@@ -31896,7 +31897,7 @@ impl Instance {
 		let HQS=HQR.exp();
 		let HQT=-BKG;
 		let BAFL=ANZB* AWAO;
-		let HQU=(((HQS- B)- HQR)+ CEN).sqrt();
+		let HQU=(((HQS- C)- HQR)+ CEN).sqrt();
 		let HQV=HQT* HQU;
 		let BAFM=L5([(BAFL* HQU),0.0,0.0,0.0,0.0])+ ((((BAFK* HQS)- BAFK)* (ANYF/ (AWAY* HQU)))* HQT);
 		let HQY=-(HQW+ HDH);
@@ -31915,7 +31916,7 @@ impl Instance {
 		let HQZ=((HQY* HQY)+ 3.999999999999999e-36f64).sqrt();
 		let BAFT=(BAFQ+ BAFQ)* (ANYF/ (AWAY* HQZ));
 		let ABUF=BK* HQZ;
-		let ABUG=B/ ABUF;
+		let ABUG=C/ ABUF;
 		let BAFU=((BAFT* BK)).product_div((-ABUG),ABUF);
 		let HRA=J* (HQY+ HQZ);
 		let BAFV=(BAFN+ BAFT)* J;
@@ -31986,7 +31987,7 @@ impl Instance {
 		if HRP{
 		let HRZ;
 		if HRQ{
-		HRZ=B;
+		HRZ=C;
 		}else{
 		let HSA;
 		if HRR{
@@ -32017,7 +32018,7 @@ impl Instance {
 		}
 		let HRX=HRW.sqrt();
 		let BBLX=AQWZ* (ANYF/ (AWAY* HRX));
-		let HRY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HRU, B));
+		let HRY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HRU, C));
 		HRU=HRY;
 		HRW=HRX;
 		AQWZ=BBLX;
@@ -32040,7 +32041,7 @@ impl Instance {
 		HSG=HSF;
 		AQWY=AQXA;
 		}
-		let HSH=B/ HSG;
+		let HSH=C/ HSG;
 		let HSJ=HRM* HSI;
 		let HSK=((HRK- 2.220446049250313e-15f64)- 2.220446049250313e-15f64)+ (HSJ* HSH);
 		let BAHM=BAHG+ (((BAHH* HSI)* HSH)+ (((AQWY).product_div((-HSH),HSG))* HSJ));
@@ -32077,7 +32078,7 @@ impl Instance {
 		if HSR{
 		let HTB;
 		if HSS{
-		HTB=B;
+		HTB=C;
 		}else{
 		let HTC;
 		if HST{
@@ -32108,7 +32109,7 @@ impl Instance {
 		}
 		let HSZ=HSY.sqrt();
 		let BAHF=AQXD* (ANYF/ (AWAY* HSZ));
-		let HTA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HSW, B));
+		let HTA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HSW, C));
 		HSW=HTA;
 		HSY=HSZ;
 		AQXD=BAHF;
@@ -32131,7 +32132,7 @@ impl Instance {
 		HTI=HTH;
 		AQXC=AQXE;
 		}
-		let HTJ=B/ HTI;
+		let HTJ=C/ HTI;
 		let HTK=HSP* HSM;
 		let BAGN=BAGF* HSP;
 		let HTL=HSN- (HTK* HTJ);
@@ -32143,12 +32144,12 @@ impl Instance {
 		AQXB=BAGE;
 		}
 		let HTN=(GHA* HTM).sqrt();
-		let HTO=B/ HTN;
+		let HTO=C/ HTN;
 		let HTP=(HRI* GGY)+ (IY* (HRH* HTO));
-		let HTQ=B/ HTP;
+		let HTQ=C/ HTP;
 		let HTR=OS* HTQ;
 		let BAGP=(((((BAGD* HTO)+ (((((AQXB* GHA)* (ANYF/ (AWAY* HTN)))).product_div((-HTO),HTN))* HRH))* IY)).product_div((-HTQ),HTP))* OS;
-		let HTS=B- IW;
+		let HTS=C- IW;
 		let HTT=BIL+ HPJ;
 		let BAGQ=AWLX+ BAFC;
 		let HTU=(IW* HTT)+ (HTS* HNW);
@@ -32169,7 +32170,7 @@ impl Instance {
 		if HTZ{
 		let HUJ;
 		if HUA{
-		HUJ=B;
+		HUJ=C;
 		}else{
 		let HUK;
 		if HUB{
@@ -32200,7 +32201,7 @@ impl Instance {
 		}
 		let HUH=HUG.sqrt();
 		let BAHE=AQXH* (ANYF/ (AWAY* HUH));
-		let HUI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HUE, B));
+		let HUI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HUE, C));
 		HUE=HUI;
 		HUG=HUH;
 		AQXH=BAHE;
@@ -32223,7 +32224,7 @@ impl Instance {
 		HUQ=HUP;
 		AQXG=AQXI;
 		}
-		let HUR=B/ HUQ;
+		let HUR=C/ HUQ;
 		let HUT=HTW* HUS;
 		let HUU=((HTT- 2.220446049250313e-15f64)- 2.220446049250313e-15f64)+ (HUT* HUR);
 		let BAGX=BAGQ+ (((BAGS* HUS)* HUR)+ (((AQXG).product_div((-HUR),HUQ))* HUT));
@@ -32234,8 +32235,8 @@ impl Instance {
 		AQXF=BAGR;
 		}
 		let HUW=BWG* HRH;
-		let HUX=B/ HUW;
-		let HUY=B/ PE;
+		let HUX=C/ HUW;
+		let HUY=C/ PE;
 		let HUZ=BK* (GGY/ OS);
 		let HVA=HUZ* (HUV- HNW);
 		let BAGY=(AQXF- AQRF)* HUZ;
@@ -32264,7 +32265,7 @@ impl Instance {
 		let HVM=AYD.sqrt();
 		let HVN=HVL- HVM;
 		let BAHP=(((BAHO+ BAHO)* (ANYF/ (AWAY* HVL)))* DYR)+ L5([(ANZH* HVN),0.0,0.0,0.0,0.0]);
-		let HVO=B+ (HVN* DYR);
+		let HVO=C+ (HVN* DYR);
 		let HVP=(HVK* HRH)/ HVO;
 		let BAHQ=((BAGD* HVK)).product_sum_div(ANYF,BAHP,(-HVP),HVO);
 		let HVQ=HVP== A;
@@ -32295,14 +32296,14 @@ impl Instance {
 		let HVY=HQ+ ((HVX* HVW)/ DZG);
 		let HVZ=1f64/ HVY;
 		let HWA=(HVZ+ (DZJ* HVS))+ (HVU/ HV);
-		let HWB=B/ HWA;
+		let HWB=C/ HWA;
 		let BAHT=(((((((((BAHP* HR)* HVW)+ ((BAGD/ HVV)* HVX))/ DZG)).product_div((-HVZ),HVY))+ (L5([(ANZI* HVS),0.0,0.0,0.0,0.0])+ (AQXJ* DZJ)))+ (AQXK/ HV))).product_div((-HWB),HWA);
 		let HWC=HWB/ FS;
 		let BAHU=BAHT/ FS;
 		let HWD=HRH+ OM;
 		let HWE=BWG* HWD;
 		let HWF=HWE* HVJ;
-		let HWG=B/ HWF;
+		let HWG=C/ HWF;
 		let HWH=HRG* HWG;
 		let HWI=(CV* AXU)/ HWC;
 		let BAHV=((BAGA* HWG)+ ((((((L5([(ANZE* HWD),0.0,0.0,0.0,0.0])+ (BAGD* BWG))* HVJ)+ (BAHN* HWE))).product_div((-HWG),HWF))* HRG))* HWH;
@@ -32346,12 +32347,12 @@ impl Instance {
 		HWR=HWS;
 		AQXL=AQXM;
 		}
-		let HWT=B+ HWR;
+		let HWT=C+ HWR;
 		let HWU=(0.9999999999999978f64<= DZV)&& (DZV<= 1.0000000000000022f64);
 		let HXD;
 		let AQXO;
 		if HWU{
-		let HWV=B/ HWT;
+		let HWV=C/ HWT;
 		let BAIE=(AQXL).product_div((-HWV),HWT);
 		HXD=HWV;
 		AQXO=BAIE;
@@ -32361,7 +32362,7 @@ impl Instance {
 		let AQXP;
 		if HWW{
 		let HWX=HWT.sqrt();
-		let HWY=B/ HWX;
+		let HWY=C/ HWX;
 		let BAID=((AQXL* (ANYF/ (AWAY* HWX)))).product_div((-HWY),HWX);
 		HXE=HWY;
 		AQXP=BAID;
@@ -32498,7 +32499,7 @@ impl Instance {
 		let BAIO=AOFO* HXP;
 		let ABUU=USZ* HXP;
 		let BAIP=AOFP* HXP;
-		let HXT=HXQ- B;
+		let HXT=HXQ- C;
 		let BAIQ=L5([BAIL[0],BAIL[1],0.0,BAIL[2],BAIL[3]]);
 		let BAIR=L5([BAIO[0],BAIO[1],0.0,BAIO[2],BAIO[3]]);
 		let BAIS=L5([BAIP[0],BAIP[1],0.0,BAIP[2],BAIP[3]]);
@@ -32545,7 +32546,7 @@ impl Instance {
 		AQYL=AQXS;
 		AQYM=AQXT;
 		}
-		let mut HXX=B;
+		let mut HXX=C;
 		let mut HXZ=HZL;
 		let mut HYV=A;
 		let mut WLW=WLQ;
@@ -32586,10 +32587,10 @@ impl Instance {
 		if HYC{
 		let ACEO=ACDM- ACDK;
 		let ACEP=ACDN- ACDL;
-		let HYD=(((HYB- B)- HYA)+ CEN).sqrt();
+		let HYD=(((HYB- C)- HYA)+ CEN).sqrt();
 		let BAVQ=(BAUV- BAUS)* (ANYF/ (AWAY* HYD));
 		let ACEQ=BK* HYD;
-		let ACER=B/ ACEQ;
+		let ACER=C/ ACEQ;
 		let BAVR=((BAVQ* BK)).product_div((-ACER),ACEQ);
 		let ACES=ACEO* ACER;
 		let ACET=ACEP* ACER;
@@ -32652,10 +32653,10 @@ impl Instance {
 		let ACDX=ACDT- (ACDV* HYM);
 		let ACDY=(ACDM- ACDK)+ (ACDW* CIB);
 		let ACDZ=(ACDN- ACDL)+ (ACDX* CIB);
-		let HYO=((((HYB- B)- HYA)+ (CIB* HYN))+ CEN).sqrt();
+		let HYO=((((HYB- C)- HYA)+ (CIB* HYN))+ CEN).sqrt();
 		let BAVE=((BAUV- BAUS)+ (L5([(ANZF* HYN),0.0,0.0,0.0,0.0])+ ((BAUY- L5([BAVB[0],BAVB[1],0.0,BAVB[2],BAVB[3]]))* CIB)))* (ANYF/ (AWAY* HYO));
 		let ACEA=BK* HYO;
-		let ACEB=B/ ACEA;
+		let ACEB=C/ ACEA;
 		let BAVF=((BAVE* BK)).product_div((-ACEB),ACEA);
 		let ACEC=ACDY* ACEB;
 		let ACED=ACDZ* ACEB;
@@ -32736,10 +32737,10 @@ impl Instance {
 		let BAWM=-HZA;
 		let BAWN=((((L5([0.0,BAWD[0],BAWD[1],BAWD[2],BAWD[3]])+ (BAWC* BNR))+ AQYQ)* AWAO)).product_sum_div(ANYF,BAWL,BAWM,HYZ);
 		let BAWO=BAWN* AWAO;
-		let ACFG=product_sum_div(((((URY* HYW)+ (ACFC* BNR))+ WLY)* AMF),B,BAWM,ACFE,HYZ);
-		let BAWP=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAWE[0],BAWE[1],BAWE[2],BAWE[3]])+ (BAWC* URY))+ (((AQYL- AQYO)* BNR)+ L5([0.0,BAWF[0],BAWF[1],BAWF[2],BAWF[3]])))+ AQYS)* AMF).0,B),(&BAWO.0,ACFE),(&(L5([0.0,BAWJ[0],BAWJ[1],BAWJ[2],BAWJ[3]])+ AQYU).0,BAWM),(&BAWL.0,(-ACFG))],HYZ));
-		let ACFH=product_sum_div(((((URZ* HYW)+ (ACFD* BNR))+ WLZ)* AMF),B,BAWM,ACFF,HYZ);
-		let BAWQ=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAWG[0],BAWG[1],BAWG[2],BAWG[3]])+ (BAWC* URZ))+ (((AQYM- AQYP)* BNR)+ L5([0.0,BAWH[0],BAWH[1],BAWH[2],BAWH[3]])))+ AQYT)* AMF).0,B),(&BAWO.0,ACFF),(&(L5([0.0,BAWK[0],BAWK[1],BAWK[2],BAWK[3]])+ AQYV).0,BAWM),(&BAWL.0,(-ACFH))],HYZ));
+		let ACFG=product_sum_div(((((URY* HYW)+ (ACFC* BNR))+ WLY)* AMF),C,BAWM,ACFE,HYZ);
+		let BAWP=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAWE[0],BAWE[1],BAWE[2],BAWE[3]])+ (BAWC* URY))+ (((AQYL- AQYO)* BNR)+ L5([0.0,BAWF[0],BAWF[1],BAWF[2],BAWF[3]])))+ AQYS)* AMF).0,C),(&BAWO.0,ACFE),(&(L5([0.0,BAWJ[0],BAWJ[1],BAWJ[2],BAWJ[3]])+ AQYU).0,BAWM),(&BAWL.0,(-ACFG))],HYZ));
+		let ACFH=product_sum_div(((((URZ* HYW)+ (ACFD* BNR))+ WLZ)* AMF),C,BAWM,ACFF,HYZ);
+		let BAWQ=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAWG[0],BAWG[1],BAWG[2],BAWG[3]])+ (BAWC* URZ))+ (((AQYM- AQYP)* BNR)+ L5([0.0,BAWH[0],BAWH[1],BAWH[2],BAWH[3]])))+ AQYT)* AMF).0,C),(&BAWO.0,ACFF),(&(L5([0.0,BAWK[0],BAWK[1],BAWK[2],BAWK[3]])+ AQYV).0,BAWM),(&BAWL.0,(-ACFH))],HYZ));
 		let HZB=(HZA.abs())< 1e-8f64;
 		let HZF;
 		let HZP;
@@ -32750,7 +32751,7 @@ impl Instance {
 		let AQZB;
 		if HZB{
 		HZF=HZA;
-		HZP=B;
+		HZP=C;
 		WME=ACFG;
 		WMF=ACFH;
 		AQYZ=BAWN;
@@ -32824,7 +32825,7 @@ impl Instance {
 		AQYX=BAWS;
 		AQYY=BAWT;
 		}
-		let HZK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HZJ, B));
+		let HZK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, HZJ, C));
 		HXX=HZK;
 		HXZ=HZM;
 		HYV=HZO;
@@ -32868,7 +32869,7 @@ impl Instance {
 		if HZW{
 		let IAG;
 		if HZX{
-		IAG=B;
+		IAG=C;
 		}else{
 		let IAH;
 		if HZY{
@@ -32899,7 +32900,7 @@ impl Instance {
 		}
 		let IAE=IAD.sqrt();
 		let BAIZ=AQZO* (ANYF/ (AWAY* IAE));
-		let IAF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IAB, B));
+		let IAF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IAB, C));
 		IAB=IAF;
 		IAD=IAE;
 		AQZO=BAIZ;
@@ -32922,7 +32923,7 @@ impl Instance {
 		IAN=IAM;
 		AQZN=AQZP;
 		}
-		let IAO=B/ IAN;
+		let IAO=C/ IAN;
 		let IAP=HZT* CV;
 		let IAQ=0.2f64- (IAP* IAO);
 		let BAIY=(((BAIT* CV)* IAO)+ (((AQZN).product_div((-IAO),IAN))* IAP))* AWAO;
@@ -32958,8 +32959,8 @@ impl Instance {
 		let BAJB=BAJA+ BAJA;
 		let IAZ=IAU* IAU;
 		let mut IBA=A;
-		let mut IBC=B;
-		let mut IBE=B;
+		let mut IBC=C;
+		let mut IBE=C;
 		let mut AQZR=AWLK;
 		loop{
 		let IBB=IBA< BK;
@@ -32969,7 +32970,7 @@ impl Instance {
 		let IBD=IBC* IAY;
 		let BAUR=(AQZR* IAY)+ (BAJB* IBC);
 		let IBF=IBE* IAZ;
-		let IBG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IBA, B));
+		let IBG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IBA, C));
 		IBA=IBG;
 		IBC=IBD;
 		IBE=IBF;
@@ -32981,7 +32982,7 @@ impl Instance {
 		if IBI{
 		let IBS;
 		if IBJ{
-		IBS=B;
+		IBS=C;
 		}else{
 		let IBT;
 		if IBK{
@@ -33012,7 +33013,7 @@ impl Instance {
 		}
 		let IBQ=IBP.sqrt();
 		let BAUQ=AQZT* (ANYF/ (AWAY* IBQ));
-		let IBR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IBN, B));
+		let IBR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IBN, C));
 		IBN=IBR;
 		IBP=IBQ;
 		AQZT=BAUQ;
@@ -33035,7 +33036,7 @@ impl Instance {
 		IBZ=IBY;
 		AQZS=AQZU;
 		}
-		let ICA=B/ IBZ;
+		let ICA=C/ IBZ;
 		let ICB=IAX* IAU;
 		let BAJD=((AQZI* IAU)* ICA)+ (((AQZS).product_div((-ICA),IBZ))* ICB);
 		let ICC=IAV+ (ICB* ICA);
@@ -33078,7 +33079,7 @@ impl Instance {
 		let BAJN=AZGP* GOD;
 		let ICS=ICR* BWG;
 		let ICU=ICT* ICJ;
-		let ICV=B- (ICU* ICJ);
+		let ICV=C- (ICU* ICJ);
 		let ICW=ICS* ICV;
 		let BAJO=((((BAJN+ BAJN)* BWG)+ L4([(ANZE* ICR),0.0,0.0,0.0]))* ICV)+ (((((BAJL* ICT)* ICJ)+ (BAJL* ICU))* AWAO)* ICS);
 		ICX=ICW;
@@ -33107,13 +33108,13 @@ impl Instance {
 		let IDP;
 		let AQZY;
 		if IDE{
-		let IDG=IDF* ((B+ ICY)- AL);
+		let IDG=IDF* ((C+ ICY)- AL);
 		let BAJW=BAJR* IDF;
 		IDP=IDG;
 		AQZY=BAJW;
 		}else{
 		let mut IDH=ICY;
-		let mut IDJ=B;
+		let mut IDJ=C;
 		let mut AQZZ=BAJR;
 		loop{
 		let IDI=IDH>= RV;
@@ -33141,7 +33142,7 @@ impl Instance {
 		IDU=IDQ;
 		AQZX=BAJY;
 		}else{
-		let IDR=B+ (ICY/ BK);
+		let IDR=C+ (ICY/ BK);
 		let IDS=ICY* IDR;
 		let IDT=IDS* IDC;
 		let BAJT=BAJS* IDS;
@@ -33153,7 +33154,7 @@ impl Instance {
 		let IEA;
 		let ARAA;
 		if IDV{
-		let IDW=B+ IDU;
+		let IDW=C+ IDU;
 		let IDX=(IDW.ln())/ ICX;
 		let BAKA=((AQZX* (ANYF/ IDW))).product_sum_div(ANYF,L5([AQZV[0],AQZV[1],0.0,AQZV[2],AQZV[3]]),(-IDX),ICX);
 		IEA=IDX;
@@ -33199,7 +33200,7 @@ impl Instance {
 		let BAKF=L5([(ANZE* IEB),0.0,0.0,0.0,0.0])+ (BAKC* BWG);
 		let IEL=GHA* CWM;
 		let IEM=IEK.exp();
-		let IEN=(IEM- IEK)- B;
+		let IEN=(IEM- IEK)- C;
 		let IEO=(IEL* IEN).sqrt();
 		let IEP=-IEO;
 		let BAKG=((L5([((ANZG* GHA)* IEN),0.0,0.0,0.0,0.0])+ (((BAKF* IEM)- BAKF)* IEL))* (ANYF/ (AWAY* IEO)))* AWAO;
@@ -33210,7 +33211,7 @@ impl Instance {
 		let BAKD=L5([(BAFY* IEB),0.0,0.0,0.0,0.0])+ (BAKC* HRE);
 		let IER=GHA* CWM;
 		let IES=IEQ.exp();
-		let IET=(IES- IEQ)- B;
+		let IET=(IES- IEQ)- C;
 		let IEU=(IER* IET).sqrt();
 		let BAKE=(L5([((ANZG* GHA)* IET),0.0,0.0,0.0,0.0])+ (((BAKD* IES)- BAKD)* IER))* (ANYF/ (AWAY* IEU));
 		IEW=IEU;
@@ -33238,7 +33239,7 @@ impl Instance {
 		if IFD{
 		let IFN;
 		if IFE{
-		IFN=B;
+		IFN=C;
 		}else{
 		let IFO;
 		if IFF{
@@ -33269,7 +33270,7 @@ impl Instance {
 		}
 		let IFL=IFK.sqrt();
 		let BAUP=ARAG* (ANYF/ (AWAY* IFL));
-		let IFM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IFI, B));
+		let IFM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IFI, C));
 		IFI=IFM;
 		IFK=IFL;
 		ARAG=BAUP;
@@ -33292,7 +33293,7 @@ impl Instance {
 		IFU=IFT;
 		ARAF=ARAH;
 		}
-		let IFV=B/ IFU;
+		let IFV=C/ IFU;
 		let IFW=IFA* IEY;
 		let IFX=1e-16f64- (IFW* IFV);
 		let BAKQ=(((BAKL* IEY)* IFV)+ (((ARAF).product_div((-IFV),IFU))* IFW))* AWAO;
@@ -33340,7 +33341,7 @@ impl Instance {
 		let BAKT=AOFO* HXP;
 		let ABUY=USZ* HXP;
 		let BAKU=AOFP* HXP;
-		let IGB=HXQ- B;
+		let IGB=HXQ- C;
 		let BAKV=L5([BAIL[0],BAIL[1],0.0,BAIL[2],BAIL[3]]);
 		let BAKW=L5([BAKT[0],BAKT[1],0.0,BAKT[2],BAKT[3]]);
 		let BAKX=L5([BAKU[0],BAKU[1],0.0,BAKU[2],BAKU[3]]);
@@ -33399,7 +33400,7 @@ impl Instance {
 		ARAT=AQXS;
 		ARAU=AQXT;
 		}
-		let mut IGD=B;
+		let mut IGD=C;
 		let mut IGF=IHR;
 		let mut IHB=A;
 		let mut WMU=WMM;
@@ -33440,10 +33441,10 @@ impl Instance {
 		if IGI{
 		let ACCO=ACBM- ACBK;
 		let ACCP=ACBN- ACBL;
-		let IGJ=(((IGH- B)- IGG)+ CEN).sqrt();
+		let IGJ=(((IGH- C)- IGG)+ CEN).sqrt();
 		let BATL=(BASQ- BASN)* (ANYF/ (AWAY* IGJ));
 		let ACCQ=BK* IGJ;
-		let ACCR=B/ ACCQ;
+		let ACCR=C/ ACCQ;
 		let BATM=((BATL* BK)).product_div((-ACCR),ACCQ);
 		let ACCS=ACCO* ACCR;
 		let ACCT=ACCP* ACCR;
@@ -33506,10 +33507,10 @@ impl Instance {
 		let ACBX=ACBT- (ACBV* IGS);
 		let ACBY=(ACBM- ACBK)+ (ACBW* CIB);
 		let ACBZ=(ACBN- ACBL)+ (ACBX* CIB);
-		let IGU=((((IGH- B)- IGG)+ (CIB* IGT))+ CEN).sqrt();
+		let IGU=((((IGH- C)- IGG)+ (CIB* IGT))+ CEN).sqrt();
 		let BASZ=((BASQ- BASN)+ (L5([(ANZF* IGT),0.0,0.0,0.0,0.0])+ ((BAST- L5([BASW[0],BASW[1],0.0,BASW[2],BASW[3]]))* CIB)))* (ANYF/ (AWAY* IGU));
 		let ACCA=BK* IGU;
-		let ACCB=B/ ACCA;
+		let ACCB=C/ ACCA;
 		let BATA=((BASZ* BK)).product_div((-ACCB),ACCA);
 		let ACCC=ACBY* ACCB;
 		let ACCD=ACBZ* ACCB;
@@ -33590,10 +33591,10 @@ impl Instance {
 		let BAUH=-IHG;
 		let BAUI=((((L5([0.0,BATY[0],BATY[1],BATY[2],BATY[3]])+ (BATX* BNR))+ ARAY)* AWAO)).product_sum_div(ANYF,BAUG,BAUH,IHF);
 		let BAUJ=BAUI* AWAO;
-		let ACDG=product_sum_div(((((URY* IHC)+ (ACDC* BNR))+ WMW)* AMF),B,BAUH,ACDE,IHF);
-		let BAUK=L5(sum_products_div_lanes(&[(&((((L5([0.0,BATZ[0],BATZ[1],BATZ[2],BATZ[3]])+ (BATX* URY))+ (((ARAR- ARAW)* BNR)+ L5([0.0,BAUA[0],BAUA[1],BAUA[2],BAUA[3]])))+ ARBA)* AMF).0,B),(&BAUJ.0,ACDE),(&(L5([0.0,BAUE[0],BAUE[1],BAUE[2],BAUE[3]])+ ARBC).0,BAUH),(&BAUG.0,(-ACDG))],IHF));
-		let ACDH=product_sum_div(((((URZ* IHC)+ (ACDD* BNR))+ WMX)* AMF),B,BAUH,ACDF,IHF);
-		let BAUL=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAUB[0],BAUB[1],BAUB[2],BAUB[3]])+ (BATX* URZ))+ (((ARAS- ARAX)* BNR)+ L5([0.0,BAUC[0],BAUC[1],BAUC[2],BAUC[3]])))+ ARBB)* AMF).0,B),(&BAUJ.0,ACDF),(&(L5([0.0,BAUF[0],BAUF[1],BAUF[2],BAUF[3]])+ ARBD).0,BAUH),(&BAUG.0,(-ACDH))],IHF));
+		let ACDG=product_sum_div(((((URY* IHC)+ (ACDC* BNR))+ WMW)* AMF),C,BAUH,ACDE,IHF);
+		let BAUK=L5(sum_products_div_lanes(&[(&((((L5([0.0,BATZ[0],BATZ[1],BATZ[2],BATZ[3]])+ (BATX* URY))+ (((ARAR- ARAW)* BNR)+ L5([0.0,BAUA[0],BAUA[1],BAUA[2],BAUA[3]])))+ ARBA)* AMF).0,C),(&BAUJ.0,ACDE),(&(L5([0.0,BAUE[0],BAUE[1],BAUE[2],BAUE[3]])+ ARBC).0,BAUH),(&BAUG.0,(-ACDG))],IHF));
+		let ACDH=product_sum_div(((((URZ* IHC)+ (ACDD* BNR))+ WMX)* AMF),C,BAUH,ACDF,IHF);
+		let BAUL=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAUB[0],BAUB[1],BAUB[2],BAUB[3]])+ (BATX* URZ))+ (((ARAS- ARAX)* BNR)+ L5([0.0,BAUC[0],BAUC[1],BAUC[2],BAUC[3]])))+ ARBB)* AMF).0,C),(&BAUJ.0,ACDF),(&(L5([0.0,BAUF[0],BAUF[1],BAUF[2],BAUF[3]])+ ARBD).0,BAUH),(&BAUG.0,(-ACDH))],IHF));
 		let IHH=(IHG.abs())< 1e-8f64;
 		let IHL;
 		let IHV;
@@ -33604,7 +33605,7 @@ impl Instance {
 		let ARBJ;
 		if IHH{
 		IHL=IHG;
-		IHV=B;
+		IHV=C;
 		WNC=ACDG;
 		WND=ACDH;
 		ARBH=BAUI;
@@ -33678,7 +33679,7 @@ impl Instance {
 		ARBF=BAUN;
 		ARBG=BAUO;
 		}
-		let IHQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IHP, B));
+		let IHQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IHP, C));
 		IGD=IHQ;
 		IGF=IHS;
 		IHB=IHU;
@@ -33746,7 +33747,7 @@ impl Instance {
 		if IIE{
 		let IIO;
 		if IIF{
-		IIO=B;
+		IIO=C;
 		}else{
 		let IIP;
 		if IIG{
@@ -33782,13 +33783,13 @@ impl Instance {
 		let IIM=IIL.sqrt();
 		let BALW=ARBZ* (ANYF/ (AWAY* IIM));
 		let ABVU=BK* IIM;
-		let ABVV=B/ ABVU;
+		let ABVV=C/ ABVU;
 		let BALX=((BALW* BK)).product_div((-ABVV),ABVU);
 		let ABVW=WNO* ABVV;
 		let BALY=(ARCA* ABVV)+ (BALX* WNO);
 		let ABVX=WNP* ABVV;
 		let BALZ=(ARCB* ABVV)+ (BALX* WNP);
-		let IIN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IIJ, B));
+		let IIN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IIJ, C));
 		IIJ=IIN;
 		IIL=IIM;
 		WNO=ABVW;
@@ -33843,7 +33844,7 @@ impl Instance {
 		ARBX=ARCD;
 		ARBY=ARCE;
 		}
-		let IIX=B/ IIW;
+		let IIX=C/ IIW;
 		let BALP=-IIX;
 		let BALQ=(ARBW).product_div(BALP,IIW);
 		let BALR=BALQ* AWAO;
@@ -33908,8 +33909,8 @@ impl Instance {
 		let BAMF=BAME+ BAME;
 		let IJH=IJC* IJC;
 		let mut IJI=A;
-		let mut IJK=B;
-		let mut IJM=B;
+		let mut IJK=C;
+		let mut IJM=C;
 		let mut WNU=A;
 		let mut WNV=A;
 		let mut ARCI=AWLK;
@@ -33927,7 +33928,7 @@ impl Instance {
 		let ACBJ=(WNV* IJG)+ (ABWB* IJK);
 		let BASM=((ARCK* IJG)+ (BAMB* WNV))+ ((BAMF* IJK)+ (ARCI* ABWB));
 		let IJN=IJM* IJH;
-		let IJO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IJI, B));
+		let IJO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IJI, C));
 		IJI=IJO;
 		IJK=IJL;
 		IJM=IJN;
@@ -33947,7 +33948,7 @@ impl Instance {
 		if IJQ{
 		let IKA;
 		if IJR{
-		IKA=B;
+		IKA=C;
 		}else{
 		let IKB;
 		if IJS{
@@ -33983,13 +33984,13 @@ impl Instance {
 		let IJY=IJX.sqrt();
 		let BASG=ARCO* (ANYF/ (AWAY* IJY));
 		let ACBE=BK* IJY;
-		let ACBF=B/ ACBE;
+		let ACBF=C/ ACBE;
 		let BASH=((BASG* BK)).product_div((-ACBF),ACBE);
 		let ACBG=WNY* ACBF;
 		let BASI=(ARCP* ACBF)+ (BASH* WNY);
 		let ACBH=WNZ* ACBF;
 		let BASJ=(ARCQ* ACBF)+ (BASH* WNZ);
-		let IJZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IJV, B));
+		let IJZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IJV, C));
 		IJV=IJZ;
 		IJX=IJY;
 		WNY=ACBG;
@@ -34044,7 +34045,7 @@ impl Instance {
 		ARCM=ARCS;
 		ARCN=ARCT;
 		}
-		let IKJ=B/ IKI;
+		let IKJ=C/ IKI;
 		let BAMK=-IKJ;
 		let BAML=(ARCL).product_div(BAMK,IKI);
 		let BAMM=BAML* AWAO;
@@ -34090,7 +34091,7 @@ impl Instance {
 		let ABWU=ABWS* ICH;
 		let BAMW=BAJI* BAJJ;
 		let ABWV=BK* ICI;
-		let ABWW=B/ ABWV;
+		let ABWW=C/ ABWV;
 		let BAMX=((BAMW* BK)).product_div((-ABWW),ABWV);
 		let ABWX=ABWT* ABWW;
 		let ABWY=ABWU* ABWW;
@@ -34118,16 +34119,16 @@ impl Instance {
 		let ARCV;
 		let ARCW;
 		if IKQ{
-		let ABXR=B/ IKP;
+		let ABXR=C/ IKP;
 		let BANP=(BAND).product_div((-ABXR),IKP);
 		let IKR=(IKP.ln())/ ICG;
 		let BANQ=-IKR;
 		let BANR=((BAND* (ANYF/ IKP))).product_sum_div(ANYF,BAJG,BANQ,ICG);
 		let BANS=BANR* AWAO;
-		let ABXS=product_sum_div((ABXD* ABXR),B,BANQ,ABWR,ICG);
-		let BANT=L4(sum_products_div_lanes(&[(&((BANE* ABXR)+ (BANP* ABXD)).0,B),(&BANS.0,ABWR),(&BAMU.0,BANQ),(&BAJG.0,(-ABXS))],ICG));
-		let ABXT=product_sum_div((ABXE* ABXR),B,BANQ,ABWS,ICG);
-		let BANU=L4(sum_products_div_lanes(&[(&((BANF* ABXR)+ (BANP* ABXE)).0,B),(&BANS.0,ABWS),(&BAMV.0,BANQ),(&BAJG.0,(-ABXT))],ICG));
+		let ABXS=product_sum_div((ABXD* ABXR),C,BANQ,ABWR,ICG);
+		let BANT=L4(sum_products_div_lanes(&[(&((BANE* ABXR)+ (BANP* ABXD)).0,C),(&BANS.0,ABWR),(&BAMU.0,BANQ),(&BAJG.0,(-ABXS))],ICG));
+		let ABXT=product_sum_div((ABXE* ABXR),C,BANQ,ABWS,ICG);
+		let BANU=L4(sum_products_div_lanes(&[(&((BANF* ABXR)+ (BANP* ABXE)).0,C),(&BANS.0,ABWS),(&BAMV.0,BANQ),(&BAJG.0,(-ABXT))],ICG));
 		IKX=IKR;
 		WOC=ABXS;
 		WOD=ABXT;
@@ -34151,7 +34152,7 @@ impl Instance {
 		let BANK=BAMY* ICT;
 		let ABXL=ABWZ* ICT;
 		let ABXM=ABXA* ICT;
-		let IKV=B- (IKU* ICJ);
+		let IKV=C- (IKU* ICJ);
 		let BANL=((BANK* ICJ)+ (BAMY* IKU))* AWAO;
 		let ABXN=-((ABXL* ICJ)+ (ABWZ* IKU));
 		let ABXO=-((ABXM* ICJ)+ (ABXA* IKU));
@@ -34228,7 +34229,7 @@ impl Instance {
 		let ARDE;
 		let ARDF;
 		if ILE{
-		let ILF=IDF* ((B+ IKY)- AL);
+		let ILF=IDF* ((C+ IKY)- AL);
 		let BAOV=BANW* IDF;
 		let ABYK=ABXU* IDF;
 		let BAOW=BANZ* IDF;
@@ -34242,7 +34243,7 @@ impl Instance {
 		ARDF=BAOX;
 		}else{
 		let mut ILG=IKY;
-		let mut ILI=B;
+		let mut ILI=C;
 		let mut WOK=ABXU;
 		let mut WOL=ABXV;
 		let mut ARDG=BANW;
@@ -34306,7 +34307,7 @@ impl Instance {
 		let BAOH=BANW/ BK;
 		let ABYC=ABXU/ BK;
 		let ABYD=ABXV/ BK;
-		let ILP=B+ (IKY/ BK);
+		let ILP=C+ (IKY/ BK);
 		let ILQ=IKY* ILP;
 		let BAOI=(BANW* ILP)+ (BAOH* IKY);
 		let ABYE=(ABXU* ILP)+ (ABYC* IKY);
@@ -34337,18 +34338,18 @@ impl Instance {
 		let ARDK;
 		let ARDL;
 		if ILT{
-		let ILU=B+ ILS;
-		let ABYQ=B/ ILU;
+		let ILU=C+ ILS;
+		let ABYQ=C/ ILU;
 		let BAPM=(ARDA).product_div((-ABYQ),ILU);
 		let ILV=(ILU.ln())/ IKX;
 		let BAPN=-ILV;
 		let BAPO=L5([ARCU[0],ARCU[1],0.0,ARCU[2],ARCU[3]]);
 		let BAPP=((ARDA* (ANYF/ ILU))).product_sum_div(ANYF,BAPO,BAPN,IKX);
 		let BAPQ=BAPP* AWAO;
-		let ABYR=product_sum_div((WOG* ABYQ),B,BAPN,WOC,IKX);
-		let BAPR=L5(sum_products_div_lanes(&[(&((ARDB* ABYQ)+ (BAPM* WOG)).0,B),(&BAPQ.0,WOC),(&L5([ARCV[0],ARCV[1],0.0,ARCV[2],ARCV[3]]).0,BAPN),(&BAPO.0,(-ABYR))],IKX));
-		let ABYS=product_sum_div((WOH* ABYQ),B,BAPN,WOD,IKX);
-		let BAPS=L5(sum_products_div_lanes(&[(&((ARDC* ABYQ)+ (BAPM* WOH)).0,B),(&BAPQ.0,WOD),(&L5([ARCW[0],ARCW[1],0.0,ARCW[2],ARCW[3]]).0,BAPN),(&BAPO.0,(-ABYS))],IKX));
+		let ABYR=product_sum_div((WOG* ABYQ),C,BAPN,WOC,IKX);
+		let BAPR=L5(sum_products_div_lanes(&[(&((ARDB* ABYQ)+ (BAPM* WOG)).0,C),(&BAPQ.0,WOC),(&L5([ARCV[0],ARCV[1],0.0,ARCV[2],ARCV[3]]).0,BAPN),(&BAPO.0,(-ABYR))],IKX));
+		let ABYS=product_sum_div((WOH* ABYQ),C,BAPN,WOD,IKX);
+		let BAPS=L5(sum_products_div_lanes(&[(&((ARDC* ABYQ)+ (BAPM* WOH)).0,C),(&BAPQ.0,WOD),(&L5([ARCW[0],ARCW[1],0.0,ARCW[2],ARCW[3]]).0,BAPN),(&BAPO.0,(-ABYS))],IKX));
 		ILY=ILV;
 		WOM=ABYR;
 		WON=ABYS;
@@ -34361,10 +34362,10 @@ impl Instance {
 		let BAPH=L5([ARCU[0],ARCU[1],0.0,ARCU[2],ARCU[3]]);
 		let BAPI=(ARDA).product_sum_div(ANYF,BAPH,BAPG,IKX);
 		let BAPJ=BAPI* AWAO;
-		let ABYO=product_sum_div(WOG,B,BAPG,WOC,IKX);
-		let BAPK=L5(sum_products_div_lanes(&[(&ARDB.0,B),(&BAPJ.0,WOC),(&L5([ARCV[0],ARCV[1],0.0,ARCV[2],ARCV[3]]).0,BAPG),(&BAPH.0,(-ABYO))],IKX));
-		let ABYP=product_sum_div(WOH,B,BAPG,WOD,IKX);
-		let BAPL=L5(sum_products_div_lanes(&[(&ARDC.0,B),(&BAPJ.0,WOD),(&L5([ARCW[0],ARCW[1],0.0,ARCW[2],ARCW[3]]).0,BAPG),(&BAPH.0,(-ABYP))],IKX));
+		let ABYO=product_sum_div(WOG,C,BAPG,WOC,IKX);
+		let BAPK=L5(sum_products_div_lanes(&[(&ARDB.0,C),(&BAPJ.0,WOC),(&L5([ARCV[0],ARCV[1],0.0,ARCV[2],ARCV[3]]).0,BAPG),(&BAPH.0,(-ABYO))],IKX));
+		let ABYP=product_sum_div(WOH,C,BAPG,WOD,IKX);
+		let BAPL=L5(sum_products_div_lanes(&[(&ARDC.0,C),(&BAPJ.0,WOD),(&L5([ARCW[0],ARCW[1],0.0,ARCW[2],ARCW[3]]).0,BAPG),(&BAPH.0,(-ABYP))],IKX));
 		ILY=ILW;
 		WOM=ABYO;
 		WON=ABYP;
@@ -34406,7 +34407,7 @@ impl Instance {
 		let IMD=(IMC* ILZ).sqrt();
 		let BAQW=(BAPW* IMC)* (ANYF/ (AWAY* IMD));
 		let ABZZ=BK* IMD;
-		let ACAA=B/ ABZZ;
+		let ACAA=C/ ABZZ;
 		let BAQX=((BAQW* BK)).product_div((-ACAA),ABZZ);
 		let IME=-IMD;
 		let BAQY=BAQW* AWAO;
@@ -34426,7 +34427,7 @@ impl Instance {
 		let IMF=(GHA* ILZ).sqrt();
 		let BAQS=(BAPW* GHA)* (ANYF/ (AWAY* IMF));
 		let ABZT=BK* IMF;
-		let ABZU=B/ ABZT;
+		let ABZU=C/ ABZT;
 		let BAQT=((BAQS* BK)).product_div((-ABZU),ABZT);
 		let ABZV=ABZR* ABZU;
 		let BAQU=((BAPX* GHA)* ABZU)+ (BAQT* ABZR);
@@ -34466,13 +34467,13 @@ impl Instance {
 		let BAQM=BAQI* IMK;
 		let ABZJ=(ABZH* IMK)- ABZH;
 		let ABZK=(ABZI* IMK)- ABZI;
-		let IML=(IMK- IMI)- B;
+		let IML=(IMK- IMI)- C;
 		let ABZL=ABZJ* IMJ;
 		let ABZM=ABZK* IMJ;
 		let IMM=(IMJ* IML).sqrt();
 		let BAQN=(L5([(BAQL* IML),0.0,0.0,0.0,0.0])+ ((BAQM- BAQI)* IMJ))* (ANYF/ (AWAY* IMM));
 		let ABZN=BK* IMM;
-		let ABZO=B/ ABZN;
+		let ABZO=C/ ABZN;
 		let BAQO=((BAQN* BK)).product_div((-ABZO),ABZN);
 		let IMN=-IMM;
 		let BAQP=BAQN* AWAO;
@@ -34499,13 +34500,13 @@ impl Instance {
 		let BAQD=BAPZ* IMQ;
 		let ABYZ=(ABYX* IMQ)- ABYX;
 		let ABZA=(ABYY* IMQ)- ABYY;
-		let IMR=(IMQ- IMO)- B;
+		let IMR=(IMQ- IMO)- C;
 		let ABZB=ABYZ* IMP;
 		let ABZC=ABZA* IMP;
 		let IMS=(IMP* IMR).sqrt();
 		let BAQE=(L5([(BAQC* IMR),0.0,0.0,0.0,0.0])+ ((BAQD- BAPZ)* IMP))* (ANYF/ (AWAY* IMS));
 		let ABZD=BK* IMS;
-		let ABZE=B/ ABZD;
+		let ABZE=C/ ABZD;
 		let BAQF=((BAQE* BK)).product_div((-ABZE),ABZD);
 		let ABZF=ABZB* ABZE;
 		let BAQG=((((((BAQA* IMQ)+ (BAQD* ABYX))- BAQA)* IMP)+ L5([(BAQC* ABYZ),0.0,0.0,0.0,0.0]))* ABZE)+ (BAQF* ABZB);
@@ -34574,7 +34575,7 @@ impl Instance {
 		if INA{
 		let INK;
 		if INB{
-		INK=B;
+		INK=C;
 		}else{
 		let INL;
 		if INC{
@@ -34610,13 +34611,13 @@ impl Instance {
 		let INI=INH.sqrt();
 		let BASC=AREB* (ANYF/ (AWAY* INI));
 		let ACBA=BK* INI;
-		let ACBB=B/ ACBA;
+		let ACBB=C/ ACBA;
 		let BASD=((BASC* BK)).product_div((-ACBB),ACBA);
 		let ACBC=WOY* ACBB;
 		let BASE=(AREC* ACBB)+ (BASD* WOY);
 		let ACBD=WOZ* ACBB;
 		let BASF=(ARED* ACBB)+ (BASD* WOZ);
-		let INJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, INF, B));
+		let INJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, INF, C));
 		INF=INJ;
 		INH=INI;
 		WOY=ACBC;
@@ -34671,7 +34672,7 @@ impl Instance {
 		ARDZ=AREF;
 		AREA=AREG;
 		}
-		let INT=B/ INS;
+		let INT=C/ INS;
 		let BARV=-INT;
 		let BARW=(ARDY).product_div(BARV,INS);
 		let BARX=BARW* AWAO;
@@ -34749,8 +34750,8 @@ impl Instance {
 		let BAZY=AZAV* ACHN;
 		let ACHP=(AAWG* INZ)+ (ACHN* GHF);
 		let BAZZ=(L5([0.0,BAZX[0],BAZX[1],BAZX[2],BAZX[3]])+ (BAZR* AAWG))+ (((AXBN- L5([BAZQ[0],BAZQ[1],0.0,BAZQ[2],BAZQ[3]]))* GHF)+ L5([0.0,BAZY[0],BAZY[1],BAZY[2],BAZY[3]]));
-		let IOA=B+ (GHF* INZ);
-		let IOB=B+ GHF;
+		let IOA=C+ (GHF* INZ);
+		let IOB=C+ GHF;
 		let IOC=A+ IOB;
 		let IOD=(IOA< IOC)&& (IOB>= A);
 		let IPE;
@@ -34815,7 +34816,7 @@ impl Instance {
 		if IOI{
 		let IOS;
 		if IOJ{
-		IOS=B;
+		IOS=C;
 		}else{
 		let IOT;
 		if IOK{
@@ -34851,13 +34852,13 @@ impl Instance {
 		let IOQ=IOP.sqrt();
 		let BBLT=ARER* (ANYF/ (AWAY* IOQ));
 		let ACQB=BK* IOQ;
-		let ACQC=B/ ACQB;
+		let ACQC=C/ ACQB;
 		let BBLU=((BBLT* BK)).product_div((-ACQC),ACQB);
 		let ACQD=WPI* ACQC;
 		let BBLV=(ARES* ACQC)+ (BBLU* WPI);
 		let ACQE=WPJ* ACQC;
 		let BBLW=(ARET* ACQC)+ (BBLU* WPJ);
-		let IOR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ION, B));
+		let IOR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ION, C));
 		ION=IOR;
 		IOP=IOQ;
 		WPI=ACQD;
@@ -34912,7 +34913,7 @@ impl Instance {
 		AREP=AREV;
 		AREQ=AREW;
 		}
-		let IPB=B/ IPA;
+		let IPB=C/ IPA;
 		let BBBE=-IPB;
 		let BBBF=(AREO).product_div(BBBE,IPA);
 		let BBBG=BBBF* AWAO;
@@ -34952,9 +34953,9 @@ impl Instance {
 		let IPF=IPE.sqrt();
 		let BBBS=AREL* (ANYF/ (AWAY* IPF));
 		let ACIR=BK* IPF;
-		let ACIS=B/ ACIR;
+		let ACIS=C/ ACIR;
 		let BBBT=((BBBS* BK)).product_div((-ACIS),ACIR);
-		let IPG=B- IPF;
+		let IPG=C- IPF;
 		let BBBU=BBBS* AWAO;
 		let ACIT=-(WPE* ACIS);
 		let ACIU=-(WPF* ACIS);
@@ -35014,7 +35015,7 @@ impl Instance {
 		if IPP{
 		let IPZ;
 		if IPQ{
-		IPZ=B;
+		IPZ=C;
 		}else{
 		let IQA;
 		if IPR{
@@ -35050,13 +35051,13 @@ impl Instance {
 		let IPX=IPW.sqrt();
 		let BBLP=ARFD* (ANYF/ (AWAY* IPX));
 		let ACPX=BK* IPX;
-		let ACPY=B/ ACPX;
+		let ACPY=C/ ACPX;
 		let BBLQ=((BBLP* BK)).product_div((-ACPY),ACPX);
 		let ACPZ=WPQ* ACPY;
 		let BBLR=(ARFE* ACPY)+ (BBLQ* WPQ);
 		let ACQA=WPR* ACPY;
 		let BBLS=(ARFF* ACPY)+ (BBLQ* WPR);
-		let IPY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IPU, B));
+		let IPY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IPU, C));
 		IPU=IPY;
 		IPW=IPX;
 		WPQ=ACPZ;
@@ -35111,7 +35112,7 @@ impl Instance {
 		ARFB=ARFH;
 		ARFC=ARFI;
 		}
-		let IQI=B/ IQH;
+		let IQI=C/ IQH;
 		let BBCU=-IQI;
 		let BBCV=(ARFA).product_div(BBCU,IQH);
 		let BBCW=BBCV* AWAO;
@@ -35158,7 +35159,7 @@ impl Instance {
 		let BAXA=AZAV* WLJ;
 		let ACFL=(AAWG* HXV)+ (WLJ* GHF);
 		let BAXB=(L5([0.0,BAWZ[0],BAWZ[1],BAWZ[2],BAWZ[3]])+ (AQXR* AAWG))+ ((AQXT* GHF)+ L5([0.0,BAXA[0],BAXA[1],BAXA[2],BAXA[3]]));
-		let IQL=B+ (GHF* HXV);
+		let IQL=C+ (GHF* HXV);
 		let IQM=IQL> A;
 		let IQQ;
 		let WPU;
@@ -35170,7 +35171,7 @@ impl Instance {
 		let IQN=IQL.sqrt();
 		let BAXH=BAWV* (ANYF/ (AWAY* IQN));
 		let ACFS=BK* IQN;
-		let ACFT=B/ ACFS;
+		let ACFT=C/ ACFS;
 		let BAXI=((BAXH* BK)).product_div((-ACFT),ACFS);
 		let ACFU=ACFK* ACFT;
 		let BAXJ=(BAWY* ACFT)+ (BAXI* ACFK);
@@ -35188,7 +35189,7 @@ impl Instance {
 		let IQO=(-IQL).sqrt();
 		let BAXC=(BAWV* AWAO)* (ANYF/ (AWAY* IQO));
 		let ACFO=BK* IQO;
-		let ACFP=B/ ACFO;
+		let ACFP=C/ ACFO;
 		let BAXD=((BAXC* BK)).product_div((-ACFP),ACFO);
 		let IQP=-IQO;
 		let BAXE=BAXC* AWAO;
@@ -35203,7 +35204,7 @@ impl Instance {
 		ARFK=BAXF;
 		ARFL=BAXG;
 		}
-		let IQR=B- IQQ;
+		let IQR=C- IQQ;
 		let BAXL=ARFJ* AWAO;
 		let ACFW=-WPU;
 		let ACFX=-WPV;
@@ -35218,7 +35219,7 @@ impl Instance {
 		let BAXS=AQXS+ ((L5([0.0,BAXN[0],BAXN[1],BAXN[2],BAXN[3]])+ (BAXL* AAWD))+ (((ARFK* AWAO)* GHE)+ L5([0.0,BAXO[0],BAXO[1],BAXO[2],BAXO[3]])));
 		let ACFZ=WLJ+ ((AAWE* IQR)+ (ACFX* GHE));
 		let BAXT=AQXT+ ((L5([0.0,BAXP[0],BAXP[1],BAXP[2],BAXP[3]])+ (BAXL* AAWE))+ (((ARFL* AWAO)* GHE)+ L5([0.0,BAXQ[0],BAXQ[1],BAXQ[2],BAXQ[3]])));
-		let mut IQT=B;
+		let mut IQT=C;
 		let mut IQV=IQS;
 		let mut IRK=A;
 		let mut WPW=ACFY;
@@ -35248,10 +35249,10 @@ impl Instance {
 		let BAYI=(product_div(ANZE,(-IQY),BWG))* (ANYF/ (AWAY* IQZ));
 		let ACGM=ACGK- ACGI;
 		let ACGN=ACGL- ACGJ;
-		let IRA=(((IQX- IQW)- B)+ CEN).sqrt();
+		let IRA=(((IQX- IQW)- C)+ CEN).sqrt();
 		let BAYJ=(BAYF- BAYC)* (ANYF/ (AWAY* IRA));
 		let ACGO=BK* IRA;
-		let ACGP=B/ ACGO;
+		let ACGP=C/ ACGO;
 		let BAYK=((BAYJ* BK)).product_div((-ACGP),ACGO);
 		let ACGQ=ACGM* ACGP;
 		let ACGR=ACGN* ACGP;
@@ -35300,7 +35301,7 @@ impl Instance {
 		let BAYU=BAYF* AWAO;
 		let ACGY=ACGK* AMF;
 		let ACGZ=ACGL* AMF;
-		let IRI=(-IQX)+ B;
+		let IRI=(-IQX)+ C;
 		let IRJ=IRH* IRI;
 		let BAYV=(BAYS* IRI)+ (BAYU* IRH);
 		let ACHA=(ACGW* IRI)+ (ACGY* IRH);
@@ -35346,10 +35347,10 @@ impl Instance {
 		let BAZG=-IRO;
 		let BAZH=((((L5([0.0,BAZA[0],BAZA[1],BAZA[2],BAZA[3]])+ (BAYZ* IRL))+ ARFP)* AWAO)).product_sum_div(ANYF,BAZF,BAZG,IRN);
 		let BAZI=BAZH* AWAO;
-		let ACHI=product_sum_div(((((ACHC* IRM)+ (ACHE* IRL))+ WPY)* AMF),B,BAZG,ACHG,IRN);
-		let BAZJ=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAZB[0],BAZB[1],BAZB[2],BAZB[3]])+ (BAYZ* ACHC))+ (((AQXS- ARFN)* IRL)+ L5([0.0,BAZC[0],BAZC[1],BAZC[2],BAZC[3]])))+ ARFQ)* AMF).0,B),(&BAZI.0,ACHG),(&(L5([0.0,AOED[0],AOED[1],AOED[2],AOED[3]])+ BAYW).0,BAZG),(&BAZF.0,(-ACHI))],IRN));
-		let ACHJ=product_sum_div(((((ACHD* IRM)+ (ACHF* IRL))+ WPZ)* AMF),B,BAZG,ACHH,IRN);
-		let BAZK=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAZD[0],BAZD[1],BAZD[2],BAZD[3]])+ (BAYZ* ACHD))+ (((AQXT- ARFO)* IRL)+ L5([0.0,BAZE[0],BAZE[1],BAZE[2],BAZE[3]])))+ ARFR)* AMF).0,B),(&BAZI.0,ACHH),(&(L5([0.0,AOEE[0],AOEE[1],AOEE[2],AOEE[3]])+ BAYX).0,BAZG),(&BAZF.0,(-ACHJ))],IRN));
+		let ACHI=product_sum_div(((((ACHC* IRM)+ (ACHE* IRL))+ WPY)* AMF),C,BAZG,ACHG,IRN);
+		let BAZJ=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAZB[0],BAZB[1],BAZB[2],BAZB[3]])+ (BAYZ* ACHC))+ (((AQXS- ARFN)* IRL)+ L5([0.0,BAZC[0],BAZC[1],BAZC[2],BAZC[3]])))+ ARFQ)* AMF).0,C),(&BAZI.0,ACHG),(&(L5([0.0,AOED[0],AOED[1],AOED[2],AOED[3]])+ BAYW).0,BAZG),(&BAZF.0,(-ACHI))],IRN));
+		let ACHJ=product_sum_div(((((ACHD* IRM)+ (ACHF* IRL))+ WPZ)* AMF),C,BAZG,ACHH,IRN);
+		let BAZK=L5(sum_products_div_lanes(&[(&((((L5([0.0,BAZD[0],BAZD[1],BAZD[2],BAZD[3]])+ (BAYZ* ACHD))+ (((AQXT- ARFO)* IRL)+ L5([0.0,BAZE[0],BAZE[1],BAZE[2],BAZE[3]])))+ ARFR)* AMF).0,C),(&BAZI.0,ACHH),(&(L5([0.0,AOEE[0],AOEE[1],AOEE[2],AOEE[3]])+ BAYX).0,BAZG),(&BAZF.0,(-ACHJ))],IRN));
 		let IRP=(IRO.abs())< QE;
 		let IRT;
 		let ISB;
@@ -35360,7 +35361,7 @@ impl Instance {
 		let ARFX;
 		if IRP{
 		IRT=IRO;
-		ISB=B;
+		ISB=C;
 		WQC=ACHI;
 		WQD=ACHJ;
 		ARFV=BAZH;
@@ -35434,7 +35435,7 @@ impl Instance {
 		ARFT=BAZM;
 		ARFU=BAZN;
 		}
-		let IRY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IRX, B));
+		let IRY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, IRX, C));
 		IQT=IRY;
 		IQV=IRZ;
 		IRK=ISA;
@@ -35454,7 +35455,7 @@ impl Instance {
 		let ISC=((IQV* IQV)+ ((BH* IPI)* IPI)).sqrt();
 		let BAXX=(BAXU+ BAXU)* (ANYF/ (AWAY* ISC));
 		let ACGE=BK* ISC;
-		let ACGF=B/ ACGE;
+		let ACGF=C/ ACGE;
 		let BAXY=((BAXX* BK)).product_div((-ACGF),ACGE);
 		let ISD=J* (IQV+ ISC);
 		let BAXZ=(ARFM+ BAXX)* J;
@@ -35495,9 +35496,9 @@ impl Instance {
 		let BBDB=-ISI;
 		let BBDC=(AWLX).product_sum_div(ANYF,AREI,BBDB,ISF);
 		let BBDD=BBDC* AWAO;
-		let ACJS=product_sum_div(URK,B,BBDB,WPC,ISF);
+		let ACJS=product_sum_div(URK,C,BBDB,WPC,ISF);
 		let BBDE=L5(sum_products_div_lanes(&[(&BBDD.0,WPC),(&AREJ.0,BBDB),(&AREI.0,(-ACJS))],ISF));
-		let ACJT=product_sum_div(URL,B,BBDB,WPD,ISF);
+		let ACJT=product_sum_div(URL,C,BBDB,WPD,ISF);
 		let BBDF=L5(sum_products_div_lanes(&[(&BBDD.0,WPD),(&AREK.0,BBDB),(&AREI.0,(-ACJT))],ISF));
 		let ISJ=ISI== A;
 		let ISM;
@@ -35514,10 +35515,10 @@ impl Instance {
 		ARGI=AWLK;
 		ARGJ=AWLK;
 		}else{
-		let ISK=GAL- B;
+		let ISK=GAL- C;
 		let ISL=ISI.powf(ISK);
 		let BBDG=BBDC* (ISK* ((ISI+ (((ISI== AWBZ) as u8 as f64)* AWCA)).powf((ISK- ANYF))));
-		let ACJU=ISK- B;
+		let ACJU=ISK- C;
 		let ACJV=ISI+ ((ISJ as u8 as f64)* ZNW);
 		let BBDH=ACJU* ((ACJV+ (((ACJV== AWBZ) as u8 as f64)* AWCA)).powf((ACJU- ANYF)));
 		let ACJW=ISK* (ACJV.powf(ACJU));
@@ -35537,7 +35538,7 @@ impl Instance {
 		let BBDL=((ARGI* ISI)+ (BBDC* WQK))+ ((BBDE* ISM)+ (ARGH* ACJS));
 		let ACKA=(WQL* ISI)+ (ACJT* ISM);
 		let BBDM=((ARGJ* ISI)+ (BBDC* WQL))+ ((BBDF* ISM)+ (ARGH* ACJT));
-		let ISN=B+ (ISM* ISI);
+		let ISN=C+ (ISM* ISI);
 		let ISO=ISN== A;
 		let ISR;
 		let WQM;
@@ -35553,10 +35554,10 @@ impl Instance {
 		ARGL=AWLK;
 		ARGM=AWLK;
 		}else{
-		let ISP=(B/ GAL)- B;
+		let ISP=(C/ GAL)- C;
 		let ISQ=ISN.powf(ISP);
 		let BBDN=BBDK* (ISP* ((ISN+ (((ISN== AWBZ) as u8 as f64)* AWCA)).powf((ISP- ANYF))));
-		let ACKB=ISP- B;
+		let ACKB=ISP- C;
 		let ACKC=ISN+ ((ISO as u8 as f64)* ZNW);
 		let BBDO=ACKB* ((ACKC+ (((ACKC== AWBZ) as u8 as f64)* AWCA)).powf((ACKB- ANYF)));
 		let ACKD=ISP* (ACKC.powf(ACKB));
@@ -35618,7 +35619,7 @@ impl Instance {
 		if ITA{
 		let ITK;
 		if ITB{
-		ITK=B;
+		ITK=C;
 		}else{
 		let ITL;
 		if ITC{
@@ -35654,13 +35655,13 @@ impl Instance {
 		let ITI=ITH.sqrt();
 		let BBLL=ARGT* (ANYF/ (AWAY* ITI));
 		let ACPT=BK* ITI;
-		let ACPU=B/ ACPT;
+		let ACPU=C/ ACPT;
 		let BBLM=((BBLL* BK)).product_div((-ACPU),ACPT);
 		let ACPV=WQS* ACPU;
 		let BBLN=(ARGU* ACPU)+ (BBLM* WQS);
 		let ACPW=WQT* ACPU;
 		let BBLO=(ARGV* ACPU)+ (BBLM* WQT);
-		let ITJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ITF, B));
+		let ITJ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ITF, C));
 		ITF=ITJ;
 		ITH=ITI;
 		WQS=ACPV;
@@ -35715,7 +35716,7 @@ impl Instance {
 		ARGR=ARGX;
 		ARGS=ARGY;
 		}
-		let ITT=B/ ITS;
+		let ITT=C/ ITS;
 		let BBEI=-ITT;
 		let BBEJ=(ARGQ).product_div(BBEI,ITS);
 		let BBEK=BBEJ* AWAO;
@@ -35749,8 +35750,8 @@ impl Instance {
 		let BBEP=-ITW;
 		let BBEQ=(AWLX).product_sum_div(ANYF,BBDR,BBEP,ISS);
 		let BBER=BBEQ* AWAO;
-		let ACLB=product_sum_div(URK,B,BBEP,ACKG,ISS);
-		let ACLC=product_sum_div(URL,B,BBEP,ACKH,ISS);
+		let ACLB=product_sum_div(URK,C,BBEP,ACKG,ISS);
+		let ACLC=product_sum_div(URL,C,BBEP,ACKH,ISS);
 		let ITY=ITW+ ITX;
 		let BBES=BBEQ+ L5([0.0,ARGN[0],0.0,ARGN[1],0.0]);
 		let ACLD=ACLB+ WQO;
@@ -35812,7 +35813,7 @@ impl Instance {
 		let BBFF=AQXX* IUJ;
 		let ACLK=WLM* BBFD;
 		let ACLL=WLN* BBFD;
-		let ACLM=B/ IUJ;
+		let ACLM=C/ IUJ;
 		let BBFG=(BBFE).product_div((-ACLM),IUJ);
 		let BBFH=(AQXX+ (BBFE* (ANYF/ IUJ)))* J;
 		let ACLN=(WLM+ (ACLK* ACLM))* J;
@@ -35853,9 +35854,9 @@ impl Instance {
 		let BBEY=AQXX* IUM;
 		let ACLF=WLM* IUM;
 		let ACLG=WLN* IUM;
-		let IUN=B+ IUM;
+		let IUN=C+ IUM;
 		let BBEZ=BBEY* (ANYF/ IUN);
-		let ACLH=B/ IUN;
+		let ACLH=C/ IUN;
 		let BBFA=(BBEY).product_div((-ACLH),IUN);
 		let ACLI=ACLF* ACLH;
 		let BBFB=(((AQYA* IUM)+ (BBEY* WLM))* ACLH)+ (BBFA* ACLF);
@@ -35901,10 +35902,10 @@ impl Instance {
 		let BBFK=-IUS;
 		let BBFL=(ARHD).product_sum_div(ANYF,ARHE,BBFK,IUQ);
 		let BBFM=BBFL* AWAO;
-		let ACLP=product_sum_div(WQY,B,BBFK,WRA,IUQ);
-		let BBFN=L5(sum_products_div_lanes(&[(&ARHH.0,B),(&BBFM.0,WRA),(&ARHJ.0,BBFK),(&ARHE.0,(-ACLP))],IUQ));
-		let ACLQ=product_sum_div(WQZ,B,BBFK,WRB,IUQ);
-		let BBFO=L5(sum_products_div_lanes(&[(&ARHI.0,B),(&BBFM.0,WRB),(&ARHK.0,BBFK),(&ARHE.0,(-ACLQ))],IUQ));
+		let ACLP=product_sum_div(WQY,C,BBFK,WRA,IUQ);
+		let BBFN=L5(sum_products_div_lanes(&[(&ARHH.0,C),(&BBFM.0,WRA),(&ARHJ.0,BBFK),(&ARHE.0,(-ACLP))],IUQ));
+		let ACLQ=product_sum_div(WQZ,C,BBFK,WRB,IUQ);
+		let BBFO=L5(sum_products_div_lanes(&[(&ARHI.0,C),(&BBFM.0,WRB),(&ARHK.0,BBFK),(&ARHE.0,(-ACLQ))],IUQ));
 		let IUT=IUS== A;
 		let IUW;
 		let WRG;
@@ -35920,10 +35921,10 @@ impl Instance {
 		ARHR=AWLK;
 		ARHS=AWLK;
 		}else{
-		let IUU=GAL- B;
+		let IUU=GAL- C;
 		let IUV=IUS.powf(IUU);
 		let BBFP=BBFL* (IUU* ((IUS+ (((IUS== AWBZ) as u8 as f64)* AWCA)).powf((IUU- ANYF))));
-		let ACLR=IUU- B;
+		let ACLR=IUU- C;
 		let ACLS=IUS+ ((IUT as u8 as f64)* ZNW);
 		let BBFQ=ACLR* ((ACLS+ (((ACLS== AWBZ) as u8 as f64)* AWCA)).powf((ACLR- ANYF)));
 		let ACLT=IUU* (ACLS.powf(ACLR));
@@ -35943,7 +35944,7 @@ impl Instance {
 		let BBFU=((ARHR* IUS)+ (BBFL* WRG))+ ((BBFN* IUW)+ (ARHQ* ACLP));
 		let ACLX=(WRH* IUS)+ (ACLQ* IUW);
 		let BBFV=((ARHS* IUS)+ (BBFL* WRH))+ ((BBFO* IUW)+ (ARHQ* ACLQ));
-		let IUX=B+ (IUW* IUS);
+		let IUX=C+ (IUW* IUS);
 		let IUY=IUX== A;
 		let IVB;
 		let WRI;
@@ -35959,10 +35960,10 @@ impl Instance {
 		ARHU=AWLK;
 		ARHV=AWLK;
 		}else{
-		let IUZ=(B/ GAL)- B;
+		let IUZ=(C/ GAL)- C;
 		let IVA=IUX.powf(IUZ);
 		let BBFW=BBFT* (IUZ* ((IUX+ (((IUX== AWBZ) as u8 as f64)* AWCA)).powf((IUZ- ANYF))));
-		let ACLY=IUZ- B;
+		let ACLY=IUZ- C;
 		let ACLZ=IUX+ ((IUY as u8 as f64)* ZNW);
 		let BBFX=ACLY* ((ACLZ+ (((ACLZ== AWBZ) as u8 as f64)* AWCA)).powf((ACLY- ANYF)));
 		let ACMA=IUZ* (ACLZ.powf(ACLY));
@@ -35985,14 +35986,14 @@ impl Instance {
 		let BBGB=-IVD;
 		let BBGC=(ARHD).product_sum_div(ANYF,BBGA,BBGB,IVC);
 		let BBGD=BBGC* AWAO;
-		let ACMF=product_sum_div(WQY,B,BBGB,ACMD,IVC);
-		let ACMG=product_sum_div(WQZ,B,BBGB,ACME,IVC);
+		let ACMF=product_sum_div(WQY,C,BBGB,ACMD,IVC);
+		let ACMG=product_sum_div(WQZ,C,BBGB,ACME,IVC);
 		let IVF=IVD+ IVE;
 		let BBGE=BBGC+ L5([0.0,ARHF[0],0.0,ARHF[1],0.0]);
 		let ACMH=ACMF+ WRC;
-		let BBGF=(L5(sum_products_div_lanes(&[(&ARHH.0,B),(&BBGD.0,ACMD),(&(((ARHU* IUX)+ (BBFT* WRI))+ ((BBFU* IVB)+ (ARHT* ACLW))).0,BBGB),(&BBGA.0,(-ACMF))],IVC)))+ L5([0.0,ARHL[0],0.0,ARHL[1],0.0]);
+		let BBGF=(L5(sum_products_div_lanes(&[(&ARHH.0,C),(&BBGD.0,ACMD),(&(((ARHU* IUX)+ (BBFT* WRI))+ ((BBFU* IVB)+ (ARHT* ACLW))).0,BBGB),(&BBGA.0,(-ACMF))],IVC)))+ L5([0.0,ARHL[0],0.0,ARHL[1],0.0]);
 		let ACMI=ACMG+ WRD;
-		let BBGG=(L5(sum_products_div_lanes(&[(&ARHI.0,B),(&BBGD.0,ACME),(&(((ARHV* IUX)+ (BBFT* WRJ))+ ((BBFV* IVB)+ (ARHT* ACLX))).0,BBGB),(&BBGA.0,(-ACMG))],IVC)))+ L5([0.0,ARHM[0],0.0,ARHM[1],0.0]);
+		let BBGG=(L5(sum_products_div_lanes(&[(&ARHI.0,C),(&BBGD.0,ACME),(&(((ARHV* IUX)+ (BBFT* WRJ))+ ((BBFV* IVB)+ (ARHT* ACLX))).0,BBGB),(&BBGA.0,(-ACMG))],IVC)))+ L5([0.0,ARHM[0],0.0,ARHM[1],0.0]);
 		IVK=IVF;
 		IYC=IYD;
 		WQW=ACMH;
@@ -36025,7 +36026,7 @@ impl Instance {
 		let IVM=(IVL+ AYD).sqrt();
 		let BBGQ=(BBGN+ BBGN)* (ANYF/ (AWAY* IVM));
 		let ACMR=BK* IVM;
-		let ACMS=B/ ACMR;
+		let ACMS=C/ ACMR;
 		let BBGR=((BBGQ* BK)).product_div((-ACMS),ACMR);
 		let ACMT=ACMO* ACMS;
 		let BBGS=((BBGO+ BBGO)* ACMS)+ (BBGR* ACMO);
@@ -36037,13 +36038,13 @@ impl Instance {
 		let BBGV=(BBGS* IVO)+ L5([(ANZO* ACMT),0.0,0.0,0.0,0.0]);
 		let ACMW=ACMU* IVO;
 		let BBGW=(BBGT* IVO)+ L5([(ANZO* ACMU),0.0,0.0,0.0,0.0]);
-		let IVS=B+ (IVN* IVO);
+		let IVS=C+ (IVN* IVO);
 		let BBGX=(BBGQ* IVT)+ L5([(ANZP* IVN),0.0,0.0,0.0,0.0]);
 		let ACMX=ACMT* IVT;
 		let BBGY=(BBGS* IVT)+ L5([(ANZP* ACMT),0.0,0.0,0.0,0.0]);
 		let ACMY=ACMU* IVT;
 		let BBGZ=(BBGT* IVT)+ L5([(ANZP* ACMU),0.0,0.0,0.0,0.0]);
-		let IVX=B+ (IVN* IVT);
+		let IVX=C+ (IVN* IVT);
 		let IWD;
 		let WRK;
 		let WRL;
@@ -36062,16 +36063,16 @@ impl Instance {
 		let BBHJ=L5([0.0,BBHF[0],0.0,BBHF[1],0.0]);
 		let BBHK=((AQKN* AWAO)).product_sum_div(ANYF,BBHJ,BBHI,IVZ);
 		let BBHL=BBHK* AWAO;
-		let ACND=product_sum_div((-WDI),B,BBHI,ACNB,IVZ);
-		let ACNE=product_sum_div((-WDJ),B,BBHI,ACNC,IVZ);
+		let ACND=product_sum_div((-WDI),C,BBHI,ACNB,IVZ);
+		let ACNE=product_sum_div((-WDJ),C,BBHI,ACNC,IVZ);
 		let IWB=IWA/ IVX;
 		let BBHM=-IWB;
 		let BBHN=(BBHK).product_sum_div(ANYF,BBGX,BBHM,IVX);
 		let BBHO=BBHN* AWAO;
-		let ACNF=product_sum_div(ACND,B,BBHM,ACMX,IVX);
-		let BBHP=L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&(AQKQ* AWAO).0,B),(&BBHL.0,ACNB),(&L5([0.0,BBHG[0],0.0,BBHG[1],0.0]).0,BBHI),(&BBHJ.0,(-ACND))],IVZ))).0,B),(&BBHO.0,ACMX),(&BBGY.0,BBHM),(&BBGX.0,(-ACNF))],IVX));
-		let ACNG=product_sum_div(ACNE,B,BBHM,ACMY,IVX);
-		let BBHQ=L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&(AQKR* AWAO).0,B),(&BBHL.0,ACNC),(&L5([0.0,BBHH[0],0.0,BBHH[1],0.0]).0,BBHI),(&BBHJ.0,(-ACNE))],IVZ))).0,B),(&BBHO.0,ACMY),(&BBGZ.0,BBHM),(&BBGX.0,(-ACNG))],IVX));
+		let ACNF=product_sum_div(ACND,C,BBHM,ACMX,IVX);
+		let BBHP=L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&(AQKQ* AWAO).0,C),(&BBHL.0,ACNB),(&L5([0.0,BBHG[0],0.0,BBHG[1],0.0]).0,BBHI),(&BBHJ.0,(-ACND))],IVZ))).0,C),(&BBHO.0,ACMX),(&BBGY.0,BBHM),(&BBGX.0,(-ACNF))],IVX));
+		let ACNG=product_sum_div(ACNE,C,BBHM,ACMY,IVX);
+		let BBHQ=L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&(AQKR* AWAO).0,C),(&BBHL.0,ACNC),(&L5([0.0,BBHH[0],0.0,BBHH[1],0.0]).0,BBHI),(&BBHJ.0,(-ACNE))],IVZ))).0,C),(&BBHO.0,ACMY),(&BBGZ.0,BBHM),(&BBGX.0,(-ACNG))],IVX));
 		IWD=IWB;
 		WRK=ACNF;
 		WRL=ACNG;
@@ -36083,10 +36084,10 @@ impl Instance {
 		let BBHA=-IWC;
 		let BBHB=((BBGH/ OS)).product_sum_div(ANYF,BBGX,BBHA,IVX);
 		let BBHC=BBHB* AWAO;
-		let ACMZ=product_sum_div((ACMJ/ OS),B,BBHA,ACMX,IVX);
-		let BBHD=L5(sum_products_div_lanes(&[(&(BBGI/ OS).0,B),(&BBHC.0,ACMX),(&BBGY.0,BBHA),(&BBGX.0,(-ACMZ))],IVX));
-		let ACNA=product_sum_div((ACMK/ OS),B,BBHA,ACMY,IVX);
-		let BBHE=L5(sum_products_div_lanes(&[(&(BBGJ/ OS).0,B),(&BBHC.0,ACMY),(&BBGZ.0,BBHA),(&BBGX.0,(-ACNA))],IVX));
+		let ACMZ=product_sum_div((ACMJ/ OS),C,BBHA,ACMX,IVX);
+		let BBHD=L5(sum_products_div_lanes(&[(&(BBGI/ OS).0,C),(&BBHC.0,ACMX),(&BBGY.0,BBHA),(&BBGX.0,(-ACMZ))],IVX));
+		let ACNA=product_sum_div((ACMK/ OS),C,BBHA,ACMY,IVX);
+		let BBHE=L5(sum_products_div_lanes(&[(&(BBGJ/ OS).0,C),(&BBHC.0,ACMY),(&BBGZ.0,BBHA),(&BBGX.0,(-ACNA))],IVX));
 		IWD=IWC;
 		WRK=ACMZ;
 		WRL=ACNA;
@@ -36111,7 +36112,7 @@ impl Instance {
 		}else{
 		let IWF=IWD.powf(EDZ);
 		let BBHR=ARHW* (EDZ* ((IWD+ (((IWD== AWBZ) as u8 as f64)* AWCA)).powf((EDZ- ANYF))));
-		let ACNH=EDZ- B;
+		let ACNH=EDZ- C;
 		let ACNI=IWD+ ((IWE as u8 as f64)* ZNW);
 		let BBHS=ACNH* ((ACNI+ (((ACNI== AWBZ) as u8 as f64)* AWCA)).powf((ACNH- ANYF)));
 		let ACNJ=EDZ* (ACNI.powf(ACNH));
@@ -36146,7 +36147,7 @@ impl Instance {
 		let BBIB=(L5(sum_products_div_lanes(&[(&BBHZ.0,ACNO),(&(((((BBGV* EEI)* IVJ)+ (BBGK* ACNM))+ ((BBGL* IWH)+ (BBHV* ACML)))/ EF).0,BBHX),(&BBHW.0,(-ACNQ))],IWI)))+ ((ARIA* EEM)+ L5([(ANZK* WRM),0.0,0.0,0.0,0.0]));
 		let ACNT=ACNR+ (WRN* EEM);
 		let BBIC=(L5(sum_products_div_lanes(&[(&BBHZ.0,ACNP),(&(((((BBGW* EEI)* IVJ)+ (BBGK* ACNN))+ ((BBGM* IWH)+ (BBHV* ACMM)))/ EF).0,BBHX),(&BBHW.0,(-ACNR))],IWI)))+ ((ARIB* EEM)+ L5([(ANZK* WRN),0.0,0.0,0.0,0.0]));
-		let IWL=B/ IWK;
+		let IWL=C/ IWK;
 		let BBID=-IWL;
 		let BBIE=(BBIA).product_div(BBID,IWK);
 		let BBIF=BBIE* AWAO;
@@ -36201,7 +36202,7 @@ impl Instance {
 		}else{
 		let IWW=IWU.powf(EFE);
 		let BBIT=BBIQ* (EFE* ((IWU+ (((IWU== AWBZ) as u8 as f64)* AWCA)).powf((EFE- ANYF))));
-		let ACOH=EFE- B;
+		let ACOH=EFE- C;
 		let ACOI=IWU+ ((IWV as u8 as f64)* ZNW);
 		let BBIU=ACOH* ((ACOI+ (((ACOI== AWBZ) as u8 as f64)* AWCA)).powf((ACOH- ANYF)));
 		let ACOJ=EFE* (ACOI.powf(ACOH));
@@ -36216,7 +36217,7 @@ impl Instance {
 		ARID=BBIV;
 		ARIE=BBIW;
 		}
-		let IWY=B+ IWX;
+		let IWY=C+ IWX;
 		let IWZ=IWY== A;
 		let IXC;
 		let WRQ;
@@ -36232,10 +36233,10 @@ impl Instance {
 		ARIG=AWLK;
 		ARIH=AWLK;
 		}else{
-		let IXA=B/ EFE;
+		let IXA=C/ EFE;
 		let IXB=IWY.powf(IXA);
 		let BBIX=ARIC* (IXA* ((IWY+ (((IWY== AWBZ) as u8 as f64)* AWCA)).powf((IXA- ANYF))));
-		let ACOM=IXA- B;
+		let ACOM=IXA- C;
 		let ACON=IWY+ ((IWZ as u8 as f64)* ZNW);
 		let BBIY=ACOM* ((ACON+ (((ACON== AWBZ) as u8 as f64)* AWCA)).powf((ACOM- ANYF)));
 		let ACOO=IXA* (ACON.powf(ACOM));
@@ -36253,10 +36254,10 @@ impl Instance {
 		let IXD=IWM/ IXC;
 		let IXF=IXE* IWO;
 		let IXG=(IWM* IWO)/ EEX;
-		let IXH=B+ IXG;
-		let IXI=B/ IXH;
-		let IXJ=B- IXI;
-		let IXK=VY* (B+ (IXF* IXJ));
+		let IXH=C+ IXG;
+		let IXI=C/ IXH;
+		let IXJ=C- IXI;
+		let IXK=VY* (C+ (IXF* IXJ));
 		let IXL=IVG* QQ;
 		let BBJB=((AQXY* QQ)* IXK)+ (((((BBIH* IXE)* IXJ)+ ((((((((BBIG* IWO)+ (BBIH* IWM))).product_sum_div(ANYF,BBIP,(-IXG),EEX))).product_div((-IXI),IXH))* AWAO)* IXF))* VY)* IXL);
 		let IXM=PI/ PE;
@@ -36315,7 +36316,7 @@ impl Instance {
 		let ACPD=(ACOR* IYO)+ (ACPB* IYI);
 		let BBJS=((((BBJI* IYN)+ (BBJM* ACOS))+ (((((BBJI* IYM)+ (BBJL* ACOS))+ (BBJO+ (BBJG* ACOY)))* IYI)+ (BBJG* ACPA)))* IYI)+ (BBJG* ACPC);
 		let ACPE=(ACOS* IYO)+ (ACPC* IYI);
-		let IYP=B+ (IYI* IYO);
+		let IYP=C+ (IYI* IYO);
 		let IYQ=LI/ IYP;
 		let BBJT=-IYQ;
 		let BBJU=(BBJQ).product_div(BBJT,IYP);
@@ -36364,7 +36365,7 @@ impl Instance {
 		let BBKK=BBKH* ACPH;
 		let BBKL=(AXBI* UL)* IZC;
 		let BBKM=BBKH* ACPI;
-		let IZE=(B+ (BQR* BI))+ (IZD* IZC);
+		let IZE=(C+ (BQR* BI))+ (IZD* IZC);
 		let BBKN=L5([BBKD[0],BBKD[1],0.0,BBKD[2],BBKD[3]])+ (L5([BBKI[0],BBKI[1],0.0,BBKI[2],BBKI[3]])+ (BBKG* IZD));
 		let ACPL=(ZME* BI)+ ((ACPJ* IZC)+ (ACPH* IZD));
 		let BBKO=L5([BBKE[0],BBKE[1],0.0,BBKE[2],BBKE[3]])+ ((L5([BBKJ[0],BBKJ[1],0.0,BBKJ[2],BBKJ[3]])+ (BBKG* ACPJ))+ ((((AQKS+ BBJW)- L5([AXBF[0],AXBF[1],0.0,AXBF[2],AXBF[3]]))* IZD)+ L5([BBKK[0],BBKK[1],0.0,BBKK[2],BBKK[3]])));
@@ -36446,7 +36447,7 @@ impl Instance {
 		let BBLG=AQOK* AMF;
 		let JAD=(JAC< OM)|| (JAA< OM);
 		let LCY=if JAD{
-		B
+		C
 		}else{
 		A
 		};
@@ -36859,7 +36860,7 @@ impl Instance {
 		let ZMK=product_div(AXBQ,ZIU,BOB);
 		let ZML=product_div(AXBQ,ZIV,BOB);
 		let JAH=JAG.ln();
-		let ZMM=B/ JAG;
+		let ZMM=C/ JAG;
 		let AXBT=(AXBR).product_div((-ZMM),JAG);
 		let ZMN=ZMK* ZMM;
 		let ZMO=ZML* ZMM;
@@ -36880,7 +36881,7 @@ impl Instance {
 		let ZMU=ZMS* BWG;
 		let AXCB=((AXBN- AXBY)* BWG)+ L5([(ANZE* ZMS),0.0,0.0,0.0,0.0]);
 		let JAK=BWG* BKG;
-		let JAL=B/ JAK;
+		let JAL=C/ JAK;
 		let AXCC=product_div(((ANZE* BKG)+ (ANZB* BWG)),(-JAL),JAK);
 		let JAM=JAL* BNR;
 		let AXCD=AODZ* JAL;
@@ -36945,10 +36946,10 @@ impl Instance {
 		let AXDG=-JAZ;
 		let AXDH=((AXCO* J)).product_sum_div(ANYF,AXCS,AXDG,JAW);
 		let AXDI=AXDH* AWAO;
-		let ZNT=product_sum_div((ZND* J),B,AXDG,ZNH,JAW);
-		let AXDJ=L5(sum_products_div_lanes(&[(&(AXCP* J).0,B),(&AXDI.0,ZNH),(&AXCT.0,AXDG),(&AXCS.0,(-ZNT))],JAW));
-		let ZNU=product_sum_div((ZNE* J),B,AXDG,ZNI,JAW);
-		let AXDK=L5(sum_products_div_lanes(&[(&(AXCQ* J).0,B),(&AXDI.0,ZNI),(&AXCU.0,AXDG),(&AXCS.0,(-ZNU))],JAW));
+		let ZNT=product_sum_div((ZND* J),C,AXDG,ZNH,JAW);
+		let AXDJ=L5(sum_products_div_lanes(&[(&(AXCP* J).0,C),(&AXDI.0,ZNH),(&AXCT.0,AXDG),(&AXCS.0,(-ZNT))],JAW));
+		let ZNU=product_sum_div((ZNE* J),C,AXDG,ZNI,JAW);
+		let AXDK=L5(sum_products_div_lanes(&[(&(AXCQ* J).0,C),(&AXDI.0,ZNI),(&AXCU.0,AXDG),(&AXCS.0,(-ZNU))],JAW));
 		JBC=JAZ;
 		WSE=ZNT;
 		WSF=ZNU;
@@ -36961,7 +36962,7 @@ impl Instance {
 		let JBA=(JAS+ JAX).sqrt();
 		let AXDB=(AXCO+ AXCW)* (ANYF/ (AWAY* JBA));
 		let ZNP=BK* JBA;
-		let ZNQ=B/ ZNP;
+		let ZNQ=C/ ZNP;
 		let AXDC=((AXDB* BK)).product_div((-ZNQ),ZNP);
 		let JBB=(-JAW)+ JBA;
 		let AXDD=(AXCS* AWAO)+ AXDB;
@@ -37016,7 +37017,7 @@ impl Instance {
 		let AXDQ=(((AXCE* GUA)* AWAO)+ (ARJH* BK))+ ((AXDP* JBF)+ (ARJH* JBG));
 		let ZOF=((-(ZMV* GUA))+ (WSG* BK))+ ((ZOD* JBF)+ (WSG* JBG));
 		let ZOG=((-(ZMW* GUA))+ (WSH* BK))+ ((ZOE* JBF)+ (WSH* JBG));
-		let JBI=B/ JBF;
+		let JBI=C/ JBF;
 		let AXDR=-JBI;
 		let AXDS=(ARJH).product_div(AXDR,JBF);
 		let AXDT=AXDS* AWAO;
@@ -37040,19 +37041,19 @@ impl Instance {
 		let AXEC=-JBL;
 		let AXED=(AXDZ).product_sum_div(ANYF,AXBU,AXEC,JAI);
 		let AXEE=AXED* AWAO;
-		let ZON=product_sum_div(ZOL,B,AXEC,ZMP,JAI);
-		let ZOO=product_sum_div(ZOM,B,AXEC,ZMQ,JAI);
+		let ZON=product_sum_div(ZOL,C,AXEC,ZMP,JAI);
+		let ZOO=product_sum_div(ZOM,C,AXEC,ZMQ,JAI);
 		let AXEF=AXED* JBL;
 		let ZOP=ZON* JBL;
-		let AXEG=((L5(sum_products_div_lanes(&[(&AXEA.0,B),(&AXEE.0,ZMP),(&AXBV.0,AXEC),(&AXBU.0,(-ZON))],JAI)))* JBL)+ (AXED* ZON);
+		let AXEG=((L5(sum_products_div_lanes(&[(&AXEA.0,C),(&AXEE.0,ZMP),(&AXBV.0,AXEC),(&AXBU.0,(-ZON))],JAI)))* JBL)+ (AXED* ZON);
 		let ZOQ=ZOP+ ZOP;
 		let ZOR=ZOO* JBL;
-		let AXEH=((L5(sum_products_div_lanes(&[(&AXEB.0,B),(&AXEE.0,ZMQ),(&AXBW.0,AXEC),(&AXBU.0,(-ZOO))],JAI)))* JBL)+ (AXED* ZOO);
+		let AXEH=((L5(sum_products_div_lanes(&[(&AXEB.0,C),(&AXEE.0,ZMQ),(&AXBW.0,AXEC),(&AXBU.0,(-ZOO))],JAI)))* JBL)+ (AXED* ZOO);
 		let ZOS=ZOR+ ZOR;
-		let JBM=(B+ (JBL* JBL)).sqrt();
+		let JBM=(C+ (JBL* JBL)).sqrt();
 		let AXEI=(AXEF+ AXEF)* (ANYF/ (AWAY* JBM));
 		let ZOT=BK* JBM;
-		let ZOU=B/ ZOT;
+		let ZOU=C/ ZOT;
 		let AXEJ=((AXEI* BK)).product_div((-ZOU),ZOT);
 		let ZOV=ZOQ* ZOU;
 		let ZOW=ZOS* ZOU;
@@ -37060,14 +37061,14 @@ impl Instance {
 		let AXEK=-JBN;
 		let AXEL=(AXDZ).product_sum_div(ANYF,AXEI,AXEK,JBM);
 		let AXEM=AXEL* AWAO;
-		let ZOX=product_sum_div(ZOL,B,AXEK,ZOV,JBM);
-		let ZOY=product_sum_div(ZOM,B,AXEK,ZOW,JBM);
+		let ZOX=product_sum_div(ZOL,C,AXEK,ZOV,JBM);
+		let ZOY=product_sum_div(ZOM,C,AXEK,ZOW,JBM);
 		let JBO=JBN+ BQN;
 		let AXEN=AXEL+ AXBO;
 		let ZOZ=ZOX+ USY;
-		let AXEO=(L5(sum_products_div_lanes(&[(&AXEA.0,B),(&AXEM.0,ZOV),(&(((AXEG+ AXEG)* ZOU)+ (AXEJ* ZOQ)).0,AXEK),(&AXEI.0,(-ZOX))],JBM)))+ AXBX;
+		let AXEO=(L5(sum_products_div_lanes(&[(&AXEA.0,C),(&AXEM.0,ZOV),(&(((AXEG+ AXEG)* ZOU)+ (AXEJ* ZOQ)).0,AXEK),(&AXEI.0,(-ZOX))],JBM)))+ AXBX;
 		let ZPA=ZOY+ USZ;
-		let AXEP=(L5(sum_products_div_lanes(&[(&AXEB.0,B),(&AXEM.0,ZOW),(&(((AXEH+ AXEH)* ZOU)+ (AXEJ* ZOS)).0,AXEK),(&AXEI.0,(-ZOY))],JBM)))+ AXBY;
+		let AXEP=(L5(sum_products_div_lanes(&[(&AXEB.0,C),(&AXEM.0,ZOW),(&(((AXEH+ AXEH)* ZOU)+ (AXEJ* ZOS)).0,AXEK),(&AXEI.0,(-ZOY))],JBM)))+ AXBY;
 		let JBP=BQU- JBO;
 		let AXEQ=AXBL- AXEN;
 		let ZPB=ZMI- ZOZ;
@@ -37083,12 +37084,12 @@ impl Instance {
 		let AXEX=AODZ* ZPC;
 		let ZPE=(URZ* JBP)+ (ZPC* BNR);
 		let AXEY=(L5([0.0,AXEW[0],AXEW[1],AXEW[2],AXEW[3]])+ (AXEQ* URZ))+ (((AXBN- AXEP)* BNR)+ L5([0.0,AXEX[0],AXEX[1],AXEX[2],AXEX[3]]));
-		JBR=B;
+		JBR=C;
 		JHK=JBJ;
 		JNJ=JBO;
 		JPP=AMF;
 		JWO=JBQ;
-		KGM=B;
+		KGM=C;
 		KGQ=JBO;
 		KSY=A;
 		RSF=JAT;
@@ -37265,15 +37266,15 @@ impl Instance {
 		let AXFI=(AWWE* FCG)+ L5([(ANZM* BOC),0.0,0.0,0.0,0.0]);
 		let ZPJ=ZIX* FCG;
 		let ZPK=ZIZ* FCG;
-		let JBW=(BH* (JBU- B))/ JBV;
+		let JBW=(BH* (JBU- C))/ JBV;
 		let AXFJ=-JBW;
 		let AXFK=((AXFF* BH)).product_sum_div(ANYF,AXFI,AXFJ,JBV);
 		let AXFL=AXFK* AWAO;
-		let ZPL=product_sum_div((ZPH* BH),B,AXFJ,ZPJ,JBV);
-		let AXFM=L5(sum_products_div_lanes(&[(&(AXFG* BH).0,B),(&AXFL.0,ZPJ),(&((AWWG* FCG)+ L5([(ANZM* ZIX),0.0,0.0,0.0,0.0])).0,AXFJ),(&AXFI.0,(-ZPL))],JBV));
-		let ZPM=product_sum_div((ZPI* BH),B,AXFJ,ZPK,JBV);
-		let AXFN=L5(sum_products_div_lanes(&[(&(AXFH* BH).0,B),(&AXFL.0,ZPK),(&((AWWI* FCG)+ L5([(ANZM* ZIZ),0.0,0.0,0.0,0.0])).0,AXFJ),(&AXFI.0,(-ZPM))],JBV));
-		let JBX=B+ JBW;
+		let ZPL=product_sum_div((ZPH* BH),C,AXFJ,ZPJ,JBV);
+		let AXFM=L5(sum_products_div_lanes(&[(&(AXFG* BH).0,C),(&AXFL.0,ZPJ),(&((AWWG* FCG)+ L5([(ANZM* ZIX),0.0,0.0,0.0,0.0])).0,AXFJ),(&AXFI.0,(-ZPL))],JBV));
+		let ZPM=product_sum_div((ZPI* BH),C,AXFJ,ZPK,JBV);
+		let AXFN=L5(sum_products_div_lanes(&[(&(AXFH* BH).0,C),(&AXFL.0,ZPK),(&((AWWI* FCG)+ L5([(ANZM* ZIZ),0.0,0.0,0.0,0.0])).0,AXFJ),(&AXFI.0,(-ZPM))],JBV));
+		let JBX=C+ JBW;
 		let JBY=JBX>= 2.220446049250313e-15f64;
 		let JCA;
 		let WTA;
@@ -37303,9 +37304,9 @@ impl Instance {
 		let JCC=JCA.sqrt();
 		let AXFP=ARLE* (ANYF/ (AWAY* JCC));
 		let ZPP=BK* JCC;
-		let ZPQ=B/ ZPP;
+		let ZPQ=C/ ZPP;
 		let AXFQ=((AXFP* BK)).product_div((-ZPQ),ZPP);
-		let JCD=B- JCC;
+		let JCD=C- JCC;
 		let AXFR=AXFP* AWAO;
 		let ZPR=-(WTA* ZPQ);
 		let ZPS=-(WTB* ZPQ);
@@ -37363,7 +37364,7 @@ impl Instance {
 		let AXHH=L5([(AXHG* BOB),0.0,0.0,0.0,0.0])+ (AWVY* JCK);
 		let ZQY=ZIU* JCK;
 		let ZQZ=ZIV* JCK;
-		let JCM=B/ JCL;
+		let JCM=C/ JCL;
 		let AXHI=-JCM;
 		let AXHJ=(AXHH).product_div(AXHI,JCL);
 		let AXHK=AXHJ* AWAO;
@@ -37428,7 +37429,7 @@ impl Instance {
 		let ZRR=((ZRP* JCO)+ (ZRD* JCT))+ ZRL;
 		let AXID=(((((((AXHP* BH)* JCO)+ (AXHN* ZRN))+ ((AXHP* JCS)+ (AXHZ* ZRD)))* JCO)+ (AXHN* ZRP))+ ((AXHP* JCT)+ (AXIA* ZRD)))+ AXHY;
 		let ZRS=BK* JCU;
-		let ZRT=B/ ZRS;
+		let ZRT=C/ ZRS;
 		let AXIE=((AXIB* BK)).product_div((-ZRT),ZRS);
 		let AXIF=AXHR+ AXIB;
 		let ZRU=ZRG+ (ZRQ* ZRT);
@@ -37457,9 +37458,9 @@ impl Instance {
 		let JDB=(JCZ* JCO)/ JDA;
 		let AXIL=-JDB;
 		let AXIM=(((AXHN* JCZ)).product_sum_div(ANYF,AXIK,AXIL,JDA))* AWAO;
-		let ZSF=product_sum_div((ZRC* JCZ),B,AXIL,ZSD,JDA);
+		let ZSF=product_sum_div((ZRC* JCZ),C,AXIL,ZSD,JDA);
 		let AXIN=-ZSF;
-		let ZSG=product_sum_div((ZRD* JCZ),B,AXIL,ZSE,JDA);
+		let ZSG=product_sum_div((ZRD* JCZ),C,AXIL,ZSE,JDA);
 		let AXIO=-ZSG;
 		let JDD=(Q- JDB)+ (JDC* JCY);
 		let ZSH=AXIN+ (WTM* JDC);
@@ -37467,9 +37468,9 @@ impl Instance {
 		let JDE=(JDD* CWM)+ BQN;
 		let AXIP=(((AXIM+ (ARLW* JDC))* CWM)+ L5([(ANZG* JDD),0.0,0.0,0.0,0.0]))+ AXBO;
 		let ZSJ=(ZSH* CWM)+ USY;
-		let AXIQ=(((((L5(sum_products_div_lanes(&[(&(AXHO* JCZ).0,B),(&AXIM.0,ZSD),(&(ARLX* Q).0,AXIL),(&AXIK.0,AXIN)],JDA)))* AWAO)+ (ARLX* JDC))* CWM)+ L5([(ANZG* ZSH),0.0,0.0,0.0,0.0]))+ AXFD;
+		let AXIQ=(((((L5(sum_products_div_lanes(&[(&(AXHO* JCZ).0,C),(&AXIM.0,ZSD),(&(ARLX* Q).0,AXIL),(&AXIK.0,AXIN)],JDA)))* AWAO)+ (ARLX* JDC))* CWM)+ L5([(ANZG* ZSH),0.0,0.0,0.0,0.0]))+ AXFD;
 		let ZSK=(ZSI* CWM)+ USZ;
-		let AXIR=(((((L5(sum_products_div_lanes(&[(&(AXHP* JCZ).0,B),(&AXIM.0,ZSE),(&(ARLY* Q).0,AXIL),(&AXIK.0,AXIO)],JDA)))* AWAO)+ (ARLY* JDC))* CWM)+ L5([(ANZG* ZSI),0.0,0.0,0.0,0.0]))+ AXFE;
+		let AXIR=(((((L5(sum_products_div_lanes(&[(&(AXHP* JCZ).0,C),(&AXIM.0,ZSE),(&(ARLY* Q).0,AXIL),(&AXIK.0,AXIO)],JDA)))* AWAO)+ (ARLY* JDC))* CWM)+ L5([(ANZG* ZSI),0.0,0.0,0.0,0.0]))+ AXFE;
 		JDY=JDE;
 		JED=JDE;
 		WTI=ZSJ;
@@ -37498,7 +37499,7 @@ impl Instance {
 		ARMA=AXFT;
 		ARMB=AXFU;
 		}else{
-		let JDG=B/ CIB;
+		let JDG=C/ CIB;
 		let JDI=JDG/ JDH;
 		let AXFY=-JDI;
 		let AXFZ=(L5([(product_div(ANZF,(-JDG),CIB)),0.0,0.0,0.0,0.0])).product_sum_div(ANYF,AOEA,AXFY,JDH);
@@ -37523,16 +37524,16 @@ impl Instance {
 		let ZQG=product_div(AXGF,ZMJ,BQU);
 		let JDM=BWG+ JDL;
 		let AXGI=L5([ANZE,0.0,0.0,0.0,0.0])+ AXGG;
-		let ZQH=B/ JDK;
+		let ZQH=C/ JDK;
 		let AXGJ=(AXGC).product_div((-ZQH),JDK);
 		let JDN=(JDK.ln())/ JDM;
 		let AXGK=-JDN;
 		let AXGL=((AXGC* (ANYF/ JDK))).product_sum_div(ANYF,AXGI,AXGK,JDM);
 		let AXGM=AXGL* AWAO;
-		let ZQI=product_sum_div((ZQD* ZQH),B,AXGK,ZQF,JDM);
-		let AXGN=L5(sum_products_div_lanes(&[(&((AXGD* ZQH)+ (AXGJ* ZQD)).0,B),(&AXGM.0,ZQF),(&(L5(sum_products_div_lanes(&[(&AXGH.0,ZMI),(&AXBM.0,AXGF),(&AXBL.0,(-ZQF))],BQU))).0,AXGK),(&AXGI.0,(-ZQI))],JDM));
-		let ZQJ=product_sum_div((ZQE* ZQH),B,AXGK,ZQG,JDM);
-		let AXGO=L5(sum_products_div_lanes(&[(&((AXGE* ZQH)+ (AXGJ* ZQE)).0,B),(&AXGM.0,ZQG),(&(L5(sum_products_div_lanes(&[(&AXGH.0,ZMJ),(&AXBN.0,AXGF),(&AXBL.0,(-ZQG))],BQU))).0,AXGK),(&AXGI.0,(-ZQJ))],JDM));
+		let ZQI=product_sum_div((ZQD* ZQH),C,AXGK,ZQF,JDM);
+		let AXGN=L5(sum_products_div_lanes(&[(&((AXGD* ZQH)+ (AXGJ* ZQD)).0,C),(&AXGM.0,ZQF),(&(L5(sum_products_div_lanes(&[(&AXGH.0,ZMI),(&AXBM.0,AXGF),(&AXBL.0,(-ZQF))],BQU))).0,AXGK),(&AXGI.0,(-ZQI))],JDM));
+		let ZQJ=product_sum_div((ZQE* ZQH),C,AXGK,ZQG,JDM);
+		let AXGO=L5(sum_products_div_lanes(&[(&((AXGE* ZQH)+ (AXGJ* ZQE)).0,C),(&AXGM.0,ZQG),(&(L5(sum_products_div_lanes(&[(&AXGH.0,ZMJ),(&AXBN.0,AXGF),(&AXBL.0,(-ZQG))],BQU))).0,AXGK),(&AXGI.0,(-ZQJ))],JDM));
 		let AXGP=AXGL- AXFS;
 		let ZQK=ZQI- ZPT;
 		let AXGQ=AXGN- AXFT;
@@ -37583,7 +37584,7 @@ impl Instance {
 		let JDU=((JDP* JDP)+ JDT).sqrt();
 		let AXHB=((AXGY+ AXGY)+ ARMC)* (ANYF/ (AWAY* JDU));
 		let ZQU=BK* JDU;
-		let ZQV=B/ ZQU;
+		let ZQV=C/ ZQU;
 		let AXHC=((AXHB* BK)).product_div((-ZQV),ZQU);
 		let JDV=JDN- (J* (JDP+ JDU));
 		let AXHD=AXGL- ((AXGP+ AXHB)* J);
@@ -37686,7 +37687,7 @@ impl Instance {
 		let AXIW=(AXIT* CIB)+ L4([(ANZF* ZSN),0.0,0.0,0.0]);
 		let ZSQ=ZSO* CIB;
 		let AXIX=(AXIU* CIB)+ L4([(ANZF* ZSO),0.0,0.0,0.0]);
-		let mut JEG=B;
+		let mut JEG=C;
 		let mut JEI=JEB;
 		let mut JGL=A;
 		let mut JHI=JHJ;
@@ -37886,7 +37887,7 @@ impl Instance {
 		let JFN=((JFI* JFI)+ JEY).sqrt();
 		let AYZB=((AYYY+ AYYY)+ AYXY)* (ANYF/ (AWAY* JFN));
 		let AAVA=BK* JFN;
-		let AAVB=B/ AAVA;
+		let AAVB=C/ AAVA;
 		let AYZC=((AYZB* BK)).product_div((-AAVB),AAVA);
 		let AAVC=AAUY* AAVB;
 		let AYZD=(((AYYZ+ AYYZ)+ AYXZ)* AAVB)+ (AYZC* AAUY);
@@ -37906,10 +37907,10 @@ impl Instance {
 		let AYZJ=-JFQ;
 		let AYZK=((((AYZF* JFI)+ (AYYQ* JFO))+ ((AYYD* JEW)+ (AYXR* JFA)))).product_sum_div(ANYF,AYZI,AYZJ,JFP);
 		let AYZL=AYZK* AWAO;
-		let AAVI=product_sum_div((((AAVE* JFI)+ (AAUM* JFO))+ ((AAUC* JEW)+ (AATU* JFA))),B,AYZJ,AAVG,JFP);
-		let AYZM=L5(sum_products_div_lanes(&[(&(AYZG+ (((((L5([AYYE[0],AYYE[1],0.0,AYYE[2],AYYE[3]])+ (AYXJ* AAUA))+ ((AYXK* JEZ)+ L5([AYYF[0],AYYF[1],0.0,AYYF[2],AYYF[3]])))* JEW)+ (AYXR* AAUC))+ (AYYI+ (AYYD* AATU)))).0,B),(&AYZL.0,AAVG),(&(AYZD+ AYZD).0,AYZJ),(&AYZI.0,(-AAVI))],JFP));
-		let AAVJ=product_sum_div((((AAVF* JFI)+ (AAUN* JFO))+ ((AAUD* JEW)+ (AATV* JFA))),B,AYZJ,AAVH,JFP);
-		let AYZN=L5(sum_products_div_lanes(&[(&(AYZH+ (((((L5([AYYG[0],AYYG[1],0.0,AYYG[2],AYYG[3]])+ (AYXJ* AAUB))+ ((AYXL* JEZ)+ L5([AYYH[0],AYYH[1],0.0,AYYH[2],AYYH[3]])))* JEW)+ (AYXR* AAUD))+ (AYYJ+ (AYYD* AATV)))).0,B),(&AYZL.0,AAVH),(&(AYZE+ AYZE).0,AYZJ),(&AYZI.0,(-AAVJ))],JFP));
+		let AAVI=product_sum_div((((AAVE* JFI)+ (AAUM* JFO))+ ((AAUC* JEW)+ (AATU* JFA))),C,AYZJ,AAVG,JFP);
+		let AYZM=L5(sum_products_div_lanes(&[(&(AYZG+ (((((L5([AYYE[0],AYYE[1],0.0,AYYE[2],AYYE[3]])+ (AYXJ* AAUA))+ ((AYXK* JEZ)+ L5([AYYF[0],AYYF[1],0.0,AYYF[2],AYYF[3]])))* JEW)+ (AYXR* AAUC))+ (AYYI+ (AYYD* AATU)))).0,C),(&AYZL.0,AAVG),(&(AYZD+ AYZD).0,AYZJ),(&AYZI.0,(-AAVI))],JFP));
+		let AAVJ=product_sum_div((((AAVF* JFI)+ (AAUN* JFO))+ ((AAUD* JEW)+ (AATV* JFA))),C,AYZJ,AAVH,JFP);
+		let AYZN=L5(sum_products_div_lanes(&[(&(AYZH+ (((((L5([AYYG[0],AYYG[1],0.0,AYYG[2],AYYG[3]])+ (AYXJ* AAUB))+ ((AYXL* JEZ)+ L5([AYYH[0],AYYH[1],0.0,AYYH[2],AYYH[3]])))* JEW)+ (AYXR* AAUD))+ (AYYJ+ (AYYD* AATV)))).0,C),(&AYZL.0,AAVH),(&(AYZE+ AYZE).0,AYZJ),(&AYZI.0,(-AAVJ))],JFP));
 		JGH=JFN;
 		JGJ=JFQ;
 		JHN=JFI;
@@ -37955,7 +37956,7 @@ impl Instance {
 		let AYVX=(AYVK* JFS)+ (AYVW* AARY);
 		let AASL=AARZ* JFS;
 		let AYVY=(AYVL* JFS)+ (AYVW* AARZ);
-		let JFT=JFS- B;
+		let JFT=JFS- C;
 		let JFU=JEF* JFT;
 		let AYVZ=AXIV* JFT;
 		let AYWA=L5([AYVZ[0],AYVZ[1],0.0,AYVZ[2],AYVZ[3]])+ (AYVW* JEF);
@@ -38035,10 +38036,10 @@ impl Instance {
 		}
 		let AASS=AARY+ WUM;
 		let AAST=AARZ+ WUN;
-		let JGD=((JEK- B)+ JGC).sqrt();
+		let JGD=((JEK- C)+ JGC).sqrt();
 		let AYWQ=(AYVJ+ ARNJ)* (ANYF/ (AWAY* JGD));
 		let AASU=BK* JGD;
-		let AASV=B/ AASU;
+		let AASV=C/ AASU;
 		let AYWR=((AYWQ* BK)).product_div((-AASV),AASU);
 		let AASW=AASS* AASV;
 		let AYWS=((AYVK+ ARNL)* AASV)+ (AYWR* AASS);
@@ -38052,10 +38053,10 @@ impl Instance {
 		let AYWV=-JGG;
 		let AYWW=((L5([ANZE,0.0,0.0,0.0,0.0])+ ARNK)).product_sum_div(ANYF,AYWU,AYWV,JGF);
 		let AYWX=AYWW* AWAO;
-		let AATA=product_sum_div(WUO,B,AYWV,AASY,JGF);
-		let AYWY=L5(sum_products_div_lanes(&[(&ARNN.0,B),(&AYWX.0,AASY),(&(AYWS+ AYWS).0,AYWV),(&AYWU.0,(-AATA))],JGF));
-		let AATB=product_sum_div(WUP,B,AYWV,AASZ,JGF);
-		let AYWZ=L5(sum_products_div_lanes(&[(&ARNO.0,B),(&AYWX.0,AASZ),(&(AYWT+ AYWT).0,AYWV),(&AYWU.0,(-AATB))],JGF));
+		let AATA=product_sum_div(WUO,C,AYWV,AASY,JGF);
+		let AYWY=L5(sum_products_div_lanes(&[(&ARNN.0,C),(&AYWX.0,AASY),(&(AYWS+ AYWS).0,AYWV),(&AYWU.0,(-AATA))],JGF));
+		let AATB=product_sum_div(WUP,C,AYWV,AASZ,JGF);
+		let AYWZ=L5(sum_products_div_lanes(&[(&ARNO.0,C),(&AYWX.0,AASZ),(&(AYWT+ AYWT).0,AYWV),(&AYWU.0,(-AATB))],JGF));
 		JGH=JGD;
 		JGJ=JGG;
 		JHN=JHM;
@@ -38093,9 +38094,9 @@ impl Instance {
 		let AYZS=(((AWWA* JGJ)+ (ARMY* ZIU))+ ((ARND* BOB)+ (AWVY* WUG)))* AWAO;
 		let AAVN=-((ZIV* JGJ)+ (WUH* BOB));
 		let AYZT=(((AWWC* JGJ)+ (ARMY* ZIV))+ ((ARNE* BOB)+ (AWVY* WUH)))* AWAO;
-		let JGM=JGL== B;
+		let JGM=JGL== C;
 		let JGN=if JGM{
-		B
+		C
 		}else{
 		A
 		};
@@ -38112,13 +38113,13 @@ impl Instance {
 		let AYZU=-JGP;
 		let AYZV=((AYZO* AWAO)).product_sum_div(ANYF,AYZR,AYZU,JGK);
 		let AYZW=AYZV* AWAO;
-		let AAVO=product_sum_div((AAVK* AMF),B,AYZU,AAVM,JGK);
-		let AYZX=L5(sum_products_div_lanes(&[(&(AYZP* AMF).0,B),(&AYZW.0,AAVM),(&AYZS.0,AYZU),(&AYZR.0,(-AAVO))],JGK));
-		let AAVP=product_sum_div((AAVL* AMF),B,AYZU,AAVN,JGK);
-		let AYZY=L5(sum_products_div_lanes(&[(&(AYZQ* AMF).0,B),(&AYZW.0,AAVN),(&AYZT.0,AYZU),(&AYZR.0,(-AAVP))],JGK));
+		let AAVO=product_sum_div((AAVK* AMF),C,AYZU,AAVM,JGK);
+		let AYZX=L5(sum_products_div_lanes(&[(&(AYZP* AMF).0,C),(&AYZW.0,AAVM),(&AYZS.0,AYZU),(&AYZR.0,(-AAVO))],JGK));
+		let AAVP=product_sum_div((AAVL* AMF),C,AYZU,AAVN,JGK);
+		let AYZY=L5(sum_products_div_lanes(&[(&(AYZQ* AMF).0,C),(&AYZW.0,AAVN),(&AYZT.0,AYZU),(&AYZR.0,(-AAVP))],JGK));
 		let JGR=JEI.abs();
 		let AYZZ=ARMI* ((AWAY* ((JEI>= AWBZ) as u8 as f64))- ANYF);
-		let JGS=B>= JGR;
+		let JGS=C>= JGR;
 		let JGT;
 		let WUS;
 		let WUT;
@@ -38126,14 +38127,14 @@ impl Instance {
 		let ARNT;
 		let ARNU;
 		if JGS{
-		JGT=B;
+		JGT=C;
 		WUS=A;
 		WUT=A;
 		ARNS=AWLK;
 		ARNT=AWLK;
 		ARNU=AWLK;
 		}else{
-		let AAVQ=(BK* ((JEI>= A) as u8 as f64))- B;
+		let AAVQ=(BK* ((JEI>= A) as u8 as f64))- C;
 		let AAVR=WTU* AAVQ;
 		let AZAA=ARMN* AAVQ;
 		let AAVS=WTV* AAVQ;
@@ -38145,7 +38146,7 @@ impl Instance {
 		ARNT=AZAA;
 		ARNU=AZAB;
 		}
-		let JGU=JGQ* (B+ JGT);
+		let JGU=JGQ* (C+ JGT);
 		let AZAC=ARNS* JGQ;
 		let AAVT=WUS* JGQ;
 		let AZAD=ARNT* JGQ;
@@ -38161,7 +38162,7 @@ impl Instance {
 		if JGV{
 		let JGW=JGP>= A;
 		let JGX=if JGW{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -38193,7 +38194,7 @@ impl Instance {
 		let AZAK=ARMO+ ARNX;
 		let JHB=((JGZ.abs())<= BBK)&& ((JGI.abs())<= AQ);
 		let JHH=if JHB{
-		B
+		C
 		}else{
 		JGL
 		};
@@ -38218,7 +38219,7 @@ impl Instance {
 		}else{
 		JEG
 		};
-		let JHE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JHD, B));
+		let JHE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JHD, C));
 		JEG=JHE;
 		JEI=JHF;
 		JGL=JHG;
@@ -38314,11 +38315,11 @@ impl Instance {
 		AROF=AXJM;
 		AROG=AXJN;
 		}else{
-		let JHS=JHI- B;
+		let JHS=JHI- C;
 		let JHT=JHS.sqrt();
 		let AXIY=ARMJ* (ANYF/ (AWAY* JHT));
 		let ZSR=BK* JHT;
-		let ZSS=B/ ZSR;
+		let ZSS=C/ ZSR;
 		let AXIZ=((AXIY* BK)).product_div((-ZSS),ZSR);
 		let ZST=WTW* ZSS;
 		let AXJA=(ARMP* ZSS)+ (AXIZ* WTW);
@@ -38361,7 +38362,7 @@ impl Instance {
 		let AXJR=ARML+ ARNY;
 		let ZTF=WUA+ WUW;
 		let ZTG=WUB+ WUX;
-		let JHZ=B/ JHY;
+		let JHZ=C/ JHY;
 		let AXJS=-JHZ;
 		let AXJT=(AXJR).product_div(AXJS,JHY);
 		let AXJU=AXJT* AWAO;
@@ -38422,11 +38423,11 @@ impl Instance {
 		let AROX;
 		let AROY;
 		if JIE{
-		JPN=B;
+		JPN=C;
 		JVT=A;
 		JWN=JHW;
 		JWT=JID;
-		KGK=B;
+		KGK=C;
 		KSX=J;
 		WVI=A;
 		WVJ=A;
@@ -38595,7 +38596,7 @@ impl Instance {
 		let AXLR=AXLJ* ZUK;
 		let ZUO=(ZUM* JIQ)+ (ZUK* JIR);
 		let AXLS=(L5([0.0,AXLQ[0],AXLQ[1],AXLQ[2],AXLQ[3]])+ (AXLF* ZUM))+ (((AXBN- AXLH)* JIR)+ L5([0.0,AXLR[0],AXLR[1],AXLR[2],AXLR[3]]));
-		let JIS=B+ (JIR* JIQ);
+		let JIS=C+ (JIR* JIQ);
 		let AXLT=AXLM* JIS;
 		let ZUP=ZUN* JIS;
 		let AXLU=(AXLP* JIS)+ (AXLM* ZUN);
@@ -38606,7 +38607,7 @@ impl Instance {
 		let JIT=((JIS* JIS)+ 4e-6f64).sqrt();
 		let AXLW=(AXLT+ AXLT)* (ANYF/ (AWAY* JIT));
 		let ZUT=BK* JIT;
-		let ZUU=B/ ZUT;
+		let ZUU=C/ ZUT;
 		let AXLX=((AXLW* BK)).product_div((-ZUU),ZUT);
 		let JIU=J* (JIS+ JIT);
 		let AXLY=(AXLM+ AXLW)* J;
@@ -38639,9 +38640,9 @@ impl Instance {
 		let JIX=(JIW+ OM).sqrt();
 		let AXMB=AROZ* (ANYF/ (AWAY* JIX));
 		let ZUX=BK* JIX;
-		let ZUY=B/ ZUX;
+		let ZUY=C/ ZUX;
 		let AXMC=((AXMB* BK)).product_div((-ZUY),ZUX);
-		let JIY=B- JIX;
+		let JIY=C- JIX;
 		let AXMD=AXMB* AWAO;
 		let ZUZ=-(WVO* ZUY);
 		let ZVA=-(WVP* ZUY);
@@ -38666,7 +38667,7 @@ impl Instance {
 		let JJA=((JIZ* JIZ)+ 4e-4f64).sqrt();
 		let AXMP=(AXMM+ AXMM)* (ANYF/ (AWAY* JJA));
 		let ZVH=BK* JJA;
-		let ZVI=B/ ZVH;
+		let ZVI=C/ ZVH;
 		let AXMQ=((AXMP* BK)).product_div((-ZVI),ZVH);
 		let JJB=J* (JIZ+ JJA);
 		let AXMR=(AXMJ+ AXMP)* J;
@@ -38701,9 +38702,9 @@ impl Instance {
 		let AXMU=-JJF;
 		let AXMV=(AWLX).product_sum_div(ANYF,ARPC,AXMU,JJE);
 		let AXMW=AXMV* AWAO;
-		let ZVL=product_sum_div(URK,B,AXMU,WVQ,JJE);
+		let ZVL=product_sum_div(URK,C,AXMU,WVQ,JJE);
 		let AXMX=L5(sum_products_div_lanes(&[(&AXMW.0,WVQ),(&ARPD.0,AXMU),(&ARPC.0,(-ZVL))],JJE));
-		let ZVM=product_sum_div(URL,B,AXMU,WVR,JJE);
+		let ZVM=product_sum_div(URL,C,AXMU,WVR,JJE);
 		let AXMY=L5(sum_products_div_lanes(&[(&AXMW.0,WVR),(&ARPE.0,AXMU),(&ARPC.0,(-ZVM))],JJE));
 		let JJG=JJF== A;
 		let JJJ;
@@ -38720,10 +38721,10 @@ impl Instance {
 		ARPG=AWLK;
 		ARPH=AWLK;
 		}else{
-		let JJH=CZC- B;
+		let JJH=CZC- C;
 		let JJI=JJF.powf(JJH);
 		let AXMZ=AXMV* (JJH* ((JJF+ (((JJF== AWBZ) as u8 as f64)* AWCA)).powf((JJH- ANYF))));
-		let ZVN=JJH- B;
+		let ZVN=JJH- C;
 		let ZVO=JJF+ ((JJG as u8 as f64)* ZNW);
 		let AXNA=ZVN* ((ZVO+ (((ZVO== AWBZ) as u8 as f64)* AWCA)).powf((ZVN- ANYF)));
 		let ZVP=JJH* (ZVO.powf(ZVN));
@@ -38743,7 +38744,7 @@ impl Instance {
 		let AXNE=((ARPG* JJF)+ (AXMV* WVS))+ ((AXMX* JJJ)+ (ARPF* ZVL));
 		let ZVT=(WVT* JJF)+ (ZVM* JJJ);
 		let AXNF=((ARPH* JJF)+ (AXMV* WVT))+ ((AXMY* JJJ)+ (ARPF* ZVM));
-		let JJK=B+ (JJJ* JJF);
+		let JJK=C+ (JJJ* JJF);
 		let JJL=JJK== A;
 		let JJO;
 		let WVU;
@@ -38759,10 +38760,10 @@ impl Instance {
 		ARPJ=AWLK;
 		ARPK=AWLK;
 		}else{
-		let JJM=(B/ CZC)- B;
+		let JJM=(C/ CZC)- C;
 		let JJN=JJK.powf(JJM);
 		let AXNG=AXND* (JJM* ((JJK+ (((JJK== AWBZ) as u8 as f64)* AWCA)).powf((JJM- ANYF))));
-		let ZVU=JJM- B;
+		let ZVU=JJM- C;
 		let ZVV=JJK+ ((JJL as u8 as f64)* ZNW);
 		let AXNH=ZVU* ((ZVV+ (((ZVV== AWBZ) as u8 as f64)* AWCA)).powf((ZVU- ANYF)));
 		let ZVW=JJM* (ZVV.powf(ZVU));
@@ -38785,9 +38786,9 @@ impl Instance {
 		let AXNL=-JJQ;
 		let AXNM=(AWLX).product_sum_div(ANYF,AXNK,AXNL,JJP);
 		let AXNN=AXNM* AWAO;
-		let ZWB=product_sum_div(URK,B,AXNL,ZVZ,JJP);
+		let ZWB=product_sum_div(URK,C,AXNL,ZVZ,JJP);
 		let AXNO=L5(sum_products_div_lanes(&[(&AXNN.0,ZVZ),(&(((ARPJ* JJK)+ (AXND* WVU))+ ((AXNE* JJO)+ (ARPI* ZVS))).0,AXNL),(&AXNK.0,(-ZWB))],JJP));
-		let ZWC=product_sum_div(URL,B,AXNL,ZWA,JJP);
+		let ZWC=product_sum_div(URL,C,AXNL,ZWA,JJP);
 		let AXNP=L5(sum_products_div_lanes(&[(&AXNN.0,ZWA),(&(((ARPK* JJK)+ (AXND* WVV))+ ((AXNF* JJO)+ (ARPI* ZVT))).0,AXNL),(&AXNK.0,(-ZWC))],JJP));
 		let JJR=BQN- JJQ;
 		let ZWD=USY- ZWB;
@@ -38809,7 +38810,7 @@ impl Instance {
 		let ARPM;
 		let ARPN;
 		if JJT{
-		JJU=B;
+		JJU=C;
 		JNI=JEI;
 		WVW=WTU;
 		WVX=WTV;
@@ -38927,7 +38928,7 @@ impl Instance {
 		let JKI=((JKC* JKC)+ JKH).sqrt();
 		let AXOL=((AXOI+ AXOI)+ ARQA)* (ANYF/ (AWAY* JKI));
 		let ZWX=BK* JKI;
-		let ZWY=B/ ZWX;
+		let ZWY=C/ ZWX;
 		let AXOM=((AXOL* BK)).product_div((-ZWY),ZWX);
 		let JKK=(JKJ* JJZ)- (J* (JKC+ JKI));
 		let AXON=(ARPU* JKJ)- ((AXNZ+ AXOL)* J);
@@ -39060,7 +39061,7 @@ impl Instance {
 		let AXOT=L5([AXIV[0],AXIV[1],0.0,AXIV[2],AXIV[3]]);
 		let AXOU=L5([AXIW[0],AXIW[1],0.0,AXIW[2],AXIW[3]]);
 		let AXOV=L5([AXIX[0],AXIX[1],0.0,AXIX[2],AXIX[3]]);
-		let mut JKW=B;
+		let mut JKW=C;
 		let mut JKZ=JNH;
 		let mut JMO=JNL;
 		let mut JNO=JHI;
@@ -39248,7 +39249,7 @@ impl Instance {
 		let JLZ=((JLU* JLU)+ (JLN* JLH)).sqrt();
 		let AYTZ=((AYTU+ AYTU)+ ((AYSZ* JLH)+ (AYSN* JLN)))* (ANYF/ (AWAY* JLZ));
 		let AAQX=BK* JLZ;
-		let AAQY=B/ AAQX;
+		let AAQY=C/ AAQX;
 		let AYUA=((AYTZ* BK)).product_div((-AAQY),AAQX);
 		let AAQZ=AAQV* AAQY;
 		let AYUB=(AYTX* AAQY)+ (AYUA* AAQV);
@@ -39268,10 +39269,10 @@ impl Instance {
 		let AYUH=-JMC;
 		let AYUI=((((AYUD* JLU)+ (AYTM* JMA))+ ((AYTB* JLL)+ (AYSV* JLP)))).product_sum_div(ANYF,AYUG,AYUH,JMB);
 		let AYUJ=AYUI* AWAO;
-		let AARF=product_sum_div((((AARB* JLU)+ (AAQJ* JMA))+ ((AAPZ* JLL)+ (AAPR* JLP))),B,AYUH,AARD,JMB);
-		let AYUK=L5(sum_products_div_lanes(&[(&(AYUE+ AYTD).0,B),(&AYUJ.0,AARD),(&(AYUB+ AYUB).0,AYUH),(&AYUG.0,(-AARF))],JMB));
-		let AARG=product_sum_div((((AARC* JLU)+ (AAQK* JMA))+ ((AAQA* JLL)+ (AAPS* JLP))),B,AYUH,AARE,JMB);
-		let AYUL=L5(sum_products_div_lanes(&[(&(AYUF+ AYTF).0,B),(&AYUJ.0,AARE),(&(AYUC+ AYUC).0,AYUH),(&AYUG.0,(-AARG))],JMB));
+		let AARF=product_sum_div((((AARB* JLU)+ (AAQJ* JMA))+ ((AAPZ* JLL)+ (AAPR* JLP))),C,AYUH,AARD,JMB);
+		let AYUK=L5(sum_products_div_lanes(&[(&(AYUE+ AYTD).0,C),(&AYUJ.0,AARD),(&(AYUB+ AYUB).0,AYUH),(&AYUG.0,(-AARF))],JMB));
+		let AARG=product_sum_div((((AARC* JLU)+ (AAQK* JMA))+ ((AAQA* JLL)+ (AAPS* JLP))),C,AYUH,AARE,JMB);
+		let AYUL=L5(sum_products_div_lanes(&[(&(AYUF+ AYTF).0,C),(&AYUJ.0,AARE),(&(AYUC+ AYUC).0,AYUH),(&AYUG.0,(-AARG))],JMB));
 		JMK=JLZ;
 		JMM=JMC;
 		JNR=JLU;
@@ -39315,10 +39316,10 @@ impl Instance {
 		let AYRT=(ANZF* BWG)+ (ANZE* CIB);
 		let AAOP=AAOF+ (AAON* CIB);
 		let AAOQ=AAOG+ (AAOO* CIB);
-		let JMH=((JLB- B)+ (CIB* JMF)).sqrt();
+		let JMH=((JLB- C)+ (CIB* JMF)).sqrt();
 		let AYRU=(AYRN+ (L5([(ANZF* JMF),0.0,0.0,0.0,0.0])+ ((AYRQ- AXNQ)* CIB)))* (ANYF/ (AWAY* JMH));
 		let AAOR=BK* JMH;
-		let AAOS=B/ AAOR;
+		let AAOS=C/ AAOR;
 		let AYRV=((AYRU* BK)).product_div((-AAOS),AAOR);
 		let AAOT=AAOP* AAOS;
 		let AYRW=((AYRO+ (((AYRR- AXNR)* CIB)+ L5([(ANZF* AAON),0.0,0.0,0.0,0.0])))* AAOS)+ (AYRV* AAOP);
@@ -39332,10 +39333,10 @@ impl Instance {
 		let AYRZ=-JMJ;
 		let AYSA=((L5([ANZE,0.0,0.0,0.0,0.0])+ (L5([(AYRT* JME),0.0,0.0,0.0,0.0])+ (AYRQ* JMG)))).product_sum_div(ANYF,AYRY,AYRZ,JMI);
 		let AYSB=AYSA* AWAO;
-		let AAOX=product_sum_div((AAOL* JMG),B,AYRZ,AAOV,JMI);
-		let AYSC=L5(sum_products_div_lanes(&[(&((AYRR* JMG)+ L5([(AYRT* AAOL),0.0,0.0,0.0,0.0])).0,B),(&AYSB.0,AAOV),(&(AYRW+ AYRW).0,AYRZ),(&AYRY.0,(-AAOX))],JMI));
-		let AAOY=product_sum_div((AAOM* JMG),B,AYRZ,AAOW,JMI);
-		let AYSD=L5(sum_products_div_lanes(&[(&((AYRS* JMG)+ L5([(AYRT* AAOM),0.0,0.0,0.0,0.0])).0,B),(&AYSB.0,AAOW),(&(AYRX+ AYRX).0,AYRZ),(&AYRY.0,(-AAOY))],JMI));
+		let AAOX=product_sum_div((AAOL* JMG),C,AYRZ,AAOV,JMI);
+		let AYSC=L5(sum_products_div_lanes(&[(&((AYRR* JMG)+ L5([(AYRT* AAOL),0.0,0.0,0.0,0.0])).0,C),(&AYSB.0,AAOV),(&(AYRW+ AYRW).0,AYRZ),(&AYRY.0,(-AAOX))],JMI));
+		let AAOY=product_sum_div((AAOM* JMG),C,AYRZ,AAOW,JMI);
+		let AYSD=L5(sum_products_div_lanes(&[(&((AYRS* JMG)+ L5([(AYRT* AAOM),0.0,0.0,0.0,0.0])).0,C),(&AYSB.0,AAOW),(&(AYRX+ AYRX).0,AYRZ),(&AYRY.0,(-AAOY))],JMI));
 		JMK=JMH;
 		JMM=JMJ;
 		JNR=JNQ;
@@ -39373,9 +39374,9 @@ impl Instance {
 		let AYUQ=(((AWWA* JMM)+ (ARQZ* ZIU))+ ((ARRE* BOB)+ (AWVY* WWY)))* AWAO;
 		let AARK=-((ZIV* JMM)+ (WWZ* BOB));
 		let AYUR=(((AWWC* JMM)+ (ARQZ* ZIV))+ ((ARRF* BOB)+ (AWVY* WWZ)))* AWAO;
-		let JMP=JMO== B;
+		let JMP=JMO== C;
 		let JMQ=if JMP{
-		B
+		C
 		}else{
 		A
 		};
@@ -39392,13 +39393,13 @@ impl Instance {
 		let AYUS=-JMS;
 		let AYUT=((AYUM* AWAO)).product_sum_div(ANYF,AYUP,AYUS,JMN);
 		let AYUU=AYUT* AWAO;
-		let AARL=product_sum_div((AARH* AMF),B,AYUS,AARJ,JMN);
-		let AYUV=L5(sum_products_div_lanes(&[(&(AYUN* AMF).0,B),(&AYUU.0,AARJ),(&AYUQ.0,AYUS),(&AYUP.0,(-AARL))],JMN));
-		let AARM=product_sum_div((AARI* AMF),B,AYUS,AARK,JMN);
-		let AYUW=L5(sum_products_div_lanes(&[(&(AYUO* AMF).0,B),(&AYUU.0,AARK),(&AYUR.0,AYUS),(&AYUP.0,(-AARM))],JMN));
+		let AARL=product_sum_div((AARH* AMF),C,AYUS,AARJ,JMN);
+		let AYUV=L5(sum_products_div_lanes(&[(&(AYUN* AMF).0,C),(&AYUU.0,AARJ),(&AYUQ.0,AYUS),(&AYUP.0,(-AARL))],JMN));
+		let AARM=product_sum_div((AARI* AMF),C,AYUS,AARK,JMN);
+		let AYUW=L5(sum_products_div_lanes(&[(&(AYUO* AMF).0,C),(&AYUU.0,AARK),(&AYUR.0,AYUS),(&AYUP.0,(-AARM))],JMN));
 		let JMU=JKZ.abs();
 		let AYUX=ARQM* ((AWAY* ((JKZ>= AWBZ) as u8 as f64))- ANYF);
-		let JMV=B>= JMU;
+		let JMV=C>= JMU;
 		let JMW;
 		let WXG;
 		let WXH;
@@ -39406,14 +39407,14 @@ impl Instance {
 		let ARRO;
 		let ARRP;
 		if JMV{
-		JMW=B;
+		JMW=C;
 		WXG=A;
 		WXH=A;
 		ARRN=AWLK;
 		ARRO=AWLK;
 		ARRP=AWLK;
 		}else{
-		let AARN=(BK* ((JKZ>= A) as u8 as f64))- B;
+		let AARN=(BK* ((JKZ>= A) as u8 as f64))- C;
 		let AARO=WWO* AARN;
 		let AYUY=ARQQ* AARN;
 		let AARP=WWP* AARN;
@@ -39425,7 +39426,7 @@ impl Instance {
 		ARRO=AYUY;
 		ARRP=AYUZ;
 		}
-		let JMX=JMT* (B+ JMW);
+		let JMX=JMT* (C+ JMW);
 		let AYVA=ARRN* JMT;
 		let AARQ=WXG* JMT;
 		let AYVB=ARRO* JMT;
@@ -39441,7 +39442,7 @@ impl Instance {
 		if JMY{
 		let JMZ=JMS>= A;
 		let JNA=if JMZ{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -39473,7 +39474,7 @@ impl Instance {
 		let AYVI=ARQR+ ARRS;
 		let JNE=((JNC.abs())<= BBK)&& ((JML.abs())<= AQ);
 		let JNN=if JNE{
-		B
+		C
 		}else{
 		JMO
 		};
@@ -39498,7 +39499,7 @@ impl Instance {
 		}else{
 		JKW
 		};
-		let JNG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JNF, B));
+		let JNG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JNF, C));
 		JKW=JNG;
 		JKZ=JNK;
 		JMO=JNM;
@@ -39566,11 +39567,11 @@ impl Instance {
 		ARRW=AXPG;
 		ARRX=AXPH;
 		}else{
-		let JNW=JNO- B;
+		let JNW=JNO- C;
 		let JNX=JNW.sqrt();
 		let AXOW=ARQN* (ANYF/ (AWAY* JNX));
 		let ZXD=BK* JNX;
-		let ZXE=B/ ZXD;
+		let ZXE=C/ ZXD;
 		let AXOX=((AXOW* BK)).product_div((-ZXE),ZXD);
 		let ZXF=WWQ* ZXE;
 		let ZXG=WWR* ZXE;
@@ -39610,11 +39611,11 @@ impl Instance {
 		let AXPQ=(((L5(sum_products_div_lanes(&[(&AXPO.0,WUY),(&AROD.0,AXPL),(&ARNZ.0,(-ZXR))],JOA)))* JNZ)+ (AXPI* ZXR))+ ((AXPJ* JOB)+ (AXPN* ZXP));
 		let ZXU=(ZXS* JNZ)+ (ZXQ* JOB);
 		let AXPR=(((L5(sum_products_div_lanes(&[(&AXPO.0,WUZ),(&AROE.0,AXPL),(&ARNZ.0,(-ZXS))],JOA)))* JNZ)+ (AXPI* ZXS))+ ((AXPK* JOB)+ (AXPN* ZXQ));
-		let JOD=JOC+ B;
+		let JOD=JOC+ C;
 		let JOE=JOD.sqrt();
 		let AXPS=AXPP* (ANYF/ (AWAY* JOE));
 		let ZXV=BK* JOE;
-		let ZXW=B/ ZXV;
+		let ZXW=C/ ZXV;
 		let AXPT=((AXPS* BK)).product_div((-ZXW),ZXV);
 		let ZXX=ZXT* ZXW;
 		let AXPU=(AXPQ* ZXW)+ (AXPT* ZXT);
@@ -39629,22 +39630,22 @@ impl Instance {
 		let AXPZ=(AXPW* JOD)+ (AXPP* JOF);
 		let ZYB=(ZXZ* JOD)+ (ZXT* JOF);
 		let ZYC=(ZYA* JOD)+ (ZXU* JOF);
-		let JOG=JOE+ B;
-		let JOH=B/ JOG;
+		let JOG=JOE+ C;
+		let JOH=C/ JOG;
 		let AXQA=-JOH;
 		let AXQB=(AXPS).product_div(AXQA,JOG);
 		let AXQC=AXQB* AWAO;
 		let ZYD=product_div(AXQA,ZXX,JOG);
 		let ZYE=product_div(AXQA,ZXY,JOG);
-		let JOI=JOF+ B;
-		let JOJ=B/ JOI;
+		let JOI=JOF+ C;
+		let JOJ=C/ JOI;
 		let AXQD=-JOJ;
 		let AXQE=(AXPW).product_div(AXQD,JOI);
 		let AXQF=AXQE* AWAO;
 		let ZYF=product_div(AXQD,ZXZ,JOI);
 		let ZYG=product_div(AXQD,ZYA,JOI);
-		let JOK=(JOF* JOD)+ B;
-		let JOL=B/ JOK;
+		let JOK=(JOF* JOD)+ C;
+		let JOL=C/ JOK;
 		let AXQG=-JOL;
 		let AXQH=(AXPZ).product_div(AXQG,JOK);
 		let AXQI=AXQH* AWAO;
@@ -39654,8 +39655,8 @@ impl Instance {
 		let AXQJ=-JOM;
 		let AXQK=(AXQB).product_sum_div(ANYF,ARNY,AXQJ,JHV);
 		let AXQL=AXQK* AWAO;
-		let ZYJ=product_sum_div(ZYD,B,AXQJ,WUW,JHV);
-		let ZYK=product_sum_div(ZYE,B,AXQJ,WUX,JHV);
+		let ZYJ=product_sum_div(ZYD,C,AXQJ,WUW,JHV);
+		let ZYK=product_sum_div(ZYE,C,AXQJ,WUX,JHV);
 		let JON=Q+ JOC;
 		let AXQM=AXPP* JOC;
 		let AXQN=(AXPP* JON)+ AXQM;
@@ -39739,9 +39740,9 @@ impl Instance {
 		let JPK=(JPI* JPG)+ (JPJ* JPH);
 		let AXRS=((AXRO* JPG)+ (AXRM* JPI))+ (L5([(AXRR* JPH),0.0,0.0,0.0,0.0])+ (((AXQU* AWAO)+ AXQK)* JPJ));
 		let ZZN=((ZZL* JPG)+ (ZZH* JPI))+ (ZZJ* JPJ);
-		let AXRT=((((L5([0.0,AXRP[0],AXRP[1],AXRP[2],AXRP[3]])+ L5([(ANZE* URY),0.0,0.0,0.0,0.0]))* JPG)+ (AXRM* ZZL))+ (((AXBM- (((ARMN* BK)+ AXPJ)* J))* JPI)+ (AXRO* ZZH)))+ ((((AXQV* AMF)+ (L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&AXQC.0,ZXX),(&AXPU.0,AXQA),(&AXPS.0,(-ZYD))],JOG))).0,B),(&AXQL.0,WUW),(&AROB.0,AXQJ),(&ARNY.0,(-ZYJ))],JHV))))* JPJ)+ L5([(AXRR* ZZJ),0.0,0.0,0.0,0.0]));
+		let AXRT=((((L5([0.0,AXRP[0],AXRP[1],AXRP[2],AXRP[3]])+ L5([(ANZE* URY),0.0,0.0,0.0,0.0]))* JPG)+ (AXRM* ZZL))+ (((AXBM- (((ARMN* BK)+ AXPJ)* J))* JPI)+ (AXRO* ZZH)))+ ((((AXQV* AMF)+ (L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&AXQC.0,ZXX),(&AXPU.0,AXQA),(&AXPS.0,(-ZYD))],JOG))).0,C),(&AXQL.0,WUW),(&AROB.0,AXQJ),(&ARNY.0,(-ZYJ))],JHV))))* JPJ)+ L5([(AXRR* ZZJ),0.0,0.0,0.0,0.0]));
 		let ZZO=((ZZM* JPG)+ (ZZI* JPI))+ (ZZK* JPJ);
-		let AXRU=((((L5([0.0,AXRQ[0],AXRQ[1],AXRQ[2],AXRQ[3]])+ L5([(ANZE* URZ),0.0,0.0,0.0,0.0]))* JPG)+ (AXRM* ZZM))+ (((AXBN- (((ARMO* BK)+ AXPK)* J))* JPI)+ (AXRO* ZZI)))+ ((((AXQW* AMF)+ (L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&AXQC.0,ZXY),(&AXPV.0,AXQA),(&AXPS.0,(-ZYE))],JOG))).0,B),(&AXQL.0,WUX),(&AROC.0,AXQJ),(&ARNY.0,(-ZYK))],JHV))))* JPJ)+ L5([(AXRR* ZZK),0.0,0.0,0.0,0.0]));
+		let AXRU=((((L5([0.0,AXRQ[0],AXRQ[1],AXRQ[2],AXRQ[3]])+ L5([(ANZE* URZ),0.0,0.0,0.0,0.0]))* JPG)+ (AXRM* ZZM))+ (((AXBN- (((ARMO* BK)+ AXPK)* J))* JPI)+ (AXRO* ZZI)))+ ((((AXQW* AMF)+ (L5(sum_products_div_lanes(&[(&(L5(sum_products_div_lanes(&[(&AXQC.0,ZXY),(&AXPV.0,AXQA),(&AXPS.0,(-ZYE))],JOG))).0,C),(&AXQL.0,WUX),(&AROC.0,AXQJ),(&ARNY.0,(-ZYK))],JHV))))* JPJ)+ L5([(AXRR* ZZK),0.0,0.0,0.0,0.0]));
 		let JPL=JNZ* JPK;
 		let AXRV=AXPI* JPK;
 		let AXRW=AXRV+ (AXRS* JNZ);
@@ -39755,9 +39756,9 @@ impl Instance {
 		let AXSB=AXPI* ZZO;
 		let ZZS=ZZR+ (ZZO* JNZ);
 		let AXSC=AXSA+ ((AXRU* JNZ)+ AXSB);
-		let JPQ=JPM== B;
+		let JPQ=JPM== C;
 		let JPR=if JPQ{
-		B
+		C
 		}else{
 		A
 		};
@@ -39815,7 +39816,7 @@ impl Instance {
 		if JPZ{
 		let JQJ;
 		if JQA{
-		JQJ=B;
+		JQJ=C;
 		}else{
 		let JQK;
 		if JQB{
@@ -39846,7 +39847,7 @@ impl Instance {
 		}
 		let JQH=JQG.sqrt();
 		let AYRM=ARSQ* (ANYF/ (AWAY* JQH));
-		let JQI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JQE, B));
+		let JQI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JQE, C));
 		JQE=JQI;
 		JQG=JQH;
 		ARSQ=AYRM;
@@ -39869,7 +39870,7 @@ impl Instance {
 		JQQ=JQP;
 		ARSP=ARSR;
 		}
-		let JQR=B/ JQQ;
+		let JQR=C/ JQQ;
 		let JQT=JPW* JQS;
 		let JQU=((JPU- 2.220446049250313e-15f64)- 2.220446049250313e-15f64)+ (JQT* JQR);
 		let AXVF=AXUZ+ (((AXVA* JQS)* JQR)+ (((ARSP).product_div((-JQR),JQQ))* JQT));
@@ -39893,13 +39894,13 @@ impl Instance {
 		let JQV=(JKZ- BQN).sqrt();
 		let AXSD=(ARQM- AXBO)* (ANYF/ (AWAY* JQV));
 		let ZZV=BK* JQV;
-		let ZZW=B/ ZZV;
+		let ZZW=C/ ZZV;
 		let AXSE=((AXSD* BK)).product_div((-ZZW),ZZV);
 		let JQW=BNE* JQV;
 		let AXSF=AXSD* BNE;
 		let ZZX=(ZZT* ZZW)* BNE;
 		let ZZY=(ZZU* ZZW)* BNE;
-		let JQX=B/ JQW;
+		let JQX=C/ JQW;
 		let AXSG=-JQX;
 		let AXSH=(AXSF).product_div(AXSG,JQW);
 		let AXSI=AXSH* AWAO;
@@ -39911,7 +39912,7 @@ impl Instance {
 		let AAAB=((ZTL* JQX)+ (ZZZ* JID))* IY;
 		let AAAC=((ZTM* JQX)+ (AAAA* JID))* IY;
 		let JQY=(IX* QR)+ (IY* (JID* JQX));
-		let JQZ=B/ JQY;
+		let JQZ=C/ JQY;
 		let AXSM=-JQZ;
 		let AXSN=(AXSL).product_div(AXSM,JQY);
 		let AXSO=AXSN* AWAO;
@@ -39923,7 +39924,7 @@ impl Instance {
 		let AXSQ=(L5(sum_products_div_lanes(&[(&AXSO.0,AAAB),(&(AXSJ* IY).0,AXSM),(&AXSL.0,(-AAAD))],JQY)))* OS;
 		let AAAG=AAAE* OS;
 		let AXSR=(L5(sum_products_div_lanes(&[(&AXSO.0,AAAC),(&(AXSK* IY).0,AXSM),(&AXSL.0,(-AAAE))],JQY)))* OS;
-		let JRB=B- IW;
+		let JRB=C- IW;
 		let JRC=BIL+ JEI;
 		let AXSS=AWLX+ ARMI;
 		let AAAH=URK+ WTU;
@@ -39977,7 +39978,7 @@ impl Instance {
 		if JRI{
 		let JRS;
 		if JRJ{
-		JRS=B;
+		JRS=C;
 		}else{
 		let JRT;
 		if JRK{
@@ -40013,13 +40014,13 @@ impl Instance {
 		let JRQ=JRP.sqrt();
 		let AXUV=ARSY* (ANYF/ (AWAY* JRQ));
 		let AACG=BK* JRQ;
-		let AACH=B/ AACG;
+		let AACH=C/ AACG;
 		let AXUW=((AXUV* BK)).product_div((-AACH),AACG);
 		let AACI=WXY* AACH;
 		let AXUX=(ARSZ* AACH)+ (AXUW* WXY);
 		let AACJ=WXZ* AACH;
 		let AXUY=(ARTA* AACH)+ (AXUW* WXZ);
-		let JRR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JRN, B));
+		let JRR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JRN, C));
 		JRN=JRR;
 		JRP=JRQ;
 		WXY=AACI;
@@ -40074,7 +40075,7 @@ impl Instance {
 		ARSW=ARTC;
 		ARSX=ARTD;
 		}
-		let JSB=B/ JSA;
+		let JSB=C/ JSA;
 		let AXTN=-JSB;
 		let AXTO=(ARSV).product_div(AXTN,JSA);
 		let AXTP=AXTO* AWAO;
@@ -40108,7 +40109,7 @@ impl Instance {
 		let AXTU=L5([(ANZE* JID),0.0,0.0,0.0,0.0])+ (AXJW* BWG);
 		let AABG=ZTL* BWG;
 		let AABH=ZTM* BWG;
-		let JSH=B/ JSG;
+		let JSH=C/ JSG;
 		let AXTV=-JSH;
 		let AXTW=(AXTU).product_div(AXTV,JSG);
 		let AXTX=AXTW* AWAO;
@@ -40121,7 +40122,7 @@ impl Instance {
 		let AABL=ZZR+ (ZZO* JSI);
 		let AXTZ=(((AXRX+ ((AXRT* JSI)+ AXRY))* JSH)+ (AXTW* AABK))+ (((L5(sum_products_div_lanes(&[(&AXTX.0,AABG),(&((AXJX* BWG)+ L5([(ANZE* ZTL),0.0,0.0,0.0,0.0])).0,AXTV),(&AXTU.0,(-AABI))],JSG)))* JSJ)+ (AXTY* AABI));
 		let AXUA=(((AXSA+ ((AXRU* JSI)+ AXSB))* JSH)+ (AXTW* AABL))+ (((L5(sum_products_div_lanes(&[(&AXTX.0,AABH),(&((AXJY* BWG)+ L5([(ANZE* ZTM),0.0,0.0,0.0,0.0])).0,AXTV),(&AXTU.0,(-AABJ))],JSG)))* JSJ)+ (AXTY* AABJ));
-		let JSK=B/ PE;
+		let JSK=C/ PE;
 		let JSL=BK* (QR/ OS);
 		let JSM=JSL* (JSF- JKZ);
 		let AXUB=(ARSS- ARQM)* JSL;
@@ -40159,7 +40160,7 @@ impl Instance {
 		let JSR=((JSO* JSO)+ (JSQ* JRA)).sqrt();
 		let AXUP=((AXUK+ AXUK)+ ((AXUJ* JRA)+ (AXSP* JSQ)))* (ANYF/ (AWAY* JSR));
 		let AACA=BK* JSR;
-		let AACB=B/ AACA;
+		let AACB=C/ AACA;
 		let AXUQ=((AXUP* BK)).product_div((-AACB),AACA);
 		let JSS=J* ((-JSO)+ JSR);
 		let AXUR=((AXUF* AWAO)+ AXUP)* J;
@@ -40192,7 +40193,7 @@ impl Instance {
 		let AACN=((ZMJ* JOS)+ (ZYU* JPF))- ZZG;
 		let JSX=J* BWG;
 		let AXVK=ANZE* J;
-		let JSY=(AW- (JOA+ B))- (JSX* JNZ);
+		let JSY=(AW- (JOA+ C))- (JSX* JNZ);
 		let AACO=(-WUY)- (ZXP* JSX);
 		let AACP=(-WUZ)- (ZXQ* JSX);
 		let AXVL=AODZ* JSW;
@@ -40213,10 +40214,10 @@ impl Instance {
 		let AXVT=-JTB;
 		let AXVU=((L5([(ANZE* JTA),0.0,0.0,0.0,0.0])+ (AXVS* BWG))).product_sum_div(ANYF,AXRS,AXVT,JPK);
 		let AXVV=AXVU* AWAO;
-		let AACU=product_sum_div((AACS* BWG),B,AXVT,ZZN,JPK);
-		let AXVW=L5(sum_products_div_lanes(&[(&((((AXVQ* BKG)+ L5([(ANZB* AACQ),0.0,0.0,0.0,0.0]))* BWG)+ L5([(ANZE* AACS),0.0,0.0,0.0,0.0])).0,B),(&AXVV.0,ZZN),(&AXRT.0,AXVT),(&AXRS.0,(-AACU))],JPK));
-		let AACV=product_sum_div((AACT* BWG),B,AXVT,ZZO,JPK);
-		let AXVX=L5(sum_products_div_lanes(&[(&((((AXVR* BKG)+ L5([(ANZB* AACR),0.0,0.0,0.0,0.0]))* BWG)+ L5([(ANZE* AACT),0.0,0.0,0.0,0.0])).0,B),(&AXVV.0,ZZO),(&AXRU.0,AXVT),(&AXRS.0,(-AACV))],JPK));
+		let AACU=product_sum_div((AACS* BWG),C,AXVT,ZZN,JPK);
+		let AXVW=L5(sum_products_div_lanes(&[(&((((AXVQ* BKG)+ L5([(ANZB* AACQ),0.0,0.0,0.0,0.0]))* BWG)+ L5([(ANZE* AACS),0.0,0.0,0.0,0.0])).0,C),(&AXVV.0,ZZN),(&AXRT.0,AXVT),(&AXRS.0,(-AACU))],JPK));
+		let AACV=product_sum_div((AACT* BWG),C,AXVT,ZZO,JPK);
+		let AXVX=L5(sum_products_div_lanes(&[(&((((AXVR* BKG)+ L5([(ANZB* AACR),0.0,0.0,0.0,0.0]))* BWG)+ L5([(ANZE* AACT),0.0,0.0,0.0,0.0])).0,C),(&AXVV.0,ZZO),(&AXRU.0,AXVT),(&AXRS.0,(-AACV))],JPK));
 		let JTC=BK* BOB;
 		let AXVY=AWVY* BK;
 		let AACW=ZIU* BK;
@@ -40229,7 +40230,7 @@ impl Instance {
 		let AXWA=AXPI+ ((AXVY* JTD)+ (AXVZ* JTC));
 		let AADA=ZXP+ ((AACW* JTD)+ (AACY* JTC));
 		let AADB=ZXQ+ ((AACX* JTD)+ (AACZ* JTC));
-		let JTF=B/ JIN;
+		let JTF=C/ JIN;
 		let AXWB=-JTF;
 		let AXWC=(AXKN).product_div(AXWB,JIN);
 		let AXWD=AXWC* AWAO;
@@ -40237,7 +40238,7 @@ impl Instance {
 		let AADD=product_div(AXWB,ZUC,JIN);
 		let AXWE=(((AXPJ+ ((((AWWA* BK)* JTD)+ (AXVZ* AACW))+ (((AXQV- AROB)* JTC)+ (AXVY* AACY))))* JTF)+ (AXWC* AADA))+ (((L5(sum_products_div_lanes(&[(&AXWD.0,ZUB),(&AXKQ.0,AXWB),(&AXKN.0,(-AADC))],JIN)))* JTE)+ (AXWA* AADC));
 		let AXWF=(((AXPK+ ((((AWWC* BK)* JTD)+ (AXVZ* AACX))+ (((AXQW- AROC)* JTC)+ (AXVY* AACZ))))* JTF)+ (AXWC* AADB))+ (((L5(sum_products_div_lanes(&[(&AXWD.0,ZUC),(&AXKT.0,AXWB),(&AXKN.0,(-AADD))],JIN)))* JTE)+ (AXWA* AADD));
-		let JTG=B- (B- (JTE* JTF));
+		let JTG=C- (C- (JTE* JTF));
 		let AXWG=(((AXWA* JTF)+ (AXWC* JTE))* AWAO)* AWAO;
 		let AADE=-(-((AADA* JTF)+ (AADC* JTE)));
 		let AXWH=(AXWE* AWAO)* AWAO;
@@ -40282,7 +40283,7 @@ impl Instance {
 		if JTL{
 		let JTV;
 		if JTM{
-		JTV=B;
+		JTV=C;
 		}else{
 		let JTW;
 		if JTN{
@@ -40318,13 +40319,13 @@ impl Instance {
 		let JTT=JTS.sqrt();
 		let AYRI=ARTH* (ANYF/ (AWAY* JTT));
 		let AANZ=BK* JTT;
-		let AAOA=B/ AANZ;
+		let AAOA=C/ AANZ;
 		let AYRJ=((AYRI* BK)).product_div((-AAOA),AANZ);
 		let AAOB=WYE* AAOA;
 		let AYRK=(ARTI* AAOA)+ (AYRJ* WYE);
 		let AAOC=WYF* AAOA;
 		let AYRL=(ARTJ* AAOA)+ (AYRJ* WYF);
-		let JTU=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JTQ, B));
+		let JTU=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JTQ, C));
 		JTQ=JTU;
 		JTS=JTT;
 		WYE=AAOB;
@@ -40379,19 +40380,19 @@ impl Instance {
 		ARTF=ARTL;
 		ARTG=ARTM;
 		}
-		let JUE=B/ JUD;
+		let JUE=C/ JUD;
 		let AXXB=-JUE;
 		let AXXC=(ARTE).product_div(AXXB,JUD);
 		let AXXD=AXXC* AWAO;
 		let AADX=product_div(AXXB,WYC,JUD);
 		let AADY=product_div(AXXB,WYD,JUD);
-		let JUF=B- (JTG* JUE);
+		let JUF=C- (JTG* JUE);
 		let AXXE=((AXWG* JUE)+ (AXXC* JTG))* AWAO;
 		let AADZ=-((AADE* JUE)+ (AADX* JTG));
 		let AXXF=(((AXWH* JUE)+ (AXXC* AADE))+ (((L5(sum_products_div_lanes(&[(&AXXD.0,WYC),(&ARTF.0,AXXB),(&ARTE.0,(-AADX))],JUD)))* JTG)+ (AXWG* AADX)))* AWAO;
 		let AAEA=-((AADF* JUE)+ (AADY* JTG));
 		let AXXG=(((AXWI* JUE)+ (AXXC* AADF))+ (((L5(sum_products_div_lanes(&[(&AXXD.0,WYD),(&ARTG.0,AXXB),(&ARTE.0,(-AADY))],JUD)))* JTG)+ (AXWG* AADY)))* AWAO;
-		let JUG=B+ JUF;
+		let JUG=C+ JUF;
 		let AXXH=(AXXE* JUG)+ (AXXE* JUF);
 		let AXXI=AXXE* AADZ;
 		let AAEB=(AADZ* JUG)+ (AADZ* JUF);
@@ -40399,7 +40400,7 @@ impl Instance {
 		let AXXK=AXXE* AAEA;
 		let AAEC=(AAEA* JUG)+ (AAEA* JUF);
 		let AXXL=((AXXG* JUG)+ AXXK)+ ((AXXG* JUF)+ AXXK);
-		let JUH=B+ (JUF* JUG);
+		let JUH=C+ (JUF* JUG);
 		let JUI=(JUG< 4.440892098500626e-15f64)&& true;
 		let JVK;
 		let WYI;
@@ -40443,7 +40444,7 @@ impl Instance {
 		if JUM{
 		let JUW;
 		if JUN{
-		JUW=B;
+		JUW=C;
 		}else{
 		let JUX;
 		if JUO{
@@ -40479,13 +40480,13 @@ impl Instance {
 		let JUU=JUT.sqrt();
 		let AYRE=ARTT* (ANYF/ (AWAY* JUU));
 		let AANV=BK* JUU;
-		let AANW=B/ AANV;
+		let AANW=C/ AANV;
 		let AYRF=((AYRE* BK)).product_div((-AANW),AANV);
 		let AANX=WYM* AANW;
 		let AYRG=(ARTU* AANW)+ (AYRF* WYM);
 		let AANY=WYN* AANW;
 		let AYRH=(ARTV* AANW)+ (AYRF* WYN);
-		let JUV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JUR, B));
+		let JUV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, JUR, C));
 		JUR=JUV;
 		JUT=JUU;
 		WYM=AANX;
@@ -40540,7 +40541,7 @@ impl Instance {
 		ARTR=ARTX;
 		ARTS=ARTY;
 		}
-		let JVF=B/ JVE;
+		let JVF=C/ JVE;
 		let AXYD=-JVF;
 		let AXYE=(ARTQ).product_div(AXYD,JVE);
 		let AXYF=AXYE* AWAO;
@@ -40578,19 +40579,19 @@ impl Instance {
 		let AXYL=-JVL;
 		let AXYM=(((AXYK* JUH)+ (AXXH* JVJ))).product_sum_div(ANYF,ARTN,AXYL,JVK);
 		let AXYN=AXYM* AWAO;
-		let AAFA=product_sum_div(((AAEY* JUH)+ (AAEB* JVJ)),B,AXYL,WYI,JVK);
-		let AAFB=product_sum_div(((AAEZ* JUH)+ (AAEC* JVJ)),B,AXYL,WYJ,JVK);
+		let AAFA=product_sum_div(((AAEY* JUH)+ (AAEB* JVJ)),C,AXYL,WYI,JVK);
+		let AAFB=product_sum_div(((AAEZ* JUH)+ (AAEC* JVJ)),C,AXYL,WYJ,JVK);
 		let JVM=JVL* BNR;
 		let AXYO=AODZ* JVL;
 		let AXYP=(AXYM* BNR)+ L5([0.0,AXYO[0],AXYO[1],AXYO[2],AXYO[3]]);
 		let AXYQ=AODZ* AAFA;
 		let AXYR=AOED* JVL;
 		let AAFC=(AAFA* BNR)+ (URY* JVL);
-		let AXYS=(((L5(sum_products_div_lanes(&[(&((((AXKQ* JOP)* JUH)+ (AXXH* AAEY))+ ((AXXJ* JVJ)+ (AXYK* AAEB))).0,B),(&AXYN.0,WYI),(&ARTO.0,AXYL),(&ARTN.0,(-AAFA))],JVK)))* BNR)+ L5([0.0,AXYQ[0],AXYQ[1],AXYQ[2],AXYQ[3]]))+ (L5([0.0,AXYR[0],AXYR[1],AXYR[2],AXYR[3]])+ (AXYM* URY));
+		let AXYS=(((L5(sum_products_div_lanes(&[(&((((AXKQ* JOP)* JUH)+ (AXXH* AAEY))+ ((AXXJ* JVJ)+ (AXYK* AAEB))).0,C),(&AXYN.0,WYI),(&ARTO.0,AXYL),(&ARTN.0,(-AAFA))],JVK)))* BNR)+ L5([0.0,AXYQ[0],AXYQ[1],AXYQ[2],AXYQ[3]]))+ (L5([0.0,AXYR[0],AXYR[1],AXYR[2],AXYR[3]])+ (AXYM* URY));
 		let AXYT=AODZ* AAFB;
 		let AXYU=AOEE* JVL;
 		let AAFD=(AAFB* BNR)+ (URZ* JVL);
-		let AXYV=(((L5(sum_products_div_lanes(&[(&((((AXKT* JOP)* JUH)+ (AXXH* AAEZ))+ ((AXXL* JVJ)+ (AXYK* AAEC))).0,B),(&AXYN.0,WYJ),(&ARTP.0,AXYL),(&ARTN.0,(-AAFB))],JVK)))* BNR)+ L5([0.0,AXYT[0],AXYT[1],AXYT[2],AXYT[3]]))+ (L5([0.0,AXYU[0],AXYU[1],AXYU[2],AXYU[3]])+ (AXYM* URZ));
+		let AXYV=(((L5(sum_products_div_lanes(&[(&((((AXKT* JOP)* JUH)+ (AXXH* AAEZ))+ ((AXXL* JVJ)+ (AXYK* AAEC))).0,C),(&AXYN.0,WYJ),(&ARTP.0,AXYL),(&ARTN.0,(-AAFB))],JVK)))* BNR)+ L5([0.0,AXYT[0],AXYT[1],AXYT[2],AXYT[3]]))+ (L5([0.0,AXYU[0],AXYU[1],AXYU[2],AXYU[3]])+ (AXYM* URZ));
 		let JVN=JVK* JUH;
 		let JVO=(I* (J+ JUF))/ JVN;
 		let JVP=0.6f64- JVO;
@@ -40627,7 +40628,7 @@ impl Instance {
 		let ARUI;
 		let ARUJ;
 		if JVR{
-		let JVU=B- JVS;
+		let JVU=C- JVS;
 		let AXYX=AROH* AWAO;
 		let AAFE=-WVC;
 		let AXYY=AROK* AWAO;
@@ -40822,28 +40823,28 @@ impl Instance {
 		let AXZN=(AXPI* DYR)+ L5([(ANZH* JNZ),0.0,0.0,0.0,0.0]);
 		let AAFO=ZXP* DYR;
 		let AAFP=ZXQ* DYR;
-		let JWI=B+ (JNZ* DYR);
+		let JWI=C+ (JNZ* DYR);
 		let JWU=((JWG* JWJ)+ (JWH* JWP))/ JWI;
 		let AXZO=-JWU;
 		let AXZP=(((ARRZ* JWG)+ (ARSA* JWH))).product_sum_div(ANYF,AXZN,AXZO,JWI);
 		let AXZQ=AXZP* AWAO;
-		let AAFQ=product_sum_div(((WXO* JWG)+ (WXQ* JWH)),B,AXZO,AAFO,JWI);
-		let AAFR=product_sum_div(((WXP* JWG)+ (WXR* JWH)),B,AXZO,AAFP,JWI);
+		let AAFQ=product_sum_div(((WXO* JWG)+ (WXQ* JWH)),C,AXZO,AAFO,JWI);
+		let AAFR=product_sum_div(((WXP* JWG)+ (WXR* JWH)),C,AXZO,AAFP,JWI);
 		let AXZR=AXBE* JWV;
 		let AAFS=ZMC* JWV;
 		let AAFT=ZMD* JWV;
-		let JWW=B+ (JWV* BQQ);
+		let JWW=C+ (JWV* BQQ);
 		let JWX=JWU* JWW;
 		let AXZS=AXZR* JWU;
 		let AXZT=(AXZP* JWW)+ L5([AXZS[0],AXZS[1],0.0,AXZS[2],AXZS[3]]);
 		let AXZU=AXZR* AAFQ;
 		let AXZV=(AXBF* JWV)* JWU;
 		let AAFU=(AAFQ* JWW)+ (AAFS* JWU);
-		let AXZW=(((L5(sum_products_div_lanes(&[(&((ARSG* JWG)+ (ARSI* JWH)).0,B),(&AXZQ.0,AAFO),(&((AXPJ* DYR)+ L5([(ANZH* ZXP),0.0,0.0,0.0,0.0])).0,AXZO),(&AXZN.0,(-AAFQ))],JWI)))* JWW)+ L5([AXZU[0],AXZU[1],0.0,AXZU[2],AXZU[3]]))+ (L5([AXZV[0],AXZV[1],0.0,AXZV[2],AXZV[3]])+ (AXZP* AAFS));
+		let AXZW=(((L5(sum_products_div_lanes(&[(&((ARSG* JWG)+ (ARSI* JWH)).0,C),(&AXZQ.0,AAFO),(&((AXPJ* DYR)+ L5([(ANZH* ZXP),0.0,0.0,0.0,0.0])).0,AXZO),(&AXZN.0,(-AAFQ))],JWI)))* JWW)+ L5([AXZU[0],AXZU[1],0.0,AXZU[2],AXZU[3]]))+ (L5([AXZV[0],AXZV[1],0.0,AXZV[2],AXZV[3]])+ (AXZP* AAFS));
 		let AXZX=AXZR* AAFR;
 		let AXZY=(AXBG* JWV)* JWU;
 		let AAFV=(AAFR* JWW)+ (AAFT* JWU);
-		let AXZZ=(((L5(sum_products_div_lanes(&[(&((ARSH* JWG)+ (ARSJ* JWH)).0,B),(&AXZQ.0,AAFP),(&((AXPK* DYR)+ L5([(ANZH* ZXQ),0.0,0.0,0.0,0.0])).0,AXZO),(&AXZN.0,(-AAFR))],JWI)))* JWW)+ L5([AXZX[0],AXZX[1],0.0,AXZX[2],AXZX[3]]))+ (L5([AXZY[0],AXZY[1],0.0,AXZY[2],AXZY[3]])+ (AXZP* AAFT));
+		let AXZZ=(((L5(sum_products_div_lanes(&[(&((ARSH* JWG)+ (ARSJ* JWH)).0,C),(&AXZQ.0,AAFP),(&((AXPK* DYR)+ L5([(ANZH* ZXQ),0.0,0.0,0.0,0.0])).0,AXZO),(&AXZN.0,(-AAFR))],JWI)))* JWW)+ L5([AXZX[0],AXZX[1],0.0,AXZX[2],AXZX[3]]))+ (L5([AXZY[0],AXZY[1],0.0,AXZY[2],AXZY[3]])+ (AXZP* AAFT));
 		let JWY=JWX== A;
 		let JXB;
 		let WZC;
@@ -40859,10 +40860,10 @@ impl Instance {
 		ARUU=AWLK;
 		ARUV=AWLK;
 		}else{
-		let JWZ=AX- B;
+		let JWZ=AX- C;
 		let JXA=JWX.powf(JWZ);
 		let AYAA=AXZT* (JWZ* ((JWX+ (((JWX== AWBZ) as u8 as f64)* AWCA)).powf((JWZ- ANYF))));
-		let AAFW=JWZ- B;
+		let AAFW=JWZ- C;
 		let AAFX=JWX+ ((JWY as u8 as f64)* ZNW);
 		let AYAB=AAFW* ((AAFX+ (((AAFX== AWBZ) as u8 as f64)* AWCA)).powf((AAFW- ANYF)));
 		let AAFY=JWZ* (AAFX.powf(AAFW));
@@ -40897,10 +40898,10 @@ impl Instance {
 		ARUX=AWLK;
 		ARUY=AWLK;
 		}else{
-		let JXD=OQ- B;
+		let JXD=OQ- C;
 		let JXE=JWX.powf(JXD);
 		let AYAH=AXZT* (JXD* ((JWX+ (((JWX== AWBZ) as u8 as f64)* AWCA)).powf((JXD- ANYF))));
-		let AAGD=JXD- B;
+		let AAGD=JXD- C;
 		let AAGE=JWX+ ((JWY as u8 as f64)* ZNW);
 		let AYAI=AAGD* ((AAGE+ (((AAGE== AWBZ) as u8 as f64)* AWCA)).powf((AAGD- ANYF)));
 		let AAGF=JXD* (AAGE.powf(AAGD));
@@ -40919,7 +40920,7 @@ impl Instance {
 		let AAGI=((WXQ/ JXG)* HR)/ DZG;
 		let AAGJ=((WXR/ JXG)* HR)/ DZG;
 		let JXH=HQ+ ((HR* (JWP/ JXG))/ DZG);
-		let JXI=B/ JXH;
+		let JXI=C/ JXH;
 		let AYAM=-JXI;
 		let AYAN=(AYAL).product_div(AYAM,JXH);
 		let AYAO=AYAN* AWAO;
@@ -40931,7 +40932,7 @@ impl Instance {
 		let AYAQ=((L5(sum_products_div_lanes(&[(&AYAO.0,AAGI),(&(((ARSI/ JXG)* HR)/ DZG).0,AYAM),(&AYAL.0,(-AAGK))],JXH)))+ ((AYAF* DZJ)+ L5([(ANZI* AAGB),0.0,0.0,0.0,0.0])))+ ((((ARUX* JWX)+ (AXZT* WZE))+ ((AXZW* JXF)+ (ARUW* AAFU)))/ HV);
 		let AAGN=(AAGL+ (AAGC* DZJ))+ (((WZF* JWX)+ (AAFV* JXF))/ HV);
 		let AYAR=((L5(sum_products_div_lanes(&[(&AYAO.0,AAGJ),(&(((ARSJ/ JXG)* HR)/ DZG).0,AYAM),(&AYAL.0,(-AAGL))],JXH)))+ ((AYAG* DZJ)+ L5([(ANZI* AAGC),0.0,0.0,0.0,0.0])))+ ((((ARUY* JWX)+ (AXZT* WZF))+ ((AXZZ* JXF)+ (ARUW* AAFV)))/ HV);
-		let JXK=B/ JXJ;
+		let JXK=C/ JXJ;
 		let AYAS=-JXK;
 		let AYAT=(AYAP).product_div(AYAS,JXJ);
 		let AYAU=AYAT* AWAO;
@@ -40952,7 +40953,7 @@ impl Instance {
 		let AYAZ=(AYAY* JXO)+ (ARUQ* JXN);
 		let AAGU=(AAGS* JXO)+ (WZA* JXN);
 		let AAGV=(AAGT* JXO)+ (WZB* JXN);
-		let JXQ=B/ JXP;
+		let JXQ=C/ JXP;
 		let AYBA=-JXQ;
 		let AYBB=(AYAZ).product_div(AYBA,JXP);
 		let AYBC=AYBB* AWAO;
@@ -40990,7 +40991,7 @@ impl Instance {
 		let JXV=((JXT* JXT)+ (JXU* JXU)).sqrt();
 		let AYBQ=((AYBK+ AYBK)+ (AYBN+ AYBN))* (ANYF/ (AWAY* JXV));
 		let AAHK=BK* JXV;
-		let AAHL=B/ AAHK;
+		let AAHL=C/ AAHK;
 		let AYBR=((AYBQ* BK)).product_div((-AAHL),AAHK);
 		let AAHM=AAHI* AAHL;
 		let AAHN=AAHJ* AAHL;
@@ -41009,7 +41010,7 @@ impl Instance {
 		let ARVA;
 		let ARVB;
 		if JXX{
-		JYD=B;
+		JYD=C;
 		WZG=A;
 		WZH=A;
 		ARUZ=AWLK;
@@ -41046,10 +41047,10 @@ impl Instance {
 		ARVG=AWLK;
 		ARVH=AWLK;
 		}else{
-		let JYA=DZV- B;
+		let JYA=DZV- C;
 		let JYB=JXW.powf(JYA);
 		let AYBW=AYBT* (JYA* ((JXW+ (((JXW== AWBZ) as u8 as f64)* AWCA)).powf((JYA- ANYF))));
-		let AAHQ=JYA- B;
+		let AAHQ=JYA- C;
 		let AAHR=JXW+ ((JXZ as u8 as f64)* ZNW);
 		let AYBX=AAHQ* ((AAHR+ (((AAHR== AWBZ) as u8 as f64)* AWCA)).powf((AAHQ- ANYF)));
 		let AAHS=JYA* (AAHR.powf(AAHQ));
@@ -41083,7 +41084,7 @@ impl Instance {
 		let AYCB=((AYBU* JYD)+ (ARUZ* AAHO))+ ((ARVA* JXW)+ (AYBT* WZG));
 		let AAHW=(AAHP* JYD)+ (WZH* JXW);
 		let AYCC=((AYBV* JYD)+ (ARUZ* AAHP))+ ((ARVB* JXW)+ (AYBT* WZH));
-		let JYF=B+ (JXW* JYD);
+		let JYF=C+ (JXW* JYD);
 		let JYG=(0.9999999999999978f64<= DZV)&& (DZV<= 1.0000000000000022f64);
 		let JYQ;
 		let WZM;
@@ -41092,7 +41093,7 @@ impl Instance {
 		let ARVJ;
 		let ARVK;
 		if JYG{
-		let JYH=B/ JYF;
+		let JYH=C/ JYF;
 		let AYCR=-JYH;
 		let AYCS=(AYCA).product_div(AYCR,JYF);
 		let AYCT=AYCS* AWAO;
@@ -41118,11 +41119,11 @@ impl Instance {
 		let JYJ=JYF.sqrt();
 		let AYCK=AYCA* (ANYF/ (AWAY* JYJ));
 		let AAIE=BK* JYJ;
-		let AAIF=B/ AAIE;
+		let AAIF=C/ AAIE;
 		let AYCL=((AYCK* BK)).product_div((-AAIF),AAIE);
 		let AAIG=AAHV* AAIF;
 		let AAIH=AAHW* AAIF;
-		let JYK=B/ JYJ;
+		let JYK=C/ JYJ;
 		let AYCM=-JYK;
 		let AYCN=(AYCK).product_div(AYCM,JYJ);
 		let AYCO=AYCN* AWAO;
@@ -41152,10 +41153,10 @@ impl Instance {
 		ARVP=AWLK;
 		ARVQ=AWLK;
 		}else{
-		let JYM=(-1f64/ DZV)- B;
+		let JYM=(-1f64/ DZV)- C;
 		let JYN=JYF.powf(JYM);
 		let AYCD=AYCA* (JYM* ((JYF+ (((JYF== AWBZ) as u8 as f64)* AWCA)).powf((JYM- ANYF))));
-		let AAHX=JYM- B;
+		let AAHX=JYM- C;
 		let AAHY=JYF+ ((JYL as u8 as f64)* ZNW);
 		let AYCE=AAHX* ((AAHY+ (((AAHY== AWBZ) as u8 as f64)* AWCA)).powf((AAHX- ANYF)));
 		let AAHZ=JYM* (AAHY.powf(AAHX));
@@ -41261,7 +41262,7 @@ impl Instance {
 		let AAJG=(AAIU* JZD)+ (AAJE* JYX);
 		let AYDU=((((AYDK* JZC)+ (AYDO* AAIV))+ (((((AYDK* JZB)+ (AYDN* AAIV))+ (AYDQ+ (AYDI* AAJB)))* JYX)+ (AYDI* AAJD)))* JYX)+ (AYDI* AAJF);
 		let AAJH=(AAIV* JZD)+ (AAJF* JYX);
-		let JZE=B+ (JYX* JZD);
+		let JZE=C+ (JYX* JZD);
 		let JZF=LI/ JZE;
 		let AYDV=-JZF;
 		let AYDW=(AYDS).product_div(AYDV,JZE);
@@ -41290,7 +41291,7 @@ impl Instance {
 		let JZI=((JZH* JZH)+ 0.010000000000000002f64).sqrt();
 		let AYEH=(AYEE+ AYEE)* (ANYF/ (AWAY* JZI));
 		let AAJS=BK* JZI;
-		let AAJT=B/ AAJS;
+		let AAJT=C/ AAJS;
 		let AYEI=((AYEH* BK)).product_div((-AAJT),AAJS);
 		let JZJ=J* (JZH+ JZI);
 		let AYEJ=(AYEB+ AYEH)* J;
@@ -41332,7 +41333,7 @@ impl Instance {
 		let AYEQ=AOEE* JZN;
 		let JZP=JZM.powf(BG);
 		let AYER=ARVX* (BG* ((JZM+ (((JZM== AWBZ) as u8 as f64)* AWCA)).powf((BG- ANYF))));
-		let AAJY=BG- B;
+		let AAJY=BG- C;
 		let AAJZ=JZM+ (((JZM== A) as u8 as f64)* ZNW);
 		let AYES=AAJY* ((AAJZ+ (((AAJZ== AWBZ) as u8 as f64)* AWCA)).powf((AAJY- ANYF)));
 		let AAKA=BG* (AAJZ.powf(AAJY));
@@ -41358,7 +41359,7 @@ impl Instance {
 		let AYFB=AYEY* AAKF;
 		let AYFC=(AXBI* UL)* JZR;
 		let AYFD=AYEY* AAKG;
-		let JZT=(B+ (BQR* BI))+ (JZS* JZR);
+		let JZT=(C+ (BQR* BI))+ (JZS* JZR);
 		let AYFE=L5([AYEU[0],AYEU[1],0.0,AYEU[2],AYEU[3]])+ (L5([AYEZ[0],AYEZ[1],0.0,AYEZ[2],AYEZ[3]])+ (AYEX* JZS));
 		let AAKJ=(ZME* BI)+ ((AAKH* JZR)+ (AAKF* JZS));
 		let AYFF=L5([AYEV[0],AYEV[1],0.0,AYEV[2],AYEV[3]])+ ((L5([AYFA[0],AYFA[1],0.0,AYFA[2],AYFA[3]])+ (AYEX* AAKH))+ (((AYDZ- AXLG)* JZS)+ L5([AYFB[0],AYFB[1],0.0,AYFB[2],AYFB[3]])));
@@ -41508,7 +41509,7 @@ impl Instance {
 		};
 		let AYGN=AYGM* KAI;
 		let KAN=((KAI* KAI)+ KAM).sqrt();
-		let KAO=EIJ* (BV+ B);
+		let KAO=EIJ* (BV+ C);
 		let AYGO=((AYGM+ ((AYGN+ AYGN)* (ANYF/ (AWAY* KAN))))* J)* AWAO;
 		let KAP=(KAO- (EIJ+ (J* (KAI+ KAN))))- 1e-4f64;
 		let KAQ=(BH* KAO)* 1e-4f64;
@@ -41543,7 +41544,7 @@ impl Instance {
 		let KBJ;
 		let ARWM;
 		if KAY{
-		let KAZ=BW- B;
+		let KAZ=BW- C;
 		let KBA=J* BW;
 		let KBB=((KBA* (21f64.powf(KAZ)))/ BL)* (BBK.powf((BW- BK)));
 		let KBC=KBB* KAX;
@@ -41578,7 +41579,7 @@ impl Instance {
 		let AYHD=ARWF* KBL;
 		let AYHE=AYGX* XAB;
 		let KBO=BIL+ BBK;
-		let KBP=B/ KBO;
+		let KBP=C/ KBO;
 		let AYHF=-KBP;
 		let AYHG=(ANYO).product_div(AYHF,KBO);
 		let AYHH=AYHG* AWAO;
@@ -41592,8 +41593,8 @@ impl Instance {
 		let AYHM=AYHG* AALA;
 		let AYHN=((AYHH).product_sum_div(URL,ANYO,(-AALC),KBO))* KBN;
 		let AALE=(AALA* KBP)+ (AALC* KBN);
-		let KBQ=B+ (KBN* KBP);
-		let KBR=B/ KBQ;
+		let KBQ=C+ (KBN* KBP);
+		let KBR=C/ KBQ;
 		let AYHO=-KBR;
 		let AYHP=(AYHJ).product_div(AYHO,KBQ);
 		let AYHQ=AYHP* AWAO;
@@ -41637,7 +41638,7 @@ impl Instance {
 		let ARWQ;
 		if KBT{
 		let KBU=PF- AU;
-		let KBV=B/ (KBU* KBU);
+		let KBV=C/ (KBU* KBU);
 		let KBW=BNJ* KBV;
 		let AYHV=AWTW* KBV;
 		let AALH=ZHW* KBV;
@@ -41710,7 +41711,7 @@ impl Instance {
 		let KCK=(BQS- KCJ)- ZV;
 		let KCL=KCJ>= A;
 		let KCM=if KCL{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -41725,7 +41726,7 @@ impl Instance {
 		let KCO=((KCK* KCK)+ ((KCN* KCJ)* ZV)).sqrt();
 		let AYJO=((AYJL+ AYJL)+ ((AYJF* KCN)* ZV))* (ANYF/ (AWAY* KCO));
 		let AAMB=BK* KCO;
-		let AAMC=B/ AAMB;
+		let AAMC=C/ AAMB;
 		let AYJP=((AYJO* BK)).product_div((-AAMC),AAMB);
 		let KCP=((((KCJ+ (J* (KCK+ KCO)))- HE)+ IN)+ KBZ)- BQQ;
 		let AAMD=((AALT+ ((AALV+ (AALZ* AAMC))* J))+ AALN)- ZMC;
@@ -41735,10 +41736,10 @@ impl Instance {
 		let AYJR=((((AYJG+ ((AYJJ+ ((((AYJM+ AYJM)+ ((AYJG* KCN)* ZV))* AAMC)+ (AYJP* AALZ)))* J))+ AYIM)- AXLG)* BWG)+ L5([(ANZE* AAMD),0.0,0.0,0.0,0.0]);
 		let AAMG=AAME* BWG;
 		let AYJS=((((AYJH+ ((AYJK+ ((((AYJN+ AYJN)+ ((AYJH* KCN)* ZV))* AAMC)+ (AYJP* AAMA)))* J))+ AYIP)- AXLH)* BWG)+ L5([(ANZE* AAME),0.0,0.0,0.0,0.0]);
-		let KCQ=(BWG* KCP)- B;
+		let KCQ=(BWG* KCP)- C;
 		let KCR=BH/ KCH;
 		let AYJT=(AYJQ* KCR)+ (((AYJD).product_div((-KCR),KCH))* KCQ);
-		let KCS=B+ (KCQ* KCR);
+		let KCS=C+ (KCQ* KCR);
 		let AYJU=AYJT* KCS;
 		let KCT=((KCS* KCS)+ 4e-4f64).sqrt();
 		let KCU=J* (KCS+ KCT);
@@ -41754,14 +41755,14 @@ impl Instance {
 		ARWR=AYJV;
 		}
 		let KCX=(KCW+ OM).sqrt();
-		let KCY=B- KCX;
+		let KCY=C- KCX;
 		let KCZ=KCB+ (KCG* KCY);
 		let AYJW=AYIR+ ((AYJC* KCY)+ (((ARWR* (ANYF/ (AWAY* KCX)))* AWAO)* KCG));
 		let KDA=KCB+ OM;
 		let KDB=BK/ KDA;
 		let KDC=BWG+ KDB;
-		let KDD=B/ KDC;
-		let KDG=B/ KDE;
+		let KDD=C/ KDC;
+		let KDG=C/ KDE;
 		let KDH=KDG/ KCF;
 		let KDI=KCB* KCB;
 		let AYJX=AYIR* KCB;
@@ -41778,7 +41779,7 @@ impl Instance {
 		let KDP=(BWG* KDO).exp();
 		let KDQ=KDO- BQQ;
 		let AYKC=L5([(ANZE* KDQ),0.0,0.0,0.0,0.0])+ ((AYKB- AXLE)* BWG);
-		let KDR=(BWG* KDQ)- B;
+		let KDR=(BWG* KDQ)- C;
 		let KDS=KDR+ (KDE* KDP);
 		let AYKD=AYKC+ (L5([(ANZS* KDP),0.0,0.0,0.0,0.0])+ (((L5([(ANZE* KDO),0.0,0.0,0.0,0.0])+ (AYKB* BWG))* KDP)* KDE));
 		let AYKE=AYKD* KDS;
@@ -41847,7 +41848,7 @@ impl Instance {
 		if KES{
 		let KFC;
 		if KET{
-		KFC=B;
+		KFC=C;
 		}else{
 		let KFD;
 		if KEU{
@@ -41878,7 +41879,7 @@ impl Instance {
 		}
 		let KFA=KEZ.sqrt();
 		let AYRD=ARWW* (ANYF/ (AWAY* KFA));
-		let KFB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KEX, B));
+		let KFB=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KEX, C));
 		KEX=KFB;
 		KEZ=KFA;
 		ARWW=AYRD;
@@ -41901,7 +41902,7 @@ impl Instance {
 		KFJ=KFI;
 		ARWV=ARWX;
 		}
-		let KFK=B/ KFJ;
+		let KFK=C/ KFJ;
 		let KFL=KEN* KFK;
 		let KFM=(BK* PH)* GK;
 		let KFN=KFM* CWM;
@@ -41983,7 +41984,7 @@ impl Instance {
 		let TDZ=if KGH{
 		A
 		}else{
-		B
+		C
 		};
 		TDY=TDZ;
 		TED=KGF;
@@ -42224,7 +42225,7 @@ impl Instance {
 		let KGZ=((KGY* KGY)+ 4e-4f64).sqrt();
 		let AYLN=(AYLK+ AYLK)* (ANYF/ (AWAY* KGZ));
 		let AAMN=BK* KGZ;
-		let AAMO=B/ AAMN;
+		let AAMO=C/ AAMN;
 		let AYLO=((AYLN* BK)).product_div((-AAMO),AAMN);
 		let KHB=QP+ GH;
 		let AAMP=((((((AAMH+ (AAMK* AAMO))* J)* KHA)/ OS)* QP)* GH)/ KHB;
@@ -42232,7 +42233,7 @@ impl Instance {
 		let KHC=(((((KHA* (J* (KGY+ KGZ)))/ OS)* QP)* GH)/ KHB).sqrt();
 		let AYLP=(((((((AYLH+ AYLN)* J)* KHA)/ OS)* QP)* GH)/ KHB)* (ANYF/ (AWAY* KHC));
 		let AAMR=BK* KHC;
-		let AAMS=B/ AAMR;
+		let AAMS=C/ AAMR;
 		let AYLQ=((AYLP* BK)).product_div((-AAMS),AAMR);
 		let KHD=KHC* PE;
 		let AYLR=AYLP* PE;
@@ -42252,10 +42253,10 @@ impl Instance {
 		let AYLW=-KHH;
 		let AYLX=(((AYLU* KHD)+ (AYLR* KHF))).product_sum_div(ANYF,AYLV,AYLW,KHG);
 		let AYLY=AYLX* AWAO;
-		let AAMZ=product_sum_div(((AAMV* KHD)+ (AAMT* KHF)),B,AYLW,AAMX,KHG);
-		let AYLZ=L4(sum_products_div_lanes(&[(&((((AYLS* KHE)* KHD)+ (AYLR* AAMV))+ ((AYLS* KHF)+ (AYLU* AAMT))).0,B),(&AYLY.0,AAMX),(&AYLS.0,AYLW),(&AYLV.0,(-AAMZ))],KHG));
-		let AANA=product_sum_div(((AAMW* KHD)+ (AAMU* KHF)),B,AYLW,AAMY,KHG);
-		let AYMA=L4(sum_products_div_lanes(&[(&((((AYLT* KHE)* KHD)+ (AYLR* AAMW))+ ((AYLT* KHF)+ (AYLU* AAMU))).0,B),(&AYLY.0,AAMY),(&AYLT.0,AYLW),(&AYLV.0,(-AANA))],KHG));
+		let AAMZ=product_sum_div(((AAMV* KHD)+ (AAMT* KHF)),C,AYLW,AAMX,KHG);
+		let AYLZ=L4(sum_products_div_lanes(&[(&((((AYLS* KHE)* KHD)+ (AYLR* AAMV))+ ((AYLS* KHF)+ (AYLU* AAMT))).0,C),(&AYLY.0,AAMX),(&AYLS.0,AYLW),(&AYLV.0,(-AAMZ))],KHG));
+		let AANA=product_sum_div(((AAMW* KHD)+ (AAMU* KHF)),C,AYLW,AAMY,KHG);
+		let AYMA=L4(sum_products_div_lanes(&[(&((((AYLT* KHE)* KHD)+ (AYLR* AAMW))+ ((AYLT* KHF)+ (AYLU* AAMU))).0,C),(&AYLY.0,AAMY),(&AYLT.0,AYLW),(&AYLV.0,(-AANA))],KHG));
 		let KHJ=KHI> A;
 		let KPF;
 		let RSA;
@@ -42280,9 +42281,9 @@ impl Instance {
 		let KHL=BWG* KHK;
 		let AYMC=L5([(ANZE* KHK),0.0,0.0,0.0,0.0])+ ((AXBL- AYMB)* BWG);
 		let KHM=BOC* FCG;
-		let KHN=(BH* (KHL- B))/ KHM;
+		let KHN=(BH* (KHL- C))/ KHM;
 		let AYMD=((AYMC* BH)).product_sum_div(ANYF,((AWWE* FCG)+ L5([(ANZM* BOC),0.0,0.0,0.0,0.0])),(-KHN),KHM);
-		let KHO=B+ KHN;
+		let KHO=C+ KHN;
 		let KHP=KHO>= 2.220446049250313e-15f64;
 		let KHR;
 		let ARXL;
@@ -42295,7 +42296,7 @@ impl Instance {
 		}
 		let KHS=(BOC* BWG)* J;
 		let KHT=KHR.sqrt();
-		let KHU=B- KHT;
+		let KHU=C- KHT;
 		let KHV=KGW+ (KHS* KHU);
 		let AYME=AXBL+ (((((AWWE* BWG)+ L5([(ANZE* BOC),0.0,0.0,0.0,0.0]))* J)* KHU)+ (((ARXL* (ANYF/ (AWAY* KHT)))* AWAO)* KHS));
 		let KHW=(BWG* (KHV- KHH))< Q;
@@ -42318,7 +42319,7 @@ impl Instance {
 		let AYMM=L5([(AYML* BOB),0.0,0.0,0.0,0.0])+ (AWVY* KHY);
 		let AANF=ZIU* KHY;
 		let AANG=ZIV* KHY;
-		let KIA=B/ KHZ;
+		let KIA=C/ KHZ;
 		let AYMN=-KIA;
 		let AYMO=(AYMM).product_div(AYMN,KHZ);
 		let AYMP=AYMO* AWAO;
@@ -42391,7 +42392,7 @@ impl Instance {
 		KJL=KHV;
 		ARXR=AYME;
 		}else{
-		let KIT=B/ CIB;
+		let KIT=C/ CIB;
 		let KIU=KIT/ JDH;
 		let KIV=KIU* KGW;
 		let KIW=KIV* KGW;
@@ -42443,7 +42444,7 @@ impl Instance {
 		KJN=KJK;
 		ARXT=ARXM;
 		}
-		let KJO=parameters[451]== B;
+		let KJO=parameters[451]== C;
 		let KPG;
 		let RSG;
 		let XAM;
@@ -42475,7 +42476,7 @@ impl Instance {
 		let AANU=AANS* BWG;
 		let AYPF=((AXBN- L5([AYMA[0],AYMA[1],0.0,AYMA[2],AYMA[3]]))* BWG)+ L5([(ANZE* AANS),0.0,0.0,0.0,0.0]);
 		let KJU=BWG* BKG;
-		let KJV=B/ KJU;
+		let KJV=C/ KJU;
 		let KJW=KJV* BNR;
 		let AYPG=AODZ* KJV;
 		let AYPH=L5([((product_div(((ANZE* BKG)+ (ANZB* BWG)),(-KJV),KJU))* BNR),0.0,0.0,0.0,0.0])+ L5([0.0,AYPG[0],AYPG[1],AYPG[2],AYPG[3]]);
@@ -42524,14 +42525,14 @@ impl Instance {
 		}
 		let KKQ=JAN* KKP;
 		let KKR=((-5.65685424949238f64- (GUA* KJW))+ (BK* KKP))+ (KKQ* KKP);
-		let KKS=B/ KKP;
+		let KKS=C/ KKP;
 		let KKT=KKR* KKS;
 		let AYPR=(((((((AYPH* GUA)* AWAO)+ (ARYD* BK))+ (((ARYD* JAN)* KKP)+ (ARYD* KKQ)))* KKS)+ (((ARYD).product_div((-KKS),KKP))* KKR))* CWM)+ L5([(ANZG* KKT),0.0,0.0,0.0,0.0]);
 		let KKU=((KKT* CWM)+ KHH)- KHH;
 		let AYPS=(AYPR+ AYMB)- AYMB;
 		let KKV=KKU/ KJT;
 		let AYPT=((AYPS).product_sum_div(ANYF,AYPD,(-KKV),KJT))* KKV;
-		let KKW=(B+ (KKV* KKV)).sqrt();
+		let KKW=(C+ (KKV* KKV)).sqrt();
 		let KKX=KKU/ KKW;
 		let KKY=KKX+ KHH;
 		let AYPU=((AYPS).product_sum_div(ANYF,((AYPT+ AYPT)* (ANYF/ (AWAY* KKW))),(-KKX),KKW))+ AYMB;
@@ -42557,7 +42558,7 @@ impl Instance {
 		let KLE=((rspice_limited_exp(KLC))+ (rspice_limited_exp(KLD)))/ BK;
 		let KLF=(KLE.ln())/ KLB;
 		let AYNL=((((AYNK* (rspice_limited_exp_derivative(KLC)))+ ((AYNK* AWAO)* (rspice_limited_exp_derivative(KLD))))/ BK)* (ANYF/ KLE))/ KLB;
-		let mut KLG=B;
+		let mut KLG=C;
 		let mut KLI=KJN;
 		let mut KNL=A;
 		let mut ARYE=ARXT;
@@ -42583,7 +42584,7 @@ impl Instance {
 		let AYNP=AYNO* KLO;
 		let KLP=((-KLF)* KLB).exp();
 		let AYNQ=AYNP- L5([(((AYNL* AWAO)* KLB)* KLP),0.0,0.0,0.0,0.0]);
-		let KLQ=B+ (KLO- KLP);
+		let KLQ=C+ (KLO- KLP);
 		let KLR=(KLQ.ln())/ KLF;
 		let AYNR=((AYNQ* (ANYF/ KLQ))).product_sum_div(ANYF,L5([AYNL,0.0,0.0,0.0,0.0]),(-KLR),KLF);
 		let KLS=KLO/ KLQ;
@@ -42594,7 +42595,7 @@ impl Instance {
 		ARYG=AYNS;
 		}else{
 		KLT=KLL;
-		KLX=B;
+		KLX=C;
 		ARYF=AYNM;
 		ARYG=AWLK;
 		}
@@ -42608,7 +42609,7 @@ impl Instance {
 		let ARYI;
 		if KLW{
 		let AYOJ=ARYG* KLX;
-		let KLY=((B- (KLX* KLX))/ BK).sqrt();
+		let KLY=((C- (KLX* KLX))/ BK).sqrt();
 		let AYOK=(((AYOJ+ AYOJ)* AWAO)/ BK)* (ANYF/ (AWAY* KLY));
 		let KLZ=KLK* KLY;
 		let AYOL=(AYNN* KLY)+ (AYOK* KLK);
@@ -42651,26 +42652,26 @@ impl Instance {
 		let AYNZ=AYNN/ Q;
 		let KMH=KLK/ BH;
 		let AYOA=AYNN/ BH;
-		let KMI=B- (KLK/ BC);
-		let KMJ=B- (KMH* KMI);
-		let KMK=B- (KMG* KMJ);
+		let KMI=C- (KLK/ BC);
+		let KMJ=C- (KMH* KMI);
+		let KMK=C- (KMG* KMJ);
 		let KML=KLK/ BK;
-		let KMM=B- KMH;
-		let KMN=B- (KMG* KMM);
-		let KMO=B- (KML* KMN);
+		let KMM=C- KMH;
+		let KMN=C- (KMG* KMM);
+		let KMO=C- (KML* KMN);
 		let AYOB=AYNT* KLU;
 		let KMP=(KLU* KLU)/ BK;
 		let KMQ=KLU/ Q;
 		let AYOC=AYNT/ Q;
 		let KMR=KLU/ BH;
 		let AYOD=AYNT/ BH;
-		let KMS=B- (KLU/ BC);
-		let KMT=B- (KMR* KMS);
-		let KMU=B- (KMQ* KMT);
+		let KMS=C- (KLU/ BC);
+		let KMT=C- (KMR* KMS);
+		let KMU=C- (KMQ* KMT);
 		let KMV=KLU/ BK;
-		let KMW=B- KMR;
-		let KMX=B- (KMQ* KMW);
-		let KMY=B- (KMV* KMX);
+		let KMW=C- KMR;
+		let KMX=C- (KMQ* KMW);
+		let KMY=C- (KMV* KMX);
 		let KMZ=KLU* KMY;
 		let AYOE=((((AYNY+ AYNY)/ BK)* KMK)+ ((((AYNZ* KMJ)+ ((((AYOA* KMI)+ (((AYNN/ BC)* AWAO)* KMH))* AWAO)* KMG))* AWAO)* KMF))- ((((AYOB+ AYOB)/ BK)* KMU)+ ((((AYOC* KMT)+ ((((AYOD* KMS)+ (((AYNT/ BC)* AWAO)* KMR))* AWAO)* KMQ))* AWAO)* KMP));
 		let KNA=((KMF* KMK)- (KMP* KMU)).sqrt();
@@ -42693,8 +42694,8 @@ impl Instance {
 		let KNG=((KLK- KLU)+ (KNE- KNF)).sqrt();
 		let AYNW=((AYNN- AYNT)+ (AYNU- AYNV))* (ANYF/ (AWAY* KNG));
 		let KNH=BWG* J;
-		let KNI=B- KNF;
-		let KNJ=(B- KNE)- (KLX* KNI);
+		let KNI=C- KNF;
+		let KNJ=(C- KNE)- (KLX* KNI);
 		let KNK=(KNH* KNJ)/ KNG;
 		let AYNX=((L5([((ANZE* J)* KNJ),0.0,0.0,0.0,0.0])+ (((AYNU* AWAO)- ((ARYG* KNI)+ ((AYNV* AWAO)* KLX)))* KNH))).product_sum_div(ANYF,AYNW,(-KNK),KNG);
 		KNQ=KNG;
@@ -42707,7 +42708,7 @@ impl Instance {
 		ARYH=ARYL;
 		ARYI=ARYM;
 		}
-		let KNM=KNL== B;
+		let KNM=KNL== C;
 		let KNN=KLK< A;
 		let KOG;
 		let KOJ;
@@ -42737,7 +42738,7 @@ impl Instance {
 		let KNX=KLI- KJA;
 		let KNY=(BWG* KNX).exp();
 		let AYOP=(L5([(ANZE* KNX),0.0,0.0,0.0,0.0])+ (ARYE* BWG))* KNY;
-		let KNZ=KLK+ B;
+		let KNZ=KLK+ C;
 		let AYOQ=AYNJ* KNZ;
 		let KOA=KNY- (KLA* KNZ);
 		let KOB=CIB* BWG;
@@ -42761,7 +42762,7 @@ impl Instance {
 		let KOI=((-KGW)+ KLI)+ (BOB* KOG);
 		let AYOW=((AXBL* AWAO)+ ARYE)+ ((AWVY* KOG)+ (ARYN* BOB));
 		let AYOX=(AWVY* KOJ)+ (ARYO* BOB);
-		let KOL=B+ (BOB* KOJ);
+		let KOL=C+ (BOB* KOJ);
 		let KOZ;
 		let KPB;
 		let KPC;
@@ -42776,17 +42777,17 @@ impl Instance {
 		let AYOY=((AYOW* AWAO)).product_sum_div(ANYF,AYOX,(-KON),KOL);
 		let KOO=KLI.abs();
 		let AYOZ=ARYE* ((AWAY* ((KLI>= AWBZ) as u8 as f64))- ANYF);
-		let KOP=B>= KOO;
+		let KOP=C>= KOO;
 		let KOQ;
 		let ARYS;
 		if KOP{
-		KOQ=B;
+		KOQ=C;
 		ARYS=AWLK;
 		}else{
 		KOQ=KOO;
 		ARYS=AYOZ;
 		}
-		let KOR=0.05f64* (B+ KOQ);
+		let KOR=0.05f64* (C+ KOQ);
 		let AYPA=ARYS* 0.05f64;
 		let KOS=(KON.abs())> KOR;
 		let KOW;
@@ -42794,7 +42795,7 @@ impl Instance {
 		if KOS{
 		let KOT=KON>= A;
 		let KOU=if KOT{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -42810,7 +42811,7 @@ impl Instance {
 		let AYPC=ARYE+ ARYT;
 		let KOY=((KOW.abs())<= BBK)&& ((KOI.abs())<= AQ);
 		let KPD=if KOY{
-		B
+		C
 		}else{
 		KNL
 		};
@@ -42819,7 +42820,7 @@ impl Instance {
 		KPC=KPD;
 		ARYR=AYPC;
 		}
-		let KPA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KOZ, B));
+		let KPA=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KOZ, C));
 		KLG=KPA;
 		KLI=KPB;
 		KNL=KPC;
@@ -42871,7 +42872,7 @@ impl Instance {
 		let KPK=KPJ.abs();
 		let AYQC=AYQB* ((AWAY* ((KPJ>= AWBZ) as u8 as f64))- ANYF);
 		let KPL=KPJ.exp();
-		let KPM=(KPL- B)- KPJ;
+		let KPM=(KPL- C)- KPJ;
 		let AYQD=(AYQB* KPL)- AYQB;
 		let KPN=KPJ> AI;
 		let KQA;
@@ -42896,8 +42897,8 @@ impl Instance {
 		}else{
 		let KPV=(-KPJ)* KPU;
 		let KPW=KPK* GTU;
-		let KPX=B+ (AY* KPK);
-		let KPY=(B+ (KPW* KPX)).sqrt();
+		let KPX=C+ (AY* KPK);
+		let KPY=(C+ (KPW* KPX)).sqrt();
 		let KPZ=KPV* KPY;
 		let AYQE=(((AYQB* AWAO)* KPU)* KPY)+ (((((AYQC* GTU)* KPX)+ ((AYQC* AY)* KPW))* (ANYF/ (AWAY* KPY)))* KPV);
 		KQB=KPZ;
@@ -42926,7 +42927,7 @@ impl Instance {
 		let KQN=(BWG* KQM).exp();
 		let AYQN=ANYO* KPE;
 		let KQO=(KPE* BIL).exp();
-		let KQP=B- KQO;
+		let KQP=C- KQO;
 		let KQQ=KQN* KQP;
 		let AYQO=(((L3([(AYPY* BIL),0.0,0.0])+ L3([0.0,AYQN[0],AYQN[1]]))* KQO)* AWAO)* KQN;
 		let AYQP=(((L5([(ANZE* KQM),0.0,0.0,0.0,0.0])+ ((AYQM- L5([AYLH[0],AYLH[1],0.0,AYLH[2],AYLH[3]]))* BWG))* KQN)* KQP)+ L5([AYQO[0],AYQO[1],0.0,AYQO[2],0.0]);
@@ -42956,7 +42957,7 @@ impl Instance {
 		if KRB{
 		let KRL;
 		if KRC{
-		KRL=B;
+		KRL=C;
 		}else{
 		let KRM;
 		if KRD{
@@ -42987,7 +42988,7 @@ impl Instance {
 		}
 		let KRJ=KRI.sqrt();
 		let AYRC=ARYY* (ANYF/ (AWAY* KRJ));
-		let KRK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KRG, B));
+		let KRK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KRG, C));
 		KRG=KRK;
 		KRI=KRJ;
 		ARYY=AYRC;
@@ -43010,7 +43011,7 @@ impl Instance {
 		KRS=KRR;
 		ARYX=ARYZ;
 		}
-		let KRT=B/ KRS;
+		let KRT=C/ KRS;
 		let KRU=KQZ* KQW;
 		let KRV=KQX- (KRU* KRT);
 		let AYQZ=AYQT- ((((AYQU* KQW)+ L5([(AYQS* KQZ),0.0,0.0,0.0,0.0]))* KRT)+ (((ARYX).product_div((-KRT),KRS))* KRU));
@@ -43172,7 +43173,7 @@ impl Instance {
 		let KTP=0.16666666666666666f64+ (KTK* KTO);
 		let KTQ=0.5f64+ (KTK* KTP);
 		let BHJH=(BHJG* KTQ)+ (((BHJG* KTP)+ (((BHJG* KTO)+ (((BHJG* KTN)+ (((BHJG* KTM)+ ((BHJG* KTL)* KTK))* KTK))* KTK))* KTK))* KTK);
-		let KTR=B+ (KTK* KTQ);
+		let KTR=C+ (KTK* KTQ);
 		let KTS=FNB/ KTR;
 		let BHJI=(BHJH).product_div((-KTS),KTR);
 		let KTT=(KTS< 4.440892098500626e-15f64)&& true;
@@ -43191,7 +43192,7 @@ impl Instance {
 		if KTX{
 		let KUH;
 		if KTY{
-		KUH=B;
+		KUH=C;
 		}else{
 		let KUI;
 		if KTZ{
@@ -43222,7 +43223,7 @@ impl Instance {
 		}
 		let KUF=KUE.sqrt();
 		let BQWV=ARZC* (ANYF/ (AWAY* KUF));
-		let KUG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KUC, B));
+		let KUG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KUC, C));
 		KUC=KUG;
 		KUE=KUF;
 		ARZC=BQWV;
@@ -43245,7 +43246,7 @@ impl Instance {
 		KUO=KUN;
 		ARZB=ARZD;
 		}
-		let KUP=B/ KUO;
+		let KUP=C/ KUO;
 		let KUR=KTU* KUQ;
 		let KUS=4.440892098500626e-15f64- (KUR* KUP);
 		let BHJO=(((BHJJ* KUQ)* KUP)+ (((ARZB).product_div((-KUP),KUO))* KUR))* AWAO;
@@ -43307,8 +43308,8 @@ impl Instance {
 		let KVR=(BK/ QS)* KVP;
 		let BHJT=AXBE* KVS;
 		let BHJU=((BHJS- L5([ANZG,0.0,0.0,0.0,0.0]))- L5([BHJT[0],BHJT[1],0.0,BHJT[2],BHJT[3]]))* KVR;
-		let KVT=B+ (KVR* ((KVO- CWM)- (KVS* BQQ)));
-		let KVU=BK* (B+ KVR);
+		let KVT=C+ (KVR* ((KVO- CWM)- (KVS* BQQ)));
+		let KVU=BK* (C+ KVR);
 		let KVV=DN+ KVU;
 		let KVW=(KVT< KVV)&& (KVU>= A);
 		let KWY;
@@ -43330,7 +43331,7 @@ impl Instance {
 		if KWD{
 		let KWN;
 		if KWE{
-		KWN=B;
+		KWN=C;
 		}else{
 		let KWO;
 		if KWF{
@@ -43361,7 +43362,7 @@ impl Instance {
 		}
 		let KWL=KWK.sqrt();
 		let BHMX=ARZR* (ANYF/ (AWAY* KWL));
-		let KWM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KWI, B));
+		let KWM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, KWI, C));
 		KWI=KWM;
 		KWK=KWL;
 		ARZR=BHMX;
@@ -43384,7 +43385,7 @@ impl Instance {
 		KWU=KWT;
 		ARZQ=ARZS;
 		}
-		let KWV=B/ KWU;
+		let KWV=C/ KWU;
 		let KWW=KVX* KVU;
 		let KWX=KVV- (KWW* KWV);
 		let BHKB=(((BHJV* KVU)* KWV)+ (((ARZQ).product_div((-KWV),KWU))* KWW))* AWAO;
@@ -43397,7 +43398,7 @@ impl Instance {
 		let KWZ=KWY.sqrt();
 		let KXB=GL/ (KXA+ GL);
 		let BHKC=AXBJ* HZ;
-		let KXC=((HZ* BQR)+ KUY)- (KXB* (KVO+ (KVQ* (B- KWZ))));
+		let KXC=((HZ* BQR)+ KUY)- (KXB* (KVO+ (KVQ* (C- KWZ))));
 		let BHKD=(L5([BHKC[0],BHKC[1],0.0,BHKC[2],BHKC[3]])+ BHJP)- ((BHJS+ (((ARZP* (ANYF/ (AWAY* KWZ)))* AWAO)* KVQ))* KXB);
 		let BHKE=BHKD* KXC;
 		let KXD=((KXC* KXC)+ 4e-6f64).sqrt();
@@ -43415,7 +43416,7 @@ impl Instance {
 		}
 		let KXH=KXG+ OM;
 		let BHKG=ANZU* KXI;
-		let KXN=B+ (KXI* (KXM- GI));
+		let KXN=C+ (KXI* (KXM- GI));
 		let KXO=KXN<= CA;
 		let KXP;
 		let ARZU;
@@ -43478,7 +43479,7 @@ impl Instance {
 		let KYB=((ALR* ALR)+ 4e-12f64).sqrt();
 		let BHKP=(BHKN+ BHKN)* (ANYF/ (AWAY* KYB));
 		let AHLD=BK* KYB;
-		let AHLE=B/ AHLD;
+		let AHLE=C/ AHLD;
 		let KYC=J* (ALR+ KYB);
 		let BHKQ=(AWAA+ BHKP)* J;
 		let AHLF=(YZS+ (AHLC* AHLE))* J;
@@ -43502,14 +43503,14 @@ impl Instance {
 		let KYF=(KYE+ OM).sqrt();
 		let BHKT=AOGM* (ANYF/ (AWAY* KYF));
 		let AHLG=BK* KYF;
-		let AHLH=B/ AHLG;
+		let AHLH=C/ AHLG;
 		let BHKU=((BHKT* BK)).product_div((-AHLH),AHLG);
 		let AHLI=UTS* AHLH;
 		let BHKV=(AOHQ* AHLH)+ (BHKU* UTS);
 		let AHLJ=UTT* AHLH;
 		let BHKW=(AOHR* AHLH)+ (BHKU* UTT);
 		let BHKX=(ANYP* CU)* CT;
-		let KYH=KYG- (CT* (B+ (CU* BJA)));
+		let KYH=KYG- (CT* (C+ (CU* BJA)));
 		let BHKY=L4([ARZZ[0],ARZZ[1],0.0,0.0]);
 		let BHKZ=BHKY- L4([0.0,BHKX[0],BHKX[1],BHKX[2]]);
 		let AHLK=XAW- ((URM* CU)* CT);
@@ -43525,7 +43526,7 @@ impl Instance {
 		let KYI=((KYH* KYH)+ 4e-4f64).sqrt();
 		let BHLE=(BHLA+ BHLA)* (ANYF/ (AWAY* KYI));
 		let AHLQ=BK* KYI;
-		let AHLR=B/ AHLQ;
+		let AHLR=C/ AHLQ;
 		let BHLF=((BHLE* BK)).product_div((-AHLR),AHLQ);
 		let BHLG=L4([ASAA[0],ASAA[1],0.0,0.0]);
 		let KYJ=J* (KYH+ KYI);
@@ -43586,7 +43587,7 @@ impl Instance {
 		let KYT=((KYS* KYS)+ 4e-4f64).sqrt();
 		let BHLW=(BHLT+ BHLT)* (ANYF/ (AWAY* KYT));
 		let AHME=BK* KYT;
-		let AHMF=B/ AHME;
+		let AHMF=C/ AHME;
 		let BHLX=((BHLW* BK)).product_div((-AHMF),AHME);
 		let KYU=J* (KYS+ KYT);
 		let BHLY=(BHLQ+ BHLW)* J;
@@ -43631,7 +43632,7 @@ impl Instance {
 		let BHMK=BHKW* KYX;
 		let BHML=ASAE* AHLJ;
 		let AHMJ=(XBA* KYF)+ (AHLJ* KYX);
-		let KYZ=B/ KYY;
+		let KYZ=C/ KYY;
 		let BHMM=-KYZ;
 		let BHMN=(BHMD).product_div(BHMM,KYY);
 		let BHMO=BHMN* AWAO;
@@ -43727,7 +43728,7 @@ impl Instance {
 		if KZY{
 		let LAI;
 		if KZZ{
-		LAI=B;
+		LAI=C;
 		}else{
 		let LAJ;
 		if LAA{
@@ -43758,7 +43759,7 @@ impl Instance {
 		}
 		let LAG=LAF.sqrt();
 		let BQWU=ASAM* (ANYF/ (AWAY* LAG));
-		let LAH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LAD, B));
+		let LAH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LAD, C));
 		LAD=LAH;
 		LAF=LAG;
 		ASAM=BQWU;
@@ -43781,7 +43782,7 @@ impl Instance {
 		LAP=LAO;
 		ASAL=ASAN;
 		}
-		let LAQ=B/ LAP;
+		let LAQ=C/ LAP;
 		let LAR=KZW* KZU;
 		let BHNG=((ASAH* KZU)* LAQ)+ (((ASAL).product_div((-LAQ),LAP))* LAR);
 		let LAS=5e4f64+ (LAR* LAQ);
@@ -43808,16 +43809,16 @@ impl Instance {
 		let ASAO;
 		let ASAP;
 		if LBB{
-		let LBC=UG* (B+ (JL* BNZ));
+		let LBC=UG* (C+ (JL* BNZ));
 		let LBD=LBC* LAZ;
 		let BHNJ=((AWVU* JL)* UG)* LAZ;
-		let LBG=B/ LBE;
+		let LBG=C/ LBE;
 		let LBH=BWG* LBD;
 		let BHNK=L7([0.0,0.0,(ANZE* LBD),0.0,0.0,0.0,0.0])+ ((L7([0.0,0.0,BHNJ[0],BHNJ[1],BHNJ[2],BHNJ[3],BHNJ[4]])+ (BHNI* LBC))* BWG);
 		let LBI=LBH* LBG;
 		let BHNL=((AOGN).product_div((-LBG),LBE))* LBH;
 		let BHNM=(BHNK* LBG)+ L7([0.0,0.0,BHNL[0],BHNL[1],BHNL[2],BHNL[3],BHNL[4]]);
-		let LBM=B/ LBJ;
+		let LBM=C/ LBJ;
 		let LBN=LBH* LBM;
 		let BHNN=((AOGO).product_div((-LBM),LBJ))* LBH;
 		let BHNO=(BHNK* LBM)+ L7([0.0,0.0,BHNN[0],BHNN[1],BHNN[2],BHNN[3],BHNN[4]]);
@@ -43871,10 +43872,10 @@ impl Instance {
 		if LCZ{
 		let LDA=((BQS- HE)+ ((FQ* (BNZ- BQT))* PE))- (((KUY+ BQR)- 2.220446049250313e-15f64)* JE);
 		let BHOA=((AXBK+ (((AWVU- AOEX)* FQ)* PE))- ((BHJP+ L5([AXBJ[0],AXBJ[1],0.0,AXBJ[2],AXBJ[3]]))* JE))* LDA;
-		let LDB=B/ Y;
+		let LDB=C/ Y;
 		let LDC=(LDA* LDA)* LDB;
-		let LDD=B/ FR;
-		let LDJ=B+ (LDE* LDD);
+		let LDD=C/ FR;
+		let LDJ=C+ (LDE* LDD);
 		let LDK=LDC* LDJ;
 		let BHOB=(((BHOA+ BHOA)* LDB)* LDJ)+ ((AOGV* LDD)* LDC);
 		let BHOC=BHOB* LDK;
@@ -43907,9 +43908,9 @@ impl Instance {
 		}
 		let LDS=(LDR- AYD)/ BZ;
 		let BHOG=(ASAZ/ BZ)* LDS;
-		let LDT=B+ (LDS* LDS);
-		let LDU=B/ LDT;
-		let LDV=B- LDU;
+		let LDT=C+ (LDS* LDS);
+		let LDU=C/ LDT;
+		let LDV=C- LDU;
 		let LDX=LDW* LDV;
 		let BHOH=(ASAY* LDV)+ (((((BHOG+ BHOG)).product_div((-LDU),LDT))* AWAO)* LDW);
 		let LDY=PE* PL;
@@ -43918,7 +43919,7 @@ impl Instance {
 		let LEB=JF/ LEA;
 		let BHOI=(AXBJ).product_div((-LEB),LEA);
 		let LEC=LDX+ OM;
-		let LED=B/ LEC;
+		let LED=C/ LEC;
 		let LEE=-ML;
 		let LEH=LEE* LEF;
 		let LEI=LEH* LED;
@@ -43933,7 +43934,7 @@ impl Instance {
 		let LEK=LEI.exp();
 		let LEN=JC/ LEL;
 		let LEO=(LEN* QQ)* LDY;
-		let LEP=B/ BKG;
+		let LEP=C/ BKG;
 		let LEQ=KTA+ (AXW* BBK);
 		let LER=(LEQ* LEP).sqrt();
 		let LES=LEK* LEO;
@@ -44107,7 +44108,7 @@ impl Instance {
 		let LHG;
 		let ASBH;
 		if LGZ{
-		let LHA=B- (AO* BIL);
+		let LHA=C- (AO* BIL);
 		let BHPJ=(ANYO* LHA)+ (((ANYO* AO)* AWAO)* BIL);
 		let LHB=(BIL* LHA)- BA;
 		let BHPK=BHPJ* LHB;
@@ -44141,7 +44142,7 @@ impl Instance {
 		}else{
 		let BHPM=ASBH* LHF;
 		let BHPN=L3([BHPM[0],0.0,BHPM[1]])- ANYP;
-		let LHJ=B/ Y;
+		let LHJ=C/ Y;
 		let LHK=(((LHF* (LHG+ LHH))- BJA)+ (BNY* LHI))* LHJ;
 		let BHPO=(L5([0.0,BHPN[0],BHPN[1],BHPN[2],0.0])+ (AWVT* LHI))* LHJ;
 		let BHPP=BHPO* LHK;
@@ -44159,7 +44160,7 @@ impl Instance {
 		ASBM=BHPQ;
 		}
 		let LHP=LHO+ OM;
-		let LHQ=B/ LHP;
+		let LHQ=C/ LHP;
 		let LHR=-MP;
 		let LHS=LHR* LEF;
 		let LHT=LHS* LHQ;
@@ -44265,7 +44266,7 @@ impl Instance {
 		}else{
 		let BHQG=(ASBH* AWAO)* LHF;
 		let BHQH=L3([BHQG[0],0.0,BHQG[1]])- (ANYP- L3([ASBH[0],0.0,ASBH[1]]));
-		let LIJ=B/ Y;
+		let LIJ=C/ Y;
 		let LIK=(((LHF* ((-LHG)+ LHH))- (BJA- LHG))+ (BNY* LHI))* LIJ;
 		let BHQI=(L5([0.0,BHQH[0],BHQH[1],BHQH[2],0.0])+ (AWVT* LHI))* LIJ;
 		let BHQJ=BHQI* LIK;
@@ -44283,7 +44284,7 @@ impl Instance {
 		ASBW=BHQK;
 		}
 		let LIP=LIO+ OM;
-		let LIQ=B/ LIP;
+		let LIQ=C/ LIP;
 		let LIR=-MP;
 		let LIS=LIR* LEF;
 		let LIT=LIS* LIQ;
@@ -44296,7 +44297,7 @@ impl Instance {
 		ASBX=AWLK;
 		}else{
 		let LIV=LIT.exp();
-		let LIW=B/ LEL;
+		let LIW=C/ LEL;
 		let LIX=((MO* LIW)* QQ)* PL;
 		let LIY=LIX* LIO;
 		let LIZ=LIY* LIO;
@@ -44394,7 +44395,7 @@ impl Instance {
 		let ASCJ;
 		let ASCK;
 		if LJJ{
-		let LJL=((LJK== B)&& (ADB> A))&& (ME> A);
+		let LJL=((LJK== C)&& (ADB> A))&& (ME> A);
 		let LLW;
 		let LMF;
 		let LNE;
@@ -44415,14 +44416,14 @@ impl Instance {
 		let LJN=-ALK;
 		let BHSQ=AVZV* AWAO;
 		let AHOJ=YZR* AMF;
-		LLW=B;
+		LLW=C;
 		LMF=ME;
 		LNE=LJN;
 		LOA=LJO;
 		LOF=AXW;
 		LOM=LJM;
 		MPB=ADB;
-		ROW=B;
+		ROW=C;
 		XBQ=AHOJ;
 		XBR=AHOI;
 		ASCL=BHSQ;
@@ -44494,7 +44495,7 @@ impl Instance {
 		let ASCV;
 		let ASCW;
 		if LJW{
-		let LJX=((((LJK== B)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= B);
+		let LJX=((((LJK== C)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= C);
 		let LLY;
 		let LNG;
 		let LOO;
@@ -44505,7 +44506,7 @@ impl Instance {
 		let BHSK=L3([AVZX[0],AVZX[1],0.0])- L3([AVZY[0],0.0,AVZY[1]]);
 		let LJZ=-ALP;
 		let BHSL=AVZY* AWAO;
-		LLY=B;
+		LLY=C;
 		LNG=LJZ;
 		LOO=LJY;
 		ASCX=BHSL;
@@ -44567,7 +44568,7 @@ impl Instance {
 		let ASDG;
 		let ASDH;
 		if LKA{
-		let LKC=((LKB== B)&& (ABL> A))&& SN;
+		let LKC=((LKB== C)&& (ABL> A))&& SN;
 		let LMA;
 		let LMI;
 		let LNI;
@@ -44599,7 +44600,7 @@ impl Instance {
 		let BHRI=AWAM- AWAL;
 		let AHND=YZP- YZR;
 		let LKS=-(ABL+ (LKF* LJ));
-		let LKU=((LKS< A)&& (LKT> A))&& (LJ== B);
+		let LKU=((LKS< A)&& (LKT> A))&& (LJ== C);
 		let LNJ;
 		let MPF;
 		let XCH;
@@ -44648,7 +44649,7 @@ impl Instance {
 		let LLC=if LLB{
 		AMF
 		}else{
-		B
+		C
 		};
 		let LLD=LLC* LKE;
 		let BHRJ=BHRI* LLC;
@@ -44659,17 +44660,17 @@ impl Instance {
 		let AHNG=AHNE/ LKX;
 		let AHNH=AHNF/ LKX;
 		let BHRL=BHRK* (LKY* ((LLE+ (((LLE== AWBZ) as u8 as f64)* AWCA)).powf((LKY- ANYF))));
-		let AHNI=LKY- B;
+		let AHNI=LKY- C;
 		let AHNJ=LLE+ (((LLE== A) as u8 as f64)* ZNW);
 		let BHRM=AHNI* ((AHNJ+ (((AHNJ== AWBZ) as u8 as f64)* AWCA)).powf((AHNI- ANYF)));
 		let AHNK=LKY* (AHNJ.powf(AHNI));
 		let AHNL=AHNG* AHNK;
 		let AHNM=AHNH* AHNK;
-		let LLF=B+ (LLE.powf(LKY));
-		let LLG=B/ LKY;
+		let LLF=C+ (LLE.powf(LKY));
+		let LLG=C/ LKY;
 		let LLH=LLF.powf(LLG);
 		let BHRN=BHRL* (LLG* ((LLF+ (((LLF== AWBZ) as u8 as f64)* AWCA)).powf((LLG- ANYF))));
-		let AHNN=LLG- B;
+		let AHNN=LLG- C;
 		let AHNO=LLF+ (((LLF== A) as u8 as f64)* ZNW);
 		let BHRO=AHNN* ((AHNO+ (((AHNO== AWBZ) as u8 as f64)* AWCA)).powf((AHNN- ANYF)));
 		let AHNP=LLG* (AHNO.powf(AHNN));
@@ -44679,9 +44680,9 @@ impl Instance {
 		let BHRP=-LLI;
 		let BHRQ=((BHRJ* LLC)).product_sum_div(ANYF,BHRN,BHRP,LLH);
 		let BHRR=BHRQ* AWAO;
-		let AHNS=product_sum_div((AHNE* LLC),B,BHRP,AHNQ,LLH);
+		let AHNS=product_sum_div((AHNE* LLC),C,BHRP,AHNQ,LLH);
 		let BHRS=L3(sum_products_div_lanes(&[(&BHRR.0,AHNQ),(&(((((BHRK* BHRM)* LKY)* AHNG)* AHNP)+ (((BHRL* BHRO)* LLG)* AHNL)).0,BHRP),(&BHRN.0,(-AHNS))],LLH));
-		let AHNT=product_sum_div((AHNF* LLC),B,BHRP,AHNR,LLH);
+		let AHNT=product_sum_div((AHNF* LLC),C,BHRP,AHNR,LLH);
 		let BHRT=L3(sum_products_div_lanes(&[(&BHRR.0,AHNR),(&(((((BHRK* BHRM)* LKY)* AHNH)* AHNP)+ (((BHRL* BHRO)* LLG)* AHNM)).0,BHRP),(&BHRN.0,(-AHNT))],LLH));
 		LLJ=LLI;
 		XCP=AHNS;
@@ -44701,7 +44702,7 @@ impl Instance {
 		let LLL=((LLK* LLK)+ 0.04000000000000001f64).sqrt();
 		let BHRX=(BHRU+ BHRU)* (ANYF/ (AWAY* LLL));
 		let AHNY=BK* LLL;
-		let AHNZ=B/ AHNY;
+		let AHNZ=C/ AHNY;
 		let BHRY=((BHRX* BK)).product_div((-AHNZ),AHNY);
 		let LLM=J* (LLK+ LLL);
 		let BHRZ=(ASED+ BHRX)* J;
@@ -44736,7 +44737,7 @@ impl Instance {
 		let LLP=(LKW* LLO).sqrt();
 		let BHSC=(ASEG* LKW)* (ANYF/ (AWAY* LLP));
 		let AHOE=BK* LLP;
-		let AHOF=B/ AHOE;
+		let AHOF=C/ AHOE;
 		let BHSD=((BHSC* BK)).product_div((-AHOF),AHOE);
 		let LLQ=LKV- (LLP* LKT);
 		let BHSE=(BHSC* LKT)* AWAO;
@@ -44796,7 +44797,7 @@ impl Instance {
 		ASDV=BHRF;
 		ASDW=BHRF;
 		}
-		LMA=B;
+		LMA=C;
 		LMI=MD;
 		LNI=LNJ;
 		LOD=LKK;
@@ -44804,7 +44805,7 @@ impl Instance {
 		LOQ=LKD;
 		LWM=LKG;
 		MPE=MPF;
-		RPL=B;
+		RPL=C;
 		XCC=XCH;
 		XCD=XCI;
 		XCE=AHNC;
@@ -44876,7 +44877,7 @@ impl Instance {
 		let ASEJ;
 		let ASEK;
 		if LLR{
-		let LLS=((((LKB== B)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= B);
+		let LLS=((((LKB== C)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= C);
 		let LMC;
 		let LNM;
 		let LOS;
@@ -44887,7 +44888,7 @@ impl Instance {
 		let BHRB=L3([AVZX[0],AVZX[1],0.0])- L3([AVZY[0],0.0,AVZY[1]]);
 		let LLU=ALN- ALP;
 		let BHRC=L3([AVZW[0],AVZW[1],0.0])- L3([0.0,AVZY[0],AVZY[1]]);
-		LMC=B;
+		LMC=C;
 		LNM=LLU;
 		LOS=LLT;
 		ASEL=BHRC;
@@ -45101,7 +45102,7 @@ impl Instance {
 		LNO=LMW;
 		ASFO=ASFM;
 		}
-		let LNC=LNB== B;
+		let LNC=LNB== C;
 		let LOU;
 		let XDB;
 		let XDC;
@@ -45153,18 +45154,18 @@ impl Instance {
 		let BHUL=(BHUE* LNS)+ (BHUB* AHOP);
 		let AHOT=AHOR* LNS;
 		let BHUM=(BHUH* LNS)+ (BHUB* AHOR);
-		let LNT=(((B+ LNR)+ LNS)+ (LNS* LNR))+ (LNS* LNS);
+		let LNT=(((C+ LNR)+ LNS)+ (LNS* LNR))+ (LNS* LNS);
 		let BHUN=((BHTW+ BHUB)+ ((BHUB* LNR)+ (BHTW* LNS)))+ (BHUK+ BHUK);
 		let AHOU=((AHOM+ AHOP)+ ((AHOP* LNR)+ (AHOM* LNS)))+ (AHOS+ AHOS);
 		let AHOV=((AHON+ AHOR)+ ((AHOR* LNR)+ (AHON* LNS)))+ (AHOT+ AHOT);
-		let LNU=B/ LNT;
+		let LNU=C/ LNT;
 		let BHUO=-LNU;
 		let BHUP=((BHUN).product_div(BHUO,LNT))* AWAO;
 		let AHOW=product_div(BHUO,AHOU,LNT);
 		let BHUQ=-AHOW;
 		let AHOX=product_div(BHUO,AHOV,LNT);
 		let BHUR=-AHOX;
-		let LNV=B- LNU;
+		let LNV=C- LNU;
 		let AHOY=BHUQ* LNQ;
 		let BHUS=((L6(sum_products_div_lanes(&[(&BHUP.0,AHOU),(&(((L6([0.0,0.0,BHTY[0],BHTY[1],BHTY[2],BHTY[3]])+ BHUE)+ (((BHUE* LNR)+ (BHTW* AHOP))+ (L6([0.0,0.0,BHUI[0],BHUI[1],BHUI[2],BHUI[3]])+ (BHUB* AHOM))))+ (BHUL+ BHUL)).0,BHUO),(&BHUN.0,BHUQ)],LNT)))* AWAO)* LNQ;
 		let BHUT=BHUS+ L6([0.0,0.0,(BHTV* BHUQ),0.0,0.0,0.0]);
@@ -45240,7 +45241,7 @@ impl Instance {
 		if LPB{
 		let AHPJ=XDB* AMF;
 		let AHPK=XDC* AMF;
-		let LPC=IDF* ((B+ LPA)- AL);
+		let LPC=IDF* ((C+ LPA)- AL);
 		let BHVN=BHVG* IDF;
 		let AHPL=(AHPJ* BWG)* IDF;
 		let BHVO=(((ASFQ* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AHPJ),0.0,0.0,0.0]))* IDF;
@@ -45260,7 +45261,7 @@ impl Instance {
 		let AHPG=AHPE* BWG;
 		let BHVI=((ASFR* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AHPE),0.0,0.0,0.0]);
 		let mut LPD=LPA;
-		let mut LPF=B;
+		let mut LPF=C;
 		let mut XDH=AHPF;
 		let mut XDI=AHPG;
 		let mut ASFY=BHVG;
@@ -45313,7 +45314,7 @@ impl Instance {
 		if A!=0.0{
 		let BHVT=(BHVD* AWAO)* J;
 		let AHPN=(AHPC* AMF)* J;
-		let LPK=(((-LOT)* J)- J)- B;
+		let LPK=(((-LOT)* J)- J)- C;
 		let LPO=if LPM{
 		LPL
 		}else{
@@ -45326,7 +45327,7 @@ impl Instance {
 		let LPP=((LPK* LPK)+ LPO).sqrt();
 		let BHVW=(BHVU+ BHVU)* (ANYF/ (AWAY* LPP));
 		let AHPQ=BK* LPP;
-		let AHPR=B/ AHPQ;
+		let AHPR=C/ AHPQ;
 		let BHVX=(BHVT+ BHVW)* J;
 		let AHPS=(AHPN+ (AHPP* AHPR))* J;
 		let BHVY=(((BHVV+ BHVV)* AHPR)+ ((((BHVW* BK)).product_div((-AHPR),AHPQ))* AHPP))* J;
@@ -45374,7 +45375,7 @@ impl Instance {
 		if LPW{
 		let LQG;
 		if LPX{
-		LQG=B;
+		LQG=C;
 		}else{
 		let LQH;
 		if LPY{
@@ -45410,13 +45411,13 @@ impl Instance {
 		let LQE=LQD.sqrt();
 		let BQWQ=ASGK* (ANYF/ (AWAY* LQE));
 		let ANNK=BK* LQE;
-		let ANNL=B/ ANNK;
+		let ANNL=C/ ANNK;
 		let BQWR=((BQWQ* BK)).product_div((-ANNL),ANNK);
 		let ANNM=XDP* ANNL;
 		let BQWS=(ASGL* ANNL)+ (BQWR* XDP);
 		let ANNN=XDQ* ANNL;
 		let BQWT=(ASGM* ANNL)+ (BQWR* XDQ);
-		let LQF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LQB, B));
+		let LQF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LQB, C));
 		LQB=LQF;
 		LQD=LQE;
 		XDP=ANNM;
@@ -45471,7 +45472,7 @@ impl Instance {
 		ASGI=ASGO;
 		ASGJ=ASGP;
 		}
-		let LQP=B/ LQO;
+		let LQP=C/ LQO;
 		let BHWV=-LQP;
 		let BHWW=(ASGH).product_div(BHWV,LQO);
 		let BHWX=BHWW* AWAO;
@@ -45585,7 +45586,7 @@ impl Instance {
 		let AIIP=XDJ* BWG;
 		let AIIQ=AIIO* BWG;
 		let LRC=BWG* LNZ;
-		let LRD=B/ LRC;
+		let LRD=C/ LRC;
 		let LRE=LRD* LOE;
 		let BIUV=(product_div(((ANZE* LNZ)+ (ASCD* BWG)),(-LRD),LRC))* LOE;
 		let BIUW=BIUV* LRF;
@@ -45640,7 +45641,7 @@ impl Instance {
 		let LRQ=(LRJ+ LRN).sqrt();
 		let BIVI=(L7([0.0,0.0,BIUX,0.0,0.0,0.0,0.0])+ BIVD)* (ANYF/ (AWAY* LRQ));
 		let AIIX=BK* LRQ;
-		let AIIY=B/ AIIX;
+		let AIIY=C/ AIIX;
 		let BIVJ=((BIVI* BK)).product_div((-AIIY),AIIX);
 		let LRR=(-LRM)+ LRQ;
 		let BIVK=(BIUZ* AWAO)+ BIVI;
@@ -45673,15 +45674,15 @@ impl Instance {
 		let BIVX=-LRV;
 		let BIVY=(((L7([0.0,0.0,((BIUV* GUA)* AWAO),0.0,0.0,0.0,0.0])+ (BIVS* BK))+ ((BIVW* LRT)+ (BIVS* LRU)))).product_sum_div(ANYF,BIVS,BIVX,LRT);
 		let BIVZ=BIVY* AWAO;
-		let AIJM=product_sum_div(((AIJG* BK)+ ((AIJK* LRT)+ (AIJG* LRU))),B,BIVX,AIJG,LRT);
-		let AIJN=product_sum_div(((AIJJ* BK)+ ((AIJL* LRT)+ (AIJJ* LRU))),B,BIVX,AIJJ,LRT);
+		let AIJM=product_sum_div(((AIJG* BK)+ ((AIJK* LRT)+ (AIJG* LRU))),C,BIVX,AIJG,LRT);
+		let AIJN=product_sum_div(((AIJJ* BK)+ ((AIJL* LRT)+ (AIJJ* LRU))),C,BIVX,AIJJ,LRT);
 		let LRW=LRV* CWM;
 		let BIWA=(BIVY* CWM)+ L7([0.0,0.0,(ANZG* LRV),0.0,0.0,0.0,0.0]);
 		let AIJO=AIJM* CWM;
-		let BIWB=(L7(sum_products_div_lanes(&[(&((BIVU* BK)+ ((((BIVU* JAN)* LRT)+ (BIVS* AIJK))+ ((BIVU* LRU)+ (BIVW* AIJG)))).0,B),(&BIVZ.0,AIJG),(&BIVU.0,BIVX),(&BIVS.0,(-AIJM))],LRT)))* CWM;
+		let BIWB=(L7(sum_products_div_lanes(&[(&((BIVU* BK)+ ((((BIVU* JAN)* LRT)+ (BIVS* AIJK))+ ((BIVU* LRU)+ (BIVW* AIJG)))).0,C),(&BIVZ.0,AIJG),(&BIVU.0,BIVX),(&BIVS.0,(-AIJM))],LRT)))* CWM;
 		let BIWC=BIWB+ L7([0.0,0.0,(ANZG* AIJM),0.0,0.0,0.0,0.0]);
 		let AIJP=AIJN* CWM;
-		let BIWD=(L7(sum_products_div_lanes(&[(&((BIVV* BK)+ ((((BIVV* JAN)* LRT)+ (BIVS* AIJL))+ ((BIVV* LRU)+ (BIVW* AIJJ)))).0,B),(&BIVZ.0,AIJJ),(&BIVV.0,BIVX),(&BIVS.0,(-AIJN))],LRT)))* CWM;
+		let BIWD=(L7(sum_products_div_lanes(&[(&((BIVV* BK)+ ((((BIVV* JAN)* LRT)+ (BIVS* AIJL))+ ((BIVV* LRU)+ (BIVW* AIJJ)))).0,C),(&BIVZ.0,AIJJ),(&BIVV.0,BIVX),(&BIVS.0,(-AIJN))],LRT)))* CWM;
 		let BIWE=BIWD+ L7([0.0,0.0,(ANZG* AIJN),0.0,0.0,0.0,0.0]);
 		let LRX=LRW/ LQZ;
 		let BIWF=L7([0.0,0.0,BIUT,0.0,0.0,0.0,0.0]);
@@ -45695,10 +45696,10 @@ impl Instance {
 		let AIJU=AIJR* LRX;
 		let BIWJ=(((BIWE).product_sum_div(ANYF,BIWF,(-AIJR),LQZ))* LRX)+ (BIWG* AIJR);
 		let AIJV=AIJU+ AIJU;
-		let LRY=(B+ (LRX* LRX)).sqrt();
+		let LRY=(C+ (LRX* LRX)).sqrt();
 		let BIWK=(BIWH+ BIWH)* (ANYF/ (AWAY* LRY));
 		let AIJW=BK* LRY;
-		let AIJX=B/ AIJW;
+		let AIJX=C/ AIJW;
 		let BIWL=((BIWK* BK)).product_div((-AIJX),AIJW);
 		let AIJY=AIJT* AIJX;
 		let AIJZ=AIJV* AIJX;
@@ -45706,14 +45707,14 @@ impl Instance {
 		let BIWM=-LRZ;
 		let BIWN=(BIWA).product_sum_div(ANYF,BIWK,BIWM,LRY);
 		let BIWO=BIWN* AWAO;
-		let AIKA=product_sum_div(AIJO,B,BIWM,AIJY,LRY);
-		let AIKB=product_sum_div(AIJP,B,BIWM,AIJZ,LRY);
+		let AIKA=product_sum_div(AIJO,C,BIWM,AIJY,LRY);
+		let AIKB=product_sum_div(AIJP,C,BIWM,AIJZ,LRY);
 		let LSA=LRZ- LRA;
 		let BIWP=BIWN- ASGB;
 		let AIKC=AIKA- XDJ;
-		let BIWQ=(L7(sum_products_div_lanes(&[(&BIWC.0,B),(&BIWO.0,AIJY),(&(((BIWI+ BIWI)* AIJX)+ (BIWL* AIJT)).0,BIWM),(&BIWK.0,(-AIKA))],LRY)))- ASGC;
+		let BIWQ=(L7(sum_products_div_lanes(&[(&BIWC.0,C),(&BIWO.0,AIJY),(&(((BIWI+ BIWI)* AIJX)+ (BIWL* AIJT)).0,BIWM),(&BIWK.0,(-AIKA))],LRY)))- ASGC;
 		let AIKD=AIKB- XDK;
-		let BIWR=(L7(sum_products_div_lanes(&[(&BIWE.0,B),(&BIWO.0,AIJZ),(&(((BIWJ+ BIWJ)* AIJX)+ (BIWL* AIJV)).0,BIWM),(&BIWK.0,(-AIKB))],LRY)))- ASGD;
+		let BIWR=(L7(sum_products_div_lanes(&[(&BIWE.0,C),(&BIWO.0,AIJZ),(&(((BIWJ+ BIWJ)* AIJX)+ (BIWL* AIJV)).0,BIWM),(&BIWK.0,(-AIKB))],LRY)))- ASGD;
 		let LSB=LOE* (LOT- LSA);
 		let BIWS=(BIUU- BIWP)* LOE;
 		let BIWT=L8([BIWP[0],BIWP[1],0.0,BIWP[2],BIWP[3],BIWP[4],BIWP[5],BIWP[6]]);
@@ -45772,7 +45773,7 @@ impl Instance {
 		let LSD=BWG* LSC;
 		let BHXM=BHXL* BWG;
 		let BHXN=L7([0.0,0.0,(ANZE* LSC),0.0,0.0,0.0,0.0])+ BHXM;
-		let LSE=LSD< (B+ (((-0.9999999999999978f64* LOK)* FCG)/ BH));
+		let LSE=LSD< (C+ (((-0.9999999999999978f64* LOK)* FCG)/ BH));
 		let LSM;
 		let XEF;
 		let XEG;
@@ -45792,18 +45793,18 @@ impl Instance {
 		}else{
 		let AHQM=AHPC+ XDK;
 		let LSG=LOK* FCG;
-		let LSH=(BH* (LSD- B))/ LSG;
+		let LSH=(BH* (LSD- C))/ LSG;
 		let BHXO=L7([0.0,0.0,((BHVC* FCG)+ (ANZM* LOK)),0.0,0.0,0.0,0.0]);
 		let AHQN=((XDJ* BWG)* BH)/ LSG;
 		let AHQO=((AHQM* BWG)* BH)/ LSG;
 		let LSI=(LOK* BWG)/ BK;
 		let BHXP=((BHVC* BWG)+ (ANZE* LOK))/ BK;
-		let LSJ=(B+ LSH).sqrt();
+		let LSJ=(C+ LSH).sqrt();
 		let BHXQ=(((BHXN* BH)).product_sum_div(ANYF,BHXO,(-LSH),LSG))* (ANYF/ (AWAY* LSJ));
 		let AHQP=BK* LSJ;
-		let AHQQ=B/ AHQP;
+		let AHQQ=C/ AHQP;
 		let BHXR=((BHXQ* BK)).product_div((-AHQQ),AHQP);
-		let LSK=B- LSJ;
+		let LSK=C- LSJ;
 		let AHQR=-(AHQN* AHQQ);
 		let AHQS=-(AHQO* AHQQ);
 		let AHQT=AHQR* LSI;
@@ -45845,7 +45846,7 @@ impl Instance {
 		let BHYW=(ASGC* BWG)+ L7([0.0,0.0,(ANZE* XDJ),0.0,0.0,0.0,0.0]);
 		let AHSF=AHSD* BWG;
 		let BHYX=(ASGD* BWG)+ L7([0.0,0.0,(ANZE* AHSD),0.0,0.0,0.0,0.0]);
-		let LSR=LSD- B;
+		let LSR=LSD- C;
 		let LSS=LOK* FCG;
 		let LST=(BH* (LSR+ LSQ))/ LSS;
 		let BHYY=L7([0.0,0.0,((BHVC* FCG)+ (ANZM* LOK)),0.0,0.0,0.0,0.0]);
@@ -45853,12 +45854,12 @@ impl Instance {
 		let AHSH=((AHSF+ (AHSC* LSQ))* BH)/ LSS;
 		let LSU=(LOK* BWG)/ BK;
 		let BHYZ=((BHVC* BWG)+ (ANZE* LOK))/ BK;
-		let LSV=(B+ LST).sqrt();
+		let LSV=(C+ LST).sqrt();
 		let BHZA=((((BHXN+ BHYV)* BH)).product_sum_div(ANYF,BHYY,(-LST),LSS))* (ANYF/ (AWAY* LSV));
 		let AHSI=BK* LSV;
-		let AHSJ=B/ AHSI;
+		let AHSJ=C/ AHSI;
 		let BHZB=((BHZA* BK)).product_div((-AHSJ),AHSI);
-		let LSW=B- LSV;
+		let LSW=C- LSV;
 		let AHSK=-(AHSG* AHSJ);
 		let AHSL=-(AHSH* AHSJ);
 		let BHZC=((((((((BHYW+ (((BHXY* AMF)* LSQ)+ (BHYV* AHSB)))* BH)).product_sum_div(ANYF,BHYY,(-AHSG),LSS))* AHSJ)+ (BHZB* AHSG))* AWAO)* LSU)+ L7([0.0,0.0,(BHYZ* AHSK),0.0,0.0,0.0,0.0]);
@@ -45873,14 +45874,14 @@ impl Instance {
 		let LSZ=(BH* (LSR+ LSY))/ LSS;
 		let AHSQ=((AHSE+ (AHSO* LSY))* BH)/ LSS;
 		let AHSR=((AHSF+ (AHSP* LSY))* BH)/ LSS;
-		let LTA=(B+ LSZ).sqrt();
+		let LTA=(C+ LSZ).sqrt();
 		let BHZF=((((BHXN+ BHZE)* BH)).product_sum_div(ANYF,BHYY,(-LSZ),LSS))* (ANYF/ (AWAY* LTA));
 		let AHSS=BK* LTA;
-		let AHST=B/ AHSS;
+		let AHST=C/ AHSS;
 		let BHZG=((BHZF* BK)).product_div((-AHST),AHSS);
 		let BHZH=(((((BHYW+ ((((((BHZC+ ASGC)* BWG)+ L7([0.0,0.0,(ANZE* AHSM),0.0,0.0,0.0,0.0]))* AMF)* LSY)+ (BHZE* AHSO)))* BH)).product_sum_div(ANYF,BHYY,(-AHSQ),LSS))* AHST)+ (BHZG* AHSQ);
 		let BHZI=(((((BHYX+ ((((((BHZD+ ASGD)* BWG)+ L7([0.0,0.0,(ANZE* AHSN),0.0,0.0,0.0,0.0]))* AMF)* LSY)+ (BHZE* AHSP)))* BH)).product_sum_div(ANYF,BHYY,(-AHSR),LSS))* AHST)+ (BHZG* AHSR);
-		let LTB=B- LTA;
+		let LTB=C- LTA;
 		let AHSU=-(AHSQ* AHST);
 		let AHSV=-(AHSR* AHST);
 		let LTC=(LOT+ (LSU* LTB))+ LRA;
@@ -45900,7 +45901,7 @@ impl Instance {
 		ASHR=BHZL;
 		}else{
 		let LTF=BWG* LOJ;
-		let LTG=B/ LTF;
+		let LTG=C/ LTF;
 		let BHYA=product_div(((ANZE* LOJ)+ (BHVA* BWG)),(-LTG),LTF);
 		let LTH=0.7071067811865475f64+ LTG;
 		let LTI=(-LSC)/ LOJ;
@@ -45927,7 +45928,7 @@ impl Instance {
 		let LTQ=((LTL* LTL)+ (LTP* LTO)).sqrt();
 		let BHYK=((BHYG+ BHYG)+ L7([0.0,0.0,(((BHYJ+ BHYJ)* LTO)+ (BHYF* LTP)),0.0,0.0,0.0,0.0]))* (ANYF/ (AWAY* LTQ));
 		let AHRH=BK* LTQ;
-		let AHRI=B/ AHRH;
+		let AHRI=C/ AHRH;
 		let BHYL=((BHYK* BK)).product_div((-AHRI),AHRH);
 		let AHRJ=AHRE* AHRI;
 		let BHYM=((BHYH+ BHYH)* AHRI)+ (BHYL* AHRE);
@@ -46017,7 +46018,7 @@ impl Instance {
 		let BIAF=L7([BHZY[0],BHZY[1],BHZY[2],BHZY[3],0.0,BHZY[4],BHZY[5]]);
 		let AHTK=AHTG+ (AHTI+ AHTI);
 		let BIAG=L7([BHZZ[0],BHZZ[1],BHZZ[2],BHZZ[3],0.0,BHZZ[4],BHZZ[5]]);
-		let AHTL=B/ LUB;
+		let AHTL=C/ LUB;
 		let BIAH=(BIAE).product_div((-AHTL),LUB);
 		let LUC=LOZ* LTY;
 		let LUD=LUC.ln();
@@ -46045,7 +46046,7 @@ impl Instance {
 		let BIAP=BHZU- BIAM;
 		let AHTQ=AHTE- AHTO;
 		let BIAQ=BHZW- BIAN;
-		let LUH=(LTZ- LUF)- B;
+		let LUH=(LTZ- LUF)- C;
 		let LUI=BH* LTZ;
 		let BIAR=BHZT* BH;
 		let AHTR=AHTD* BH;
@@ -46090,7 +46091,7 @@ impl Instance {
 		let LUM=((LUH* LUH)+ LUL).sqrt();
 		let BIBA=((BIAX+ BIAX)+ ASIE)* (ANYF/ (AWAY* LUM));
 		let AHTZ=BK* LUM;
-		let AHUA=B/ AHTZ;
+		let AHUA=C/ AHTZ;
 		let BIBB=((BIBA* BK)).product_div((-AHUA),AHTZ);
 		let LUN=LTZ- (J* (LUH+ LUM));
 		let BIBC=BHZT- ((BIAO+ BIBA)* J);
@@ -46169,7 +46170,7 @@ impl Instance {
 		let BIBJ=BIAD+ (BIBG+ BIBG);
 		let AHUH=AHTF+ (AHUF+ AHUF);
 		let AHUI=AHTG+ (AHUG+ AHUG);
-		let AHUJ=B/ LUU;
+		let AHUJ=C/ LUU;
 		let BIBK=(BIBJ).product_div((-AHUJ),LUU);
 		let LUV=((LUU.ln())- LUD)+ LUE;
 		let BIBL=((BIBJ* (ANYF/ LUU))- BIAI)+ BIAJ;
@@ -46271,7 +46272,7 @@ impl Instance {
 		if LVG{
 		let LVQ;
 		if LVH{
-		LVQ=B;
+		LVQ=C;
 		}else{
 		let LVR;
 		if LVI{
@@ -46307,13 +46308,13 @@ impl Instance {
 		let LVO=LVN.sqrt();
 		let BIUP=ASIZ* (ANYF/ (AWAY* LVO));
 		let AIIK=BK* LVO;
-		let AIIL=B/ AIIK;
+		let AIIL=C/ AIIK;
 		let BIUQ=((BIUP* BK)).product_div((-AIIL),AIIK);
 		let AIIM=XFF* AIIL;
 		let BIUR=(ASJA* AIIL)+ (BIUQ* XFF);
 		let AIIN=XFG* AIIL;
 		let BIUS=(ASJB* AIIL)+ (BIUQ* XFG);
-		let LVP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LVL, B));
+		let LVP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LVL, C));
 		LVL=LVP;
 		LVN=LVO;
 		XFF=AIIM;
@@ -46368,7 +46369,7 @@ impl Instance {
 		ASIX=ASJD;
 		ASIY=ASJE;
 		}
-		let LVZ=B/ LVY;
+		let LVZ=C/ LVY;
 		let BICQ=-LVZ;
 		let BICR=(ASIW).product_div(BICQ,LVY);
 		let BICS=BICR* AWAO;
@@ -46480,7 +46481,7 @@ impl Instance {
 		ASHZ=BHZN;
 		ASIA=BHZO;
 		}
-		let LWE=P== B;
+		let LWE=P== C;
 		let LXP;
 		let LYD;
 		let LZL;
@@ -46525,7 +46526,7 @@ impl Instance {
 		let LWQ=((LWP* LWP)+ 0.04000000000000001f64).sqrt();
 		let BIDF=(BIDC+ BIDC)* (ANYF/ (AWAY* LWQ));
 		let AHVT=BK* LWQ;
-		let AHVU=B/ AHVT;
+		let AHVU=C/ AHVT;
 		let BIDG=((BIDF* BK)).product_div((-AHVU),AHVT);
 		let LWR=J* (LWP+ LWQ);
 		let BIDH=(AVZT+ BIDF)* J;
@@ -46560,7 +46561,7 @@ impl Instance {
 		let LWU=(LKW* LWT).sqrt();
 		let BIDK=(ASJR* LKW)* (ANYF/ (AWAY* LWU));
 		let AHVZ=BK* LWU;
-		let AHWA=B/ AHVZ;
+		let AHWA=C/ AHVZ;
 		let BIDL=((BIDK* BK)).product_div((-AHWA),AHVZ);
 		let LWV=K- (LWU* LKT);
 		let BIDM=(BIDK* LKT)* AWAO;
@@ -46589,7 +46590,7 @@ impl Instance {
 		let LWY=((LWW* LWW)+ ((BH* LWX)* LWX)).sqrt();
 		let BIDX=(BIDS+ BIDS)* (ANYF/ (AWAY* LWY));
 		let AHWH=BK* LWY;
-		let AHWI=B/ AHWH;
+		let AHWI=C/ AHWH;
 		let BIDY=((BIDX* BK)).product_div((-AHWI),AHWH);
 		let LWZ=J* (LWW+ LWY);
 		let BIDZ=(ASJO+ BIDX)* J;
@@ -46628,7 +46629,7 @@ impl Instance {
 		let LXH=LXG< RV;
 		let LXK=if LXH{
 		let LXI=BIEC* LXC;
-		let LXJ=((B+ ((LXG.exp())- (LXI.exp()))).ln())/ LXE;
+		let LXJ=((C+ ((LXG.exp())- (LXI.exp()))).ln())/ LXE;
 		LXJ
 		}else{
 		LXF
@@ -46707,10 +46708,10 @@ impl Instance {
 		let BIEM=(ASJI* AWAO)* LXT;
 		let AHWZ=XFL+ (AHWX* LXT);
 		let AHXA=XFM+ (AHWY* LXT);
-		let LXU=((LXP- B)+ LXT).sqrt();
+		let LXU=((LXP- C)+ LXT).sqrt();
 		let BIEN=(ASJI+ BIEM)* (ANYF/ (AWAY* LXU));
 		let AHXB=BK* LXU;
-		let AHXC=B/ AHXB;
+		let AHXC=C/ AHXB;
 		let BIEO=((BIEN* BK)).product_div((-AHXC),AHXB);
 		let AHXD=AHWZ* AHXC;
 		let BIEP=((ASJK+ (((ASJK* AMF)* LXT)+ (BIEM* AHWX)))* AHXC)+ (BIEO* AHWZ);
@@ -46729,10 +46730,10 @@ impl Instance {
 		let AHWO=XFM* KPU;
 		let AHWP=-(XFL* GTU);
 		let AHWQ=-(XFM* GTU);
-		let LXW=(B- (LXP* GTU)).sqrt();
+		let LXW=(C- (LXP* GTU)).sqrt();
 		let BIEH=((ASJI* GTU)* AWAO)* (ANYF/ (AWAY* LXW));
 		let AHWR=BK* LXW;
-		let AHWS=B/ AHWR;
+		let AHWS=C/ AHWR;
 		let BIEI=((BIEH* BK)).product_div((-AHWS),AHWR);
 		let AHWT=AHWP* AHWS;
 		let AHWU=AHWQ* AHWS;
@@ -46838,7 +46839,7 @@ impl Instance {
 		if LYM{
 		let LYW;
 		if LYN{
-		LYW=B;
+		LYW=C;
 		}else{
 		let LYX;
 		if LYO{
@@ -46874,13 +46875,13 @@ impl Instance {
 		let LYU=LYT.sqrt();
 		let BIUL=ASKM* (ANYF/ (AWAY* LYU));
 		let AIIG=BK* LYU;
-		let AIIH=B/ AIIG;
+		let AIIH=C/ AIIG;
 		let BIUM=((BIUL* BK)).product_div((-AIIH),AIIG);
 		let AIII=XGF* AIIH;
 		let BIUN=(ASKN* AIIH)+ (BIUM* XGF);
 		let AIIJ=XGG* AIIH;
 		let BIUO=(ASKO* AIIH)+ (BIUM* XGG);
-		let LYV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LYR, B));
+		let LYV=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LYR, C));
 		LYR=LYV;
 		LYT=LYU;
 		XGF=AIII;
@@ -46935,7 +46936,7 @@ impl Instance {
 		ASKK=ASKQ;
 		ASKL=ASKR;
 		}
-		let LZF=B/ LZE;
+		let LZF=C/ LZE;
 		let BIGK=-LZF;
 		let BIGL=(ASKJ).product_div(BIGK,LZE);
 		let BIGM=BIGL* AWAO;
@@ -46972,7 +46973,7 @@ impl Instance {
 		let BIFE=L8([BIET[0],BIET[1],0.0,BIET[2],BIET[3],BIET[4],BIET[5],BIET[6]]);
 		let BIFF=L8([BIEU[0],BIEU[1],0.0,BIEU[2],BIEU[3],BIEU[4],BIEU[5],BIEU[6]]);
 		let BIFG=L8([BIEV[0],BIEV[1],0.0,BIEV[2],BIEV[3],BIEV[4],BIEV[5],BIEV[6]]);
-		LZJ=B;
+		LZJ=C;
 		LZX=LYB;
 		XGB=AHXF;
 		XGC=AHXG;
@@ -46980,7 +46981,7 @@ impl Instance {
 		ASKH=BIFF;
 		ASKI=BIFG;
 		}
-		let LZK=LZJ< B;
+		let LZK=LZJ< C;
 		let LZT=if LZK{
 		let LZN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, LZL, BK));
 		LZN
@@ -47110,7 +47111,7 @@ impl Instance {
 		if MAF{
 		let MAP;
 		if MAG{
-		MAP=B;
+		MAP=C;
 		}else{
 		let MAQ;
 		if MAH{
@@ -47146,13 +47147,13 @@ impl Instance {
 		let MAN=MAM.sqrt();
 		let BIUH=ASLI* (ANYF/ (AWAY* MAN));
 		let AIIC=BK* MAN;
-		let AIID=B/ AIIC;
+		let AIID=C/ AIIC;
 		let BIUI=((BIUH* BK)).product_div((-AIID),AIIC);
 		let AIIE=XGT* AIID;
 		let BIUJ=(ASLJ* AIID)+ (BIUI* XGT);
 		let AIIF=XGU* AIID;
 		let BIUK=(ASLK* AIID)+ (BIUI* XGU);
-		let MAO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MAK, B));
+		let MAO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MAK, C));
 		MAK=MAO;
 		MAM=MAN;
 		XGT=AIIE;
@@ -47207,7 +47208,7 @@ impl Instance {
 		ASLG=ASLM;
 		ASLH=ASLN;
 		}
-		let MAY=B/ MAX;
+		let MAY=C/ MAX;
 		let BIIF=-MAY;
 		let BIIG=(ASLF).product_div(BIIF,MAX);
 		let BIIH=BIIG* AWAO;
@@ -47358,7 +47359,7 @@ impl Instance {
 		let MBL=((MBK* MBK)+ 0.04000000000000001f64).sqrt();
 		let BIIU=(BIIR+ BIIR)* (ANYF/ (AWAY* MBL));
 		let AHZL=BK* MBL;
-		let AHZM=B/ AHZL;
+		let AHZM=C/ AHZL;
 		let BIIV=((BIIU* BK)).product_div((-AHZM),AHZL);
 		let MBM=J* (MBK+ MBL);
 		let BIIW=(AVZT+ BIIU)* J;
@@ -47393,7 +47394,7 @@ impl Instance {
 		let MBP=(LKW* MBO).sqrt();
 		let BIIZ=(ASMH* LKW)* (ANYF/ (AWAY* MBP));
 		let AHZR=BK* MBP;
-		let AHZS=B/ AHZR;
+		let AHZS=C/ AHZR;
 		let BIJA=((BIIZ* BK)).product_div((-AHZS),AHZR);
 		let MBQ=K- (MBP* LKT);
 		let BIJB=(BIIZ* LKT)* AWAO;
@@ -47422,7 +47423,7 @@ impl Instance {
 		let MBT=((MBR* MBR)+ ((BH* MBS)* MBS)).sqrt();
 		let BIJM=(BIJH+ BIJH)* (ANYF/ (AWAY* MBT));
 		let AHZZ=BK* MBT;
-		let AIAA=B/ AHZZ;
+		let AIAA=C/ AHZZ;
 		let BIJN=((BIJM* BK)).product_div((-AIAA),AHZZ);
 		let MBU=J* (MBR+ MBT);
 		let BIJO=(ASME+ BIJM)* J;
@@ -47472,7 +47473,7 @@ impl Instance {
 		let MCA=(MBZ* MBY).sqrt();
 		let BIJZ=(L6([0.0,0.0,0.0,(BIJV* MBY),0.0,0.0])+ L6([BIJW[0],BIJW[1],BIJW[2],0.0,BIJW[3],BIJW[4]]))* (ANYF/ (AWAY* MCA));
 		let AIAJ=BK* MCA;
-		let AIAK=B/ AIAJ;
+		let AIAK=C/ AIAJ;
 		let BIKA=((BIJZ* BK)).product_div((-AIAK),AIAJ);
 		let AIAL=AIAH* AIAK;
 		let BIKB=((L6([BIJX[0],BIJX[1],BIJX[2],0.0,BIJX[3],BIJX[4]])+ L6([0.0,0.0,0.0,(BIJV* AIAF),0.0,0.0]))* AIAK)+ (BIKA* AIAH);
@@ -47489,21 +47490,21 @@ impl Instance {
 		let BIKF=((BIJZ* BIKD)+ ((BIJZ* AWAO)* BIKE))/ BK;
 		let AIAR=(AIAN+ AIAP)/ BK;
 		let AIAS=(AIAO+ AIAQ)/ BK;
-		let AIAT=B/ MCC;
+		let AIAT=C/ MCC;
 		let BIKG=(BIKF).product_div((-AIAT),MCC);
 		let MCD=(MCC.ln())/ MBY;
 		let BIKH=-MCD;
 		let BIKI=L6([BIJS[0],BIJS[1],BIJS[2],0.0,BIJS[3],BIJS[4]]);
 		let BIKJ=((BIKF* (ANYF/ MCC))).product_sum_div(ANYF,BIKI,BIKH,MBY);
 		let BIKK=BIKJ* AWAO;
-		let AIAU=product_sum_div((AIAR* AIAT),B,BIKH,AIAF,MBY);
-		let BIKL=L6(sum_products_div_lanes(&[(&(((((BIKB* BIKD)+ ((BIKB* AMF)* BIKE))/ BK)* AIAT)+ (BIKG* AIAR)).0,B),(&BIKK.0,AIAF),(&L6([BIJT[0],BIJT[1],BIJT[2],0.0,BIJT[3],BIJT[4]]).0,BIKH),(&BIKI.0,(-AIAU))],MBY));
-		let AIAV=product_sum_div((AIAS* AIAT),B,BIKH,AIAG,MBY);
-		let BIKM=L6(sum_products_div_lanes(&[(&(((((BIKC* BIKD)+ ((BIKC* AMF)* BIKE))/ BK)* AIAT)+ (BIKG* AIAS)).0,B),(&BIKK.0,AIAG),(&L6([BIJU[0],BIJU[1],BIJU[2],0.0,BIJU[3],BIJU[4]]).0,BIKH),(&BIKI.0,(-AIAV))],MBY));
+		let AIAU=product_sum_div((AIAR* AIAT),C,BIKH,AIAF,MBY);
+		let BIKL=L6(sum_products_div_lanes(&[(&(((((BIKB* BIKD)+ ((BIKB* AMF)* BIKE))/ BK)* AIAT)+ (BIKG* AIAR)).0,C),(&BIKK.0,AIAF),(&L6([BIJT[0],BIJT[1],BIJT[2],0.0,BIJT[3],BIJT[4]]).0,BIKH),(&BIKI.0,(-AIAU))],MBY));
+		let AIAV=product_sum_div((AIAS* AIAT),C,BIKH,AIAG,MBY);
+		let BIKM=L6(sum_products_div_lanes(&[(&(((((BIKC* BIKD)+ ((BIKC* AMF)* BIKE))/ BK)* AIAT)+ (BIKG* AIAS)).0,C),(&BIKK.0,AIAG),(&L6([BIJU[0],BIJU[1],BIJU[2],0.0,BIJU[3],BIJU[4]]).0,BIKH),(&BIKI.0,(-AIAV))],MBY));
 		let BIKN=L8([ASBS[0],ASBS[1],0.0,ASBS[2],ASBS[3],ASBS[4],ASBS[5],ASBS[6]]);
 		let BIKO=L8([ASBU[0],ASBU[1],0.0,ASBU[2],ASBU[3],ASBU[4],ASBU[5],ASBU[6]]);
 		let BIKP=L8([ASBV[0],ASBV[1],0.0,ASBV[2],ASBV[3],ASBV[4],ASBV[5],ASBV[6]]);
-		let mut MCE=B;
+		let mut MCE=C;
 		let mut MCG=MBD;
 		let mut MGN=A;
 		let mut MHN=A;
@@ -47599,26 +47600,26 @@ impl Instance {
 		let BILW=BILL- L8([BILT[0],BILT[1],BILT[2],BILT[3],BILT[4],0.0,BILT[5],0.0]);
 		let AIBN=AIBF- (AIBL* MCO);
 		let BILX=BILM- L8([BILU[0],BILU[1],BILU[2],BILU[3],BILU[4],0.0,BILU[5],0.0]);
-		let MCP=B+ (MCM- MCO);
-		let AIBO=B/ MCP;
+		let MCP=C+ (MCM- MCO);
+		let AIBO=C/ MCP;
 		let BILY=(BILV).product_div((-AIBO),MCP);
 		let MCQ=(MCP.ln())/ MCD;
 		let BILZ=-MCQ;
 		let BIMA=L8([BIKJ[0],BIKJ[1],BIKJ[2],BIKJ[3],BIKJ[4],0.0,BIKJ[5],0.0]);
 		let BIMB=((BILV* (ANYF/ MCP))).product_sum_div(ANYF,BIMA,BILZ,MCD);
 		let BIMC=BIMB* AWAO;
-		let AIBP=product_sum_div((AIBM* AIBO),B,BILZ,AIAU,MCD);
-		let BIMD=L8(sum_products_div_lanes(&[(&((BILW* AIBO)+ (BILY* AIBM)).0,B),(&BIMC.0,AIAU),(&L8([BIKL[0],BIKL[1],BIKL[2],BIKL[3],BIKL[4],0.0,BIKL[5],0.0]).0,BILZ),(&BIMA.0,(-AIBP))],MCD));
-		let AIBQ=product_sum_div((AIBN* AIBO),B,BILZ,AIAV,MCD);
-		let BIME=L8(sum_products_div_lanes(&[(&((BILX* AIBO)+ (BILY* AIBN)).0,B),(&BIMC.0,AIAV),(&L8([BIKM[0],BIKM[1],BIKM[2],BIKM[3],BIKM[4],0.0,BIKM[5],0.0]).0,BILZ),(&BIMA.0,(-AIBQ))],MCD));
+		let AIBP=product_sum_div((AIBM* AIBO),C,BILZ,AIAU,MCD);
+		let BIMD=L8(sum_products_div_lanes(&[(&((BILW* AIBO)+ (BILY* AIBM)).0,C),(&BIMC.0,AIAU),(&L8([BIKL[0],BIKL[1],BIKL[2],BIKL[3],BIKL[4],0.0,BIKL[5],0.0]).0,BILZ),(&BIMA.0,(-AIBP))],MCD));
+		let AIBQ=product_sum_div((AIBN* AIBO),C,BILZ,AIAV,MCD);
+		let BIME=L8(sum_products_div_lanes(&[(&((BILX* AIBO)+ (BILY* AIBN)).0,C),(&BIMC.0,AIAV),(&L8([BIKM[0],BIKM[1],BIKM[2],BIKM[3],BIKM[4],0.0,BIKM[5],0.0]).0,BILZ),(&BIMA.0,(-AIBQ))],MCD));
 		let MCR=MCM/ MCP;
 		let BIMF=-MCR;
 		let BIMG=(BILK).product_sum_div(ANYF,BILV,BIMF,MCP);
 		let BIMH=BIMG* AWAO;
-		let AIBR=product_sum_div(AIBE,B,BIMF,AIBM,MCP);
-		let BIMI=L8(sum_products_div_lanes(&[(&BILL.0,B),(&BIMH.0,AIBM),(&BILW.0,BIMF),(&BILV.0,(-AIBR))],MCP));
-		let AIBS=product_sum_div(AIBF,B,BIMF,AIBN,MCP);
-		let BIMJ=L8(sum_products_div_lanes(&[(&BILM.0,B),(&BIMH.0,AIBN),(&BILX.0,BIMF),(&BILV.0,(-AIBS))],MCP));
+		let AIBR=product_sum_div(AIBE,C,BIMF,AIBM,MCP);
+		let BIMI=L8(sum_products_div_lanes(&[(&BILL.0,C),(&BIMH.0,AIBM),(&BILW.0,BIMF),(&BILV.0,(-AIBR))],MCP));
+		let AIBS=product_sum_div(AIBF,C,BIMF,AIBN,MCP);
+		let BIMJ=L8(sum_products_div_lanes(&[(&BILM.0,C),(&BIMH.0,AIBN),(&BILX.0,BIMF),(&BILV.0,(-AIBS))],MCP));
 		MCS=MCQ;
 		MDZ=MCR;
 		XHP=AIBP;
@@ -47633,7 +47634,7 @@ impl Instance {
 		ASNB=BIMJ;
 		}else{
 		MCS=MCJ;
-		MDZ=B;
+		MDZ=C;
 		XHP=AIBA;
 		XHQ=AIBB;
 		XHR=A;
@@ -47739,17 +47740,17 @@ impl Instance {
 		let BINP=BIKX/ BH;
 		let AICW=AIAZ/ BH;
 		let BINQ=BIKY/ BH;
-		let MDC=B- (MCI/ BC);
+		let MDC=C- (MCI/ BC);
 		let BINR=(BIKW/ BC)* AWAO;
 		let AICX=-(AIAY/ BC);
 		let AICY=-(AIAZ/ BC);
-		let MDD=B- (MDB* MDC);
+		let MDD=C- (MDB* MDC);
 		let BINS=((BINO* MDC)+ (BINR* MDB))* AWAO;
 		let AICZ=-((AICV* MDC)+ (AICX* MDB));
 		let AIDA=-((AICW* MDC)+ (AICY* MDB));
 		let BINT=((BINM* MDD)+ (BINS* AICT))+ ((((((BINP* MDC)+ (BINR* AICV))+ ((((BIKX/ BC)* AWAO)* MDB)+ (BINO* AICX)))* AWAO)* MDA)+ (BINL* AICZ));
 		let BINU=((BINN* MDD)+ (BINS* AICU))+ ((((((BINQ* MDC)+ (BINR* AICW))+ ((((BIKY/ BC)* AWAO)* MDB)+ (BINO* AICY)))* AWAO)* MDA)+ (BINL* AIDA));
-		let MDE=B- (MDA* MDD);
+		let MDE=C- (MDA* MDD);
 		let BINV=((BINL* MDD)+ (BINS* MDA))* AWAO;
 		let AIDB=-((AICT* MDD)+ (AICZ* MDA));
 		let AIDC=-((AICU* MDD)+ (AIDA* MDA));
@@ -47757,17 +47758,17 @@ impl Instance {
 		let BINW=BIKW/ BK;
 		let AIDD=AIAY/ BK;
 		let AIDE=AIAZ/ BK;
-		let MDG=B- MDB;
+		let MDG=C- MDB;
 		let BINX=BINO* AWAO;
 		let AIDF=-AICV;
 		let AIDG=-AICW;
-		let MDH=B- (MDA* MDG);
+		let MDH=C- (MDA* MDG);
 		let BINY=((BINL* MDG)+ (BINX* MDA))* AWAO;
 		let AIDH=-((AICT* MDG)+ (AIDF* MDA));
 		let AIDI=-((AICU* MDG)+ (AIDG* MDA));
 		let BINZ=(((BIKX/ BK)* MDH)+ (BINY* AIDD))+ ((((((BINM* MDG)+ (BINX* AICT))+ (((BINP* AWAO)* MDA)+ (BINL* AIDF)))* AWAO)* MDF)+ (BINW* AIDH));
 		let BIOA=(((BIKY/ BK)* MDH)+ (BINY* AIDE))+ ((((((BINN* MDG)+ (BINX* AICU))+ (((BINQ* AWAO)* MDA)+ (BINL* AIDG)))* AWAO)* MDF)+ (BINW* AIDI));
-		let MDI=B- (MDF* MDH);
+		let MDI=C- (MDF* MDH);
 		let BIOB=((BINW* MDH)+ (BINY* MDF))* AWAO;
 		let AIDJ=-((AIDD* MDH)+ (AIDH* MDF));
 		let AIDK=-((AIDE* MDH)+ (AIDI* MDF));
@@ -47798,17 +47799,17 @@ impl Instance {
 		let BION=BIML/ BH;
 		let AIDU=AIBU/ BH;
 		let BIOO=BIMM/ BH;
-		let MDN=B- (MCT/ BC);
+		let MDN=C- (MCT/ BC);
 		let BIOP=(BIMK/ BC)* AWAO;
 		let AIDV=-(AIBT/ BC);
 		let AIDW=-(AIBU/ BC);
-		let MDO=B- (MDM* MDN);
+		let MDO=C- (MDM* MDN);
 		let BIOQ=((BIOM* MDN)+ (BIOP* MDM))* AWAO;
 		let AIDX=-((AIDT* MDN)+ (AIDV* MDM));
 		let AIDY=-((AIDU* MDN)+ (AIDW* MDM));
 		let BIOR=((BIOK* MDO)+ (BIOQ* AIDR))+ ((((((BION* MDN)+ (BIOP* AIDT))+ ((((BIML/ BC)* AWAO)* MDM)+ (BIOM* AIDV)))* AWAO)* MDL)+ (BIOJ* AIDX));
 		let BIOS=((BIOL* MDO)+ (BIOQ* AIDS))+ ((((((BIOO* MDN)+ (BIOP* AIDU))+ ((((BIMM/ BC)* AWAO)* MDM)+ (BIOM* AIDW)))* AWAO)* MDL)+ (BIOJ* AIDY));
-		let MDP=B- (MDL* MDO);
+		let MDP=C- (MDL* MDO);
 		let BIOT=((BIOJ* MDO)+ (BIOQ* MDL))* AWAO;
 		let AIDZ=-((AIDR* MDO)+ (AIDX* MDL));
 		let AIEA=-((AIDS* MDO)+ (AIDY* MDL));
@@ -47816,17 +47817,17 @@ impl Instance {
 		let BIOU=BIMK/ BK;
 		let AIEB=AIBT/ BK;
 		let AIEC=AIBU/ BK;
-		let MDR=B- MDM;
+		let MDR=C- MDM;
 		let BIOV=BIOM* AWAO;
 		let AIED=-AIDT;
 		let AIEE=-AIDU;
-		let MDS=B- (MDL* MDR);
+		let MDS=C- (MDL* MDR);
 		let BIOW=((BIOJ* MDR)+ (BIOV* MDL))* AWAO;
 		let AIEF=-((AIDR* MDR)+ (AIED* MDL));
 		let AIEG=-((AIDS* MDR)+ (AIEE* MDL));
 		let BIOX=(((BIML/ BK)* MDS)+ (BIOW* AIEB))+ ((((((BIOK* MDR)+ (BIOV* AIDR))+ (((BION* AWAO)* MDL)+ (BIOJ* AIED)))* AWAO)* MDQ)+ (BIOU* AIEF));
 		let BIOY=(((BIMM/ BK)* MDS)+ (BIOW* AIEC))+ ((((((BIOL* MDR)+ (BIOV* AIDS))+ (((BIOO* AWAO)* MDL)+ (BIOJ* AIEE)))* AWAO)* MDQ)+ (BIOU* AIEG));
-		let MDT=B- (MDQ* MDS);
+		let MDT=C- (MDQ* MDS);
 		let BIOZ=((BIOU* MDS)+ (BIOW* MDQ))* AWAO;
 		let AIEH=-((AIEB* MDS)+ (AIEF* MDQ));
 		let AIEI=-((AIEC* MDS)+ (AIEG* MDQ));
@@ -47859,7 +47860,7 @@ impl Instance {
 		let MDX=MDV.sqrt();
 		let BIPG=BIPD* (ANYF/ (AWAY* MDX));
 		let AIEN=BK* MDX;
-		let AIEO=B/ AIEN;
+		let AIEO=C/ AIEN;
 		let BIPH=((BIPG* BK)).product_div((-AIEO),AIEN);
 		let AIEP=AIEL* AIEO;
 		let BIPI=(BIPE* AIEO)+ (BIPH* AIEL);
@@ -47874,10 +47875,10 @@ impl Instance {
 		let BIPL=-MEB;
 		let BIPM=((L8([0.0,0.0,0.0,(BIPK* MEA),0.0,0.0,0.0,0.0])+ ((BIOC- ((ASMX* MDU)+ (BIPA* MDZ)))* MDY))).product_sum_div(ANYF,BIPG,BIPL,MDX);
 		let BIPN=BIPM* AWAO;
-		let AIET=product_sum_div((AIER* MDY),B,BIPL,AIEP,MDX);
-		let BIPO=L8(sum_products_div_lanes(&[(&(((BIOD- (((ASNA* MDU)+ (BIPA* XHR))+ ((BIPB* MDZ)+ (ASMX* AIEJ))))* MDY)+ L8([0.0,0.0,0.0,(BIPK* AIER),0.0,0.0,0.0,0.0])).0,B),(&BIPN.0,AIEP),(&BIPI.0,BIPL),(&BIPG.0,(-AIET))],MDX));
-		let AIEU=product_sum_div((AIES* MDY),B,BIPL,AIEQ,MDX);
-		let BIPP=L8(sum_products_div_lanes(&[(&(((BIOE- (((ASNB* MDU)+ (BIPA* XHS))+ ((BIPC* MDZ)+ (ASMX* AIEK))))* MDY)+ L8([0.0,0.0,0.0,(BIPK* AIES),0.0,0.0,0.0,0.0])).0,B),(&BIPN.0,AIEQ),(&BIPJ.0,BIPL),(&BIPG.0,(-AIEU))],MDX));
+		let AIET=product_sum_div((AIER* MDY),C,BIPL,AIEP,MDX);
+		let BIPO=L8(sum_products_div_lanes(&[(&(((BIOD- (((ASNA* MDU)+ (BIPA* XHR))+ ((BIPB* MDZ)+ (ASMX* AIEJ))))* MDY)+ L8([0.0,0.0,0.0,(BIPK* AIER),0.0,0.0,0.0,0.0])).0,C),(&BIPN.0,AIEP),(&BIPI.0,BIPL),(&BIPG.0,(-AIET))],MDX));
+		let AIEU=product_sum_div((AIES* MDY),C,BIPL,AIEQ,MDX);
+		let BIPP=L8(sum_products_div_lanes(&[(&(((BIOE- (((ASNB* MDU)+ (BIPA* XHS))+ ((BIPC* MDZ)+ (ASMX* AIEK))))* MDY)+ L8([0.0,0.0,0.0,(BIPK* AIES),0.0,0.0,0.0,0.0])).0,C),(&BIPN.0,AIEQ),(&BIPJ.0,BIPL),(&BIPG.0,(-AIEU))],MDX));
 		MEN=MDX;
 		MES=MEB;
 		XIF=AIEP;
@@ -47962,7 +47963,7 @@ impl Instance {
 		let MEG=MEE.sqrt();
 		let BIMW=BIMT* (ANYF/ (AWAY* MEG));
 		let AICF=BK* MEG;
-		let AICG=B/ AICF;
+		let AICG=C/ AICF;
 		let BIMX=((BIMW* BK)).product_div((-AICG),AICF);
 		let AICH=AICD* AICG;
 		let BIMY=(BIMU* AICG)+ (BIMX* AICD);
@@ -47970,21 +47971,21 @@ impl Instance {
 		let BIMZ=(BIMV* AICG)+ (BIMX* AICE);
 		let MEH=BWG* J;
 		let BINA=ANZE* J;
-		let MEI=B- MED;
+		let MEI=C- MED;
 		let BINB=BIMQ* AWAO;
 		let AICJ=-AICB;
 		let AICK=-AICC;
-		let MEJ=(B- MEC)- (MDZ* MEI);
+		let MEJ=(C- MEC)- (MDZ* MEI);
 		let AICL=(-AIBX)- ((XHR* MEI)+ (AICJ* MDZ));
 		let AICM=(-AIBY)- ((XHS* MEI)+ (AICK* MDZ));
 		let MEK=(MEH* MEJ)/ MEG;
 		let BINC=-MEK;
 		let BIND=((L8([0.0,0.0,0.0,(BINA* MEJ),0.0,0.0,0.0,0.0])+ (((BIMN* AWAO)- ((ASMX* MEI)+ (BINB* MDZ)))* MEH))).product_sum_div(ANYF,BIMW,BINC,MEG);
 		let BINE=BIND* AWAO;
-		let AICN=product_sum_div((AICL* MEH),B,BINC,AICH,MEG);
-		let BINF=L8(sum_products_div_lanes(&[(&((((BIMO* AWAO)- (((ASNA* MEI)+ (BINB* XHR))+ (((BIMR* AWAO)* MDZ)+ (ASMX* AICJ))))* MEH)+ L8([0.0,0.0,0.0,(BINA* AICL),0.0,0.0,0.0,0.0])).0,B),(&BINE.0,AICH),(&BIMY.0,BINC),(&BIMW.0,(-AICN))],MEG));
-		let AICO=product_sum_div((AICM* MEH),B,BINC,AICI,MEG);
-		let BING=L8(sum_products_div_lanes(&[(&((((BIMP* AWAO)- (((ASNB* MEI)+ (BINB* XHS))+ (((BIMS* AWAO)* MDZ)+ (ASMX* AICK))))* MEH)+ L8([0.0,0.0,0.0,(BINA* AICM),0.0,0.0,0.0,0.0])).0,B),(&BINE.0,AICI),(&BIMZ.0,BINC),(&BIMW.0,(-AICO))],MEG));
+		let AICN=product_sum_div((AICL* MEH),C,BINC,AICH,MEG);
+		let BINF=L8(sum_products_div_lanes(&[(&((((BIMO* AWAO)- (((ASNA* MEI)+ (BINB* XHR))+ (((BIMR* AWAO)* MDZ)+ (ASMX* AICJ))))* MEH)+ L8([0.0,0.0,0.0,(BINA* AICL),0.0,0.0,0.0,0.0])).0,C),(&BINE.0,AICH),(&BIMY.0,BINC),(&BIMW.0,(-AICN))],MEG));
+		let AICO=product_sum_div((AICM* MEH),C,BINC,AICI,MEG);
+		let BING=L8(sum_products_div_lanes(&[(&((((BIMP* AWAO)- (((ASNB* MEI)+ (BINB* XHS))+ (((BIMS* AWAO)* MDZ)+ (ASMX* AICK))))* MEH)+ L8([0.0,0.0,0.0,(BINA* AICM),0.0,0.0,0.0,0.0])).0,C),(&BINE.0,AICI),(&BIMZ.0,BINC),(&BIMW.0,(-AICO))],MEG));
 		MEO=MEG;
 		MET=MEK;
 		XIJ=AICH;
@@ -48143,15 +48144,15 @@ impl Instance {
 		let BIRO=BIKW/ BC;
 		let AIGB=AIAY/ BC;
 		let AIGC=AIAZ/ BC;
-		let MFA=B+ (MCI/ BC);
+		let MFA=C+ (MCI/ BC);
 		let BIRP=(BIRL* MFA)+ (BIRO* MEZ);
 		let AIGD=(AIFZ* MFA)+ (AIGB* MEZ);
 		let AIGE=(AIGA* MFA)+ (AIGC* MEZ);
-		let MFB=B+ (MEZ* MFA);
+		let MFB=C+ (MEZ* MFA);
 		let BIRQ=(BIRI* MFB)+ (BIRP* MEY);
 		let AIGF=(AIFX* MFB)+ (AIGD* MEY);
 		let AIGG=(AIFY* MFB)+ (AIGE* MEY);
-		let MFC=B+ (MEY* MFB);
+		let MFC=C+ (MEY* MFB);
 		let MFD=MEX* MFC;
 		let BIRR=(BIRH* MFC)+ (BIRQ* MEX);
 		let BIRS=(((BIRJ* MFB)+ (BIRP* AIFX))+ (((((BIRM* MFA)+ (BIRO* AIFZ))+ (((BIKX/ BC)* MEZ)+ (BIRL* AIGB)))* MEY)+ (BIRI* AIGD)))* MEX;
@@ -48162,15 +48163,15 @@ impl Instance {
 		let BIRU=BIKW/ BK;
 		let AIGJ=AIAY/ BK;
 		let AIGK=AIAZ/ BK;
-		let MFF=B+ MEZ;
+		let MFF=C+ MEZ;
 		let BIRV=(BIRI* MFF)+ (BIRL* MEY);
 		let AIGL=(AIFX* MFF)+ (AIFZ* MEY);
 		let AIGM=(AIFY* MFF)+ (AIGA* MEY);
-		let MFG=B+ (MEY* MFF);
+		let MFG=C+ (MEY* MFF);
 		let BIRW=(BIRU* MFG)+ (BIRV* MFE);
 		let AIGN=(AIGJ* MFG)+ (AIGL* MFE);
 		let AIGO=(AIGK* MFG)+ (AIGM* MFE);
-		let MFH=B+ (MFE* MFG);
+		let MFH=C+ (MFE* MFG);
 		let MFI=MCI* MFH;
 		let BIRX=(BIKW* MFH)+ (BIRW* MCI);
 		let BIRY=((((BIKX/ BK)* MFG)+ (BIRV* AIGJ))+ (((((BIRJ* MFF)+ (BIRL* AIFX))+ ((BIRM* MEY)+ (BIRI* AIFZ)))* MFE)+ (BIRU* AIGL)))* MCI;
@@ -48221,7 +48222,7 @@ impl Instance {
 		let BIQK=(BIKX* MFM)+ (BIQJ* AIAY);
 		let AIFK=AIAZ* MFM;
 		let BIQL=(BIKY* MFM)+ (BIQJ* AIAZ);
-		let MFN=MFM- B;
+		let MFN=MFM- C;
 		let MFO=MFN- MCI;
 		let BIQM=BIQJ- BIKW;
 		let AIFL=AIFJ- AIAY;
@@ -48286,7 +48287,7 @@ impl Instance {
 		let BIPV=(((ASMS* BWG)+ L8([0.0,0.0,0.0,(ANZE* XHL),0.0,0.0,0.0,0.0]))* MFS)+ (BIPU* AIEX);
 		let AIFA=AIEY* MFS;
 		let BIPW=(((ASMT* BWG)+ L8([0.0,0.0,0.0,(ANZE* XHM),0.0,0.0,0.0,0.0]))* MFS)+ (BIPU* AIEY);
-		let MFT=MCI+ B;
+		let MFT=MCI+ C;
 		let BIPX=ASFV* MFT;
 		let BIPY=ASFW* MFT;
 		let BIPZ=ASFV* AIAY;
@@ -48349,7 +48350,7 @@ impl Instance {
 		let MGC=((MEL* MEL)+ MFZ).sqrt();
 		let BIST=((BISQ+ BISQ)+ ASON)* (ANYF/ (AWAY* MGC));
 		let AIHB=BK* MGC;
-		let AIHC=B/ AIHB;
+		let AIHC=C/ AIHB;
 		let BISU=((BIST* BK)).product_div((-AIHC),AIHB);
 		let AIHD=AIGZ* AIHC;
 		let BISV=(((BISR+ BISR)+ ASOP)* AIHC)+ (BISU* AIGZ);
@@ -48363,10 +48364,10 @@ impl Instance {
 		let BISY=-MGG;
 		let BISZ=(((((BISX* MEL)+ (ASNC* MGD))+ ASOO)* J)).product_sum_div(ANYF,BIST,BISY,MGC);
 		let BITA=BISZ* AWAO;
-		let AIHH=product_sum_div(((((AIHF* MEL)+ (XHT* MGD))+ XIT)* J),B,BISY,AIHD,MGC);
-		let BITB=L8(sum_products_div_lanes(&[(&((((((ASNH* BK)* MEL)+ (ASNC* AIHF))+ ((ASNF* MGD)+ (BISX* XHT)))+ ASOR)* J).0,B),(&BITA.0,AIHD),(&BISV.0,BISY),(&BIST.0,(-AIHH))],MGC));
-		let AIHI=product_sum_div(((((AIHG* MEL)+ (XHU* MGD))+ XIU)* J),B,BISY,AIHE,MGC);
-		let BITC=L8(sum_products_div_lanes(&[(&((((((ASNI* BK)* MEL)+ (ASNC* AIHG))+ ((ASNG* MGD)+ (BISX* XHU)))+ ASOS)* J).0,B),(&BITA.0,AIHE),(&BISW.0,BISY),(&BIST.0,(-AIHI))],MGC));
+		let AIHH=product_sum_div(((((AIHF* MEL)+ (XHT* MGD))+ XIT)* J),C,BISY,AIHD,MGC);
+		let BITB=L8(sum_products_div_lanes(&[(&((((((ASNH* BK)* MEL)+ (ASNC* AIHF))+ ((ASNF* MGD)+ (BISX* XHT)))+ ASOR)* J).0,C),(&BITA.0,AIHD),(&BISV.0,BISY),(&BIST.0,(-AIHH))],MGC));
+		let AIHI=product_sum_div(((((AIHG* MEL)+ (XHU* MGD))+ XIU)* J),C,BISY,AIHE,MGC);
+		let BITC=L8(sum_products_div_lanes(&[(&((((((ASNI* BK)* MEL)+ (ASNC* AIHG))+ ((ASNG* MGD)+ (BISX* XHU)))+ ASOS)* J).0,C),(&BITA.0,AIHE),(&BISW.0,BISY),(&BIST.0,(-AIHI))],MGC));
 		MGI=MGC;
 		MGL=MGG;
 		XIZ=AIHD;
@@ -48420,8 +48421,8 @@ impl Instance {
 		let BITO=(ASOL* LOJ)+ L8([0.0,0.0,0.0,(BHVA* XIP),0.0,0.0,0.0,0.0]);
 		let AIHQ=XIQ* LOJ;
 		let BITP=(ASOM* LOJ)+ L8([0.0,0.0,0.0,(BHVA* XIQ),0.0,0.0,0.0,0.0]);
-		let MGM=B+ (LOJ* MGK);
-		let MGO=MGN== B;
+		let MGM=C+ (LOJ* MGK);
+		let MGO=MGN== C;
 		let MHD;
 		let MHF;
 		let MHL;
@@ -48444,13 +48445,13 @@ impl Instance {
 		let BITQ=-MGQ;
 		let BITR=((BITK* AWAO)).product_sum_div(ANYF,BITN,BITQ,MGM);
 		let BITS=BITR* AWAO;
-		let AIHR=product_sum_div((AIHN* AMF),B,BITQ,AIHP,MGM);
-		let BITT=L8(sum_products_div_lanes(&[(&(BITL* AMF).0,B),(&BITS.0,AIHP),(&BITO.0,BITQ),(&BITN.0,(-AIHR))],MGM));
-		let AIHS=product_sum_div((AIHO* AMF),B,BITQ,AIHQ,MGM);
-		let BITU=L8(sum_products_div_lanes(&[(&(BITM* AMF).0,B),(&BITS.0,AIHQ),(&BITP.0,BITQ),(&BITN.0,(-AIHS))],MGM));
+		let AIHR=product_sum_div((AIHN* AMF),C,BITQ,AIHP,MGM);
+		let BITT=L8(sum_products_div_lanes(&[(&(BITL* AMF).0,C),(&BITS.0,AIHP),(&BITO.0,BITQ),(&BITN.0,(-AIHR))],MGM));
+		let AIHS=product_sum_div((AIHO* AMF),C,BITQ,AIHQ,MGM);
+		let BITU=L8(sum_products_div_lanes(&[(&(BITM* AMF).0,C),(&BITS.0,AIHQ),(&BITP.0,BITQ),(&BITN.0,(-AIHS))],MGM));
 		let MGS=MCG.abs();
 		let BITV=ASMN* ((AWAY* ((MCG>= AWBZ) as u8 as f64))- ANYF);
-		let MGT=B>= MGS;
+		let MGT=C>= MGS;
 		let MGU;
 		let XJF;
 		let XJG;
@@ -48458,14 +48459,14 @@ impl Instance {
 		let ASPJ;
 		let ASPK;
 		if MGT{
-		MGU=B;
+		MGU=C;
 		XJF=A;
 		XJG=A;
 		ASPI=BHSX;
 		ASPJ=BHSX;
 		ASPK=BHSX;
 		}else{
-		let AIHT=(BK* ((MCG>= A) as u8 as f64))- B;
+		let AIHT=(BK* ((MCG>= A) as u8 as f64))- C;
 		let AIHU=XHL* AIHT;
 		let BITW=ASMS* AIHT;
 		let AIHV=XHM* AIHT;
@@ -48477,7 +48478,7 @@ impl Instance {
 		ASPJ=BITW;
 		ASPK=BITX;
 		}
-		let MGV=MGR* (B+ MGU);
+		let MGV=MGR* (C+ MGU);
 		let BITY=ASPI* MGR;
 		let AIHW=XJF* MGR;
 		let BITZ=ASPJ* MGR;
@@ -48493,7 +48494,7 @@ impl Instance {
 		if MGW{
 		let MGX=MGQ>= A;
 		let MGY=if MGX{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -48525,7 +48526,7 @@ impl Instance {
 		let BIUG=ASMT+ ASPN;
 		let MHC=((MHA.abs())<= BBK)&& ((MGJ.abs())<= AQ);
 		let MHM=if MHC{
-		B
+		C
 		}else{
 		MGN
 		};
@@ -48538,7 +48539,7 @@ impl Instance {
 		ASPG=BIUF;
 		ASPH=BIUG;
 		}
-		let MHE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MHD, B));
+		let MHE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MHD, C));
 		MCE=MHE;
 		MCG=MHF;
 		MGN=MHL;
@@ -48567,7 +48568,7 @@ impl Instance {
 		let MHQ=LNZ* MHP;
 		let BIKR=L8([0.0,0.0,0.0,(ASCD* MHP),0.0,0.0,0.0,0.0])+ (BIKQ* LNZ);
 		let MHS=MHR+ MHP;
-		let MHT=B/ MHS;
+		let MHT=C/ MHS;
 		let MHW=LNZ* MHU;
 		let MHX=MHQ+ (MHW* MHT);
 		let BIKS=BIKR+ (((L8([0.0,0.0,0.0,(ASCD* MHU),0.0,0.0,0.0,0.0])+ (ASMQ* LNZ))* MHT)+ ((((ASMP+ BIKQ)).product_div((-MHT),MHS))* MHW));
@@ -48744,7 +48745,7 @@ impl Instance {
 		let MII=((MIH* MIH)+ 0.04000000000000001f64).sqrt();
 		let BIXN=(BIXK+ BIXK)* (ANYF/ (AWAY* MII));
 		let AIKQ=BK* MII;
-		let AIKR=B/ AIKQ;
+		let AIKR=C/ AIKQ;
 		let BIXO=((BIXN* BK)).product_div((-AIKR),AIKQ);
 		let MIJ=J* (MIH+ MII);
 		let BIXP=(AVZT+ BIXN)* J;
@@ -48779,7 +48780,7 @@ impl Instance {
 		let MIM=(LKW* MIL).sqrt();
 		let BIXS=(ASQC* LKW)* (ANYF/ (AWAY* MIM));
 		let AIKW=BK* MIM;
-		let AIKX=B/ AIKW;
+		let AIKX=C/ AIKW;
 		let BIXT=((BIXS* BK)).product_div((-AIKX),AIKW);
 		let MIN=K- (MIM* LKT);
 		let BIXU=(BIXS* LKT)* AWAO;
@@ -48808,7 +48809,7 @@ impl Instance {
 		let MIQ=((MIO* MIO)+ ((BH* MIP)* MIP)).sqrt();
 		let BIYF=(BIYA+ BIYA)* (ANYF/ (AWAY* MIQ));
 		let AILE=BK* MIQ;
-		let AILF=B/ AILE;
+		let AILF=C/ AILE;
 		let BIYG=((BIYF* BK)).product_div((-AILF),AILE);
 		let MIR=J* (MIO+ MIQ);
 		let BIYH=(ASPZ+ BIYF)* J;
@@ -48858,7 +48859,7 @@ impl Instance {
 		let MIX=(MIW* MIV).sqrt();
 		let BIYS=(L6([0.0,0.0,0.0,(BIYO* MIV),0.0,0.0])+ L6([BIYP[0],BIYP[1],BIYP[2],0.0,BIYP[3],BIYP[4]]))* (ANYF/ (AWAY* MIX));
 		let AILO=BK* MIX;
-		let AILP=B/ AILO;
+		let AILP=C/ AILO;
 		let BIYT=((BIYS* BK)).product_div((-AILP),AILO);
 		let AILQ=AILM* AILP;
 		let BIYU=((L6([BIYQ[0],BIYQ[1],BIYQ[2],0.0,BIYQ[3],BIYQ[4]])+ L6([0.0,0.0,0.0,(BIYO* AILK),0.0,0.0]))* AILP)+ (BIYT* AILM);
@@ -48875,18 +48876,18 @@ impl Instance {
 		let BIYY=((BIYS* BIYW)+ ((BIYS* AWAO)* BIYX))/ BK;
 		let AILW=(AILS+ AILU)/ BK;
 		let AILX=(AILT+ AILV)/ BK;
-		let AILY=B/ MIZ;
+		let AILY=C/ MIZ;
 		let BIYZ=(BIYY).product_div((-AILY),MIZ);
 		let MJA=(MIZ.ln())/ MIV;
 		let BIZA=-MJA;
 		let BIZB=L6([BIYL[0],BIYL[1],BIYL[2],0.0,BIYL[3],BIYL[4]]);
 		let BIZC=((BIYY* (ANYF/ MIZ))).product_sum_div(ANYF,BIZB,BIZA,MIV);
 		let BIZD=BIZC* AWAO;
-		let AILZ=product_sum_div((AILW* AILY),B,BIZA,AILK,MIV);
-		let BIZE=L6(sum_products_div_lanes(&[(&(((((BIYU* BIYW)+ ((BIYU* AMF)* BIYX))/ BK)* AILY)+ (BIYZ* AILW)).0,B),(&BIZD.0,AILK),(&L6([BIYM[0],BIYM[1],BIYM[2],0.0,BIYM[3],BIYM[4]]).0,BIZA),(&BIZB.0,(-AILZ))],MIV));
-		let AIMA=product_sum_div((AILX* AILY),B,BIZA,AILL,MIV);
-		let BIZF=L6(sum_products_div_lanes(&[(&(((((BIYV* BIYW)+ ((BIYV* AMF)* BIYX))/ BK)* AILY)+ (BIYZ* AILX)).0,B),(&BIZD.0,AILL),(&L6([BIYN[0],BIYN[1],BIYN[2],0.0,BIYN[3],BIYN[4]]).0,BIZA),(&BIZB.0,(-AIMA))],MIV));
-		let mut MJB=B;
+		let AILZ=product_sum_div((AILW* AILY),C,BIZA,AILK,MIV);
+		let BIZE=L6(sum_products_div_lanes(&[(&(((((BIYU* BIYW)+ ((BIYU* AMF)* BIYX))/ BK)* AILY)+ (BIYZ* AILW)).0,C),(&BIZD.0,AILK),(&L6([BIYM[0],BIYM[1],BIYM[2],0.0,BIYM[3],BIYM[4]]).0,BIZA),(&BIZB.0,(-AILZ))],MIV));
+		let AIMA=product_sum_div((AILX* AILY),C,BIZA,AILL,MIV);
+		let BIZF=L6(sum_products_div_lanes(&[(&(((((BIYV* BIYW)+ ((BIYV* AMF)* BIYX))/ BK)* AILY)+ (BIYZ* AILX)).0,C),(&BIZD.0,AILL),(&L6([BIYN[0],BIYN[1],BIYN[2],0.0,BIYN[3],BIYN[4]]).0,BIZA),(&BIZB.0,(-AIMA))],MIV));
+		let mut MJB=C;
 		let mut MJD=MIC;
 		let mut MMZ=A;
 		let mut MNV=A;
@@ -48976,26 +48977,26 @@ impl Instance {
 		let BQOY=BQON- L8([BQOV[0],BQOV[1],BQOV[2],BQOV[3],BQOV[4],0.0,BQOV[5],0.0]);
 		let ANHF=ANGX- (ANHD* MJL);
 		let BQOZ=BQOO- L8([BQOW[0],BQOW[1],BQOW[2],BQOW[3],BQOW[4],0.0,BQOW[5],0.0]);
-		let MJM=B+ (MJJ- MJL);
-		let ANHG=B/ MJM;
+		let MJM=C+ (MJJ- MJL);
+		let ANHG=C/ MJM;
 		let BQPA=(BQOX).product_div((-ANHG),MJM);
 		let MJN=(MJM.ln())/ MJA;
 		let BQPB=-MJN;
 		let BQPC=L8([BIZC[0],BIZC[1],BIZC[2],BIZC[3],BIZC[4],0.0,BIZC[5],0.0]);
 		let BQPD=((BQOX* (ANYF/ MJM))).product_sum_div(ANYF,BQPC,BQPB,MJA);
 		let BQPE=BQPD* AWAO;
-		let ANHH=product_sum_div((ANHE* ANHG),B,BQPB,AILZ,MJA);
-		let BQPF=L8(sum_products_div_lanes(&[(&((BQOY* ANHG)+ (BQPA* ANHE)).0,B),(&BQPE.0,AILZ),(&L8([BIZE[0],BIZE[1],BIZE[2],BIZE[3],BIZE[4],0.0,BIZE[5],0.0]).0,BQPB),(&BQPC.0,(-ANHH))],MJA));
-		let ANHI=product_sum_div((ANHF* ANHG),B,BQPB,AIMA,MJA);
-		let BQPG=L8(sum_products_div_lanes(&[(&((BQOZ* ANHG)+ (BQPA* ANHF)).0,B),(&BQPE.0,AIMA),(&L8([BIZF[0],BIZF[1],BIZF[2],BIZF[3],BIZF[4],0.0,BIZF[5],0.0]).0,BQPB),(&BQPC.0,(-ANHI))],MJA));
+		let ANHH=product_sum_div((ANHE* ANHG),C,BQPB,AILZ,MJA);
+		let BQPF=L8(sum_products_div_lanes(&[(&((BQOY* ANHG)+ (BQPA* ANHE)).0,C),(&BQPE.0,AILZ),(&L8([BIZE[0],BIZE[1],BIZE[2],BIZE[3],BIZE[4],0.0,BIZE[5],0.0]).0,BQPB),(&BQPC.0,(-ANHH))],MJA));
+		let ANHI=product_sum_div((ANHF* ANHG),C,BQPB,AIMA,MJA);
+		let BQPG=L8(sum_products_div_lanes(&[(&((BQOZ* ANHG)+ (BQPA* ANHF)).0,C),(&BQPE.0,AIMA),(&L8([BIZF[0],BIZF[1],BIZF[2],BIZF[3],BIZF[4],0.0,BIZF[5],0.0]).0,BQPB),(&BQPC.0,(-ANHI))],MJA));
 		let MJO=MJJ/ MJM;
 		let BQPH=-MJO;
 		let BQPI=(BQOM).product_sum_div(ANYF,BQOX,BQPH,MJM);
 		let BQPJ=BQPI* AWAO;
-		let ANHJ=product_sum_div(ANGW,B,BQPH,ANHE,MJM);
-		let BQPK=L8(sum_products_div_lanes(&[(&BQON.0,B),(&BQPJ.0,ANHE),(&BQOY.0,BQPH),(&BQOX.0,(-ANHJ))],MJM));
-		let ANHK=product_sum_div(ANGX,B,BQPH,ANHF,MJM);
-		let BQPL=L8(sum_products_div_lanes(&[(&BQOO.0,B),(&BQPJ.0,ANHF),(&BQOZ.0,BQPH),(&BQOX.0,(-ANHK))],MJM));
+		let ANHJ=product_sum_div(ANGW,C,BQPH,ANHE,MJM);
+		let BQPK=L8(sum_products_div_lanes(&[(&BQON.0,C),(&BQPJ.0,ANHE),(&BQOY.0,BQPH),(&BQOX.0,(-ANHJ))],MJM));
+		let ANHK=product_sum_div(ANGX,C,BQPH,ANHF,MJM);
+		let BQPL=L8(sum_products_div_lanes(&[(&BQOO.0,C),(&BQPJ.0,ANHF),(&BQOZ.0,BQPH),(&BQOX.0,(-ANHK))],MJM));
 		MJP=MJN;
 		MKP=MJO;
 		XJX=ANHH;
@@ -49010,7 +49011,7 @@ impl Instance {
 		ASQT=BQPL;
 		}else{
 		MJP=MJG;
-		MKP=B;
+		MKP=C;
 		XJX=ANGS;
 		XJY=ANGT;
 		XJZ=A;
@@ -49064,17 +49065,17 @@ impl Instance {
 		let BQQK=BQNZ/ BH;
 		let ANIK=ANGR/ BH;
 		let BQQL=BQOA/ BH;
-		let MJW=B- (MJF/ BC);
+		let MJW=C- (MJF/ BC);
 		let BQQM=(BQNY/ BC)* AWAO;
 		let ANIL=-(ANGQ/ BC);
 		let ANIM=-(ANGR/ BC);
-		let MJX=B- (MJV* MJW);
+		let MJX=C- (MJV* MJW);
 		let BQQN=((BQQJ* MJW)+ (BQQM* MJV))* AWAO;
 		let ANIN=-((ANIJ* MJW)+ (ANIL* MJV));
 		let ANIO=-((ANIK* MJW)+ (ANIM* MJV));
 		let BQQO=((BQQH* MJX)+ (BQQN* ANIH))+ ((((((BQQK* MJW)+ (BQQM* ANIJ))+ ((((BQNZ/ BC)* AWAO)* MJV)+ (BQQJ* ANIL)))* AWAO)* MJU)+ (BQQG* ANIN));
 		let BQQP=((BQQI* MJX)+ (BQQN* ANII))+ ((((((BQQL* MJW)+ (BQQM* ANIK))+ ((((BQOA/ BC)* AWAO)* MJV)+ (BQQJ* ANIM)))* AWAO)* MJU)+ (BQQG* ANIO));
-		let MJY=B- (MJU* MJX);
+		let MJY=C- (MJU* MJX);
 		let BQQQ=((BQQG* MJX)+ (BQQN* MJU))* AWAO;
 		let ANIP=-((ANIH* MJX)+ (ANIN* MJU));
 		let ANIQ=-((ANII* MJX)+ (ANIO* MJU));
@@ -49082,17 +49083,17 @@ impl Instance {
 		let BQQR=BQNY/ BK;
 		let ANIR=ANGQ/ BK;
 		let ANIS=ANGR/ BK;
-		let MKA=B- MJV;
+		let MKA=C- MJV;
 		let BQQS=BQQJ* AWAO;
 		let ANIT=-ANIJ;
 		let ANIU=-ANIK;
-		let MKB=B- (MJU* MKA);
+		let MKB=C- (MJU* MKA);
 		let BQQT=((BQQG* MKA)+ (BQQS* MJU))* AWAO;
 		let ANIV=-((ANIH* MKA)+ (ANIT* MJU));
 		let ANIW=-((ANII* MKA)+ (ANIU* MJU));
 		let BQQU=(((BQNZ/ BK)* MKB)+ (BQQT* ANIR))+ ((((((BQQH* MKA)+ (BQQS* ANIH))+ (((BQQK* AWAO)* MJU)+ (BQQG* ANIT)))* AWAO)* MJZ)+ (BQQR* ANIV));
 		let BQQV=(((BQOA/ BK)* MKB)+ (BQQT* ANIS))+ ((((((BQQI* MKA)+ (BQQS* ANII))+ (((BQQL* AWAO)* MJU)+ (BQQG* ANIU)))* AWAO)* MJZ)+ (BQQR* ANIW));
-		let MKC=B- (MJZ* MKB);
+		let MKC=C- (MJZ* MKB);
 		let BQQW=((BQQR* MKB)+ (BQQT* MJZ))* AWAO;
 		let ANIX=-((ANIR* MKB)+ (ANIV* MJZ));
 		let ANIY=-((ANIS* MKB)+ (ANIW* MJZ));
@@ -49117,17 +49118,17 @@ impl Instance {
 		let BQRF=BQPN/ BH;
 		let ANJG=ANHM/ BH;
 		let BQRG=BQPO/ BH;
-		let MKG=B- (MJQ/ BC);
+		let MKG=C- (MJQ/ BC);
 		let BQRH=(BQPM/ BC)* AWAO;
 		let ANJH=-(ANHL/ BC);
 		let ANJI=-(ANHM/ BC);
-		let MKH=B- (MKF* MKG);
+		let MKH=C- (MKF* MKG);
 		let BQRI=((BQRE* MKG)+ (BQRH* MKF))* AWAO;
 		let ANJJ=-((ANJF* MKG)+ (ANJH* MKF));
 		let ANJK=-((ANJG* MKG)+ (ANJI* MKF));
 		let BQRJ=((BQRC* MKH)+ (BQRI* ANJD))+ ((((((BQRF* MKG)+ (BQRH* ANJF))+ ((((BQPN/ BC)* AWAO)* MKF)+ (BQRE* ANJH)))* AWAO)* MKE)+ (BQRB* ANJJ));
 		let BQRK=((BQRD* MKH)+ (BQRI* ANJE))+ ((((((BQRG* MKG)+ (BQRH* ANJG))+ ((((BQPO/ BC)* AWAO)* MKF)+ (BQRE* ANJI)))* AWAO)* MKE)+ (BQRB* ANJK));
-		let MKI=B- (MKE* MKH);
+		let MKI=C- (MKE* MKH);
 		let BQRL=((BQRB* MKH)+ (BQRI* MKE))* AWAO;
 		let ANJL=-((ANJD* MKH)+ (ANJJ* MKE));
 		let ANJM=-((ANJE* MKH)+ (ANJK* MKE));
@@ -49135,17 +49136,17 @@ impl Instance {
 		let BQRM=BQPM/ BK;
 		let ANJN=ANHL/ BK;
 		let ANJO=ANHM/ BK;
-		let MKK=B- MKF;
+		let MKK=C- MKF;
 		let BQRN=BQRE* AWAO;
 		let ANJP=-ANJF;
 		let ANJQ=-ANJG;
-		let MKL=B- (MKE* MKK);
+		let MKL=C- (MKE* MKK);
 		let BQRO=((BQRB* MKK)+ (BQRN* MKE))* AWAO;
 		let ANJR=-((ANJD* MKK)+ (ANJP* MKE));
 		let ANJS=-((ANJE* MKK)+ (ANJQ* MKE));
 		let BQRP=(((BQPN/ BK)* MKL)+ (BQRO* ANJN))+ ((((((BQRC* MKK)+ (BQRN* ANJD))+ (((BQRF* AWAO)* MKE)+ (BQRB* ANJP)))* AWAO)* MKJ)+ (BQRM* ANJR));
 		let BQRQ=(((BQPO/ BK)* MKL)+ (BQRO* ANJO))+ ((((((BQRD* MKK)+ (BQRN* ANJE))+ (((BQRG* AWAO)* MKE)+ (BQRB* ANJQ)))* AWAO)* MKJ)+ (BQRM* ANJS));
-		let MKM=B- (MKJ* MKL);
+		let MKM=C- (MKJ* MKL);
 		let BQRR=((BQRM* MKL)+ (BQRO* MKJ))* AWAO;
 		let ANJT=-((ANJN* MKL)+ (ANJR* MKJ));
 		let ANJU=-((ANJO* MKL)+ (ANJS* MKJ));
@@ -49205,11 +49206,11 @@ impl Instance {
 		let BQPW=(BQNZ- BQPN)+ (BQPQ- BQPT);
 		let ANHW=(ANGR- ANHM)+ (ANHQ- ANHU);
 		let BQPX=(BQOA- BQPO)+ (BQPR- BQPU);
-		let MKV=B- MKT;
+		let MKV=C- MKT;
 		let BQPY=BQPS* AWAO;
 		let ANHX=-ANHT;
 		let ANHY=-ANHU;
-		let MKW=(B- MKS)- (MKP* MKV);
+		let MKW=(C- MKS)- (MKP* MKV);
 		let ANHZ=(-ANHP)- ((XJZ* MKV)+ (ANHX* MKP));
 		let ANIA=(-ANHQ)- ((XKA* MKV)+ (ANHY* MKP));
 		let MKX=BWG* MKW;
@@ -49269,15 +49270,15 @@ impl Instance {
 		let BQTV=BQNY/ BC;
 		let ANLH=ANGQ/ BC;
 		let ANLI=ANGR/ BC;
-		let MLC=B+ (MJF/ BC);
+		let MLC=C+ (MJF/ BC);
 		let BQTW=(BQTS* MLC)+ (BQTV* MLB);
 		let ANLJ=(ANLF* MLC)+ (ANLH* MLB);
 		let ANLK=(ANLG* MLC)+ (ANLI* MLB);
-		let MLD=B+ (MLB* MLC);
+		let MLD=C+ (MLB* MLC);
 		let BQTX=(BQTP* MLD)+ (BQTW* MLA);
 		let ANLL=(ANLD* MLD)+ (ANLJ* MLA);
 		let ANLM=(ANLE* MLD)+ (ANLK* MLA);
-		let MLE=B+ (MLA* MLD);
+		let MLE=C+ (MLA* MLD);
 		let MLF=MKZ* MLE;
 		let BQTY=(BQTO* MLE)+ (BQTX* MKZ);
 		let BQTZ=(((BQTQ* MLD)+ (BQTW* ANLD))+ (((((BQTT* MLC)+ (BQTV* ANLF))+ (((BQNZ/ BC)* MLB)+ (BQTS* ANLH)))* MLA)+ (BQTP* ANLJ)))* MKZ;
@@ -49288,15 +49289,15 @@ impl Instance {
 		let BQUB=BQNY/ BK;
 		let ANLP=ANGQ/ BK;
 		let ANLQ=ANGR/ BK;
-		let MLH=B+ MLB;
+		let MLH=C+ MLB;
 		let BQUC=(BQTP* MLH)+ (BQTS* MLA);
 		let ANLR=(ANLD* MLH)+ (ANLF* MLA);
 		let ANLS=(ANLE* MLH)+ (ANLG* MLA);
-		let MLI=B+ (MLA* MLH);
+		let MLI=C+ (MLA* MLH);
 		let BQUD=(BQUB* MLI)+ (BQUC* MLG);
 		let ANLT=(ANLP* MLI)+ (ANLR* MLG);
 		let ANLU=(ANLQ* MLI)+ (ANLS* MLG);
-		let MLJ=B+ (MLG* MLI);
+		let MLJ=C+ (MLG* MLI);
 		let MLK=MJF* MLJ;
 		let BQUE=(BQNY* MLJ)+ (BQUD* MJF);
 		let BQUF=((((BQNZ/ BK)* MLI)+ (BQUC* ANLP))+ (((((BQTQ* MLH)+ (BQTS* ANLD))+ ((BQTT* MLA)+ (BQTP* ANLF)))* MLG)+ (BQUB* ANLR)))* MJF;
@@ -49361,7 +49362,7 @@ impl Instance {
 		let BQSR=(BQNZ* MLP)+ (BQSQ* ANGQ);
 		let ANKQ=ANGR* MLP;
 		let BQSS=(BQOA* MLP)+ (BQSQ* ANGR);
-		let MLQ=MLP- B;
+		let MLQ=MLP- C;
 		let MLR=MLQ- MJF;
 		let BQST=BQSQ- BQNY;
 		let ANKR=ANKP- ANGQ;
@@ -49413,7 +49414,7 @@ impl Instance {
 		let BQSC=(((ASQM* BWG)+ L8([0.0,0.0,0.0,(ANZE* XJV),0.0,0.0,0.0,0.0]))* MLV)+ (BQSB* ANKD);
 		let ANKG=ANKE* MLV;
 		let BQSD=(((ASQN* BWG)+ L8([0.0,0.0,0.0,(ANZE* XJW),0.0,0.0,0.0,0.0]))* MLV)+ (BQSB* ANKE);
-		let MLW=MJF+ B;
+		let MLW=MJF+ C;
 		let BQSE=BIXD* MLW;
 		let BQSF=BIXE* MLW;
 		let BQSG=BIXD* ANGQ;
@@ -49484,7 +49485,7 @@ impl Instance {
 		let MMG=(MMF+ MMC).sqrt();
 		let BQVG=(ASQU+ ASRA)* (ANYF/ (AWAY* MMG));
 		let ANML=BK* MMG;
-		let ANMM=B/ ANML;
+		let ANMM=C/ ANML;
 		let BQVH=((BQVG* BK)).product_div((-ANMM),ANML);
 		let ANMN=ANMJ* ANMM;
 		let BQVI=((ASQW+ ASRC)* ANMM)+ (BQVH* ANMJ);
@@ -49494,10 +49495,10 @@ impl Instance {
 		let BQVK=-MMK;
 		let BQVL=(((ASQV+ ASRB)* J)).product_sum_div(ANYF,BQVG,BQVK,MMG);
 		let BQVM=BQVL* AWAO;
-		let ANMP=product_sum_div(((XKD+ XKH)* J),B,BQVK,ANMN,MMG);
-		let BQVN=L8(sum_products_div_lanes(&[(&((ASQY+ ASRE)* J).0,B),(&BQVM.0,ANMN),(&BQVI.0,BQVK),(&BQVG.0,(-ANMP))],MMG));
-		let ANMQ=product_sum_div(((XKE+ XKI)* J),B,BQVK,ANMO,MMG);
-		let BQVO=L8(sum_products_div_lanes(&[(&((ASQZ+ ASRF)* J).0,B),(&BQVM.0,ANMO),(&BQVJ.0,BQVK),(&BQVG.0,(-ANMQ))],MMG));
+		let ANMP=product_sum_div(((XKD+ XKH)* J),C,BQVK,ANMN,MMG);
+		let BQVN=L8(sum_products_div_lanes(&[(&((ASQY+ ASRE)* J).0,C),(&BQVM.0,ANMN),(&BQVI.0,BQVK),(&BQVG.0,(-ANMP))],MMG));
+		let ANMQ=product_sum_div(((XKE+ XKI)* J),C,BQVK,ANMO,MMG);
+		let BQVO=L8(sum_products_div_lanes(&[(&((ASQZ+ ASRF)* J).0,C),(&BQVM.0,ANMO),(&BQVJ.0,BQVK),(&BQVG.0,(-ANMQ))],MMG));
 		MMQ=MMG;
 		MMU=MMK;
 		XKN=ANMN;
@@ -49528,7 +49529,7 @@ impl Instance {
 		let MMM=MMF.sqrt();
 		let BQUX=ASQU* (ANYF/ (AWAY* MMM));
 		let ANMD=BK* MMM;
-		let ANME=B/ ANMD;
+		let ANME=C/ ANMD;
 		let BQUY=((BQUX* BK)).product_div((-ANME),ANMD);
 		let ANMF=XKB* ANME;
 		let BQUZ=(ASQW* ANME)+ (BQUY* XKB);
@@ -49538,10 +49539,10 @@ impl Instance {
 		let BQVB=-MMN;
 		let BQVC=((ASQV* J)).product_sum_div(ANYF,BQUX,BQVB,MMM);
 		let BQVD=BQVC* AWAO;
-		let ANMH=product_sum_div((XKD* J),B,BQVB,ANMF,MMM);
-		let BQVE=L8(sum_products_div_lanes(&[(&(ASQY* J).0,B),(&BQVD.0,ANMF),(&BQUZ.0,BQVB),(&BQUX.0,(-ANMH))],MMM));
-		let ANMI=product_sum_div((XKE* J),B,BQVB,ANMG,MMM);
-		let BQVF=L8(sum_products_div_lanes(&[(&(ASQZ* J).0,B),(&BQVD.0,ANMG),(&BQVA.0,BQVB),(&BQUX.0,(-ANMI))],MMM));
+		let ANMH=product_sum_div((XKD* J),C,BQVB,ANMF,MMM);
+		let BQVE=L8(sum_products_div_lanes(&[(&(ASQY* J).0,C),(&BQVD.0,ANMF),(&BQUZ.0,BQVB),(&BQUX.0,(-ANMH))],MMM));
+		let ANMI=product_sum_div((XKE* J),C,BQVB,ANMG,MMM);
+		let BQVF=L8(sum_products_div_lanes(&[(&(ASQZ* J).0,C),(&BQVD.0,ANMG),(&BQVA.0,BQVB),(&BQUX.0,(-ANMI))],MMM));
 		MMR=MMM;
 		MMV=MMN;
 		XKR=ANMF;
@@ -49583,7 +49584,7 @@ impl Instance {
 		}
 		let MMO=MJF>= A;
 		let MMP=if MMO{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -49594,7 +49595,7 @@ impl Instance {
 		let ANMS=XKO* MMP;
 		let BQVR=ASRP* MMP;
 		let MMT=if MMO{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -49613,7 +49614,7 @@ impl Instance {
 		let BQVX=((ASRQ* MMT)* LOJ)+ L8([0.0,0.0,0.0,(BHVA* ANMT),0.0,0.0,0.0,0.0]);
 		let ANMY=ANMU* LOJ;
 		let BQVY=((ASRR* MMT)* LOJ)+ L8([0.0,0.0,0.0,(BHVA* ANMU),0.0,0.0,0.0,0.0]);
-		let MMY=B+ (LOJ* MMW);
+		let MMY=C+ (LOJ* MMW);
 		let MNA=MMZ> A;
 		let MNQ;
 		let MNS;
@@ -49637,13 +49638,13 @@ impl Instance {
 		let BQVZ=-MNC;
 		let BQWA=((BQVT* AWAO)).product_sum_div(ANYF,BQVW,BQVZ,MMY);
 		let BQWB=BQWA* AWAO;
-		let ANMZ=product_sum_div((ANMV* AMF),B,BQVZ,ANMX,MMY);
-		let BQWC=L8(sum_products_div_lanes(&[(&(BQVU* AMF).0,B),(&BQWB.0,ANMX),(&BQVX.0,BQVZ),(&BQVW.0,(-ANMZ))],MMY));
-		let ANNA=product_sum_div((ANMW* AMF),B,BQVZ,ANMY,MMY);
-		let BQWD=L8(sum_products_div_lanes(&[(&(BQVV* AMF).0,B),(&BQWB.0,ANMY),(&BQVY.0,BQVZ),(&BQVW.0,(-ANNA))],MMY));
+		let ANMZ=product_sum_div((ANMV* AMF),C,BQVZ,ANMX,MMY);
+		let BQWC=L8(sum_products_div_lanes(&[(&(BQVU* AMF).0,C),(&BQWB.0,ANMX),(&BQVX.0,BQVZ),(&BQVW.0,(-ANMZ))],MMY));
+		let ANNA=product_sum_div((ANMW* AMF),C,BQVZ,ANMY,MMY);
+		let BQWD=L8(sum_products_div_lanes(&[(&(BQVV* AMF).0,C),(&BQWB.0,ANMY),(&BQVY.0,BQVZ),(&BQVW.0,(-ANNA))],MMY));
 		let MNE=MJD.abs();
 		let BQWE=ASQI* ((AWAY* ((MJD>= AWBZ) as u8 as f64))- ANYF);
-		let MNF=B>= MNE;
+		let MNF=C>= MNE;
 		let MNG;
 		let XKX;
 		let XKY;
@@ -49651,14 +49652,14 @@ impl Instance {
 		let ASSC;
 		let ASSD;
 		if MNF{
-		MNG=B;
+		MNG=C;
 		XKX=A;
 		XKY=A;
 		ASSB=BHSX;
 		ASSC=BHSX;
 		ASSD=BHSX;
 		}else{
-		let ANNB=(BK* ((MJD>= A) as u8 as f64))- B;
+		let ANNB=(BK* ((MJD>= A) as u8 as f64))- C;
 		let ANNC=XJV* ANNB;
 		let BQWF=ASQM* ANNB;
 		let ANND=XJW* ANNB;
@@ -49670,7 +49671,7 @@ impl Instance {
 		ASSC=BQWF;
 		ASSD=BQWG;
 		}
-		let MNH=MND* (B+ MNG);
+		let MNH=MND* (C+ MNG);
 		let BQWH=ASSB* MND;
 		let ANNE=XKX* MND;
 		let BQWI=ASSC* MND;
@@ -49686,7 +49687,7 @@ impl Instance {
 		if MNI{
 		let MNJ=MNC>= A;
 		let MNK=if MNJ{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -49732,7 +49733,7 @@ impl Instance {
 		ASRZ=BQWO;
 		ASSA=BQWP;
 		}
-		let MNR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MNQ, B));
+		let MNR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MNQ, C));
 		MJB=MNR;
 		MJD=MNS;
 		MMZ=MNT;
@@ -49755,7 +49756,7 @@ impl Instance {
 		if MNW{
 		let MOB=MNX>= A;
 		let MOC=if MOB{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -49774,7 +49775,7 @@ impl Instance {
 		let MOI=LNZ* MOH;
 		let BIZI=L8([0.0,0.0,0.0,(ASCD* MOH),0.0,0.0,0.0,0.0])+ (BIZH* LNZ);
 		let MOM=MOJ+ MOH;
-		let MON=B/ MOM;
+		let MON=C/ MOM;
 		let MOR=LNZ* MOO;
 		let MOS=MOI+ (MOR* MON);
 		let BIZJ=BIZI+ (((L8([0.0,0.0,0.0,(ASCD* MOO),0.0,0.0,0.0,0.0])+ (ASQL* LNZ))* MON)+ ((((ASQK+ BIZH)).product_div((-MON),MOM))* MOR));
@@ -49888,7 +49889,7 @@ impl Instance {
 		let MPS=((MPR* MPR)+ 0.04000000000000001f64).sqrt();
 		let BJAC=(BIZZ+ BIZZ)* (ANYF/ (AWAY* MPS));
 		let AIMJ=BK* MPS;
-		let AIMK=B/ AIMJ;
+		let AIMK=C/ AIMJ;
 		let BJAD=((BJAC* BK)).product_div((-AIMK),AIMJ);
 		let MPT=J* (MPR+ MPS);
 		let BJAE=(ASSO+ BJAC)* J;
@@ -49923,7 +49924,7 @@ impl Instance {
 		let MPW=(LKW* MPV).sqrt();
 		let BJAH=(ASSR* LKW)* (ANYF/ (AWAY* MPW));
 		let AIMP=BK* MPW;
-		let AIMQ=B/ AIMP;
+		let AIMQ=C/ AIMP;
 		let BJAI=((BJAH* BK)).product_div((-AIMQ),AIMP);
 		let BJAJ=L8([0.0,0.0,0.0,0.0,BIZN[0],0.0,BIZN[1],BIZN[2]]);
 		let BJAK=L8([0.0,0.0,0.0,0.0,BIZO[0],0.0,BIZO[1],BIZO[2]]);
@@ -49988,7 +49989,7 @@ impl Instance {
 		let MQE=((MPY* MPY)+ MQD).sqrt();
 		let BJBC=((BJAZ+ BJAZ)+ L8([0.0,0.0,0.0,0.0,ASSU[0],0.0,ASSU[1],ASSU[2]]))* (ANYF/ (AWAY* MQE));
 		let AINF=BK* MQE;
-		let AING=B/ AINF;
+		let AING=C/ AINF;
 		let BJBD=((BJBC* BK)).product_div((-AING),AINF);
 		let MQF=MPI- (MPI- (J* (MPY+ MQE)));
 		let BJBE=BJAJ- (BJAJ- ((BJAP+ BJBC)* J));
@@ -50059,7 +50060,7 @@ impl Instance {
 		let ASTJ;
 		let ASTK;
 		if MQG{
-		let MQH=LJ== B;
+		let MQH=LJ== C;
 		let MQN;
 		let XLN;
 		let XLO;
@@ -50080,7 +50081,7 @@ impl Instance {
 		ASTM=BJCD;
 		ASTN=BJCE;
 		}else{
-		let MQL=B- JN;
+		let MQL=C- JN;
 		let MQM=(PM* MQI)* MQL;
 		let BJBZ=(ASSI* PM)* MQL;
 		let AINR=(XLB* PM)* MQL;
@@ -50208,7 +50209,7 @@ impl Instance {
 		let ASUI;
 		let ASUJ;
 		if MQU{
-		let MQV=LJ== B;
+		let MQV=LJ== C;
 		let MRA;
 		let XLT;
 		let XLU;
@@ -50229,7 +50230,7 @@ impl Instance {
 		ASUL=BJBQ;
 		ASUM=BJBR;
 		}else{
-		let MQX=B- JN;
+		let MQX=C- JN;
 		let MQY=(PM* MQI)* MQX;
 		let BJBM=(ASSI* PM)* MQX;
 		let AINL=(XLB* PM)* MQX;
@@ -50524,7 +50525,7 @@ impl Instance {
 		let ASVA;
 		let ASVB;
 		if MRH{
-		let MRI=((LJK== B)&& (ADB> A))&& (ME> A);
+		let MRI=((LJK== C)&& (ADB> A))&& (ME> A);
 		let MSU;
 		let MTD;
 		let MUB;
@@ -50557,7 +50558,7 @@ impl Instance {
 		let AIPC=YZR* AMF;
 		let BJDW=L5([0.0,0.0,0.0,BJDV[0],BJDV[1]]);
 		let BJDX=L4([0.0,BJDU[0],BJDU[1],BJDU[2]]);
-		MSU=B;
+		MSU=C;
 		MTD=ME;
 		MUB=MRK;
 		MUX=LJO;
@@ -50565,7 +50566,7 @@ impl Instance {
 		MVJ=MRJ;
 		NDH=A;
 		NWC=ADB;
-		ROU=B;
+		ROU=C;
 		XMC=A;
 		XMD=AIPC;
 		XME=AIPB;
@@ -50654,7 +50655,7 @@ impl Instance {
 		let ASVS;
 		let ASVT;
 		if MRL{
-		let MRM=((((LJK== B)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= B);
+		let MRM=((((LJK== C)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= C);
 		let MSW;
 		let MUD;
 		let MVL;
@@ -50672,7 +50673,7 @@ impl Instance {
 		let BJDR=AVZY* AWAO;
 		let BJDS=L5([0.0,BJDR[0],0.0,0.0,BJDR[1]]);
 		let BJDT=L4([BJDQ[0],BJDQ[1],0.0,BJDQ[2]]);
-		MSW=B;
+		MSW=C;
 		MUD=MRO;
 		MVL=MRN;
 		XMM=A;
@@ -50742,7 +50743,7 @@ impl Instance {
 		let ASWF;
 		let ASWG;
 		if MRP{
-		let MRQ=((LKB== B)&& (ABL> A))&& SN;
+		let MRQ=((LKB== C)&& (ABL> A))&& SN;
 		let MSY;
 		let MTG;
 		let MUF;
@@ -50774,7 +50775,7 @@ impl Instance {
 		let BJCM=AWAM- AWAL;
 		let AINW=YZP- YZR;
 		let MRT=-(ABL+ (LKF* LJ));
-		let MRU=((MRT< A)&& (LKT> A))&& (LJ== B);
+		let MRU=((MRT< A)&& (LKT> A))&& (LJ== C);
 		let MUG;
 		let NWH;
 		let XMZ;
@@ -50823,7 +50824,7 @@ impl Instance {
 		let MSA=if MRZ{
 		AMF
 		}else{
-		B
+		C
 		};
 		let MSB=MSA* MRS;
 		let BJCN=BJCM* MSA;
@@ -50834,17 +50835,17 @@ impl Instance {
 		let AINZ=AINX/ MRW;
 		let AIOA=AINY/ MRW;
 		let BJCP=BJCO* (LKY* ((MSC+ (((MSC== AWBZ) as u8 as f64)* AWCA)).powf((LKY- ANYF))));
-		let AIOB=LKY- B;
+		let AIOB=LKY- C;
 		let AIOC=MSC+ (((MSC== A) as u8 as f64)* ZNW);
 		let BJCQ=AIOB* ((AIOC+ (((AIOC== AWBZ) as u8 as f64)* AWCA)).powf((AIOB- ANYF)));
 		let AIOD=LKY* (AIOC.powf(AIOB));
 		let AIOE=AINZ* AIOD;
 		let AIOF=AIOA* AIOD;
-		let MSD=B+ (MSC.powf(LKY));
-		let MSE=B/ LKY;
+		let MSD=C+ (MSC.powf(LKY));
+		let MSE=C/ LKY;
 		let MSF=MSD.powf(MSE);
 		let BJCR=BJCP* (MSE* ((MSD+ (((MSD== AWBZ) as u8 as f64)* AWCA)).powf((MSE- ANYF))));
-		let AIOG=MSE- B;
+		let AIOG=MSE- C;
 		let AIOH=MSD+ (((MSD== A) as u8 as f64)* ZNW);
 		let BJCS=AIOG* ((AIOH+ (((AIOH== AWBZ) as u8 as f64)* AWCA)).powf((AIOG- ANYF)));
 		let AIOI=MSE* (AIOH.powf(AIOG));
@@ -50854,9 +50855,9 @@ impl Instance {
 		let BJCT=-MSG;
 		let BJCU=((BJCN* MSA)).product_sum_div(ANYF,BJCR,BJCT,MSF);
 		let BJCV=BJCU* AWAO;
-		let AIOL=product_sum_div((AINX* MSA),B,BJCT,AIOJ,MSF);
+		let AIOL=product_sum_div((AINX* MSA),C,BJCT,AIOJ,MSF);
 		let BJCW=L3(sum_products_div_lanes(&[(&BJCV.0,AIOJ),(&(((((BJCO* BJCQ)* LKY)* AINZ)* AIOI)+ (((BJCP* BJCS)* MSE)* AIOE)).0,BJCT),(&BJCR.0,(-AIOL))],MSF));
-		let AIOM=product_sum_div((AINY* MSA),B,BJCT,AIOK,MSF);
+		let AIOM=product_sum_div((AINY* MSA),C,BJCT,AIOK,MSF);
 		let BJCX=L3(sum_products_div_lanes(&[(&BJCV.0,AIOK),(&(((((BJCO* BJCQ)* LKY)* AIOA)* AIOI)+ (((BJCP* BJCS)* MSE)* AIOF)).0,BJCT),(&BJCR.0,(-AIOM))],MSF));
 		MSH=MSG;
 		XNH=AIOL;
@@ -50876,7 +50877,7 @@ impl Instance {
 		let MSJ=((MSI* MSI)+ 0.04000000000000001f64).sqrt();
 		let BJDB=(BJCY+ BJCY)* (ANYF/ (AWAY* MSJ));
 		let AIOR=BK* MSJ;
-		let AIOS=B/ AIOR;
+		let AIOS=C/ AIOR;
 		let BJDC=((BJDB* BK)).product_div((-AIOS),AIOR);
 		let MSK=J* (MSI+ MSJ);
 		let BJDD=(ASXC+ BJDB)* J;
@@ -50911,7 +50912,7 @@ impl Instance {
 		let MSN=(LKW* MSM).sqrt();
 		let BJDG=(ASXF* LKW)* (ANYF/ (AWAY* MSN));
 		let AIOX=BK* MSN;
-		let AIOY=B/ AIOX;
+		let AIOY=C/ AIOX;
 		let BJDH=((BJDG* BK)).product_div((-AIOY),AIOX);
 		let MSO=MRV- (MSN* LKT);
 		let BJDI=(BJDG* LKT)* AWAO;
@@ -50976,7 +50977,7 @@ impl Instance {
 		let BJDN=L8([0.0,0.0,0.0,0.0,ASWR[0],0.0,ASWR[1],ASWR[2]]);
 		let BJDO=L8([0.0,0.0,0.0,0.0,ASWU[0],0.0,ASWU[1],ASWU[2]]);
 		let BJDP=L8([0.0,0.0,0.0,0.0,ASWV[0],0.0,ASWV[1],ASWV[2]]);
-		MSY=B;
+		MSY=C;
 		MTG=MD;
 		MUF=MUG;
 		MVA=LKK;
@@ -50984,7 +50985,7 @@ impl Instance {
 		MVN=MRR;
 		NDK=LKG;
 		NWG=NWH;
-		RPO=B;
+		RPO=C;
 		XMU=XMZ;
 		XMV=XNA;
 		XMW=AINV;
@@ -51059,7 +51060,7 @@ impl Instance {
 		let ASXK;
 		let ASXL;
 		if MSP{
-		let MSQ=((((LKB== B)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= B);
+		let MSQ=((((LKB== C)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= C);
 		let MTA;
 		let MUJ;
 		let MVP;
@@ -51077,7 +51078,7 @@ impl Instance {
 		let BJCI=L3([AVZW[0],AVZW[1],0.0])- L3([0.0,AVZY[0],AVZY[1]]);
 		let BJCJ=L5([BJCI[0],BJCI[1],0.0,0.0,BJCI[2]]);
 		let BJCK=L4([BJCH[0],BJCH[1],0.0,BJCH[2]]);
-		MTA=B;
+		MTA=C;
 		MUJ=MSS;
 		MVP=MSR;
 		XNO=A;
@@ -51309,7 +51310,7 @@ impl Instance {
 		MUL=MTU;
 		ASYR=ASYP;
 		}
-		let MTZ=LNB== B;
+		let MTZ=LNB== C;
 		let MVR;
 		let XNZ;
 		let XOA;
@@ -51361,18 +51362,18 @@ impl Instance {
 		let BJFF=(BJEY* MUP)+ (BJEV* AIPI);
 		let AIPM=AIPK* MUP;
 		let BJFG=(BJFB* MUP)+ (BJEV* AIPK);
-		let MUQ=(((B+ MUO)+ MUP)+ (MUP* MUO))+ (MUP* MUP);
+		let MUQ=(((C+ MUO)+ MUP)+ (MUP* MUO))+ (MUP* MUP);
 		let BJFH=((BJEQ+ BJEV)+ ((BJEV* MUO)+ (BJEQ* MUP)))+ (BJFE+ BJFE);
 		let AIPN=((AIPF+ AIPI)+ ((AIPI* MUO)+ (AIPF* MUP)))+ (AIPL+ AIPL);
 		let AIPO=((AIPG+ AIPK)+ ((AIPK* MUO)+ (AIPG* MUP)))+ (AIPM+ AIPM);
-		let MUR=B/ MUQ;
+		let MUR=C/ MUQ;
 		let BJFI=-MUR;
 		let BJFJ=((BJFH).product_div(BJFI,MUQ))* AWAO;
 		let AIPP=product_div(BJFI,AIPN,MUQ);
 		let BJFK=-AIPP;
 		let AIPQ=product_div(BJFI,AIPO,MUQ);
 		let BJFL=-AIPQ;
-		let MUS=B- MUR;
+		let MUS=C- MUR;
 		let AIPR=BJFK* MUN;
 		let BJFM=((L6(sum_products_div_lanes(&[(&BJFJ.0,AIPN),(&(((L6([0.0,0.0,BJES[0],BJES[1],BJES[2],BJES[3]])+ BJEY)+ (((BJEY* MUO)+ (BJEQ* AIPI))+ (L6([0.0,0.0,BJFC[0],BJFC[1],BJFC[2],BJFC[3]])+ (BJEV* AIPF))))+ (BJFF+ BJFF)).0,BJFI),(&BJFH.0,BJFK)],MUQ)))* AWAO)* MUN;
 		let BJFN=BJFM+ L6([0.0,0.0,(BJEP* BJFK),0.0,0.0,0.0]);
@@ -51448,7 +51449,7 @@ impl Instance {
 		if MVY{
 		let AIQC=XNZ* AMF;
 		let AIQD=XOA* AMF;
-		let MVZ=IDF* ((B+ MVX)- AL);
+		let MVZ=IDF* ((C+ MVX)- AL);
 		let BJGH=BJGA* IDF;
 		let AIQE=(AIQC* BWG)* IDF;
 		let BJGI=(((ASYT* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AIQC),0.0,0.0,0.0]))* IDF;
@@ -51468,7 +51469,7 @@ impl Instance {
 		let AIPZ=AIPX* BWG;
 		let BJGC=((ASYU* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AIPX),0.0,0.0,0.0]);
 		let mut MWA=MVX;
-		let mut MWC=B;
+		let mut MWC=C;
 		let mut XOF=AIPY;
 		let mut XOG=AIPZ;
 		let mut ASZB=BJGA;
@@ -51521,7 +51522,7 @@ impl Instance {
 		if A!=0.0{
 		let BJGN=(BJFX* AWAO)* J;
 		let AIQG=(AIPV* AMF)* J;
-		let MWH=(((-MVQ)* J)- J)- B;
+		let MWH=(((-MVQ)* J)- J)- C;
 		let MWL=if MWJ{
 		MWI
 		}else{
@@ -51534,7 +51535,7 @@ impl Instance {
 		let MWM=((MWH* MWH)+ MWL).sqrt();
 		let BJGQ=(BJGO+ BJGO)* (ANYF/ (AWAY* MWM));
 		let AIQJ=BK* MWM;
-		let AIQK=B/ AIQJ;
+		let AIQK=C/ AIQJ;
 		let BJGR=(BJGN+ BJGQ)* J;
 		let AIQL=(AIQG+ (AIQI* AIQK))* J;
 		let BJGS=(((BJGP+ BJGP)* AIQK)+ ((((BJGQ* BK)).product_div((-AIQK),AIQJ))* AIQI))* J;
@@ -51582,7 +51583,7 @@ impl Instance {
 		if MWT{
 		let MXD;
 		if MWU{
-		MXD=B;
+		MXD=C;
 		}else{
 		let MXE;
 		if MWV{
@@ -51618,13 +51619,13 @@ impl Instance {
 		let MXB=MXA.sqrt();
 		let BQNR=ASZN* (ANYF/ (AWAY* MXB));
 		let ANGK=BK* MXB;
-		let ANGL=B/ ANGK;
+		let ANGL=C/ ANGK;
 		let BQNS=((BQNR* BK)).product_div((-ANGL),ANGK);
 		let ANGM=XON* ANGL;
 		let BQNT=(ASZO* ANGL)+ (BQNS* XON);
 		let ANGN=XOO* ANGL;
 		let BQNU=(ASZP* ANGL)+ (BQNS* XOO);
-		let MXC=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MWY, B));
+		let MXC=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, MWY, C));
 		MWY=MXC;
 		MXA=MXB;
 		XON=ANGM;
@@ -51679,7 +51680,7 @@ impl Instance {
 		ASZL=ASZR;
 		ASZM=ASZS;
 		}
-		let MXM=B/ MXL;
+		let MXM=C/ MXL;
 		let BJHP=-MXM;
 		let BJHQ=(ASZK).product_div(BJHP,MXL);
 		let BJHR=BJHQ* AWAO;
@@ -51793,7 +51794,7 @@ impl Instance {
 		let AJJI=XOH* BWG;
 		let AJJJ=AJJH* BWG;
 		let MXZ=BWG* MUW;
-		let MYA=B/ MXZ;
+		let MYA=C/ MXZ;
 		let MYB=MYA* MVB;
 		let BKFG=(product_div(((ANZE* MUW)+ (ASUU* BWG)),(-MYA),MXZ))* MVB;
 		let BKFH=BKFG* MYC;
@@ -51848,7 +51849,7 @@ impl Instance {
 		let MYN=(MYG+ MYK).sqrt();
 		let BKFT=(L7([0.0,0.0,BKFI,0.0,0.0,0.0,0.0])+ BKFO)* (ANYF/ (AWAY* MYN));
 		let AJJQ=BK* MYN;
-		let AJJR=B/ AJJQ;
+		let AJJR=C/ AJJQ;
 		let BKFU=((BKFT* BK)).product_div((-AJJR),AJJQ);
 		let MYO=(-MYJ)+ MYN;
 		let BKFV=(BKFK* AWAO)+ BKFT;
@@ -51881,15 +51882,15 @@ impl Instance {
 		let BKGI=-MYS;
 		let BKGJ=(((L7([0.0,0.0,((BKFG* GUA)* AWAO),0.0,0.0,0.0,0.0])+ (BKGD* BK))+ ((BKGH* MYQ)+ (BKGD* MYR)))).product_sum_div(ANYF,BKGD,BKGI,MYQ);
 		let BKGK=BKGJ* AWAO;
-		let AJKF=product_sum_div(((AJJZ* BK)+ ((AJKD* MYQ)+ (AJJZ* MYR))),B,BKGI,AJJZ,MYQ);
-		let AJKG=product_sum_div(((AJKC* BK)+ ((AJKE* MYQ)+ (AJKC* MYR))),B,BKGI,AJKC,MYQ);
+		let AJKF=product_sum_div(((AJJZ* BK)+ ((AJKD* MYQ)+ (AJJZ* MYR))),C,BKGI,AJJZ,MYQ);
+		let AJKG=product_sum_div(((AJKC* BK)+ ((AJKE* MYQ)+ (AJKC* MYR))),C,BKGI,AJKC,MYQ);
 		let MYT=MYS* CWM;
 		let BKGL=(BKGJ* CWM)+ L7([0.0,0.0,(ANZG* MYS),0.0,0.0,0.0,0.0]);
 		let AJKH=AJKF* CWM;
-		let BKGM=(L7(sum_products_div_lanes(&[(&((BKGF* BK)+ ((((BKGF* JAN)* MYQ)+ (BKGD* AJKD))+ ((BKGF* MYR)+ (BKGH* AJJZ)))).0,B),(&BKGK.0,AJJZ),(&BKGF.0,BKGI),(&BKGD.0,(-AJKF))],MYQ)))* CWM;
+		let BKGM=(L7(sum_products_div_lanes(&[(&((BKGF* BK)+ ((((BKGF* JAN)* MYQ)+ (BKGD* AJKD))+ ((BKGF* MYR)+ (BKGH* AJJZ)))).0,C),(&BKGK.0,AJJZ),(&BKGF.0,BKGI),(&BKGD.0,(-AJKF))],MYQ)))* CWM;
 		let BKGN=BKGM+ L7([0.0,0.0,(ANZG* AJKF),0.0,0.0,0.0,0.0]);
 		let AJKI=AJKG* CWM;
-		let BKGO=(L7(sum_products_div_lanes(&[(&((BKGG* BK)+ ((((BKGG* JAN)* MYQ)+ (BKGD* AJKE))+ ((BKGG* MYR)+ (BKGH* AJKC)))).0,B),(&BKGK.0,AJKC),(&BKGG.0,BKGI),(&BKGD.0,(-AJKG))],MYQ)))* CWM;
+		let BKGO=(L7(sum_products_div_lanes(&[(&((BKGG* BK)+ ((((BKGG* JAN)* MYQ)+ (BKGD* AJKE))+ ((BKGG* MYR)+ (BKGH* AJKC)))).0,C),(&BKGK.0,AJKC),(&BKGG.0,BKGI),(&BKGD.0,(-AJKG))],MYQ)))* CWM;
 		let BKGP=BKGO+ L7([0.0,0.0,(ANZG* AJKG),0.0,0.0,0.0,0.0]);
 		let MYU=MYT/ MXW;
 		let BKGQ=L7([0.0,0.0,BKFE,0.0,0.0,0.0,0.0]);
@@ -51903,10 +51904,10 @@ impl Instance {
 		let AJKN=AJKK* MYU;
 		let BKGU=(((BKGP).product_sum_div(ANYF,BKGQ,(-AJKK),MXW))* MYU)+ (BKGR* AJKK);
 		let AJKO=AJKN+ AJKN;
-		let MYV=(B+ (MYU* MYU)).sqrt();
+		let MYV=(C+ (MYU* MYU)).sqrt();
 		let BKGV=(BKGS+ BKGS)* (ANYF/ (AWAY* MYV));
 		let AJKP=BK* MYV;
-		let AJKQ=B/ AJKP;
+		let AJKQ=C/ AJKP;
 		let BKGW=((BKGV* BK)).product_div((-AJKQ),AJKP);
 		let AJKR=AJKM* AJKQ;
 		let AJKS=AJKO* AJKQ;
@@ -51914,14 +51915,14 @@ impl Instance {
 		let BKGX=-MYW;
 		let BKGY=(BKGL).product_sum_div(ANYF,BKGV,BKGX,MYV);
 		let BKGZ=BKGY* AWAO;
-		let AJKT=product_sum_div(AJKH,B,BKGX,AJKR,MYV);
-		let AJKU=product_sum_div(AJKI,B,BKGX,AJKS,MYV);
+		let AJKT=product_sum_div(AJKH,C,BKGX,AJKR,MYV);
+		let AJKU=product_sum_div(AJKI,C,BKGX,AJKS,MYV);
 		let MYX=MYW- MXX;
 		let BKHA=BKGY- ASZE;
 		let AJKV=AJKT- XOH;
-		let BKHB=(L7(sum_products_div_lanes(&[(&BKGN.0,B),(&BKGZ.0,AJKR),(&(((BKGT+ BKGT)* AJKQ)+ (BKGW* AJKM)).0,BKGX),(&BKGV.0,(-AJKT))],MYV)))- ASZF;
+		let BKHB=(L7(sum_products_div_lanes(&[(&BKGN.0,C),(&BKGZ.0,AJKR),(&(((BKGT+ BKGT)* AJKQ)+ (BKGW* AJKM)).0,BKGX),(&BKGV.0,(-AJKT))],MYV)))- ASZF;
 		let AJKW=AJKU- XOI;
-		let BKHC=(L7(sum_products_div_lanes(&[(&BKGP.0,B),(&BKGZ.0,AJKS),(&(((BKGU+ BKGU)* AJKQ)+ (BKGW* AJKO)).0,BKGX),(&BKGV.0,(-AJKU))],MYV)))- ASZG;
+		let BKHC=(L7(sum_products_div_lanes(&[(&BKGP.0,C),(&BKGZ.0,AJKS),(&(((BKGU+ BKGU)* AJKQ)+ (BKGW* AJKO)).0,BKGX),(&BKGV.0,(-AJKU))],MYV)))- ASZG;
 		let MYY=MVB* (MVQ- MYX);
 		let BKHD=(BKFF- BKHA)* MVB;
 		let BKHE=L8([BKHA[0],BKHA[1],0.0,BKHA[2],BKHA[3],BKHA[4],BKHA[5],BKHA[6]]);
@@ -51974,7 +51975,7 @@ impl Instance {
 		let MZA=BWG* MYZ;
 		let BJIG=BJIF* BWG;
 		let BJIH=L7([0.0,0.0,(ANZE* MYZ),0.0,0.0,0.0,0.0])+ BJIG;
-		let MZB=MZA< (B+ (((-0.9999999999999978f64* MVH)* FCG)/ BH));
+		let MZB=MZA< (C+ (((-0.9999999999999978f64* MVH)* FCG)/ BH));
 		let MZJ;
 		let XPD;
 		let XPE;
@@ -51994,18 +51995,18 @@ impl Instance {
 		}else{
 		let AIRF=AIPV+ XOI;
 		let MZD=MVH* FCG;
-		let MZE=(BH* (MZA- B))/ MZD;
+		let MZE=(BH* (MZA- C))/ MZD;
 		let BJII=L7([0.0,0.0,((BJFW* FCG)+ (ANZM* MVH)),0.0,0.0,0.0,0.0]);
 		let AIRG=((XOH* BWG)* BH)/ MZD;
 		let AIRH=((AIRF* BWG)* BH)/ MZD;
 		let MZF=(MVH* BWG)/ BK;
 		let BJIJ=((BJFW* BWG)+ (ANZE* MVH))/ BK;
-		let MZG=(B+ MZE).sqrt();
+		let MZG=(C+ MZE).sqrt();
 		let BJIK=(((BJIH* BH)).product_sum_div(ANYF,BJII,(-MZE),MZD))* (ANYF/ (AWAY* MZG));
 		let AIRI=BK* MZG;
-		let AIRJ=B/ AIRI;
+		let AIRJ=C/ AIRI;
 		let BJIL=((BJIK* BK)).product_div((-AIRJ),AIRI);
-		let MZH=B- MZG;
+		let MZH=C- MZG;
 		let AIRK=-(AIRG* AIRJ);
 		let AIRL=-(AIRH* AIRJ);
 		let AIRM=AIRK* MZF;
@@ -52047,7 +52048,7 @@ impl Instance {
 		let BJJQ=(ASZF* BWG)+ L7([0.0,0.0,(ANZE* XOH),0.0,0.0,0.0,0.0]);
 		let AISY=AISW* BWG;
 		let BJJR=(ASZG* BWG)+ L7([0.0,0.0,(ANZE* AISW),0.0,0.0,0.0,0.0]);
-		let MZO=MZA- B;
+		let MZO=MZA- C;
 		let MZP=MVH* FCG;
 		let MZQ=(BH* (MZO+ MZN))/ MZP;
 		let BJJS=L7([0.0,0.0,((BJFW* FCG)+ (ANZM* MVH)),0.0,0.0,0.0,0.0]);
@@ -52055,12 +52056,12 @@ impl Instance {
 		let AITA=((AISY+ (AISV* MZN))* BH)/ MZP;
 		let MZR=(MVH* BWG)/ BK;
 		let BJJT=((BJFW* BWG)+ (ANZE* MVH))/ BK;
-		let MZS=(B+ MZQ).sqrt();
+		let MZS=(C+ MZQ).sqrt();
 		let BJJU=((((BJIH+ BJJP)* BH)).product_sum_div(ANYF,BJJS,(-MZQ),MZP))* (ANYF/ (AWAY* MZS));
 		let AITB=BK* MZS;
-		let AITC=B/ AITB;
+		let AITC=C/ AITB;
 		let BJJV=((BJJU* BK)).product_div((-AITC),AITB);
-		let MZT=B- MZS;
+		let MZT=C- MZS;
 		let AITD=-(AISZ* AITC);
 		let AITE=-(AITA* AITC);
 		let BJJW=((((((((BJJQ+ (((BJIS* AMF)* MZN)+ (BJJP* AISU)))* BH)).product_sum_div(ANYF,BJJS,(-AISZ),MZP))* AITC)+ (BJJV* AISZ))* AWAO)* MZR)+ L7([0.0,0.0,(BJJT* AITD),0.0,0.0,0.0,0.0]);
@@ -52075,14 +52076,14 @@ impl Instance {
 		let MZW=(BH* (MZO+ MZV))/ MZP;
 		let AITJ=((AISX+ (AITH* MZV))* BH)/ MZP;
 		let AITK=((AISY+ (AITI* MZV))* BH)/ MZP;
-		let MZX=(B+ MZW).sqrt();
+		let MZX=(C+ MZW).sqrt();
 		let BJJZ=((((BJIH+ BJJY)* BH)).product_sum_div(ANYF,BJJS,(-MZW),MZP))* (ANYF/ (AWAY* MZX));
 		let AITL=BK* MZX;
-		let AITM=B/ AITL;
+		let AITM=C/ AITL;
 		let BJKA=((BJJZ* BK)).product_div((-AITM),AITL);
 		let BJKB=(((((BJJQ+ ((((((BJJW+ ASZF)* BWG)+ L7([0.0,0.0,(ANZE* AITF),0.0,0.0,0.0,0.0]))* AMF)* MZV)+ (BJJY* AITH)))* BH)).product_sum_div(ANYF,BJJS,(-AITJ),MZP))* AITM)+ (BJKA* AITJ);
 		let BJKC=(((((BJJR+ ((((((BJJX+ ASZG)* BWG)+ L7([0.0,0.0,(ANZE* AITG),0.0,0.0,0.0,0.0]))* AMF)* MZV)+ (BJJY* AITI)))* BH)).product_sum_div(ANYF,BJJS,(-AITK),MZP))* AITM)+ (BJKA* AITK);
-		let MZY=B- MZX;
+		let MZY=C- MZX;
 		let AITN=-(AITJ* AITM);
 		let AITO=-(AITK* AITM);
 		let MZZ=(MVQ+ (MZR* MZY))+ MXX;
@@ -52102,7 +52103,7 @@ impl Instance {
 		ATAU=BJKF;
 		}else{
 		let NAC=BWG* MVG;
-		let NAD=B/ NAC;
+		let NAD=C/ NAC;
 		let BJIU=product_div(((ANZE* MVG)+ (BJFU* BWG)),(-NAD),NAC);
 		let NAE=0.7071067811865475f64+ NAD;
 		let NAF=(-MYZ)/ MVG;
@@ -52129,7 +52130,7 @@ impl Instance {
 		let NAN=((NAI* NAI)+ (NAM* NAL)).sqrt();
 		let BJJE=((BJJA+ BJJA)+ L7([0.0,0.0,(((BJJD+ BJJD)* NAL)+ (BJIZ* NAM)),0.0,0.0,0.0,0.0]))* (ANYF/ (AWAY* NAN));
 		let AISA=BK* NAN;
-		let AISB=B/ AISA;
+		let AISB=C/ AISA;
 		let BJJF=((BJJE* BK)).product_div((-AISB),AISA);
 		let AISC=AIRX* AISB;
 		let BJJG=((BJJB+ BJJB)* AISB)+ (BJJF* AIRX);
@@ -52219,7 +52220,7 @@ impl Instance {
 		let BJKW=L7([BJKP[0],BJKP[1],BJKP[2],BJKP[3],0.0,BJKP[4],BJKP[5]]);
 		let AIUD=AITZ+ (AIUB+ AIUB);
 		let BJKX=L7([BJKQ[0],BJKQ[1],BJKQ[2],BJKQ[3],0.0,BJKQ[4],BJKQ[5]]);
-		let AIUE=B/ NAY;
+		let AIUE=C/ NAY;
 		let BJKY=(BJKV).product_div((-AIUE),NAY);
 		let NAZ=MVW* NAV;
 		let NBA=NAZ.ln();
@@ -52247,7 +52248,7 @@ impl Instance {
 		let BJLG=BJKL- BJLD;
 		let AIUJ=AITX- AIUH;
 		let BJLH=BJKN- BJLE;
-		let NBE=(NAW- NBC)- B;
+		let NBE=(NAW- NBC)- C;
 		let NBF=BH* NAW;
 		let BJLI=BJKK* BH;
 		let AIUK=AITW* BH;
@@ -52292,7 +52293,7 @@ impl Instance {
 		let NBJ=((NBE* NBE)+ NBI).sqrt();
 		let BJLR=((BJLO+ BJLO)+ ATBH)* (ANYF/ (AWAY* NBJ));
 		let AIUS=BK* NBJ;
-		let AIUT=B/ AIUS;
+		let AIUT=C/ AIUS;
 		let BJLS=((BJLR* BK)).product_div((-AIUT),AIUS);
 		let NBK=NAW- (J* (NBE+ NBJ));
 		let BJLT=BJKK- ((BJLF+ BJLR)* J);
@@ -52371,7 +52372,7 @@ impl Instance {
 		let BJMA=BJKU+ (BJLX+ BJLX);
 		let AIVA=AITY+ (AIUY+ AIUY);
 		let AIVB=AITZ+ (AIUZ+ AIUZ);
-		let AIVC=B/ NBR;
+		let AIVC=C/ NBR;
 		let BJMB=(BJMA).product_div((-AIVC),NBR);
 		let NBS=((NBR.ln())- NBA)+ NBB;
 		let BJMC=((BJMA* (ANYF/ NBR))- BJKZ)+ BJLA;
@@ -52473,7 +52474,7 @@ impl Instance {
 		if NCD{
 		let NCN;
 		if NCE{
-		NCN=B;
+		NCN=C;
 		}else{
 		let NCO;
 		if NCF{
@@ -52509,13 +52510,13 @@ impl Instance {
 		let NCL=NCK.sqrt();
 		let BKFA=ATCC* (ANYF/ (AWAY* NCL));
 		let AJJD=BK* NCL;
-		let AJJE=B/ AJJD;
+		let AJJE=C/ AJJD;
 		let BKFB=((BKFA* BK)).product_div((-AJJE),AJJD);
 		let AJJF=XQD* AJJE;
 		let BKFC=(ATCD* AJJE)+ (BKFB* XQD);
 		let AJJG=XQE* AJJE;
 		let BKFD=(ATCE* AJJE)+ (BKFB* XQE);
-		let NCM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NCI, B));
+		let NCM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NCI, C));
 		NCI=NCM;
 		NCK=NCL;
 		XQD=AJJF;
@@ -52570,7 +52571,7 @@ impl Instance {
 		ATCA=ATCG;
 		ATCB=ATCH;
 		}
-		let NCW=B/ NCV;
+		let NCW=C/ NCV;
 		let BJNH=-NCW;
 		let BJNI=(ATBZ).product_div(BJNH,NCV);
 		let BJNJ=BJNI* AWAO;
@@ -52679,7 +52680,7 @@ impl Instance {
 		ATBC=ASFE;
 		ATBD=ASFF;
 		}
-		let NDB=P== B;
+		let NDB=P== C;
 		let NEN;
 		let NFB;
 		let NGN;
@@ -52724,7 +52725,7 @@ impl Instance {
 		let NDO=((NDN* NDN)+ 0.04000000000000001f64).sqrt();
 		let BJNW=(BJNT+ BJNT)* (ANYF/ (AWAY* NDO));
 		let AIWM=BK* NDO;
-		let AIWN=B/ AIWM;
+		let AIWN=C/ AIWM;
 		let BJNX=((BJNW* BK)).product_div((-AIWN),AIWM);
 		let NDP=J* (NDN+ NDO);
 		let BJNY=(AVZT+ BJNW)* J;
@@ -52759,7 +52760,7 @@ impl Instance {
 		let NDS=(LKW* NDR).sqrt();
 		let BJOB=(ATCU* LKW)* (ANYF/ (AWAY* NDS));
 		let AIWS=BK* NDS;
-		let AIWT=B/ AIWS;
+		let AIWT=C/ AIWS;
 		let BJOC=((BJOB* BK)).product_div((-AIWT),AIWS);
 		let NDT=K- (NDS* LKT);
 		let BJOD=(BJOB* LKT)* AWAO;
@@ -52788,7 +52789,7 @@ impl Instance {
 		let NDW=((NDU* NDU)+ ((BH* NDV)* NDV)).sqrt();
 		let BJOO=(BJOJ+ BJOJ)* (ANYF/ (AWAY* NDW));
 		let AIXA=BK* NDW;
-		let AIXB=B/ AIXA;
+		let AIXB=C/ AIXA;
 		let BJOP=((BJOO* BK)).product_div((-AIXB),AIXA);
 		let NDX=J* (NDU+ NDW);
 		let BJOQ=(ATCR+ BJOO)* J;
@@ -52827,7 +52828,7 @@ impl Instance {
 		let NEF=NEE< RV;
 		let NEI=if NEF{
 		let NEG=BJOT* NEA;
-		let NEH=((B+ ((NEE.exp())- (NEG.exp()))).ln())/ NEC;
+		let NEH=((C+ ((NEE.exp())- (NEG.exp()))).ln())/ NEC;
 		NEH
 		}else{
 		NED
@@ -52906,10 +52907,10 @@ impl Instance {
 		let BJPD=(ATCL* AWAO)* NER;
 		let AIXS=XQJ+ (AIXQ* NER);
 		let AIXT=XQK+ (AIXR* NER);
-		let NES=((NEN- B)+ NER).sqrt();
+		let NES=((NEN- C)+ NER).sqrt();
 		let BJPE=(ATCL+ BJPD)* (ANYF/ (AWAY* NES));
 		let AIXU=BK* NES;
-		let AIXV=B/ AIXU;
+		let AIXV=C/ AIXU;
 		let BJPF=((BJPE* BK)).product_div((-AIXV),AIXU);
 		let AIXW=AIXS* AIXV;
 		let BJPG=((ATCN+ (((ATCN* AMF)* NER)+ (BJPD* AIXQ)))* AIXV)+ (BJPF* AIXS);
@@ -52928,10 +52929,10 @@ impl Instance {
 		let AIXH=XQK* KPU;
 		let AIXI=-(XQJ* GTU);
 		let AIXJ=-(XQK* GTU);
-		let NEU=(B- (NEN* GTU)).sqrt();
+		let NEU=(C- (NEN* GTU)).sqrt();
 		let BJOY=((ATCL* GTU)* AWAO)* (ANYF/ (AWAY* NEU));
 		let AIXK=BK* NEU;
-		let AIXL=B/ AIXK;
+		let AIXL=C/ AIXK;
 		let BJOZ=((BJOY* BK)).product_div((-AIXL),AIXK);
 		let AIXM=AIXI* AIXL;
 		let AIXN=AIXJ* AIXL;
@@ -53037,7 +53038,7 @@ impl Instance {
 		if NFO{
 		let NFY;
 		if NFP{
-		NFY=B;
+		NFY=C;
 		}else{
 		let NFZ;
 		if NFQ{
@@ -53073,13 +53074,13 @@ impl Instance {
 		let NFW=NFV.sqrt();
 		let BKEW=ATDP* (ANYF/ (AWAY* NFW));
 		let AJIZ=BK* NFW;
-		let AJJA=B/ AJIZ;
+		let AJJA=C/ AJIZ;
 		let BKEX=((BKEW* BK)).product_div((-AJJA),AJIZ);
 		let AJJB=XRD* AJJA;
 		let BKEY=(ATDQ* AJJA)+ (BKEX* XRD);
 		let AJJC=XRE* AJJA;
 		let BKEZ=(ATDR* AJJA)+ (BKEX* XRE);
-		let NFX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NFT, B));
+		let NFX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NFT, C));
 		NFT=NFX;
 		NFV=NFW;
 		XRD=AJJB;
@@ -53134,7 +53135,7 @@ impl Instance {
 		ATDN=ATDT;
 		ATDO=ATDU;
 		}
-		let NGH=B/ NGG;
+		let NGH=C/ NGG;
 		let BJRB=-NGH;
 		let BJRC=(ATDM).product_div(BJRB,NGG);
 		let BJRD=BJRC* AWAO;
@@ -53171,7 +53172,7 @@ impl Instance {
 		let BJPV=L8([BJPK[0],BJPK[1],0.0,BJPK[2],BJPK[3],BJPK[4],BJPK[5],BJPK[6]]);
 		let BJPW=L8([BJPL[0],BJPL[1],0.0,BJPL[2],BJPL[3],BJPL[4],BJPL[5],BJPL[6]]);
 		let BJPX=L8([BJPM[0],BJPM[1],0.0,BJPM[2],BJPM[3],BJPM[4],BJPM[5],BJPM[6]]);
-		NGL=B;
+		NGL=C;
 		NGZ=NEZ;
 		XQZ=AIXY;
 		XRA=AIXZ;
@@ -53179,7 +53180,7 @@ impl Instance {
 		ATDK=BJPW;
 		ATDL=BJPX;
 		}
-		let NGM=NGL< B;
+		let NGM=NGL< C;
 		let NGV=if NGM{
 		let NGP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NGN, BK));
 		NGP
@@ -53309,7 +53310,7 @@ impl Instance {
 		if NHH{
 		let NHR;
 		if NHI{
-		NHR=B;
+		NHR=C;
 		}else{
 		let NHS;
 		if NHJ{
@@ -53345,13 +53346,13 @@ impl Instance {
 		let NHP=NHO.sqrt();
 		let BKES=ATEL* (ANYF/ (AWAY* NHP));
 		let AJIV=BK* NHP;
-		let AJIW=B/ AJIV;
+		let AJIW=C/ AJIV;
 		let BKET=((BKES* BK)).product_div((-AJIW),AJIV);
 		let AJIX=XRR* AJIW;
 		let BKEU=(ATEM* AJIW)+ (BKET* XRR);
 		let AJIY=XRS* AJIW;
 		let BKEV=(ATEN* AJIW)+ (BKET* XRS);
-		let NHQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NHM, B));
+		let NHQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NHM, C));
 		NHM=NHQ;
 		NHO=NHP;
 		XRR=AJIX;
@@ -53406,7 +53407,7 @@ impl Instance {
 		ATEJ=ATEP;
 		ATEK=ATEQ;
 		}
-		let NIA=B/ NHZ;
+		let NIA=C/ NHZ;
 		let BJSW=-NIA;
 		let BJSX=(ATEI).product_div(BJSW,NHZ);
 		let BJSY=BJSX* AWAO;
@@ -53557,7 +53558,7 @@ impl Instance {
 		let NIN=((NIM* NIM)+ 0.04000000000000001f64).sqrt();
 		let BJTI=(BJTF+ BJTF)* (ANYF/ (AWAY* NIN));
 		let AJAE=BK* NIN;
-		let AJAF=B/ AJAE;
+		let AJAF=C/ AJAE;
 		let BJTJ=((BJTI* BK)).product_div((-AJAF),AJAE);
 		let NIO=J* (NIM+ NIN);
 		let BJTK=(AVZT+ BJTI)* J;
@@ -53592,7 +53593,7 @@ impl Instance {
 		let NIR=(LKW* NIQ).sqrt();
 		let BJTN=(ATFK* LKW)* (ANYF/ (AWAY* NIR));
 		let AJAK=BK* NIR;
-		let AJAL=B/ AJAK;
+		let AJAL=C/ AJAK;
 		let BJTO=((BJTN* BK)).product_div((-AJAL),AJAK);
 		let NIS=K- (NIR* LKT);
 		let BJTP=(BJTN* LKT)* AWAO;
@@ -53621,7 +53622,7 @@ impl Instance {
 		let NIV=((NIT* NIT)+ ((BH* NIU)* NIU)).sqrt();
 		let BJUA=(BJTV+ BJTV)* (ANYF/ (AWAY* NIV));
 		let AJAS=BK* NIV;
-		let AJAT=B/ AJAS;
+		let AJAT=C/ AJAS;
 		let BJUB=((BJUA* BK)).product_div((-AJAT),AJAS);
 		let NIW=J* (NIT+ NIV);
 		let BJUC=(ATFH+ BJUA)* J;
@@ -53671,7 +53672,7 @@ impl Instance {
 		let NJC=(NJB* NJA).sqrt();
 		let BJUN=(L6([0.0,0.0,0.0,(BJUJ* NJA),0.0,0.0])+ L6([BJUK[0],BJUK[1],BJUK[2],0.0,BJUK[3],BJUK[4]]))* (ANYF/ (AWAY* NJC));
 		let AJBC=BK* NJC;
-		let AJBD=B/ AJBC;
+		let AJBD=C/ AJBC;
 		let BJUO=((BJUN* BK)).product_div((-AJBD),AJBC);
 		let AJBE=AJBA* AJBD;
 		let BJUP=((L6([BJUL[0],BJUL[1],BJUL[2],0.0,BJUL[3],BJUL[4]])+ L6([0.0,0.0,0.0,(BJUJ* AJAY),0.0,0.0]))* AJBD)+ (BJUO* AJBA);
@@ -53688,18 +53689,18 @@ impl Instance {
 		let BJUT=((BJUN* BJUR)+ ((BJUN* AWAO)* BJUS))/ BK;
 		let AJBK=(AJBG+ AJBI)/ BK;
 		let AJBL=(AJBH+ AJBJ)/ BK;
-		let AJBM=B/ NJE;
+		let AJBM=C/ NJE;
 		let BJUU=(BJUT).product_div((-AJBM),NJE);
 		let NJF=(NJE.ln())/ NJA;
 		let BJUV=-NJF;
 		let BJUW=L6([BJUG[0],BJUG[1],BJUG[2],0.0,BJUG[3],BJUG[4]]);
 		let BJUX=((BJUT* (ANYF/ NJE))).product_sum_div(ANYF,BJUW,BJUV,NJA);
 		let BJUY=BJUX* AWAO;
-		let AJBN=product_sum_div((AJBK* AJBM),B,BJUV,AJAY,NJA);
-		let BJUZ=L6(sum_products_div_lanes(&[(&(((((BJUP* BJUR)+ ((BJUP* AMF)* BJUS))/ BK)* AJBM)+ (BJUU* AJBK)).0,B),(&BJUY.0,AJAY),(&L6([BJUH[0],BJUH[1],BJUH[2],0.0,BJUH[3],BJUH[4]]).0,BJUV),(&BJUW.0,(-AJBN))],NJA));
-		let AJBO=product_sum_div((AJBL* AJBM),B,BJUV,AJAZ,NJA);
-		let BJVA=L6(sum_products_div_lanes(&[(&(((((BJUQ* BJUR)+ ((BJUQ* AMF)* BJUS))/ BK)* AJBM)+ (BJUU* AJBL)).0,B),(&BJUY.0,AJAZ),(&L6([BJUI[0],BJUI[1],BJUI[2],0.0,BJUI[3],BJUI[4]]).0,BJUV),(&BJUW.0,(-AJBO))],NJA));
-		let mut NJG=B;
+		let AJBN=product_sum_div((AJBK* AJBM),C,BJUV,AJAY,NJA);
+		let BJUZ=L6(sum_products_div_lanes(&[(&(((((BJUP* BJUR)+ ((BJUP* AMF)* BJUS))/ BK)* AJBM)+ (BJUU* AJBK)).0,C),(&BJUY.0,AJAY),(&L6([BJUH[0],BJUH[1],BJUH[2],0.0,BJUH[3],BJUH[4]]).0,BJUV),(&BJUW.0,(-AJBN))],NJA));
+		let AJBO=product_sum_div((AJBL* AJBM),C,BJUV,AJAZ,NJA);
+		let BJVA=L6(sum_products_div_lanes(&[(&(((((BJUQ* BJUR)+ ((BJUQ* AMF)* BJUS))/ BK)* AJBM)+ (BJUU* AJBL)).0,C),(&BJUY.0,AJAZ),(&L6([BJUI[0],BJUI[1],BJUI[2],0.0,BJUI[3],BJUI[4]]).0,BJUV),(&BJUW.0,(-AJBO))],NJA));
+		let mut NJG=C;
 		let mut NJI=NIF;
 		let mut NNP=A;
 		let mut NOO=A;
@@ -53795,26 +53796,26 @@ impl Instance {
 		let BJWH=BJVW- L8([BJWE[0],BJWE[1],BJWE[2],BJWE[3],BJWE[4],0.0,BJWE[5],0.0]);
 		let AJCG=AJBY- (AJCE* NJQ);
 		let BJWI=BJVX- L8([BJWF[0],BJWF[1],BJWF[2],BJWF[3],BJWF[4],0.0,BJWF[5],0.0]);
-		let NJR=B+ (NJO- NJQ);
-		let AJCH=B/ NJR;
+		let NJR=C+ (NJO- NJQ);
+		let AJCH=C/ NJR;
 		let BJWJ=(BJWG).product_div((-AJCH),NJR);
 		let NJS=(NJR.ln())/ NJF;
 		let BJWK=-NJS;
 		let BJWL=L8([BJUX[0],BJUX[1],BJUX[2],BJUX[3],BJUX[4],0.0,BJUX[5],0.0]);
 		let BJWM=((BJWG* (ANYF/ NJR))).product_sum_div(ANYF,BJWL,BJWK,NJF);
 		let BJWN=BJWM* AWAO;
-		let AJCI=product_sum_div((AJCF* AJCH),B,BJWK,AJBN,NJF);
-		let BJWO=L8(sum_products_div_lanes(&[(&((BJWH* AJCH)+ (BJWJ* AJCF)).0,B),(&BJWN.0,AJBN),(&L8([BJUZ[0],BJUZ[1],BJUZ[2],BJUZ[3],BJUZ[4],0.0,BJUZ[5],0.0]).0,BJWK),(&BJWL.0,(-AJCI))],NJF));
-		let AJCJ=product_sum_div((AJCG* AJCH),B,BJWK,AJBO,NJF);
-		let BJWP=L8(sum_products_div_lanes(&[(&((BJWI* AJCH)+ (BJWJ* AJCG)).0,B),(&BJWN.0,AJBO),(&L8([BJVA[0],BJVA[1],BJVA[2],BJVA[3],BJVA[4],0.0,BJVA[5],0.0]).0,BJWK),(&BJWL.0,(-AJCJ))],NJF));
+		let AJCI=product_sum_div((AJCF* AJCH),C,BJWK,AJBN,NJF);
+		let BJWO=L8(sum_products_div_lanes(&[(&((BJWH* AJCH)+ (BJWJ* AJCF)).0,C),(&BJWN.0,AJBN),(&L8([BJUZ[0],BJUZ[1],BJUZ[2],BJUZ[3],BJUZ[4],0.0,BJUZ[5],0.0]).0,BJWK),(&BJWL.0,(-AJCI))],NJF));
+		let AJCJ=product_sum_div((AJCG* AJCH),C,BJWK,AJBO,NJF);
+		let BJWP=L8(sum_products_div_lanes(&[(&((BJWI* AJCH)+ (BJWJ* AJCG)).0,C),(&BJWN.0,AJBO),(&L8([BJVA[0],BJVA[1],BJVA[2],BJVA[3],BJVA[4],0.0,BJVA[5],0.0]).0,BJWK),(&BJWL.0,(-AJCJ))],NJF));
 		let NJT=NJO/ NJR;
 		let BJWQ=-NJT;
 		let BJWR=(BJVV).product_sum_div(ANYF,BJWG,BJWQ,NJR);
 		let BJWS=BJWR* AWAO;
-		let AJCK=product_sum_div(AJBX,B,BJWQ,AJCF,NJR);
-		let BJWT=L8(sum_products_div_lanes(&[(&BJVW.0,B),(&BJWS.0,AJCF),(&BJWH.0,BJWQ),(&BJWG.0,(-AJCK))],NJR));
-		let AJCL=product_sum_div(AJBY,B,BJWQ,AJCG,NJR);
-		let BJWU=L8(sum_products_div_lanes(&[(&BJVX.0,B),(&BJWS.0,AJCG),(&BJWI.0,BJWQ),(&BJWG.0,(-AJCL))],NJR));
+		let AJCK=product_sum_div(AJBX,C,BJWQ,AJCF,NJR);
+		let BJWT=L8(sum_products_div_lanes(&[(&BJVW.0,C),(&BJWS.0,AJCF),(&BJWH.0,BJWQ),(&BJWG.0,(-AJCK))],NJR));
+		let AJCL=product_sum_div(AJBY,C,BJWQ,AJCG,NJR);
+		let BJWU=L8(sum_products_div_lanes(&[(&BJVX.0,C),(&BJWS.0,AJCG),(&BJWI.0,BJWQ),(&BJWG.0,(-AJCL))],NJR));
 		NJU=NJS;
 		NLB=NJT;
 		XSN=AJCI;
@@ -53829,7 +53830,7 @@ impl Instance {
 		ATGE=BJWU;
 		}else{
 		NJU=NJL;
-		NLB=B;
+		NLB=C;
 		XSN=AJBT;
 		XSO=AJBU;
 		XSP=A;
@@ -53935,17 +53936,17 @@ impl Instance {
 		let BJYA=BJVI/ BH;
 		let AJDP=AJBS/ BH;
 		let BJYB=BJVJ/ BH;
-		let NKE=B- (NJK/ BC);
+		let NKE=C- (NJK/ BC);
 		let BJYC=(BJVH/ BC)* AWAO;
 		let AJDQ=-(AJBR/ BC);
 		let AJDR=-(AJBS/ BC);
-		let NKF=B- (NKD* NKE);
+		let NKF=C- (NKD* NKE);
 		let BJYD=((BJXZ* NKE)+ (BJYC* NKD))* AWAO;
 		let AJDS=-((AJDO* NKE)+ (AJDQ* NKD));
 		let AJDT=-((AJDP* NKE)+ (AJDR* NKD));
 		let BJYE=((BJXX* NKF)+ (BJYD* AJDM))+ ((((((BJYA* NKE)+ (BJYC* AJDO))+ ((((BJVI/ BC)* AWAO)* NKD)+ (BJXZ* AJDQ)))* AWAO)* NKC)+ (BJXW* AJDS));
 		let BJYF=((BJXY* NKF)+ (BJYD* AJDN))+ ((((((BJYB* NKE)+ (BJYC* AJDP))+ ((((BJVJ/ BC)* AWAO)* NKD)+ (BJXZ* AJDR)))* AWAO)* NKC)+ (BJXW* AJDT));
-		let NKG=B- (NKC* NKF);
+		let NKG=C- (NKC* NKF);
 		let BJYG=((BJXW* NKF)+ (BJYD* NKC))* AWAO;
 		let AJDU=-((AJDM* NKF)+ (AJDS* NKC));
 		let AJDV=-((AJDN* NKF)+ (AJDT* NKC));
@@ -53953,17 +53954,17 @@ impl Instance {
 		let BJYH=BJVH/ BK;
 		let AJDW=AJBR/ BK;
 		let AJDX=AJBS/ BK;
-		let NKI=B- NKD;
+		let NKI=C- NKD;
 		let BJYI=BJXZ* AWAO;
 		let AJDY=-AJDO;
 		let AJDZ=-AJDP;
-		let NKJ=B- (NKC* NKI);
+		let NKJ=C- (NKC* NKI);
 		let BJYJ=((BJXW* NKI)+ (BJYI* NKC))* AWAO;
 		let AJEA=-((AJDM* NKI)+ (AJDY* NKC));
 		let AJEB=-((AJDN* NKI)+ (AJDZ* NKC));
 		let BJYK=(((BJVI/ BK)* NKJ)+ (BJYJ* AJDW))+ ((((((BJXX* NKI)+ (BJYI* AJDM))+ (((BJYA* AWAO)* NKC)+ (BJXW* AJDY)))* AWAO)* NKH)+ (BJYH* AJEA));
 		let BJYL=(((BJVJ/ BK)* NKJ)+ (BJYJ* AJDX))+ ((((((BJXY* NKI)+ (BJYI* AJDN))+ (((BJYB* AWAO)* NKC)+ (BJXW* AJDZ)))* AWAO)* NKH)+ (BJYH* AJEB));
-		let NKK=B- (NKH* NKJ);
+		let NKK=C- (NKH* NKJ);
 		let BJYM=((BJYH* NKJ)+ (BJYJ* NKH))* AWAO;
 		let AJEC=-((AJDW* NKJ)+ (AJEA* NKH));
 		let AJED=-((AJDX* NKJ)+ (AJEB* NKH));
@@ -53994,17 +53995,17 @@ impl Instance {
 		let BJYY=BJWW/ BH;
 		let AJEN=AJCN/ BH;
 		let BJYZ=BJWX/ BH;
-		let NKP=B- (NJV/ BC);
+		let NKP=C- (NJV/ BC);
 		let BJZA=(BJWV/ BC)* AWAO;
 		let AJEO=-(AJCM/ BC);
 		let AJEP=-(AJCN/ BC);
-		let NKQ=B- (NKO* NKP);
+		let NKQ=C- (NKO* NKP);
 		let BJZB=((BJYX* NKP)+ (BJZA* NKO))* AWAO;
 		let AJEQ=-((AJEM* NKP)+ (AJEO* NKO));
 		let AJER=-((AJEN* NKP)+ (AJEP* NKO));
 		let BJZC=((BJYV* NKQ)+ (BJZB* AJEK))+ ((((((BJYY* NKP)+ (BJZA* AJEM))+ ((((BJWW/ BC)* AWAO)* NKO)+ (BJYX* AJEO)))* AWAO)* NKN)+ (BJYU* AJEQ));
 		let BJZD=((BJYW* NKQ)+ (BJZB* AJEL))+ ((((((BJYZ* NKP)+ (BJZA* AJEN))+ ((((BJWX/ BC)* AWAO)* NKO)+ (BJYX* AJEP)))* AWAO)* NKN)+ (BJYU* AJER));
-		let NKR=B- (NKN* NKQ);
+		let NKR=C- (NKN* NKQ);
 		let BJZE=((BJYU* NKQ)+ (BJZB* NKN))* AWAO;
 		let AJES=-((AJEK* NKQ)+ (AJEQ* NKN));
 		let AJET=-((AJEL* NKQ)+ (AJER* NKN));
@@ -54012,17 +54013,17 @@ impl Instance {
 		let BJZF=BJWV/ BK;
 		let AJEU=AJCM/ BK;
 		let AJEV=AJCN/ BK;
-		let NKT=B- NKO;
+		let NKT=C- NKO;
 		let BJZG=BJYX* AWAO;
 		let AJEW=-AJEM;
 		let AJEX=-AJEN;
-		let NKU=B- (NKN* NKT);
+		let NKU=C- (NKN* NKT);
 		let BJZH=((BJYU* NKT)+ (BJZG* NKN))* AWAO;
 		let AJEY=-((AJEK* NKT)+ (AJEW* NKN));
 		let AJEZ=-((AJEL* NKT)+ (AJEX* NKN));
 		let BJZI=(((BJWW/ BK)* NKU)+ (BJZH* AJEU))+ ((((((BJYV* NKT)+ (BJZG* AJEK))+ (((BJYY* AWAO)* NKN)+ (BJYU* AJEW)))* AWAO)* NKS)+ (BJZF* AJEY));
 		let BJZJ=(((BJWX/ BK)* NKU)+ (BJZH* AJEV))+ ((((((BJYW* NKT)+ (BJZG* AJEL))+ (((BJYZ* AWAO)* NKN)+ (BJYU* AJEX)))* AWAO)* NKS)+ (BJZF* AJEZ));
-		let NKV=B- (NKS* NKU);
+		let NKV=C- (NKS* NKU);
 		let BJZK=((BJZF* NKU)+ (BJZH* NKS))* AWAO;
 		let AJFA=-((AJEU* NKU)+ (AJEY* NKS));
 		let AJFB=-((AJEV* NKU)+ (AJEZ* NKS));
@@ -54055,7 +54056,7 @@ impl Instance {
 		let NKZ=NKX.sqrt();
 		let BJZR=BJZO* (ANYF/ (AWAY* NKZ));
 		let AJFG=BK* NKZ;
-		let AJFH=B/ AJFG;
+		let AJFH=C/ AJFG;
 		let BJZS=((BJZR* BK)).product_div((-AJFH),AJFG);
 		let AJFI=AJFE* AJFH;
 		let BJZT=(BJZP* AJFH)+ (BJZS* AJFE);
@@ -54070,10 +54071,10 @@ impl Instance {
 		let BJZW=-NLD;
 		let BJZX=((L8([0.0,0.0,0.0,(BJZV* NLC),0.0,0.0,0.0,0.0])+ ((BJYN- ((ATGA* NKW)+ (BJZL* NLB)))* NLA))).product_sum_div(ANYF,BJZR,BJZW,NKZ);
 		let BJZY=BJZX* AWAO;
-		let AJFM=product_sum_div((AJFK* NLA),B,BJZW,AJFI,NKZ);
-		let BJZZ=L8(sum_products_div_lanes(&[(&(((BJYO- (((ATGD* NKW)+ (BJZL* XSP))+ ((BJZM* NLB)+ (ATGA* AJFC))))* NLA)+ L8([0.0,0.0,0.0,(BJZV* AJFK),0.0,0.0,0.0,0.0])).0,B),(&BJZY.0,AJFI),(&BJZT.0,BJZW),(&BJZR.0,(-AJFM))],NKZ));
-		let AJFN=product_sum_div((AJFL* NLA),B,BJZW,AJFJ,NKZ);
-		let BKAA=L8(sum_products_div_lanes(&[(&(((BJYP- (((ATGE* NKW)+ (BJZL* XSQ))+ ((BJZN* NLB)+ (ATGA* AJFD))))* NLA)+ L8([0.0,0.0,0.0,(BJZV* AJFL),0.0,0.0,0.0,0.0])).0,B),(&BJZY.0,AJFJ),(&BJZU.0,BJZW),(&BJZR.0,(-AJFN))],NKZ));
+		let AJFM=product_sum_div((AJFK* NLA),C,BJZW,AJFI,NKZ);
+		let BJZZ=L8(sum_products_div_lanes(&[(&(((BJYO- (((ATGD* NKW)+ (BJZL* XSP))+ ((BJZM* NLB)+ (ATGA* AJFC))))* NLA)+ L8([0.0,0.0,0.0,(BJZV* AJFK),0.0,0.0,0.0,0.0])).0,C),(&BJZY.0,AJFI),(&BJZT.0,BJZW),(&BJZR.0,(-AJFM))],NKZ));
+		let AJFN=product_sum_div((AJFL* NLA),C,BJZW,AJFJ,NKZ);
+		let BKAA=L8(sum_products_div_lanes(&[(&(((BJYP- (((ATGE* NKW)+ (BJZL* XSQ))+ ((BJZN* NLB)+ (ATGA* AJFD))))* NLA)+ L8([0.0,0.0,0.0,(BJZV* AJFL),0.0,0.0,0.0,0.0])).0,C),(&BJZY.0,AJFJ),(&BJZU.0,BJZW),(&BJZR.0,(-AJFN))],NKZ));
 		NLP=NKZ;
 		NLU=NLD;
 		XTD=AJFI;
@@ -54158,7 +54159,7 @@ impl Instance {
 		let NLI=NLG.sqrt();
 		let BJXH=BJXE* (ANYF/ (AWAY* NLI));
 		let AJCY=BK* NLI;
-		let AJCZ=B/ AJCY;
+		let AJCZ=C/ AJCY;
 		let BJXI=((BJXH* BK)).product_div((-AJCZ),AJCY);
 		let AJDA=AJCW* AJCZ;
 		let BJXJ=(BJXF* AJCZ)+ (BJXI* AJCW);
@@ -54166,21 +54167,21 @@ impl Instance {
 		let BJXK=(BJXG* AJCZ)+ (BJXI* AJCX);
 		let NLJ=BWG* J;
 		let BJXL=ANZE* J;
-		let NLK=B- NLF;
+		let NLK=C- NLF;
 		let BJXM=BJXB* AWAO;
 		let AJDC=-AJCU;
 		let AJDD=-AJCV;
-		let NLL=(B- NLE)- (NLB* NLK);
+		let NLL=(C- NLE)- (NLB* NLK);
 		let AJDE=(-AJCQ)- ((XSP* NLK)+ (AJDC* NLB));
 		let AJDF=(-AJCR)- ((XSQ* NLK)+ (AJDD* NLB));
 		let NLM=(NLJ* NLL)/ NLI;
 		let BJXN=-NLM;
 		let BJXO=((L8([0.0,0.0,0.0,(BJXL* NLL),0.0,0.0,0.0,0.0])+ (((BJWY* AWAO)- ((ATGA* NLK)+ (BJXM* NLB)))* NLJ))).product_sum_div(ANYF,BJXH,BJXN,NLI);
 		let BJXP=BJXO* AWAO;
-		let AJDG=product_sum_div((AJDE* NLJ),B,BJXN,AJDA,NLI);
-		let BJXQ=L8(sum_products_div_lanes(&[(&((((BJWZ* AWAO)- (((ATGD* NLK)+ (BJXM* XSP))+ (((BJXC* AWAO)* NLB)+ (ATGA* AJDC))))* NLJ)+ L8([0.0,0.0,0.0,(BJXL* AJDE),0.0,0.0,0.0,0.0])).0,B),(&BJXP.0,AJDA),(&BJXJ.0,BJXN),(&BJXH.0,(-AJDG))],NLI));
-		let AJDH=product_sum_div((AJDF* NLJ),B,BJXN,AJDB,NLI);
-		let BJXR=L8(sum_products_div_lanes(&[(&((((BJXA* AWAO)- (((ATGE* NLK)+ (BJXM* XSQ))+ (((BJXD* AWAO)* NLB)+ (ATGA* AJDD))))* NLJ)+ L8([0.0,0.0,0.0,(BJXL* AJDF),0.0,0.0,0.0,0.0])).0,B),(&BJXP.0,AJDB),(&BJXK.0,BJXN),(&BJXH.0,(-AJDH))],NLI));
+		let AJDG=product_sum_div((AJDE* NLJ),C,BJXN,AJDA,NLI);
+		let BJXQ=L8(sum_products_div_lanes(&[(&((((BJWZ* AWAO)- (((ATGD* NLK)+ (BJXM* XSP))+ (((BJXC* AWAO)* NLB)+ (ATGA* AJDC))))* NLJ)+ L8([0.0,0.0,0.0,(BJXL* AJDE),0.0,0.0,0.0,0.0])).0,C),(&BJXP.0,AJDA),(&BJXJ.0,BJXN),(&BJXH.0,(-AJDG))],NLI));
+		let AJDH=product_sum_div((AJDF* NLJ),C,BJXN,AJDB,NLI);
+		let BJXR=L8(sum_products_div_lanes(&[(&((((BJXA* AWAO)- (((ATGE* NLK)+ (BJXM* XSQ))+ (((BJXD* AWAO)* NLB)+ (ATGA* AJDD))))* NLJ)+ L8([0.0,0.0,0.0,(BJXL* AJDF),0.0,0.0,0.0,0.0])).0,C),(&BJXP.0,AJDB),(&BJXK.0,BJXN),(&BJXH.0,(-AJDH))],NLI));
 		NLQ=NLI;
 		NLV=NLM;
 		XTH=AJDA;
@@ -54339,15 +54340,15 @@ impl Instance {
 		let BKBZ=BJVH/ BC;
 		let AJGU=AJBR/ BC;
 		let AJGV=AJBS/ BC;
-		let NMC=B+ (NJK/ BC);
+		let NMC=C+ (NJK/ BC);
 		let BKCA=(BKBW* NMC)+ (BKBZ* NMB);
 		let AJGW=(AJGS* NMC)+ (AJGU* NMB);
 		let AJGX=(AJGT* NMC)+ (AJGV* NMB);
-		let NMD=B+ (NMB* NMC);
+		let NMD=C+ (NMB* NMC);
 		let BKCB=(BKBT* NMD)+ (BKCA* NMA);
 		let AJGY=(AJGQ* NMD)+ (AJGW* NMA);
 		let AJGZ=(AJGR* NMD)+ (AJGX* NMA);
-		let NME=B+ (NMA* NMD);
+		let NME=C+ (NMA* NMD);
 		let NMF=NLZ* NME;
 		let BKCC=(BKBS* NME)+ (BKCB* NLZ);
 		let BKCD=(((BKBU* NMD)+ (BKCA* AJGQ))+ (((((BKBX* NMC)+ (BKBZ* AJGS))+ (((BJVI/ BC)* NMB)+ (BKBW* AJGU)))* NMA)+ (BKBT* AJGW)))* NLZ;
@@ -54358,15 +54359,15 @@ impl Instance {
 		let BKCF=BJVH/ BK;
 		let AJHC=AJBR/ BK;
 		let AJHD=AJBS/ BK;
-		let NMH=B+ NMB;
+		let NMH=C+ NMB;
 		let BKCG=(BKBT* NMH)+ (BKBW* NMA);
 		let AJHE=(AJGQ* NMH)+ (AJGS* NMA);
 		let AJHF=(AJGR* NMH)+ (AJGT* NMA);
-		let NMI=B+ (NMA* NMH);
+		let NMI=C+ (NMA* NMH);
 		let BKCH=(BKCF* NMI)+ (BKCG* NMG);
 		let AJHG=(AJHC* NMI)+ (AJHE* NMG);
 		let AJHH=(AJHD* NMI)+ (AJHF* NMG);
-		let NMJ=B+ (NMG* NMI);
+		let NMJ=C+ (NMG* NMI);
 		let NMK=NJK* NMJ;
 		let BKCI=(BJVH* NMJ)+ (BKCH* NJK);
 		let BKCJ=((((BJVI/ BK)* NMI)+ (BKCG* AJHC))+ (((((BKBU* NMH)+ (BKBW* AJGQ))+ ((BKBX* NMA)+ (BKBT* AJGS)))* NMG)+ (BKCF* AJHE)))* NJK;
@@ -54417,7 +54418,7 @@ impl Instance {
 		let BKAV=(BJVI* NMO)+ (BKAU* AJBR);
 		let AJGD=AJBS* NMO;
 		let BKAW=(BJVJ* NMO)+ (BKAU* AJBS);
-		let NMP=NMO- B;
+		let NMP=NMO- C;
 		let NMQ=NMP- NJK;
 		let BKAX=BKAU- BJVH;
 		let AJGE=AJGC- AJBR;
@@ -54482,7 +54483,7 @@ impl Instance {
 		let BKAG=(((ATFV* BWG)+ L8([0.0,0.0,0.0,(ANZE* XSJ),0.0,0.0,0.0,0.0]))* NMU)+ (BKAF* AJFQ);
 		let AJFT=AJFR* NMU;
 		let BKAH=(((ATFW* BWG)+ L8([0.0,0.0,0.0,(ANZE* XSK),0.0,0.0,0.0,0.0]))* NMU)+ (BKAF* AJFR);
-		let NMV=NJK+ B;
+		let NMV=NJK+ C;
 		let BKAI=ASYY* NMV;
 		let BKAJ=ASYZ* NMV;
 		let BKAK=ASYY* AJBR;
@@ -54545,7 +54546,7 @@ impl Instance {
 		let NNE=((NLN* NLN)+ NNB).sqrt();
 		let BKDE=((BKDB+ BKDB)+ ATHQ)* (ANYF/ (AWAY* NNE));
 		let AJHU=BK* NNE;
-		let AJHV=B/ AJHU;
+		let AJHV=C/ AJHU;
 		let BKDF=((BKDE* BK)).product_div((-AJHV),AJHU);
 		let AJHW=AJHS* AJHV;
 		let BKDG=(((BKDC+ BKDC)+ ATHS)* AJHV)+ (BKDF* AJHS);
@@ -54559,10 +54560,10 @@ impl Instance {
 		let BKDJ=-NNI;
 		let BKDK=(((((BKDI* NLN)+ (ATGF* NNF))+ ATHR)* J)).product_sum_div(ANYF,BKDE,BKDJ,NNE);
 		let BKDL=BKDK* AWAO;
-		let AJIA=product_sum_div(((((AJHY* NLN)+ (XSR* NNF))+ XTR)* J),B,BKDJ,AJHW,NNE);
-		let BKDM=L8(sum_products_div_lanes(&[(&((((((ATGK* BK)* NLN)+ (ATGF* AJHY))+ ((ATGI* NNF)+ (BKDI* XSR)))+ ATHU)* J).0,B),(&BKDL.0,AJHW),(&BKDG.0,BKDJ),(&BKDE.0,(-AJIA))],NNE));
-		let AJIB=product_sum_div(((((AJHZ* NLN)+ (XSS* NNF))+ XTS)* J),B,BKDJ,AJHX,NNE);
-		let BKDN=L8(sum_products_div_lanes(&[(&((((((ATGL* BK)* NLN)+ (ATGF* AJHZ))+ ((ATGJ* NNF)+ (BKDI* XSS)))+ ATHV)* J).0,B),(&BKDL.0,AJHX),(&BKDH.0,BKDJ),(&BKDE.0,(-AJIB))],NNE));
+		let AJIA=product_sum_div(((((AJHY* NLN)+ (XSR* NNF))+ XTR)* J),C,BKDJ,AJHW,NNE);
+		let BKDM=L8(sum_products_div_lanes(&[(&((((((ATGK* BK)* NLN)+ (ATGF* AJHY))+ ((ATGI* NNF)+ (BKDI* XSR)))+ ATHU)* J).0,C),(&BKDL.0,AJHW),(&BKDG.0,BKDJ),(&BKDE.0,(-AJIA))],NNE));
+		let AJIB=product_sum_div(((((AJHZ* NLN)+ (XSS* NNF))+ XTS)* J),C,BKDJ,AJHX,NNE);
+		let BKDN=L8(sum_products_div_lanes(&[(&((((((ATGL* BK)* NLN)+ (ATGF* AJHZ))+ ((ATGJ* NNF)+ (BKDI* XSS)))+ ATHV)* J).0,C),(&BKDL.0,AJHX),(&BKDH.0,BKDJ),(&BKDE.0,(-AJIB))],NNE));
 		NNK=NNE;
 		NNN=NNI;
 		XTX=AJHW;
@@ -54616,8 +54617,8 @@ impl Instance {
 		let BKDZ=(ATHO* MVG)+ L8([0.0,0.0,0.0,(BJFU* XTN),0.0,0.0,0.0,0.0]);
 		let AJIJ=XTO* MVG;
 		let BKEA=(ATHP* MVG)+ L8([0.0,0.0,0.0,(BJFU* XTO),0.0,0.0,0.0,0.0]);
-		let NNO=B+ (MVG* NNM);
-		let NNQ=NNP== B;
+		let NNO=C+ (MVG* NNM);
+		let NNQ=NNP== C;
 		let NOF;
 		let NOH;
 		let NOM;
@@ -54640,13 +54641,13 @@ impl Instance {
 		let BKEB=-NNS;
 		let BKEC=((BKDV* AWAO)).product_sum_div(ANYF,BKDY,BKEB,NNO);
 		let BKED=BKEC* AWAO;
-		let AJIK=product_sum_div((AJIG* AMF),B,BKEB,AJII,NNO);
-		let BKEE=L8(sum_products_div_lanes(&[(&(BKDW* AMF).0,B),(&BKED.0,AJII),(&BKDZ.0,BKEB),(&BKDY.0,(-AJIK))],NNO));
-		let AJIL=product_sum_div((AJIH* AMF),B,BKEB,AJIJ,NNO);
-		let BKEF=L8(sum_products_div_lanes(&[(&(BKDX* AMF).0,B),(&BKED.0,AJIJ),(&BKEA.0,BKEB),(&BKDY.0,(-AJIL))],NNO));
+		let AJIK=product_sum_div((AJIG* AMF),C,BKEB,AJII,NNO);
+		let BKEE=L8(sum_products_div_lanes(&[(&(BKDW* AMF).0,C),(&BKED.0,AJII),(&BKDZ.0,BKEB),(&BKDY.0,(-AJIK))],NNO));
+		let AJIL=product_sum_div((AJIH* AMF),C,BKEB,AJIJ,NNO);
+		let BKEF=L8(sum_products_div_lanes(&[(&(BKDX* AMF).0,C),(&BKED.0,AJIJ),(&BKEA.0,BKEB),(&BKDY.0,(-AJIL))],NNO));
 		let NNU=NJI.abs();
 		let BKEG=ATFQ* ((AWAY* ((NJI>= AWBZ) as u8 as f64))- ANYF);
-		let NNV=B>= NNU;
+		let NNV=C>= NNU;
 		let NNW;
 		let XUD;
 		let XUE;
@@ -54654,14 +54655,14 @@ impl Instance {
 		let ATIM;
 		let ATIN;
 		if NNV{
-		NNW=B;
+		NNW=C;
 		XUD=A;
 		XUE=A;
 		ATIL=BHSX;
 		ATIM=BHSX;
 		ATIN=BHSX;
 		}else{
-		let AJIM=(BK* ((NJI>= A) as u8 as f64))- B;
+		let AJIM=(BK* ((NJI>= A) as u8 as f64))- C;
 		let AJIN=XSJ* AJIM;
 		let BKEH=ATFV* AJIM;
 		let AJIO=XSK* AJIM;
@@ -54673,7 +54674,7 @@ impl Instance {
 		ATIM=BKEH;
 		ATIN=BKEI;
 		}
-		let NNX=NNT* (B+ NNW);
+		let NNX=NNT* (C+ NNW);
 		let BKEJ=ATIL* NNT;
 		let AJIP=XUD* NNT;
 		let BKEK=ATIM* NNT;
@@ -54689,7 +54690,7 @@ impl Instance {
 		if NNY{
 		let NNZ=NNS>= A;
 		let NOA=if NNZ{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -54721,7 +54722,7 @@ impl Instance {
 		let BKER=ATFW+ ATIQ;
 		let NOE=((NOC.abs())<= BBK)&& ((NNL.abs())<= AQ);
 		let NON=if NOE{
-		B
+		C
 		}else{
 		NNP
 		};
@@ -54734,7 +54735,7 @@ impl Instance {
 		ATIJ=BKEQ;
 		ATIK=BKER;
 		}
-		let NOG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NOF, B));
+		let NOG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NOF, C));
 		NJG=NOG;
 		NJI=NOH;
 		NNP=NOM;
@@ -54763,7 +54764,7 @@ impl Instance {
 		let NOR=MUW* NOQ;
 		let BJVC=L8([0.0,0.0,0.0,(ASUU* NOQ),0.0,0.0,0.0,0.0])+ (BJVB* MUW);
 		let NOT=NOS+ NOQ;
-		let NOU=B/ NOT;
+		let NOU=C/ NOT;
 		let NOX=MUW* NOV;
 		let NOY=NOR+ (NOX* NOU);
 		let BJVD=BJVC+ (((L8([0.0,0.0,0.0,(ASUU* NOV),0.0,0.0,0.0,0.0])+ (ATFT* MUW))* NOU)+ ((((ATFS+ BJVB)).product_div((-NOU),NOT))* NOX));
@@ -54937,7 +54938,7 @@ impl Instance {
 		let NPJ=((NPI* NPI)+ 0.04000000000000001f64).sqrt();
 		let BKHS=(BKHP+ BKHP)* (ANYF/ (AWAY* NPJ));
 		let AJLJ=BK* NPJ;
-		let AJLK=B/ AJLJ;
+		let AJLK=C/ AJLJ;
 		let BKHT=((BKHS* BK)).product_div((-AJLK),AJLJ);
 		let NPK=J* (NPI+ NPJ);
 		let BKHU=(AVZT+ BKHS)* J;
@@ -54972,7 +54973,7 @@ impl Instance {
 		let NPN=(LKW* NPM).sqrt();
 		let BKHX=(ATJF* LKW)* (ANYF/ (AWAY* NPN));
 		let AJLP=BK* NPN;
-		let AJLQ=B/ AJLP;
+		let AJLQ=C/ AJLP;
 		let BKHY=((BKHX* BK)).product_div((-AJLQ),AJLP);
 		let NPO=K- (NPN* LKT);
 		let BKHZ=(BKHX* LKT)* AWAO;
@@ -55001,7 +55002,7 @@ impl Instance {
 		let NPR=((NPP* NPP)+ ((BH* NPQ)* NPQ)).sqrt();
 		let BKIK=(BKIF+ BKIF)* (ANYF/ (AWAY* NPR));
 		let AJLX=BK* NPR;
-		let AJLY=B/ AJLX;
+		let AJLY=C/ AJLX;
 		let BKIL=((BKIK* BK)).product_div((-AJLY),AJLX);
 		let NPS=J* (NPP+ NPR);
 		let BKIM=(ATJC+ BKIK)* J;
@@ -55051,7 +55052,7 @@ impl Instance {
 		let NPY=(NPX* NPW).sqrt();
 		let BKIX=(L6([0.0,0.0,0.0,(BKIT* NPW),0.0,0.0])+ L6([BKIU[0],BKIU[1],BKIU[2],0.0,BKIU[3],BKIU[4]]))* (ANYF/ (AWAY* NPY));
 		let AJMH=BK* NPY;
-		let AJMI=B/ AJMH;
+		let AJMI=C/ AJMH;
 		let BKIY=((BKIX* BK)).product_div((-AJMI),AJMH);
 		let AJMJ=AJMF* AJMI;
 		let BKIZ=((L6([BKIV[0],BKIV[1],BKIV[2],0.0,BKIV[3],BKIV[4]])+ L6([0.0,0.0,0.0,(BKIT* AJMD),0.0,0.0]))* AJMI)+ (BKIY* AJMF);
@@ -55068,18 +55069,18 @@ impl Instance {
 		let BKJD=((BKIX* BKJB)+ ((BKIX* AWAO)* BKJC))/ BK;
 		let AJMP=(AJML+ AJMN)/ BK;
 		let AJMQ=(AJMM+ AJMO)/ BK;
-		let AJMR=B/ NQA;
+		let AJMR=C/ NQA;
 		let BKJE=(BKJD).product_div((-AJMR),NQA);
 		let NQB=(NQA.ln())/ NPW;
 		let BKJF=-NQB;
 		let BKJG=L6([BKIQ[0],BKIQ[1],BKIQ[2],0.0,BKIQ[3],BKIQ[4]]);
 		let BKJH=((BKJD* (ANYF/ NQA))).product_sum_div(ANYF,BKJG,BKJF,NPW);
 		let BKJI=BKJH* AWAO;
-		let AJMS=product_sum_div((AJMP* AJMR),B,BKJF,AJMD,NPW);
-		let BKJJ=L6(sum_products_div_lanes(&[(&(((((BKIZ* BKJB)+ ((BKIZ* AMF)* BKJC))/ BK)* AJMR)+ (BKJE* AJMP)).0,B),(&BKJI.0,AJMD),(&L6([BKIR[0],BKIR[1],BKIR[2],0.0,BKIR[3],BKIR[4]]).0,BKJF),(&BKJG.0,(-AJMS))],NPW));
-		let AJMT=product_sum_div((AJMQ* AJMR),B,BKJF,AJME,NPW);
-		let BKJK=L6(sum_products_div_lanes(&[(&(((((BKJA* BKJB)+ ((BKJA* AMF)* BKJC))/ BK)* AJMR)+ (BKJE* AJMQ)).0,B),(&BKJI.0,AJME),(&L6([BKIS[0],BKIS[1],BKIS[2],0.0,BKIS[3],BKIS[4]]).0,BKJF),(&BKJG.0,(-AJMT))],NPW));
-		let mut NQC=B;
+		let AJMS=product_sum_div((AJMP* AJMR),C,BKJF,AJMD,NPW);
+		let BKJJ=L6(sum_products_div_lanes(&[(&(((((BKIZ* BKJB)+ ((BKIZ* AMF)* BKJC))/ BK)* AJMR)+ (BKJE* AJMP)).0,C),(&BKJI.0,AJMD),(&L6([BKIR[0],BKIR[1],BKIR[2],0.0,BKIR[3],BKIR[4]]).0,BKJF),(&BKJG.0,(-AJMS))],NPW));
+		let AJMT=product_sum_div((AJMQ* AJMR),C,BKJF,AJME,NPW);
+		let BKJK=L6(sum_products_div_lanes(&[(&(((((BKJA* BKJB)+ ((BKJA* AMF)* BKJC))/ BK)* AJMR)+ (BKJE* AJMQ)).0,C),(&BKJI.0,AJME),(&L6([BKIS[0],BKIS[1],BKIS[2],0.0,BKIS[3],BKIS[4]]).0,BKJF),(&BKJG.0,(-AJMT))],NPW));
+		let mut NQC=C;
 		let mut NQE=NPD;
 		let mut NUA=A;
 		let mut NUW=A;
@@ -55169,26 +55170,26 @@ impl Instance {
 		let BQFZ=BQFO- L8([BQFW[0],BQFW[1],BQFW[2],BQFW[3],BQFW[4],0.0,BQFW[5],0.0]);
 		let ANAF=AMZX- (ANAD* NQM);
 		let BQGA=BQFP- L8([BQFX[0],BQFX[1],BQFX[2],BQFX[3],BQFX[4],0.0,BQFX[5],0.0]);
-		let NQN=B+ (NQK- NQM);
-		let ANAG=B/ NQN;
+		let NQN=C+ (NQK- NQM);
+		let ANAG=C/ NQN;
 		let BQGB=(BQFY).product_div((-ANAG),NQN);
 		let NQO=(NQN.ln())/ NQB;
 		let BQGC=-NQO;
 		let BQGD=L8([BKJH[0],BKJH[1],BKJH[2],BKJH[3],BKJH[4],0.0,BKJH[5],0.0]);
 		let BQGE=((BQFY* (ANYF/ NQN))).product_sum_div(ANYF,BQGD,BQGC,NQB);
 		let BQGF=BQGE* AWAO;
-		let ANAH=product_sum_div((ANAE* ANAG),B,BQGC,AJMS,NQB);
-		let BQGG=L8(sum_products_div_lanes(&[(&((BQFZ* ANAG)+ (BQGB* ANAE)).0,B),(&BQGF.0,AJMS),(&L8([BKJJ[0],BKJJ[1],BKJJ[2],BKJJ[3],BKJJ[4],0.0,BKJJ[5],0.0]).0,BQGC),(&BQGD.0,(-ANAH))],NQB));
-		let ANAI=product_sum_div((ANAF* ANAG),B,BQGC,AJMT,NQB);
-		let BQGH=L8(sum_products_div_lanes(&[(&((BQGA* ANAG)+ (BQGB* ANAF)).0,B),(&BQGF.0,AJMT),(&L8([BKJK[0],BKJK[1],BKJK[2],BKJK[3],BKJK[4],0.0,BKJK[5],0.0]).0,BQGC),(&BQGD.0,(-ANAI))],NQB));
+		let ANAH=product_sum_div((ANAE* ANAG),C,BQGC,AJMS,NQB);
+		let BQGG=L8(sum_products_div_lanes(&[(&((BQFZ* ANAG)+ (BQGB* ANAE)).0,C),(&BQGF.0,AJMS),(&L8([BKJJ[0],BKJJ[1],BKJJ[2],BKJJ[3],BKJJ[4],0.0,BKJJ[5],0.0]).0,BQGC),(&BQGD.0,(-ANAH))],NQB));
+		let ANAI=product_sum_div((ANAF* ANAG),C,BQGC,AJMT,NQB);
+		let BQGH=L8(sum_products_div_lanes(&[(&((BQGA* ANAG)+ (BQGB* ANAF)).0,C),(&BQGF.0,AJMT),(&L8([BKJK[0],BKJK[1],BKJK[2],BKJK[3],BKJK[4],0.0,BKJK[5],0.0]).0,BQGC),(&BQGD.0,(-ANAI))],NQB));
 		let NQP=NQK/ NQN;
 		let BQGI=-NQP;
 		let BQGJ=(BQFN).product_sum_div(ANYF,BQFY,BQGI,NQN);
 		let BQGK=BQGJ* AWAO;
-		let ANAJ=product_sum_div(AMZW,B,BQGI,ANAE,NQN);
-		let BQGL=L8(sum_products_div_lanes(&[(&BQFO.0,B),(&BQGK.0,ANAE),(&BQFZ.0,BQGI),(&BQFY.0,(-ANAJ))],NQN));
-		let ANAK=product_sum_div(AMZX,B,BQGI,ANAF,NQN);
-		let BQGM=L8(sum_products_div_lanes(&[(&BQFP.0,B),(&BQGK.0,ANAF),(&BQGA.0,BQGI),(&BQFY.0,(-ANAK))],NQN));
+		let ANAJ=product_sum_div(AMZW,C,BQGI,ANAE,NQN);
+		let BQGL=L8(sum_products_div_lanes(&[(&BQFO.0,C),(&BQGK.0,ANAE),(&BQFZ.0,BQGI),(&BQFY.0,(-ANAJ))],NQN));
+		let ANAK=product_sum_div(AMZX,C,BQGI,ANAF,NQN);
+		let BQGM=L8(sum_products_div_lanes(&[(&BQFP.0,C),(&BQGK.0,ANAF),(&BQGA.0,BQGI),(&BQFY.0,(-ANAK))],NQN));
 		NQQ=NQO;
 		NRQ=NQP;
 		XUV=ANAH;
@@ -55203,7 +55204,7 @@ impl Instance {
 		ATJW=BQGM;
 		}else{
 		NQQ=NQH;
-		NRQ=B;
+		NRQ=C;
 		XUV=AMZS;
 		XUW=AMZT;
 		XUX=A;
@@ -55257,17 +55258,17 @@ impl Instance {
 		let BQHL=BQFA/ BH;
 		let ANBK=AMZR/ BH;
 		let BQHM=BQFB/ BH;
-		let NQX=B- (NQG/ BC);
+		let NQX=C- (NQG/ BC);
 		let BQHN=(BQEZ/ BC)* AWAO;
 		let ANBL=-(AMZQ/ BC);
 		let ANBM=-(AMZR/ BC);
-		let NQY=B- (NQW* NQX);
+		let NQY=C- (NQW* NQX);
 		let BQHO=((BQHK* NQX)+ (BQHN* NQW))* AWAO;
 		let ANBN=-((ANBJ* NQX)+ (ANBL* NQW));
 		let ANBO=-((ANBK* NQX)+ (ANBM* NQW));
 		let BQHP=((BQHI* NQY)+ (BQHO* ANBH))+ ((((((BQHL* NQX)+ (BQHN* ANBJ))+ ((((BQFA/ BC)* AWAO)* NQW)+ (BQHK* ANBL)))* AWAO)* NQV)+ (BQHH* ANBN));
 		let BQHQ=((BQHJ* NQY)+ (BQHO* ANBI))+ ((((((BQHM* NQX)+ (BQHN* ANBK))+ ((((BQFB/ BC)* AWAO)* NQW)+ (BQHK* ANBM)))* AWAO)* NQV)+ (BQHH* ANBO));
-		let NQZ=B- (NQV* NQY);
+		let NQZ=C- (NQV* NQY);
 		let BQHR=((BQHH* NQY)+ (BQHO* NQV))* AWAO;
 		let ANBP=-((ANBH* NQY)+ (ANBN* NQV));
 		let ANBQ=-((ANBI* NQY)+ (ANBO* NQV));
@@ -55275,17 +55276,17 @@ impl Instance {
 		let BQHS=BQEZ/ BK;
 		let ANBR=AMZQ/ BK;
 		let ANBS=AMZR/ BK;
-		let NRB=B- NQW;
+		let NRB=C- NQW;
 		let BQHT=BQHK* AWAO;
 		let ANBT=-ANBJ;
 		let ANBU=-ANBK;
-		let NRC=B- (NQV* NRB);
+		let NRC=C- (NQV* NRB);
 		let BQHU=((BQHH* NRB)+ (BQHT* NQV))* AWAO;
 		let ANBV=-((ANBH* NRB)+ (ANBT* NQV));
 		let ANBW=-((ANBI* NRB)+ (ANBU* NQV));
 		let BQHV=(((BQFA/ BK)* NRC)+ (BQHU* ANBR))+ ((((((BQHI* NRB)+ (BQHT* ANBH))+ (((BQHL* AWAO)* NQV)+ (BQHH* ANBT)))* AWAO)* NRA)+ (BQHS* ANBV));
 		let BQHW=(((BQFB/ BK)* NRC)+ (BQHU* ANBS))+ ((((((BQHJ* NRB)+ (BQHT* ANBI))+ (((BQHM* AWAO)* NQV)+ (BQHH* ANBU)))* AWAO)* NRA)+ (BQHS* ANBW));
-		let NRD=B- (NRA* NRC);
+		let NRD=C- (NRA* NRC);
 		let BQHX=((BQHS* NRC)+ (BQHU* NRA))* AWAO;
 		let ANBX=-((ANBR* NRC)+ (ANBV* NRA));
 		let ANBY=-((ANBS* NRC)+ (ANBW* NRA));
@@ -55310,17 +55311,17 @@ impl Instance {
 		let BQIG=BQGO/ BH;
 		let ANCG=ANAM/ BH;
 		let BQIH=BQGP/ BH;
-		let NRH=B- (NQR/ BC);
+		let NRH=C- (NQR/ BC);
 		let BQII=(BQGN/ BC)* AWAO;
 		let ANCH=-(ANAL/ BC);
 		let ANCI=-(ANAM/ BC);
-		let NRI=B- (NRG* NRH);
+		let NRI=C- (NRG* NRH);
 		let BQIJ=((BQIF* NRH)+ (BQII* NRG))* AWAO;
 		let ANCJ=-((ANCF* NRH)+ (ANCH* NRG));
 		let ANCK=-((ANCG* NRH)+ (ANCI* NRG));
 		let BQIK=((BQID* NRI)+ (BQIJ* ANCD))+ ((((((BQIG* NRH)+ (BQII* ANCF))+ ((((BQGO/ BC)* AWAO)* NRG)+ (BQIF* ANCH)))* AWAO)* NRF)+ (BQIC* ANCJ));
 		let BQIL=((BQIE* NRI)+ (BQIJ* ANCE))+ ((((((BQIH* NRH)+ (BQII* ANCG))+ ((((BQGP/ BC)* AWAO)* NRG)+ (BQIF* ANCI)))* AWAO)* NRF)+ (BQIC* ANCK));
-		let NRJ=B- (NRF* NRI);
+		let NRJ=C- (NRF* NRI);
 		let BQIM=((BQIC* NRI)+ (BQIJ* NRF))* AWAO;
 		let ANCL=-((ANCD* NRI)+ (ANCJ* NRF));
 		let ANCM=-((ANCE* NRI)+ (ANCK* NRF));
@@ -55328,17 +55329,17 @@ impl Instance {
 		let BQIN=BQGN/ BK;
 		let ANCN=ANAL/ BK;
 		let ANCO=ANAM/ BK;
-		let NRL=B- NRG;
+		let NRL=C- NRG;
 		let BQIO=BQIF* AWAO;
 		let ANCP=-ANCF;
 		let ANCQ=-ANCG;
-		let NRM=B- (NRF* NRL);
+		let NRM=C- (NRF* NRL);
 		let BQIP=((BQIC* NRL)+ (BQIO* NRF))* AWAO;
 		let ANCR=-((ANCD* NRL)+ (ANCP* NRF));
 		let ANCS=-((ANCE* NRL)+ (ANCQ* NRF));
 		let BQIQ=(((BQGO/ BK)* NRM)+ (BQIP* ANCN))+ ((((((BQID* NRL)+ (BQIO* ANCD))+ (((BQIG* AWAO)* NRF)+ (BQIC* ANCP)))* AWAO)* NRK)+ (BQIN* ANCR));
 		let BQIR=(((BQGP/ BK)* NRM)+ (BQIP* ANCO))+ ((((((BQIE* NRL)+ (BQIO* ANCE))+ (((BQIH* AWAO)* NRF)+ (BQIC* ANCQ)))* AWAO)* NRK)+ (BQIN* ANCS));
-		let NRN=B- (NRK* NRM);
+		let NRN=C- (NRK* NRM);
 		let BQIS=((BQIN* NRM)+ (BQIP* NRK))* AWAO;
 		let ANCT=-((ANCN* NRM)+ (ANCR* NRK));
 		let ANCU=-((ANCO* NRM)+ (ANCS* NRK));
@@ -55398,11 +55399,11 @@ impl Instance {
 		let BQGX=(BQFA- BQGO)+ (BQGR- BQGU);
 		let ANAW=(AMZR- ANAM)+ (ANAQ- ANAU);
 		let BQGY=(BQFB- BQGP)+ (BQGS- BQGV);
-		let NRW=B- NRU;
+		let NRW=C- NRU;
 		let BQGZ=BQGT* AWAO;
 		let ANAX=-ANAT;
 		let ANAY=-ANAU;
-		let NRX=(B- NRT)- (NRQ* NRW);
+		let NRX=(C- NRT)- (NRQ* NRW);
 		let ANAZ=(-ANAP)- ((XUX* NRW)+ (ANAX* NRQ));
 		let ANBA=(-ANAQ)- ((XUY* NRW)+ (ANAY* NRQ));
 		let NRY=BWG* NRX;
@@ -55462,15 +55463,15 @@ impl Instance {
 		let BQKW=BQEZ/ BC;
 		let ANEH=AMZQ/ BC;
 		let ANEI=AMZR/ BC;
-		let NSD=B+ (NQG/ BC);
+		let NSD=C+ (NQG/ BC);
 		let BQKX=(BQKT* NSD)+ (BQKW* NSC);
 		let ANEJ=(ANEF* NSD)+ (ANEH* NSC);
 		let ANEK=(ANEG* NSD)+ (ANEI* NSC);
-		let NSE=B+ (NSC* NSD);
+		let NSE=C+ (NSC* NSD);
 		let BQKY=(BQKQ* NSE)+ (BQKX* NSB);
 		let ANEL=(ANED* NSE)+ (ANEJ* NSB);
 		let ANEM=(ANEE* NSE)+ (ANEK* NSB);
-		let NSF=B+ (NSB* NSE);
+		let NSF=C+ (NSB* NSE);
 		let NSG=NSA* NSF;
 		let BQKZ=(BQKP* NSF)+ (BQKY* NSA);
 		let BQLA=(((BQKR* NSE)+ (BQKX* ANED))+ (((((BQKU* NSD)+ (BQKW* ANEF))+ (((BQFA/ BC)* NSC)+ (BQKT* ANEH)))* NSB)+ (BQKQ* ANEJ)))* NSA;
@@ -55481,15 +55482,15 @@ impl Instance {
 		let BQLC=BQEZ/ BK;
 		let ANEP=AMZQ/ BK;
 		let ANEQ=AMZR/ BK;
-		let NSI=B+ NSC;
+		let NSI=C+ NSC;
 		let BQLD=(BQKQ* NSI)+ (BQKT* NSB);
 		let ANER=(ANED* NSI)+ (ANEF* NSB);
 		let ANES=(ANEE* NSI)+ (ANEG* NSB);
-		let NSJ=B+ (NSB* NSI);
+		let NSJ=C+ (NSB* NSI);
 		let BQLE=(BQLC* NSJ)+ (BQLD* NSH);
 		let ANET=(ANEP* NSJ)+ (ANER* NSH);
 		let ANEU=(ANEQ* NSJ)+ (ANES* NSH);
-		let NSK=B+ (NSH* NSJ);
+		let NSK=C+ (NSH* NSJ);
 		let NSL=NQG* NSK;
 		let BQLF=(BQEZ* NSK)+ (BQLE* NQG);
 		let BQLG=((((BQFA/ BK)* NSJ)+ (BQLD* ANEP))+ (((((BQKR* NSI)+ (BQKT* ANED))+ ((BQKU* NSB)+ (BQKQ* ANEF)))* NSH)+ (BQLC* ANER)))* NQG;
@@ -55554,7 +55555,7 @@ impl Instance {
 		let BQJS=(BQFA* NSQ)+ (BQJR* AMZQ);
 		let ANDQ=AMZR* NSQ;
 		let BQJT=(BQFB* NSQ)+ (BQJR* AMZR);
-		let NSR=NSQ- B;
+		let NSR=NSQ- C;
 		let NSS=NSR- NQG;
 		let BQJU=BQJR- BQEZ;
 		let ANDR=ANDP- AMZQ;
@@ -55606,7 +55607,7 @@ impl Instance {
 		let BQJD=(((ATJP* BWG)+ L8([0.0,0.0,0.0,(ANZE* XUT),0.0,0.0,0.0,0.0]))* NSW)+ (BQJC* ANDD);
 		let ANDG=ANDE* NSW;
 		let BQJE=(((ATJQ* BWG)+ L8([0.0,0.0,0.0,(ANZE* XUU),0.0,0.0,0.0,0.0]))* NSW)+ (BQJC* ANDE);
-		let NSX=NQG+ B;
+		let NSX=NQG+ C;
 		let BQJF=BKHI* NSX;
 		let BQJG=BKHJ* NSX;
 		let BQJH=BKHI* AMZQ;
@@ -55677,7 +55678,7 @@ impl Instance {
 		let NTH=(NTG+ NTD).sqrt();
 		let BQMH=(ATJX+ ATKD)* (ANYF/ (AWAY* NTH));
 		let ANFL=BK* NTH;
-		let ANFM=B/ ANFL;
+		let ANFM=C/ ANFL;
 		let BQMI=((BQMH* BK)).product_div((-ANFM),ANFL);
 		let ANFN=ANFJ* ANFM;
 		let BQMJ=((ATJZ+ ATKF)* ANFM)+ (BQMI* ANFJ);
@@ -55687,10 +55688,10 @@ impl Instance {
 		let BQML=-NTL;
 		let BQMM=(((ATJY+ ATKE)* J)).product_sum_div(ANYF,BQMH,BQML,NTH);
 		let BQMN=BQMM* AWAO;
-		let ANFP=product_sum_div(((XVB+ XVF)* J),B,BQML,ANFN,NTH);
-		let BQMO=L8(sum_products_div_lanes(&[(&((ATKB+ ATKH)* J).0,B),(&BQMN.0,ANFN),(&BQMJ.0,BQML),(&BQMH.0,(-ANFP))],NTH));
-		let ANFQ=product_sum_div(((XVC+ XVG)* J),B,BQML,ANFO,NTH);
-		let BQMP=L8(sum_products_div_lanes(&[(&((ATKC+ ATKI)* J).0,B),(&BQMN.0,ANFO),(&BQMK.0,BQML),(&BQMH.0,(-ANFQ))],NTH));
+		let ANFP=product_sum_div(((XVB+ XVF)* J),C,BQML,ANFN,NTH);
+		let BQMO=L8(sum_products_div_lanes(&[(&((ATKB+ ATKH)* J).0,C),(&BQMN.0,ANFN),(&BQMJ.0,BQML),(&BQMH.0,(-ANFP))],NTH));
+		let ANFQ=product_sum_div(((XVC+ XVG)* J),C,BQML,ANFO,NTH);
+		let BQMP=L8(sum_products_div_lanes(&[(&((ATKC+ ATKI)* J).0,C),(&BQMN.0,ANFO),(&BQMK.0,BQML),(&BQMH.0,(-ANFQ))],NTH));
 		NTR=NTH;
 		NTV=NTL;
 		XVL=ANFN;
@@ -55721,7 +55722,7 @@ impl Instance {
 		let NTN=NTG.sqrt();
 		let BQLY=ATJX* (ANYF/ (AWAY* NTN));
 		let ANFD=BK* NTN;
-		let ANFE=B/ ANFD;
+		let ANFE=C/ ANFD;
 		let BQLZ=((BQLY* BK)).product_div((-ANFE),ANFD);
 		let ANFF=XUZ* ANFE;
 		let BQMA=(ATJZ* ANFE)+ (BQLZ* XUZ);
@@ -55731,10 +55732,10 @@ impl Instance {
 		let BQMC=-NTO;
 		let BQMD=((ATJY* J)).product_sum_div(ANYF,BQLY,BQMC,NTN);
 		let BQME=BQMD* AWAO;
-		let ANFH=product_sum_div((XVB* J),B,BQMC,ANFF,NTN);
-		let BQMF=L8(sum_products_div_lanes(&[(&(ATKB* J).0,B),(&BQME.0,ANFF),(&BQMA.0,BQMC),(&BQLY.0,(-ANFH))],NTN));
-		let ANFI=product_sum_div((XVC* J),B,BQMC,ANFG,NTN);
-		let BQMG=L8(sum_products_div_lanes(&[(&(ATKC* J).0,B),(&BQME.0,ANFG),(&BQMB.0,BQMC),(&BQLY.0,(-ANFI))],NTN));
+		let ANFH=product_sum_div((XVB* J),C,BQMC,ANFF,NTN);
+		let BQMF=L8(sum_products_div_lanes(&[(&(ATKB* J).0,C),(&BQME.0,ANFF),(&BQMA.0,BQMC),(&BQLY.0,(-ANFH))],NTN));
+		let ANFI=product_sum_div((XVC* J),C,BQMC,ANFG,NTN);
+		let BQMG=L8(sum_products_div_lanes(&[(&(ATKC* J).0,C),(&BQME.0,ANFG),(&BQMB.0,BQMC),(&BQLY.0,(-ANFI))],NTN));
 		NTS=NTN;
 		NTW=NTO;
 		XVP=ANFF;
@@ -55776,7 +55777,7 @@ impl Instance {
 		}
 		let NTP=NQG>= A;
 		let NTQ=if NTP{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -55787,7 +55788,7 @@ impl Instance {
 		let ANFS=XVM* NTQ;
 		let BQMS=ATKS* NTQ;
 		let NTU=if NTP{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -55806,7 +55807,7 @@ impl Instance {
 		let BQMY=((ATKT* NTU)* MVG)+ L8([0.0,0.0,0.0,(BJFU* ANFT),0.0,0.0,0.0,0.0]);
 		let ANFY=ANFU* MVG;
 		let BQMZ=((ATKU* NTU)* MVG)+ L8([0.0,0.0,0.0,(BJFU* ANFU),0.0,0.0,0.0,0.0]);
-		let NTZ=B+ (MVG* NTX);
+		let NTZ=C+ (MVG* NTX);
 		let NUB=NUA> A;
 		let NUR;
 		let NUT;
@@ -55830,13 +55831,13 @@ impl Instance {
 		let BQNA=-NUD;
 		let BQNB=((BQMU* AWAO)).product_sum_div(ANYF,BQMX,BQNA,NTZ);
 		let BQNC=BQNB* AWAO;
-		let ANFZ=product_sum_div((ANFV* AMF),B,BQNA,ANFX,NTZ);
-		let BQND=L8(sum_products_div_lanes(&[(&(BQMV* AMF).0,B),(&BQNC.0,ANFX),(&BQMY.0,BQNA),(&BQMX.0,(-ANFZ))],NTZ));
-		let ANGA=product_sum_div((ANFW* AMF),B,BQNA,ANFY,NTZ);
-		let BQNE=L8(sum_products_div_lanes(&[(&(BQMW* AMF).0,B),(&BQNC.0,ANFY),(&BQMZ.0,BQNA),(&BQMX.0,(-ANGA))],NTZ));
+		let ANFZ=product_sum_div((ANFV* AMF),C,BQNA,ANFX,NTZ);
+		let BQND=L8(sum_products_div_lanes(&[(&(BQMV* AMF).0,C),(&BQNC.0,ANFX),(&BQMY.0,BQNA),(&BQMX.0,(-ANFZ))],NTZ));
+		let ANGA=product_sum_div((ANFW* AMF),C,BQNA,ANFY,NTZ);
+		let BQNE=L8(sum_products_div_lanes(&[(&(BQMW* AMF).0,C),(&BQNC.0,ANFY),(&BQMZ.0,BQNA),(&BQMX.0,(-ANGA))],NTZ));
 		let NUF=NQE.abs();
 		let BQNF=ATJL* ((AWAY* ((NQE>= AWBZ) as u8 as f64))- ANYF);
-		let NUG=B>= NUF;
+		let NUG=C>= NUF;
 		let NUH;
 		let XVV;
 		let XVW;
@@ -55844,14 +55845,14 @@ impl Instance {
 		let ATLF;
 		let ATLG;
 		if NUG{
-		NUH=B;
+		NUH=C;
 		XVV=A;
 		XVW=A;
 		ATLE=BHSX;
 		ATLF=BHSX;
 		ATLG=BHSX;
 		}else{
-		let ANGB=(BK* ((NQE>= A) as u8 as f64))- B;
+		let ANGB=(BK* ((NQE>= A) as u8 as f64))- C;
 		let ANGC=XUT* ANGB;
 		let BQNG=ATJP* ANGB;
 		let ANGD=XUU* ANGB;
@@ -55863,7 +55864,7 @@ impl Instance {
 		ATLF=BQNG;
 		ATLG=BQNH;
 		}
-		let NUI=NUE* (B+ NUH);
+		let NUI=NUE* (C+ NUH);
 		let BQNI=ATLE* NUE;
 		let ANGE=XVV* NUE;
 		let BQNJ=ATLF* NUE;
@@ -55879,7 +55880,7 @@ impl Instance {
 		if NUJ{
 		let NUK=NUD>= A;
 		let NUL=if NUK{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -55925,7 +55926,7 @@ impl Instance {
 		ATLC=BQNP;
 		ATLD=BQNQ;
 		}
-		let NUS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NUR, B));
+		let NUS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, NUR, C));
 		NQC=NUS;
 		NQE=NUT;
 		NUA=NUU;
@@ -55948,7 +55949,7 @@ impl Instance {
 		if NUX{
 		let NVC=NUY>= A;
 		let NVD=if NVC{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -55967,7 +55968,7 @@ impl Instance {
 		let NVJ=MUW* NVI;
 		let BKJN=L8([0.0,0.0,0.0,(ASUU* NVI),0.0,0.0,0.0,0.0])+ (BKJM* MUW);
 		let NVN=NVK+ NVI;
-		let NVO=B/ NVN;
+		let NVO=C/ NVN;
 		let NVS=MUW* NVP;
 		let NVT=NVJ+ (NVS* NVO);
 		let BKJO=BKJN+ (((L8([0.0,0.0,0.0,(ASUU* NVP),0.0,0.0,0.0,0.0])+ (ATJO* MUW))* NVO)+ ((((ATJN+ BKJM)).product_div((-NVO),NVN))* NVS));
@@ -56081,7 +56082,7 @@ impl Instance {
 		let NWT=((NWS* NWS)+ 0.04000000000000001f64).sqrt();
 		let BKKB=(BKJY+ BKJY)* (ANYF/ (AWAY* NWT));
 		let AJNC=BK* NWT;
-		let AJND=B/ AJNC;
+		let AJND=C/ AJNC;
 		let BKKC=((BKKB* BK)).product_div((-AJND),AJNC);
 		let NWU=J* (NWS+ NWT);
 		let BKKD=(ATLR+ BKKB)* J;
@@ -56116,7 +56117,7 @@ impl Instance {
 		let NWX=(LKW* NWW).sqrt();
 		let BKKG=(ATLU* LKW)* (ANYF/ (AWAY* NWX));
 		let AJNI=BK* NWX;
-		let AJNJ=B/ AJNI;
+		let AJNJ=C/ AJNI;
 		let BKKH=((BKKG* BK)).product_div((-AJNJ),AJNI);
 		let NWY=BZ* NWK;
 		let BKKI=BKJP* BZ;
@@ -56178,7 +56179,7 @@ impl Instance {
 		let NXF=((NWZ* NWZ)+ NXE).sqrt();
 		let BKKY=((BKKV+ BKKV)+ ATLX)* (ANYF/ (AWAY* NXF));
 		let AJNY=BK* NXF;
-		let AJNZ=B/ AJNY;
+		let AJNZ=C/ AJNY;
 		let BKKZ=((BKKY* BK)).product_div((-AJNZ),AJNY);
 		let NXG=NWK- (NWK- (J* (NWZ+ NXF)));
 		let BKLA=BKJP- (BKJP- ((BKKL+ BKKY)* J));
@@ -56243,7 +56244,7 @@ impl Instance {
 		let ATMM;
 		let ATMN;
 		if NXH{
-		let NXI=LJ== B;
+		let NXI=LJ== C;
 		let NXO;
 		let XWL;
 		let XWM;
@@ -56264,7 +56265,7 @@ impl Instance {
 		ATMP=BKLZ;
 		ATMQ=BKMA;
 		}else{
-		let NXM=B- JN;
+		let NXM=C- JN;
 		let NXN=(PM* NXJ)* NXM;
 		let BKLV=(ATLL* PM)* NXM;
 		let AJOK=(XVZ* PM)* NXM;
@@ -56392,7 +56393,7 @@ impl Instance {
 		let ATNL;
 		let ATNM;
 		if NXV{
-		let NXW=LJ== B;
+		let NXW=LJ== C;
 		let NYB;
 		let XWR;
 		let XWS;
@@ -56413,7 +56414,7 @@ impl Instance {
 		ATNO=BKLM;
 		ATNP=BKLN;
 		}else{
-		let NXY=B- JN;
+		let NXY=C- JN;
 		let NXZ=(PM* NXJ)* NXY;
 		let BKLI=(ATLL* PM)* NXY;
 		let AJOE=(XVZ* PM)* NXY;
@@ -56699,7 +56700,7 @@ impl Instance {
 		let ATOD;
 		let ATOE;
 		if NYI{
-		let NYJ=((LJK== B)&& (ADB> A))&& (ME> A);
+		let NYJ=((LJK== C)&& (ADB> A))&& (ME> A);
 		let NZV;
 		let OAE;
 		let OBC;
@@ -56732,7 +56733,7 @@ impl Instance {
 		let AJPV=YZR* AMF;
 		let BKNS=L5([0.0,0.0,0.0,BKNR[0],BKNR[1]]);
 		let BKNT=L4([0.0,BKNQ[0],BKNQ[1],BKNQ[2]]);
-		NZV=B;
+		NZV=C;
 		OAE=ME;
 		OBC=NYL;
 		OBY=LJO;
@@ -56740,7 +56741,7 @@ impl Instance {
 		OCK=NYK;
 		OKI=A;
 		PDD=ADB;
-		ROS=B;
+		ROS=C;
 		XXA=A;
 		XXB=AJPV;
 		XXC=AJPU;
@@ -56829,7 +56830,7 @@ impl Instance {
 		let ATOV;
 		let ATOW;
 		if NYM{
-		let NYN=((((LJK== B)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= B);
+		let NYN=((((LJK== C)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= C);
 		let NZX;
 		let OBE;
 		let OCM;
@@ -56847,7 +56848,7 @@ impl Instance {
 		let BKNN=AVZY* AWAO;
 		let BKNO=L5([0.0,BKNN[0],0.0,0.0,BKNN[1]]);
 		let BKNP=L4([BKNM[0],BKNM[1],0.0,BKNM[2]]);
-		NZX=B;
+		NZX=C;
 		OBE=NYP;
 		OCM=NYO;
 		XXK=A;
@@ -56917,7 +56918,7 @@ impl Instance {
 		let ATPI;
 		let ATPJ;
 		if NYQ{
-		let NYR=((LKB== B)&& (ABL> A))&& SN;
+		let NYR=((LKB== C)&& (ABL> A))&& SN;
 		let NZZ;
 		let OAH;
 		let OBG;
@@ -56949,7 +56950,7 @@ impl Instance {
 		let BKMI=AWAM- AWAL;
 		let AJOP=YZP- YZR;
 		let NYU=-(ABL+ (LKF* LJ));
-		let NYV=((NYU< A)&& (LKT> A))&& (LJ== B);
+		let NYV=((NYU< A)&& (LKT> A))&& (LJ== C);
 		let OBH;
 		let PDI;
 		let XXX;
@@ -56998,7 +56999,7 @@ impl Instance {
 		let NZB=if NZA{
 		AMF
 		}else{
-		B
+		C
 		};
 		let NZC=NZB* NYT;
 		let BKMJ=BKMI* NZB;
@@ -57009,17 +57010,17 @@ impl Instance {
 		let AJOS=AJOQ/ NYX;
 		let AJOT=AJOR/ NYX;
 		let BKML=BKMK* (LKY* ((NZD+ (((NZD== AWBZ) as u8 as f64)* AWCA)).powf((LKY- ANYF))));
-		let AJOU=LKY- B;
+		let AJOU=LKY- C;
 		let AJOV=NZD+ (((NZD== A) as u8 as f64)* ZNW);
 		let BKMM=AJOU* ((AJOV+ (((AJOV== AWBZ) as u8 as f64)* AWCA)).powf((AJOU- ANYF)));
 		let AJOW=LKY* (AJOV.powf(AJOU));
 		let AJOX=AJOS* AJOW;
 		let AJOY=AJOT* AJOW;
-		let NZE=B+ (NZD.powf(LKY));
-		let NZF=B/ LKY;
+		let NZE=C+ (NZD.powf(LKY));
+		let NZF=C/ LKY;
 		let NZG=NZE.powf(NZF);
 		let BKMN=BKML* (NZF* ((NZE+ (((NZE== AWBZ) as u8 as f64)* AWCA)).powf((NZF- ANYF))));
-		let AJOZ=NZF- B;
+		let AJOZ=NZF- C;
 		let AJPA=NZE+ (((NZE== A) as u8 as f64)* ZNW);
 		let BKMO=AJOZ* ((AJPA+ (((AJPA== AWBZ) as u8 as f64)* AWCA)).powf((AJOZ- ANYF)));
 		let AJPB=NZF* (AJPA.powf(AJOZ));
@@ -57029,9 +57030,9 @@ impl Instance {
 		let BKMP=-NZH;
 		let BKMQ=((BKMJ* NZB)).product_sum_div(ANYF,BKMN,BKMP,NZG);
 		let BKMR=BKMQ* AWAO;
-		let AJPE=product_sum_div((AJOQ* NZB),B,BKMP,AJPC,NZG);
+		let AJPE=product_sum_div((AJOQ* NZB),C,BKMP,AJPC,NZG);
 		let BKMS=L3(sum_products_div_lanes(&[(&BKMR.0,AJPC),(&(((((BKMK* BKMM)* LKY)* AJOS)* AJPB)+ (((BKML* BKMO)* NZF)* AJOX)).0,BKMP),(&BKMN.0,(-AJPE))],NZG));
-		let AJPF=product_sum_div((AJOR* NZB),B,BKMP,AJPD,NZG);
+		let AJPF=product_sum_div((AJOR* NZB),C,BKMP,AJPD,NZG);
 		let BKMT=L3(sum_products_div_lanes(&[(&BKMR.0,AJPD),(&(((((BKMK* BKMM)* LKY)* AJOT)* AJPB)+ (((BKML* BKMO)* NZF)* AJOY)).0,BKMP),(&BKMN.0,(-AJPF))],NZG));
 		NZI=NZH;
 		XYF=AJPE;
@@ -57051,7 +57052,7 @@ impl Instance {
 		let NZK=((NZJ* NZJ)+ 0.04000000000000001f64).sqrt();
 		let BKMX=(BKMU+ BKMU)* (ANYF/ (AWAY* NZK));
 		let AJPK=BK* NZK;
-		let AJPL=B/ AJPK;
+		let AJPL=C/ AJPK;
 		let BKMY=((BKMX* BK)).product_div((-AJPL),AJPK);
 		let NZL=J* (NZJ+ NZK);
 		let BKMZ=(ATQF+ BKMX)* J;
@@ -57086,7 +57087,7 @@ impl Instance {
 		let NZO=(LKW* NZN).sqrt();
 		let BKNC=(ATQI* LKW)* (ANYF/ (AWAY* NZO));
 		let AJPQ=BK* NZO;
-		let AJPR=B/ AJPQ;
+		let AJPR=C/ AJPQ;
 		let BKND=((BKNC* BK)).product_div((-AJPR),AJPQ);
 		let NZP=NYW- (NZO* LKT);
 		let BKNE=(BKNC* LKT)* AWAO;
@@ -57151,7 +57152,7 @@ impl Instance {
 		let BKNJ=L8([0.0,0.0,0.0,0.0,ATPU[0],0.0,ATPU[1],ATPU[2]]);
 		let BKNK=L8([0.0,0.0,0.0,0.0,ATPX[0],0.0,ATPX[1],ATPX[2]]);
 		let BKNL=L8([0.0,0.0,0.0,0.0,ATPY[0],0.0,ATPY[1],ATPY[2]]);
-		NZZ=B;
+		NZZ=C;
 		OAH=MD;
 		OBG=OBH;
 		OCB=LKK;
@@ -57159,7 +57160,7 @@ impl Instance {
 		OCO=NYS;
 		OKL=LKG;
 		PDH=PDI;
-		RPR=B;
+		RPR=C;
 		XXS=XXX;
 		XXT=XXY;
 		XXU=AJOO;
@@ -57234,7 +57235,7 @@ impl Instance {
 		let ATQN;
 		let ATQO;
 		if NZQ{
-		let NZR=((((LKB== B)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= B);
+		let NZR=((((LKB== C)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= C);
 		let OAB;
 		let OBK;
 		let OCQ;
@@ -57252,7 +57253,7 @@ impl Instance {
 		let BKME=L3([AVZW[0],AVZW[1],0.0])- L3([0.0,AVZY[0],AVZY[1]]);
 		let BKMF=L5([BKME[0],BKME[1],0.0,0.0,BKME[2]]);
 		let BKMG=L4([BKMD[0],BKMD[1],0.0,BKMD[2]]);
-		OAB=B;
+		OAB=C;
 		OBK=NZT;
 		OCQ=NZS;
 		XYM=A;
@@ -57484,7 +57485,7 @@ impl Instance {
 		OBM=OAV;
 		ATRU=ATRS;
 		}
-		let OBA=LNB== B;
+		let OBA=LNB== C;
 		let OCS;
 		let XYX;
 		let XYY;
@@ -57536,18 +57537,18 @@ impl Instance {
 		let BKPB=(BKOU* OBQ)+ (BKOR* AJQB);
 		let AJQF=AJQD* OBQ;
 		let BKPC=(BKOX* OBQ)+ (BKOR* AJQD);
-		let OBR=(((B+ OBP)+ OBQ)+ (OBQ* OBP))+ (OBQ* OBQ);
+		let OBR=(((C+ OBP)+ OBQ)+ (OBQ* OBP))+ (OBQ* OBQ);
 		let BKPD=((BKOM+ BKOR)+ ((BKOR* OBP)+ (BKOM* OBQ)))+ (BKPA+ BKPA);
 		let AJQG=((AJPY+ AJQB)+ ((AJQB* OBP)+ (AJPY* OBQ)))+ (AJQE+ AJQE);
 		let AJQH=((AJPZ+ AJQD)+ ((AJQD* OBP)+ (AJPZ* OBQ)))+ (AJQF+ AJQF);
-		let OBS=B/ OBR;
+		let OBS=C/ OBR;
 		let BKPE=-OBS;
 		let BKPF=((BKPD).product_div(BKPE,OBR))* AWAO;
 		let AJQI=product_div(BKPE,AJQG,OBR);
 		let BKPG=-AJQI;
 		let AJQJ=product_div(BKPE,AJQH,OBR);
 		let BKPH=-AJQJ;
-		let OBT=B- OBS;
+		let OBT=C- OBS;
 		let AJQK=BKPG* OBO;
 		let BKPI=((L6(sum_products_div_lanes(&[(&BKPF.0,AJQG),(&(((L6([0.0,0.0,BKOO[0],BKOO[1],BKOO[2],BKOO[3]])+ BKOU)+ (((BKOU* OBP)+ (BKOM* AJQB))+ (L6([0.0,0.0,BKOY[0],BKOY[1],BKOY[2],BKOY[3]])+ (BKOR* AJPY))))+ (BKPB+ BKPB)).0,BKPE),(&BKPD.0,BKPG)],OBR)))* AWAO)* OBO;
 		let BKPJ=BKPI+ L6([0.0,0.0,(BKOL* BKPG),0.0,0.0,0.0]);
@@ -57623,7 +57624,7 @@ impl Instance {
 		if OCZ{
 		let AJQV=XYX* AMF;
 		let AJQW=XYY* AMF;
-		let ODA=IDF* ((B+ OCY)- AL);
+		let ODA=IDF* ((C+ OCY)- AL);
 		let BKQD=BKPW* IDF;
 		let AJQX=(AJQV* BWG)* IDF;
 		let BKQE=(((ATRW* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AJQV),0.0,0.0,0.0]))* IDF;
@@ -57643,7 +57644,7 @@ impl Instance {
 		let AJQS=AJQQ* BWG;
 		let BKPY=((ATRX* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AJQQ),0.0,0.0,0.0]);
 		let mut ODB=OCY;
-		let mut ODD=B;
+		let mut ODD=C;
 		let mut XZD=AJQR;
 		let mut XZE=AJQS;
 		let mut ATSE=BKPW;
@@ -57696,7 +57697,7 @@ impl Instance {
 		if A!=0.0{
 		let BKQJ=(BKPT* AWAO)* J;
 		let AJQZ=(AJQO* AMF)* J;
-		let ODI=(((-OCR)* J)- J)- B;
+		let ODI=(((-OCR)* J)- J)- C;
 		let ODM=if ODK{
 		ODJ
 		}else{
@@ -57709,7 +57710,7 @@ impl Instance {
 		let ODN=((ODI* ODI)+ ODM).sqrt();
 		let BKQM=(BKQK+ BKQK)* (ANYF/ (AWAY* ODN));
 		let AJRC=BK* ODN;
-		let AJRD=B/ AJRC;
+		let AJRD=C/ AJRC;
 		let BKQN=(BKQJ+ BKQM)* J;
 		let AJRE=(AJQZ+ (AJRB* AJRD))* J;
 		let BKQO=(((BKQL+ BKQL)* AJRD)+ ((((BKQM* BK)).product_div((-AJRD),AJRC))* AJRB))* J;
@@ -57757,7 +57758,7 @@ impl Instance {
 		if ODU{
 		let OEE;
 		if ODV{
-		OEE=B;
+		OEE=C;
 		}else{
 		let OEF;
 		if ODW{
@@ -57793,13 +57794,13 @@ impl Instance {
 		let OEC=OEB.sqrt();
 		let BQES=ATSQ* (ANYF/ (AWAY* OEC));
 		let AMZK=BK* OEC;
-		let AMZL=B/ AMZK;
+		let AMZL=C/ AMZK;
 		let BQET=((BQES* BK)).product_div((-AMZL),AMZK);
 		let AMZM=XZL* AMZL;
 		let BQEU=(ATSR* AMZL)+ (BQET* XZL);
 		let AMZN=XZM* AMZL;
 		let BQEV=(ATSS* AMZL)+ (BQET* XZM);
-		let OED=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ODZ, B));
+		let OED=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ODZ, C));
 		ODZ=OED;
 		OEB=OEC;
 		XZL=AMZM;
@@ -57854,7 +57855,7 @@ impl Instance {
 		ATSO=ATSU;
 		ATSP=ATSV;
 		}
-		let OEN=B/ OEM;
+		let OEN=C/ OEM;
 		let BKRL=-OEN;
 		let BKRM=(ATSN).product_div(BKRL,OEM);
 		let BKRN=BKRM* AWAO;
@@ -57968,7 +57969,7 @@ impl Instance {
 		let AKKB=XZF* BWG;
 		let AKKC=AKKA* BWG;
 		let OFA=BWG* OBX;
-		let OFB=B/ OFA;
+		let OFB=C/ OFA;
 		let OFC=OFB* OCC;
 		let BLPC=(product_div(((ANZE* OBX)+ (ATNX* BWG)),(-OFB),OFA))* OCC;
 		let BLPD=BLPC* OFD;
@@ -58023,7 +58024,7 @@ impl Instance {
 		let OFO=(OFH+ OFL).sqrt();
 		let BLPP=(L7([0.0,0.0,BLPE,0.0,0.0,0.0,0.0])+ BLPK)* (ANYF/ (AWAY* OFO));
 		let AKKJ=BK* OFO;
-		let AKKK=B/ AKKJ;
+		let AKKK=C/ AKKJ;
 		let BLPQ=((BLPP* BK)).product_div((-AKKK),AKKJ);
 		let OFP=(-OFK)+ OFO;
 		let BLPR=(BLPG* AWAO)+ BLPP;
@@ -58056,15 +58057,15 @@ impl Instance {
 		let BLQE=-OFT;
 		let BLQF=(((L7([0.0,0.0,((BLPC* GUA)* AWAO),0.0,0.0,0.0,0.0])+ (BLPZ* BK))+ ((BLQD* OFR)+ (BLPZ* OFS)))).product_sum_div(ANYF,BLPZ,BLQE,OFR);
 		let BLQG=BLQF* AWAO;
-		let AKKY=product_sum_div(((AKKS* BK)+ ((AKKW* OFR)+ (AKKS* OFS))),B,BLQE,AKKS,OFR);
-		let AKKZ=product_sum_div(((AKKV* BK)+ ((AKKX* OFR)+ (AKKV* OFS))),B,BLQE,AKKV,OFR);
+		let AKKY=product_sum_div(((AKKS* BK)+ ((AKKW* OFR)+ (AKKS* OFS))),C,BLQE,AKKS,OFR);
+		let AKKZ=product_sum_div(((AKKV* BK)+ ((AKKX* OFR)+ (AKKV* OFS))),C,BLQE,AKKV,OFR);
 		let OFU=OFT* CWM;
 		let BLQH=(BLQF* CWM)+ L7([0.0,0.0,(ANZG* OFT),0.0,0.0,0.0,0.0]);
 		let AKLA=AKKY* CWM;
-		let BLQI=(L7(sum_products_div_lanes(&[(&((BLQB* BK)+ ((((BLQB* JAN)* OFR)+ (BLPZ* AKKW))+ ((BLQB* OFS)+ (BLQD* AKKS)))).0,B),(&BLQG.0,AKKS),(&BLQB.0,BLQE),(&BLPZ.0,(-AKKY))],OFR)))* CWM;
+		let BLQI=(L7(sum_products_div_lanes(&[(&((BLQB* BK)+ ((((BLQB* JAN)* OFR)+ (BLPZ* AKKW))+ ((BLQB* OFS)+ (BLQD* AKKS)))).0,C),(&BLQG.0,AKKS),(&BLQB.0,BLQE),(&BLPZ.0,(-AKKY))],OFR)))* CWM;
 		let BLQJ=BLQI+ L7([0.0,0.0,(ANZG* AKKY),0.0,0.0,0.0,0.0]);
 		let AKLB=AKKZ* CWM;
-		let BLQK=(L7(sum_products_div_lanes(&[(&((BLQC* BK)+ ((((BLQC* JAN)* OFR)+ (BLPZ* AKKX))+ ((BLQC* OFS)+ (BLQD* AKKV)))).0,B),(&BLQG.0,AKKV),(&BLQC.0,BLQE),(&BLPZ.0,(-AKKZ))],OFR)))* CWM;
+		let BLQK=(L7(sum_products_div_lanes(&[(&((BLQC* BK)+ ((((BLQC* JAN)* OFR)+ (BLPZ* AKKX))+ ((BLQC* OFS)+ (BLQD* AKKV)))).0,C),(&BLQG.0,AKKV),(&BLQC.0,BLQE),(&BLPZ.0,(-AKKZ))],OFR)))* CWM;
 		let BLQL=BLQK+ L7([0.0,0.0,(ANZG* AKKZ),0.0,0.0,0.0,0.0]);
 		let OFV=OFU/ OEX;
 		let BLQM=L7([0.0,0.0,BLPA,0.0,0.0,0.0,0.0]);
@@ -58078,10 +58079,10 @@ impl Instance {
 		let AKLG=AKLD* OFV;
 		let BLQQ=(((BLQL).product_sum_div(ANYF,BLQM,(-AKLD),OEX))* OFV)+ (BLQN* AKLD);
 		let AKLH=AKLG+ AKLG;
-		let OFW=(B+ (OFV* OFV)).sqrt();
+		let OFW=(C+ (OFV* OFV)).sqrt();
 		let BLQR=(BLQO+ BLQO)* (ANYF/ (AWAY* OFW));
 		let AKLI=BK* OFW;
-		let AKLJ=B/ AKLI;
+		let AKLJ=C/ AKLI;
 		let BLQS=((BLQR* BK)).product_div((-AKLJ),AKLI);
 		let AKLK=AKLF* AKLJ;
 		let AKLL=AKLH* AKLJ;
@@ -58089,14 +58090,14 @@ impl Instance {
 		let BLQT=-OFX;
 		let BLQU=(BLQH).product_sum_div(ANYF,BLQR,BLQT,OFW);
 		let BLQV=BLQU* AWAO;
-		let AKLM=product_sum_div(AKLA,B,BLQT,AKLK,OFW);
-		let AKLN=product_sum_div(AKLB,B,BLQT,AKLL,OFW);
+		let AKLM=product_sum_div(AKLA,C,BLQT,AKLK,OFW);
+		let AKLN=product_sum_div(AKLB,C,BLQT,AKLL,OFW);
 		let OFY=OFX- OEY;
 		let BLQW=BLQU- ATSH;
 		let AKLO=AKLM- XZF;
-		let BLQX=(L7(sum_products_div_lanes(&[(&BLQJ.0,B),(&BLQV.0,AKLK),(&(((BLQP+ BLQP)* AKLJ)+ (BLQS* AKLF)).0,BLQT),(&BLQR.0,(-AKLM))],OFW)))- ATSI;
+		let BLQX=(L7(sum_products_div_lanes(&[(&BLQJ.0,C),(&BLQV.0,AKLK),(&(((BLQP+ BLQP)* AKLJ)+ (BLQS* AKLF)).0,BLQT),(&BLQR.0,(-AKLM))],OFW)))- ATSI;
 		let AKLP=AKLN- XZG;
-		let BLQY=(L7(sum_products_div_lanes(&[(&BLQL.0,B),(&BLQV.0,AKLL),(&(((BLQQ+ BLQQ)* AKLJ)+ (BLQS* AKLH)).0,BLQT),(&BLQR.0,(-AKLN))],OFW)))- ATSJ;
+		let BLQY=(L7(sum_products_div_lanes(&[(&BLQL.0,C),(&BLQV.0,AKLL),(&(((BLQQ+ BLQQ)* AKLJ)+ (BLQS* AKLH)).0,BLQT),(&BLQR.0,(-AKLN))],OFW)))- ATSJ;
 		let OFZ=OCC* (OCR- OFY);
 		let BLQZ=(BLPB- BLQW)* OCC;
 		let BLRA=L8([BLQW[0],BLQW[1],0.0,BLQW[2],BLQW[3],BLQW[4],BLQW[5],BLQW[6]]);
@@ -58149,7 +58150,7 @@ impl Instance {
 		let OGB=BWG* OGA;
 		let BKSC=BKSB* BWG;
 		let BKSD=L7([0.0,0.0,(ANZE* OGA),0.0,0.0,0.0,0.0])+ BKSC;
-		let OGC=OGB< (B+ (((-0.9999999999999978f64* OCI)* FCG)/ BH));
+		let OGC=OGB< (C+ (((-0.9999999999999978f64* OCI)* FCG)/ BH));
 		let OGK;
 		let YAB;
 		let YAC;
@@ -58169,18 +58170,18 @@ impl Instance {
 		}else{
 		let AJRY=AJQO+ XZG;
 		let OGE=OCI* FCG;
-		let OGF=(BH* (OGB- B))/ OGE;
+		let OGF=(BH* (OGB- C))/ OGE;
 		let BKSE=L7([0.0,0.0,((BKPS* FCG)+ (ANZM* OCI)),0.0,0.0,0.0,0.0]);
 		let AJRZ=((XZF* BWG)* BH)/ OGE;
 		let AJSA=((AJRY* BWG)* BH)/ OGE;
 		let OGG=(OCI* BWG)/ BK;
 		let BKSF=((BKPS* BWG)+ (ANZE* OCI))/ BK;
-		let OGH=(B+ OGF).sqrt();
+		let OGH=(C+ OGF).sqrt();
 		let BKSG=(((BKSD* BH)).product_sum_div(ANYF,BKSE,(-OGF),OGE))* (ANYF/ (AWAY* OGH));
 		let AJSB=BK* OGH;
-		let AJSC=B/ AJSB;
+		let AJSC=C/ AJSB;
 		let BKSH=((BKSG* BK)).product_div((-AJSC),AJSB);
-		let OGI=B- OGH;
+		let OGI=C- OGH;
 		let AJSD=-(AJRZ* AJSC);
 		let AJSE=-(AJSA* AJSC);
 		let AJSF=AJSD* OGG;
@@ -58222,7 +58223,7 @@ impl Instance {
 		let BKTM=(ATSI* BWG)+ L7([0.0,0.0,(ANZE* XZF),0.0,0.0,0.0,0.0]);
 		let AJTR=AJTP* BWG;
 		let BKTN=(ATSJ* BWG)+ L7([0.0,0.0,(ANZE* AJTP),0.0,0.0,0.0,0.0]);
-		let OGP=OGB- B;
+		let OGP=OGB- C;
 		let OGQ=OCI* FCG;
 		let OGR=(BH* (OGP+ OGO))/ OGQ;
 		let BKTO=L7([0.0,0.0,((BKPS* FCG)+ (ANZM* OCI)),0.0,0.0,0.0,0.0]);
@@ -58230,12 +58231,12 @@ impl Instance {
 		let AJTT=((AJTR+ (AJTO* OGO))* BH)/ OGQ;
 		let OGS=(OCI* BWG)/ BK;
 		let BKTP=((BKPS* BWG)+ (ANZE* OCI))/ BK;
-		let OGT=(B+ OGR).sqrt();
+		let OGT=(C+ OGR).sqrt();
 		let BKTQ=((((BKSD+ BKTL)* BH)).product_sum_div(ANYF,BKTO,(-OGR),OGQ))* (ANYF/ (AWAY* OGT));
 		let AJTU=BK* OGT;
-		let AJTV=B/ AJTU;
+		let AJTV=C/ AJTU;
 		let BKTR=((BKTQ* BK)).product_div((-AJTV),AJTU);
-		let OGU=B- OGT;
+		let OGU=C- OGT;
 		let AJTW=-(AJTS* AJTV);
 		let AJTX=-(AJTT* AJTV);
 		let BKTS=((((((((BKTM+ (((BKSO* AMF)* OGO)+ (BKTL* AJTN)))* BH)).product_sum_div(ANYF,BKTO,(-AJTS),OGQ))* AJTV)+ (BKTR* AJTS))* AWAO)* OGS)+ L7([0.0,0.0,(BKTP* AJTW),0.0,0.0,0.0,0.0]);
@@ -58250,14 +58251,14 @@ impl Instance {
 		let OGX=(BH* (OGP+ OGW))/ OGQ;
 		let AJUC=((AJTQ+ (AJUA* OGW))* BH)/ OGQ;
 		let AJUD=((AJTR+ (AJUB* OGW))* BH)/ OGQ;
-		let OGY=(B+ OGX).sqrt();
+		let OGY=(C+ OGX).sqrt();
 		let BKTV=((((BKSD+ BKTU)* BH)).product_sum_div(ANYF,BKTO,(-OGX),OGQ))* (ANYF/ (AWAY* OGY));
 		let AJUE=BK* OGY;
-		let AJUF=B/ AJUE;
+		let AJUF=C/ AJUE;
 		let BKTW=((BKTV* BK)).product_div((-AJUF),AJUE);
 		let BKTX=(((((BKTM+ ((((((BKTS+ ATSI)* BWG)+ L7([0.0,0.0,(ANZE* AJTY),0.0,0.0,0.0,0.0]))* AMF)* OGW)+ (BKTU* AJUA)))* BH)).product_sum_div(ANYF,BKTO,(-AJUC),OGQ))* AJUF)+ (BKTW* AJUC);
 		let BKTY=(((((BKTN+ ((((((BKTT+ ATSJ)* BWG)+ L7([0.0,0.0,(ANZE* AJTZ),0.0,0.0,0.0,0.0]))* AMF)* OGW)+ (BKTU* AJUB)))* BH)).product_sum_div(ANYF,BKTO,(-AJUD),OGQ))* AJUF)+ (BKTW* AJUD);
-		let OGZ=B- OGY;
+		let OGZ=C- OGY;
 		let AJUG=-(AJUC* AJUF);
 		let AJUH=-(AJUD* AJUF);
 		let OHA=(OCR+ (OGS* OGZ))+ OEY;
@@ -58277,7 +58278,7 @@ impl Instance {
 		ATTX=BKUB;
 		}else{
 		let OHD=BWG* OCH;
-		let OHE=B/ OHD;
+		let OHE=C/ OHD;
 		let BKSQ=product_div(((ANZE* OCH)+ (BKPQ* BWG)),(-OHE),OHD);
 		let OHF=0.7071067811865475f64+ OHE;
 		let OHG=(-OGA)/ OCH;
@@ -58304,7 +58305,7 @@ impl Instance {
 		let OHO=((OHJ* OHJ)+ (OHN* OHM)).sqrt();
 		let BKTA=((BKSW+ BKSW)+ L7([0.0,0.0,(((BKSZ+ BKSZ)* OHM)+ (BKSV* OHN)),0.0,0.0,0.0,0.0]))* (ANYF/ (AWAY* OHO));
 		let AJST=BK* OHO;
-		let AJSU=B/ AJST;
+		let AJSU=C/ AJST;
 		let BKTB=((BKTA* BK)).product_div((-AJSU),AJST);
 		let AJSV=AJSQ* AJSU;
 		let BKTC=((BKSX+ BKSX)* AJSU)+ (BKTB* AJSQ);
@@ -58394,7 +58395,7 @@ impl Instance {
 		let BKUS=L7([BKUL[0],BKUL[1],BKUL[2],BKUL[3],0.0,BKUL[4],BKUL[5]]);
 		let AJUW=AJUS+ (AJUU+ AJUU);
 		let BKUT=L7([BKUM[0],BKUM[1],BKUM[2],BKUM[3],0.0,BKUM[4],BKUM[5]]);
-		let AJUX=B/ OHZ;
+		let AJUX=C/ OHZ;
 		let BKUU=(BKUR).product_div((-AJUX),OHZ);
 		let OIA=OCX* OHW;
 		let OIB=OIA.ln();
@@ -58422,7 +58423,7 @@ impl Instance {
 		let BKVC=BKUH- BKUZ;
 		let AJVC=AJUQ- AJVA;
 		let BKVD=BKUJ- BKVA;
-		let OIF=(OHX- OID)- B;
+		let OIF=(OHX- OID)- C;
 		let OIG=BH* OHX;
 		let BKVE=BKUG* BH;
 		let AJVD=AJUP* BH;
@@ -58467,7 +58468,7 @@ impl Instance {
 		let OIK=((OIF* OIF)+ OIJ).sqrt();
 		let BKVN=((BKVK+ BKVK)+ ATUK)* (ANYF/ (AWAY* OIK));
 		let AJVL=BK* OIK;
-		let AJVM=B/ AJVL;
+		let AJVM=C/ AJVL;
 		let BKVO=((BKVN* BK)).product_div((-AJVM),AJVL);
 		let OIL=OHX- (J* (OIF+ OIK));
 		let BKVP=BKUG- ((BKVB+ BKVN)* J);
@@ -58546,7 +58547,7 @@ impl Instance {
 		let BKVW=BKUQ+ (BKVT+ BKVT);
 		let AJVT=AJUR+ (AJVR+ AJVR);
 		let AJVU=AJUS+ (AJVS+ AJVS);
-		let AJVV=B/ OIS;
+		let AJVV=C/ OIS;
 		let BKVX=(BKVW).product_div((-AJVV),OIS);
 		let OIT=((OIS.ln())- OIB)+ OIC;
 		let BKVY=((BKVW* (ANYF/ OIS))- BKUV)+ BKUW;
@@ -58648,7 +58649,7 @@ impl Instance {
 		if OJE{
 		let OJO;
 		if OJF{
-		OJO=B;
+		OJO=C;
 		}else{
 		let OJP;
 		if OJG{
@@ -58684,13 +58685,13 @@ impl Instance {
 		let OJM=OJL.sqrt();
 		let BLOW=ATVF* (ANYF/ (AWAY* OJM));
 		let AKJW=BK* OJM;
-		let AKJX=B/ AKJW;
+		let AKJX=C/ AKJW;
 		let BLOX=((BLOW* BK)).product_div((-AKJX),AKJW);
 		let AKJY=YBB* AKJX;
 		let BLOY=(ATVG* AKJX)+ (BLOX* YBB);
 		let AKJZ=YBC* AKJX;
 		let BLOZ=(ATVH* AKJX)+ (BLOX* YBC);
-		let OJN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OJJ, B));
+		let OJN=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OJJ, C));
 		OJJ=OJN;
 		OJL=OJM;
 		YBB=AKJY;
@@ -58745,7 +58746,7 @@ impl Instance {
 		ATVD=ATVJ;
 		ATVE=ATVK;
 		}
-		let OJX=B/ OJW;
+		let OJX=C/ OJW;
 		let BKXD=-OJX;
 		let BKXE=(ATVC).product_div(BKXD,OJW);
 		let BKXF=BKXE* AWAO;
@@ -58854,7 +58855,7 @@ impl Instance {
 		ATUF=ASYH;
 		ATUG=ASYI;
 		}
-		let OKC=P== B;
+		let OKC=P== C;
 		let OLO;
 		let OMC;
 		let ONO;
@@ -58899,7 +58900,7 @@ impl Instance {
 		let OKP=((OKO* OKO)+ 0.04000000000000001f64).sqrt();
 		let BKXS=(BKXP+ BKXP)* (ANYF/ (AWAY* OKP));
 		let AJXF=BK* OKP;
-		let AJXG=B/ AJXF;
+		let AJXG=C/ AJXF;
 		let BKXT=((BKXS* BK)).product_div((-AJXG),AJXF);
 		let OKQ=J* (OKO+ OKP);
 		let BKXU=(AVZT+ BKXS)* J;
@@ -58934,7 +58935,7 @@ impl Instance {
 		let OKT=(LKW* OKS).sqrt();
 		let BKXX=(ATVX* LKW)* (ANYF/ (AWAY* OKT));
 		let AJXL=BK* OKT;
-		let AJXM=B/ AJXL;
+		let AJXM=C/ AJXL;
 		let BKXY=((BKXX* BK)).product_div((-AJXM),AJXL);
 		let OKU=K- (OKT* LKT);
 		let BKXZ=(BKXX* LKT)* AWAO;
@@ -58963,7 +58964,7 @@ impl Instance {
 		let OKX=((OKV* OKV)+ ((BH* OKW)* OKW)).sqrt();
 		let BKYK=(BKYF+ BKYF)* (ANYF/ (AWAY* OKX));
 		let AJXT=BK* OKX;
-		let AJXU=B/ AJXT;
+		let AJXU=C/ AJXT;
 		let BKYL=((BKYK* BK)).product_div((-AJXU),AJXT);
 		let OKY=J* (OKV+ OKX);
 		let BKYM=(ATVU+ BKYK)* J;
@@ -59002,7 +59003,7 @@ impl Instance {
 		let OLG=OLF< RV;
 		let OLJ=if OLG{
 		let OLH=BKYP* OLB;
-		let OLI=((B+ ((OLF.exp())- (OLH.exp()))).ln())/ OLD;
+		let OLI=((C+ ((OLF.exp())- (OLH.exp()))).ln())/ OLD;
 		OLI
 		}else{
 		OLE
@@ -59081,10 +59082,10 @@ impl Instance {
 		let BKYZ=(ATVO* AWAO)* OLS;
 		let AJYL=YBH+ (AJYJ* OLS);
 		let AJYM=YBI+ (AJYK* OLS);
-		let OLT=((OLO- B)+ OLS).sqrt();
+		let OLT=((OLO- C)+ OLS).sqrt();
 		let BKZA=(ATVO+ BKYZ)* (ANYF/ (AWAY* OLT));
 		let AJYN=BK* OLT;
-		let AJYO=B/ AJYN;
+		let AJYO=C/ AJYN;
 		let BKZB=((BKZA* BK)).product_div((-AJYO),AJYN);
 		let AJYP=AJYL* AJYO;
 		let BKZC=((ATVQ+ (((ATVQ* AMF)* OLS)+ (BKYZ* AJYJ)))* AJYO)+ (BKZB* AJYL);
@@ -59103,10 +59104,10 @@ impl Instance {
 		let AJYA=YBI* KPU;
 		let AJYB=-(YBH* GTU);
 		let AJYC=-(YBI* GTU);
-		let OLV=(B- (OLO* GTU)).sqrt();
+		let OLV=(C- (OLO* GTU)).sqrt();
 		let BKYU=((ATVO* GTU)* AWAO)* (ANYF/ (AWAY* OLV));
 		let AJYD=BK* OLV;
-		let AJYE=B/ AJYD;
+		let AJYE=C/ AJYD;
 		let BKYV=((BKYU* BK)).product_div((-AJYE),AJYD);
 		let AJYF=AJYB* AJYE;
 		let AJYG=AJYC* AJYE;
@@ -59212,7 +59213,7 @@ impl Instance {
 		if OMP{
 		let OMZ;
 		if OMQ{
-		OMZ=B;
+		OMZ=C;
 		}else{
 		let ONA;
 		if OMR{
@@ -59248,13 +59249,13 @@ impl Instance {
 		let OMX=OMW.sqrt();
 		let BLOS=ATWS* (ANYF/ (AWAY* OMX));
 		let AKJS=BK* OMX;
-		let AKJT=B/ AKJS;
+		let AKJT=C/ AKJS;
 		let BLOT=((BLOS* BK)).product_div((-AKJT),AKJS);
 		let AKJU=YCB* AKJT;
 		let BLOU=(ATWT* AKJT)+ (BLOT* YCB);
 		let AKJV=YCC* AKJT;
 		let BLOV=(ATWU* AKJT)+ (BLOT* YCC);
-		let OMY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OMU, B));
+		let OMY=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OMU, C));
 		OMU=OMY;
 		OMW=OMX;
 		YCB=AKJU;
@@ -59309,7 +59310,7 @@ impl Instance {
 		ATWQ=ATWW;
 		ATWR=ATWX;
 		}
-		let ONI=B/ ONH;
+		let ONI=C/ ONH;
 		let BLAX=-ONI;
 		let BLAY=(ATWP).product_div(BLAX,ONH);
 		let BLAZ=BLAY* AWAO;
@@ -59346,7 +59347,7 @@ impl Instance {
 		let BKZR=L8([BKZG[0],BKZG[1],0.0,BKZG[2],BKZG[3],BKZG[4],BKZG[5],BKZG[6]]);
 		let BKZS=L8([BKZH[0],BKZH[1],0.0,BKZH[2],BKZH[3],BKZH[4],BKZH[5],BKZH[6]]);
 		let BKZT=L8([BKZI[0],BKZI[1],0.0,BKZI[2],BKZI[3],BKZI[4],BKZI[5],BKZI[6]]);
-		ONM=B;
+		ONM=C;
 		OOA=OMA;
 		YBX=AJYR;
 		YBY=AJYS;
@@ -59354,7 +59355,7 @@ impl Instance {
 		ATWN=BKZS;
 		ATWO=BKZT;
 		}
-		let ONN=ONM< B;
+		let ONN=ONM< C;
 		let ONW=if ONN{
 		let ONQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, ONO, BK));
 		ONQ
@@ -59484,7 +59485,7 @@ impl Instance {
 		if OOI{
 		let OOS;
 		if OOJ{
-		OOS=B;
+		OOS=C;
 		}else{
 		let OOT;
 		if OOK{
@@ -59520,13 +59521,13 @@ impl Instance {
 		let OOQ=OOP.sqrt();
 		let BLOO=ATXO* (ANYF/ (AWAY* OOQ));
 		let AKJO=BK* OOQ;
-		let AKJP=B/ AKJO;
+		let AKJP=C/ AKJO;
 		let BLOP=((BLOO* BK)).product_div((-AKJP),AKJO);
 		let AKJQ=YCP* AKJP;
 		let BLOQ=(ATXP* AKJP)+ (BLOP* YCP);
 		let AKJR=YCQ* AKJP;
 		let BLOR=(ATXQ* AKJP)+ (BLOP* YCQ);
-		let OOR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OON, B));
+		let OOR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OON, C));
 		OON=OOR;
 		OOP=OOQ;
 		YCP=AKJQ;
@@ -59581,7 +59582,7 @@ impl Instance {
 		ATXM=ATXS;
 		ATXN=ATXT;
 		}
-		let OPB=B/ OPA;
+		let OPB=C/ OPA;
 		let BLCS=-OPB;
 		let BLCT=(ATXL).product_div(BLCS,OPA);
 		let BLCU=BLCT* AWAO;
@@ -59732,7 +59733,7 @@ impl Instance {
 		let OPO=((OPN* OPN)+ 0.04000000000000001f64).sqrt();
 		let BLDE=(BLDB+ BLDB)* (ANYF/ (AWAY* OPO));
 		let AKAX=BK* OPO;
-		let AKAY=B/ AKAX;
+		let AKAY=C/ AKAX;
 		let BLDF=((BLDE* BK)).product_div((-AKAY),AKAX);
 		let OPP=J* (OPN+ OPO);
 		let BLDG=(AVZT+ BLDE)* J;
@@ -59767,7 +59768,7 @@ impl Instance {
 		let OPS=(LKW* OPR).sqrt();
 		let BLDJ=(ATYN* LKW)* (ANYF/ (AWAY* OPS));
 		let AKBD=BK* OPS;
-		let AKBE=B/ AKBD;
+		let AKBE=C/ AKBD;
 		let BLDK=((BLDJ* BK)).product_div((-AKBE),AKBD);
 		let OPT=K- (OPS* LKT);
 		let BLDL=(BLDJ* LKT)* AWAO;
@@ -59796,7 +59797,7 @@ impl Instance {
 		let OPW=((OPU* OPU)+ ((BH* OPV)* OPV)).sqrt();
 		let BLDW=(BLDR+ BLDR)* (ANYF/ (AWAY* OPW));
 		let AKBL=BK* OPW;
-		let AKBM=B/ AKBL;
+		let AKBM=C/ AKBL;
 		let BLDX=((BLDW* BK)).product_div((-AKBM),AKBL);
 		let OPX=J* (OPU+ OPW);
 		let BLDY=(ATYK+ BLDW)* J;
@@ -59846,7 +59847,7 @@ impl Instance {
 		let OQD=(OQC* OQB).sqrt();
 		let BLEJ=(L6([0.0,0.0,0.0,(BLEF* OQB),0.0,0.0])+ L6([BLEG[0],BLEG[1],BLEG[2],0.0,BLEG[3],BLEG[4]]))* (ANYF/ (AWAY* OQD));
 		let AKBV=BK* OQD;
-		let AKBW=B/ AKBV;
+		let AKBW=C/ AKBV;
 		let BLEK=((BLEJ* BK)).product_div((-AKBW),AKBV);
 		let AKBX=AKBT* AKBW;
 		let BLEL=((L6([BLEH[0],BLEH[1],BLEH[2],0.0,BLEH[3],BLEH[4]])+ L6([0.0,0.0,0.0,(BLEF* AKBR),0.0,0.0]))* AKBW)+ (BLEK* AKBT);
@@ -59863,18 +59864,18 @@ impl Instance {
 		let BLEP=((BLEJ* BLEN)+ ((BLEJ* AWAO)* BLEO))/ BK;
 		let AKCD=(AKBZ+ AKCB)/ BK;
 		let AKCE=(AKCA+ AKCC)/ BK;
-		let AKCF=B/ OQF;
+		let AKCF=C/ OQF;
 		let BLEQ=(BLEP).product_div((-AKCF),OQF);
 		let OQG=(OQF.ln())/ OQB;
 		let BLER=-OQG;
 		let BLES=L6([BLEC[0],BLEC[1],BLEC[2],0.0,BLEC[3],BLEC[4]]);
 		let BLET=((BLEP* (ANYF/ OQF))).product_sum_div(ANYF,BLES,BLER,OQB);
 		let BLEU=BLET* AWAO;
-		let AKCG=product_sum_div((AKCD* AKCF),B,BLER,AKBR,OQB);
-		let BLEV=L6(sum_products_div_lanes(&[(&(((((BLEL* BLEN)+ ((BLEL* AMF)* BLEO))/ BK)* AKCF)+ (BLEQ* AKCD)).0,B),(&BLEU.0,AKBR),(&L6([BLED[0],BLED[1],BLED[2],0.0,BLED[3],BLED[4]]).0,BLER),(&BLES.0,(-AKCG))],OQB));
-		let AKCH=product_sum_div((AKCE* AKCF),B,BLER,AKBS,OQB);
-		let BLEW=L6(sum_products_div_lanes(&[(&(((((BLEM* BLEN)+ ((BLEM* AMF)* BLEO))/ BK)* AKCF)+ (BLEQ* AKCE)).0,B),(&BLEU.0,AKBS),(&L6([BLEE[0],BLEE[1],BLEE[2],0.0,BLEE[3],BLEE[4]]).0,BLER),(&BLES.0,(-AKCH))],OQB));
-		let mut OQH=B;
+		let AKCG=product_sum_div((AKCD* AKCF),C,BLER,AKBR,OQB);
+		let BLEV=L6(sum_products_div_lanes(&[(&(((((BLEL* BLEN)+ ((BLEL* AMF)* BLEO))/ BK)* AKCF)+ (BLEQ* AKCD)).0,C),(&BLEU.0,AKBR),(&L6([BLED[0],BLED[1],BLED[2],0.0,BLED[3],BLED[4]]).0,BLER),(&BLES.0,(-AKCG))],OQB));
+		let AKCH=product_sum_div((AKCE* AKCF),C,BLER,AKBS,OQB);
+		let BLEW=L6(sum_products_div_lanes(&[(&(((((BLEM* BLEN)+ ((BLEM* AMF)* BLEO))/ BK)* AKCF)+ (BLEQ* AKCE)).0,C),(&BLEU.0,AKBS),(&L6([BLEE[0],BLEE[1],BLEE[2],0.0,BLEE[3],BLEE[4]]).0,BLER),(&BLES.0,(-AKCH))],OQB));
+		let mut OQH=C;
 		let mut OQJ=OPG;
 		let mut OUQ=A;
 		let mut OVP=A;
@@ -59970,26 +59971,26 @@ impl Instance {
 		let BLGD=BLFS- L8([BLGA[0],BLGA[1],BLGA[2],BLGA[3],BLGA[4],0.0,BLGA[5],0.0]);
 		let AKCZ=AKCR- (AKCX* OQR);
 		let BLGE=BLFT- L8([BLGB[0],BLGB[1],BLGB[2],BLGB[3],BLGB[4],0.0,BLGB[5],0.0]);
-		let OQS=B+ (OQP- OQR);
-		let AKDA=B/ OQS;
+		let OQS=C+ (OQP- OQR);
+		let AKDA=C/ OQS;
 		let BLGF=(BLGC).product_div((-AKDA),OQS);
 		let OQT=(OQS.ln())/ OQG;
 		let BLGG=-OQT;
 		let BLGH=L8([BLET[0],BLET[1],BLET[2],BLET[3],BLET[4],0.0,BLET[5],0.0]);
 		let BLGI=((BLGC* (ANYF/ OQS))).product_sum_div(ANYF,BLGH,BLGG,OQG);
 		let BLGJ=BLGI* AWAO;
-		let AKDB=product_sum_div((AKCY* AKDA),B,BLGG,AKCG,OQG);
-		let BLGK=L8(sum_products_div_lanes(&[(&((BLGD* AKDA)+ (BLGF* AKCY)).0,B),(&BLGJ.0,AKCG),(&L8([BLEV[0],BLEV[1],BLEV[2],BLEV[3],BLEV[4],0.0,BLEV[5],0.0]).0,BLGG),(&BLGH.0,(-AKDB))],OQG));
-		let AKDC=product_sum_div((AKCZ* AKDA),B,BLGG,AKCH,OQG);
-		let BLGL=L8(sum_products_div_lanes(&[(&((BLGE* AKDA)+ (BLGF* AKCZ)).0,B),(&BLGJ.0,AKCH),(&L8([BLEW[0],BLEW[1],BLEW[2],BLEW[3],BLEW[4],0.0,BLEW[5],0.0]).0,BLGG),(&BLGH.0,(-AKDC))],OQG));
+		let AKDB=product_sum_div((AKCY* AKDA),C,BLGG,AKCG,OQG);
+		let BLGK=L8(sum_products_div_lanes(&[(&((BLGD* AKDA)+ (BLGF* AKCY)).0,C),(&BLGJ.0,AKCG),(&L8([BLEV[0],BLEV[1],BLEV[2],BLEV[3],BLEV[4],0.0,BLEV[5],0.0]).0,BLGG),(&BLGH.0,(-AKDB))],OQG));
+		let AKDC=product_sum_div((AKCZ* AKDA),C,BLGG,AKCH,OQG);
+		let BLGL=L8(sum_products_div_lanes(&[(&((BLGE* AKDA)+ (BLGF* AKCZ)).0,C),(&BLGJ.0,AKCH),(&L8([BLEW[0],BLEW[1],BLEW[2],BLEW[3],BLEW[4],0.0,BLEW[5],0.0]).0,BLGG),(&BLGH.0,(-AKDC))],OQG));
 		let OQU=OQP/ OQS;
 		let BLGM=-OQU;
 		let BLGN=(BLFR).product_sum_div(ANYF,BLGC,BLGM,OQS);
 		let BLGO=BLGN* AWAO;
-		let AKDD=product_sum_div(AKCQ,B,BLGM,AKCY,OQS);
-		let BLGP=L8(sum_products_div_lanes(&[(&BLFS.0,B),(&BLGO.0,AKCY),(&BLGD.0,BLGM),(&BLGC.0,(-AKDD))],OQS));
-		let AKDE=product_sum_div(AKCR,B,BLGM,AKCZ,OQS);
-		let BLGQ=L8(sum_products_div_lanes(&[(&BLFT.0,B),(&BLGO.0,AKCZ),(&BLGE.0,BLGM),(&BLGC.0,(-AKDE))],OQS));
+		let AKDD=product_sum_div(AKCQ,C,BLGM,AKCY,OQS);
+		let BLGP=L8(sum_products_div_lanes(&[(&BLFS.0,C),(&BLGO.0,AKCY),(&BLGD.0,BLGM),(&BLGC.0,(-AKDD))],OQS));
+		let AKDE=product_sum_div(AKCR,C,BLGM,AKCZ,OQS);
+		let BLGQ=L8(sum_products_div_lanes(&[(&BLFT.0,C),(&BLGO.0,AKCZ),(&BLGE.0,BLGM),(&BLGC.0,(-AKDE))],OQS));
 		OQV=OQT;
 		OSC=OQU;
 		YDL=AKDB;
@@ -60004,7 +60005,7 @@ impl Instance {
 		ATZH=BLGQ;
 		}else{
 		OQV=OQM;
-		OSC=B;
+		OSC=C;
 		YDL=AKCM;
 		YDM=AKCN;
 		YDN=A;
@@ -60110,17 +60111,17 @@ impl Instance {
 		let BLHW=BLFE/ BH;
 		let AKEI=AKCL/ BH;
 		let BLHX=BLFF/ BH;
-		let ORF=B- (OQL/ BC);
+		let ORF=C- (OQL/ BC);
 		let BLHY=(BLFD/ BC)* AWAO;
 		let AKEJ=-(AKCK/ BC);
 		let AKEK=-(AKCL/ BC);
-		let ORG=B- (ORE* ORF);
+		let ORG=C- (ORE* ORF);
 		let BLHZ=((BLHV* ORF)+ (BLHY* ORE))* AWAO;
 		let AKEL=-((AKEH* ORF)+ (AKEJ* ORE));
 		let AKEM=-((AKEI* ORF)+ (AKEK* ORE));
 		let BLIA=((BLHT* ORG)+ (BLHZ* AKEF))+ ((((((BLHW* ORF)+ (BLHY* AKEH))+ ((((BLFE/ BC)* AWAO)* ORE)+ (BLHV* AKEJ)))* AWAO)* ORD)+ (BLHS* AKEL));
 		let BLIB=((BLHU* ORG)+ (BLHZ* AKEG))+ ((((((BLHX* ORF)+ (BLHY* AKEI))+ ((((BLFF/ BC)* AWAO)* ORE)+ (BLHV* AKEK)))* AWAO)* ORD)+ (BLHS* AKEM));
-		let ORH=B- (ORD* ORG);
+		let ORH=C- (ORD* ORG);
 		let BLIC=((BLHS* ORG)+ (BLHZ* ORD))* AWAO;
 		let AKEN=-((AKEF* ORG)+ (AKEL* ORD));
 		let AKEO=-((AKEG* ORG)+ (AKEM* ORD));
@@ -60128,17 +60129,17 @@ impl Instance {
 		let BLID=BLFD/ BK;
 		let AKEP=AKCK/ BK;
 		let AKEQ=AKCL/ BK;
-		let ORJ=B- ORE;
+		let ORJ=C- ORE;
 		let BLIE=BLHV* AWAO;
 		let AKER=-AKEH;
 		let AKES=-AKEI;
-		let ORK=B- (ORD* ORJ);
+		let ORK=C- (ORD* ORJ);
 		let BLIF=((BLHS* ORJ)+ (BLIE* ORD))* AWAO;
 		let AKET=-((AKEF* ORJ)+ (AKER* ORD));
 		let AKEU=-((AKEG* ORJ)+ (AKES* ORD));
 		let BLIG=(((BLFE/ BK)* ORK)+ (BLIF* AKEP))+ ((((((BLHT* ORJ)+ (BLIE* AKEF))+ (((BLHW* AWAO)* ORD)+ (BLHS* AKER)))* AWAO)* ORI)+ (BLID* AKET));
 		let BLIH=(((BLFF/ BK)* ORK)+ (BLIF* AKEQ))+ ((((((BLHU* ORJ)+ (BLIE* AKEG))+ (((BLHX* AWAO)* ORD)+ (BLHS* AKES)))* AWAO)* ORI)+ (BLID* AKEU));
-		let ORL=B- (ORI* ORK);
+		let ORL=C- (ORI* ORK);
 		let BLII=((BLID* ORK)+ (BLIF* ORI))* AWAO;
 		let AKEV=-((AKEP* ORK)+ (AKET* ORI));
 		let AKEW=-((AKEQ* ORK)+ (AKEU* ORI));
@@ -60169,17 +60170,17 @@ impl Instance {
 		let BLIU=BLGS/ BH;
 		let AKFG=AKDG/ BH;
 		let BLIV=BLGT/ BH;
-		let ORQ=B- (OQW/ BC);
+		let ORQ=C- (OQW/ BC);
 		let BLIW=(BLGR/ BC)* AWAO;
 		let AKFH=-(AKDF/ BC);
 		let AKFI=-(AKDG/ BC);
-		let ORR=B- (ORP* ORQ);
+		let ORR=C- (ORP* ORQ);
 		let BLIX=((BLIT* ORQ)+ (BLIW* ORP))* AWAO;
 		let AKFJ=-((AKFF* ORQ)+ (AKFH* ORP));
 		let AKFK=-((AKFG* ORQ)+ (AKFI* ORP));
 		let BLIY=((BLIR* ORR)+ (BLIX* AKFD))+ ((((((BLIU* ORQ)+ (BLIW* AKFF))+ ((((BLGS/ BC)* AWAO)* ORP)+ (BLIT* AKFH)))* AWAO)* ORO)+ (BLIQ* AKFJ));
 		let BLIZ=((BLIS* ORR)+ (BLIX* AKFE))+ ((((((BLIV* ORQ)+ (BLIW* AKFG))+ ((((BLGT/ BC)* AWAO)* ORP)+ (BLIT* AKFI)))* AWAO)* ORO)+ (BLIQ* AKFK));
-		let ORS=B- (ORO* ORR);
+		let ORS=C- (ORO* ORR);
 		let BLJA=((BLIQ* ORR)+ (BLIX* ORO))* AWAO;
 		let AKFL=-((AKFD* ORR)+ (AKFJ* ORO));
 		let AKFM=-((AKFE* ORR)+ (AKFK* ORO));
@@ -60187,17 +60188,17 @@ impl Instance {
 		let BLJB=BLGR/ BK;
 		let AKFN=AKDF/ BK;
 		let AKFO=AKDG/ BK;
-		let ORU=B- ORP;
+		let ORU=C- ORP;
 		let BLJC=BLIT* AWAO;
 		let AKFP=-AKFF;
 		let AKFQ=-AKFG;
-		let ORV=B- (ORO* ORU);
+		let ORV=C- (ORO* ORU);
 		let BLJD=((BLIQ* ORU)+ (BLJC* ORO))* AWAO;
 		let AKFR=-((AKFD* ORU)+ (AKFP* ORO));
 		let AKFS=-((AKFE* ORU)+ (AKFQ* ORO));
 		let BLJE=(((BLGS/ BK)* ORV)+ (BLJD* AKFN))+ ((((((BLIR* ORU)+ (BLJC* AKFD))+ (((BLIU* AWAO)* ORO)+ (BLIQ* AKFP)))* AWAO)* ORT)+ (BLJB* AKFR));
 		let BLJF=(((BLGT/ BK)* ORV)+ (BLJD* AKFO))+ ((((((BLIS* ORU)+ (BLJC* AKFE))+ (((BLIV* AWAO)* ORO)+ (BLIQ* AKFQ)))* AWAO)* ORT)+ (BLJB* AKFS));
-		let ORW=B- (ORT* ORV);
+		let ORW=C- (ORT* ORV);
 		let BLJG=((BLJB* ORV)+ (BLJD* ORT))* AWAO;
 		let AKFT=-((AKFN* ORV)+ (AKFR* ORT));
 		let AKFU=-((AKFO* ORV)+ (AKFS* ORT));
@@ -60230,7 +60231,7 @@ impl Instance {
 		let OSA=ORY.sqrt();
 		let BLJN=BLJK* (ANYF/ (AWAY* OSA));
 		let AKFZ=BK* OSA;
-		let AKGA=B/ AKFZ;
+		let AKGA=C/ AKFZ;
 		let BLJO=((BLJN* BK)).product_div((-AKGA),AKFZ);
 		let AKGB=AKFX* AKGA;
 		let BLJP=(BLJL* AKGA)+ (BLJO* AKFX);
@@ -60245,10 +60246,10 @@ impl Instance {
 		let BLJS=-OSE;
 		let BLJT=((L8([0.0,0.0,0.0,(BLJR* OSD),0.0,0.0,0.0,0.0])+ ((BLIJ- ((ATZD* ORX)+ (BLJH* OSC)))* OSB))).product_sum_div(ANYF,BLJN,BLJS,OSA);
 		let BLJU=BLJT* AWAO;
-		let AKGF=product_sum_div((AKGD* OSB),B,BLJS,AKGB,OSA);
-		let BLJV=L8(sum_products_div_lanes(&[(&(((BLIK- (((ATZG* ORX)+ (BLJH* YDN))+ ((BLJI* OSC)+ (ATZD* AKFV))))* OSB)+ L8([0.0,0.0,0.0,(BLJR* AKGD),0.0,0.0,0.0,0.0])).0,B),(&BLJU.0,AKGB),(&BLJP.0,BLJS),(&BLJN.0,(-AKGF))],OSA));
-		let AKGG=product_sum_div((AKGE* OSB),B,BLJS,AKGC,OSA);
-		let BLJW=L8(sum_products_div_lanes(&[(&(((BLIL- (((ATZH* ORX)+ (BLJH* YDO))+ ((BLJJ* OSC)+ (ATZD* AKFW))))* OSB)+ L8([0.0,0.0,0.0,(BLJR* AKGE),0.0,0.0,0.0,0.0])).0,B),(&BLJU.0,AKGC),(&BLJQ.0,BLJS),(&BLJN.0,(-AKGG))],OSA));
+		let AKGF=product_sum_div((AKGD* OSB),C,BLJS,AKGB,OSA);
+		let BLJV=L8(sum_products_div_lanes(&[(&(((BLIK- (((ATZG* ORX)+ (BLJH* YDN))+ ((BLJI* OSC)+ (ATZD* AKFV))))* OSB)+ L8([0.0,0.0,0.0,(BLJR* AKGD),0.0,0.0,0.0,0.0])).0,C),(&BLJU.0,AKGB),(&BLJP.0,BLJS),(&BLJN.0,(-AKGF))],OSA));
+		let AKGG=product_sum_div((AKGE* OSB),C,BLJS,AKGC,OSA);
+		let BLJW=L8(sum_products_div_lanes(&[(&(((BLIL- (((ATZH* ORX)+ (BLJH* YDO))+ ((BLJJ* OSC)+ (ATZD* AKFW))))* OSB)+ L8([0.0,0.0,0.0,(BLJR* AKGE),0.0,0.0,0.0,0.0])).0,C),(&BLJU.0,AKGC),(&BLJQ.0,BLJS),(&BLJN.0,(-AKGG))],OSA));
 		OSQ=OSA;
 		OSV=OSE;
 		YEB=AKGB;
@@ -60333,7 +60334,7 @@ impl Instance {
 		let OSJ=OSH.sqrt();
 		let BLHD=BLHA* (ANYF/ (AWAY* OSJ));
 		let AKDR=BK* OSJ;
-		let AKDS=B/ AKDR;
+		let AKDS=C/ AKDR;
 		let BLHE=((BLHD* BK)).product_div((-AKDS),AKDR);
 		let AKDT=AKDP* AKDS;
 		let BLHF=(BLHB* AKDS)+ (BLHE* AKDP);
@@ -60341,21 +60342,21 @@ impl Instance {
 		let BLHG=(BLHC* AKDS)+ (BLHE* AKDQ);
 		let OSK=BWG* J;
 		let BLHH=ANZE* J;
-		let OSL=B- OSG;
+		let OSL=C- OSG;
 		let BLHI=BLGX* AWAO;
 		let AKDV=-AKDN;
 		let AKDW=-AKDO;
-		let OSM=(B- OSF)- (OSC* OSL);
+		let OSM=(C- OSF)- (OSC* OSL);
 		let AKDX=(-AKDJ)- ((YDN* OSL)+ (AKDV* OSC));
 		let AKDY=(-AKDK)- ((YDO* OSL)+ (AKDW* OSC));
 		let OSN=(OSK* OSM)/ OSJ;
 		let BLHJ=-OSN;
 		let BLHK=((L8([0.0,0.0,0.0,(BLHH* OSM),0.0,0.0,0.0,0.0])+ (((BLGU* AWAO)- ((ATZD* OSL)+ (BLHI* OSC)))* OSK))).product_sum_div(ANYF,BLHD,BLHJ,OSJ);
 		let BLHL=BLHK* AWAO;
-		let AKDZ=product_sum_div((AKDX* OSK),B,BLHJ,AKDT,OSJ);
-		let BLHM=L8(sum_products_div_lanes(&[(&((((BLGV* AWAO)- (((ATZG* OSL)+ (BLHI* YDN))+ (((BLGY* AWAO)* OSC)+ (ATZD* AKDV))))* OSK)+ L8([0.0,0.0,0.0,(BLHH* AKDX),0.0,0.0,0.0,0.0])).0,B),(&BLHL.0,AKDT),(&BLHF.0,BLHJ),(&BLHD.0,(-AKDZ))],OSJ));
-		let AKEA=product_sum_div((AKDY* OSK),B,BLHJ,AKDU,OSJ);
-		let BLHN=L8(sum_products_div_lanes(&[(&((((BLGW* AWAO)- (((ATZH* OSL)+ (BLHI* YDO))+ (((BLGZ* AWAO)* OSC)+ (ATZD* AKDW))))* OSK)+ L8([0.0,0.0,0.0,(BLHH* AKDY),0.0,0.0,0.0,0.0])).0,B),(&BLHL.0,AKDU),(&BLHG.0,BLHJ),(&BLHD.0,(-AKEA))],OSJ));
+		let AKDZ=product_sum_div((AKDX* OSK),C,BLHJ,AKDT,OSJ);
+		let BLHM=L8(sum_products_div_lanes(&[(&((((BLGV* AWAO)- (((ATZG* OSL)+ (BLHI* YDN))+ (((BLGY* AWAO)* OSC)+ (ATZD* AKDV))))* OSK)+ L8([0.0,0.0,0.0,(BLHH* AKDX),0.0,0.0,0.0,0.0])).0,C),(&BLHL.0,AKDT),(&BLHF.0,BLHJ),(&BLHD.0,(-AKDZ))],OSJ));
+		let AKEA=product_sum_div((AKDY* OSK),C,BLHJ,AKDU,OSJ);
+		let BLHN=L8(sum_products_div_lanes(&[(&((((BLGW* AWAO)- (((ATZH* OSL)+ (BLHI* YDO))+ (((BLGZ* AWAO)* OSC)+ (ATZD* AKDW))))* OSK)+ L8([0.0,0.0,0.0,(BLHH* AKDY),0.0,0.0,0.0,0.0])).0,C),(&BLHL.0,AKDU),(&BLHG.0,BLHJ),(&BLHD.0,(-AKEA))],OSJ));
 		OSR=OSJ;
 		OSW=OSN;
 		YEF=AKDT;
@@ -60514,15 +60515,15 @@ impl Instance {
 		let BLLV=BLFD/ BC;
 		let AKHN=AKCK/ BC;
 		let AKHO=AKCL/ BC;
-		let OTD=B+ (OQL/ BC);
+		let OTD=C+ (OQL/ BC);
 		let BLLW=(BLLS* OTD)+ (BLLV* OTC);
 		let AKHP=(AKHL* OTD)+ (AKHN* OTC);
 		let AKHQ=(AKHM* OTD)+ (AKHO* OTC);
-		let OTE=B+ (OTC* OTD);
+		let OTE=C+ (OTC* OTD);
 		let BLLX=(BLLP* OTE)+ (BLLW* OTB);
 		let AKHR=(AKHJ* OTE)+ (AKHP* OTB);
 		let AKHS=(AKHK* OTE)+ (AKHQ* OTB);
-		let OTF=B+ (OTB* OTE);
+		let OTF=C+ (OTB* OTE);
 		let OTG=OTA* OTF;
 		let BLLY=(BLLO* OTF)+ (BLLX* OTA);
 		let BLLZ=(((BLLQ* OTE)+ (BLLW* AKHJ))+ (((((BLLT* OTD)+ (BLLV* AKHL))+ (((BLFE/ BC)* OTC)+ (BLLS* AKHN)))* OTB)+ (BLLP* AKHP)))* OTA;
@@ -60533,15 +60534,15 @@ impl Instance {
 		let BLMB=BLFD/ BK;
 		let AKHV=AKCK/ BK;
 		let AKHW=AKCL/ BK;
-		let OTI=B+ OTC;
+		let OTI=C+ OTC;
 		let BLMC=(BLLP* OTI)+ (BLLS* OTB);
 		let AKHX=(AKHJ* OTI)+ (AKHL* OTB);
 		let AKHY=(AKHK* OTI)+ (AKHM* OTB);
-		let OTJ=B+ (OTB* OTI);
+		let OTJ=C+ (OTB* OTI);
 		let BLMD=(BLMB* OTJ)+ (BLMC* OTH);
 		let AKHZ=(AKHV* OTJ)+ (AKHX* OTH);
 		let AKIA=(AKHW* OTJ)+ (AKHY* OTH);
-		let OTK=B+ (OTH* OTJ);
+		let OTK=C+ (OTH* OTJ);
 		let OTL=OQL* OTK;
 		let BLME=(BLFD* OTK)+ (BLMD* OQL);
 		let BLMF=((((BLFE/ BK)* OTJ)+ (BLMC* AKHV))+ (((((BLLQ* OTI)+ (BLLS* AKHJ))+ ((BLLT* OTB)+ (BLLP* AKHL)))* OTH)+ (BLMB* AKHX)))* OQL;
@@ -60592,7 +60593,7 @@ impl Instance {
 		let BLKR=(BLFE* OTP)+ (BLKQ* AKCK);
 		let AKGW=AKCL* OTP;
 		let BLKS=(BLFF* OTP)+ (BLKQ* AKCL);
-		let OTQ=OTP- B;
+		let OTQ=OTP- C;
 		let OTR=OTQ- OQL;
 		let BLKT=BLKQ- BLFD;
 		let AKGX=AKGV- AKCK;
@@ -60657,7 +60658,7 @@ impl Instance {
 		let BLKC=(((ATYY* BWG)+ L8([0.0,0.0,0.0,(ANZE* YDH),0.0,0.0,0.0,0.0]))* OTV)+ (BLKB* AKGJ);
 		let AKGM=AKGK* OTV;
 		let BLKD=(((ATYZ* BWG)+ L8([0.0,0.0,0.0,(ANZE* YDI),0.0,0.0,0.0,0.0]))* OTV)+ (BLKB* AKGK);
-		let OTW=OQL+ B;
+		let OTW=OQL+ C;
 		let BLKE=ATSB* OTW;
 		let BLKF=ATSC* OTW;
 		let BLKG=ATSB* AKCK;
@@ -60720,7 +60721,7 @@ impl Instance {
 		let OUF=((OSO* OSO)+ OUC).sqrt();
 		let BLNA=((BLMX+ BLMX)+ AUAT)* (ANYF/ (AWAY* OUF));
 		let AKIN=BK* OUF;
-		let AKIO=B/ AKIN;
+		let AKIO=C/ AKIN;
 		let BLNB=((BLNA* BK)).product_div((-AKIO),AKIN);
 		let AKIP=AKIL* AKIO;
 		let BLNC=(((BLMY+ BLMY)+ AUAV)* AKIO)+ (BLNB* AKIL);
@@ -60734,10 +60735,10 @@ impl Instance {
 		let BLNF=-OUJ;
 		let BLNG=(((((BLNE* OSO)+ (ATZI* OUG))+ AUAU)* J)).product_sum_div(ANYF,BLNA,BLNF,OUF);
 		let BLNH=BLNG* AWAO;
-		let AKIT=product_sum_div(((((AKIR* OSO)+ (YDP* OUG))+ YEP)* J),B,BLNF,AKIP,OUF);
-		let BLNI=L8(sum_products_div_lanes(&[(&((((((ATZN* BK)* OSO)+ (ATZI* AKIR))+ ((ATZL* OUG)+ (BLNE* YDP)))+ AUAX)* J).0,B),(&BLNH.0,AKIP),(&BLNC.0,BLNF),(&BLNA.0,(-AKIT))],OUF));
-		let AKIU=product_sum_div(((((AKIS* OSO)+ (YDQ* OUG))+ YEQ)* J),B,BLNF,AKIQ,OUF);
-		let BLNJ=L8(sum_products_div_lanes(&[(&((((((ATZO* BK)* OSO)+ (ATZI* AKIS))+ ((ATZM* OUG)+ (BLNE* YDQ)))+ AUAY)* J).0,B),(&BLNH.0,AKIQ),(&BLND.0,BLNF),(&BLNA.0,(-AKIU))],OUF));
+		let AKIT=product_sum_div(((((AKIR* OSO)+ (YDP* OUG))+ YEP)* J),C,BLNF,AKIP,OUF);
+		let BLNI=L8(sum_products_div_lanes(&[(&((((((ATZN* BK)* OSO)+ (ATZI* AKIR))+ ((ATZL* OUG)+ (BLNE* YDP)))+ AUAX)* J).0,C),(&BLNH.0,AKIP),(&BLNC.0,BLNF),(&BLNA.0,(-AKIT))],OUF));
+		let AKIU=product_sum_div(((((AKIS* OSO)+ (YDQ* OUG))+ YEQ)* J),C,BLNF,AKIQ,OUF);
+		let BLNJ=L8(sum_products_div_lanes(&[(&((((((ATZO* BK)* OSO)+ (ATZI* AKIS))+ ((ATZM* OUG)+ (BLNE* YDQ)))+ AUAY)* J).0,C),(&BLNH.0,AKIQ),(&BLND.0,BLNF),(&BLNA.0,(-AKIU))],OUF));
 		OUL=OUF;
 		OUO=OUJ;
 		YEV=AKIP;
@@ -60791,8 +60792,8 @@ impl Instance {
 		let BLNV=(AUAR* OCH)+ L8([0.0,0.0,0.0,(BKPQ* YEL),0.0,0.0,0.0,0.0]);
 		let AKJC=YEM* OCH;
 		let BLNW=(AUAS* OCH)+ L8([0.0,0.0,0.0,(BKPQ* YEM),0.0,0.0,0.0,0.0]);
-		let OUP=B+ (OCH* OUN);
-		let OUR=OUQ== B;
+		let OUP=C+ (OCH* OUN);
+		let OUR=OUQ== C;
 		let OVG;
 		let OVI;
 		let OVN;
@@ -60815,13 +60816,13 @@ impl Instance {
 		let BLNX=-OUT;
 		let BLNY=((BLNR* AWAO)).product_sum_div(ANYF,BLNU,BLNX,OUP);
 		let BLNZ=BLNY* AWAO;
-		let AKJD=product_sum_div((AKIZ* AMF),B,BLNX,AKJB,OUP);
-		let BLOA=L8(sum_products_div_lanes(&[(&(BLNS* AMF).0,B),(&BLNZ.0,AKJB),(&BLNV.0,BLNX),(&BLNU.0,(-AKJD))],OUP));
-		let AKJE=product_sum_div((AKJA* AMF),B,BLNX,AKJC,OUP);
-		let BLOB=L8(sum_products_div_lanes(&[(&(BLNT* AMF).0,B),(&BLNZ.0,AKJC),(&BLNW.0,BLNX),(&BLNU.0,(-AKJE))],OUP));
+		let AKJD=product_sum_div((AKIZ* AMF),C,BLNX,AKJB,OUP);
+		let BLOA=L8(sum_products_div_lanes(&[(&(BLNS* AMF).0,C),(&BLNZ.0,AKJB),(&BLNV.0,BLNX),(&BLNU.0,(-AKJD))],OUP));
+		let AKJE=product_sum_div((AKJA* AMF),C,BLNX,AKJC,OUP);
+		let BLOB=L8(sum_products_div_lanes(&[(&(BLNT* AMF).0,C),(&BLNZ.0,AKJC),(&BLNW.0,BLNX),(&BLNU.0,(-AKJE))],OUP));
 		let OUV=OQJ.abs();
 		let BLOC=ATYT* ((AWAY* ((OQJ>= AWBZ) as u8 as f64))- ANYF);
-		let OUW=B>= OUV;
+		let OUW=C>= OUV;
 		let OUX;
 		let YFB;
 		let YFC;
@@ -60829,14 +60830,14 @@ impl Instance {
 		let AUBP;
 		let AUBQ;
 		if OUW{
-		OUX=B;
+		OUX=C;
 		YFB=A;
 		YFC=A;
 		AUBO=BHSX;
 		AUBP=BHSX;
 		AUBQ=BHSX;
 		}else{
-		let AKJF=(BK* ((OQJ>= A) as u8 as f64))- B;
+		let AKJF=(BK* ((OQJ>= A) as u8 as f64))- C;
 		let AKJG=YDH* AKJF;
 		let BLOD=ATYY* AKJF;
 		let AKJH=YDI* AKJF;
@@ -60848,7 +60849,7 @@ impl Instance {
 		AUBP=BLOD;
 		AUBQ=BLOE;
 		}
-		let OUY=OUU* (B+ OUX);
+		let OUY=OUU* (C+ OUX);
 		let BLOF=AUBO* OUU;
 		let AKJI=YFB* OUU;
 		let BLOG=AUBP* OUU;
@@ -60864,7 +60865,7 @@ impl Instance {
 		if OUZ{
 		let OVA=OUT>= A;
 		let OVB=if OVA{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -60896,7 +60897,7 @@ impl Instance {
 		let BLON=ATYZ+ AUBT;
 		let OVF=((OVD.abs())<= BBK)&& ((OUM.abs())<= AQ);
 		let OVO=if OVF{
-		B
+		C
 		}else{
 		OUQ
 		};
@@ -60909,7 +60910,7 @@ impl Instance {
 		AUBM=BLOM;
 		AUBN=BLON;
 		}
-		let OVH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OVG, B));
+		let OVH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, OVG, C));
 		OQH=OVH;
 		OQJ=OVI;
 		OUQ=OVN;
@@ -60938,7 +60939,7 @@ impl Instance {
 		let OVS=OBX* OVR;
 		let BLEY=L8([0.0,0.0,0.0,(ATNX* OVR),0.0,0.0,0.0,0.0])+ (BLEX* OBX);
 		let OVU=OVT+ OVR;
-		let OVV=B/ OVU;
+		let OVV=C/ OVU;
 		let OVY=OBX* OVW;
 		let OVZ=OVS+ (OVY* OVV);
 		let BLEZ=BLEY+ (((L8([0.0,0.0,0.0,(ATNX* OVW),0.0,0.0,0.0,0.0])+ (ATYW* OBX))* OVV)+ ((((ATYV+ BLEX)).product_div((-OVV),OVU))* OVY));
@@ -61112,7 +61113,7 @@ impl Instance {
 		let OWK=((OWJ* OWJ)+ 0.04000000000000001f64).sqrt();
 		let BLRO=(BLRL+ BLRL)* (ANYF/ (AWAY* OWK));
 		let AKMC=BK* OWK;
-		let AKMD=B/ AKMC;
+		let AKMD=C/ AKMC;
 		let BLRP=((BLRO* BK)).product_div((-AKMD),AKMC);
 		let OWL=J* (OWJ+ OWK);
 		let BLRQ=(AVZT+ BLRO)* J;
@@ -61147,7 +61148,7 @@ impl Instance {
 		let OWO=(LKW* OWN).sqrt();
 		let BLRT=(AUCI* LKW)* (ANYF/ (AWAY* OWO));
 		let AKMI=BK* OWO;
-		let AKMJ=B/ AKMI;
+		let AKMJ=C/ AKMI;
 		let BLRU=((BLRT* BK)).product_div((-AKMJ),AKMI);
 		let OWP=K- (OWO* LKT);
 		let BLRV=(BLRT* LKT)* AWAO;
@@ -61176,7 +61177,7 @@ impl Instance {
 		let OWS=((OWQ* OWQ)+ ((BH* OWR)* OWR)).sqrt();
 		let BLSG=(BLSB+ BLSB)* (ANYF/ (AWAY* OWS));
 		let AKMQ=BK* OWS;
-		let AKMR=B/ AKMQ;
+		let AKMR=C/ AKMQ;
 		let BLSH=((BLSG* BK)).product_div((-AKMR),AKMQ);
 		let OWT=J* (OWQ+ OWS);
 		let BLSI=(AUCF+ BLSG)* J;
@@ -61226,7 +61227,7 @@ impl Instance {
 		let OWZ=(OWY* OWX).sqrt();
 		let BLST=(L6([0.0,0.0,0.0,(BLSP* OWX),0.0,0.0])+ L6([BLSQ[0],BLSQ[1],BLSQ[2],0.0,BLSQ[3],BLSQ[4]]))* (ANYF/ (AWAY* OWZ));
 		let AKNA=BK* OWZ;
-		let AKNB=B/ AKNA;
+		let AKNB=C/ AKNA;
 		let BLSU=((BLST* BK)).product_div((-AKNB),AKNA);
 		let AKNC=AKMY* AKNB;
 		let BLSV=((L6([BLSR[0],BLSR[1],BLSR[2],0.0,BLSR[3],BLSR[4]])+ L6([0.0,0.0,0.0,(BLSP* AKMW),0.0,0.0]))* AKNB)+ (BLSU* AKMY);
@@ -61243,18 +61244,18 @@ impl Instance {
 		let BLSZ=((BLST* BLSX)+ ((BLST* AWAO)* BLSY))/ BK;
 		let AKNI=(AKNE+ AKNG)/ BK;
 		let AKNJ=(AKNF+ AKNH)/ BK;
-		let AKNK=B/ OXB;
+		let AKNK=C/ OXB;
 		let BLTA=(BLSZ).product_div((-AKNK),OXB);
 		let OXC=(OXB.ln())/ OWX;
 		let BLTB=-OXC;
 		let BLTC=L6([BLSM[0],BLSM[1],BLSM[2],0.0,BLSM[3],BLSM[4]]);
 		let BLTD=((BLSZ* (ANYF/ OXB))).product_sum_div(ANYF,BLTC,BLTB,OWX);
 		let BLTE=BLTD* AWAO;
-		let AKNL=product_sum_div((AKNI* AKNK),B,BLTB,AKMW,OWX);
-		let BLTF=L6(sum_products_div_lanes(&[(&(((((BLSV* BLSX)+ ((BLSV* AMF)* BLSY))/ BK)* AKNK)+ (BLTA* AKNI)).0,B),(&BLTE.0,AKMW),(&L6([BLSN[0],BLSN[1],BLSN[2],0.0,BLSN[3],BLSN[4]]).0,BLTB),(&BLTC.0,(-AKNL))],OWX));
-		let AKNM=product_sum_div((AKNJ* AKNK),B,BLTB,AKMX,OWX);
-		let BLTG=L6(sum_products_div_lanes(&[(&(((((BLSW* BLSX)+ ((BLSW* AMF)* BLSY))/ BK)* AKNK)+ (BLTA* AKNJ)).0,B),(&BLTE.0,AKMX),(&L6([BLSO[0],BLSO[1],BLSO[2],0.0,BLSO[3],BLSO[4]]).0,BLTB),(&BLTC.0,(-AKNM))],OWX));
-		let mut OXD=B;
+		let AKNL=product_sum_div((AKNI* AKNK),C,BLTB,AKMW,OWX);
+		let BLTF=L6(sum_products_div_lanes(&[(&(((((BLSV* BLSX)+ ((BLSV* AMF)* BLSY))/ BK)* AKNK)+ (BLTA* AKNI)).0,C),(&BLTE.0,AKMW),(&L6([BLSN[0],BLSN[1],BLSN[2],0.0,BLSN[3],BLSN[4]]).0,BLTB),(&BLTC.0,(-AKNL))],OWX));
+		let AKNM=product_sum_div((AKNJ* AKNK),C,BLTB,AKMX,OWX);
+		let BLTG=L6(sum_products_div_lanes(&[(&(((((BLSW* BLSX)+ ((BLSW* AMF)* BLSY))/ BK)* AKNK)+ (BLTA* AKNJ)).0,C),(&BLTE.0,AKMX),(&L6([BLSO[0],BLSO[1],BLSO[2],0.0,BLSO[3],BLSO[4]]).0,BLTB),(&BLTC.0,(-AKNM))],OWX));
+		let mut OXD=C;
 		let mut OXF=OWE;
 		let mut PBB=A;
 		let mut PBX=A;
@@ -61344,26 +61345,26 @@ impl Instance {
 		let BPXA=BPWP- L8([BPWX[0],BPWX[1],BPWX[2],BPWX[3],BPWX[4],0.0,BPWX[5],0.0]);
 		let AMTF=AMSX- (AMTD* OXN);
 		let BPXB=BPWQ- L8([BPWY[0],BPWY[1],BPWY[2],BPWY[3],BPWY[4],0.0,BPWY[5],0.0]);
-		let OXO=B+ (OXL- OXN);
-		let AMTG=B/ OXO;
+		let OXO=C+ (OXL- OXN);
+		let AMTG=C/ OXO;
 		let BPXC=(BPWZ).product_div((-AMTG),OXO);
 		let OXP=(OXO.ln())/ OXC;
 		let BPXD=-OXP;
 		let BPXE=L8([BLTD[0],BLTD[1],BLTD[2],BLTD[3],BLTD[4],0.0,BLTD[5],0.0]);
 		let BPXF=((BPWZ* (ANYF/ OXO))).product_sum_div(ANYF,BPXE,BPXD,OXC);
 		let BPXG=BPXF* AWAO;
-		let AMTH=product_sum_div((AMTE* AMTG),B,BPXD,AKNL,OXC);
-		let BPXH=L8(sum_products_div_lanes(&[(&((BPXA* AMTG)+ (BPXC* AMTE)).0,B),(&BPXG.0,AKNL),(&L8([BLTF[0],BLTF[1],BLTF[2],BLTF[3],BLTF[4],0.0,BLTF[5],0.0]).0,BPXD),(&BPXE.0,(-AMTH))],OXC));
-		let AMTI=product_sum_div((AMTF* AMTG),B,BPXD,AKNM,OXC);
-		let BPXI=L8(sum_products_div_lanes(&[(&((BPXB* AMTG)+ (BPXC* AMTF)).0,B),(&BPXG.0,AKNM),(&L8([BLTG[0],BLTG[1],BLTG[2],BLTG[3],BLTG[4],0.0,BLTG[5],0.0]).0,BPXD),(&BPXE.0,(-AMTI))],OXC));
+		let AMTH=product_sum_div((AMTE* AMTG),C,BPXD,AKNL,OXC);
+		let BPXH=L8(sum_products_div_lanes(&[(&((BPXA* AMTG)+ (BPXC* AMTE)).0,C),(&BPXG.0,AKNL),(&L8([BLTF[0],BLTF[1],BLTF[2],BLTF[3],BLTF[4],0.0,BLTF[5],0.0]).0,BPXD),(&BPXE.0,(-AMTH))],OXC));
+		let AMTI=product_sum_div((AMTF* AMTG),C,BPXD,AKNM,OXC);
+		let BPXI=L8(sum_products_div_lanes(&[(&((BPXB* AMTG)+ (BPXC* AMTF)).0,C),(&BPXG.0,AKNM),(&L8([BLTG[0],BLTG[1],BLTG[2],BLTG[3],BLTG[4],0.0,BLTG[5],0.0]).0,BPXD),(&BPXE.0,(-AMTI))],OXC));
 		let OXQ=OXL/ OXO;
 		let BPXJ=-OXQ;
 		let BPXK=(BPWO).product_sum_div(ANYF,BPWZ,BPXJ,OXO);
 		let BPXL=BPXK* AWAO;
-		let AMTJ=product_sum_div(AMSW,B,BPXJ,AMTE,OXO);
-		let BPXM=L8(sum_products_div_lanes(&[(&BPWP.0,B),(&BPXL.0,AMTE),(&BPXA.0,BPXJ),(&BPWZ.0,(-AMTJ))],OXO));
-		let AMTK=product_sum_div(AMSX,B,BPXJ,AMTF,OXO);
-		let BPXN=L8(sum_products_div_lanes(&[(&BPWQ.0,B),(&BPXL.0,AMTF),(&BPXB.0,BPXJ),(&BPWZ.0,(-AMTK))],OXO));
+		let AMTJ=product_sum_div(AMSW,C,BPXJ,AMTE,OXO);
+		let BPXM=L8(sum_products_div_lanes(&[(&BPWP.0,C),(&BPXL.0,AMTE),(&BPXA.0,BPXJ),(&BPWZ.0,(-AMTJ))],OXO));
+		let AMTK=product_sum_div(AMSX,C,BPXJ,AMTF,OXO);
+		let BPXN=L8(sum_products_div_lanes(&[(&BPWQ.0,C),(&BPXL.0,AMTF),(&BPXB.0,BPXJ),(&BPWZ.0,(-AMTK))],OXO));
 		OXR=OXP;
 		OYR=OXQ;
 		YFT=AMTH;
@@ -61378,7 +61379,7 @@ impl Instance {
 		AUCZ=BPXN;
 		}else{
 		OXR=OXI;
-		OYR=B;
+		OYR=C;
 		YFT=AMSS;
 		YFU=AMST;
 		YFV=A;
@@ -61432,17 +61433,17 @@ impl Instance {
 		let BPYM=BPWB/ BH;
 		let AMUK=AMSR/ BH;
 		let BPYN=BPWC/ BH;
-		let OXY=B- (OXH/ BC);
+		let OXY=C- (OXH/ BC);
 		let BPYO=(BPWA/ BC)* AWAO;
 		let AMUL=-(AMSQ/ BC);
 		let AMUM=-(AMSR/ BC);
-		let OXZ=B- (OXX* OXY);
+		let OXZ=C- (OXX* OXY);
 		let BPYP=((BPYL* OXY)+ (BPYO* OXX))* AWAO;
 		let AMUN=-((AMUJ* OXY)+ (AMUL* OXX));
 		let AMUO=-((AMUK* OXY)+ (AMUM* OXX));
 		let BPYQ=((BPYJ* OXZ)+ (BPYP* AMUH))+ ((((((BPYM* OXY)+ (BPYO* AMUJ))+ ((((BPWB/ BC)* AWAO)* OXX)+ (BPYL* AMUL)))* AWAO)* OXW)+ (BPYI* AMUN));
 		let BPYR=((BPYK* OXZ)+ (BPYP* AMUI))+ ((((((BPYN* OXY)+ (BPYO* AMUK))+ ((((BPWC/ BC)* AWAO)* OXX)+ (BPYL* AMUM)))* AWAO)* OXW)+ (BPYI* AMUO));
-		let OYA=B- (OXW* OXZ);
+		let OYA=C- (OXW* OXZ);
 		let BPYS=((BPYI* OXZ)+ (BPYP* OXW))* AWAO;
 		let AMUP=-((AMUH* OXZ)+ (AMUN* OXW));
 		let AMUQ=-((AMUI* OXZ)+ (AMUO* OXW));
@@ -61450,17 +61451,17 @@ impl Instance {
 		let BPYT=BPWA/ BK;
 		let AMUR=AMSQ/ BK;
 		let AMUS=AMSR/ BK;
-		let OYC=B- OXX;
+		let OYC=C- OXX;
 		let BPYU=BPYL* AWAO;
 		let AMUT=-AMUJ;
 		let AMUU=-AMUK;
-		let OYD=B- (OXW* OYC);
+		let OYD=C- (OXW* OYC);
 		let BPYV=((BPYI* OYC)+ (BPYU* OXW))* AWAO;
 		let AMUV=-((AMUH* OYC)+ (AMUT* OXW));
 		let AMUW=-((AMUI* OYC)+ (AMUU* OXW));
 		let BPYW=(((BPWB/ BK)* OYD)+ (BPYV* AMUR))+ ((((((BPYJ* OYC)+ (BPYU* AMUH))+ (((BPYM* AWAO)* OXW)+ (BPYI* AMUT)))* AWAO)* OYB)+ (BPYT* AMUV));
 		let BPYX=(((BPWC/ BK)* OYD)+ (BPYV* AMUS))+ ((((((BPYK* OYC)+ (BPYU* AMUI))+ (((BPYN* AWAO)* OXW)+ (BPYI* AMUU)))* AWAO)* OYB)+ (BPYT* AMUW));
-		let OYE=B- (OYB* OYD);
+		let OYE=C- (OYB* OYD);
 		let BPYY=((BPYT* OYD)+ (BPYV* OYB))* AWAO;
 		let AMUX=-((AMUR* OYD)+ (AMUV* OYB));
 		let AMUY=-((AMUS* OYD)+ (AMUW* OYB));
@@ -61485,17 +61486,17 @@ impl Instance {
 		let BPZH=BPXP/ BH;
 		let AMVG=AMTM/ BH;
 		let BPZI=BPXQ/ BH;
-		let OYI=B- (OXS/ BC);
+		let OYI=C- (OXS/ BC);
 		let BPZJ=(BPXO/ BC)* AWAO;
 		let AMVH=-(AMTL/ BC);
 		let AMVI=-(AMTM/ BC);
-		let OYJ=B- (OYH* OYI);
+		let OYJ=C- (OYH* OYI);
 		let BPZK=((BPZG* OYI)+ (BPZJ* OYH))* AWAO;
 		let AMVJ=-((AMVF* OYI)+ (AMVH* OYH));
 		let AMVK=-((AMVG* OYI)+ (AMVI* OYH));
 		let BPZL=((BPZE* OYJ)+ (BPZK* AMVD))+ ((((((BPZH* OYI)+ (BPZJ* AMVF))+ ((((BPXP/ BC)* AWAO)* OYH)+ (BPZG* AMVH)))* AWAO)* OYG)+ (BPZD* AMVJ));
 		let BPZM=((BPZF* OYJ)+ (BPZK* AMVE))+ ((((((BPZI* OYI)+ (BPZJ* AMVG))+ ((((BPXQ/ BC)* AWAO)* OYH)+ (BPZG* AMVI)))* AWAO)* OYG)+ (BPZD* AMVK));
-		let OYK=B- (OYG* OYJ);
+		let OYK=C- (OYG* OYJ);
 		let BPZN=((BPZD* OYJ)+ (BPZK* OYG))* AWAO;
 		let AMVL=-((AMVD* OYJ)+ (AMVJ* OYG));
 		let AMVM=-((AMVE* OYJ)+ (AMVK* OYG));
@@ -61503,17 +61504,17 @@ impl Instance {
 		let BPZO=BPXO/ BK;
 		let AMVN=AMTL/ BK;
 		let AMVO=AMTM/ BK;
-		let OYM=B- OYH;
+		let OYM=C- OYH;
 		let BPZP=BPZG* AWAO;
 		let AMVP=-AMVF;
 		let AMVQ=-AMVG;
-		let OYN=B- (OYG* OYM);
+		let OYN=C- (OYG* OYM);
 		let BPZQ=((BPZD* OYM)+ (BPZP* OYG))* AWAO;
 		let AMVR=-((AMVD* OYM)+ (AMVP* OYG));
 		let AMVS=-((AMVE* OYM)+ (AMVQ* OYG));
 		let BPZR=(((BPXP/ BK)* OYN)+ (BPZQ* AMVN))+ ((((((BPZE* OYM)+ (BPZP* AMVD))+ (((BPZH* AWAO)* OYG)+ (BPZD* AMVP)))* AWAO)* OYL)+ (BPZO* AMVR));
 		let BPZS=(((BPXQ/ BK)* OYN)+ (BPZQ* AMVO))+ ((((((BPZF* OYM)+ (BPZP* AMVE))+ (((BPZI* AWAO)* OYG)+ (BPZD* AMVQ)))* AWAO)* OYL)+ (BPZO* AMVS));
-		let OYO=B- (OYL* OYN);
+		let OYO=C- (OYL* OYN);
 		let BPZT=((BPZO* OYN)+ (BPZQ* OYL))* AWAO;
 		let AMVT=-((AMVN* OYN)+ (AMVR* OYL));
 		let AMVU=-((AMVO* OYN)+ (AMVS* OYL));
@@ -61573,11 +61574,11 @@ impl Instance {
 		let BPXY=(BPWB- BPXP)+ (BPXS- BPXV);
 		let AMTW=(AMSR- AMTM)+ (AMTQ- AMTU);
 		let BPXZ=(BPWC- BPXQ)+ (BPXT- BPXW);
-		let OYX=B- OYV;
+		let OYX=C- OYV;
 		let BPYA=BPXU* AWAO;
 		let AMTX=-AMTT;
 		let AMTY=-AMTU;
-		let OYY=(B- OYU)- (OYR* OYX);
+		let OYY=(C- OYU)- (OYR* OYX);
 		let AMTZ=(-AMTP)- ((YFV* OYX)+ (AMTX* OYR));
 		let AMUA=(-AMTQ)- ((YFW* OYX)+ (AMTY* OYR));
 		let OYZ=BWG* OYY;
@@ -61637,15 +61638,15 @@ impl Instance {
 		let BQBX=BPWA/ BC;
 		let AMXH=AMSQ/ BC;
 		let AMXI=AMSR/ BC;
-		let OZE=B+ (OXH/ BC);
+		let OZE=C+ (OXH/ BC);
 		let BQBY=(BQBU* OZE)+ (BQBX* OZD);
 		let AMXJ=(AMXF* OZE)+ (AMXH* OZD);
 		let AMXK=(AMXG* OZE)+ (AMXI* OZD);
-		let OZF=B+ (OZD* OZE);
+		let OZF=C+ (OZD* OZE);
 		let BQBZ=(BQBR* OZF)+ (BQBY* OZC);
 		let AMXL=(AMXD* OZF)+ (AMXJ* OZC);
 		let AMXM=(AMXE* OZF)+ (AMXK* OZC);
-		let OZG=B+ (OZC* OZF);
+		let OZG=C+ (OZC* OZF);
 		let OZH=OZB* OZG;
 		let BQCA=(BQBQ* OZG)+ (BQBZ* OZB);
 		let BQCB=(((BQBS* OZF)+ (BQBY* AMXD))+ (((((BQBV* OZE)+ (BQBX* AMXF))+ (((BPWB/ BC)* OZD)+ (BQBU* AMXH)))* OZC)+ (BQBR* AMXJ)))* OZB;
@@ -61656,15 +61657,15 @@ impl Instance {
 		let BQCD=BPWA/ BK;
 		let AMXP=AMSQ/ BK;
 		let AMXQ=AMSR/ BK;
-		let OZJ=B+ OZD;
+		let OZJ=C+ OZD;
 		let BQCE=(BQBR* OZJ)+ (BQBU* OZC);
 		let AMXR=(AMXD* OZJ)+ (AMXF* OZC);
 		let AMXS=(AMXE* OZJ)+ (AMXG* OZC);
-		let OZK=B+ (OZC* OZJ);
+		let OZK=C+ (OZC* OZJ);
 		let BQCF=(BQCD* OZK)+ (BQCE* OZI);
 		let AMXT=(AMXP* OZK)+ (AMXR* OZI);
 		let AMXU=(AMXQ* OZK)+ (AMXS* OZI);
-		let OZL=B+ (OZI* OZK);
+		let OZL=C+ (OZI* OZK);
 		let OZM=OXH* OZL;
 		let BQCG=(BPWA* OZL)+ (BQCF* OXH);
 		let BQCH=((((BPWB/ BK)* OZK)+ (BQCE* AMXP))+ (((((BQBS* OZJ)+ (BQBU* AMXD))+ ((BQBV* OZC)+ (BQBR* AMXF)))* OZI)+ (BQCD* AMXR)))* OXH;
@@ -61729,7 +61730,7 @@ impl Instance {
 		let BQAT=(BPWB* OZR)+ (BQAS* AMSQ);
 		let AMWQ=AMSR* OZR;
 		let BQAU=(BPWC* OZR)+ (BQAS* AMSR);
-		let OZS=OZR- B;
+		let OZS=OZR- C;
 		let OZT=OZS- OXH;
 		let BQAV=BQAS- BPWA;
 		let AMWR=AMWP- AMSQ;
@@ -61781,7 +61782,7 @@ impl Instance {
 		let BQAE=(((AUCS* BWG)+ L8([0.0,0.0,0.0,(ANZE* YFR),0.0,0.0,0.0,0.0]))* OZX)+ (BQAD* AMWD);
 		let AMWG=AMWE* OZX;
 		let BQAF=(((AUCT* BWG)+ L8([0.0,0.0,0.0,(ANZE* YFS),0.0,0.0,0.0,0.0]))* OZX)+ (BQAD* AMWE);
-		let OZY=OXH+ B;
+		let OZY=OXH+ C;
 		let BQAG=BLRE* OZY;
 		let BQAH=BLRF* OZY;
 		let BQAI=BLRE* AMSQ;
@@ -61852,7 +61853,7 @@ impl Instance {
 		let PAI=(PAH+ PAE).sqrt();
 		let BQDI=(AUDA+ AUDG)* (ANYF/ (AWAY* PAI));
 		let AMYL=BK* PAI;
-		let AMYM=B/ AMYL;
+		let AMYM=C/ AMYL;
 		let BQDJ=((BQDI* BK)).product_div((-AMYM),AMYL);
 		let AMYN=AMYJ* AMYM;
 		let BQDK=((AUDC+ AUDI)* AMYM)+ (BQDJ* AMYJ);
@@ -61862,10 +61863,10 @@ impl Instance {
 		let BQDM=-PAM;
 		let BQDN=(((AUDB+ AUDH)* J)).product_sum_div(ANYF,BQDI,BQDM,PAI);
 		let BQDO=BQDN* AWAO;
-		let AMYP=product_sum_div(((YFZ+ YGD)* J),B,BQDM,AMYN,PAI);
-		let BQDP=L8(sum_products_div_lanes(&[(&((AUDE+ AUDK)* J).0,B),(&BQDO.0,AMYN),(&BQDK.0,BQDM),(&BQDI.0,(-AMYP))],PAI));
-		let AMYQ=product_sum_div(((YGA+ YGE)* J),B,BQDM,AMYO,PAI);
-		let BQDQ=L8(sum_products_div_lanes(&[(&((AUDF+ AUDL)* J).0,B),(&BQDO.0,AMYO),(&BQDL.0,BQDM),(&BQDI.0,(-AMYQ))],PAI));
+		let AMYP=product_sum_div(((YFZ+ YGD)* J),C,BQDM,AMYN,PAI);
+		let BQDP=L8(sum_products_div_lanes(&[(&((AUDE+ AUDK)* J).0,C),(&BQDO.0,AMYN),(&BQDK.0,BQDM),(&BQDI.0,(-AMYP))],PAI));
+		let AMYQ=product_sum_div(((YGA+ YGE)* J),C,BQDM,AMYO,PAI);
+		let BQDQ=L8(sum_products_div_lanes(&[(&((AUDF+ AUDL)* J).0,C),(&BQDO.0,AMYO),(&BQDL.0,BQDM),(&BQDI.0,(-AMYQ))],PAI));
 		PAS=PAI;
 		PAW=PAM;
 		YGJ=AMYN;
@@ -61896,7 +61897,7 @@ impl Instance {
 		let PAO=PAH.sqrt();
 		let BQCZ=AUDA* (ANYF/ (AWAY* PAO));
 		let AMYD=BK* PAO;
-		let AMYE=B/ AMYD;
+		let AMYE=C/ AMYD;
 		let BQDA=((BQCZ* BK)).product_div((-AMYE),AMYD);
 		let AMYF=YFX* AMYE;
 		let BQDB=(AUDC* AMYE)+ (BQDA* YFX);
@@ -61906,10 +61907,10 @@ impl Instance {
 		let BQDD=-PAP;
 		let BQDE=((AUDB* J)).product_sum_div(ANYF,BQCZ,BQDD,PAO);
 		let BQDF=BQDE* AWAO;
-		let AMYH=product_sum_div((YFZ* J),B,BQDD,AMYF,PAO);
-		let BQDG=L8(sum_products_div_lanes(&[(&(AUDE* J).0,B),(&BQDF.0,AMYF),(&BQDB.0,BQDD),(&BQCZ.0,(-AMYH))],PAO));
-		let AMYI=product_sum_div((YGA* J),B,BQDD,AMYG,PAO);
-		let BQDH=L8(sum_products_div_lanes(&[(&(AUDF* J).0,B),(&BQDF.0,AMYG),(&BQDC.0,BQDD),(&BQCZ.0,(-AMYI))],PAO));
+		let AMYH=product_sum_div((YFZ* J),C,BQDD,AMYF,PAO);
+		let BQDG=L8(sum_products_div_lanes(&[(&(AUDE* J).0,C),(&BQDF.0,AMYF),(&BQDB.0,BQDD),(&BQCZ.0,(-AMYH))],PAO));
+		let AMYI=product_sum_div((YGA* J),C,BQDD,AMYG,PAO);
+		let BQDH=L8(sum_products_div_lanes(&[(&(AUDF* J).0,C),(&BQDF.0,AMYG),(&BQDC.0,BQDD),(&BQCZ.0,(-AMYI))],PAO));
 		PAT=PAO;
 		PAX=PAP;
 		YGN=AMYF;
@@ -61951,7 +61952,7 @@ impl Instance {
 		}
 		let PAQ=OXH>= A;
 		let PAR=if PAQ{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -61962,7 +61963,7 @@ impl Instance {
 		let AMYS=YGK* PAR;
 		let BQDT=AUDV* PAR;
 		let PAV=if PAQ{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -61981,7 +61982,7 @@ impl Instance {
 		let BQDZ=((AUDW* PAV)* OCH)+ L8([0.0,0.0,0.0,(BKPQ* AMYT),0.0,0.0,0.0,0.0]);
 		let AMYY=AMYU* OCH;
 		let BQEA=((AUDX* PAV)* OCH)+ L8([0.0,0.0,0.0,(BKPQ* AMYU),0.0,0.0,0.0,0.0]);
-		let PBA=B+ (OCH* PAY);
+		let PBA=C+ (OCH* PAY);
 		let PBC=PBB> A;
 		let PBS;
 		let PBU;
@@ -62005,13 +62006,13 @@ impl Instance {
 		let BQEB=-PBE;
 		let BQEC=((BQDV* AWAO)).product_sum_div(ANYF,BQDY,BQEB,PBA);
 		let BQED=BQEC* AWAO;
-		let AMYZ=product_sum_div((AMYV* AMF),B,BQEB,AMYX,PBA);
-		let BQEE=L8(sum_products_div_lanes(&[(&(BQDW* AMF).0,B),(&BQED.0,AMYX),(&BQDZ.0,BQEB),(&BQDY.0,(-AMYZ))],PBA));
-		let AMZA=product_sum_div((AMYW* AMF),B,BQEB,AMYY,PBA);
-		let BQEF=L8(sum_products_div_lanes(&[(&(BQDX* AMF).0,B),(&BQED.0,AMYY),(&BQEA.0,BQEB),(&BQDY.0,(-AMZA))],PBA));
+		let AMYZ=product_sum_div((AMYV* AMF),C,BQEB,AMYX,PBA);
+		let BQEE=L8(sum_products_div_lanes(&[(&(BQDW* AMF).0,C),(&BQED.0,AMYX),(&BQDZ.0,BQEB),(&BQDY.0,(-AMYZ))],PBA));
+		let AMZA=product_sum_div((AMYW* AMF),C,BQEB,AMYY,PBA);
+		let BQEF=L8(sum_products_div_lanes(&[(&(BQDX* AMF).0,C),(&BQED.0,AMYY),(&BQEA.0,BQEB),(&BQDY.0,(-AMZA))],PBA));
 		let PBG=OXF.abs();
 		let BQEG=AUCO* ((AWAY* ((OXF>= AWBZ) as u8 as f64))- ANYF);
-		let PBH=B>= PBG;
+		let PBH=C>= PBG;
 		let PBI;
 		let YGT;
 		let YGU;
@@ -62019,14 +62020,14 @@ impl Instance {
 		let AUEI;
 		let AUEJ;
 		if PBH{
-		PBI=B;
+		PBI=C;
 		YGT=A;
 		YGU=A;
 		AUEH=BHSX;
 		AUEI=BHSX;
 		AUEJ=BHSX;
 		}else{
-		let AMZB=(BK* ((OXF>= A) as u8 as f64))- B;
+		let AMZB=(BK* ((OXF>= A) as u8 as f64))- C;
 		let AMZC=YFR* AMZB;
 		let BQEH=AUCS* AMZB;
 		let AMZD=YFS* AMZB;
@@ -62038,7 +62039,7 @@ impl Instance {
 		AUEI=BQEH;
 		AUEJ=BQEI;
 		}
-		let PBJ=PBF* (B+ PBI);
+		let PBJ=PBF* (C+ PBI);
 		let BQEJ=AUEH* PBF;
 		let AMZE=YGT* PBF;
 		let BQEK=AUEI* PBF;
@@ -62054,7 +62055,7 @@ impl Instance {
 		if PBK{
 		let PBL=PBE>= A;
 		let PBM=if PBL{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -62100,7 +62101,7 @@ impl Instance {
 		AUEF=BQEQ;
 		AUEG=BQER;
 		}
-		let PBT=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PBS, B));
+		let PBT=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PBS, C));
 		OXD=PBT;
 		OXF=PBU;
 		PBB=PBV;
@@ -62123,7 +62124,7 @@ impl Instance {
 		if PBY{
 		let PCD=PBZ>= A;
 		let PCE=if PCD{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -62142,7 +62143,7 @@ impl Instance {
 		let PCK=OBX* PCJ;
 		let BLTJ=L8([0.0,0.0,0.0,(ATNX* PCJ),0.0,0.0,0.0,0.0])+ (BLTI* OBX);
 		let PCO=PCL+ PCJ;
-		let PCP=B/ PCO;
+		let PCP=C/ PCO;
 		let PCT=OBX* PCQ;
 		let PCU=PCK+ (PCT* PCP);
 		let BLTK=BLTJ+ (((L8([0.0,0.0,0.0,(ATNX* PCQ),0.0,0.0,0.0,0.0])+ (AUCR* OBX))* PCP)+ ((((AUCQ+ BLTI)).product_div((-PCP),PCO))* PCT));
@@ -62256,7 +62257,7 @@ impl Instance {
 		let PDU=((PDT* PDT)+ 0.04000000000000001f64).sqrt();
 		let BLTX=(BLTU+ BLTU)* (ANYF/ (AWAY* PDU));
 		let AKNV=BK* PDU;
-		let AKNW=B/ AKNV;
+		let AKNW=C/ AKNV;
 		let BLTY=((BLTX* BK)).product_div((-AKNW),AKNV);
 		let PDV=J* (PDT+ PDU);
 		let BLTZ=(AUEU+ BLTX)* J;
@@ -62291,7 +62292,7 @@ impl Instance {
 		let PDY=(LKW* PDX).sqrt();
 		let BLUC=(AUEX* LKW)* (ANYF/ (AWAY* PDY));
 		let AKOB=BK* PDY;
-		let AKOC=B/ AKOB;
+		let AKOC=C/ AKOB;
 		let BLUD=((BLUC* BK)).product_div((-AKOC),AKOB);
 		let PDZ=BZ* PDL;
 		let BLUE=BLTL* BZ;
@@ -62353,7 +62354,7 @@ impl Instance {
 		let PEG=((PEA* PEA)+ PEF).sqrt();
 		let BLUU=((BLUR+ BLUR)+ AUFA)* (ANYF/ (AWAY* PEG));
 		let AKOR=BK* PEG;
-		let AKOS=B/ AKOR;
+		let AKOS=C/ AKOR;
 		let BLUV=((BLUU* BK)).product_div((-AKOS),AKOR);
 		let PEH=PDL- (PDL- (J* (PEA+ PEG)));
 		let BLUW=BLTL- (BLTL- ((BLUH+ BLUU)* J));
@@ -62418,7 +62419,7 @@ impl Instance {
 		let AUFP;
 		let AUFQ;
 		if PEI{
-		let PEJ=LJ== B;
+		let PEJ=LJ== C;
 		let PEP;
 		let YHJ;
 		let YHK;
@@ -62439,7 +62440,7 @@ impl Instance {
 		AUFS=BLVV;
 		AUFT=BLVW;
 		}else{
-		let PEN=B- JN;
+		let PEN=C- JN;
 		let PEO=(PM* PEK)* PEN;
 		let BLVR=(AUEO* PM)* PEN;
 		let AKPD=(YGX* PM)* PEN;
@@ -62567,7 +62568,7 @@ impl Instance {
 		let AUGO;
 		let AUGP;
 		if PEW{
-		let PEX=LJ== B;
+		let PEX=LJ== C;
 		let PFC;
 		let YHP;
 		let YHQ;
@@ -62588,7 +62589,7 @@ impl Instance {
 		AUGR=BLVI;
 		AUGS=BLVJ;
 		}else{
-		let PEZ=B- JN;
+		let PEZ=C- JN;
 		let PFA=(PM* PEK)* PEZ;
 		let BLVE=(AUEO* PM)* PEZ;
 		let AKOX=(YGX* PM)* PEZ;
@@ -62874,7 +62875,7 @@ impl Instance {
 		let AUHG;
 		let AUHH;
 		if PFJ{
-		let PFK=((LJK== B)&& (ADB> A))&& (ME> A);
+		let PFK=((LJK== C)&& (ADB> A))&& (ME> A);
 		let PGW;
 		let PHF;
 		let PID;
@@ -62907,7 +62908,7 @@ impl Instance {
 		let AKQO=YZR* AMF;
 		let BLXO=L5([0.0,0.0,0.0,BLXN[0],BLXN[1]]);
 		let BLXP=L4([0.0,BLXM[0],BLXM[1],BLXM[2]]);
-		PGW=B;
+		PGW=C;
 		PHF=ME;
 		PID=PFM;
 		PIZ=LJO;
@@ -62915,7 +62916,7 @@ impl Instance {
 		PJL=PFL;
 		PRJ=A;
 		QKE=ADB;
-		ROQ=B;
+		ROQ=C;
 		YHY=A;
 		YHZ=AKQO;
 		YIA=AKQN;
@@ -63004,7 +63005,7 @@ impl Instance {
 		let AUHY;
 		let AUHZ;
 		if PFN{
-		let PFO=((((LJK== B)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= B);
+		let PFO=((((LJK== C)&& (ADB> A))&& (ME> A))&& (JN!= A))&& (LJ!= C);
 		let PGY;
 		let PIF;
 		let PJN;
@@ -63022,7 +63023,7 @@ impl Instance {
 		let BLXJ=AVZY* AWAO;
 		let BLXK=L5([0.0,BLXJ[0],0.0,0.0,BLXJ[1]]);
 		let BLXL=L4([BLXI[0],BLXI[1],0.0,BLXI[2]]);
-		PGY=B;
+		PGY=C;
 		PIF=PFQ;
 		PJN=PFP;
 		YII=A;
@@ -63092,7 +63093,7 @@ impl Instance {
 		let AUIL;
 		let AUIM;
 		if PFR{
-		let PFS=((LKB== B)&& (ABL> A))&& SN;
+		let PFS=((LKB== C)&& (ABL> A))&& SN;
 		let PHA;
 		let PHI;
 		let PIH;
@@ -63124,7 +63125,7 @@ impl Instance {
 		let BLWE=AWAM- AWAL;
 		let AKPI=YZP- YZR;
 		let PFV=-(ABL+ (LKF* LJ));
-		let PFW=((PFV< A)&& (LKT> A))&& (LJ== B);
+		let PFW=((PFV< A)&& (LKT> A))&& (LJ== C);
 		let PII;
 		let QKJ;
 		let YIV;
@@ -63173,7 +63174,7 @@ impl Instance {
 		let PGC=if PGB{
 		AMF
 		}else{
-		B
+		C
 		};
 		let PGD=PGC* PFU;
 		let BLWF=BLWE* PGC;
@@ -63184,17 +63185,17 @@ impl Instance {
 		let AKPL=AKPJ/ PFY;
 		let AKPM=AKPK/ PFY;
 		let BLWH=BLWG* (LKY* ((PGE+ (((PGE== AWBZ) as u8 as f64)* AWCA)).powf((LKY- ANYF))));
-		let AKPN=LKY- B;
+		let AKPN=LKY- C;
 		let AKPO=PGE+ (((PGE== A) as u8 as f64)* ZNW);
 		let BLWI=AKPN* ((AKPO+ (((AKPO== AWBZ) as u8 as f64)* AWCA)).powf((AKPN- ANYF)));
 		let AKPP=LKY* (AKPO.powf(AKPN));
 		let AKPQ=AKPL* AKPP;
 		let AKPR=AKPM* AKPP;
-		let PGF=B+ (PGE.powf(LKY));
-		let PGG=B/ LKY;
+		let PGF=C+ (PGE.powf(LKY));
+		let PGG=C/ LKY;
 		let PGH=PGF.powf(PGG);
 		let BLWJ=BLWH* (PGG* ((PGF+ (((PGF== AWBZ) as u8 as f64)* AWCA)).powf((PGG- ANYF))));
-		let AKPS=PGG- B;
+		let AKPS=PGG- C;
 		let AKPT=PGF+ (((PGF== A) as u8 as f64)* ZNW);
 		let BLWK=AKPS* ((AKPT+ (((AKPT== AWBZ) as u8 as f64)* AWCA)).powf((AKPS- ANYF)));
 		let AKPU=PGG* (AKPT.powf(AKPS));
@@ -63204,9 +63205,9 @@ impl Instance {
 		let BLWL=-PGI;
 		let BLWM=((BLWF* PGC)).product_sum_div(ANYF,BLWJ,BLWL,PGH);
 		let BLWN=BLWM* AWAO;
-		let AKPX=product_sum_div((AKPJ* PGC),B,BLWL,AKPV,PGH);
+		let AKPX=product_sum_div((AKPJ* PGC),C,BLWL,AKPV,PGH);
 		let BLWO=L3(sum_products_div_lanes(&[(&BLWN.0,AKPV),(&(((((BLWG* BLWI)* LKY)* AKPL)* AKPU)+ (((BLWH* BLWK)* PGG)* AKPQ)).0,BLWL),(&BLWJ.0,(-AKPX))],PGH));
-		let AKPY=product_sum_div((AKPK* PGC),B,BLWL,AKPW,PGH);
+		let AKPY=product_sum_div((AKPK* PGC),C,BLWL,AKPW,PGH);
 		let BLWP=L3(sum_products_div_lanes(&[(&BLWN.0,AKPW),(&(((((BLWG* BLWI)* LKY)* AKPM)* AKPU)+ (((BLWH* BLWK)* PGG)* AKPR)).0,BLWL),(&BLWJ.0,(-AKPY))],PGH));
 		PGJ=PGI;
 		YJD=AKPX;
@@ -63226,7 +63227,7 @@ impl Instance {
 		let PGL=((PGK* PGK)+ 0.04000000000000001f64).sqrt();
 		let BLWT=(BLWQ+ BLWQ)* (ANYF/ (AWAY* PGL));
 		let AKQD=BK* PGL;
-		let AKQE=B/ AKQD;
+		let AKQE=C/ AKQD;
 		let BLWU=((BLWT* BK)).product_div((-AKQE),AKQD);
 		let PGM=J* (PGK+ PGL);
 		let BLWV=(AUJI+ BLWT)* J;
@@ -63261,7 +63262,7 @@ impl Instance {
 		let PGP=(LKW* PGO).sqrt();
 		let BLWY=(AUJL* LKW)* (ANYF/ (AWAY* PGP));
 		let AKQJ=BK* PGP;
-		let AKQK=B/ AKQJ;
+		let AKQK=C/ AKQJ;
 		let BLWZ=((BLWY* BK)).product_div((-AKQK),AKQJ);
 		let PGQ=PFX- (PGP* LKT);
 		let BLXA=(BLWY* LKT)* AWAO;
@@ -63326,7 +63327,7 @@ impl Instance {
 		let BLXF=L8([0.0,0.0,0.0,0.0,AUIX[0],0.0,AUIX[1],AUIX[2]]);
 		let BLXG=L8([0.0,0.0,0.0,0.0,AUJA[0],0.0,AUJA[1],AUJA[2]]);
 		let BLXH=L8([0.0,0.0,0.0,0.0,AUJB[0],0.0,AUJB[1],AUJB[2]]);
-		PHA=B;
+		PHA=C;
 		PHI=MD;
 		PIH=PII;
 		PJC=LKK;
@@ -63334,7 +63335,7 @@ impl Instance {
 		PJP=PFT;
 		PRM=LKG;
 		QKI=QKJ;
-		RPU=B;
+		RPU=C;
 		YIQ=YIV;
 		YIR=YIW;
 		YIS=AKPH;
@@ -63409,7 +63410,7 @@ impl Instance {
 		let AUJQ;
 		let AUJR;
 		if PGR{
-		let PGS=((((LKB== B)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= B);
+		let PGS=((((LKB== C)&& (ABL> A))&& SN)&& (JN!= A))&& (LJ!= C);
 		let PHC;
 		let PIL;
 		let PJR;
@@ -63427,7 +63428,7 @@ impl Instance {
 		let BLWA=L3([AVZW[0],AVZW[1],0.0])- L3([0.0,AVZY[0],AVZY[1]]);
 		let BLWB=L5([BLWA[0],BLWA[1],0.0,0.0,BLWA[2]]);
 		let BLWC=L4([BLVZ[0],BLVZ[1],0.0,BLVZ[2]]);
-		PHC=B;
+		PHC=C;
 		PIL=PGU;
 		PJR=PGT;
 		YJK=A;
@@ -63653,7 +63654,7 @@ impl Instance {
 		PIN=PHW;
 		AUKU=AUKS;
 		}
-		let PIB=LNB== B;
+		let PIB=LNB== C;
 		let PJT;
 		let YJT;
 		let YJU;
@@ -63705,18 +63706,18 @@ impl Instance {
 		let BLYX=(BLYQ* PIR)+ (BLYN* AKQU);
 		let AKQY=AKQW* PIR;
 		let BLYY=(BLYT* PIR)+ (BLYN* AKQW);
-		let PIS=(((B+ PIQ)+ PIR)+ (PIR* PIQ))+ (PIR* PIR);
+		let PIS=(((C+ PIQ)+ PIR)+ (PIR* PIQ))+ (PIR* PIR);
 		let BLYZ=((BLYI+ BLYN)+ ((BLYN* PIQ)+ (BLYI* PIR)))+ (BLYW+ BLYW);
 		let AKQZ=((AKQR+ AKQU)+ ((AKQU* PIQ)+ (AKQR* PIR)))+ (AKQX+ AKQX);
 		let AKRA=((AKQS+ AKQW)+ ((AKQW* PIQ)+ (AKQS* PIR)))+ (AKQY+ AKQY);
-		let PIT=B/ PIS;
+		let PIT=C/ PIS;
 		let BLZA=-PIT;
 		let BLZB=((BLYZ).product_div(BLZA,PIS))* AWAO;
 		let AKRB=product_div(BLZA,AKQZ,PIS);
 		let BLZC=-AKRB;
 		let AKRC=product_div(BLZA,AKRA,PIS);
 		let BLZD=-AKRC;
-		let PIU=B- PIT;
+		let PIU=C- PIT;
 		let AKRD=BLZC* PIP;
 		let BLZE=((L6(sum_products_div_lanes(&[(&BLZB.0,AKQZ),(&(((L6([0.0,0.0,BLYK[0],BLYK[1],BLYK[2],BLYK[3]])+ BLYQ)+ (((BLYQ* PIQ)+ (BLYI* AKQU))+ (L6([0.0,0.0,BLYU[0],BLYU[1],BLYU[2],BLYU[3]])+ (BLYN* AKQR))))+ (BLYX+ BLYX)).0,BLZA),(&BLYZ.0,BLZC)],PIS)))* AWAO)* PIP;
 		let BLZF=BLZE+ L6([0.0,0.0,(BLYH* BLZC),0.0,0.0,0.0]);
@@ -63792,7 +63793,7 @@ impl Instance {
 		if PKA{
 		let AKRO=YJT* AMF;
 		let AKRP=YJU* AMF;
-		let PKB=IDF* ((B+ PJZ)- AL);
+		let PKB=IDF* ((C+ PJZ)- AL);
 		let BLZZ=BLZS* IDF;
 		let AKRQ=(AKRO* BWG)* IDF;
 		let BMAA=(((AUKW* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AKRO),0.0,0.0,0.0]))* IDF;
@@ -63812,7 +63813,7 @@ impl Instance {
 		let AKRL=AKRJ* BWG;
 		let BLZU=((AUKX* AMF)* BWG)+ L6([0.0,0.0,(ANZE* AKRJ),0.0,0.0,0.0]);
 		let mut PKC=PJZ;
-		let mut PKE=B;
+		let mut PKE=C;
 		let mut YJZ=AKRK;
 		let mut YKA=AKRL;
 		let mut AULE=BLZS;
@@ -63865,7 +63866,7 @@ impl Instance {
 		if A!=0.0{
 		let BMAF=(BLZP* AWAO)* J;
 		let AKRS=(AKRH* AMF)* J;
-		let PKJ=(((-PJS)* J)- J)- B;
+		let PKJ=(((-PJS)* J)- J)- C;
 		let PKN=if PKL{
 		PKK
 		}else{
@@ -63878,7 +63879,7 @@ impl Instance {
 		let PKO=((PKJ* PKJ)+ PKN).sqrt();
 		let BMAI=(BMAG+ BMAG)* (ANYF/ (AWAY* PKO));
 		let AKRV=BK* PKO;
-		let AKRW=B/ AKRV;
+		let AKRW=C/ AKRV;
 		let BMAJ=(BMAF+ BMAI)* J;
 		let AKRX=(AKRS+ (AKRU* AKRW))* J;
 		let BMAK=(((BMAH+ BMAH)* AKRW)+ ((((BMAI* BK)).product_div((-AKRW),AKRV))* AKRU))* J;
@@ -63926,7 +63927,7 @@ impl Instance {
 		if PKV{
 		let PLF;
 		if PKW{
-		PLF=B;
+		PLF=C;
 		}else{
 		let PLG;
 		if PKX{
@@ -63962,13 +63963,13 @@ impl Instance {
 		let PLD=PLC.sqrt();
 		let BPVT=AULQ* (ANYF/ (AWAY* PLD));
 		let AMSK=BK* PLD;
-		let AMSL=B/ AMSK;
+		let AMSL=C/ AMSK;
 		let BPVU=((BPVT* BK)).product_div((-AMSL),AMSK);
 		let AMSM=YKH* AMSL;
 		let BPVV=(AULR* AMSL)+ (BPVU* YKH);
 		let AMSN=YKI* AMSL;
 		let BPVW=(AULS* AMSL)+ (BPVU* YKI);
-		let PLE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PLA, B));
+		let PLE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PLA, C));
 		PLA=PLE;
 		PLC=PLD;
 		YKH=AMSM;
@@ -64023,7 +64024,7 @@ impl Instance {
 		AULO=AULU;
 		AULP=AULV;
 		}
-		let PLO=B/ PLN;
+		let PLO=C/ PLN;
 		let BMBH=-PLO;
 		let BMBI=(AULN).product_div(BMBH,PLN);
 		let BMBJ=BMBI* AWAO;
@@ -64137,7 +64138,7 @@ impl Instance {
 		let ALKU=YKB* BWG;
 		let ALKV=ALKT* BWG;
 		let PMB=BWG* PIY;
-		let PMC=B/ PMB;
+		let PMC=C/ PMB;
 		let PMD=PMC* PJD;
 		let BMYY=(product_div(((ANZE* PIY)+ (AUHA* BWG)),(-PMC),PMB))* PJD;
 		let BMYZ=BMYY* PME;
@@ -64192,7 +64193,7 @@ impl Instance {
 		let PMP=(PMI+ PMM).sqrt();
 		let BMZL=(L7([0.0,0.0,BMZA,0.0,0.0,0.0,0.0])+ BMZG)* (ANYF/ (AWAY* PMP));
 		let ALLC=BK* PMP;
-		let ALLD=B/ ALLC;
+		let ALLD=C/ ALLC;
 		let BMZM=((BMZL* BK)).product_div((-ALLD),ALLC);
 		let PMQ=(-PML)+ PMP;
 		let BMZN=(BMZC* AWAO)+ BMZL;
@@ -64225,15 +64226,15 @@ impl Instance {
 		let BNAA=-PMU;
 		let BNAB=(((L7([0.0,0.0,((BMYY* GUA)* AWAO),0.0,0.0,0.0,0.0])+ (BMZV* BK))+ ((BMZZ* PMS)+ (BMZV* PMT)))).product_sum_div(ANYF,BMZV,BNAA,PMS);
 		let BNAC=BNAB* AWAO;
-		let ALLR=product_sum_div(((ALLL* BK)+ ((ALLP* PMS)+ (ALLL* PMT))),B,BNAA,ALLL,PMS);
-		let ALLS=product_sum_div(((ALLO* BK)+ ((ALLQ* PMS)+ (ALLO* PMT))),B,BNAA,ALLO,PMS);
+		let ALLR=product_sum_div(((ALLL* BK)+ ((ALLP* PMS)+ (ALLL* PMT))),C,BNAA,ALLL,PMS);
+		let ALLS=product_sum_div(((ALLO* BK)+ ((ALLQ* PMS)+ (ALLO* PMT))),C,BNAA,ALLO,PMS);
 		let PMV=PMU* CWM;
 		let BNAD=(BNAB* CWM)+ L7([0.0,0.0,(ANZG* PMU),0.0,0.0,0.0,0.0]);
 		let ALLT=ALLR* CWM;
-		let BNAE=(L7(sum_products_div_lanes(&[(&((BMZX* BK)+ ((((BMZX* JAN)* PMS)+ (BMZV* ALLP))+ ((BMZX* PMT)+ (BMZZ* ALLL)))).0,B),(&BNAC.0,ALLL),(&BMZX.0,BNAA),(&BMZV.0,(-ALLR))],PMS)))* CWM;
+		let BNAE=(L7(sum_products_div_lanes(&[(&((BMZX* BK)+ ((((BMZX* JAN)* PMS)+ (BMZV* ALLP))+ ((BMZX* PMT)+ (BMZZ* ALLL)))).0,C),(&BNAC.0,ALLL),(&BMZX.0,BNAA),(&BMZV.0,(-ALLR))],PMS)))* CWM;
 		let BNAF=BNAE+ L7([0.0,0.0,(ANZG* ALLR),0.0,0.0,0.0,0.0]);
 		let ALLU=ALLS* CWM;
-		let BNAG=(L7(sum_products_div_lanes(&[(&((BMZY* BK)+ ((((BMZY* JAN)* PMS)+ (BMZV* ALLQ))+ ((BMZY* PMT)+ (BMZZ* ALLO)))).0,B),(&BNAC.0,ALLO),(&BMZY.0,BNAA),(&BMZV.0,(-ALLS))],PMS)))* CWM;
+		let BNAG=(L7(sum_products_div_lanes(&[(&((BMZY* BK)+ ((((BMZY* JAN)* PMS)+ (BMZV* ALLQ))+ ((BMZY* PMT)+ (BMZZ* ALLO)))).0,C),(&BNAC.0,ALLO),(&BMZY.0,BNAA),(&BMZV.0,(-ALLS))],PMS)))* CWM;
 		let BNAH=BNAG+ L7([0.0,0.0,(ANZG* ALLS),0.0,0.0,0.0,0.0]);
 		let PMW=PMV/ PLY;
 		let BNAI=L7([0.0,0.0,BMYW,0.0,0.0,0.0,0.0]);
@@ -64247,10 +64248,10 @@ impl Instance {
 		let ALLZ=ALLW* PMW;
 		let BNAM=(((BNAH).product_sum_div(ANYF,BNAI,(-ALLW),PLY))* PMW)+ (BNAJ* ALLW);
 		let ALMA=ALLZ+ ALLZ;
-		let PMX=(B+ (PMW* PMW)).sqrt();
+		let PMX=(C+ (PMW* PMW)).sqrt();
 		let BNAN=(BNAK+ BNAK)* (ANYF/ (AWAY* PMX));
 		let ALMB=BK* PMX;
-		let ALMC=B/ ALMB;
+		let ALMC=C/ ALMB;
 		let BNAO=((BNAN* BK)).product_div((-ALMC),ALMB);
 		let ALMD=ALLY* ALMC;
 		let ALME=ALMA* ALMC;
@@ -64258,14 +64259,14 @@ impl Instance {
 		let BNAP=-PMY;
 		let BNAQ=(BNAD).product_sum_div(ANYF,BNAN,BNAP,PMX);
 		let BNAR=BNAQ* AWAO;
-		let ALMF=product_sum_div(ALLT,B,BNAP,ALMD,PMX);
-		let ALMG=product_sum_div(ALLU,B,BNAP,ALME,PMX);
+		let ALMF=product_sum_div(ALLT,C,BNAP,ALMD,PMX);
+		let ALMG=product_sum_div(ALLU,C,BNAP,ALME,PMX);
 		let PMZ=PMY- PLZ;
 		let BNAS=BNAQ- AULH;
 		let ALMH=ALMF- YKB;
-		let BNAT=(L7(sum_products_div_lanes(&[(&BNAF.0,B),(&BNAR.0,ALMD),(&(((BNAL+ BNAL)* ALMC)+ (BNAO* ALLY)).0,BNAP),(&BNAN.0,(-ALMF))],PMX)))- AULI;
+		let BNAT=(L7(sum_products_div_lanes(&[(&BNAF.0,C),(&BNAR.0,ALMD),(&(((BNAL+ BNAL)* ALMC)+ (BNAO* ALLY)).0,BNAP),(&BNAN.0,(-ALMF))],PMX)))- AULI;
 		let ALMI=ALMG- YKC;
-		let BNAU=(L7(sum_products_div_lanes(&[(&BNAH.0,B),(&BNAR.0,ALME),(&(((BNAM+ BNAM)* ALMC)+ (BNAO* ALMA)).0,BNAP),(&BNAN.0,(-ALMG))],PMX)))- AULJ;
+		let BNAU=(L7(sum_products_div_lanes(&[(&BNAH.0,C),(&BNAR.0,ALME),(&(((BNAM+ BNAM)* ALMC)+ (BNAO* ALMA)).0,BNAP),(&BNAN.0,(-ALMG))],PMX)))- AULJ;
 		let PNA=PJD* (PJS- PMZ);
 		let BNAV=(BMYX- BNAS)* PJD;
 		let BNAW=L8([BNAS[0],BNAS[1],0.0,BNAS[2],BNAS[3],BNAS[4],BNAS[5],BNAS[6]]);
@@ -64318,7 +64319,7 @@ impl Instance {
 		let PNC=BWG* PNB;
 		let BMBY=BMBX* BWG;
 		let BMBZ=L7([0.0,0.0,(ANZE* PNB),0.0,0.0,0.0,0.0])+ BMBY;
-		let PND=PNC< (B+ (((-0.9999999999999978f64* PJJ)* FCG)/ BH));
+		let PND=PNC< (C+ (((-0.9999999999999978f64* PJJ)* FCG)/ BH));
 		let PNL;
 		let YKX;
 		let YKY;
@@ -64338,18 +64339,18 @@ impl Instance {
 		}else{
 		let AKSR=AKRH+ YKC;
 		let PNF=PJJ* FCG;
-		let PNG=(BH* (PNC- B))/ PNF;
+		let PNG=(BH* (PNC- C))/ PNF;
 		let BMCA=L7([0.0,0.0,((BLZO* FCG)+ (ANZM* PJJ)),0.0,0.0,0.0,0.0]);
 		let AKSS=((YKB* BWG)* BH)/ PNF;
 		let AKST=((AKSR* BWG)* BH)/ PNF;
 		let PNH=(PJJ* BWG)/ BK;
 		let BMCB=((BLZO* BWG)+ (ANZE* PJJ))/ BK;
-		let PNI=(B+ PNG).sqrt();
+		let PNI=(C+ PNG).sqrt();
 		let BMCC=(((BMBZ* BH)).product_sum_div(ANYF,BMCA,(-PNG),PNF))* (ANYF/ (AWAY* PNI));
 		let AKSU=BK* PNI;
-		let AKSV=B/ AKSU;
+		let AKSV=C/ AKSU;
 		let BMCD=((BMCC* BK)).product_div((-AKSV),AKSU);
-		let PNJ=B- PNI;
+		let PNJ=C- PNI;
 		let AKSW=-(AKSS* AKSV);
 		let AKSX=-(AKST* AKSV);
 		let AKSY=AKSW* PNH;
@@ -64391,7 +64392,7 @@ impl Instance {
 		let BMDI=(AULI* BWG)+ L7([0.0,0.0,(ANZE* YKB),0.0,0.0,0.0,0.0]);
 		let AKUK=AKUI* BWG;
 		let BMDJ=(AULJ* BWG)+ L7([0.0,0.0,(ANZE* AKUI),0.0,0.0,0.0,0.0]);
-		let PNQ=PNC- B;
+		let PNQ=PNC- C;
 		let PNR=PJJ* FCG;
 		let PNS=(BH* (PNQ+ PNP))/ PNR;
 		let BMDK=L7([0.0,0.0,((BLZO* FCG)+ (ANZM* PJJ)),0.0,0.0,0.0,0.0]);
@@ -64399,12 +64400,12 @@ impl Instance {
 		let AKUM=((AKUK+ (AKUH* PNP))* BH)/ PNR;
 		let PNT=(PJJ* BWG)/ BK;
 		let BMDL=((BLZO* BWG)+ (ANZE* PJJ))/ BK;
-		let PNU=(B+ PNS).sqrt();
+		let PNU=(C+ PNS).sqrt();
 		let BMDM=((((BMBZ+ BMDH)* BH)).product_sum_div(ANYF,BMDK,(-PNS),PNR))* (ANYF/ (AWAY* PNU));
 		let AKUN=BK* PNU;
-		let AKUO=B/ AKUN;
+		let AKUO=C/ AKUN;
 		let BMDN=((BMDM* BK)).product_div((-AKUO),AKUN);
-		let PNV=B- PNU;
+		let PNV=C- PNU;
 		let AKUP=-(AKUL* AKUO);
 		let AKUQ=-(AKUM* AKUO);
 		let BMDO=((((((((BMDI+ (((BMCK* AMF)* PNP)+ (BMDH* AKUG)))* BH)).product_sum_div(ANYF,BMDK,(-AKUL),PNR))* AKUO)+ (BMDN* AKUL))* AWAO)* PNT)+ L7([0.0,0.0,(BMDL* AKUP),0.0,0.0,0.0,0.0]);
@@ -64419,14 +64420,14 @@ impl Instance {
 		let PNY=(BH* (PNQ+ PNX))/ PNR;
 		let AKUV=((AKUJ+ (AKUT* PNX))* BH)/ PNR;
 		let AKUW=((AKUK+ (AKUU* PNX))* BH)/ PNR;
-		let PNZ=(B+ PNY).sqrt();
+		let PNZ=(C+ PNY).sqrt();
 		let BMDR=((((BMBZ+ BMDQ)* BH)).product_sum_div(ANYF,BMDK,(-PNY),PNR))* (ANYF/ (AWAY* PNZ));
 		let AKUX=BK* PNZ;
-		let AKUY=B/ AKUX;
+		let AKUY=C/ AKUX;
 		let BMDS=((BMDR* BK)).product_div((-AKUY),AKUX);
 		let BMDT=(((((BMDI+ ((((((BMDO+ AULI)* BWG)+ L7([0.0,0.0,(ANZE* AKUR),0.0,0.0,0.0,0.0]))* AMF)* PNX)+ (BMDQ* AKUT)))* BH)).product_sum_div(ANYF,BMDK,(-AKUV),PNR))* AKUY)+ (BMDS* AKUV);
 		let BMDU=(((((BMDJ+ ((((((BMDP+ AULJ)* BWG)+ L7([0.0,0.0,(ANZE* AKUS),0.0,0.0,0.0,0.0]))* AMF)* PNX)+ (BMDQ* AKUU)))* BH)).product_sum_div(ANYF,BMDK,(-AKUW),PNR))* AKUY)+ (BMDS* AKUW);
-		let POA=B- PNZ;
+		let POA=C- PNZ;
 		let AKUZ=-(AKUV* AKUY);
 		let AKVA=-(AKUW* AKUY);
 		let POB=(PJS+ (PNT* POA))+ PLZ;
@@ -64446,7 +64447,7 @@ impl Instance {
 		AUMX=BMDX;
 		}else{
 		let POE=BWG* PJI;
-		let POF=B/ POE;
+		let POF=C/ POE;
 		let BMCM=product_div(((ANZE* PJI)+ (BLZM* BWG)),(-POF),POE);
 		let POG=0.7071067811865475f64+ POF;
 		let POH=(-PNB)/ PJI;
@@ -64473,7 +64474,7 @@ impl Instance {
 		let POP=((POK* POK)+ (POO* PON)).sqrt();
 		let BMCW=((BMCS+ BMCS)+ L7([0.0,0.0,(((BMCV+ BMCV)* PON)+ (BMCR* POO)),0.0,0.0,0.0,0.0]))* (ANYF/ (AWAY* POP));
 		let AKTM=BK* POP;
-		let AKTN=B/ AKTM;
+		let AKTN=C/ AKTM;
 		let BMCX=((BMCW* BK)).product_div((-AKTN),AKTM);
 		let AKTO=AKTJ* AKTN;
 		let BMCY=((BMCT+ BMCT)* AKTN)+ (BMCX* AKTJ);
@@ -64563,7 +64564,7 @@ impl Instance {
 		let BMEO=L7([BMEH[0],BMEH[1],BMEH[2],BMEH[3],0.0,BMEH[4],BMEH[5]]);
 		let AKVP=AKVL+ (AKVN+ AKVN);
 		let BMEP=L7([BMEI[0],BMEI[1],BMEI[2],BMEI[3],0.0,BMEI[4],BMEI[5]]);
-		let AKVQ=B/ PPA;
+		let AKVQ=C/ PPA;
 		let BMEQ=(BMEN).product_div((-AKVQ),PPA);
 		let PPB=PJY* POX;
 		let PPC=PPB.ln();
@@ -64591,7 +64592,7 @@ impl Instance {
 		let BMEY=BMED- BMEV;
 		let AKVV=AKVJ- AKVT;
 		let BMEZ=BMEF- BMEW;
-		let PPG=(POY- PPE)- B;
+		let PPG=(POY- PPE)- C;
 		let PPH=BH* POY;
 		let BMFA=BMEC* BH;
 		let AKVW=AKVI* BH;
@@ -64636,7 +64637,7 @@ impl Instance {
 		let PPL=((PPG* PPG)+ PPK).sqrt();
 		let BMFJ=((BMFG+ BMFG)+ AUNK)* (ANYF/ (AWAY* PPL));
 		let AKWE=BK* PPL;
-		let AKWF=B/ AKWE;
+		let AKWF=C/ AKWE;
 		let BMFK=((BMFJ* BK)).product_div((-AKWF),AKWE);
 		let PPM=POY- (J* (PPG+ PPL));
 		let BMFL=BMEC- ((BMEX+ BMFJ)* J);
@@ -64715,7 +64716,7 @@ impl Instance {
 		let BMFS=BMEM+ (BMFP+ BMFP);
 		let AKWM=AKVK+ (AKWK+ AKWK);
 		let AKWN=AKVL+ (AKWL+ AKWL);
-		let AKWO=B/ PPT;
+		let AKWO=C/ PPT;
 		let BMFT=(BMFS).product_div((-AKWO),PPT);
 		let PPU=((PPT.ln())- PPC)+ PPD;
 		let BMFU=((BMFS* (ANYF/ PPT))- BMER)+ BMES;
@@ -64817,7 +64818,7 @@ impl Instance {
 		if PQF{
 		let PQP;
 		if PQG{
-		PQP=B;
+		PQP=C;
 		}else{
 		let PQQ;
 		if PQH{
@@ -64853,13 +64854,13 @@ impl Instance {
 		let PQN=PQM.sqrt();
 		let BMYS=AUOF* (ANYF/ (AWAY* PQN));
 		let ALKP=BK* PQN;
-		let ALKQ=B/ ALKP;
+		let ALKQ=C/ ALKP;
 		let BMYT=((BMYS* BK)).product_div((-ALKQ),ALKP);
 		let ALKR=YLX* ALKQ;
 		let BMYU=(AUOG* ALKQ)+ (BMYT* YLX);
 		let ALKS=YLY* ALKQ;
 		let BMYV=(AUOH* ALKQ)+ (BMYT* YLY);
-		let PQO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PQK, B));
+		let PQO=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PQK, C));
 		PQK=PQO;
 		PQM=PQN;
 		YLX=ALKR;
@@ -64914,7 +64915,7 @@ impl Instance {
 		AUOD=AUOJ;
 		AUOE=AUOK;
 		}
-		let PQY=B/ PQX;
+		let PQY=C/ PQX;
 		let BMGZ=-PQY;
 		let BMHA=(AUOC).product_div(BMGZ,PQX);
 		let BMHB=BMHA* AWAO;
@@ -65023,7 +65024,7 @@ impl Instance {
 		AUNF=ATRK;
 		AUNG=ATRL;
 		}
-		let PRD=P== B;
+		let PRD=P== C;
 		let PSP;
 		let PTD;
 		let PUP;
@@ -65068,7 +65069,7 @@ impl Instance {
 		let PRQ=((PRP* PRP)+ 0.04000000000000001f64).sqrt();
 		let BMHO=(BMHL+ BMHL)* (ANYF/ (AWAY* PRQ));
 		let AKXY=BK* PRQ;
-		let AKXZ=B/ AKXY;
+		let AKXZ=C/ AKXY;
 		let BMHP=((BMHO* BK)).product_div((-AKXZ),AKXY);
 		let PRR=J* (PRP+ PRQ);
 		let BMHQ=(AVZT+ BMHO)* J;
@@ -65103,7 +65104,7 @@ impl Instance {
 		let PRU=(LKW* PRT).sqrt();
 		let BMHT=(AUOX* LKW)* (ANYF/ (AWAY* PRU));
 		let AKYE=BK* PRU;
-		let AKYF=B/ AKYE;
+		let AKYF=C/ AKYE;
 		let BMHU=((BMHT* BK)).product_div((-AKYF),AKYE);
 		let PRV=K- (PRU* LKT);
 		let BMHV=(BMHT* LKT)* AWAO;
@@ -65132,7 +65133,7 @@ impl Instance {
 		let PRY=((PRW* PRW)+ ((BH* PRX)* PRX)).sqrt();
 		let BMIG=(BMIB+ BMIB)* (ANYF/ (AWAY* PRY));
 		let AKYM=BK* PRY;
-		let AKYN=B/ AKYM;
+		let AKYN=C/ AKYM;
 		let BMIH=((BMIG* BK)).product_div((-AKYN),AKYM);
 		let PRZ=J* (PRW+ PRY);
 		let BMII=(AUOU+ BMIG)* J;
@@ -65171,7 +65172,7 @@ impl Instance {
 		let PSH=PSG< RV;
 		let PSK=if PSH{
 		let PSI=BMIL* PSC;
-		let PSJ=((B+ ((PSG.exp())- (PSI.exp()))).ln())/ PSE;
+		let PSJ=((C+ ((PSG.exp())- (PSI.exp()))).ln())/ PSE;
 		PSJ
 		}else{
 		PSF
@@ -65250,10 +65251,10 @@ impl Instance {
 		let BMIV=(AUOO* AWAO)* PST;
 		let AKZE=YMD+ (AKZC* PST);
 		let AKZF=YME+ (AKZD* PST);
-		let PSU=((PSP- B)+ PST).sqrt();
+		let PSU=((PSP- C)+ PST).sqrt();
 		let BMIW=(AUOO+ BMIV)* (ANYF/ (AWAY* PSU));
 		let AKZG=BK* PSU;
-		let AKZH=B/ AKZG;
+		let AKZH=C/ AKZG;
 		let BMIX=((BMIW* BK)).product_div((-AKZH),AKZG);
 		let AKZI=AKZE* AKZH;
 		let BMIY=((AUOQ+ (((AUOQ* AMF)* PST)+ (BMIV* AKZC)))* AKZH)+ (BMIX* AKZE);
@@ -65272,10 +65273,10 @@ impl Instance {
 		let AKYT=YME* KPU;
 		let AKYU=-(YMD* GTU);
 		let AKYV=-(YME* GTU);
-		let PSW=(B- (PSP* GTU)).sqrt();
+		let PSW=(C- (PSP* GTU)).sqrt();
 		let BMIQ=((AUOO* GTU)* AWAO)* (ANYF/ (AWAY* PSW));
 		let AKYW=BK* PSW;
-		let AKYX=B/ AKYW;
+		let AKYX=C/ AKYW;
 		let BMIR=((BMIQ* BK)).product_div((-AKYX),AKYW);
 		let AKYY=AKYU* AKYX;
 		let AKYZ=AKYV* AKYX;
@@ -65381,7 +65382,7 @@ impl Instance {
 		if PTQ{
 		let PUA;
 		if PTR{
-		PUA=B;
+		PUA=C;
 		}else{
 		let PUB;
 		if PTS{
@@ -65417,13 +65418,13 @@ impl Instance {
 		let PTY=PTX.sqrt();
 		let BMYO=AUPS* (ANYF/ (AWAY* PTY));
 		let ALKL=BK* PTY;
-		let ALKM=B/ ALKL;
+		let ALKM=C/ ALKL;
 		let BMYP=((BMYO* BK)).product_div((-ALKM),ALKL);
 		let ALKN=YMX* ALKM;
 		let BMYQ=(AUPT* ALKM)+ (BMYP* YMX);
 		let ALKO=YMY* ALKM;
 		let BMYR=(AUPU* ALKM)+ (BMYP* YMY);
-		let PTZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PTV, B));
+		let PTZ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PTV, C));
 		PTV=PTZ;
 		PTX=PTY;
 		YMX=ALKN;
@@ -65478,7 +65479,7 @@ impl Instance {
 		AUPQ=AUPW;
 		AUPR=AUPX;
 		}
-		let PUJ=B/ PUI;
+		let PUJ=C/ PUI;
 		let BMKT=-PUJ;
 		let BMKU=(AUPP).product_div(BMKT,PUI);
 		let BMKV=BMKU* AWAO;
@@ -65515,7 +65516,7 @@ impl Instance {
 		let BMJN=L8([BMJC[0],BMJC[1],0.0,BMJC[2],BMJC[3],BMJC[4],BMJC[5],BMJC[6]]);
 		let BMJO=L8([BMJD[0],BMJD[1],0.0,BMJD[2],BMJD[3],BMJD[4],BMJD[5],BMJD[6]]);
 		let BMJP=L8([BMJE[0],BMJE[1],0.0,BMJE[2],BMJE[3],BMJE[4],BMJE[5],BMJE[6]]);
-		PUN=B;
+		PUN=C;
 		PVB=PTB;
 		YMT=AKZK;
 		YMU=AKZL;
@@ -65523,7 +65524,7 @@ impl Instance {
 		AUPN=BMJO;
 		AUPO=BMJP;
 		}
-		let PUO=PUN< B;
+		let PUO=PUN< C;
 		let PUX=if PUO{
 		let PUR=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PUP, BK));
 		PUR
@@ -65653,7 +65654,7 @@ impl Instance {
 		if PVJ{
 		let PVT;
 		if PVK{
-		PVT=B;
+		PVT=C;
 		}else{
 		let PVU;
 		if PVL{
@@ -65689,13 +65690,13 @@ impl Instance {
 		let PVR=PVQ.sqrt();
 		let BMYK=AUQO* (ANYF/ (AWAY* PVR));
 		let ALKH=BK* PVR;
-		let ALKI=B/ ALKH;
+		let ALKI=C/ ALKH;
 		let BMYL=((BMYK* BK)).product_div((-ALKI),ALKH);
 		let ALKJ=YNL* ALKI;
 		let BMYM=(AUQP* ALKI)+ (BMYL* YNL);
 		let ALKK=YNM* ALKI;
 		let BMYN=(AUQQ* ALKI)+ (BMYL* YNM);
-		let PVS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PVO, B));
+		let PVS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, PVO, C));
 		PVO=PVS;
 		PVQ=PVR;
 		YNL=ALKJ;
@@ -65750,7 +65751,7 @@ impl Instance {
 		AUQM=AUQS;
 		AUQN=AUQT;
 		}
-		let PWC=B/ PWB;
+		let PWC=C/ PWB;
 		let BMMO=-PWC;
 		let BMMP=(AUQL).product_div(BMMO,PWB);
 		let BMMQ=BMMP* AWAO;
@@ -65901,7 +65902,7 @@ impl Instance {
 		let PWP=((PWO* PWO)+ 0.04000000000000001f64).sqrt();
 		let BMNA=(BMMX+ BMMX)* (ANYF/ (AWAY* PWP));
 		let ALBQ=BK* PWP;
-		let ALBR=B/ ALBQ;
+		let ALBR=C/ ALBQ;
 		let BMNB=((BMNA* BK)).product_div((-ALBR),ALBQ);
 		let PWQ=J* (PWO+ PWP);
 		let BMNC=(AVZT+ BMNA)* J;
@@ -65936,7 +65937,7 @@ impl Instance {
 		let PWT=(LKW* PWS).sqrt();
 		let BMNF=(AURN* LKW)* (ANYF/ (AWAY* PWT));
 		let ALBW=BK* PWT;
-		let ALBX=B/ ALBW;
+		let ALBX=C/ ALBW;
 		let BMNG=((BMNF* BK)).product_div((-ALBX),ALBW);
 		let PWU=K- (PWT* LKT);
 		let BMNH=(BMNF* LKT)* AWAO;
@@ -65965,7 +65966,7 @@ impl Instance {
 		let PWX=((PWV* PWV)+ ((BH* PWW)* PWW)).sqrt();
 		let BMNS=(BMNN+ BMNN)* (ANYF/ (AWAY* PWX));
 		let ALCE=BK* PWX;
-		let ALCF=B/ ALCE;
+		let ALCF=C/ ALCE;
 		let BMNT=((BMNS* BK)).product_div((-ALCF),ALCE);
 		let PWY=J* (PWV+ PWX);
 		let BMNU=(AURK+ BMNS)* J;
@@ -66015,7 +66016,7 @@ impl Instance {
 		let PXE=(PXD* PXC).sqrt();
 		let BMOF=(L6([0.0,0.0,0.0,(BMOB* PXC),0.0,0.0])+ L6([BMOC[0],BMOC[1],BMOC[2],0.0,BMOC[3],BMOC[4]]))* (ANYF/ (AWAY* PXE));
 		let ALCO=BK* PXE;
-		let ALCP=B/ ALCO;
+		let ALCP=C/ ALCO;
 		let BMOG=((BMOF* BK)).product_div((-ALCP),ALCO);
 		let ALCQ=ALCM* ALCP;
 		let BMOH=((L6([BMOD[0],BMOD[1],BMOD[2],0.0,BMOD[3],BMOD[4]])+ L6([0.0,0.0,0.0,(BMOB* ALCK),0.0,0.0]))* ALCP)+ (BMOG* ALCM);
@@ -66032,18 +66033,18 @@ impl Instance {
 		let BMOL=((BMOF* BMOJ)+ ((BMOF* AWAO)* BMOK))/ BK;
 		let ALCW=(ALCS+ ALCU)/ BK;
 		let ALCX=(ALCT+ ALCV)/ BK;
-		let ALCY=B/ PXG;
+		let ALCY=C/ PXG;
 		let BMOM=(BMOL).product_div((-ALCY),PXG);
 		let PXH=(PXG.ln())/ PXC;
 		let BMON=-PXH;
 		let BMOO=L6([BMNY[0],BMNY[1],BMNY[2],0.0,BMNY[3],BMNY[4]]);
 		let BMOP=((BMOL* (ANYF/ PXG))).product_sum_div(ANYF,BMOO,BMON,PXC);
 		let BMOQ=BMOP* AWAO;
-		let ALCZ=product_sum_div((ALCW* ALCY),B,BMON,ALCK,PXC);
-		let BMOR=L6(sum_products_div_lanes(&[(&(((((BMOH* BMOJ)+ ((BMOH* AMF)* BMOK))/ BK)* ALCY)+ (BMOM* ALCW)).0,B),(&BMOQ.0,ALCK),(&L6([BMNZ[0],BMNZ[1],BMNZ[2],0.0,BMNZ[3],BMNZ[4]]).0,BMON),(&BMOO.0,(-ALCZ))],PXC));
-		let ALDA=product_sum_div((ALCX* ALCY),B,BMON,ALCL,PXC);
-		let BMOS=L6(sum_products_div_lanes(&[(&(((((BMOI* BMOJ)+ ((BMOI* AMF)* BMOK))/ BK)* ALCY)+ (BMOM* ALCX)).0,B),(&BMOQ.0,ALCL),(&L6([BMOA[0],BMOA[1],BMOA[2],0.0,BMOA[3],BMOA[4]]).0,BMON),(&BMOO.0,(-ALDA))],PXC));
-		let mut PXI=B;
+		let ALCZ=product_sum_div((ALCW* ALCY),C,BMON,ALCK,PXC);
+		let BMOR=L6(sum_products_div_lanes(&[(&(((((BMOH* BMOJ)+ ((BMOH* AMF)* BMOK))/ BK)* ALCY)+ (BMOM* ALCW)).0,C),(&BMOQ.0,ALCK),(&L6([BMNZ[0],BMNZ[1],BMNZ[2],0.0,BMNZ[3],BMNZ[4]]).0,BMON),(&BMOO.0,(-ALCZ))],PXC));
+		let ALDA=product_sum_div((ALCX* ALCY),C,BMON,ALCL,PXC);
+		let BMOS=L6(sum_products_div_lanes(&[(&(((((BMOI* BMOJ)+ ((BMOI* AMF)* BMOK))/ BK)* ALCY)+ (BMOM* ALCX)).0,C),(&BMOQ.0,ALCL),(&L6([BMOA[0],BMOA[1],BMOA[2],0.0,BMOA[3],BMOA[4]]).0,BMON),(&BMOO.0,(-ALDA))],PXC));
+		let mut PXI=C;
 		let mut PXK=PWH;
 		let mut QBR=A;
 		let mut QCQ=A;
@@ -66139,26 +66140,26 @@ impl Instance {
 		let BMPZ=BMPO- L8([BMPW[0],BMPW[1],BMPW[2],BMPW[3],BMPW[4],0.0,BMPW[5],0.0]);
 		let ALDS=ALDK- (ALDQ* PXS);
 		let BMQA=BMPP- L8([BMPX[0],BMPX[1],BMPX[2],BMPX[3],BMPX[4],0.0,BMPX[5],0.0]);
-		let PXT=B+ (PXQ- PXS);
-		let ALDT=B/ PXT;
+		let PXT=C+ (PXQ- PXS);
+		let ALDT=C/ PXT;
 		let BMQB=(BMPY).product_div((-ALDT),PXT);
 		let PXU=(PXT.ln())/ PXH;
 		let BMQC=-PXU;
 		let BMQD=L8([BMOP[0],BMOP[1],BMOP[2],BMOP[3],BMOP[4],0.0,BMOP[5],0.0]);
 		let BMQE=((BMPY* (ANYF/ PXT))).product_sum_div(ANYF,BMQD,BMQC,PXH);
 		let BMQF=BMQE* AWAO;
-		let ALDU=product_sum_div((ALDR* ALDT),B,BMQC,ALCZ,PXH);
-		let BMQG=L8(sum_products_div_lanes(&[(&((BMPZ* ALDT)+ (BMQB* ALDR)).0,B),(&BMQF.0,ALCZ),(&L8([BMOR[0],BMOR[1],BMOR[2],BMOR[3],BMOR[4],0.0,BMOR[5],0.0]).0,BMQC),(&BMQD.0,(-ALDU))],PXH));
-		let ALDV=product_sum_div((ALDS* ALDT),B,BMQC,ALDA,PXH);
-		let BMQH=L8(sum_products_div_lanes(&[(&((BMQA* ALDT)+ (BMQB* ALDS)).0,B),(&BMQF.0,ALDA),(&L8([BMOS[0],BMOS[1],BMOS[2],BMOS[3],BMOS[4],0.0,BMOS[5],0.0]).0,BMQC),(&BMQD.0,(-ALDV))],PXH));
+		let ALDU=product_sum_div((ALDR* ALDT),C,BMQC,ALCZ,PXH);
+		let BMQG=L8(sum_products_div_lanes(&[(&((BMPZ* ALDT)+ (BMQB* ALDR)).0,C),(&BMQF.0,ALCZ),(&L8([BMOR[0],BMOR[1],BMOR[2],BMOR[3],BMOR[4],0.0,BMOR[5],0.0]).0,BMQC),(&BMQD.0,(-ALDU))],PXH));
+		let ALDV=product_sum_div((ALDS* ALDT),C,BMQC,ALDA,PXH);
+		let BMQH=L8(sum_products_div_lanes(&[(&((BMQA* ALDT)+ (BMQB* ALDS)).0,C),(&BMQF.0,ALDA),(&L8([BMOS[0],BMOS[1],BMOS[2],BMOS[3],BMOS[4],0.0,BMOS[5],0.0]).0,BMQC),(&BMQD.0,(-ALDV))],PXH));
 		let PXV=PXQ/ PXT;
 		let BMQI=-PXV;
 		let BMQJ=(BMPN).product_sum_div(ANYF,BMPY,BMQI,PXT);
 		let BMQK=BMQJ* AWAO;
-		let ALDW=product_sum_div(ALDJ,B,BMQI,ALDR,PXT);
-		let BMQL=L8(sum_products_div_lanes(&[(&BMPO.0,B),(&BMQK.0,ALDR),(&BMPZ.0,BMQI),(&BMPY.0,(-ALDW))],PXT));
-		let ALDX=product_sum_div(ALDK,B,BMQI,ALDS,PXT);
-		let BMQM=L8(sum_products_div_lanes(&[(&BMPP.0,B),(&BMQK.0,ALDS),(&BMQA.0,BMQI),(&BMPY.0,(-ALDX))],PXT));
+		let ALDW=product_sum_div(ALDJ,C,BMQI,ALDR,PXT);
+		let BMQL=L8(sum_products_div_lanes(&[(&BMPO.0,C),(&BMQK.0,ALDR),(&BMPZ.0,BMQI),(&BMPY.0,(-ALDW))],PXT));
+		let ALDX=product_sum_div(ALDK,C,BMQI,ALDS,PXT);
+		let BMQM=L8(sum_products_div_lanes(&[(&BMPP.0,C),(&BMQK.0,ALDS),(&BMQA.0,BMQI),(&BMPY.0,(-ALDX))],PXT));
 		PXW=PXU;
 		PZD=PXV;
 		YOH=ALDU;
@@ -66173,7 +66174,7 @@ impl Instance {
 		AUSH=BMQM;
 		}else{
 		PXW=PXN;
-		PZD=B;
+		PZD=C;
 		YOH=ALDF;
 		YOI=ALDG;
 		YOJ=A;
@@ -66279,17 +66280,17 @@ impl Instance {
 		let BMRS=BMPA/ BH;
 		let ALFB=ALDE/ BH;
 		let BMRT=BMPB/ BH;
-		let PYG=B- (PXM/ BC);
+		let PYG=C- (PXM/ BC);
 		let BMRU=(BMOZ/ BC)* AWAO;
 		let ALFC=-(ALDD/ BC);
 		let ALFD=-(ALDE/ BC);
-		let PYH=B- (PYF* PYG);
+		let PYH=C- (PYF* PYG);
 		let BMRV=((BMRR* PYG)+ (BMRU* PYF))* AWAO;
 		let ALFE=-((ALFA* PYG)+ (ALFC* PYF));
 		let ALFF=-((ALFB* PYG)+ (ALFD* PYF));
 		let BMRW=((BMRP* PYH)+ (BMRV* ALEY))+ ((((((BMRS* PYG)+ (BMRU* ALFA))+ ((((BMPA/ BC)* AWAO)* PYF)+ (BMRR* ALFC)))* AWAO)* PYE)+ (BMRO* ALFE));
 		let BMRX=((BMRQ* PYH)+ (BMRV* ALEZ))+ ((((((BMRT* PYG)+ (BMRU* ALFB))+ ((((BMPB/ BC)* AWAO)* PYF)+ (BMRR* ALFD)))* AWAO)* PYE)+ (BMRO* ALFF));
-		let PYI=B- (PYE* PYH);
+		let PYI=C- (PYE* PYH);
 		let BMRY=((BMRO* PYH)+ (BMRV* PYE))* AWAO;
 		let ALFG=-((ALEY* PYH)+ (ALFE* PYE));
 		let ALFH=-((ALEZ* PYH)+ (ALFF* PYE));
@@ -66297,17 +66298,17 @@ impl Instance {
 		let BMRZ=BMOZ/ BK;
 		let ALFI=ALDD/ BK;
 		let ALFJ=ALDE/ BK;
-		let PYK=B- PYF;
+		let PYK=C- PYF;
 		let BMSA=BMRR* AWAO;
 		let ALFK=-ALFA;
 		let ALFL=-ALFB;
-		let PYL=B- (PYE* PYK);
+		let PYL=C- (PYE* PYK);
 		let BMSB=((BMRO* PYK)+ (BMSA* PYE))* AWAO;
 		let ALFM=-((ALEY* PYK)+ (ALFK* PYE));
 		let ALFN=-((ALEZ* PYK)+ (ALFL* PYE));
 		let BMSC=(((BMPA/ BK)* PYL)+ (BMSB* ALFI))+ ((((((BMRP* PYK)+ (BMSA* ALEY))+ (((BMRS* AWAO)* PYE)+ (BMRO* ALFK)))* AWAO)* PYJ)+ (BMRZ* ALFM));
 		let BMSD=(((BMPB/ BK)* PYL)+ (BMSB* ALFJ))+ ((((((BMRQ* PYK)+ (BMSA* ALEZ))+ (((BMRT* AWAO)* PYE)+ (BMRO* ALFL)))* AWAO)* PYJ)+ (BMRZ* ALFN));
-		let PYM=B- (PYJ* PYL);
+		let PYM=C- (PYJ* PYL);
 		let BMSE=((BMRZ* PYL)+ (BMSB* PYJ))* AWAO;
 		let ALFO=-((ALFI* PYL)+ (ALFM* PYJ));
 		let ALFP=-((ALFJ* PYL)+ (ALFN* PYJ));
@@ -66338,17 +66339,17 @@ impl Instance {
 		let BMSQ=BMQO/ BH;
 		let ALFZ=ALDZ/ BH;
 		let BMSR=BMQP/ BH;
-		let PYR=B- (PXX/ BC);
+		let PYR=C- (PXX/ BC);
 		let BMSS=(BMQN/ BC)* AWAO;
 		let ALGA=-(ALDY/ BC);
 		let ALGB=-(ALDZ/ BC);
-		let PYS=B- (PYQ* PYR);
+		let PYS=C- (PYQ* PYR);
 		let BMST=((BMSP* PYR)+ (BMSS* PYQ))* AWAO;
 		let ALGC=-((ALFY* PYR)+ (ALGA* PYQ));
 		let ALGD=-((ALFZ* PYR)+ (ALGB* PYQ));
 		let BMSU=((BMSN* PYS)+ (BMST* ALFW))+ ((((((BMSQ* PYR)+ (BMSS* ALFY))+ ((((BMQO/ BC)* AWAO)* PYQ)+ (BMSP* ALGA)))* AWAO)* PYP)+ (BMSM* ALGC));
 		let BMSV=((BMSO* PYS)+ (BMST* ALFX))+ ((((((BMSR* PYR)+ (BMSS* ALFZ))+ ((((BMQP/ BC)* AWAO)* PYQ)+ (BMSP* ALGB)))* AWAO)* PYP)+ (BMSM* ALGD));
-		let PYT=B- (PYP* PYS);
+		let PYT=C- (PYP* PYS);
 		let BMSW=((BMSM* PYS)+ (BMST* PYP))* AWAO;
 		let ALGE=-((ALFW* PYS)+ (ALGC* PYP));
 		let ALGF=-((ALFX* PYS)+ (ALGD* PYP));
@@ -66356,17 +66357,17 @@ impl Instance {
 		let BMSX=BMQN/ BK;
 		let ALGG=ALDY/ BK;
 		let ALGH=ALDZ/ BK;
-		let PYV=B- PYQ;
+		let PYV=C- PYQ;
 		let BMSY=BMSP* AWAO;
 		let ALGI=-ALFY;
 		let ALGJ=-ALFZ;
-		let PYW=B- (PYP* PYV);
+		let PYW=C- (PYP* PYV);
 		let BMSZ=((BMSM* PYV)+ (BMSY* PYP))* AWAO;
 		let ALGK=-((ALFW* PYV)+ (ALGI* PYP));
 		let ALGL=-((ALFX* PYV)+ (ALGJ* PYP));
 		let BMTA=(((BMQO/ BK)* PYW)+ (BMSZ* ALGG))+ ((((((BMSN* PYV)+ (BMSY* ALFW))+ (((BMSQ* AWAO)* PYP)+ (BMSM* ALGI)))* AWAO)* PYU)+ (BMSX* ALGK));
 		let BMTB=(((BMQP/ BK)* PYW)+ (BMSZ* ALGH))+ ((((((BMSO* PYV)+ (BMSY* ALFX))+ (((BMSR* AWAO)* PYP)+ (BMSM* ALGJ)))* AWAO)* PYU)+ (BMSX* ALGL));
-		let PYX=B- (PYU* PYW);
+		let PYX=C- (PYU* PYW);
 		let BMTC=((BMSX* PYW)+ (BMSZ* PYU))* AWAO;
 		let ALGM=-((ALGG* PYW)+ (ALGK* PYU));
 		let ALGN=-((ALGH* PYW)+ (ALGL* PYU));
@@ -66399,7 +66400,7 @@ impl Instance {
 		let PZB=PYZ.sqrt();
 		let BMTJ=BMTG* (ANYF/ (AWAY* PZB));
 		let ALGS=BK* PZB;
-		let ALGT=B/ ALGS;
+		let ALGT=C/ ALGS;
 		let BMTK=((BMTJ* BK)).product_div((-ALGT),ALGS);
 		let ALGU=ALGQ* ALGT;
 		let BMTL=(BMTH* ALGT)+ (BMTK* ALGQ);
@@ -66414,10 +66415,10 @@ impl Instance {
 		let BMTO=-PZF;
 		let BMTP=((L8([0.0,0.0,0.0,(BMTN* PZE),0.0,0.0,0.0,0.0])+ ((BMSF- ((AUSD* PYY)+ (BMTD* PZD)))* PZC))).product_sum_div(ANYF,BMTJ,BMTO,PZB);
 		let BMTQ=BMTP* AWAO;
-		let ALGY=product_sum_div((ALGW* PZC),B,BMTO,ALGU,PZB);
-		let BMTR=L8(sum_products_div_lanes(&[(&(((BMSG- (((AUSG* PYY)+ (BMTD* YOJ))+ ((BMTE* PZD)+ (AUSD* ALGO))))* PZC)+ L8([0.0,0.0,0.0,(BMTN* ALGW),0.0,0.0,0.0,0.0])).0,B),(&BMTQ.0,ALGU),(&BMTL.0,BMTO),(&BMTJ.0,(-ALGY))],PZB));
-		let ALGZ=product_sum_div((ALGX* PZC),B,BMTO,ALGV,PZB);
-		let BMTS=L8(sum_products_div_lanes(&[(&(((BMSH- (((AUSH* PYY)+ (BMTD* YOK))+ ((BMTF* PZD)+ (AUSD* ALGP))))* PZC)+ L8([0.0,0.0,0.0,(BMTN* ALGX),0.0,0.0,0.0,0.0])).0,B),(&BMTQ.0,ALGV),(&BMTM.0,BMTO),(&BMTJ.0,(-ALGZ))],PZB));
+		let ALGY=product_sum_div((ALGW* PZC),C,BMTO,ALGU,PZB);
+		let BMTR=L8(sum_products_div_lanes(&[(&(((BMSG- (((AUSG* PYY)+ (BMTD* YOJ))+ ((BMTE* PZD)+ (AUSD* ALGO))))* PZC)+ L8([0.0,0.0,0.0,(BMTN* ALGW),0.0,0.0,0.0,0.0])).0,C),(&BMTQ.0,ALGU),(&BMTL.0,BMTO),(&BMTJ.0,(-ALGY))],PZB));
+		let ALGZ=product_sum_div((ALGX* PZC),C,BMTO,ALGV,PZB);
+		let BMTS=L8(sum_products_div_lanes(&[(&(((BMSH- (((AUSH* PYY)+ (BMTD* YOK))+ ((BMTF* PZD)+ (AUSD* ALGP))))* PZC)+ L8([0.0,0.0,0.0,(BMTN* ALGX),0.0,0.0,0.0,0.0])).0,C),(&BMTQ.0,ALGV),(&BMTM.0,BMTO),(&BMTJ.0,(-ALGZ))],PZB));
 		PZR=PZB;
 		PZW=PZF;
 		YOX=ALGU;
@@ -66502,7 +66503,7 @@ impl Instance {
 		let PZK=PZI.sqrt();
 		let BMQZ=BMQW* (ANYF/ (AWAY* PZK));
 		let ALEK=BK* PZK;
-		let ALEL=B/ ALEK;
+		let ALEL=C/ ALEK;
 		let BMRA=((BMQZ* BK)).product_div((-ALEL),ALEK);
 		let ALEM=ALEI* ALEL;
 		let BMRB=(BMQX* ALEL)+ (BMRA* ALEI);
@@ -66510,21 +66511,21 @@ impl Instance {
 		let BMRC=(BMQY* ALEL)+ (BMRA* ALEJ);
 		let PZL=BWG* J;
 		let BMRD=ANZE* J;
-		let PZM=B- PZH;
+		let PZM=C- PZH;
 		let BMRE=BMQT* AWAO;
 		let ALEO=-ALEG;
 		let ALEP=-ALEH;
-		let PZN=(B- PZG)- (PZD* PZM);
+		let PZN=(C- PZG)- (PZD* PZM);
 		let ALEQ=(-ALEC)- ((YOJ* PZM)+ (ALEO* PZD));
 		let ALER=(-ALED)- ((YOK* PZM)+ (ALEP* PZD));
 		let PZO=(PZL* PZN)/ PZK;
 		let BMRF=-PZO;
 		let BMRG=((L8([0.0,0.0,0.0,(BMRD* PZN),0.0,0.0,0.0,0.0])+ (((BMQQ* AWAO)- ((AUSD* PZM)+ (BMRE* PZD)))* PZL))).product_sum_div(ANYF,BMQZ,BMRF,PZK);
 		let BMRH=BMRG* AWAO;
-		let ALES=product_sum_div((ALEQ* PZL),B,BMRF,ALEM,PZK);
-		let BMRI=L8(sum_products_div_lanes(&[(&((((BMQR* AWAO)- (((AUSG* PZM)+ (BMRE* YOJ))+ (((BMQU* AWAO)* PZD)+ (AUSD* ALEO))))* PZL)+ L8([0.0,0.0,0.0,(BMRD* ALEQ),0.0,0.0,0.0,0.0])).0,B),(&BMRH.0,ALEM),(&BMRB.0,BMRF),(&BMQZ.0,(-ALES))],PZK));
-		let ALET=product_sum_div((ALER* PZL),B,BMRF,ALEN,PZK);
-		let BMRJ=L8(sum_products_div_lanes(&[(&((((BMQS* AWAO)- (((AUSH* PZM)+ (BMRE* YOK))+ (((BMQV* AWAO)* PZD)+ (AUSD* ALEP))))* PZL)+ L8([0.0,0.0,0.0,(BMRD* ALER),0.0,0.0,0.0,0.0])).0,B),(&BMRH.0,ALEN),(&BMRC.0,BMRF),(&BMQZ.0,(-ALET))],PZK));
+		let ALES=product_sum_div((ALEQ* PZL),C,BMRF,ALEM,PZK);
+		let BMRI=L8(sum_products_div_lanes(&[(&((((BMQR* AWAO)- (((AUSG* PZM)+ (BMRE* YOJ))+ (((BMQU* AWAO)* PZD)+ (AUSD* ALEO))))* PZL)+ L8([0.0,0.0,0.0,(BMRD* ALEQ),0.0,0.0,0.0,0.0])).0,C),(&BMRH.0,ALEM),(&BMRB.0,BMRF),(&BMQZ.0,(-ALES))],PZK));
+		let ALET=product_sum_div((ALER* PZL),C,BMRF,ALEN,PZK);
+		let BMRJ=L8(sum_products_div_lanes(&[(&((((BMQS* AWAO)- (((AUSH* PZM)+ (BMRE* YOK))+ (((BMQV* AWAO)* PZD)+ (AUSD* ALEP))))* PZL)+ L8([0.0,0.0,0.0,(BMRD* ALER),0.0,0.0,0.0,0.0])).0,C),(&BMRH.0,ALEN),(&BMRC.0,BMRF),(&BMQZ.0,(-ALET))],PZK));
 		PZS=PZK;
 		PZX=PZO;
 		YPB=ALEM;
@@ -66683,15 +66684,15 @@ impl Instance {
 		let BMVR=BMOZ/ BC;
 		let ALIG=ALDD/ BC;
 		let ALIH=ALDE/ BC;
-		let QAE=B+ (PXM/ BC);
+		let QAE=C+ (PXM/ BC);
 		let BMVS=(BMVO* QAE)+ (BMVR* QAD);
 		let ALII=(ALIE* QAE)+ (ALIG* QAD);
 		let ALIJ=(ALIF* QAE)+ (ALIH* QAD);
-		let QAF=B+ (QAD* QAE);
+		let QAF=C+ (QAD* QAE);
 		let BMVT=(BMVL* QAF)+ (BMVS* QAC);
 		let ALIK=(ALIC* QAF)+ (ALII* QAC);
 		let ALIL=(ALID* QAF)+ (ALIJ* QAC);
-		let QAG=B+ (QAC* QAF);
+		let QAG=C+ (QAC* QAF);
 		let QAH=QAB* QAG;
 		let BMVU=(BMVK* QAG)+ (BMVT* QAB);
 		let BMVV=(((BMVM* QAF)+ (BMVS* ALIC))+ (((((BMVP* QAE)+ (BMVR* ALIE))+ (((BMPA/ BC)* QAD)+ (BMVO* ALIG)))* QAC)+ (BMVL* ALII)))* QAB;
@@ -66702,15 +66703,15 @@ impl Instance {
 		let BMVX=BMOZ/ BK;
 		let ALIO=ALDD/ BK;
 		let ALIP=ALDE/ BK;
-		let QAJ=B+ QAD;
+		let QAJ=C+ QAD;
 		let BMVY=(BMVL* QAJ)+ (BMVO* QAC);
 		let ALIQ=(ALIC* QAJ)+ (ALIE* QAC);
 		let ALIR=(ALID* QAJ)+ (ALIF* QAC);
-		let QAK=B+ (QAC* QAJ);
+		let QAK=C+ (QAC* QAJ);
 		let BMVZ=(BMVX* QAK)+ (BMVY* QAI);
 		let ALIS=(ALIO* QAK)+ (ALIQ* QAI);
 		let ALIT=(ALIP* QAK)+ (ALIR* QAI);
-		let QAL=B+ (QAI* QAK);
+		let QAL=C+ (QAI* QAK);
 		let QAM=PXM* QAL;
 		let BMWA=(BMOZ* QAL)+ (BMVZ* PXM);
 		let BMWB=((((BMPA/ BK)* QAK)+ (BMVY* ALIO))+ (((((BMVM* QAJ)+ (BMVO* ALIC))+ ((BMVP* QAC)+ (BMVL* ALIE)))* QAI)+ (BMVX* ALIQ)))* PXM;
@@ -66761,7 +66762,7 @@ impl Instance {
 		let BMUN=(BMPA* QAQ)+ (BMUM* ALDD);
 		let ALHP=ALDE* QAQ;
 		let BMUO=(BMPB* QAQ)+ (BMUM* ALDE);
-		let QAR=QAQ- B;
+		let QAR=QAQ- C;
 		let QAS=QAR- PXM;
 		let BMUP=BMUM- BMOZ;
 		let ALHQ=ALHO- ALDD;
@@ -66826,7 +66827,7 @@ impl Instance {
 		let BMTY=(((AURY* BWG)+ L8([0.0,0.0,0.0,(ANZE* YOD),0.0,0.0,0.0,0.0]))* QAW)+ (BMTX* ALHC);
 		let ALHF=ALHD* QAW;
 		let BMTZ=(((AURZ* BWG)+ L8([0.0,0.0,0.0,(ANZE* YOE),0.0,0.0,0.0,0.0]))* QAW)+ (BMTX* ALHD);
-		let QAX=PXM+ B;
+		let QAX=PXM+ C;
 		let BMUA=AULB* QAX;
 		let BMUB=AULC* QAX;
 		let BMUC=AULB* ALDD;
@@ -66889,7 +66890,7 @@ impl Instance {
 		let QBG=((PZP* PZP)+ QBD).sqrt();
 		let BMWW=((BMWT+ BMWT)+ AUTT)* (ANYF/ (AWAY* QBG));
 		let ALJG=BK* QBG;
-		let ALJH=B/ ALJG;
+		let ALJH=C/ ALJG;
 		let BMWX=((BMWW* BK)).product_div((-ALJH),ALJG);
 		let ALJI=ALJE* ALJH;
 		let BMWY=(((BMWU+ BMWU)+ AUTV)* ALJH)+ (BMWX* ALJE);
@@ -66903,10 +66904,10 @@ impl Instance {
 		let BMXB=-QBK;
 		let BMXC=(((((BMXA* PZP)+ (AUSI* QBH))+ AUTU)* J)).product_sum_div(ANYF,BMWW,BMXB,QBG);
 		let BMXD=BMXC* AWAO;
-		let ALJM=product_sum_div(((((ALJK* PZP)+ (YOL* QBH))+ YPL)* J),B,BMXB,ALJI,QBG);
-		let BMXE=L8(sum_products_div_lanes(&[(&((((((AUSN* BK)* PZP)+ (AUSI* ALJK))+ ((AUSL* QBH)+ (BMXA* YOL)))+ AUTX)* J).0,B),(&BMXD.0,ALJI),(&BMWY.0,BMXB),(&BMWW.0,(-ALJM))],QBG));
-		let ALJN=product_sum_div(((((ALJL* PZP)+ (YOM* QBH))+ YPM)* J),B,BMXB,ALJJ,QBG);
-		let BMXF=L8(sum_products_div_lanes(&[(&((((((AUSO* BK)* PZP)+ (AUSI* ALJL))+ ((AUSM* QBH)+ (BMXA* YOM)))+ AUTY)* J).0,B),(&BMXD.0,ALJJ),(&BMWZ.0,BMXB),(&BMWW.0,(-ALJN))],QBG));
+		let ALJM=product_sum_div(((((ALJK* PZP)+ (YOL* QBH))+ YPL)* J),C,BMXB,ALJI,QBG);
+		let BMXE=L8(sum_products_div_lanes(&[(&((((((AUSN* BK)* PZP)+ (AUSI* ALJK))+ ((AUSL* QBH)+ (BMXA* YOL)))+ AUTX)* J).0,C),(&BMXD.0,ALJI),(&BMWY.0,BMXB),(&BMWW.0,(-ALJM))],QBG));
+		let ALJN=product_sum_div(((((ALJL* PZP)+ (YOM* QBH))+ YPM)* J),C,BMXB,ALJJ,QBG);
+		let BMXF=L8(sum_products_div_lanes(&[(&((((((AUSO* BK)* PZP)+ (AUSI* ALJL))+ ((AUSM* QBH)+ (BMXA* YOM)))+ AUTY)* J).0,C),(&BMXD.0,ALJJ),(&BMWZ.0,BMXB),(&BMWW.0,(-ALJN))],QBG));
 		QBM=QBG;
 		QBP=QBK;
 		YPR=ALJI;
@@ -66960,8 +66961,8 @@ impl Instance {
 		let BMXR=(AUTR* PJI)+ L8([0.0,0.0,0.0,(BLZM* YPH),0.0,0.0,0.0,0.0]);
 		let ALJV=YPI* PJI;
 		let BMXS=(AUTS* PJI)+ L8([0.0,0.0,0.0,(BLZM* YPI),0.0,0.0,0.0,0.0]);
-		let QBQ=B+ (PJI* QBO);
-		let QBS=QBR== B;
+		let QBQ=C+ (PJI* QBO);
+		let QBS=QBR== C;
 		let QCH;
 		let QCJ;
 		let QCO;
@@ -66984,13 +66985,13 @@ impl Instance {
 		let BMXT=-QBU;
 		let BMXU=((BMXN* AWAO)).product_sum_div(ANYF,BMXQ,BMXT,QBQ);
 		let BMXV=BMXU* AWAO;
-		let ALJW=product_sum_div((ALJS* AMF),B,BMXT,ALJU,QBQ);
-		let BMXW=L8(sum_products_div_lanes(&[(&(BMXO* AMF).0,B),(&BMXV.0,ALJU),(&BMXR.0,BMXT),(&BMXQ.0,(-ALJW))],QBQ));
-		let ALJX=product_sum_div((ALJT* AMF),B,BMXT,ALJV,QBQ);
-		let BMXX=L8(sum_products_div_lanes(&[(&(BMXP* AMF).0,B),(&BMXV.0,ALJV),(&BMXS.0,BMXT),(&BMXQ.0,(-ALJX))],QBQ));
+		let ALJW=product_sum_div((ALJS* AMF),C,BMXT,ALJU,QBQ);
+		let BMXW=L8(sum_products_div_lanes(&[(&(BMXO* AMF).0,C),(&BMXV.0,ALJU),(&BMXR.0,BMXT),(&BMXQ.0,(-ALJW))],QBQ));
+		let ALJX=product_sum_div((ALJT* AMF),C,BMXT,ALJV,QBQ);
+		let BMXX=L8(sum_products_div_lanes(&[(&(BMXP* AMF).0,C),(&BMXV.0,ALJV),(&BMXS.0,BMXT),(&BMXQ.0,(-ALJX))],QBQ));
 		let QBW=PXK.abs();
 		let BMXY=AURT* ((AWAY* ((PXK>= AWBZ) as u8 as f64))- ANYF);
-		let QBX=B>= QBW;
+		let QBX=C>= QBW;
 		let QBY;
 		let YPX;
 		let YPY;
@@ -66998,14 +66999,14 @@ impl Instance {
 		let AUUP;
 		let AUUQ;
 		if QBX{
-		QBY=B;
+		QBY=C;
 		YPX=A;
 		YPY=A;
 		AUUO=BHSX;
 		AUUP=BHSX;
 		AUUQ=BHSX;
 		}else{
-		let ALJY=(BK* ((PXK>= A) as u8 as f64))- B;
+		let ALJY=(BK* ((PXK>= A) as u8 as f64))- C;
 		let ALJZ=YOD* ALJY;
 		let BMXZ=AURY* ALJY;
 		let ALKA=YOE* ALJY;
@@ -67017,7 +67018,7 @@ impl Instance {
 		AUUP=BMXZ;
 		AUUQ=BMYA;
 		}
-		let QBZ=QBV* (B+ QBY);
+		let QBZ=QBV* (C+ QBY);
 		let BMYB=AUUO* QBV;
 		let ALKB=YPX* QBV;
 		let BMYC=AUUP* QBV;
@@ -67033,7 +67034,7 @@ impl Instance {
 		if QCA{
 		let QCB=QBU>= A;
 		let QCC=if QCB{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -67065,7 +67066,7 @@ impl Instance {
 		let BMYJ=AURZ+ AUUT;
 		let QCG=((QCE.abs())<= BBK)&& ((QBN.abs())<= AQ);
 		let QCP=if QCG{
-		B
+		C
 		}else{
 		QBR
 		};
@@ -67078,7 +67079,7 @@ impl Instance {
 		AUUM=BMYI;
 		AUUN=BMYJ;
 		}
-		let QCI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QCH, B));
+		let QCI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QCH, C));
 		PXI=QCI;
 		PXK=QCJ;
 		QBR=QCO;
@@ -67107,7 +67108,7 @@ impl Instance {
 		let QCT=PIY* QCS;
 		let BMOU=L8([0.0,0.0,0.0,(AUHA* QCS),0.0,0.0,0.0,0.0])+ (BMOT* PIY);
 		let QCV=QCU+ QCS;
-		let QCW=B/ QCV;
+		let QCW=C/ QCV;
 		let QCZ=PIY* QCX;
 		let QDA=QCT+ (QCZ* QCW);
 		let BMOV=BMOU+ (((L8([0.0,0.0,0.0,(AUHA* QCX),0.0,0.0,0.0,0.0])+ (AURW* PIY))* QCW)+ ((((AURV+ BMOT)).product_div((-QCW),QCV))* QCZ));
@@ -67281,7 +67282,7 @@ impl Instance {
 		let QDL=((QDK* QDK)+ 0.04000000000000001f64).sqrt();
 		let BNBK=(BNBH+ BNBH)* (ANYF/ (AWAY* QDL));
 		let ALMV=BK* QDL;
-		let ALMW=B/ ALMV;
+		let ALMW=C/ ALMV;
 		let BNBL=((BNBK* BK)).product_div((-ALMW),ALMV);
 		let QDM=J* (QDK+ QDL);
 		let BNBM=(AVZT+ BNBK)* J;
@@ -67316,7 +67317,7 @@ impl Instance {
 		let QDP=(LKW* QDO).sqrt();
 		let BNBP=(AUVI* LKW)* (ANYF/ (AWAY* QDP));
 		let ALNB=BK* QDP;
-		let ALNC=B/ ALNB;
+		let ALNC=C/ ALNB;
 		let BNBQ=((BNBP* BK)).product_div((-ALNC),ALNB);
 		let QDQ=K- (QDP* LKT);
 		let BNBR=(BNBP* LKT)* AWAO;
@@ -67345,7 +67346,7 @@ impl Instance {
 		let QDT=((QDR* QDR)+ ((BH* QDS)* QDS)).sqrt();
 		let BNCC=(BNBX+ BNBX)* (ANYF/ (AWAY* QDT));
 		let ALNJ=BK* QDT;
-		let ALNK=B/ ALNJ;
+		let ALNK=C/ ALNJ;
 		let BNCD=((BNCC* BK)).product_div((-ALNK),ALNJ);
 		let QDU=J* (QDR+ QDT);
 		let BNCE=(AUVF+ BNCC)* J;
@@ -67395,7 +67396,7 @@ impl Instance {
 		let QEA=(QDZ* QDY).sqrt();
 		let BNCP=(L6([0.0,0.0,0.0,(BNCL* QDY),0.0,0.0])+ L6([BNCM[0],BNCM[1],BNCM[2],0.0,BNCM[3],BNCM[4]]))* (ANYF/ (AWAY* QEA));
 		let ALNT=BK* QEA;
-		let ALNU=B/ ALNT;
+		let ALNU=C/ ALNT;
 		let BNCQ=((BNCP* BK)).product_div((-ALNU),ALNT);
 		let ALNV=ALNR* ALNU;
 		let BNCR=((L6([BNCN[0],BNCN[1],BNCN[2],0.0,BNCN[3],BNCN[4]])+ L6([0.0,0.0,0.0,(BNCL* ALNP),0.0,0.0]))* ALNU)+ (BNCQ* ALNR);
@@ -67412,18 +67413,18 @@ impl Instance {
 		let BNCV=((BNCP* BNCT)+ ((BNCP* AWAO)* BNCU))/ BK;
 		let ALOB=(ALNX+ ALNZ)/ BK;
 		let ALOC=(ALNY+ ALOA)/ BK;
-		let ALOD=B/ QEC;
+		let ALOD=C/ QEC;
 		let BNCW=(BNCV).product_div((-ALOD),QEC);
 		let QED=(QEC.ln())/ QDY;
 		let BNCX=-QED;
 		let BNCY=L6([BNCI[0],BNCI[1],BNCI[2],0.0,BNCI[3],BNCI[4]]);
 		let BNCZ=((BNCV* (ANYF/ QEC))).product_sum_div(ANYF,BNCY,BNCX,QDY);
 		let BNDA=BNCZ* AWAO;
-		let ALOE=product_sum_div((ALOB* ALOD),B,BNCX,ALNP,QDY);
-		let BNDB=L6(sum_products_div_lanes(&[(&(((((BNCR* BNCT)+ ((BNCR* AMF)* BNCU))/ BK)* ALOD)+ (BNCW* ALOB)).0,B),(&BNDA.0,ALNP),(&L6([BNCJ[0],BNCJ[1],BNCJ[2],0.0,BNCJ[3],BNCJ[4]]).0,BNCX),(&BNCY.0,(-ALOE))],QDY));
-		let ALOF=product_sum_div((ALOC* ALOD),B,BNCX,ALNQ,QDY);
-		let BNDC=L6(sum_products_div_lanes(&[(&(((((BNCS* BNCT)+ ((BNCS* AMF)* BNCU))/ BK)* ALOD)+ (BNCW* ALOC)).0,B),(&BNDA.0,ALNQ),(&L6([BNCK[0],BNCK[1],BNCK[2],0.0,BNCK[3],BNCK[4]]).0,BNCX),(&BNCY.0,(-ALOF))],QDY));
-		let mut QEE=B;
+		let ALOE=product_sum_div((ALOB* ALOD),C,BNCX,ALNP,QDY);
+		let BNDB=L6(sum_products_div_lanes(&[(&(((((BNCR* BNCT)+ ((BNCR* AMF)* BNCU))/ BK)* ALOD)+ (BNCW* ALOB)).0,C),(&BNDA.0,ALNP),(&L6([BNCJ[0],BNCJ[1],BNCJ[2],0.0,BNCJ[3],BNCJ[4]]).0,BNCX),(&BNCY.0,(-ALOE))],QDY));
+		let ALOF=product_sum_div((ALOC* ALOD),C,BNCX,ALNQ,QDY);
+		let BNDC=L6(sum_products_div_lanes(&[(&(((((BNCS* BNCT)+ ((BNCS* AMF)* BNCU))/ BK)* ALOD)+ (BNCW* ALOC)).0,C),(&BNDA.0,ALNQ),(&L6([BNCK[0],BNCK[1],BNCK[2],0.0,BNCK[3],BNCK[4]]).0,BNCX),(&BNCY.0,(-ALOF))],QDY));
+		let mut QEE=C;
 		let mut QEG=QDF;
 		let mut QIC=A;
 		let mut QIY=A;
@@ -67513,26 +67514,26 @@ impl Instance {
 		let BPOB=BPNQ- L8([BPNY[0],BPNY[1],BPNY[2],BPNY[3],BPNY[4],0.0,BPNY[5],0.0]);
 		let AMMF=AMLX- (AMMD* QEO);
 		let BPOC=BPNR- L8([BPNZ[0],BPNZ[1],BPNZ[2],BPNZ[3],BPNZ[4],0.0,BPNZ[5],0.0]);
-		let QEP=B+ (QEM- QEO);
-		let AMMG=B/ QEP;
+		let QEP=C+ (QEM- QEO);
+		let AMMG=C/ QEP;
 		let BPOD=(BPOA).product_div((-AMMG),QEP);
 		let QEQ=(QEP.ln())/ QED;
 		let BPOE=-QEQ;
 		let BPOF=L8([BNCZ[0],BNCZ[1],BNCZ[2],BNCZ[3],BNCZ[4],0.0,BNCZ[5],0.0]);
 		let BPOG=((BPOA* (ANYF/ QEP))).product_sum_div(ANYF,BPOF,BPOE,QED);
 		let BPOH=BPOG* AWAO;
-		let AMMH=product_sum_div((AMME* AMMG),B,BPOE,ALOE,QED);
-		let BPOI=L8(sum_products_div_lanes(&[(&((BPOB* AMMG)+ (BPOD* AMME)).0,B),(&BPOH.0,ALOE),(&L8([BNDB[0],BNDB[1],BNDB[2],BNDB[3],BNDB[4],0.0,BNDB[5],0.0]).0,BPOE),(&BPOF.0,(-AMMH))],QED));
-		let AMMI=product_sum_div((AMMF* AMMG),B,BPOE,ALOF,QED);
-		let BPOJ=L8(sum_products_div_lanes(&[(&((BPOC* AMMG)+ (BPOD* AMMF)).0,B),(&BPOH.0,ALOF),(&L8([BNDC[0],BNDC[1],BNDC[2],BNDC[3],BNDC[4],0.0,BNDC[5],0.0]).0,BPOE),(&BPOF.0,(-AMMI))],QED));
+		let AMMH=product_sum_div((AMME* AMMG),C,BPOE,ALOE,QED);
+		let BPOI=L8(sum_products_div_lanes(&[(&((BPOB* AMMG)+ (BPOD* AMME)).0,C),(&BPOH.0,ALOE),(&L8([BNDB[0],BNDB[1],BNDB[2],BNDB[3],BNDB[4],0.0,BNDB[5],0.0]).0,BPOE),(&BPOF.0,(-AMMH))],QED));
+		let AMMI=product_sum_div((AMMF* AMMG),C,BPOE,ALOF,QED);
+		let BPOJ=L8(sum_products_div_lanes(&[(&((BPOC* AMMG)+ (BPOD* AMMF)).0,C),(&BPOH.0,ALOF),(&L8([BNDC[0],BNDC[1],BNDC[2],BNDC[3],BNDC[4],0.0,BNDC[5],0.0]).0,BPOE),(&BPOF.0,(-AMMI))],QED));
 		let QER=QEM/ QEP;
 		let BPOK=-QER;
 		let BPOL=(BPNP).product_sum_div(ANYF,BPOA,BPOK,QEP);
 		let BPOM=BPOL* AWAO;
-		let AMMJ=product_sum_div(AMLW,B,BPOK,AMME,QEP);
-		let BPON=L8(sum_products_div_lanes(&[(&BPNQ.0,B),(&BPOM.0,AMME),(&BPOB.0,BPOK),(&BPOA.0,(-AMMJ))],QEP));
-		let AMMK=product_sum_div(AMLX,B,BPOK,AMMF,QEP);
-		let BPOO=L8(sum_products_div_lanes(&[(&BPNR.0,B),(&BPOM.0,AMMF),(&BPOC.0,BPOK),(&BPOA.0,(-AMMK))],QEP));
+		let AMMJ=product_sum_div(AMLW,C,BPOK,AMME,QEP);
+		let BPON=L8(sum_products_div_lanes(&[(&BPNQ.0,C),(&BPOM.0,AMME),(&BPOB.0,BPOK),(&BPOA.0,(-AMMJ))],QEP));
+		let AMMK=product_sum_div(AMLX,C,BPOK,AMMF,QEP);
+		let BPOO=L8(sum_products_div_lanes(&[(&BPNR.0,C),(&BPOM.0,AMMF),(&BPOC.0,BPOK),(&BPOA.0,(-AMMK))],QEP));
 		QES=QEQ;
 		QFS=QER;
 		YQP=AMMH;
@@ -67547,7 +67548,7 @@ impl Instance {
 		AUVZ=BPOO;
 		}else{
 		QES=QEJ;
-		QFS=B;
+		QFS=C;
 		YQP=AMLS;
 		YQQ=AMLT;
 		YQR=A;
@@ -67601,17 +67602,17 @@ impl Instance {
 		let BPPN=BPNC/ BH;
 		let AMNK=AMLR/ BH;
 		let BPPO=BPND/ BH;
-		let QEZ=B- (QEI/ BC);
+		let QEZ=C- (QEI/ BC);
 		let BPPP=(BPNB/ BC)* AWAO;
 		let AMNL=-(AMLQ/ BC);
 		let AMNM=-(AMLR/ BC);
-		let QFA=B- (QEY* QEZ);
+		let QFA=C- (QEY* QEZ);
 		let BPPQ=((BPPM* QEZ)+ (BPPP* QEY))* AWAO;
 		let AMNN=-((AMNJ* QEZ)+ (AMNL* QEY));
 		let AMNO=-((AMNK* QEZ)+ (AMNM* QEY));
 		let BPPR=((BPPK* QFA)+ (BPPQ* AMNH))+ ((((((BPPN* QEZ)+ (BPPP* AMNJ))+ ((((BPNC/ BC)* AWAO)* QEY)+ (BPPM* AMNL)))* AWAO)* QEX)+ (BPPJ* AMNN));
 		let BPPS=((BPPL* QFA)+ (BPPQ* AMNI))+ ((((((BPPO* QEZ)+ (BPPP* AMNK))+ ((((BPND/ BC)* AWAO)* QEY)+ (BPPM* AMNM)))* AWAO)* QEX)+ (BPPJ* AMNO));
-		let QFB=B- (QEX* QFA);
+		let QFB=C- (QEX* QFA);
 		let BPPT=((BPPJ* QFA)+ (BPPQ* QEX))* AWAO;
 		let AMNP=-((AMNH* QFA)+ (AMNN* QEX));
 		let AMNQ=-((AMNI* QFA)+ (AMNO* QEX));
@@ -67619,17 +67620,17 @@ impl Instance {
 		let BPPU=BPNB/ BK;
 		let AMNR=AMLQ/ BK;
 		let AMNS=AMLR/ BK;
-		let QFD=B- QEY;
+		let QFD=C- QEY;
 		let BPPV=BPPM* AWAO;
 		let AMNT=-AMNJ;
 		let AMNU=-AMNK;
-		let QFE=B- (QEX* QFD);
+		let QFE=C- (QEX* QFD);
 		let BPPW=((BPPJ* QFD)+ (BPPV* QEX))* AWAO;
 		let AMNV=-((AMNH* QFD)+ (AMNT* QEX));
 		let AMNW=-((AMNI* QFD)+ (AMNU* QEX));
 		let BPPX=(((BPNC/ BK)* QFE)+ (BPPW* AMNR))+ ((((((BPPK* QFD)+ (BPPV* AMNH))+ (((BPPN* AWAO)* QEX)+ (BPPJ* AMNT)))* AWAO)* QFC)+ (BPPU* AMNV));
 		let BPPY=(((BPND/ BK)* QFE)+ (BPPW* AMNS))+ ((((((BPPL* QFD)+ (BPPV* AMNI))+ (((BPPO* AWAO)* QEX)+ (BPPJ* AMNU)))* AWAO)* QFC)+ (BPPU* AMNW));
-		let QFF=B- (QFC* QFE);
+		let QFF=C- (QFC* QFE);
 		let BPPZ=((BPPU* QFE)+ (BPPW* QFC))* AWAO;
 		let AMNX=-((AMNR* QFE)+ (AMNV* QFC));
 		let AMNY=-((AMNS* QFE)+ (AMNW* QFC));
@@ -67654,17 +67655,17 @@ impl Instance {
 		let BPQI=BPOQ/ BH;
 		let AMOG=AMMM/ BH;
 		let BPQJ=BPOR/ BH;
-		let QFJ=B- (QET/ BC);
+		let QFJ=C- (QET/ BC);
 		let BPQK=(BPOP/ BC)* AWAO;
 		let AMOH=-(AMML/ BC);
 		let AMOI=-(AMMM/ BC);
-		let QFK=B- (QFI* QFJ);
+		let QFK=C- (QFI* QFJ);
 		let BPQL=((BPQH* QFJ)+ (BPQK* QFI))* AWAO;
 		let AMOJ=-((AMOF* QFJ)+ (AMOH* QFI));
 		let AMOK=-((AMOG* QFJ)+ (AMOI* QFI));
 		let BPQM=((BPQF* QFK)+ (BPQL* AMOD))+ ((((((BPQI* QFJ)+ (BPQK* AMOF))+ ((((BPOQ/ BC)* AWAO)* QFI)+ (BPQH* AMOH)))* AWAO)* QFH)+ (BPQE* AMOJ));
 		let BPQN=((BPQG* QFK)+ (BPQL* AMOE))+ ((((((BPQJ* QFJ)+ (BPQK* AMOG))+ ((((BPOR/ BC)* AWAO)* QFI)+ (BPQH* AMOI)))* AWAO)* QFH)+ (BPQE* AMOK));
-		let QFL=B- (QFH* QFK);
+		let QFL=C- (QFH* QFK);
 		let BPQO=((BPQE* QFK)+ (BPQL* QFH))* AWAO;
 		let AMOL=-((AMOD* QFK)+ (AMOJ* QFH));
 		let AMOM=-((AMOE* QFK)+ (AMOK* QFH));
@@ -67672,17 +67673,17 @@ impl Instance {
 		let BPQP=BPOP/ BK;
 		let AMON=AMML/ BK;
 		let AMOO=AMMM/ BK;
-		let QFN=B- QFI;
+		let QFN=C- QFI;
 		let BPQQ=BPQH* AWAO;
 		let AMOP=-AMOF;
 		let AMOQ=-AMOG;
-		let QFO=B- (QFH* QFN);
+		let QFO=C- (QFH* QFN);
 		let BPQR=((BPQE* QFN)+ (BPQQ* QFH))* AWAO;
 		let AMOR=-((AMOD* QFN)+ (AMOP* QFH));
 		let AMOS=-((AMOE* QFN)+ (AMOQ* QFH));
 		let BPQS=(((BPOQ/ BK)* QFO)+ (BPQR* AMON))+ ((((((BPQF* QFN)+ (BPQQ* AMOD))+ (((BPQI* AWAO)* QFH)+ (BPQE* AMOP)))* AWAO)* QFM)+ (BPQP* AMOR));
 		let BPQT=(((BPOR/ BK)* QFO)+ (BPQR* AMOO))+ ((((((BPQG* QFN)+ (BPQQ* AMOE))+ (((BPQJ* AWAO)* QFH)+ (BPQE* AMOQ)))* AWAO)* QFM)+ (BPQP* AMOS));
-		let QFP=B- (QFM* QFO);
+		let QFP=C- (QFM* QFO);
 		let BPQU=((BPQP* QFO)+ (BPQR* QFM))* AWAO;
 		let AMOT=-((AMON* QFO)+ (AMOR* QFM));
 		let AMOU=-((AMOO* QFO)+ (AMOS* QFM));
@@ -67742,11 +67743,11 @@ impl Instance {
 		let BPOZ=(BPNC- BPOQ)+ (BPOT- BPOW);
 		let AMMW=(AMLR- AMMM)+ (AMMQ- AMMU);
 		let BPPA=(BPND- BPOR)+ (BPOU- BPOX);
-		let QFY=B- QFW;
+		let QFY=C- QFW;
 		let BPPB=BPOV* AWAO;
 		let AMMX=-AMMT;
 		let AMMY=-AMMU;
-		let QFZ=(B- QFV)- (QFS* QFY);
+		let QFZ=(C- QFV)- (QFS* QFY);
 		let AMMZ=(-AMMP)- ((YQR* QFY)+ (AMMX* QFS));
 		let AMNA=(-AMMQ)- ((YQS* QFY)+ (AMMY* QFS));
 		let QGA=BWG* QFZ;
@@ -67806,15 +67807,15 @@ impl Instance {
 		let BPSY=BPNB/ BC;
 		let AMQH=AMLQ/ BC;
 		let AMQI=AMLR/ BC;
-		let QGF=B+ (QEI/ BC);
+		let QGF=C+ (QEI/ BC);
 		let BPSZ=(BPSV* QGF)+ (BPSY* QGE);
 		let AMQJ=(AMQF* QGF)+ (AMQH* QGE);
 		let AMQK=(AMQG* QGF)+ (AMQI* QGE);
-		let QGG=B+ (QGE* QGF);
+		let QGG=C+ (QGE* QGF);
 		let BPTA=(BPSS* QGG)+ (BPSZ* QGD);
 		let AMQL=(AMQD* QGG)+ (AMQJ* QGD);
 		let AMQM=(AMQE* QGG)+ (AMQK* QGD);
-		let QGH=B+ (QGD* QGG);
+		let QGH=C+ (QGD* QGG);
 		let QGI=QGC* QGH;
 		let BPTB=(BPSR* QGH)+ (BPTA* QGC);
 		let BPTC=(((BPST* QGG)+ (BPSZ* AMQD))+ (((((BPSW* QGF)+ (BPSY* AMQF))+ (((BPNC/ BC)* QGE)+ (BPSV* AMQH)))* QGD)+ (BPSS* AMQJ)))* QGC;
@@ -67825,15 +67826,15 @@ impl Instance {
 		let BPTE=BPNB/ BK;
 		let AMQP=AMLQ/ BK;
 		let AMQQ=AMLR/ BK;
-		let QGK=B+ QGE;
+		let QGK=C+ QGE;
 		let BPTF=(BPSS* QGK)+ (BPSV* QGD);
 		let AMQR=(AMQD* QGK)+ (AMQF* QGD);
 		let AMQS=(AMQE* QGK)+ (AMQG* QGD);
-		let QGL=B+ (QGD* QGK);
+		let QGL=C+ (QGD* QGK);
 		let BPTG=(BPTE* QGL)+ (BPTF* QGJ);
 		let AMQT=(AMQP* QGL)+ (AMQR* QGJ);
 		let AMQU=(AMQQ* QGL)+ (AMQS* QGJ);
-		let QGM=B+ (QGJ* QGL);
+		let QGM=C+ (QGJ* QGL);
 		let QGN=QEI* QGM;
 		let BPTH=(BPNB* QGM)+ (BPTG* QEI);
 		let BPTI=((((BPNC/ BK)* QGL)+ (BPTF* AMQP))+ (((((BPST* QGK)+ (BPSV* AMQD))+ ((BPSW* QGD)+ (BPSS* AMQF)))* QGJ)+ (BPTE* AMQR)))* QEI;
@@ -67898,7 +67899,7 @@ impl Instance {
 		let BPRU=(BPNC* QGS)+ (BPRT* AMLQ);
 		let AMPQ=AMLR* QGS;
 		let BPRV=(BPND* QGS)+ (BPRT* AMLR);
-		let QGT=QGS- B;
+		let QGT=QGS- C;
 		let QGU=QGT- QEI;
 		let BPRW=BPRT- BPNB;
 		let AMPR=AMPP- AMLQ;
@@ -67950,7 +67951,7 @@ impl Instance {
 		let BPRF=(((AUVS* BWG)+ L8([0.0,0.0,0.0,(ANZE* YQN),0.0,0.0,0.0,0.0]))* QGY)+ (BPRE* AMPD);
 		let AMPG=AMPE* QGY;
 		let BPRG=(((AUVT* BWG)+ L8([0.0,0.0,0.0,(ANZE* YQO),0.0,0.0,0.0,0.0]))* QGY)+ (BPRE* AMPE);
-		let QGZ=QEI+ B;
+		let QGZ=QEI+ C;
 		let BPRH=BNBA* QGZ;
 		let BPRI=BNBB* QGZ;
 		let BPRJ=BNBA* AMLQ;
@@ -68021,7 +68022,7 @@ impl Instance {
 		let QHJ=(QHI+ QHF).sqrt();
 		let BPUJ=(AUWA+ AUWG)* (ANYF/ (AWAY* QHJ));
 		let AMRL=BK* QHJ;
-		let AMRM=B/ AMRL;
+		let AMRM=C/ AMRL;
 		let BPUK=((BPUJ* BK)).product_div((-AMRM),AMRL);
 		let AMRN=AMRJ* AMRM;
 		let BPUL=((AUWC+ AUWI)* AMRM)+ (BPUK* AMRJ);
@@ -68031,10 +68032,10 @@ impl Instance {
 		let BPUN=-QHN;
 		let BPUO=(((AUWB+ AUWH)* J)).product_sum_div(ANYF,BPUJ,BPUN,QHJ);
 		let BPUP=BPUO* AWAO;
-		let AMRP=product_sum_div(((YQV+ YQZ)* J),B,BPUN,AMRN,QHJ);
-		let BPUQ=L8(sum_products_div_lanes(&[(&((AUWE+ AUWK)* J).0,B),(&BPUP.0,AMRN),(&BPUL.0,BPUN),(&BPUJ.0,(-AMRP))],QHJ));
-		let AMRQ=product_sum_div(((YQW+ YRA)* J),B,BPUN,AMRO,QHJ);
-		let BPUR=L8(sum_products_div_lanes(&[(&((AUWF+ AUWL)* J).0,B),(&BPUP.0,AMRO),(&BPUM.0,BPUN),(&BPUJ.0,(-AMRQ))],QHJ));
+		let AMRP=product_sum_div(((YQV+ YQZ)* J),C,BPUN,AMRN,QHJ);
+		let BPUQ=L8(sum_products_div_lanes(&[(&((AUWE+ AUWK)* J).0,C),(&BPUP.0,AMRN),(&BPUL.0,BPUN),(&BPUJ.0,(-AMRP))],QHJ));
+		let AMRQ=product_sum_div(((YQW+ YRA)* J),C,BPUN,AMRO,QHJ);
+		let BPUR=L8(sum_products_div_lanes(&[(&((AUWF+ AUWL)* J).0,C),(&BPUP.0,AMRO),(&BPUM.0,BPUN),(&BPUJ.0,(-AMRQ))],QHJ));
 		QHT=QHJ;
 		QHX=QHN;
 		YRF=AMRN;
@@ -68065,7 +68066,7 @@ impl Instance {
 		let QHP=QHI.sqrt();
 		let BPUA=AUWA* (ANYF/ (AWAY* QHP));
 		let AMRD=BK* QHP;
-		let AMRE=B/ AMRD;
+		let AMRE=C/ AMRD;
 		let BPUB=((BPUA* BK)).product_div((-AMRE),AMRD);
 		let AMRF=YQT* AMRE;
 		let BPUC=(AUWC* AMRE)+ (BPUB* YQT);
@@ -68075,10 +68076,10 @@ impl Instance {
 		let BPUE=-QHQ;
 		let BPUF=((AUWB* J)).product_sum_div(ANYF,BPUA,BPUE,QHP);
 		let BPUG=BPUF* AWAO;
-		let AMRH=product_sum_div((YQV* J),B,BPUE,AMRF,QHP);
-		let BPUH=L8(sum_products_div_lanes(&[(&(AUWE* J).0,B),(&BPUG.0,AMRF),(&BPUC.0,BPUE),(&BPUA.0,(-AMRH))],QHP));
-		let AMRI=product_sum_div((YQW* J),B,BPUE,AMRG,QHP);
-		let BPUI=L8(sum_products_div_lanes(&[(&(AUWF* J).0,B),(&BPUG.0,AMRG),(&BPUD.0,BPUE),(&BPUA.0,(-AMRI))],QHP));
+		let AMRH=product_sum_div((YQV* J),C,BPUE,AMRF,QHP);
+		let BPUH=L8(sum_products_div_lanes(&[(&(AUWE* J).0,C),(&BPUG.0,AMRF),(&BPUC.0,BPUE),(&BPUA.0,(-AMRH))],QHP));
+		let AMRI=product_sum_div((YQW* J),C,BPUE,AMRG,QHP);
+		let BPUI=L8(sum_products_div_lanes(&[(&(AUWF* J).0,C),(&BPUG.0,AMRG),(&BPUD.0,BPUE),(&BPUA.0,(-AMRI))],QHP));
 		QHU=QHP;
 		QHY=QHQ;
 		YRJ=AMRF;
@@ -68120,7 +68121,7 @@ impl Instance {
 		}
 		let QHR=QEI>= A;
 		let QHS=if QHR{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -68131,7 +68132,7 @@ impl Instance {
 		let AMRS=YRG* QHS;
 		let BPUU=AUWV* QHS;
 		let QHW=if QHR{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -68150,7 +68151,7 @@ impl Instance {
 		let BPVA=((AUWW* QHW)* PJI)+ L8([0.0,0.0,0.0,(BLZM* AMRT),0.0,0.0,0.0,0.0]);
 		let AMRY=AMRU* PJI;
 		let BPVB=((AUWX* QHW)* PJI)+ L8([0.0,0.0,0.0,(BLZM* AMRU),0.0,0.0,0.0,0.0]);
-		let QIB=B+ (PJI* QHZ);
+		let QIB=C+ (PJI* QHZ);
 		let QID=QIC> A;
 		let QIT;
 		let QIV;
@@ -68174,13 +68175,13 @@ impl Instance {
 		let BPVC=-QIF;
 		let BPVD=((BPUW* AWAO)).product_sum_div(ANYF,BPUZ,BPVC,QIB);
 		let BPVE=BPVD* AWAO;
-		let AMRZ=product_sum_div((AMRV* AMF),B,BPVC,AMRX,QIB);
-		let BPVF=L8(sum_products_div_lanes(&[(&(BPUX* AMF).0,B),(&BPVE.0,AMRX),(&BPVA.0,BPVC),(&BPUZ.0,(-AMRZ))],QIB));
-		let AMSA=product_sum_div((AMRW* AMF),B,BPVC,AMRY,QIB);
-		let BPVG=L8(sum_products_div_lanes(&[(&(BPUY* AMF).0,B),(&BPVE.0,AMRY),(&BPVB.0,BPVC),(&BPUZ.0,(-AMSA))],QIB));
+		let AMRZ=product_sum_div((AMRV* AMF),C,BPVC,AMRX,QIB);
+		let BPVF=L8(sum_products_div_lanes(&[(&(BPUX* AMF).0,C),(&BPVE.0,AMRX),(&BPVA.0,BPVC),(&BPUZ.0,(-AMRZ))],QIB));
+		let AMSA=product_sum_div((AMRW* AMF),C,BPVC,AMRY,QIB);
+		let BPVG=L8(sum_products_div_lanes(&[(&(BPUY* AMF).0,C),(&BPVE.0,AMRY),(&BPVB.0,BPVC),(&BPUZ.0,(-AMSA))],QIB));
 		let QIH=QEG.abs();
 		let BPVH=AUVO* ((AWAY* ((QEG>= AWBZ) as u8 as f64))- ANYF);
-		let QII=B>= QIH;
+		let QII=C>= QIH;
 		let QIJ;
 		let YRP;
 		let YRQ;
@@ -68188,14 +68189,14 @@ impl Instance {
 		let AUXI;
 		let AUXJ;
 		if QII{
-		QIJ=B;
+		QIJ=C;
 		YRP=A;
 		YRQ=A;
 		AUXH=BHSX;
 		AUXI=BHSX;
 		AUXJ=BHSX;
 		}else{
-		let AMSB=(BK* ((QEG>= A) as u8 as f64))- B;
+		let AMSB=(BK* ((QEG>= A) as u8 as f64))- C;
 		let AMSC=YQN* AMSB;
 		let BPVI=AUVS* AMSB;
 		let AMSD=YQO* AMSB;
@@ -68207,7 +68208,7 @@ impl Instance {
 		AUXI=BPVI;
 		AUXJ=BPVJ;
 		}
-		let QIK=QIG* (B+ QIJ);
+		let QIK=QIG* (C+ QIJ);
 		let BPVK=AUXH* QIG;
 		let AMSE=YRP* QIG;
 		let BPVL=AUXI* QIG;
@@ -68223,7 +68224,7 @@ impl Instance {
 		if QIL{
 		let QIM=QIF>= A;
 		let QIN=if QIM{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -68269,7 +68270,7 @@ impl Instance {
 		AUXF=BPVR;
 		AUXG=BPVS;
 		}
-		let QIU=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QIT, B));
+		let QIU=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QIT, C));
 		QEE=QIU;
 		QEG=QIV;
 		QIC=QIW;
@@ -68292,7 +68293,7 @@ impl Instance {
 		if QIZ{
 		let QJE=QJA>= A;
 		let QJF=if QJE{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -68311,7 +68312,7 @@ impl Instance {
 		let QJL=PIY* QJK;
 		let BNDF=L8([0.0,0.0,0.0,(AUHA* QJK),0.0,0.0,0.0,0.0])+ (BNDE* PIY);
 		let QJP=QJM+ QJK;
-		let QJQ=B/ QJP;
+		let QJQ=C/ QJP;
 		let QJU=PIY* QJR;
 		let QJV=QJL+ (QJU* QJQ);
 		let BNDG=BNDF+ (((L8([0.0,0.0,0.0,(AUHA* QJR),0.0,0.0,0.0,0.0])+ (AUVR* PIY))* QJQ)+ ((((AUVQ+ BNDE)).product_div((-QJQ),QJP))* QJU));
@@ -68425,7 +68426,7 @@ impl Instance {
 		let QKV=((QKU* QKU)+ 0.04000000000000001f64).sqrt();
 		let BNDT=(BNDQ+ BNDQ)* (ANYF/ (AWAY* QKV));
 		let ALOO=BK* QKV;
-		let ALOP=B/ ALOO;
+		let ALOP=C/ ALOO;
 		let BNDU=((BNDT* BK)).product_div((-ALOP),ALOO);
 		let QKW=J* (QKU+ QKV);
 		let BNDV=(AUXU+ BNDT)* J;
@@ -68460,7 +68461,7 @@ impl Instance {
 		let QKZ=(LKW* QKY).sqrt();
 		let BNDY=(AUXX* LKW)* (ANYF/ (AWAY* QKZ));
 		let ALOU=BK* QKZ;
-		let ALOV=B/ ALOU;
+		let ALOV=C/ ALOU;
 		let BNDZ=((BNDY* BK)).product_div((-ALOV),ALOU);
 		let QLA=BZ* QKM;
 		let BNEA=BNDH* BZ;
@@ -68522,7 +68523,7 @@ impl Instance {
 		let QLH=((QLB* QLB)+ QLG).sqrt();
 		let BNEQ=((BNEN+ BNEN)+ AUYA)* (ANYF/ (AWAY* QLH));
 		let ALPK=BK* QLH;
-		let ALPL=B/ ALPK;
+		let ALPL=C/ ALPK;
 		let BNER=((BNEQ* BK)).product_div((-ALPL),ALPK);
 		let QLI=QKM- (QKM- (J* (QLB+ QLH)));
 		let BNES=BNDH- (BNDH- ((BNED+ BNEQ)* J));
@@ -68587,7 +68588,7 @@ impl Instance {
 		let AUYP;
 		let AUYQ;
 		if QLJ{
-		let QLK=LJ== B;
+		let QLK=LJ== C;
 		let QLQ;
 		let YSF;
 		let YSG;
@@ -68608,7 +68609,7 @@ impl Instance {
 		AUYS=BNFR;
 		AUYT=BNFS;
 		}else{
-		let QLO=B- JN;
+		let QLO=C- JN;
 		let QLP=(PM* QLL)* QLO;
 		let BNFN=(AUXO* PM)* QLO;
 		let ALPW=(YRT* PM)* QLO;
@@ -68736,7 +68737,7 @@ impl Instance {
 		let AUZO;
 		let AUZP;
 		if QLX{
-		let QLY=LJ== B;
+		let QLY=LJ== C;
 		let QMD;
 		let YSL;
 		let YSM;
@@ -68757,7 +68758,7 @@ impl Instance {
 		AUZR=BNFE;
 		AUZS=BNFF;
 		}else{
-		let QMA=B- JN;
+		let QMA=C- JN;
 		let QMB=(PM* QLL)* QMA;
 		let BNFA=(AUXO* PM)* QMA;
 		let ALPQ=(YRT* PM)* QMA;
@@ -69016,7 +69017,7 @@ impl Instance {
 		let AVAB;
 		let AVAC;
 		if QMK{
-		let QML=((LKB== B)&& (ABL> A))&& SN;
+		let QML=((LKB== C)&& (ABL> A))&& SN;
 		let RQK;
 		let TWB;
 		let YSR;
@@ -69100,7 +69101,7 @@ impl Instance {
 		QNJ=QNC;
 		AVAL=AVAJ;
 		}
-		let QNH=LNB== B;
+		let QNH=LNB== C;
 		let QNX;
 		let YST;
 		let YSU;
@@ -69145,18 +69146,18 @@ impl Instance {
 		let BNGT=(BNGP* QNN)+ (BNGN* ALQH);
 		let ALQL=ALQJ* QNN;
 		let BNGU=(BNGR* QNN)+ (BNGN* ALQJ);
-		let QNO=(((B+ QNM)+ QNN)+ (QNN* QNM))+ (QNN* QNN);
+		let QNO=(((C+ QNM)+ QNN)+ (QNN* QNM))+ (QNN* QNN);
 		let BNGV=((BNGJ+ BNGN)+ ((BNGN* QNM)+ (BNGJ* QNN)))+ (BNGS+ BNGS);
 		let ALQM=((ALQE+ ALQH)+ ((ALQH* QNM)+ (ALQE* QNN)))+ (ALQK+ ALQK);
 		let ALQN=((ALQF+ ALQJ)+ ((ALQJ* QNM)+ (ALQF* QNN)))+ (ALQL+ ALQL);
-		let QNP=B/ QNO;
+		let QNP=C/ QNO;
 		let BNGW=-QNP;
 		let BNGX=((BNGV).product_div(BNGW,QNO))* AWAO;
 		let ALQO=product_div(BNGW,ALQM,QNO);
 		let BNGY=-ALQO;
 		let ALQP=product_div(BNGW,ALQN,QNO);
 		let BNGZ=-ALQP;
-		let QNQ=B- QNP;
+		let QNQ=C- QNP;
 		let BNHA=(L4(sum_products_div_lanes(&[(&BNGX.0,ALQM),(&(((L4([BNGK,0.0,0.0,0.0])+ BNGP)+ (((BNGP* QNM)+ (BNGJ* ALQH))+ (L4([(BNGK* QNN),0.0,0.0,0.0])+ (BNGN* ALQE))))+ (BNGT+ BNGT)).0,BNGW),(&BNGV.0,BNGY)],QNO)))* AWAO;
 		let BNHB=(L4(sum_products_div_lanes(&[(&BNGX.0,ALQN),(&(((L4([BNGL,0.0,0.0,0.0])+ BNGR)+ (((BNGR* QNM)+ (BNGJ* ALQJ))+ (L4([(BNGL* QNN),0.0,0.0,0.0])+ (BNGN* ALQF))))+ (BNGU+ BNGU)).0,BNGW),(&BNGV.0,BNGZ)],QNO)))* AWAO;
 		let ALQQ=BNGY* QNL;
@@ -69228,7 +69229,7 @@ impl Instance {
 		if QOE{
 		let ALRB=YST* AMF;
 		let ALRC=YSU* AMF;
-		let QOF=IDF* ((B+ QOD)- AL);
+		let QOF=IDF* ((C+ QOD)- AL);
 		let BNHV=BNHO* IDF;
 		let ALRD=(ALRB* BWG)* IDF;
 		let BNHW=(((AVAN* AMF)* BWG)+ L4([(ANZE* ALRB),0.0,0.0,0.0]))* IDF;
@@ -69248,7 +69249,7 @@ impl Instance {
 		let ALQY=ALQW* BWG;
 		let BNHQ=((AVAO* AMF)* BWG)+ L4([(ANZE* ALQW),0.0,0.0,0.0]);
 		let mut QOG=QOD;
-		let mut QOI=B;
+		let mut QOI=C;
 		let mut YSZ=ALQX;
 		let mut YTA=ALQY;
 		let mut AVAV=BNHO;
@@ -69298,10 +69299,10 @@ impl Instance {
 		let AVAY;
 		let AVAZ;
 		let AVBA;
-		if B!=0.0{
+		if C!=0.0{
 		let BNIB=(BNHL* AWAO)* J;
 		let ALRF=(ALQU* AMF)* J;
-		let QON=(((-QNW)* J)- J)- B;
+		let QON=(((-QNW)* J)- J)- C;
 		let QOR=if QOP{
 		QOO
 		}else{
@@ -69314,7 +69315,7 @@ impl Instance {
 		let QOS=((QON* QON)+ QOR).sqrt();
 		let BNIE=(BNIC+ BNIC)* (ANYF/ (AWAY* QOS));
 		let ALRI=BK* QOS;
-		let ALRJ=B/ ALRI;
+		let ALRJ=C/ ALRI;
 		let BNIF=(BNIB+ BNIE)* J;
 		let ALRK=(ALRF+ (ALRH* ALRJ))* J;
 		let BNIG=(((BNID+ BNID)* ALRJ)+ ((((BNIE* BK)).product_div((-ALRJ),ALRI))* ALRH))* J;
@@ -69362,7 +69363,7 @@ impl Instance {
 		if QOZ{
 		let QPJ;
 		if QPA{
-		QPJ=B;
+		QPJ=C;
 		}else{
 		let QPK;
 		if QPB{
@@ -69398,13 +69399,13 @@ impl Instance {
 		let QPH=QPG.sqrt();
 		let BPMU=AVBH* (ANYF/ (AWAY* QPH));
 		let AMLK=BK* QPH;
-		let AMLL=B/ AMLK;
+		let AMLL=C/ AMLK;
 		let BPMV=((BPMU* BK)).product_div((-AMLL),AMLK);
 		let AMLM=YTH* AMLL;
 		let BPMW=(AVBI* AMLL)+ (BPMV* YTH);
 		let AMLN=YTI* AMLL;
 		let BPMX=(AVBJ* AMLL)+ (BPMV* YTI);
-		let QPI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QPE, B));
+		let QPI=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QPE, C));
 		QPE=QPI;
 		QPG=QPH;
 		YTH=AMLM;
@@ -69459,7 +69460,7 @@ impl Instance {
 		AVBF=AVBL;
 		AVBG=AVBM;
 		}
-		let QPS=B/ QPR;
+		let QPS=C/ QPR;
 		let BNJD=-QPS;
 		let BNJE=(AVBE).product_div(BNJD,QPR);
 		let BNJF=BNJE* AWAO;
@@ -69542,7 +69543,7 @@ impl Instance {
 		let QQE=QNW+ QQD;
 		let BOGP=L5([0.0,0.0,BNHL[0],BNHL[1],BNHL[2]]);
 		let QQF=BWG* LKK;
-		let QQG=B/ QQF;
+		let QQG=C/ QQF;
 		let QQH=QQG* AXZ;
 		let BOGQ=(product_div(((ANZE* LKK)+ (AOAB* BWG)),(-QQG),QQF))* AXZ;
 		let BOGR=BOGQ* QQI;
@@ -69581,7 +69582,7 @@ impl Instance {
 		let BOGZ=(((((L5([((BOGQ* GUA)* AWAO),0.0,0.0,0.0,0.0])+ (BOGY* BK))+ (((BOGY* JAN)* QQW)+ (BOGY* QQX)))).product_sum_div(ANYF,BOGY,(-QQY),QQW))* CWM)+ L5([(ANZG* QQY),0.0,0.0,0.0,0.0]);
 		let QRA=QQZ/ QQC;
 		let BOHA=((BOGZ).product_sum_div(ANYF,L5([BOGO,0.0,0.0,0.0,0.0]),(-QRA),QQC))* QRA;
-		let QRB=(B+ (QRA* QRA)).sqrt();
+		let QRB=(C+ (QRA* QRA)).sqrt();
 		let QRC=QQZ/ QRB;
 		let QRD=QRC- QQD;
 		let BOHB=((BOGZ).product_sum_div(ANYF,((BOHA+ BOHA)* (ANYF/ (AWAY* QRB))),(-QRC),QRB))- AVAY;
@@ -69607,7 +69608,7 @@ impl Instance {
 		let QRG=BWG* QRF;
 		let BNJU=BNJT* BWG;
 		let BNJV=L5([(ANZE* QRF),0.0,0.0,0.0,0.0])+ BNJU;
-		let QRH=QRG< (B+ (((-0.9999999999999978f64* QNV)* FCG)/ BH));
+		let QRH=QRG< (C+ (((-0.9999999999999978f64* QNV)* FCG)/ BH));
 		let QRP;
 		let YTN;
 		let YTO;
@@ -69627,18 +69628,18 @@ impl Instance {
 		}else{
 		let ALSE=ALQU+ YTC;
 		let QRJ=QNV* FCG;
-		let QRK=(BH* (QRG- B))/ QRJ;
+		let QRK=(BH* (QRG- C))/ QRJ;
 		let BNJW=L5([((BNHK* FCG)+ (ANZM* QNV)),0.0,0.0,0.0,0.0]);
 		let ALSF=((YTB* BWG)* BH)/ QRJ;
 		let ALSG=((ALSE* BWG)* BH)/ QRJ;
 		let QRL=(QNV* BWG)/ BK;
 		let BNJX=((BNHK* BWG)+ (ANZE* QNV))/ BK;
-		let QRM=(B+ QRK).sqrt();
+		let QRM=(C+ QRK).sqrt();
 		let BNJY=(((BNJV* BH)).product_sum_div(ANYF,BNJW,(-QRK),QRJ))* (ANYF/ (AWAY* QRM));
 		let ALSH=BK* QRM;
-		let ALSI=B/ ALSH;
+		let ALSI=C/ ALSH;
 		let BNJZ=((BNJY* BK)).product_div((-ALSI),ALSH);
-		let QRN=B- QRM;
+		let QRN=C- QRM;
 		let ALSJ=-(ALSF* ALSI);
 		let ALSK=-(ALSG* ALSI);
 		let ALSL=ALSJ* QRL;
@@ -69680,7 +69681,7 @@ impl Instance {
 		let BNLE=(AVAZ* BWG)+ L5([(ANZE* YTB),0.0,0.0,0.0,0.0]);
 		let ALTX=ALTV* BWG;
 		let BNLF=(AVBA* BWG)+ L5([(ANZE* ALTV),0.0,0.0,0.0,0.0]);
-		let QRU=QRG- B;
+		let QRU=QRG- C;
 		let QRV=QNV* FCG;
 		let QRW=(BH* (QRU+ QRT))/ QRV;
 		let BNLG=L5([((BNHK* FCG)+ (ANZM* QNV)),0.0,0.0,0.0,0.0]);
@@ -69688,12 +69689,12 @@ impl Instance {
 		let ALTZ=((ALTX+ (ALTU* QRT))* BH)/ QRV;
 		let QRX=(QNV* BWG)/ BK;
 		let BNLH=((BNHK* BWG)+ (ANZE* QNV))/ BK;
-		let QRY=(B+ QRW).sqrt();
+		let QRY=(C+ QRW).sqrt();
 		let BNLI=((((BNJV+ BNLD)* BH)).product_sum_div(ANYF,BNLG,(-QRW),QRV))* (ANYF/ (AWAY* QRY));
 		let ALUA=BK* QRY;
-		let ALUB=B/ ALUA;
+		let ALUB=C/ ALUA;
 		let BNLJ=((BNLI* BK)).product_div((-ALUB),ALUA);
-		let QRZ=B- QRY;
+		let QRZ=C- QRY;
 		let ALUC=-(ALTY* ALUB);
 		let ALUD=-(ALTZ* ALUB);
 		let BNLK=((((((((BNLE+ (((BNKG* AMF)* QRT)+ (BNLD* ALTT)))* BH)).product_sum_div(ANYF,BNLG,(-ALTY),QRV))* ALUB)+ (BNLJ* ALTY))* AWAO)* QRX)+ L5([(BNLH* ALUC),0.0,0.0,0.0,0.0]);
@@ -69708,14 +69709,14 @@ impl Instance {
 		let QSC=(BH* (QRU+ QSB))/ QRV;
 		let ALUI=((ALTW+ (ALUG* QSB))* BH)/ QRV;
 		let ALUJ=((ALTX+ (ALUH* QSB))* BH)/ QRV;
-		let QSD=(B+ QSC).sqrt();
+		let QSD=(C+ QSC).sqrt();
 		let BNLN=((((BNJV+ BNLM)* BH)).product_sum_div(ANYF,BNLG,(-QSC),QRV))* (ANYF/ (AWAY* QSD));
 		let ALUK=BK* QSD;
-		let ALUL=B/ ALUK;
+		let ALUL=C/ ALUK;
 		let BNLO=((BNLN* BK)).product_div((-ALUL),ALUK);
 		let BNLP=(((((BNLE+ ((((((BNLK+ AVAZ)* BWG)+ L5([(ANZE* ALUE),0.0,0.0,0.0,0.0]))* AMF)* QSB)+ (BNLM* ALUG)))* BH)).product_sum_div(ANYF,BNLG,(-ALUI),QRV))* ALUL)+ (BNLO* ALUI);
 		let BNLQ=(((((BNLF+ ((((((BNLL+ AVBA)* BWG)+ L5([(ANZE* ALUF),0.0,0.0,0.0,0.0]))* AMF)* QSB)+ (BNLM* ALUH)))* BH)).product_sum_div(ANYF,BNLG,(-ALUJ),QRV))* ALUL)+ (BNLO* ALUJ);
-		let QSE=B- QSD;
+		let QSE=C- QSD;
 		let ALUM=-(ALUI* ALUL);
 		let ALUN=-(ALUJ* ALUL);
 		let QSF=(QNW+ (QRX* QSE))+ QQD;
@@ -69735,7 +69736,7 @@ impl Instance {
 		AVBY=BNLT;
 		}else{
 		let QSI=BWG* QNU;
-		let QSJ=B/ QSI;
+		let QSJ=C/ QSI;
 		let BNKI=product_div(((ANZE* QNU)+ (BNHI* BWG)),(-QSJ),QSI);
 		let QSK=0.7071067811865475f64+ QSJ;
 		let QSL=(-QRF)/ QNU;
@@ -69762,7 +69763,7 @@ impl Instance {
 		let QST=((QSO* QSO)+ (QSS* QSR)).sqrt();
 		let BNKS=((BNKO+ BNKO)+ L5([(((BNKR+ BNKR)* QSR)+ (BNKN* QSS)),0.0,0.0,0.0,0.0]))* (ANYF/ (AWAY* QST));
 		let ALSZ=BK* QST;
-		let ALTA=B/ ALSZ;
+		let ALTA=C/ ALSZ;
 		let BNKT=((BNKS* BK)).product_div((-ALTA),ALSZ);
 		let ALTB=ALSW* ALTA;
 		let BNKU=((BNKP+ BNKP)* ALTA)+ (BNKT* ALSW);
@@ -69852,7 +69853,7 @@ impl Instance {
 		let BNMK=L5([BNMD[0],BNMD[1],0.0,BNMD[2],BNMD[3]]);
 		let ALVC=ALUY+ (ALVA+ ALVA);
 		let BNML=L5([BNME[0],BNME[1],0.0,BNME[2],BNME[3]]);
-		let ALVD=B/ QTE;
+		let ALVD=C/ QTE;
 		let BNMM=(BNMJ).product_div((-ALVD),QTE);
 		let QTF=QOC* QTB;
 		let QTG=QTF.ln();
@@ -69880,7 +69881,7 @@ impl Instance {
 		let BNMU=BNLZ- BNMR;
 		let ALVI=ALUW- ALVG;
 		let BNMV=BNMB- BNMS;
-		let QTK=(QTC- QTI)- B;
+		let QTK=(QTC- QTI)- C;
 		let QTL=BH* QTC;
 		let BNMW=BNLY* BH;
 		let ALVJ=ALUV* BH;
@@ -69925,7 +69926,7 @@ impl Instance {
 		let QTP=((QTK* QTK)+ QTO).sqrt();
 		let BNNF=((BNNC+ BNNC)+ AVCL)* (ANYF/ (AWAY* QTP));
 		let ALVR=BK* QTP;
-		let ALVS=B/ ALVR;
+		let ALVS=C/ ALVR;
 		let BNNG=((BNNF* BK)).product_div((-ALVS),ALVR);
 		let QTQ=QTC- (J* (QTK+ QTP));
 		let BNNH=BNLY- ((BNMT+ BNNF)* J);
@@ -70004,7 +70005,7 @@ impl Instance {
 		let BNNO=BNMI+ (BNNL+ BNNL);
 		let ALVZ=ALUX+ (ALVX+ ALVX);
 		let ALWA=ALUY+ (ALVY+ ALVY);
-		let ALWB=B/ QTX;
+		let ALWB=C/ QTX;
 		let BNNP=(BNNO).product_div((-ALWB),QTX);
 		let QTY=((QTX.ln())- QTG)+ QTH;
 		let BNNQ=((BNNO* (ANYF/ QTX))- BNMN)+ BNMO;
@@ -70106,7 +70107,7 @@ impl Instance {
 		if QUJ{
 		let QUT;
 		if QUK{
-		QUT=B;
+		QUT=C;
 		}else{
 		let QUU;
 		if QUL{
@@ -70142,13 +70143,13 @@ impl Instance {
 		let QUR=QUQ.sqrt();
 		let BOGK=AVDG* (ANYF/ (AWAY* QUR));
 		let AMKC=BK* QUR;
-		let AMKD=B/ AMKC;
+		let AMKD=C/ AMKC;
 		let BOGL=((BOGK* BK)).product_div((-AMKD),AMKC);
 		let AMKE=YUN* AMKD;
 		let BOGM=(AVDH* AMKD)+ (BOGL* YUN);
 		let AMKF=YUO* AMKD;
 		let BOGN=(AVDI* AMKD)+ (BOGL* YUO);
-		let QUS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QUO, B));
+		let QUS=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QUO, C));
 		QUO=QUS;
 		QUQ=QUR;
 		YUN=AMKE;
@@ -70203,7 +70204,7 @@ impl Instance {
 		AVDE=AVDK;
 		AVDF=AVDL;
 		}
-		let QVC=B/ QVB;
+		let QVC=C/ QVB;
 		let BNOV=-QVC;
 		let BNOW=(AVDD).product_div(BNOV,QVB);
 		let BNOX=BNOW* AWAO;
@@ -70312,7 +70313,7 @@ impl Instance {
 		AVCG=AUKM;
 		AVCH=AUKN;
 		}
-		let QVH=P== B;
+		let QVH=P== C;
 		let QWO;
 		let QXB;
 		let QYN;
@@ -70357,7 +70358,7 @@ impl Instance {
 		let QVP=((QVO* QVO)+ 0.04000000000000001f64).sqrt();
 		let BNPK=(BNPH+ BNPH)* (ANYF/ (AWAY* QVP));
 		let ALXL=BK* QVP;
-		let ALXM=B/ ALXL;
+		let ALXM=C/ ALXL;
 		let BNPL=((BNPK* BK)).product_div((-ALXM),ALXL);
 		let QVQ=J* (QVO+ QVP);
 		let BNPM=(AVZT+ BNPK)* J;
@@ -70392,7 +70393,7 @@ impl Instance {
 		let QVT=(LKW* QVS).sqrt();
 		let BNPP=(AVDY* LKW)* (ANYF/ (AWAY* QVT));
 		let ALXR=BK* QVT;
-		let ALXS=B/ ALXR;
+		let ALXS=C/ ALXR;
 		let BNPQ=((BNPP* BK)).product_div((-ALXS),ALXR);
 		let QVU=K- (QVT* LKT);
 		let BNPR=(BNPP* LKT)* AWAO;
@@ -70421,7 +70422,7 @@ impl Instance {
 		let QVX=((QVV* QVV)+ ((BH* QVW)* QVW)).sqrt();
 		let BNQC=(BNPX+ BNPX)* (ANYF/ (AWAY* QVX));
 		let ALXZ=BK* QVX;
-		let ALYA=B/ ALXZ;
+		let ALYA=C/ ALXZ;
 		let BNQD=((BNQC* BK)).product_div((-ALYA),ALXZ);
 		let QVY=J* (QVV+ QVX);
 		let BNQE=(AVDV+ BNQC)* J;
@@ -70460,7 +70461,7 @@ impl Instance {
 		let QWG=QWF< RV;
 		let QWJ=if QWG{
 		let QWH=BNQH* QWB;
-		let QWI=((B+ ((QWF.exp())- (QWH.exp()))).ln())/ QWD;
+		let QWI=((C+ ((QWF.exp())- (QWH.exp()))).ln())/ QWD;
 		QWI
 		}else{
 		QWE
@@ -70539,10 +70540,10 @@ impl Instance {
 		let BNQR=(AVDP* AWAO)* QWS;
 		let ALYR=YUT+ (ALYP* QWS);
 		let ALYS=YUU+ (ALYQ* QWS);
-		let QWT=((QWO- B)+ QWS).sqrt();
+		let QWT=((QWO- C)+ QWS).sqrt();
 		let BNQS=(AVDP+ BNQR)* (ANYF/ (AWAY* QWT));
 		let ALYT=BK* QWT;
-		let ALYU=B/ ALYT;
+		let ALYU=C/ ALYT;
 		let BNQT=((BNQS* BK)).product_div((-ALYU),ALYT);
 		let ALYV=ALYR* ALYU;
 		let BNQU=((AVDR+ (((AVDR* AMF)* QWS)+ (BNQR* ALYP)))* ALYU)+ (BNQT* ALYR);
@@ -70561,10 +70562,10 @@ impl Instance {
 		let ALYG=YUU* KPU;
 		let ALYH=-(YUT* GTU);
 		let ALYI=-(YUU* GTU);
-		let QWV=(B- (QWO* GTU)).sqrt();
+		let QWV=(C- (QWO* GTU)).sqrt();
 		let BNQM=((AVDP* GTU)* AWAO)* (ANYF/ (AWAY* QWV));
 		let ALYJ=BK* QWV;
-		let ALYK=B/ ALYJ;
+		let ALYK=C/ ALYJ;
 		let BNQN=((BNQM* BK)).product_div((-ALYK),ALYJ);
 		let ALYL=ALYH* ALYK;
 		let ALYM=ALYI* ALYK;
@@ -70668,7 +70669,7 @@ impl Instance {
 		if QXO{
 		let QXY;
 		if QXP{
-		QXY=B;
+		QXY=C;
 		}else{
 		let QXZ;
 		if QXQ{
@@ -70704,13 +70705,13 @@ impl Instance {
 		let QXW=QXV.sqrt();
 		let BOGG=AVET* (ANYF/ (AWAY* QXW));
 		let AMJY=BK* QXW;
-		let AMJZ=B/ AMJY;
+		let AMJZ=C/ AMJY;
 		let BOGH=((BOGG* BK)).product_div((-AMJZ),AMJY);
 		let AMKA=YVN* AMJZ;
 		let BOGI=(AVEU* AMJZ)+ (BOGH* YVN);
 		let AMKB=YVO* AMJZ;
 		let BOGJ=(AVEV* AMJZ)+ (BOGH* YVO);
-		let QXX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QXT, B));
+		let QXX=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QXT, C));
 		QXT=QXX;
 		QXV=QXW;
 		YVN=AMKA;
@@ -70765,7 +70766,7 @@ impl Instance {
 		AVER=AVEX;
 		AVES=AVEY;
 		}
-		let QYH=B/ QYG;
+		let QYH=C/ QYG;
 		let BNSO=-QYH;
 		let BNSP=(AVEQ).product_div(BNSO,QYG);
 		let BNSQ=BNSP* AWAO;
@@ -70802,7 +70803,7 @@ impl Instance {
 		let BNRI=L8([0.0,0.0,0.0,BNQX[0],BNQX[1],BNQX[2],BNQX[3],BNQX[4]]);
 		let BNRJ=L8([0.0,0.0,0.0,BNQY[0],BNQY[1],BNQY[2],BNQY[3],BNQY[4]]);
 		let BNRK=L8([0.0,0.0,0.0,BNQZ[0],BNQZ[1],BNQZ[2],BNQZ[3],BNQZ[4]]);
-		QYL=B;
+		QYL=C;
 		QYZ=QWZ;
 		YVJ=ALYX;
 		YVK=ALYY;
@@ -70810,7 +70811,7 @@ impl Instance {
 		AVEO=BNRJ;
 		AVEP=BNRK;
 		}
-		let QYM=QYL< B;
+		let QYM=QYL< C;
 		let QYV=if QYM{
 		let QYP=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QYN, BK));
 		QYP
@@ -70940,7 +70941,7 @@ impl Instance {
 		if QZH{
 		let QZR;
 		if QZI{
-		QZR=B;
+		QZR=C;
 		}else{
 		let QZS;
 		if QZJ{
@@ -70976,13 +70977,13 @@ impl Instance {
 		let QZP=QZO.sqrt();
 		let BOGC=AVFP* (ANYF/ (AWAY* QZP));
 		let AMJU=BK* QZP;
-		let AMJV=B/ AMJU;
+		let AMJV=C/ AMJU;
 		let BOGD=((BOGC* BK)).product_div((-AMJV),AMJU);
 		let AMJW=YWB* AMJV;
 		let BOGE=(AVFQ* AMJV)+ (BOGD* YWB);
 		let AMJX=YWC* AMJV;
 		let BOGF=(AVFR* AMJV)+ (BOGD* YWC);
-		let QZQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QZM, B));
+		let QZQ=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, QZM, C));
 		QZM=QZQ;
 		QZO=QZP;
 		YWB=AMJW;
@@ -71037,7 +71038,7 @@ impl Instance {
 		AVFN=AVFT;
 		AVFO=AVFU;
 		}
-		let RAA=B/ QZZ;
+		let RAA=C/ QZZ;
 		let BNUJ=-RAA;
 		let BNUK=(AVFM).product_div(BNUJ,QZZ);
 		let BNUL=BNUK* AWAO;
@@ -71170,7 +71171,7 @@ impl Instance {
 		let RAN=((RAM* RAM)+ 0.04000000000000001f64).sqrt();
 		let BNUU=(BNUR+ BNUR)* (ANYF/ (AWAY* RAN));
 		let AMBD=BK* RAN;
-		let AMBE=B/ AMBD;
+		let AMBE=C/ AMBD;
 		let BNUV=((BNUU* BK)).product_div((-AMBE),AMBD);
 		let RAO=J* (RAM+ RAN);
 		let BNUW=(AVZT+ BNUU)* J;
@@ -71205,7 +71206,7 @@ impl Instance {
 		let RAR=(LKW* RAQ).sqrt();
 		let BNUZ=(AVGF* LKW)* (ANYF/ (AWAY* RAR));
 		let AMBJ=BK* RAR;
-		let AMBK=B/ AMBJ;
+		let AMBK=C/ AMBJ;
 		let BNVA=((BNUZ* BK)).product_div((-AMBK),AMBJ);
 		let RAS=K- (RAR* LKT);
 		let BNVB=(BNUZ* LKT)* AWAO;
@@ -71234,7 +71235,7 @@ impl Instance {
 		let RAV=((RAT* RAT)+ ((BH* RAU)* RAU)).sqrt();
 		let BNVM=(BNVH+ BNVH)* (ANYF/ (AWAY* RAV));
 		let AMBR=BK* RAV;
-		let AMBS=B/ AMBR;
+		let AMBS=C/ AMBR;
 		let BNVN=((BNVM* BK)).product_div((-AMBS),AMBR);
 		let RAW=J* (RAT+ RAV);
 		let BNVO=(AVGC+ BNVM)* J;
@@ -71284,7 +71285,7 @@ impl Instance {
 		let RBC=(RBB* RBA).sqrt();
 		let BNVZ=(L6([0.0,0.0,0.0,(BNVV* RBA),0.0,0.0])+ L6([BNVW[0],BNVW[1],BNVW[2],0.0,BNVW[3],BNVW[4]]))* (ANYF/ (AWAY* RBC));
 		let AMCB=BK* RBC;
-		let AMCC=B/ AMCB;
+		let AMCC=C/ AMCB;
 		let BNWA=((BNVZ* BK)).product_div((-AMCC),AMCB);
 		let AMCD=AMBZ* AMCC;
 		let BNWB=((L6([BNVX[0],BNVX[1],BNVX[2],0.0,BNVX[3],BNVX[4]])+ L6([0.0,0.0,0.0,(BNVV* AMBX),0.0,0.0]))* AMCC)+ (BNWA* AMBZ);
@@ -71301,18 +71302,18 @@ impl Instance {
 		let BNWF=((BNVZ* BNWD)+ ((BNVZ* AWAO)* BNWE))/ BK;
 		let AMCJ=(AMCF+ AMCH)/ BK;
 		let AMCK=(AMCG+ AMCI)/ BK;
-		let AMCL=B/ RBE;
+		let AMCL=C/ RBE;
 		let BNWG=(BNWF).product_div((-AMCL),RBE);
 		let RBF=(RBE.ln())/ RBA;
 		let BNWH=-RBF;
 		let BNWI=L6([BNVS[0],BNVS[1],BNVS[2],0.0,BNVS[3],BNVS[4]]);
 		let BNWJ=((BNWF* (ANYF/ RBE))).product_sum_div(ANYF,BNWI,BNWH,RBA);
 		let BNWK=BNWJ* AWAO;
-		let AMCM=product_sum_div((AMCJ* AMCL),B,BNWH,AMBX,RBA);
-		let BNWL=L6(sum_products_div_lanes(&[(&(((((BNWB* BNWD)+ ((BNWB* AMF)* BNWE))/ BK)* AMCL)+ (BNWG* AMCJ)).0,B),(&BNWK.0,AMBX),(&L6([BNVT[0],BNVT[1],BNVT[2],0.0,BNVT[3],BNVT[4]]).0,BNWH),(&BNWI.0,(-AMCM))],RBA));
-		let AMCN=product_sum_div((AMCK* AMCL),B,BNWH,AMBY,RBA);
-		let BNWM=L6(sum_products_div_lanes(&[(&(((((BNWC* BNWD)+ ((BNWC* AMF)* BNWE))/ BK)* AMCL)+ (BNWG* AMCK)).0,B),(&BNWK.0,AMBY),(&L6([BNVU[0],BNVU[1],BNVU[2],0.0,BNVU[3],BNVU[4]]).0,BNWH),(&BNWI.0,(-AMCN))],RBA));
-		let mut RBG=B;
+		let AMCM=product_sum_div((AMCJ* AMCL),C,BNWH,AMBX,RBA);
+		let BNWL=L6(sum_products_div_lanes(&[(&(((((BNWB* BNWD)+ ((BNWB* AMF)* BNWE))/ BK)* AMCL)+ (BNWG* AMCJ)).0,C),(&BNWK.0,AMBX),(&L6([BNVT[0],BNVT[1],BNVT[2],0.0,BNVT[3],BNVT[4]]).0,BNWH),(&BNWI.0,(-AMCM))],RBA));
+		let AMCN=product_sum_div((AMCK* AMCL),C,BNWH,AMBY,RBA);
+		let BNWM=L6(sum_products_div_lanes(&[(&(((((BNWC* BNWD)+ ((BNWC* AMF)* BNWE))/ BK)* AMCL)+ (BNWG* AMCK)).0,C),(&BNWK.0,AMBY),(&L6([BNVU[0],BNVU[1],BNVU[2],0.0,BNVU[3],BNVU[4]]).0,BNWH),(&BNWI.0,(-AMCN))],RBA));
+		let mut RBG=C;
 		let mut RBI=RAF;
 		let mut RFP=A;
 		let mut RGO=A;
@@ -71404,26 +71405,26 @@ impl Instance {
 		let BNXR=BNXG- L8([BNXO[0],BNXO[1],BNXO[2],BNXO[3],BNXO[4],0.0,BNXO[5],0.0]);
 		let AMDF=AMCX- (AMDD* RBQ);
 		let BNXS=BNXH- L8([BNXP[0],BNXP[1],BNXP[2],BNXP[3],BNXP[4],0.0,BNXP[5],0.0]);
-		let RBR=B+ (RBO- RBQ);
-		let AMDG=B/ RBR;
+		let RBR=C+ (RBO- RBQ);
+		let AMDG=C/ RBR;
 		let BNXT=(BNXQ).product_div((-AMDG),RBR);
 		let RBS=(RBR.ln())/ RBF;
 		let BNXU=-RBS;
 		let BNXV=L8([BNWJ[0],BNWJ[1],BNWJ[2],BNWJ[3],BNWJ[4],0.0,BNWJ[5],0.0]);
 		let BNXW=((BNXQ* (ANYF/ RBR))).product_sum_div(ANYF,BNXV,BNXU,RBF);
 		let BNXX=BNXW* AWAO;
-		let AMDH=product_sum_div((AMDE* AMDG),B,BNXU,AMCM,RBF);
-		let BNXY=L8(sum_products_div_lanes(&[(&((BNXR* AMDG)+ (BNXT* AMDE)).0,B),(&BNXX.0,AMCM),(&L8([BNWL[0],BNWL[1],BNWL[2],BNWL[3],BNWL[4],0.0,BNWL[5],0.0]).0,BNXU),(&BNXV.0,(-AMDH))],RBF));
-		let AMDI=product_sum_div((AMDF* AMDG),B,BNXU,AMCN,RBF);
-		let BNXZ=L8(sum_products_div_lanes(&[(&((BNXS* AMDG)+ (BNXT* AMDF)).0,B),(&BNXX.0,AMCN),(&L8([BNWM[0],BNWM[1],BNWM[2],BNWM[3],BNWM[4],0.0,BNWM[5],0.0]).0,BNXU),(&BNXV.0,(-AMDI))],RBF));
+		let AMDH=product_sum_div((AMDE* AMDG),C,BNXU,AMCM,RBF);
+		let BNXY=L8(sum_products_div_lanes(&[(&((BNXR* AMDG)+ (BNXT* AMDE)).0,C),(&BNXX.0,AMCM),(&L8([BNWL[0],BNWL[1],BNWL[2],BNWL[3],BNWL[4],0.0,BNWL[5],0.0]).0,BNXU),(&BNXV.0,(-AMDH))],RBF));
+		let AMDI=product_sum_div((AMDF* AMDG),C,BNXU,AMCN,RBF);
+		let BNXZ=L8(sum_products_div_lanes(&[(&((BNXS* AMDG)+ (BNXT* AMDF)).0,C),(&BNXX.0,AMCN),(&L8([BNWM[0],BNWM[1],BNWM[2],BNWM[3],BNWM[4],0.0,BNWM[5],0.0]).0,BNXU),(&BNXV.0,(-AMDI))],RBF));
 		let RBT=RBO/ RBR;
 		let BNYA=-RBT;
 		let BNYB=(BNXF).product_sum_div(ANYF,BNXQ,BNYA,RBR);
 		let BNYC=BNYB* AWAO;
-		let AMDJ=product_sum_div(AMCW,B,BNYA,AMDE,RBR);
-		let BNYD=L8(sum_products_div_lanes(&[(&BNXG.0,B),(&BNYC.0,AMDE),(&BNXR.0,BNYA),(&BNXQ.0,(-AMDJ))],RBR));
-		let AMDK=product_sum_div(AMCX,B,BNYA,AMDF,RBR);
-		let BNYE=L8(sum_products_div_lanes(&[(&BNXH.0,B),(&BNYC.0,AMDF),(&BNXS.0,BNYA),(&BNXQ.0,(-AMDK))],RBR));
+		let AMDJ=product_sum_div(AMCW,C,BNYA,AMDE,RBR);
+		let BNYD=L8(sum_products_div_lanes(&[(&BNXG.0,C),(&BNYC.0,AMDE),(&BNXR.0,BNYA),(&BNXQ.0,(-AMDJ))],RBR));
+		let AMDK=product_sum_div(AMCX,C,BNYA,AMDF,RBR);
+		let BNYE=L8(sum_products_div_lanes(&[(&BNXH.0,C),(&BNYC.0,AMDF),(&BNXS.0,BNYA),(&BNXQ.0,(-AMDK))],RBR));
 		RBU=RBS;
 		RDB=RBT;
 		YWT=AMDH;
@@ -71438,7 +71439,7 @@ impl Instance {
 		AVGX=BNYE;
 		}else{
 		RBU=RBL;
-		RDB=B;
+		RDB=C;
 		YWT=AMCS;
 		YWU=AMCT;
 		YWV=A;
@@ -71544,17 +71545,17 @@ impl Instance {
 		let BNZK=BNWS/ BH;
 		let AMEO=AMCR/ BH;
 		let BNZL=BNWT/ BH;
-		let RCE=B- (RBK/ BC);
+		let RCE=C- (RBK/ BC);
 		let BNZM=(BNWR/ BC)* AWAO;
 		let AMEP=-(AMCQ/ BC);
 		let AMEQ=-(AMCR/ BC);
-		let RCF=B- (RCD* RCE);
+		let RCF=C- (RCD* RCE);
 		let BNZN=((BNZJ* RCE)+ (BNZM* RCD))* AWAO;
 		let AMER=-((AMEN* RCE)+ (AMEP* RCD));
 		let AMES=-((AMEO* RCE)+ (AMEQ* RCD));
 		let BNZO=((BNZH* RCF)+ (BNZN* AMEL))+ ((((((BNZK* RCE)+ (BNZM* AMEN))+ ((((BNWS/ BC)* AWAO)* RCD)+ (BNZJ* AMEP)))* AWAO)* RCC)+ (BNZG* AMER));
 		let BNZP=((BNZI* RCF)+ (BNZN* AMEM))+ ((((((BNZL* RCE)+ (BNZM* AMEO))+ ((((BNWT/ BC)* AWAO)* RCD)+ (BNZJ* AMEQ)))* AWAO)* RCC)+ (BNZG* AMES));
-		let RCG=B- (RCC* RCF);
+		let RCG=C- (RCC* RCF);
 		let BNZQ=((BNZG* RCF)+ (BNZN* RCC))* AWAO;
 		let AMET=-((AMEL* RCF)+ (AMER* RCC));
 		let AMEU=-((AMEM* RCF)+ (AMES* RCC));
@@ -71562,17 +71563,17 @@ impl Instance {
 		let BNZR=BNWR/ BK;
 		let AMEV=AMCQ/ BK;
 		let AMEW=AMCR/ BK;
-		let RCI=B- RCD;
+		let RCI=C- RCD;
 		let BNZS=BNZJ* AWAO;
 		let AMEX=-AMEN;
 		let AMEY=-AMEO;
-		let RCJ=B- (RCC* RCI);
+		let RCJ=C- (RCC* RCI);
 		let BNZT=((BNZG* RCI)+ (BNZS* RCC))* AWAO;
 		let AMEZ=-((AMEL* RCI)+ (AMEX* RCC));
 		let AMFA=-((AMEM* RCI)+ (AMEY* RCC));
 		let BNZU=(((BNWS/ BK)* RCJ)+ (BNZT* AMEV))+ ((((((BNZH* RCI)+ (BNZS* AMEL))+ (((BNZK* AWAO)* RCC)+ (BNZG* AMEX)))* AWAO)* RCH)+ (BNZR* AMEZ));
 		let BNZV=(((BNWT/ BK)* RCJ)+ (BNZT* AMEW))+ ((((((BNZI* RCI)+ (BNZS* AMEM))+ (((BNZL* AWAO)* RCC)+ (BNZG* AMEY)))* AWAO)* RCH)+ (BNZR* AMFA));
-		let RCK=B- (RCH* RCJ);
+		let RCK=C- (RCH* RCJ);
 		let BNZW=((BNZR* RCJ)+ (BNZT* RCH))* AWAO;
 		let AMFB=-((AMEV* RCJ)+ (AMEZ* RCH));
 		let AMFC=-((AMEW* RCJ)+ (AMFA* RCH));
@@ -71603,17 +71604,17 @@ impl Instance {
 		let BOAI=BNYG/ BH;
 		let AMFM=AMDM/ BH;
 		let BOAJ=BNYH/ BH;
-		let RCP=B- (RBV/ BC);
+		let RCP=C- (RBV/ BC);
 		let BOAK=(BNYF/ BC)* AWAO;
 		let AMFN=-(AMDL/ BC);
 		let AMFO=-(AMDM/ BC);
-		let RCQ=B- (RCO* RCP);
+		let RCQ=C- (RCO* RCP);
 		let BOAL=((BOAH* RCP)+ (BOAK* RCO))* AWAO;
 		let AMFP=-((AMFL* RCP)+ (AMFN* RCO));
 		let AMFQ=-((AMFM* RCP)+ (AMFO* RCO));
 		let BOAM=((BOAF* RCQ)+ (BOAL* AMFJ))+ ((((((BOAI* RCP)+ (BOAK* AMFL))+ ((((BNYG/ BC)* AWAO)* RCO)+ (BOAH* AMFN)))* AWAO)* RCN)+ (BOAE* AMFP));
 		let BOAN=((BOAG* RCQ)+ (BOAL* AMFK))+ ((((((BOAJ* RCP)+ (BOAK* AMFM))+ ((((BNYH/ BC)* AWAO)* RCO)+ (BOAH* AMFO)))* AWAO)* RCN)+ (BOAE* AMFQ));
-		let RCR=B- (RCN* RCQ);
+		let RCR=C- (RCN* RCQ);
 		let BOAO=((BOAE* RCQ)+ (BOAL* RCN))* AWAO;
 		let AMFR=-((AMFJ* RCQ)+ (AMFP* RCN));
 		let AMFS=-((AMFK* RCQ)+ (AMFQ* RCN));
@@ -71621,17 +71622,17 @@ impl Instance {
 		let BOAP=BNYF/ BK;
 		let AMFT=AMDL/ BK;
 		let AMFU=AMDM/ BK;
-		let RCT=B- RCO;
+		let RCT=C- RCO;
 		let BOAQ=BOAH* AWAO;
 		let AMFV=-AMFL;
 		let AMFW=-AMFM;
-		let RCU=B- (RCN* RCT);
+		let RCU=C- (RCN* RCT);
 		let BOAR=((BOAE* RCT)+ (BOAQ* RCN))* AWAO;
 		let AMFX=-((AMFJ* RCT)+ (AMFV* RCN));
 		let AMFY=-((AMFK* RCT)+ (AMFW* RCN));
 		let BOAS=(((BNYG/ BK)* RCU)+ (BOAR* AMFT))+ ((((((BOAF* RCT)+ (BOAQ* AMFJ))+ (((BOAI* AWAO)* RCN)+ (BOAE* AMFV)))* AWAO)* RCS)+ (BOAP* AMFX));
 		let BOAT=(((BNYH/ BK)* RCU)+ (BOAR* AMFU))+ ((((((BOAG* RCT)+ (BOAQ* AMFK))+ (((BOAJ* AWAO)* RCN)+ (BOAE* AMFW)))* AWAO)* RCS)+ (BOAP* AMFY));
-		let RCV=B- (RCS* RCU);
+		let RCV=C- (RCS* RCU);
 		let BOAU=((BOAP* RCU)+ (BOAR* RCS))* AWAO;
 		let AMFZ=-((AMFT* RCU)+ (AMFX* RCS));
 		let AMGA=-((AMFU* RCU)+ (AMFY* RCS));
@@ -71664,7 +71665,7 @@ impl Instance {
 		let RCZ=RCX.sqrt();
 		let BOBB=BOAY* (ANYF/ (AWAY* RCZ));
 		let AMGF=BK* RCZ;
-		let AMGG=B/ AMGF;
+		let AMGG=C/ AMGF;
 		let BOBC=((BOBB* BK)).product_div((-AMGG),AMGF);
 		let AMGH=AMGD* AMGG;
 		let BOBD=(BOAZ* AMGG)+ (BOBC* AMGD);
@@ -71679,10 +71680,10 @@ impl Instance {
 		let BOBG=-RDD;
 		let BOBH=((L8([0.0,0.0,0.0,(BOBF* RDC),0.0,0.0,0.0,0.0])+ ((BNZX- ((AVGT* RCW)+ (BOAV* RDB)))* RDA))).product_sum_div(ANYF,BOBB,BOBG,RCZ);
 		let BOBI=BOBH* AWAO;
-		let AMGL=product_sum_div((AMGJ* RDA),B,BOBG,AMGH,RCZ);
-		let BOBJ=L8(sum_products_div_lanes(&[(&(((BNZY- (((AVGW* RCW)+ (BOAV* YWV))+ ((BOAW* RDB)+ (AVGT* AMGB))))* RDA)+ L8([0.0,0.0,0.0,(BOBF* AMGJ),0.0,0.0,0.0,0.0])).0,B),(&BOBI.0,AMGH),(&BOBD.0,BOBG),(&BOBB.0,(-AMGL))],RCZ));
-		let AMGM=product_sum_div((AMGK* RDA),B,BOBG,AMGI,RCZ);
-		let BOBK=L8(sum_products_div_lanes(&[(&(((BNZZ- (((AVGX* RCW)+ (BOAV* YWW))+ ((BOAX* RDB)+ (AVGT* AMGC))))* RDA)+ L8([0.0,0.0,0.0,(BOBF* AMGK),0.0,0.0,0.0,0.0])).0,B),(&BOBI.0,AMGI),(&BOBE.0,BOBG),(&BOBB.0,(-AMGM))],RCZ));
+		let AMGL=product_sum_div((AMGJ* RDA),C,BOBG,AMGH,RCZ);
+		let BOBJ=L8(sum_products_div_lanes(&[(&(((BNZY- (((AVGW* RCW)+ (BOAV* YWV))+ ((BOAW* RDB)+ (AVGT* AMGB))))* RDA)+ L8([0.0,0.0,0.0,(BOBF* AMGJ),0.0,0.0,0.0,0.0])).0,C),(&BOBI.0,AMGH),(&BOBD.0,BOBG),(&BOBB.0,(-AMGL))],RCZ));
+		let AMGM=product_sum_div((AMGK* RDA),C,BOBG,AMGI,RCZ);
+		let BOBK=L8(sum_products_div_lanes(&[(&(((BNZZ- (((AVGX* RCW)+ (BOAV* YWW))+ ((BOAX* RDB)+ (AVGT* AMGC))))* RDA)+ L8([0.0,0.0,0.0,(BOBF* AMGK),0.0,0.0,0.0,0.0])).0,C),(&BOBI.0,AMGI),(&BOBE.0,BOBG),(&BOBB.0,(-AMGM))],RCZ));
 		RDP=RCZ;
 		RDU=RDD;
 		YXJ=AMGH;
@@ -71767,7 +71768,7 @@ impl Instance {
 		let RDI=RDG.sqrt();
 		let BNYR=BNYO* (ANYF/ (AWAY* RDI));
 		let AMDX=BK* RDI;
-		let AMDY=B/ AMDX;
+		let AMDY=C/ AMDX;
 		let BNYS=((BNYR* BK)).product_div((-AMDY),AMDX);
 		let AMDZ=AMDV* AMDY;
 		let BNYT=(BNYP* AMDY)+ (BNYS* AMDV);
@@ -71775,21 +71776,21 @@ impl Instance {
 		let BNYU=(BNYQ* AMDY)+ (BNYS* AMDW);
 		let RDJ=BWG* J;
 		let BNYV=ANZE* J;
-		let RDK=B- RDF;
+		let RDK=C- RDF;
 		let BNYW=BNYL* AWAO;
 		let AMEB=-AMDT;
 		let AMEC=-AMDU;
-		let RDL=(B- RDE)- (RDB* RDK);
+		let RDL=(C- RDE)- (RDB* RDK);
 		let AMED=(-AMDP)- ((YWV* RDK)+ (AMEB* RDB));
 		let AMEE=(-AMDQ)- ((YWW* RDK)+ (AMEC* RDB));
 		let RDM=(RDJ* RDL)/ RDI;
 		let BNYX=-RDM;
 		let BNYY=((L8([0.0,0.0,0.0,(BNYV* RDL),0.0,0.0,0.0,0.0])+ (((BNYI* AWAO)- ((AVGT* RDK)+ (BNYW* RDB)))* RDJ))).product_sum_div(ANYF,BNYR,BNYX,RDI);
 		let BNYZ=BNYY* AWAO;
-		let AMEF=product_sum_div((AMED* RDJ),B,BNYX,AMDZ,RDI);
-		let BNZA=L8(sum_products_div_lanes(&[(&((((BNYJ* AWAO)- (((AVGW* RDK)+ (BNYW* YWV))+ (((BNYM* AWAO)* RDB)+ (AVGT* AMEB))))* RDJ)+ L8([0.0,0.0,0.0,(BNYV* AMED),0.0,0.0,0.0,0.0])).0,B),(&BNYZ.0,AMDZ),(&BNYT.0,BNYX),(&BNYR.0,(-AMEF))],RDI));
-		let AMEG=product_sum_div((AMEE* RDJ),B,BNYX,AMEA,RDI);
-		let BNZB=L8(sum_products_div_lanes(&[(&((((BNYK* AWAO)- (((AVGX* RDK)+ (BNYW* YWW))+ (((BNYN* AWAO)* RDB)+ (AVGT* AMEC))))* RDJ)+ L8([0.0,0.0,0.0,(BNYV* AMEE),0.0,0.0,0.0,0.0])).0,B),(&BNYZ.0,AMEA),(&BNYU.0,BNYX),(&BNYR.0,(-AMEG))],RDI));
+		let AMEF=product_sum_div((AMED* RDJ),C,BNYX,AMDZ,RDI);
+		let BNZA=L8(sum_products_div_lanes(&[(&((((BNYJ* AWAO)- (((AVGW* RDK)+ (BNYW* YWV))+ (((BNYM* AWAO)* RDB)+ (AVGT* AMEB))))* RDJ)+ L8([0.0,0.0,0.0,(BNYV* AMED),0.0,0.0,0.0,0.0])).0,C),(&BNYZ.0,AMDZ),(&BNYT.0,BNYX),(&BNYR.0,(-AMEF))],RDI));
+		let AMEG=product_sum_div((AMEE* RDJ),C,BNYX,AMEA,RDI);
+		let BNZB=L8(sum_products_div_lanes(&[(&((((BNYK* AWAO)- (((AVGX* RDK)+ (BNYW* YWW))+ (((BNYN* AWAO)* RDB)+ (AVGT* AMEC))))* RDJ)+ L8([0.0,0.0,0.0,(BNYV* AMEE),0.0,0.0,0.0,0.0])).0,C),(&BNYZ.0,AMEA),(&BNYU.0,BNYX),(&BNYR.0,(-AMEG))],RDI));
 		RDQ=RDI;
 		RDV=RDM;
 		YXN=AMDZ;
@@ -71944,15 +71945,15 @@ impl Instance {
 		let BODJ=BNWR/ BC;
 		let AMHT=AMCQ/ BC;
 		let AMHU=AMCR/ BC;
-		let REC=B+ (RBK/ BC);
+		let REC=C+ (RBK/ BC);
 		let BODK=(BODG* REC)+ (BODJ* REB);
 		let AMHV=(AMHR* REC)+ (AMHT* REB);
 		let AMHW=(AMHS* REC)+ (AMHU* REB);
-		let RED=B+ (REB* REC);
+		let RED=C+ (REB* REC);
 		let BODL=(BODD* RED)+ (BODK* REA);
 		let AMHX=(AMHP* RED)+ (AMHV* REA);
 		let AMHY=(AMHQ* RED)+ (AMHW* REA);
-		let REE=B+ (REA* RED);
+		let REE=C+ (REA* RED);
 		let REF=RDZ* REE;
 		let BODM=(BODC* REE)+ (BODL* RDZ);
 		let BODN=(((BODE* RED)+ (BODK* AMHP))+ (((((BODH* REC)+ (BODJ* AMHR))+ (((BNWS/ BC)* REB)+ (BODG* AMHT)))* REA)+ (BODD* AMHV)))* RDZ;
@@ -71963,15 +71964,15 @@ impl Instance {
 		let BODP=BNWR/ BK;
 		let AMIB=AMCQ/ BK;
 		let AMIC=AMCR/ BK;
-		let REH=B+ REB;
+		let REH=C+ REB;
 		let BODQ=(BODD* REH)+ (BODG* REA);
 		let AMID=(AMHP* REH)+ (AMHR* REA);
 		let AMIE=(AMHQ* REH)+ (AMHS* REA);
-		let REI=B+ (REA* REH);
+		let REI=C+ (REA* REH);
 		let BODR=(BODP* REI)+ (BODQ* REG);
 		let AMIF=(AMIB* REI)+ (AMID* REG);
 		let AMIG=(AMIC* REI)+ (AMIE* REG);
-		let REJ=B+ (REG* REI);
+		let REJ=C+ (REG* REI);
 		let REK=RBK* REJ;
 		let BODS=(BNWR* REJ)+ (BODR* RBK);
 		let BODT=((((BNWS/ BK)* REI)+ (BODQ* AMIB))+ (((((BODE* REH)+ (BODG* AMHP))+ ((BODH* REA)+ (BODD* AMHR)))* REG)+ (BODP* AMID)))* RBK;
@@ -72022,7 +72023,7 @@ impl Instance {
 		let BOCF=(BNWS* REO)+ (BOCE* AMCQ);
 		let AMHC=AMCR* REO;
 		let BOCG=(BNWT* REO)+ (BOCE* AMCR);
-		let REP=REO- B;
+		let REP=REO- C;
 		let REQ=REP- RBK;
 		let BOCH=BOCE- BNWR;
 		let AMHD=AMHB- AMCQ;
@@ -72087,7 +72088,7 @@ impl Instance {
 		let BOBQ=(((AVGO* BWG)+ L8([0.0,0.0,0.0,(ANZE* YWP),0.0,0.0,0.0,0.0]))* REU)+ (BOBP* AMGP);
 		let AMGS=AMGQ* REU;
 		let BOBR=(((AVGP* BWG)+ L8([0.0,0.0,0.0,(ANZE* YWQ),0.0,0.0,0.0,0.0]))* REU)+ (BOBP* AMGQ);
-		let REV=RBK+ B;
+		let REV=RBK+ C;
 		let BOBS=AVAS* REV;
 		let BOBT=AVAT* REV;
 		let BOBU=AVAS* AMCQ;
@@ -72150,7 +72151,7 @@ impl Instance {
 		let RFE=((RDN* RDN)+ RFB).sqrt();
 		let BOEO=((BOEL+ BOEL)+ AVII)* (ANYF/ (AWAY* RFE));
 		let AMIT=BK* RFE;
-		let AMIU=B/ AMIT;
+		let AMIU=C/ AMIT;
 		let BOEP=((BOEO* BK)).product_div((-AMIU),AMIT);
 		let AMIV=AMIR* AMIU;
 		let BOEQ=(((BOEM+ BOEM)+ AVIK)* AMIU)+ (BOEP* AMIR);
@@ -72164,10 +72165,10 @@ impl Instance {
 		let BOET=-RFI;
 		let BOEU=(((((BOES* RDN)+ (AVGY* RFF))+ AVIJ)* J)).product_sum_div(ANYF,BOEO,BOET,RFE);
 		let BOEV=BOEU* AWAO;
-		let AMIZ=product_sum_div(((((AMIX* RDN)+ (YWX* RFF))+ YXX)* J),B,BOET,AMIV,RFE);
-		let BOEW=L8(sum_products_div_lanes(&[(&((((((AVHD* BK)* RDN)+ (AVGY* AMIX))+ ((AVHB* RFF)+ (BOES* YWX)))+ AVIM)* J).0,B),(&BOEV.0,AMIV),(&BOEQ.0,BOET),(&BOEO.0,(-AMIZ))],RFE));
-		let AMJA=product_sum_div(((((AMIY* RDN)+ (YWY* RFF))+ YXY)* J),B,BOET,AMIW,RFE);
-		let BOEX=L8(sum_products_div_lanes(&[(&((((((AVHE* BK)* RDN)+ (AVGY* AMIY))+ ((AVHC* RFF)+ (BOES* YWY)))+ AVIN)* J).0,B),(&BOEV.0,AMIW),(&BOER.0,BOET),(&BOEO.0,(-AMJA))],RFE));
+		let AMIZ=product_sum_div(((((AMIX* RDN)+ (YWX* RFF))+ YXX)* J),C,BOET,AMIV,RFE);
+		let BOEW=L8(sum_products_div_lanes(&[(&((((((AVHD* BK)* RDN)+ (AVGY* AMIX))+ ((AVHB* RFF)+ (BOES* YWX)))+ AVIM)* J).0,C),(&BOEV.0,AMIV),(&BOEQ.0,BOET),(&BOEO.0,(-AMIZ))],RFE));
+		let AMJA=product_sum_div(((((AMIY* RDN)+ (YWY* RFF))+ YXY)* J),C,BOET,AMIW,RFE);
+		let BOEX=L8(sum_products_div_lanes(&[(&((((((AVHE* BK)* RDN)+ (AVGY* AMIY))+ ((AVHC* RFF)+ (BOES* YWY)))+ AVIN)* J).0,C),(&BOEV.0,AMIW),(&BOER.0,BOET),(&BOEO.0,(-AMJA))],RFE));
 		RFK=RFE;
 		RFN=RFI;
 		YYD=AMIV;
@@ -72219,8 +72220,8 @@ impl Instance {
 		let BOFJ=(AVIG* QNU)+ L8([0.0,0.0,0.0,(BNHI* YXT),0.0,0.0,0.0,0.0]);
 		let AMJI=YXU* QNU;
 		let BOFK=(AVIH* QNU)+ L8([0.0,0.0,0.0,(BNHI* YXU),0.0,0.0,0.0,0.0]);
-		let RFO=B+ (QNU* RFM);
-		let RFQ=RFP== B;
+		let RFO=C+ (QNU* RFM);
+		let RFQ=RFP== C;
 		let RGF;
 		let RGH;
 		let RGM;
@@ -72243,13 +72244,13 @@ impl Instance {
 		let BOFL=-RFS;
 		let BOFM=((BOFF* AWAO)).product_sum_div(ANYF,BOFI,BOFL,RFO);
 		let BOFN=BOFM* AWAO;
-		let AMJJ=product_sum_div((AMJF* AMF),B,BOFL,AMJH,RFO);
-		let BOFO=L8(sum_products_div_lanes(&[(&(BOFG* AMF).0,B),(&BOFN.0,AMJH),(&BOFJ.0,BOFL),(&BOFI.0,(-AMJJ))],RFO));
-		let AMJK=product_sum_div((AMJG* AMF),B,BOFL,AMJI,RFO);
-		let BOFP=L8(sum_products_div_lanes(&[(&(BOFH* AMF).0,B),(&BOFN.0,AMJI),(&BOFK.0,BOFL),(&BOFI.0,(-AMJK))],RFO));
+		let AMJJ=product_sum_div((AMJF* AMF),C,BOFL,AMJH,RFO);
+		let BOFO=L8(sum_products_div_lanes(&[(&(BOFG* AMF).0,C),(&BOFN.0,AMJH),(&BOFJ.0,BOFL),(&BOFI.0,(-AMJJ))],RFO));
+		let AMJK=product_sum_div((AMJG* AMF),C,BOFL,AMJI,RFO);
+		let BOFP=L8(sum_products_div_lanes(&[(&(BOFH* AMF).0,C),(&BOFN.0,AMJI),(&BOFK.0,BOFL),(&BOFI.0,(-AMJK))],RFO));
 		let RFU=RBI.abs();
 		let BOFQ=AVGL* ((AWAY* ((RBI>= AWBZ) as u8 as f64))- ANYF);
-		let RFV=B>= RFU;
+		let RFV=C>= RFU;
 		let RFW;
 		let YYJ;
 		let YYK;
@@ -72257,14 +72258,14 @@ impl Instance {
 		let AVJE;
 		let AVJF;
 		if RFV{
-		RFW=B;
+		RFW=C;
 		YYJ=A;
 		YYK=A;
 		AVJD=BHSX;
 		AVJE=BHSX;
 		AVJF=BHSX;
 		}else{
-		let AMJL=(BK* ((RBI>= A) as u8 as f64))- B;
+		let AMJL=(BK* ((RBI>= A) as u8 as f64))- C;
 		let AMJM=YWP* AMJL;
 		let BOFR=AVGO* AMJL;
 		let AMJN=YWQ* AMJL;
@@ -72276,7 +72277,7 @@ impl Instance {
 		AVJE=BOFR;
 		AVJF=BOFS;
 		}
-		let RFX=RFT* (B+ RFW);
+		let RFX=RFT* (C+ RFW);
 		let BOFT=AVJD* RFT;
 		let AMJO=YYJ* RFT;
 		let BOFU=AVJE* RFT;
@@ -72292,7 +72293,7 @@ impl Instance {
 		if RFY{
 		let RFZ=RFS>= A;
 		let RGA=if RFZ{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -72324,7 +72325,7 @@ impl Instance {
 		let BOGB=AVGP+ AVJI;
 		let RGE=((RGC.abs())<= BBK)&& ((RFL.abs())<= AQ);
 		let RGN=if RGE{
-		B
+		C
 		}else{
 		RFP
 		};
@@ -72337,7 +72338,7 @@ impl Instance {
 		AVJB=BOGA;
 		AVJC=BOGB;
 		}
-		let RGG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, RGF, B));
+		let RGG=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, RGF, C));
 		RBG=RGG;
 		RBI=RGH;
 		RFP=RGM;
@@ -72463,7 +72464,7 @@ impl Instance {
 		let RHU=(RHT.ln())/ RHP;
 		let BOHT=-RHU;
 		let BOHU=(((((BOHS* (rspice_limited_exp_derivative(RHR)))+ ((BOHS* AWAO)* (rspice_limited_exp_derivative(RHS))))/ BK)* (ANYF/ RHT))).product_sum_div(ANYF,L6([BOHQ[0],BOHQ[1],BOHQ[2],0.0,BOHQ[3],BOHQ[4]]),BOHT,RHP);
-		let mut RHV=B;
+		let mut RHV=C;
 		let mut RHX=RGW;
 		let mut RLT=A;
 		let mut RMO=A;
@@ -72497,7 +72498,7 @@ impl Instance {
 		let RIF=RIE.exp();
 		let BPKZ=(((BOHU* AWAO)* RHP)+ L6([BPKY[0],BPKY[1],BPKY[2],0.0,BPKY[3],BPKY[4]]))* RIF;
 		let BPLA=BPKX- L8([BPKZ[0],BPKZ[1],BPKZ[2],BPKZ[3],BPKZ[4],0.0,BPKZ[5],0.0]);
-		let RIG=B+ (RID- RIF);
+		let RIG=C+ (RID- RIF);
 		let RIH=(RIG.ln())/ RHU;
 		let BPLB=((BPLA* (ANYF/ RIG))).product_sum_div(ANYF,L8([BOHU[0],BOHU[1],BOHU[2],BOHU[3],BOHU[4],0.0,BOHU[5],0.0]),(-RIH),RHU);
 		let RII=RID/ RIG;
@@ -72508,7 +72509,7 @@ impl Instance {
 		AVJQ=BPLC;
 		}else{
 		RIJ=RIA;
-		RJJ=B;
+		RJJ=C;
 		AVJP=BPKU;
 		AVJQ=BHSX;
 		}
@@ -72527,26 +72528,26 @@ impl Instance {
 		let BPLJ=BPKT/ Q;
 		let RIP=RHZ/ BH;
 		let BPLK=BPKT/ BH;
-		let RIQ=B- (RHZ/ BC);
-		let RIR=B- (RIP* RIQ);
-		let RIS=B- (RIO* RIR);
+		let RIQ=C- (RHZ/ BC);
+		let RIR=C- (RIP* RIQ);
+		let RIS=C- (RIO* RIR);
 		let RIT=RHZ/ BK;
-		let RIU=B- RIP;
-		let RIV=B- (RIO* RIU);
-		let RIW=B- (RIT* RIV);
+		let RIU=C- RIP;
+		let RIV=C- (RIO* RIU);
+		let RIW=C- (RIT* RIV);
 		let BPLL=BPLD* RIK;
 		let RIX=(RIK* RIK)/ BK;
 		let RIY=RIK/ Q;
 		let BPLM=BPLD/ Q;
 		let RIZ=RIK/ BH;
 		let BPLN=BPLD/ BH;
-		let RJA=B- (RIK/ BC);
-		let RJB=B- (RIZ* RJA);
-		let RJC=B- (RIY* RJB);
+		let RJA=C- (RIK/ BC);
+		let RJB=C- (RIZ* RJA);
+		let RJC=C- (RIY* RJB);
 		let RJD=RIK/ BK;
-		let RJE=B- RIZ;
-		let RJF=B- (RIY* RJE);
-		let RJG=B- (RJD* RJF);
+		let RJE=C- RIZ;
+		let RJF=C- (RIY* RJE);
+		let RJG=C- (RJD* RJF);
 		let RJH=RIK* RJG;
 		let RJI=(RIN* RIS)- (RIX* RJC);
 		let BPLO=((((BPLI+ BPLI)/ BK)* RIS)+ ((((BPLJ* RIR)+ ((((BPLK* RIQ)+ (((BPKT/ BC)* AWAO)* RIP))* AWAO)* RIO))* AWAO)* RIN))- ((((BPLL+ BPLL)/ BK)* RJC)+ ((((BPLM* RJB)+ ((((BPLN* RJA)+ (((BPLD/ BC)* AWAO)* RIZ))* AWAO)* RIY))* AWAO)* RIX));
@@ -72565,8 +72566,8 @@ impl Instance {
 		let BPLF=(BPLD* AWAO)* RJN;
 		let RJO=(RHZ- RIK)+ (RJM- RJN);
 		let BPLG=(BPKT- BPLD)+ (BPLE- BPLF);
-		let RJP=B- RJN;
-		let RJQ=(B- RJM)- (RJJ* RJP);
+		let RJP=C- RJN;
+		let RJQ=(C- RJM)- (RJJ* RJP);
 		let RJR=BWG* RJQ;
 		let BPLH=L8([0.0,0.0,0.0,(ANZE* RJQ),0.0,0.0,0.0,0.0])+ (((BPLE* AWAO)- ((AVJQ* RJP)+ ((BPLF* AWAO)* RJJ)))* BWG);
 		RKZ=RJO;
@@ -72586,14 +72587,14 @@ impl Instance {
 		let BPMB=BPKT/ Q;
 		let RJV=RHZ/ BH;
 		let BPMC=BPKT/ BH;
-		let RJW=B+ (RHZ/ BC);
-		let RJX=B+ (RJV* RJW);
-		let RJY=B+ (RJU* RJX);
+		let RJW=C+ (RHZ/ BC);
+		let RJX=C+ (RJV* RJW);
+		let RJY=C+ (RJU* RJX);
 		let RJZ=RJT* RJY;
 		let RKA=RHZ/ BK;
-		let RKB=B+ RJV;
-		let RKC=B+ (RJU* RKB);
-		let RKD=B+ (RKA* RKC);
+		let RKB=C+ RJV;
+		let RKC=C+ (RJU* RKB);
+		let RKD=C+ (RKA* RKC);
 		let RKE=RHZ* RKD;
 		let RKF=RGV* RJZ;
 		let BPMD=BOHG* RJZ;
@@ -72615,7 +72616,7 @@ impl Instance {
 		if RKI{
 		let RKJ=RHZ.exp();
 		let BPLV=BPKT* RKJ;
-		let RKK=RKJ- B;
+		let RKK=RKJ- C;
 		let RKL=RKK- RHZ;
 		let RKM=RGV* RKL;
 		let BPLW=BOHG* RKL;
@@ -72631,7 +72632,7 @@ impl Instance {
 		}else{
 		let RKP=(BWG* RHX).exp();
 		let BPLR=(L8([0.0,0.0,0.0,(ANZE* RHX),0.0,0.0,0.0,0.0])+ (AVJN* BWG))* RKP;
-		let RKQ=RHZ+ B;
+		let RKQ=RHZ+ C;
 		let BPLS=BOHF* RKQ;
 		let RKR=RKP- (RGU* RKQ);
 		let RKS=QOC* RKR;
@@ -72692,14 +72693,14 @@ impl Instance {
 		}
 		let RLI=RHZ>= A;
 		let RLJ=if RLI{
-		B
+		C
 		}else{
 		AMF
 		};
 		let RLM=RLJ* RLK;
 		let BPML=AVJX* RLJ;
 		let RLN=if RLI{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -72708,7 +72709,7 @@ impl Instance {
 		let RLR=((-QNW)+ RHX)+ (QNU* RLM);
 		let BPMN=(L8([0.0,0.0,0.0,0.0,0.0,BPMM[0],BPMM[1],BPMM[2]])+ AVJN)+ (L8([0.0,0.0,0.0,(BNHI* RLM),0.0,0.0,0.0,0.0])+ (BPML* QNU));
 		let BPMO=L8([0.0,0.0,0.0,(BNHI* RLQ),0.0,0.0,0.0,0.0])+ ((AVJY* RLN)* QNU);
-		let RLS=B+ (QNU* RLQ);
+		let RLS=C+ (QNU* RLQ);
 		let RLU=RLT> A;
 		let RMJ;
 		let RML;
@@ -72724,17 +72725,17 @@ impl Instance {
 		let BPMP=((BPMN* AWAO)).product_sum_div(ANYF,BPMO,(-RLW),RLS);
 		let RLX=RHX.abs();
 		let BPMQ=AVJN* ((AWAY* ((RHX>= AWBZ) as u8 as f64))- ANYF);
-		let RLY=B>= RLX;
+		let RLY=C>= RLX;
 		let RLZ;
 		let AVKC;
 		if RLY{
-		RLZ=B;
+		RLZ=C;
 		AVKC=BHSX;
 		}else{
 		RLZ=RLX;
 		AVKC=BPMQ;
 		}
-		let RMA=0.05f64* (B+ RLZ);
+		let RMA=0.05f64* (C+ RLZ);
 		let BPMR=AVKC* 0.05f64;
 		let RMB=(RLW.abs())> RMA;
 		let RMF;
@@ -72742,7 +72743,7 @@ impl Instance {
 		if RMB{
 		let RMC=RLW>= A;
 		let RMD=if RMC{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -72768,7 +72769,7 @@ impl Instance {
 		RMM=RMN;
 		AVKB=BPMT;
 		}
-		let RMK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, RMJ, B));
+		let RMK=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, RMJ, C));
 		RHV=RMK;
 		RHX=RML;
 		RLT=RMM;
@@ -72783,7 +72784,7 @@ impl Instance {
 		if RMP{
 		let RMU=RMQ>= A;
 		let RMV=if RMU{
-		B
+		C
 		}else{
 		AMF
 		};
@@ -72842,7 +72843,7 @@ impl Instance {
 		AVAB=AUKO;
 		AVAC=AUKP;
 		}
-		let RNG=((LJK== B)&& (ADB> A))&& (ME== A);
+		let RNG=((LJK== C)&& (ADB> A))&& (ME== A);
 		let ROO;
 		let RQH;
 		let THT;
@@ -72854,7 +72855,7 @@ impl Instance {
 		let AVKI;
 		if RNG{
 		let RNI=AXW* PM;
-		let RNK=RNJ== B;
+		let RNK=RNJ== C;
 		let RQI;
 		let THU;
 		let YYP;
@@ -72900,7 +72901,7 @@ impl Instance {
 		AVKK=BOIB;
 		}
 		let BOIG=L8([0.0,0.0,0.0,0.0,AVKJ[0],AVKJ[1],AVKJ[2],0.0]);
-		ROO=B;
+		ROO=C;
 		RQH=RQI;
 		THT=THU;
 		YYN=YYP;
@@ -72920,7 +72921,7 @@ impl Instance {
 		AVKH=AVAB;
 		AVKI=AVAC;
 		}
-		let ROA=((LKB== B)&& (ABL> A))&& (MD== A);
+		let ROA=((LKB== C)&& (ABL> A))&& (MD== A);
 		let RPE;
 		let RQF;
 		let THV;
@@ -72932,7 +72933,7 @@ impl Instance {
 		let AVKO;
 		if ROA{
 		let ROB=AXZ* PM;
-		let ROC=RNJ== B;
+		let ROC=RNJ== C;
 		let RQG;
 		let THW;
 		let YYT;
@@ -72978,7 +72979,7 @@ impl Instance {
 		AVKQ=BOIK;
 		}
 		let BOIQ=L8([0.0,0.0,0.0,0.0,AVKP[0],AVKP[1],AVKP[2],0.0]);
-		RPE=B;
+		RPE=C;
 		RQF=RQG;
 		THV=THW;
 		YYR=YYT;
@@ -73034,7 +73035,7 @@ impl Instance {
 		let BOIS=L3([0.0,AVZX[0],AVZX[1]])- L3([AVZW[0],AVZW[1],0.0]);
 		let RQB=RPZ* RQA;
 		let BOIT=BOIS* RPZ;
-		let RQC=RNJ== B;
+		let RQC=RNJ== C;
 		let TJC;
 		let TJD;
 		let TJG;
@@ -73132,7 +73133,7 @@ impl Instance {
 		if RTN{
 		let RTO=BIL+ KUT;
 		let BOJT=AWLX+ AOGJ;
-		let RTP=B- IW;
+		let RTP=C- IW;
 		let RTQ=(IW* RTO)+ (RTP* RNT);
 		let BOJU=(BOJT* IW)+ (AOGX* RTP);
 		let RTR=(RTQ> ((RTO- 2.220446049250313e-15f64)- 2.220446049250313e-15f64))&& true;
@@ -73151,7 +73152,7 @@ impl Instance {
 		if RTV{
 		let RUF;
 		if RTW{
-		RUF=B;
+		RUF=C;
 		}else{
 		let RUG;
 		if RTX{
@@ -73182,7 +73183,7 @@ impl Instance {
 		}
 		let RUD=RUC.sqrt();
 		let BPKR=AVLF* (ANYF/ (AWAY* RUD));
-		let RUE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, RUA, B));
+		let RUE=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, RUA, C));
 		RUA=RUE;
 		RUC=RUD;
 		AVLF=BPKR;
@@ -73205,7 +73206,7 @@ impl Instance {
 		RUM=RUL;
 		AVLE=AVLG;
 		}
-		let RUN=B/ RUM;
+		let RUN=C/ RUM;
 		let RUP=RTS* RUO;
 		let RUQ=((RTO- 2.220446049250313e-15f64)- 2.220446049250313e-15f64)+ (RUP* RUN);
 		let BOKA=BOJT+ (((BOJV* RUO)* RUN)+ (((AVLE).product_div((-RUN),RUM))* RUP));
@@ -73250,14 +73251,14 @@ impl Instance {
 		let BOJN=-RVJ;
 		let BOJO=(AOGZ).product_sum_div(ANYF,AOHA,BOJN,RVE);
 		let BOJP=BOJO* AWAO;
-		let AMKW=product_sum_div(UTY,B,BOJN,UUA,RVE);
-		let AMKX=product_sum_div(UTZ,B,BOJN,UUB,RVE);
+		let AMKW=product_sum_div(UTY,C,BOJN,UUA,RVE);
+		let AMKX=product_sum_div(UTZ,C,BOJN,UUB,RVE);
 		let RVK=(RVJ* CWM)/ PE;
 		let BOJQ=((BOJO* CWM)+ L5([(ANZG* RVJ),0.0,0.0,0.0,0.0]))/ PE;
 		let AMKY=(AMKW* CWM)/ PE;
-		let BOJR=(((L5(sum_products_div_lanes(&[(&AOHW.0,B),(&BOJP.0,UUA),(&AOHY.0,BOJN),(&AOHA.0,(-AMKW))],RVE)))* CWM)+ L5([(ANZG* AMKW),0.0,0.0,0.0,0.0]))/ PE;
+		let BOJR=(((L5(sum_products_div_lanes(&[(&AOHW.0,C),(&BOJP.0,UUA),(&AOHY.0,BOJN),(&AOHA.0,(-AMKW))],RVE)))* CWM)+ L5([(ANZG* AMKW),0.0,0.0,0.0,0.0]))/ PE;
 		let AMKZ=(AMKX* CWM)/ PE;
-		let BOJS=(((L5(sum_products_div_lanes(&[(&AOHX.0,B),(&BOJP.0,UUB),(&AOHZ.0,BOJN),(&AOHA.0,(-AMKX))],RVE)))* CWM)+ L5([(ANZG* AMKX),0.0,0.0,0.0,0.0]))/ PE;
+		let BOJS=(((L5(sum_products_div_lanes(&[(&AOHX.0,C),(&BOJP.0,UUB),(&AOHZ.0,BOJN),(&AOHA.0,(-AMKX))],RVE)))* CWM)+ L5([(ANZG* AMKX),0.0,0.0,0.0,0.0]))/ PE;
 		RVP=RVK;
 		YZD=AMKY;
 		YZE=AMKZ;
@@ -73317,7 +73318,7 @@ impl Instance {
 		let BOKC=L5([AXBH[0],AXBH[1],0.0,AXBH[2],AXBH[3]])+ AOHO;
 		let AMLB=ZMF+ UTR;
 		let BOKD=L5([AXBI[0],AXBI[1],0.0,AXBI[2],AXBI[3]])+ AOHP;
-		let RVR=B- IW;
+		let RVR=C- IW;
 		let RVS=(-((RVQ- ((IW* RVQ)+ (RVR* ((RVN* PE)+ KUT))))/ AP))* RVM;
 		let BOKE=(((BOKB- ((BOKB* IW)+ (((AVKZ* PE)+ AOGJ)* RVR)))/ AP)* AWAO)* RVM;
 		let AMLC=(((AMLA- ((AMLA* IW)+ (((YYZ* PE)+ UTQ)* RVR)))/ AP)* AMF)* RVM;
@@ -73594,13 +73595,13 @@ impl Instance {
 		let RXR=KF/ BWG;
 		let BOLL=product_div(ANZE,(-RXR),BWG);
 		let RXS=(KH* RVZ)/ RXQ;
-		let RXT=RXS+ B;
+		let RXT=RXS+ C;
 		let RXU=RXT.ln();
 		let RXV=RXR* RXU;
 		let BOLM=(BOLL* RXU)+ (((product_sum_div((BOKM* KH),ANYF,BOLK,(-RXS),RXQ))* (ANYF/ RXT))* RXR);
-		let RXW=((RVX- B)* AHC).exp();
+		let RXW=((RVX- C)* AHC).exp();
 		let BOLN=(AOAC* AHC)* RXW;
-		let RXX=B/ RXR;
+		let RXX=C/ RXR;
 		let BOLO=product_div(BOLL,(-RXX),RXR);
 		let RXY=(RXV* RXX).exp();
 		let BOLP=((BOLM* RXX)+ (BOLO* RXV))* RXY;
@@ -73768,13 +73769,13 @@ impl Instance {
 		let RZM=KK/ BWG;
 		let BOMN=product_div(ANZE,(-RZM),BWG);
 		let RZN=(KM* RVZ)/ RZL;
-		let RZO=RZN+ B;
+		let RZO=RZN+ C;
 		let RZP=RZO.ln();
 		let RZQ=RZM* RZP;
 		let BOMO=(BOMN* RZP)+ (((product_sum_div((BOKM* KM),ANYF,BOMM,(-RZN),RZL))* (ANYF/ RZO))* RZM);
-		let RZR=((RVX- B)* AIV).exp();
+		let RZR=((RVX- C)* AIV).exp();
 		let BOMP=(AOAC* AIV)* RZR;
-		let RZS=B/ RZM;
+		let RZS=C/ RZM;
 		let BOMQ=product_div(BOMN,(-RZS),RZM);
 		let RZT=(RZQ* RZS).exp();
 		let BOMR=((BOMO* RZS)+ (BOMQ* RZQ))* RZT;
@@ -73797,7 +73798,7 @@ impl Instance {
 		AVOI=AWAV;
 		}
 		let RZU=AIZ* AGC;
-		let RZX=RZU* (B+ (AJA* RZV));
+		let RZX=RZU* (C+ (AJA* RZV));
 		let BOMS=(AOAE* AJA)* RZU;
 		let RZY=AGA> PL;
 		let SAG;
@@ -73806,10 +73807,10 @@ impl Instance {
 		let AVOK;
 		if RZY{
 		let RZZ=AJD* (AGA- PL);
-		let SAA=RZZ* (B+ (AJE* RZV));
+		let SAA=RZZ* (C+ (AJE* RZV));
 		let BOMU=(AOAE* AJE)* RZZ;
 		let SAB=AJG* PL;
-		let SAC=SAB* (B+ (AJH* RZV));
+		let SAC=SAB* (C+ (AJH* RZV));
 		let BOMV=(AOAE* AJH)* SAB;
 		SAG=SAA;
 		SAI=SAC;
@@ -73817,7 +73818,7 @@ impl Instance {
 		AVOK=BOMV;
 		}else{
 		let SAD=AJG* AGA;
-		let SAE=SAD* (B+ (AJH* RZV));
+		let SAE=SAD* (C+ (AJH* RZV));
 		let BOMT=(AOAE* AJH)* SAD;
 		SAG=A;
 		SAI=SAE;
@@ -73891,7 +73892,7 @@ impl Instance {
 		AVOQ=BOMY;
 		}
 		let SAQ=AKB* AHV;
-		let SAR=SAQ* (B+ (AKC* RZV));
+		let SAR=SAQ* (C+ (AKC* RZV));
 		let BOMZ=(AOAE* AKC)* SAQ;
 		let SAS=AHT> PL;
 		let SBA;
@@ -73900,10 +73901,10 @@ impl Instance {
 		let AVOS;
 		if SAS{
 		let SAT=AKF* (AHT- PL);
-		let SAU=SAT* (B+ (AKG* RZV));
+		let SAU=SAT* (C+ (AKG* RZV));
 		let BONB=(AOAE* AKG)* SAT;
 		let SAV=AKI* PL;
-		let SAW=SAV* (B+ (AKJ* RZV));
+		let SAW=SAV* (C+ (AKJ* RZV));
 		let BONC=(AOAE* AKJ)* SAV;
 		SBA=SAU;
 		SBC=SAW;
@@ -73911,7 +73912,7 @@ impl Instance {
 		AVOS=BONC;
 		}else{
 		let SAX=AKI* AHT;
-		let SAY=SAX* (B+ (AKJ* RZV));
+		let SAY=SAX* (C+ (AKJ* RZV));
 		let BONA=(AOAE* AKJ)* SAX;
 		SBA=A;
 		SBC=SAY;
@@ -74152,8 +74153,8 @@ impl Instance {
 		SCQ=SCP;
 		AVPB=BONQ;
 		}
-		let SCR=SCQ- B;
-		let SCS=SCH- B;
+		let SCR=SCQ- C;
+		let SCS=SCH- C;
 		let SCT=((SBW* SCR)+ (SCF* SCS))+ (KG* SCS);
 		let BONR=((L3([0.0,(AVLY* SCR),0.0])+ (AVPB* SBW))+ (L3([0.0,(BONJ* SCS),0.0])+ (BONL* SCF)))+ (BONL* KG);
 		SDH=SCT;
@@ -74161,10 +74162,10 @@ impl Instance {
 		}else{
 		let SCY=SBW* SBL;
 		let SCZ=SCY* SCU;
-		let SDA=SCU- B;
+		let SDA=SCU- C;
 		let SDB=ALX- SCI;
 		let BONM=L3([0.0,((AVLY* SDA)+ (AVMB* SBW)),0.0])+ (L3([0.0,(((((AVLY* SBL)+ (AVLW* SBW))* SCU)+ (AVMB* SCY))* SDB),0.0])+ ((L3([AWAE[0],0.0,AWAE[1]])- L3([0.0,AVMA,0.0]))* SCZ));
-		let SDC=SCH- B;
+		let SDC=SCH- C;
 		let SDD=(((SBW* SDA)+ (SCZ* SDB))+ (SCF* SDC))+ (KG* SDC);
 		let BONN=(BONM+ (L3([0.0,(BONJ* SDC),0.0])+ (BONL* SCF)))+ (BONL* KG);
 		SDH=SDD;
@@ -74209,8 +74210,8 @@ impl Instance {
 		SDZ=SDY;
 		AVPE=BOOB;
 		}
-		let SEA=SDZ- B;
-		let SEB=SDU- B;
+		let SEA=SDZ- C;
+		let SEB=SDU- C;
 		let SEC=((SDJ* SEA)+ (SDS* SEB))+ (KG* SEB);
 		let BOOC=((L3([0.0,(AVMC* SEA),0.0])+ (AVPE* SDJ))+ (L3([0.0,(BONU* SEB),0.0])+ (BONW* SDS)))+ (BONW* KG);
 		SEL=SEC;
@@ -74218,10 +74219,10 @@ impl Instance {
 		}else{
 		let SED=SDJ* SBL;
 		let SEE=SED* SCU;
-		let SEF=SCU- B;
+		let SEF=SCU- C;
 		let SEG=ALX- SCI;
 		let BONX=L3([0.0,((AVMC* SEF)+ (AVMB* SDJ)),0.0])+ (L3([0.0,(((((AVMC* SBL)+ (AVLW* SDJ))* SCU)+ (AVMB* SED))* SEG),0.0])+ ((L3([AWAE[0],0.0,AWAE[1]])- L3([0.0,AVMA,0.0]))* SEE));
-		let SEH=SDU- B;
+		let SEH=SDU- C;
 		let SEI=(((SDJ* SEF)+ (SEE* SEG))+ (SDS* SEH))+ (KG* SEH);
 		let BONY=(BONX+ (L3([0.0,(BONU* SEH),0.0])+ (BONW* SDS)))+ (BONW* KG);
 		SEL=SEI;
@@ -74270,8 +74271,8 @@ impl Instance {
 		SFE=SFD;
 		AVPI=BOON;
 		}
-		let SFF=SFE- B;
-		let SFG=SEZ- B;
+		let SFF=SFE- C;
+		let SFG=SEZ- C;
 		let SFH=((SEO* SFF)+ (SEX* SFG))+ (KG* SFG);
 		let BOOO=((L3([(AVME* SFF),0.0,0.0])+ (AVPI* SEO))+ (L3([(BOOG* SFG),0.0,0.0])+ (BOOI* SEX)))+ (BOOI* KG);
 		SFQ=SFH;
@@ -74279,10 +74280,10 @@ impl Instance {
 		}else{
 		let SFI=SEO* SBL;
 		let SFJ=SFI* SCU;
-		let SFK=SCU- B;
+		let SFK=SCU- C;
 		let SFL=ALY- SCI;
 		let BOOJ=L3([((AVME* SFK)+ (AVMB* SEO)),0.0,0.0])+ (L3([(((((AVME* SBL)+ (AVLW* SEO))* SCU)+ (AVMB* SFI))* SFL),0.0,0.0])+ ((L3([0.0,AWAF[0],AWAF[1]])- L3([AVMA,0.0,0.0]))* SFJ));
-		let SFM=SEZ- B;
+		let SFM=SEZ- C;
 		let SFN=(((SEO* SFK)+ (SFJ* SFL))+ (SEX* SFM))+ (KG* SFM);
 		let BOOK=(BOOJ+ (L3([(BOOG* SFM),0.0,0.0])+ (BOOI* SEX)))+ (BOOI* KG);
 		SFQ=SFN;
@@ -74337,8 +74338,8 @@ impl Instance {
 		SGX=SGW;
 		AVPL=BOPB;
 		}
-		let SGY=SGX- B;
-		let SGZ=SGO- B;
+		let SGY=SGX- C;
+		let SGZ=SGO- C;
 		let SHA=((SGD* SGY)+ (SGM* SGZ))+ (KL* SGZ);
 		let BOPC=((L3([0.0,(AVMI* SGY),0.0])+ (AVPL* SGD))+ (L3([0.0,(BOOU* SGZ),0.0])+ (BOOW* SGM)))+ (BOOW* KL);
 		SHO=SHA;
@@ -74346,10 +74347,10 @@ impl Instance {
 		}else{
 		let SHF=SGD* SFS;
 		let SHG=SHF* SHB;
-		let SHH=SHB- B;
+		let SHH=SHB- C;
 		let SHI=ALV- SGP;
 		let BOOX=L3([0.0,((AVMI* SHH)+ (AVML* SGD)),0.0])+ (L3([0.0,(((((AVMI* SFS)+ (AVMG* SGD))* SHB)+ (AVML* SHF))* SHI),0.0])+ ((L3([AWAD[0],0.0,AWAD[1]])- L3([0.0,AVMK,0.0]))* SHG));
-		let SHJ=SGO- B;
+		let SHJ=SGO- C;
 		let SHK=(((SGD* SHH)+ (SHG* SHI))+ (SGM* SHJ))+ (KL* SHJ);
 		let BOOY=(BOOX+ (L3([0.0,(BOOU* SHJ),0.0])+ (BOOW* SGM)))+ (BOOW* KL);
 		SHO=SHK;
@@ -74394,8 +74395,8 @@ impl Instance {
 		SIG=SIF;
 		AVPO=BOPM;
 		}
-		let SIH=SIG- B;
-		let SII=SIB- B;
+		let SIH=SIG- C;
+		let SII=SIB- C;
 		let SIJ=((SHQ* SIH)+ (SHZ* SII))+ (KL* SII);
 		let BOPN=((L3([0.0,(AVMM* SIH),0.0])+ (AVPO* SHQ))+ (L3([0.0,(BOPF* SII),0.0])+ (BOPH* SHZ)))+ (BOPH* KL);
 		SIS=SIJ;
@@ -74403,10 +74404,10 @@ impl Instance {
 		}else{
 		let SIK=SHQ* SFS;
 		let SIL=SIK* SHB;
-		let SIM=SHB- B;
+		let SIM=SHB- C;
 		let SIN=ALV- SGP;
 		let BOPI=L3([0.0,((AVMM* SIM)+ (AVML* SHQ)),0.0])+ (L3([0.0,(((((AVMM* SFS)+ (AVMG* SHQ))* SHB)+ (AVML* SIK))* SIN),0.0])+ ((L3([AWAD[0],0.0,AWAD[1]])- L3([0.0,AVMK,0.0]))* SIL));
-		let SIO=SIB- B;
+		let SIO=SIB- C;
 		let SIP=(((SHQ* SIM)+ (SIL* SIN))+ (SHZ* SIO))+ (KL* SIO);
 		let BOPJ=(BOPI+ (L3([0.0,(BOPF* SIO),0.0])+ (BOPH* SHZ)))+ (BOPH* KL);
 		SIS=SIP;
@@ -74454,8 +74455,8 @@ impl Instance {
 		SJK=SJJ;
 		AVPS=BOPY;
 		}
-		let SJL=SJK- B;
-		let SJM=SJF- B;
+		let SJL=SJK- C;
+		let SJM=SJF- C;
 		let SJN=((SIU* SJL)+ (SJD* SJM))+ (KL* SJM);
 		let BOPZ=((L3([(AVMO* SJL),0.0,0.0])+ (AVPS* SIU))+ (L3([(BOPR* SJM),0.0,0.0])+ (BOPT* SJD)))+ (BOPT* KL);
 		SJW=SJN;
@@ -74463,10 +74464,10 @@ impl Instance {
 		}else{
 		let SJO=SIU* SFS;
 		let SJP=SJO* SHB;
-		let SJQ=SHB- B;
+		let SJQ=SHB- C;
 		let SJR=ALK- SGP;
 		let BOPU=L3([((AVMO* SJQ)+ (AVML* SIU)),0.0,0.0])+ (L3([(((((AVMO* SFS)+ (AVMG* SIU))* SHB)+ (AVML* SJO))* SJR),0.0,0.0])+ ((L3([0.0,AVZV[0],AVZV[1]])- L3([AVMK,0.0,0.0]))* SJP));
-		let SJS=SJF- B;
+		let SJS=SJF- C;
 		let SJT=(((SIU* SJQ)+ (SJP* SJR))+ (SJD* SJS))+ (KL* SJS);
 		let BOPV=(BOPU+ (L3([(BOPR* SJS),0.0,0.0])+ (BOPT* SJD)))+ (BOPT* KL);
 		SJW=SJT;
@@ -74497,14 +74498,14 @@ impl Instance {
 		let AVPU;
 		if SKD{
 		let SKI=ALX/ SKE;
-		let SKJ=B- SKI;
+		let SKJ=C- SKI;
 		let BOQF=((L3([AWAE[0],0.0,AWAE[1]])).product_sum_div(ANYF,L3([0.0,AVMR,0.0]),(-SKI),SKE))* AWAO;
 		let SKL=SKK== J;
 		let SKT;
 		let AVPV;
 		if SKL{
 		let SKM=SKJ.sqrt();
-		let SKN=B/ SKM;
+		let SKN=C/ SKM;
 		let BOQH=((BOQF* (ANYF/ (AWAY* SKM)))).product_div((-SKN),SKM);
 		SKT=SKN;
 		AVPV=BOQH;
@@ -74526,8 +74527,8 @@ impl Instance {
 		AVPV=AVPW;
 		}
 		let SKS=SKE* SJY;
-		let SKU=B- (SKJ* SKT);
-		let SKV=B- SKK;
+		let SKU=C- (SKJ* SKT);
+		let SKV=C- SKK;
 		let SKW=(SKS* SKU)/ SKV;
 		let BOQI=(L3([0.0,(((AVMR* SJY)+ (AVMQ* SKE))* SKU),0.0])+ ((((BOQF* SKT)+ (AVPV* SKJ))* AWAO)* SKS))/ SKV;
 		SSO=SKW;
@@ -74558,14 +74559,14 @@ impl Instance {
 		let AVPY;
 		if SLG{
 		let SLL=ALX/ SLH;
-		let SLM=B- SLL;
+		let SLM=C- SLL;
 		let BOQM=((L3([AWAE[0],0.0,AWAE[1]])).product_sum_div(ANYF,L3([0.0,AVMT,0.0]),(-SLL),SLH))* AWAO;
 		let SLO=SLN== J;
 		let SLW;
 		let AVPZ;
 		if SLO{
 		let SLP=SLM.sqrt();
-		let SLQ=B/ SLP;
+		let SLQ=C/ SLP;
 		let BOQO=((BOQM* (ANYF/ (AWAY* SLP)))).product_div((-SLQ),SLP);
 		SLW=SLQ;
 		AVPZ=BOQO;
@@ -74587,8 +74588,8 @@ impl Instance {
 		AVPZ=AVQA;
 		}
 		let SLV=SLH* SLB;
-		let SLX=B- (SLM* SLW);
-		let SLY=B- SLN;
+		let SLX=C- (SLM* SLW);
+		let SLY=C- SLN;
 		let SLZ=(SLV* SLX)/ SLY;
 		let BOQP=(L3([0.0,(((AVMT* SLB)+ (AVMS* SLH))* SLX),0.0])+ ((((BOQM* SLW)+ (AVPZ* SLM))* AWAO)* SLV))/ SLY;
 		SSQ=SLZ;
@@ -74622,14 +74623,14 @@ impl Instance {
 		let AVQD;
 		if SMJ{
 		let SMO=ALY/ SMK;
-		let SMP=B- SMO;
+		let SMP=C- SMO;
 		let BORB=((L3([0.0,AWAF[0],AWAF[1]])).product_sum_div(ANYF,L3([AVMV,0.0,0.0]),(-SMO),SMK))* AWAO;
 		let SMR=SMQ== J;
 		let SMZ;
 		let AVQE;
 		if SMR{
 		let SMS=SMP.sqrt();
-		let SMT=B/ SMS;
+		let SMT=C/ SMS;
 		let BORD=((BORB* (ANYF/ (AWAY* SMS)))).product_div((-SMT),SMS);
 		SMZ=SMT;
 		AVQE=BORD;
@@ -74651,8 +74652,8 @@ impl Instance {
 		AVQE=AVQF;
 		}
 		let SMY=SMK* SME;
-		let SNA=B- (SMP* SMZ);
-		let SNB=B- SMQ;
+		let SNA=C- (SMP* SMZ);
+		let SNB=C- SMQ;
 		let SNC=(SMY* SNA)/ SNB;
 		let BORE=(L3([(((AVMV* SME)+ (AVMU* SMK))* SNA),0.0,0.0])+ ((((BORB* SMZ)+ (AVQE* SMP))* AWAO)* SMY))/ SNB;
 		SSZ=SNC;
@@ -74687,14 +74688,14 @@ impl Instance {
 		let AVQH;
 		if SNI{
 		let SNJ=ALX/ SMK;
-		let SNK=B- SNJ;
+		let SNK=C- SNJ;
 		let BOQT=((L3([AWAE[0],0.0,AWAE[1]])).product_sum_div(ANYF,L3([0.0,AVMV,0.0]),(-SNJ),SMK))* AWAO;
 		let SNL=SMQ== J;
 		let SNT;
 		let AVQI;
 		if SNL{
 		let SNM=SNK.sqrt();
-		let SNN=B/ SNM;
+		let SNN=C/ SNM;
 		let BOQV=((BOQT* (ANYF/ (AWAY* SNM)))).product_div((-SNN),SNM);
 		SNT=SNN;
 		AVQI=BOQV;
@@ -74716,8 +74717,8 @@ impl Instance {
 		AVQI=AVQJ;
 		}
 		let SNS=SMK* SME;
-		let SNU=B- (SNK* SNT);
-		let SNV=B- SMQ;
+		let SNU=C- (SNK* SNT);
+		let SNV=C- SMQ;
 		let SNW=(SNS* SNU)/ SNV;
 		let BOQW=(L3([0.0,(((AVMV* SME)+ (AVMU* SMK))* SNU),0.0])+ ((((BOQT* SNT)+ (AVQI* SNK))* AWAO)* SNS))/ SNV;
 		STB=SNW;
@@ -74752,14 +74753,14 @@ impl Instance {
 		let AVQL;
 		if SOG{
 		let SOL=ALV/ SOH;
-		let SOM=B- SOL;
+		let SOM=C- SOL;
 		let BORJ=((L3([AWAD[0],0.0,AWAD[1]])).product_sum_div(ANYF,L3([0.0,AVMX,0.0]),(-SOL),SOH))* AWAO;
 		let SOO=SON== J;
 		let SOW;
 		let AVQM;
 		if SOO{
 		let SOP=SOM.sqrt();
-		let SOQ=B/ SOP;
+		let SOQ=C/ SOP;
 		let BORL=((BORJ* (ANYF/ (AWAY* SOP)))).product_div((-SOQ),SOP);
 		SOW=SOQ;
 		AVQM=BORL;
@@ -74781,8 +74782,8 @@ impl Instance {
 		AVQM=AVQN;
 		}
 		let SOV=SOH* SOB;
-		let SOX=B- (SOM* SOW);
-		let SOY=B- SON;
+		let SOX=C- (SOM* SOW);
+		let SOY=C- SON;
 		let SOZ=(SOV* SOX)/ SOY;
 		let BORM=(L3([0.0,(((AVMX* SOB)+ (AVMW* SOH))* SOX),0.0])+ ((((BORJ* SOW)+ (AVQM* SOM))* AWAO)* SOV))/ SOY;
 		SSJ=SOZ;
@@ -74813,14 +74814,14 @@ impl Instance {
 		let AVQP;
 		if SPJ{
 		let SPO=ALV/ SPK;
-		let SPP=B- SPO;
+		let SPP=C- SPO;
 		let BORQ=((L3([AWAD[0],0.0,AWAD[1]])).product_sum_div(ANYF,L3([0.0,AVMZ,0.0]),(-SPO),SPK))* AWAO;
 		let SPR=SPQ== J;
 		let SPZ;
 		let AVQQ;
 		if SPR{
 		let SPS=SPP.sqrt();
-		let SPT=B/ SPS;
+		let SPT=C/ SPS;
 		let BORS=((BORQ* (ANYF/ (AWAY* SPS)))).product_div((-SPT),SPS);
 		SPZ=SPT;
 		AVQQ=BORS;
@@ -74842,8 +74843,8 @@ impl Instance {
 		AVQQ=AVQR;
 		}
 		let SPY=SPK* SPE;
-		let SQA=B- (SPP* SPZ);
-		let SQB=B- SPQ;
+		let SQA=C- (SPP* SPZ);
+		let SQB=C- SPQ;
 		let SQC=(SPY* SQA)/ SQB;
 		let BORT=(L3([0.0,(((AVMZ* SPE)+ (AVMY* SPK))* SQA),0.0])+ ((((BORQ* SPZ)+ (AVQQ* SPP))* AWAO)* SPY))/ SQB;
 		SSL=SQC;
@@ -74877,14 +74878,14 @@ impl Instance {
 		let AVQU;
 		if SQM{
 		let SQR=ALK/ SQN;
-		let SQS=B- SQR;
+		let SQS=C- SQR;
 		let BOSF=((L3([0.0,AVZV[0],AVZV[1]])).product_sum_div(ANYF,L3([AVNB,0.0,0.0]),(-SQR),SQN))* AWAO;
 		let SQU=SQT== J;
 		let SRC;
 		let AVQV;
 		if SQU{
 		let SQV=SQS.sqrt();
-		let SQW=B/ SQV;
+		let SQW=C/ SQV;
 		let BOSH=((BOSF* (ANYF/ (AWAY* SQV)))).product_div((-SQW),SQV);
 		SRC=SQW;
 		AVQV=BOSH;
@@ -74906,8 +74907,8 @@ impl Instance {
 		AVQV=AVQW;
 		}
 		let SRB=SQN* SQH;
-		let SRD=B- (SQS* SRC);
-		let SRE=B- SQT;
+		let SRD=C- (SQS* SRC);
+		let SRE=C- SQT;
 		let SRF=(SRB* SRD)/ SRE;
 		let BOSI=(L3([(((AVNB* SQH)+ (AVNA* SQN))* SRD),0.0,0.0])+ ((((BOSF* SRC)+ (AVQV* SQS))* AWAO)* SRB))/ SRE;
 		SSU=SRF;
@@ -74942,14 +74943,14 @@ impl Instance {
 		let AVQY;
 		if SRL{
 		let SRM=ALV/ SQN;
-		let SRN=B- SRM;
+		let SRN=C- SRM;
 		let BORX=((L3([AWAD[0],0.0,AWAD[1]])).product_sum_div(ANYF,L3([0.0,AVNB,0.0]),(-SRM),SQN))* AWAO;
 		let SRO=SQT== J;
 		let SRW;
 		let AVQZ;
 		if SRO{
 		let SRP=SRN.sqrt();
-		let SRQ=B/ SRP;
+		let SRQ=C/ SRP;
 		let BORZ=((BORX* (ANYF/ (AWAY* SRP)))).product_div((-SRQ),SRP);
 		SRW=SRQ;
 		AVQZ=BORZ;
@@ -74971,8 +74972,8 @@ impl Instance {
 		AVQZ=AVRA;
 		}
 		let SRV=SQN* SQH;
-		let SRX=B- (SRN* SRW);
-		let SRY=B- SQT;
+		let SRX=C- (SRN* SRW);
+		let SRY=C- SQT;
 		let SRZ=(SRV* SRX)/ SRY;
 		let BOSA=(L3([0.0,(((AVNB* SQH)+ (AVNA* SQN))* SRX),0.0])+ ((((BORX* SRW)+ (AVQZ* SRN))* AWAO)* SRV))/ SRY;
 		SSW=SRZ;
@@ -75119,7 +75120,7 @@ impl Instance {
 		SVK=SUH;
 		AVRO=BOTU;
 		}else{
-		SVK=B;
+		SVK=C;
 		AVRO=BONI;
 		}
 		let SUJ=SUI== A;
@@ -75138,7 +75139,7 @@ impl Instance {
 		let BOTV=BOTS- L3([0.0,BOTG,0.0]);
 		let SUQ=SUO* SUP;
 		let SUR=SUQ* SUP;
-		let SUT=B/ RVX;
+		let SUT=C/ RVX;
 		let SUU=(SUS* (SUT.ln())).exp();
 		let SUV=(SUR* SUU).exp();
 		let SUW=SUN* SUV;
@@ -75205,7 +75206,7 @@ impl Instance {
 		let BOUF=BOTS- L3([0.0,BOTH,0.0]);
 		let SVP=SVN* SVO;
 		let SVQ=SVP* SVO;
-		let SVR=B/ RVX;
+		let SVR=C/ RVX;
 		let SVS=(SUS* (SVR.ln())).exp();
 		let SVT=(SVQ* SVS).exp();
 		let SVU=SVM* SVT;
@@ -75331,7 +75332,7 @@ impl Instance {
 		let BOVF=BOVA* AWAO;
 		let SXI=(-(STY- SXC))/ STT;
 		let SXJ=SXI.exp();
-		let SXK=SXJ- B;
+		let SXK=SXJ- C;
 		let BOVG=(L4([0.0,(BOTD* SXG),0.0,0.0])+ (AVRW* STT))* SXK;
 		let BOVH=(((L4([BOVF[0],0.0,BOVF[1],BOVF[2]])).product_sum_div(ANYF,BOVB,(-SXI),STT))* SXJ)* SXH;
 		let BOVI=L5([BOVG[0],BOVG[1],BOVG[2],BOVG[3],0.0])+ L5([BOVH[0],BOVH[1],BOVH[2],0.0,BOVH[3]]);
@@ -75404,9 +75405,9 @@ impl Instance {
 		AVSF=BOVN;
 		AVSG=BOVQ;
 		}else{
-		UNZ=B;
+		UNZ=C;
 		UOC=SYA;
-		UOG=B;
+		UOG=C;
 		UOJ=SYB;
 		UQR=A;
 		UQU=A;
@@ -75434,13 +75435,13 @@ impl Instance {
 		AVSH=BOVS;
 		AVSI=BOVT;
 		}else{
-		UON=B;
+		UON=C;
 		UOQ=SYJ;
 		UQX=A;
 		AVSH=BOTM;
 		AVSI=BOTN;
 		}
-		let SYK=UA== B;
+		let SYK=UA== C;
 		let TFM;
 		let AVSJ;
 		if SYK{
@@ -75455,8 +75456,8 @@ impl Instance {
 		let SYQ=(BK/ QS)* SYO;
 		let BOVW=AXBE* SYR;
 		let BOVX=((BOVV- L5([ANZG,0.0,0.0,0.0,0.0]))- L5([BOVW[0],BOVW[1],0.0,BOVW[2],BOVW[3]]))* SYQ;
-		let SYS=B+ (SYQ* ((SYN- CWM)- (SYR* BQQ)));
-		let SYT=BK* (B+ SYQ);
+		let SYS=C+ (SYQ* ((SYN- CWM)- (SYR* BQQ)));
+		let SYT=BK* (C+ SYQ);
 		let SYU=A+ SYT;
 		let SYV=(SYS< SYU)&& (SYT>= A);
 		let SZX;
@@ -75478,7 +75479,7 @@ impl Instance {
 		if SZC{
 		let SZM;
 		if SZD{
-		SZM=B;
+		SZM=C;
 		}else{
 		let SZN;
 		if SZE{
@@ -75509,7 +75510,7 @@ impl Instance {
 		}
 		let SZK=SZJ.sqrt();
 		let BPKQ=AVSN* (ANYF/ (AWAY* SZK));
-		let SZL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, SZH, B));
+		let SZL=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, SZH, C));
 		SZH=SZL;
 		SZJ=SZK;
 		AVSN=BPKQ;
@@ -75532,7 +75533,7 @@ impl Instance {
 		SZT=SZS;
 		AVSM=AVSO;
 		}
-		let SZU=B/ SZT;
+		let SZU=C/ SZT;
 		let SZV=SYW* SYT;
 		let SZW=SYU- (SZV* SZU);
 		let BOWE=(((BOVY* SYT)* SZU)+ (((AVSM).product_div((-SZU),SZT))* SZV))* AWAO;
@@ -75545,7 +75546,7 @@ impl Instance {
 		let SZY=SZX.sqrt();
 		let TAA=GL/ (SZZ+ GL);
 		let BOWF=AXBJ* IE;
-		let TAB=((IE* BQR)+ KUY)- (TAA* (SYN+ (SYP* (B- SZY))));
+		let TAB=((IE* BQR)+ KUY)- (TAA* (SYN+ (SYP* (C- SZY))));
 		let BOWG=(L5([BOWF[0],BOWF[1],0.0,BOWF[2],BOWF[3]])+ BHJP)- ((BOVV+ (((AVSL* (ANYF/ (AWAY* SZY)))* AWAO)* SYP))* TAA);
 		let BOWH=BOWG* TAB;
 		let TAC=((TAB* TAB)+ 4e-6f64).sqrt();
@@ -75563,7 +75564,7 @@ impl Instance {
 		}
 		let TAG=TAF+ OM;
 		let BOWJ=AVNC* KXI;
-		let TAI=B+ (KXI* (TAH- GI));
+		let TAI=C+ (KXI* (TAH- GI));
 		let TAJ=TAI<= CA;
 		let TAK;
 		let AVSQ;
@@ -75583,7 +75584,7 @@ impl Instance {
 		let TFO;
 		let AVSR;
 		if SEN{
-		let TAU=B+ TAT;
+		let TAU=C+ TAT;
 		let TAW=TAU* TAV;
 		let BOWO=AVRC* TAU;
 		let BOWP=(BOWK* TAV)+ L5([BOWO[0],0.0,0.0,BOWO[1],BOWO[2]]);
@@ -75591,7 +75592,7 @@ impl Instance {
 		TFO=TAW;
 		AVSR=BOWQ;
 		}else{
-		let TAX=B+ TAT;
+		let TAX=C+ TAT;
 		let TAY=TAX* SSE;
 		let BOWL=BOWK* SSE;
 		let BOWM=BOSK* TAX;
@@ -75670,7 +75671,7 @@ impl Instance {
 		let TCR;
 		let AVSY;
 		if TCL{
-		TCR=B;
+		TCR=C;
 		AVSY=AWLK;
 		}else{
 		let TCM=(1.9999999999999978f64<= DZV)&& (DZV<= 2.000000000000002f64);
@@ -75687,7 +75688,7 @@ impl Instance {
 		TCQ=A;
 		AVTA=AWLK;
 		}else{
-		let TCO=DZV- B;
+		let TCO=DZV- C;
 		let TCP=TCE.powf(TCO);
 		let BOWV=AVSX* (TCO* ((TCE+ (((TCE== AWBZ) as u8 as f64)* AWCA)).powf((TCO- ANYF))));
 		TCQ=TCP;
@@ -75700,7 +75701,7 @@ impl Instance {
 		AVSY=AVSZ;
 		}
 		let BOWW=(BOWU* TCR)+ (AVSY* TCK);
-		let TCT=B+ (TCK* TCR);
+		let TCT=C+ (TCK* TCR);
 		let TCU=TCT== A;
 		let TCX;
 		let AVTB;
@@ -75708,7 +75709,7 @@ impl Instance {
 		TCX=A;
 		AVTB=AWLK;
 		}else{
-		let TCV=(-1f64/ DZV)- B;
+		let TCV=(-1f64/ DZV)- C;
 		let TCW=TCT.powf(TCV);
 		let BOWX=BOWW* (TCV* ((TCT+ (((TCT== AWBZ) as u8 as f64)* AWCA)).powf((TCV- ANYF))));
 		TCX=TCW;
@@ -75728,7 +75729,7 @@ impl Instance {
 		let TDH=TDG* LCH;
 		let TDI=Q* TDB;
 		let BOXD=AOHE* Q;
-		let TDJ=(B+ TDI)+ (AMK* TDE);
+		let TDJ=(C+ TDI)+ (AMK* TDE);
 		let TDK=TDJ* TCZ;
 		let TDL=(Q+ (BH* TDB))+ (Q* TDE);
 		let TDM=TDL* TCZ;
@@ -75738,7 +75739,7 @@ impl Instance {
 		let TDP=((TDK* TCZ)+ (TDM* LCH))+ (TDO* LCH);
 		let BOXF=((((L5([0.0,BOXC[0],BOXC[1],BOXC[2],BOXC[3]])+ (AOGM* TDF))* LCH)+ (AOGU* TDG))* TDP)+ ((BOXE+ (((((BOXD+ BOXB)* LCH)+ (AOGU* TDN))* LCH)+ (AOGU* TDO)))* TDH);
 		let TDQ=JIJ* TBC;
-		let TDR=B+ TDB;
+		let TDR=C+ TDB;
 		let TDS=TDQ* TDR;
 		let TDT=TDS* TDA;
 		let TDU=TDT* TDA;
@@ -75754,7 +75755,7 @@ impl Instance {
 		AVSV=AWLK;
 		AVSW=AWLK;
 		}
-		let TEA=((((EM!= A)&& TBO)&& (TDW== B))&& TBN)&& LBA;
+		let TEA=((((EM!= A)&& TBO)&& (TDW== C))&& TBN)&& LBA;
 		let TNI;
 		let TNQ;
 		let TNW;
@@ -76049,7 +76050,7 @@ impl Instance {
 		UDP=TMJ;
 		AVUF=BOZE;
 		}else{
-		let TMK=B- BQ;
+		let TMK=C- BQ;
 		let TMN=(TMK* TME)- TML;
 		let BOZD=(ASAS* TMK)- L5([0.0,ASAU[0],ASAU[1],ASAU[2],0.0]);
 		UDP=TMN;
@@ -76058,7 +76059,7 @@ impl Instance {
 		let UDQ;
 		let AVUG;
 		if RQC{
-		let TMO=B- BQ;
+		let TMO=C- BQ;
 		let TMP=(TMO* TME)- TML;
 		let BOZG=(ASAS* TMO)- L5([0.0,ASAU[0],ASAU[1],ASAU[2],0.0]);
 		UDQ=TMP;
@@ -76182,7 +76183,7 @@ impl Instance {
 		let TOQ;
 		let AVUP;
 		if TNC{
-		let TON=B- KSS;
+		let TON=C- KSS;
 		let TOO=TOM* TON;
 		let BOZW=(AOGG* AWAO)* TOM;
 		let BOZX=(AVUO* TON)+ L8([0.0,0.0,0.0,BOZW[0],BOZW[1],BOZW[2],BOZW[3],BOZW[4]]);
@@ -76204,7 +76205,7 @@ impl Instance {
 		TOU=TOR;
 		AVUQ=BPAB;
 		}else{
-		let TOS=B- KSS;
+		let TOS=C- KSS;
 		let TOT=TOM* TOS;
 		let BOZY=(AOGG* AWAO)* TOM;
 		let BOZZ=(AVUO* TOS)+ L8([0.0,0.0,0.0,BOZY[0],BOZY[1],BOZY[2],BOZY[3],BOZY[4]]);
@@ -76251,7 +76252,7 @@ impl Instance {
 		let TPB=GA/ TPA;
 		let BPAF=product_div(AVUZ,(-TPB),TPA);
 		let TPC=BZ* RVX;
-		let TPD=((AZ+ (I* RVX))+ (TPC* RVX))- (AEY* (B- RVX));
+		let TPD=((AZ+ (I* RVX))+ (TPC* RVX))- (AEY* (C- RVX));
 		let TPE=GB/ TPD;
 		let BPAG=product_div((((AOAC* I)+ (((AOAC* BZ)* RVX)+ (AOAC* TPC)))- ((AOAC* AWAO)* AEY)),(-TPE),TPD);
 		let BPAH=AVNC* AFA;
@@ -76301,7 +76302,7 @@ impl Instance {
 		let TQG;
 		let AVVB;
 		if TQB{
-		TQG=B;
+		TQG=C;
 		AVVB=BPAP;
 		}else{
 		let TQC=(1.9999999999999978f64<= TQA)&& (TQA<= 2.000000000000002f64);
@@ -76311,7 +76312,7 @@ impl Instance {
 		TQH=TQD;
 		AVVC=AVVA;
 		}else{
-		let TQE=TQA- B;
+		let TQE=TQA- C;
 		let TQF=TQD.powf(TQE);
 		let BPAO=(AVVA* (TQE* ((TQD+ (((TQD== AWBZ) as u8 as f64)* AWCA)).powf((TQE- ANYF)))))+ L3([0.0,(AVUX* (TQF* (((if !(TQD).is_nan()&&(TQD>=AWCA||(AWCA).is_nan()){TQD}else{AWCA}).ln())* ((TQD> AWBZ) as u8 as f64)))),0.0]);
 		TQH=TQF;
@@ -76321,12 +76322,12 @@ impl Instance {
 		AVVB=AVVC;
 		}
 		let BPAQ=(AVVA* TQG)+ (AVVB* TQD);
-		let TQI=B+ (TQD* TQG);
+		let TQI=C+ (TQD* TQG);
 		let TQJ=(0.9999999999999978f64<= TQA)&& (TQA<= 1.0000000000000022f64);
 		let TQU;
 		let AVVD;
 		if TQJ{
-		let TQK=B/ TQI;
+		let TQK=C/ TQI;
 		let BPAU=(BPAQ).product_div((-TQK),TQI);
 		TQU=TQK;
 		AVVD=BPAU;
@@ -76336,7 +76337,7 @@ impl Instance {
 		let AVVE;
 		if TQL{
 		let TQM=TQI.sqrt();
-		let TQN=B/ TQM;
+		let TQN=C/ TQM;
 		let BPAT=((BPAQ* (ANYF/ (AWAY* TQM)))).product_div((-TQN),TQM);
 		TQV=TQN;
 		AVVE=BPAT;
@@ -76349,7 +76350,7 @@ impl Instance {
 		AVVF=BPAP;
 		}else{
 		let TQP=-1f64/ TQA;
-		let TQQ=TQP- B;
+		let TQQ=TQP- C;
 		let TQR=TQI.powf(TQQ);
 		let BPAR=(BPAQ* (TQQ* ((TQI+ (((TQI== AWBZ) as u8 as f64)* AWCA)).powf((TQQ- ANYF)))))+ L3([0.0,((product_div(AVUX,(-TQP),TQA))* (TQR* (((if !(TQI).is_nan()&&(TQI>=AWCA||(AWCA).is_nan()){TQI}else{AWCA}).ln())* ((TQI> AWBZ) as u8 as f64)))),0.0]);
 		TQS=TQR;
@@ -76382,7 +76383,7 @@ impl Instance {
 		if TRD{
 		let TRN;
 		if TRE{
-		TRN=B;
+		TRN=C;
 		}else{
 		let TRO;
 		if TRF{
@@ -76413,7 +76414,7 @@ impl Instance {
 		}
 		let TRL=TRK.sqrt();
 		let BPBD=AVVI* (ANYF/ (AWAY* TRL));
-		let TRM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, TRI, B));
+		let TRM=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, TRI, C));
 		TRI=TRM;
 		TRK=TRL;
 		AVVI=BPBD;
@@ -76436,7 +76437,7 @@ impl Instance {
 		TRU=TRT;
 		AVVH=AVVJ;
 		}
-		let TRV=B/ TRU;
+		let TRV=C/ TRU;
 		let TRW=TRA* OM;
 		let TRX=1e-25f64- (TRW* TRV);
 		let BPBB=(((BPAW* OM)* TRV)+ (((AVVH).product_div((-TRV),TRU))* TRW))* AWAO;
@@ -76446,7 +76447,7 @@ impl Instance {
 		TRY=TQY;
 		AVVG=BPAV;
 		}
-		let TRZ=B/ TRY;
+		let TRZ=C/ TRY;
 		let BPBC=((AVVG).product_div((-TRZ),TRY))/ AXT;
 		let TSA=(TRZ/ AXT)+ BHO;
 		let TSB=TSA< RJ;
@@ -76493,7 +76494,7 @@ impl Instance {
 		let TSJ=FY/ TSI;
 		let BPBF=product_div(AVVP,(-TSJ),TSI);
 		let TSK=BZ* RVX;
-		let TSL=((AZ+ (I* RVX))+ (TSK* RVX))- (CS* (B- RVX));
+		let TSL=((AZ+ (I* RVX))+ (TSK* RVX))- (CS* (C- RVX));
 		let TSM=FZ/ TSL;
 		let BPBG=product_div((((AOAC* I)+ (((AOAC* BZ)* RVX)+ (AOAC* TSK)))- ((AOAC* AWAO)* CS)),(-TSM),TSL);
 		let BPBH=AVUT* AFG;
@@ -76525,7 +76526,7 @@ impl Instance {
 		let TSU=EN+ BBK;
 		let TSW=parameters[410]- (TSV* ALK);
 		let BPBI=(AVZV* TSW)+ (((AVZV* TSV)* AWAO)* ALK);
-		let TSX=B+ (ALK* TSW);
+		let TSX=C+ (ALK* TSW);
 		let BPBJ=BPBI* TSX;
 		let TSY=((TSX* TSX)+ 0.04000000000000001f64).sqrt();
 		let TSZ=J* (TSX+ TSY);
@@ -76558,7 +76559,7 @@ impl Instance {
 		let TTS=0.16666666666666666f64+ (TTN* TTR);
 		let TTT=0.5f64+ (TTN* TTS);
 		let BPBT=(BPBS* TTT)+ (((BPBS* TTS)+ (((BPBS* TTR)+ (((BPBS* TTQ)+ (((BPBS* TTP)+ ((BPBS* TTO)* TTN))* TTN))* TTN))* TTN))* TTN);
-		let TTU=B+ (TTN* TTT);
+		let TTU=C+ (TTN* TTT);
 		let TTV=AYD/ TTU;
 		let BPBU=(BPBT).product_div((-TTV),TTU);
 		let TTW=TTV< BBK;
@@ -76584,7 +76585,7 @@ impl Instance {
 		let TUE=0.16666666666666666f64+ (TTZ* TUD);
 		let TUF=0.5f64+ (TTZ* TUE);
 		let BPBP=(BPBO* TUF)+ (((BPBO* TUE)+ (((BPBO* TUD)+ (((BPBO* TUC)+ (((BPBO* TUB)+ ((BPBO* TUA)* TTZ))* TTZ))* TTZ))* TTZ))* TTZ);
-		let TUG=B+ (TTZ* TUF);
+		let TUG=C+ (TTZ* TUF);
 		let TUH=AYD/ TUG;
 		let BPBQ=(BPBP).product_div((-TUH),TUG);
 		let TUI=TUH< BBK;
@@ -76625,7 +76626,7 @@ impl Instance {
 		let TUY;
 		let AVVW;
 		if TUT{
-		TUY=B;
+		TUY=C;
 		AVVW=BPCC;
 		}else{
 		let TUU=(1.9999999999999978f64<= TUR)&& (TUR<= 2.000000000000002f64);
@@ -76635,7 +76636,7 @@ impl Instance {
 		TUZ=TUV;
 		AVVX=AVVV;
 		}else{
-		let TUW=TUR- B;
+		let TUW=TUR- C;
 		let TUX=TUV.powf(TUW);
 		let BPCB=(AVVV* (TUW* ((TUV+ (((TUV== AWBZ) as u8 as f64)* AWCA)).powf((TUW- ANYF)))))+ L5([0.0,(AVVO* (TUX* (((if !(TUV).is_nan()&&(TUV>=AWCA||(AWCA).is_nan()){TUV}else{AWCA}).ln())* ((TUV> AWBZ) as u8 as f64)))),0.0,0.0,0.0]);
 		TUZ=TUX;
@@ -76645,12 +76646,12 @@ impl Instance {
 		AVVW=AVVX;
 		}
 		let BPCD=(AVVV* TUY)+ (AVVW* TUV);
-		let TVA=B+ (TUV* TUY);
+		let TVA=C+ (TUV* TUY);
 		let TVB=(0.9999999999999978f64<= TUR)&& (TUR<= 1.0000000000000022f64);
 		let TVM;
 		let AVVY;
 		if TVB{
-		let TVC=B/ TVA;
+		let TVC=C/ TVA;
 		let BPCH=(BPCD).product_div((-TVC),TVA);
 		TVM=TVC;
 		AVVY=BPCH;
@@ -76660,7 +76661,7 @@ impl Instance {
 		let AVVZ;
 		if TVD{
 		let TVE=TVA.sqrt();
-		let TVF=B/ TVE;
+		let TVF=C/ TVE;
 		let BPCG=((BPCD* (ANYF/ (AWAY* TVE)))).product_div((-TVF),TVE);
 		TVN=TVF;
 		AVVZ=BPCG;
@@ -76673,7 +76674,7 @@ impl Instance {
 		AVWA=BPCC;
 		}else{
 		let TVH=-1f64/ TUR;
-		let TVI=TVH- B;
+		let TVI=TVH- C;
 		let TVJ=TVA.powf(TVI);
 		let BPCE=(BPCD* (TVI* ((TVA+ (((TVA== AWBZ) as u8 as f64)* AWCA)).powf((TVI- ANYF)))))+ L5([0.0,((product_div(AVVO,(-TVH),TUR))* (TVJ* (((if !(TVA).is_nan()&&(TVA>=AWCA||(AWCA).is_nan()){TVA}else{AWCA}).ln())* ((TVA> AWBZ) as u8 as f64)))),0.0,0.0,0.0]);
 		TVK=TVJ;
@@ -76690,13 +76691,13 @@ impl Instance {
 		let TVO=TTG* TVM;
 		let BPCI=BPBM* TVM;
 		let BPCJ=L5([0.0,BPCI[0],0.0,BPCI[1],BPCI[2]])+ (AVVY* TTG);
-		let TVP=B+ TUV;
-		let TVQ=B/ TVP;
-		let TVR=CQ* (B- TVQ);
+		let TVP=C+ TUV;
+		let TVQ=C/ TVP;
+		let TVR=CQ* (C- TVQ);
 		let BPCK=AVVS* TVR;
 		let TVS=GQ- parameters[423];
 		let BPCL=((((((AVVV).product_div((-TVQ),TVP))* AWAO)* CQ)* TUL)+ L5([BPCK[0],0.0,BPCK[1],0.0,0.0]))/ TVS;
-		let TVT=(B+ ((TVR* TUL)/ TVS))- CA;
+		let TVT=(C+ ((TVR* TUL)/ TVS))- CA;
 		let TVX=if TVV{
 		TVU
 		}else{
@@ -76730,7 +76731,7 @@ impl Instance {
 		let TXD=((TWX* TWX)+ TXC).sqrt();
 		let TXE=TVZ- (TVZ- (J* (TWX+ TXD)));
 		let BPCU=BPCO- (BPCO- ((BPCQ+ (((BPCT+ BPCT)+ L8([AVWB[0],0.0,0.0,AVWB[1],AVWB[2],0.0,AVWB[3],AVWB[4]]))* (ANYF/ (AWAY* TXD))))* J));
-		let TXH=(TXF> A)&& (TXG> B);
+		let TXH=(TXF> A)&& (TXG> C);
 		let UAQ;
 		let AVWC;
 		if TXH{
@@ -76747,8 +76748,8 @@ impl Instance {
 		let BPCW=BPCV+ BPCV;
 		let TXO=TXJ* TXJ;
 		let mut TXP=A;
-		let mut TXS=B;
-		let mut TXU=B;
+		let mut TXS=C;
+		let mut TXU=C;
 		let mut AVWE=BHSX;
 		loop{
 		let TXR=TXP< TXQ;
@@ -76758,14 +76759,14 @@ impl Instance {
 		let TXT=TXS* TXN;
 		let BPEF=(AVWE* TXN)+ (BPCW* TXS);
 		let TXV=TXU* TXO;
-		let TXW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, TXP, B));
+		let TXW=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, TXP, C));
 		TXP=TXW;
 		TXS=TXT;
 		TXU=TXV;
 		AVWE=BPEF;
 		}
 		let TXX=TXS+ TXU;
-		let TXY=TXQ== B;
+		let TXY=TXQ== C;
 		let TXZ=TXQ== BK;
 		let TYA=TXQ== BH;
 		let TYB=TXQ== BBI;
@@ -76775,7 +76776,7 @@ impl Instance {
 		if TYC{
 		let TYI;
 		if TXY{
-		TYI=B;
+		TYI=C;
 		}else{
 		let TYJ;
 		if TXZ{
@@ -76806,7 +76807,7 @@ impl Instance {
 		}
 		let TYG=TYF.sqrt();
 		let BPEE=AVWG* (ANYF/ (AWAY* TYG));
-		let TYH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, TYD, B));
+		let TYH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, TYD, C));
 		TYD=TYH;
 		TYF=TYG;
 		AVWG=BPEE;
@@ -76821,7 +76822,7 @@ impl Instance {
 		TYP=A;
 		AVWH=BHSX;
 		}else{
-		let TYN=B/ (BK* TXQ);
+		let TYN=C/ (BK* TXQ);
 		let TYO=TXX.powf(TYN);
 		let BPCX=AVWE* (TYN* ((TXX+ (((TXX== AWBZ) as u8 as f64)* AWCA)).powf((TYN- ANYF))));
 		TYP=TYO;
@@ -76830,7 +76831,7 @@ impl Instance {
 		TYQ=TYP;
 		AVWF=AVWH;
 		}
-		let TYR=B/ TYQ;
+		let TYR=C/ TYQ;
 		let TYS=TXM* TXJ;
 		let BPCY=((BPCU* TXJ)* TYR)+ (((AVWF).product_div((-TYR),TYQ))* TYS);
 		let TYT=TXK+ (TYS* TYR);
@@ -76896,10 +76897,10 @@ impl Instance {
 		let UAE=((TZZ* TZZ)+ UAD).sqrt();
 		let UAF=SG+ OM;
 		let BPDI=(((BPDG+ ((BPDH+ BPDH)* (ANYF/ (AWAY* UAE))))* J)* AWAO)/ TSU;
-		let UAH=UAG* (B- (TTL* ((TZR/ UAF)+ ((TSU- (J* (TZZ+ UAE)))/ TSU))));
+		let UAH=UAG* (C- (TTL* ((TZR/ UAF)+ ((TSU- (J* (TZZ+ UAE)))/ TSU))));
 		let BPDJ=((((BPDC/ UAF)+ L8([0.0,0.0,0.0,0.0,BPDI[0],0.0,BPDI[1],BPDI[2]]))* TTL)* AWAO)* UAG;
 		let BPDK=BPDJ* UAH;
-		let UAI=((B- TTL)* UAG)/ AO;
+		let UAI=((C- TTL)* UAG)/ AO;
 		let UAJ=((UAH* UAH)+ ((BH* UAI)* UAI)).sqrt();
 		let UAK=J* (UAH+ UAJ);
 		let BPDL=(BPDJ+ ((BPDK+ BPDK)* (ANYF/ (AWAY* UAJ))))* J;
@@ -76935,7 +76936,7 @@ impl Instance {
 		if UAW{
 		let UBG;
 		if UAX{
-		UBG=B;
+		UBG=C;
 		}else{
 		let UBH;
 		if UAY{
@@ -76966,7 +76967,7 @@ impl Instance {
 		}
 		let UBE=UBD.sqrt();
 		let BPED=AVWN* (ANYF/ (AWAY* UBE));
-		let UBF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, UBB, B));
+		let UBF=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, UBB, C));
 		UBB=UBF;
 		UBD=UBE;
 		AVWN=BPED;
@@ -76989,7 +76990,7 @@ impl Instance {
 		UBN=UBM;
 		AVWM=AVWO;
 		}
-		let UBO=B/ UBN;
+		let UBO=C/ UBN;
 		let UBP=UAT* OM;
 		let UBQ=1e-25f64- (UBP* UBO);
 		let BPDT=(((BPDO* OM)* UBO)+ (((AVWM).product_div((-UBO),UBN))* UBP))* AWAO;
@@ -76999,7 +77000,7 @@ impl Instance {
 		UBR=UAR;
 		AVWL=BPDN;
 		}
-		let UBS=B/ UBR;
+		let UBS=C/ UBR;
 		let UBT=UBS/ AXT;
 		let BPDU=((AVWL).product_div((-UBS),UBR))/ AXT;
 		let UBU=(UBT> 999000f64)&& true;
@@ -77017,7 +77018,7 @@ impl Instance {
 		if UBY{
 		let UCI;
 		if UBZ{
-		UCI=B;
+		UCI=C;
 		}else{
 		let UCJ;
 		if UCA{
@@ -77048,7 +77049,7 @@ impl Instance {
 		}
 		let UCG=UCF.sqrt();
 		let BPEC=AVWR* (ANYF/ (AWAY* UCG));
-		let UCH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, UCD, B));
+		let UCH=ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Add, UCD, C));
 		UCD=UCH;
 		UCF=UCG;
 		AVWR=BPEC;
@@ -77071,7 +77072,7 @@ impl Instance {
 		UCP=UCO;
 		AVWQ=AVWS;
 		}
-		let UCQ=B/ UCP;
+		let UCQ=C/ UCP;
 		let UCR=UBV* RH;
 		let BPDZ=((BPDU* RH)* UCQ)+ (((AVWQ).product_div((-UCQ),UCP))* UCR);
 		let UCS=999000f64+ (UCR* UCQ);
@@ -77238,7 +77239,7 @@ impl Instance {
 		let UGE;
 		let AVXQ;
 		if MZ!=0.0{
-		let UDW=B- UDU;
+		let UDW=C- UDU;
 		let BPEI=AVTJ* AWAO;
 		UGE=UDW;
 		AVXQ=BPEI;
@@ -77294,7 +77295,7 @@ impl Instance {
 		if AML{
 		let UER=UEL> YK;
 		let UFF=if UER{
-		let UES=B/ UEL;
+		let UES=C/ UEL;
 		UES
 		}else{
 		UET
@@ -77307,7 +77308,7 @@ impl Instance {
 		let UFB;
 		let AVXS;
 		if UEV{
-		let UEW=JP== B;
+		let UEW=JP== C;
 		let UFC;
 		let AVXT;
 		if UEW{
@@ -77328,7 +77329,7 @@ impl Instance {
 		let UFD=UFA* UFB;
 		let BPES=AVXS* UFA;
 		let BPET=(AVXB* UFB)+ L7([BPES[0],BPES[1],0.0,BPES[2],0.0,BPES[3],0.0]);
-		let UFE=UT== B;
+		let UFE=UT== C;
 		let ULF;
 		let AVXU;
 		if UFE{
@@ -77402,7 +77403,7 @@ impl Instance {
 		let BPFD=L6([0.0,0.0,0.0,0.0,0.0,(ANYL* UGC)])+ L6([BPFC[0],BPFC[1],BPFC[2],BPFC[3],BPFC[4],0.0]);
 		let UGG=(-UFU)- UFY;
 		let BPFE=L2([(ANYL* AWAO),0.0])- L2([0.0,ANYM]);
-		let UGH=B- UGC;
+		let UGH=C- UGC;
 		let UGI=UFU* UGH;
 		let BPFF=(AVXC* AWAO)* UFU;
 		let BPFG=L6([0.0,0.0,0.0,0.0,0.0,(ANYL* UGH)])+ L6([BPFF[0],BPFF[1],BPFF[2],BPFF[3],BPFF[4],0.0]);
@@ -77520,7 +77521,7 @@ impl Instance {
 		AVYG=BOSR;
 		AVYH=BOSQ;
 		}
-		let UHW=LCQ== B;
+		let UHW=LCQ== C;
 		let UPS;
 		let UPT;
 		let UPU;
@@ -77560,7 +77561,7 @@ impl Instance {
 		AVYL=BPGK;
 		}else{
 		UJZ=UIC;
-		UKA=B;
+		UKA=C;
 		AVYL=BHSX;
 		}
 		let UJT;
@@ -77575,7 +77576,7 @@ impl Instance {
 		AVYM=BPGM;
 		}else{
 		UJT=UIF;
-		UJU=B;
+		UJU=C;
 		AVYM=BPGL;
 		}
 		let UIH=UDY+ UIG;
@@ -77716,7 +77717,7 @@ impl Instance {
 		UNI=UKP;
 		AVYR=BPHY;
 		}else{
-		UNF=B;
+		UNF=C;
 		UNI=UKQ;
 		AVYR=BPHX;
 		}
@@ -77746,11 +77747,11 @@ impl Instance {
 		AVYT=BPID;
 		AVYU=BPIC;
 		}else{
-		UML=B;
+		UML=C;
 		UMO=ULB;
-		UMS=B;
+		UMS=C;
 		UMV=ULD;
-		UNM=B;
+		UNM=C;
 		UNP=ULC;
 		AVYS=BPHZ;
 		AVYT=BPIA;
@@ -77847,9 +77848,9 @@ impl Instance {
 		AVZA=BPIQ;
 		AVZB=BPIN;
 		}else{
-		UOU=B;
+		UOU=C;
 		UOX=UMB;
-		UPI=B;
+		UPI=C;
 		UPL=UMA;
 		URA=A;
 		URG=A;
@@ -77887,7 +77888,7 @@ impl Instance {
 		AVZE=BPIW;
 		AVZF=BPIV;
 		}else{
-		UPB=B;
+		UPB=C;
 		UPE=UMI;
 		URD=A;
 		AVZE=BOXZ;

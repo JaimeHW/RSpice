@@ -12,6 +12,7 @@ pub(super) const CANONICAL_TEMPERATURE_STAGE_SLOTS: [u32; 63] = [36, 21, 39, 19,
 pub(super) fn canonical_model_preprocess(
     parameters: &[f64],
     parameter_given: &[bool],
+    port_connected: &[bool],
     multiplicity: f64,
     staged: &[f64],
     temperature: f64,
@@ -233,6 +234,7 @@ pub(super) fn canonical_model_preprocess(
 pub(super) fn canonical_instance_preprocess(
     parameters: &[f64],
     parameter_given: &[bool],
+    port_connected: &[bool],
     multiplicity: f64,
     staged: &[f64],
     temperature: f64,
@@ -281,6 +283,7 @@ pub(super) fn canonical_instance_preprocess(
 pub(super) fn canonical_temperature_preprocess(
     parameters: &[f64],
     parameter_given: &[bool],
+    port_connected: &[bool],
     multiplicity: f64,
     staged: &[f64],
     temperature: f64,
@@ -630,6 +633,7 @@ impl Instance {
         let produced: CanonicalModelValues = canonical_model_preprocess(
             &self.params.values,
             &self.param_given[..],
+            &self.port_connected[..],
             self.multiplicity,
             &self.canonical_staged[..],
             ctx.temperature(),
@@ -648,6 +652,7 @@ impl Instance {
         let produced = canonical_instance_preprocess(
             &self.params.values,
             &self.param_given[..],
+            &self.port_connected[..],
             self.multiplicity,
             &self.canonical_staged[..],
             ctx.temperature(),
@@ -669,6 +674,7 @@ impl Instance {
         let produced = canonical_temperature_preprocess(
             &self.params.values,
             &self.param_given[..],
+            &self.port_connected[..],
             self.multiplicity,
             &self.canonical_staged[..],
             ctx.temperature(),

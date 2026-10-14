@@ -23,10 +23,11 @@ impl Instance {
 		if !self.multiplicity.is_finite() || self.multiplicity <= 0.0 {
 			return Err(GeneratedNoiseEvaluationError::InvalidMultiplicity { value: self.multiplicity });
 		}
-		let mut prepared = [0.0; 334];
+		let mut prepared = [0.0; 335];
 		let produced = canonical_model_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),
@@ -37,6 +38,7 @@ impl Instance {
 		let produced = canonical_instance_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),
@@ -47,6 +49,7 @@ impl Instance {
 		let produced = canonical_temperature_preprocess(
 			&self.params.values,
 			&self.param_given[..],
+			&self.port_connected[..],
 			self.multiplicity,
 			&prepared[..],
 			ctx.temperature(),
@@ -65,7 +68,7 @@ impl Instance {
 		let F=staged[148];
 		let G=1e-6f64;
 		let K=staged[21];
-		let L=staged[300];
+		let L=staged[301];
 		let Q=staged[132];
 		let R=staged[170];
 		let S=staged[72];
@@ -79,7 +82,7 @@ impl Instance {
 		let AF=staged[7];
 		let AG=parameters[49];
 		let AH=staged[122];
-		let AJ=staged[264]!=0.0;
+		let AJ=staged[265]!=0.0;
 		let AK=parameters[60];
 		let AM=staged[129];
 		let AN=staged[134];
@@ -87,7 +90,7 @@ impl Instance {
 		let AP=staged[137];
 		let AQ=staged[136];
 		let AR=staged[135];
-		let AS=staged[267]!=0.0;
+		let AS=staged[268]!=0.0;
 		let AT=1e-38f64;
 		let AU=0.5f64;
 		let AV=staged[125];
@@ -95,19 +98,19 @@ impl Instance {
 		let AX=staged[235];
 		let AY=staged[127];
 		let AZ=parameters[296];
-		let BA=staged[285]!=0.0;
-		let BB=staged[286]!=0.0;
+		let BA=staged[286]!=0.0;
+		let BB=staged[287]!=0.0;
 		let BC=1e-3f64;
 		let BD=1e3f64;
-		let BF=staged[297];
+		let BF=staged[298];
 		let BG=staged[12];
 		let BJ=0.25f64;
 		let BK=0.01f64;
 		let BM=staged[13];
 		let BY=1e-4f64;
-		let CA=staged[302]!=0.0;
-		let CB=staged[298]!=0.0;
-		let CC=staged[299]!=0.0;
+		let CA=staged[303]!=0.0;
+		let CB=staged[299]!=0.0;
+		let CC=staged[300]!=0.0;
 		let CH=staged[22];
 		let CP=0.9f64;
 		let DP=staged[46];
@@ -119,7 +122,7 @@ impl Instance {
 		let EN=0.02f64;
 		let EX=40f64;
 		let FF=parameters[83];
-		let FN=staged[301]!=0.0;
+		let FN=staged[302]!=0.0;
 		let GB=staged[80];
 		let GE=1.60219e-19f64;
 		let GF=staged[157];
@@ -146,30 +149,30 @@ impl Instance {
 		let QO=staged[131];
 		let QP=parameters[11];
 		let QS=staged[138];
-		let QX=staged[303]!=0.0;
+		let QX=staged[304]!=0.0;
 		let QY=staged[139];
 		let RA=staged[141];
 		let RB=staged[140];
-		let AAI=staged[304]!=0.0;
-		let AAL=staged[305]!=0.0;
-		let ABO=staged[306]!=0.0;
-		let ABX=staged[307]!=0.0;
+		let AAI=staged[305]!=0.0;
+		let AAL=staged[306]!=0.0;
+		let ABO=staged[307]!=0.0;
+		let ABX=staged[308]!=0.0;
 		let ABY=parameters[213];
-		let ABZ=staged[308]!=0.0;
-		let ACH=staged[309]!=0.0;
-		let ACU=staged[310]!=0.0;
-		let ADD=staged[311]!=0.0;
-		let ADK=staged[314]!=0.0;
-		let AED=staged[315]!=0.0;
+		let ABZ=staged[309]!=0.0;
+		let ACH=staged[310]!=0.0;
+		let ACU=staged[311]!=0.0;
+		let ADD=staged[312]!=0.0;
+		let ADK=staged[315]!=0.0;
+		let AED=staged[316]!=0.0;
 		let AEO=staged[217];
 		let AES=parameters[234];
 		let AEY=parameters[235];
 		let AFC=parameters[288];
 		let AFD=parameters[289];
 		let AFE=parameters[290];
-		let AFF=staged[317]!=0.0;
-		let AFJ=staged[318]!=0.0;
-		let AFM=staged[319]!=0.0;
+		let AFF=staged[318]!=0.0;
+		let AFJ=staged[319]!=0.0;
+		let AFM=staged[320]!=0.0;
 		let AFP=parameters[292];
 		let AFR=1e10f64;
 		let AHG=parameters[286];
@@ -1530,6 +1533,7 @@ impl Instance {
 		let thermal_voltage = ctx.thermal_voltage();
 		let multiplicity = self.multiplicity;
 		let time = self.time;
+		let port_connected = &self.port_connected;
 		let node_potentials: [f64; 13] = [ctx.node_voltage(self.nodes[0]), ctx.node_voltage(self.nodes[1]), ctx.node_voltage(self.nodes[2]), ctx.node_voltage(self.nodes[3]), ctx.node_voltage(self.nodes[4]), ctx.node_voltage(self.nodes[5]), ctx.node_voltage(self.nodes[6]), ctx.node_voltage(self.nodes[7]), ctx.node_voltage(self.nodes[8]), ctx.node_voltage(self.nodes[9]), ctx.node_voltage(self.nodes[10]), ctx.node_voltage(self.nodes[11]), ctx.node_voltage(self.nodes[12])];
 		let branch_flows: [f64; 0] = [];
 		let branch_unknown_flows: [f64; 1] = [ctx.branch_current(self.branches[0])];

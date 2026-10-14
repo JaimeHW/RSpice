@@ -910,8 +910,7 @@ impl BuiltinVerilogAInstance {
 
     /// Whether this instance's contributions connect an electrical port to
     /// node 0: the generator's reading of its module, decided with this
-    /// instance's parameter values. Every port of a generated device is
-    /// connected.
+    /// instance's parameter values and the terminals its card connected.
     pub(crate) fn references_ground(&self) -> bool {
         struct Inputs<'a>(&'a builtins::GeneratedBuiltinKind);
         impl rspice_veriloga_runtime::GroundReferenceInputs for Inputs<'_> {
@@ -921,8 +920,8 @@ impl BuiltinVerilogAInstance {
             fn parameter_given(&self, name: &str) -> Option<bool> {
                 self.0.parameter_state(name).map(|(_, given)| given)
             }
-            fn port_connected(&self, _: u32) -> Option<bool> {
-                Some(true)
+            fn port_connected(&self, port: u32) -> Option<bool> {
+                self.0.port_connected(usize::try_from(port).ok()?)
             }
         }
         self.kind
@@ -2237,18 +2236,35 @@ pub fn instantiate_builtin(
         .iter()
         .map(|(name, value)| BuiltinParameterAssignment::instance(name, value.clone()))
         .collect::<Vec<_>>();
+    // An X card may leave trailing terminals out, as it may on the `.va`
+    // route: they sit on node 0 and `$port_connected` reads them unconnected.
+    let terminals = builtins::builtin_names()
+        .iter()
+        .find(|name| name.eq_ignore_ascii_case(model_name))
+        .and_then(|name| builtins::descriptor(name))
+        .map_or(0, |descriptor| descriptor.terminals.len());
+    let mut nodes = node_names.to_vec();
+    if nodes.len() < terminals {
+        nodes.resize(terminals, "0".to_string());
+    }
     instantiate_builtin_scoped(
         model_name,
         instance_name,
-        node_names,
+        &nodes,
         &scoped,
         param_ctx,
         circuit,
         &[],
+        node_names.len(),
     )
 }
 
+/// Build a generated instance on `node_names`: every external terminal, then
+/// any of `optional_internal_nodes` the card binds. The card itself connected
+/// the first `connected_terminals` of the external terminals; the rest are
+/// node 0, and `$port_connected` reads them unconnected.
 #[cfg(feature = "veriloga-builtins-base")]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn instantiate_builtin_scoped(
     model_name: &str,
     instance_name: &str,
@@ -2257,6 +2273,7 @@ pub(crate) fn instantiate_builtin_scoped(
     param_ctx: &crate::netlist::ParamContext,
     circuit: &mut crate::CircuitData,
     optional_internal_nodes: &[&str],
+    connected_terminals: usize,
 ) -> Result<Option<BuiltinVerilogAInstance>, BuiltinInstantiationError> {
     let Some(descriptor_name) = builtins::builtin_names()
         .iter()
@@ -2379,6 +2396,12 @@ pub(crate) fn instantiate_builtin_scoped(
         &resolved,
         &circuit.generated_simulation_parameters,
     )
+    .and_then(|mut kind| {
+        if let Some(kind) = kind.as_mut() {
+            kind.set_connected_terminals(connected_terminals.min(expected_nodes))?;
+        }
+        Ok(kind)
+    })
     .map_err(|error| {
         BuiltinInstantiationError(format!(
             "Failed to instantiate generated Verilog-A instance '{}': {}",
@@ -2628,6 +2651,7 @@ mod tests {
                 &crate::netlist::ParamContext::new(),
                 &mut circuit,
                 &optional,
+                4,
             )
             .unwrap()
             .unwrap();
@@ -2680,6 +2704,7 @@ mod tests {
                 &crate::netlist::ParamContext::new(),
                 &mut circuit,
                 optional,
+                count,
             )
             .unwrap_err();
             assert!(error.to_string().contains("vbic13_4t"));

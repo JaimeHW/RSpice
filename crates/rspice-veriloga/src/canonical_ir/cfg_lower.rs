@@ -173,21 +173,11 @@ impl CfgModel {
         Self::from_hir_with_mode(hir, mir, CfgLowerMode::GENERATED)
     }
 
-    /// Lower `hir` for a backend that evaluates instances it did not build.
-    ///
-    /// The one thing this changes is `$port_connected`, and it changes it
-    /// because the guarantee behind the constant fold is not a property of the
-    /// language: a generated device is instantiated with exactly the terminals
-    /// its descriptor declares — `veriloga_builtins::instantiate` refuses any
-    /// other count — so every port it can be asked about is connected, and
-    /// folding the query to `1.0` deletes every guard in the shipped compact
-    /// models. `VerilogADevice` has no such guarantee. It marks terminal `i`
-    /// connected only while `i < supplied_terminals`, so an instance that omits
-    /// a trailing terminal takes the other arm of every one of those guards.
-    ///
-    /// So the fold is an optimization one consumer has earned and the other has
-    /// not, and this is where the two part company rather than a mode the CFG
-    /// level is confused about.
+    /// Lower `hir` for a backend that keeps the MIR route's assignment pass and
+    /// its `currents` storage: an event-controlled variable and a contributed
+    /// current are the leaves that storage holds, not values the body
+    /// recomputes. See [`CfgLowerMode::frozen_event_state`] and
+    /// [`CfgLowerMode::frozen_contribution_current`].
     ///
     /// Gated with its only caller, [`crate::jit`]: a build with neither JIT
     /// compiles no executable backend, so this entry point has no consumer to
@@ -248,13 +238,11 @@ impl CfgModel {
     pub(crate) fn from_hir_for_dae_proof(
         hir: &HirModel,
         mir: &MirModel,
-        per_instance_ports: bool,
     ) -> Result<Self, Vec<IrDiagnostic>> {
         Self::from_hir_with_mode(
             hir,
             mir,
             CfgLowerMode {
-                per_instance_ports,
                 record_observations: true,
                 ..CfgLowerMode::GENERATED
             },
@@ -553,9 +541,6 @@ struct CfgLowerer<'a> {
     /// Whether each noise process publishes its site magnitudes as well as its
     /// exit-merged ones. See [`CfgNoiseProcess::site`].
     noise_site_values: bool,
-    /// Whether `$port_connected` is a runtime leaf rather than the constant
-    /// `1.0`. See [`CfgModel::from_hir_for_executable_backend`].
-    per_instance_ports: bool,
     /// Whether the module prologue is evaluated into the entry block. See
     /// [`Self::prologue`].
     lower_prologue: bool,
@@ -1070,13 +1055,9 @@ fn compute_instance_static_guard_conditions(hir: &HirModel) -> HashSet<ExprId> {
     static_conditions
 }
 
-/// What the consumer of a lowered CFG is, in the two respects the lowering has
-/// to know about.
-///
-/// Two independent facts rather than one three-valued mode, because they are
-/// independent: noise metadata is lowered for the generated backend and still
-/// needs the runtime `$port_connected` leaf, since the metadata it produces is
-/// read per instance.
+/// What the consumer of a lowered CFG is, in the respects the lowering has to
+/// know about: independent facts rather than one many-valued mode, because
+/// they are independent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CfgLowerMode {
     phase: rspice_veriloga_runtime::AnalogEvaluationPhase,
@@ -1089,10 +1070,6 @@ struct CfgLowerMode {
     /// Publish each noise process's magnitudes as its own *site* computed them,
     /// beside the exit-merged ones. See [`CfgNoiseProcess::site`].
     noise_site_values: bool,
-    /// The consumer may evaluate an instance that omits a trailing terminal,
-    /// so `$port_connected` is a runtime leaf rather than the constant `1.0`.
-    /// See [`CfgModel::from_hir_for_executable_backend`].
-    per_instance_ports: bool,
     /// Evaluate [`HirModel::prologue_statements`] into the entry block before
     /// the body, so a body read of a localparam or a declaration initializer
     /// sees what the initializer wrote. See [`CfgLowerer::prologue`].
@@ -1119,8 +1096,8 @@ struct CfgLowerMode {
     ///
     /// So the residual reads the slot, which is exactly the
     /// `NativeOp::LoadVariable` the postfix route's own read lowers to — the
-    /// two routes agree by identity of leaf and op, the standard
-    /// `$port_connected` set. The body's writes to the variable are then dead
+    /// two routes agree by identity of leaf and op, as `$port_connected` and
+    /// `NativeOp::LoadPortConnected` do. The body's writes to the variable are then dead
     /// on this route and the pruner drops them; they are still what
     /// [`CfgModel::event_state_candidates`] reads, which only the generated
     /// backend consumes.
@@ -1152,7 +1129,7 @@ struct CfgLowerMode {
     /// [`crate::native::cfg_program`] translates it to the same
     /// `LoadCurrent`/`LoadPriorCurrent` the shipped route chose. The two routes
     /// then agree by identity of leaf and op, which is the standard the
-    /// `$port_connected` and event-state splits were held to.
+    /// event-state split was held to.
     frozen_contribution_current: bool,
 }
 
@@ -1165,7 +1142,6 @@ impl CfgLowerMode {
         record_observations: false,
         noise_metadata_only: false,
         noise_site_values: false,
-        per_instance_ports: false,
         lower_prologue: true,
         frozen_event_state: false,
         frozen_contribution_current: false,
@@ -1178,7 +1154,6 @@ impl CfgLowerMode {
         record_observations: false,
         noise_metadata_only: false,
         noise_site_values: true,
-        per_instance_ports: true,
         lower_prologue: true,
         frozen_event_state: true,
         frozen_contribution_current: true,
@@ -1191,7 +1166,6 @@ impl CfgLowerMode {
         record_observations: false,
         noise_metadata_only: true,
         noise_site_values: false,
-        per_instance_ports: true,
         lower_prologue: true,
         frozen_event_state: false,
         frozen_contribution_current: false,
@@ -1241,7 +1215,6 @@ impl<'a> CfgLowerer<'a> {
             runtime_task_gate: mode.runtime_task_gate,
             record_observations: mode.record_observations,
             noise_site_values: mode.noise_site_values,
-            per_instance_ports: mode.per_instance_ports,
             lower_prologue: mode.lower_prologue,
             frozen_event_state: mode.frozen_event_state,
             frozen_event_states: HashMap::new(),
@@ -3701,33 +3674,28 @@ impl<'a> CfgLowerer<'a> {
                     self.real_constant(0.0)
                 }
             },
-            // The runtime flag for a consumer that evaluates instances it did
-            // not build, and the constant `1.0` for one that did.
+            // Always the instance's own flag, whichever backend evaluates it.
             //
-            // A generated device is instantiated with exactly the terminals its
-            // descriptor declares — `veriloga_builtins::instantiate` refuses any
-            // other count — so no port it can be asked about is unconnected, and
-            // folding the query lets the optimizer delete every
-            // `$port_connected` guard in the shipped compact models. The
-            // executable backends have no such guarantee: `VerilogADevice` marks
-            // terminal `i` connected only while `i < supplied_terminals`, and the
-            // JIT reads that flag with `NativeOp::LoadPortConnected`. See
-            // [`CfgModel::from_hir_for_executable_backend`] for which consumer
-            // asks for which.
-            ("$port_connected", 1) if self.per_instance_ports => {
-                match self.port_argument(args[0]) {
-                    Some(port) => self.leaf(
-                        LeafKey::PortConnected(port),
-                        CfgValueType::Real,
-                        CfgValueKind::PortConnected(port),
-                    ),
-                    None => {
-                        self.unsupported(span, "$port_connected of a non-port".to_string());
-                        self.real_constant(0.0)
-                    }
+            // A card may leave trailing terminals out on either route: the
+            // `.va` route ties them to node 0 and marks terminal `i` connected
+            // only while `i < supplied_terminals` (the JIT reads that flag
+            // with `NativeOp::LoadPortConnected`), and a generated device is
+            // built with every terminal, the omitted ones on node 0, and told
+            // which of them its card connected. Folding the query to `1.0` for
+            // the generated backend, on the reasoning that it builds every
+            // terminal, made one card take the other arm of every guard in
+            // the shipped compact models on that route alone.
+            ("$port_connected", 1) => match self.port_argument(args[0]) {
+                Some(port) => self.leaf(
+                    LeafKey::PortConnected(port),
+                    CfgValueType::Real,
+                    CfgValueKind::PortConnected(port),
+                ),
+                None => {
+                    self.unsupported(span, "$port_connected of a non-port".to_string());
+                    self.real_constant(0.0)
                 }
-            }
-            ("$port_connected", 1) => self.real_constant(1.0),
+            },
             _ => {
                 self.unsupported(span, format!("system function '{name}'"));
                 self.real_constant(0.0)
