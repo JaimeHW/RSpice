@@ -2103,6 +2103,20 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if responses.selection.clicked() {
                             select_result_dataset(app, run.run_index);
                         }
+                        let mut details = false;
+                        responses.selection.context_menu(|ui| {
+                            if ui.button("Run details\u{2026}").clicked() {
+                                details = true;
+                                ui.close();
+                            }
+                        });
+                        if details
+                            && let Some(retained) =
+                                app.state.simulation.retained.runs.get(run.run_index)
+                        {
+                            let run_id = retained.id;
+                            super::inspector::run_details::open(&mut app.state, run_id);
+                        }
                         if responses.overlay.is_some_and(|response| response.clicked()) {
                             let enabled =
                                 app.state.simulation.toggle_dataset_overlay(run.dataset_id);

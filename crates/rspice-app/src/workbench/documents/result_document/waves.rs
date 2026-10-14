@@ -498,44 +498,18 @@ pub(crate) struct ActivePaneFacts {
     /// stack still draws exactly one analysis, and it is not necessarily the
     /// one the run's analysis selector points at.
     pub analysis: Option<String>,
-    /// Visible and bound trace counts on this pane alone.
-    pub traces: Option<(usize, usize)>,
-    /// How many runs the pane draws at once. The mockup's corner families are
-    /// a Visualization Studio presentation; on this workspace the same
-    /// question — one curve, or several realizations of it? — is answered by
-    /// the overlaid runs the pane is actually carrying.
-    pub runs: Option<usize>,
     pub scale: Option<&'static str>,
     pub limit_mask: &'static str,
-    pub x_viewport: Option<String>,
-    pub y_viewport: Option<String>,
-    /// The same two intervals as numbers, so an axis-limit editor opens on
+    /// The pane's two intervals as numbers, so an axis-limit editor opens on
     /// what the reader is actually looking at rather than on an empty field.
     pub x_extent: Option<(f64, f64)>,
     pub y_extent: Option<(f64, f64)>,
-    /// Whether any pane of the active strip is showing a pinned viewport.
-    /// `None` when this sheet has no unit-pane stack to report on.
-    pub pinned: Option<bool>,
 }
 
 pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> ActivePaneFacts {
-    // The viewport the pane is actually showing, whether the user pinned it
-    // or it is fitting the retained data. The mockup states the interval
-    // either way: "automatic" alone does not tell a reader what they see.
-    let PaneViewports {
-        x: x_viewport,
-        y: y_viewport,
-        x_unit,
-    } = active_pane_viewports(tokens, state);
+    let x_unit = active_pane_x_unit(tokens, state);
     let (x_extent, y_extent) = active_pane_extents(tokens, state);
-    let (analysis, traces, runs) = active_pane_identity(tokens, state);
-    let pinned = state
-        .ui
-        .results
-        .session
-        .active_wave_pane
-        .is_some()
-        .then(|| active_pane_is_pinned(tokens, state));
+    let analysis = active_pane_analysis(tokens, state);
     let key = state.ui.results.session.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         // One owner: the pane’s own log-Y flag on ResultsState. This read
@@ -552,19 +526,14 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
         unit: key.map(|key| key.unit.clone()),
         x_unit,
         analysis,
-        traces,
-        runs,
         scale,
         limit_mask: if state.ui.results.session.show_spec_limits {
             "project specification limits"
         } else {
             "none bound"
         },
-        x_viewport,
-        y_viewport,
         x_extent,
         y_extent,
-        pinned,
     }
 }
 
@@ -633,18 +602,12 @@ fn x_range_text(
     super::axis_range::format_axis_range((x0, x1), &model.x_unit)
 }
 
-/// The analysis the active pane belongs to and how many of its traces the
-/// pane carries.
+/// The analysis the active pane belongs to.
 ///
 /// A sheet that is not the waveform stack picks its own analysis, so the
 /// run's analysis selector is not the authority here: the pane is.
-fn active_pane_identity(
-    tokens: &Tokens,
-    state: &mut AppState,
-) -> (Option<String>, Option<(usize, usize)>, Option<usize>) {
-    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
-        return (None, None, None);
-    };
+fn active_pane_analysis(tokens: &Tokens, state: &mut AppState) -> Option<String> {
+    let key = state.ui.results.session.active_wave_pane.clone()?;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
         &state.simulation,
@@ -652,35 +615,14 @@ fn active_pane_identity(
         presentation.complex_number_display(),
         tokens,
     );
-    let Some(model) = models
+    let model = models
         .iter()
-        .find(|model| model.analysis_key == key.analysis)
-    else {
-        return (None, None, None);
-    };
-    let bound = model
-        .traces
-        .iter()
-        .filter(|trace| model.trace_unit(trace) == key.unit)
-        .count();
-    let visible = model
-        .traces
-        .iter()
-        .filter(|trace| trace.visible && model.trace_unit(trace) == key.unit)
-        .count();
-    let runs = model
-        .traces
-        .iter()
-        .filter(|trace| model.trace_unit(trace) == key.unit)
-        .map(|trace| trace.run_id)
-        .collect::<std::collections::BTreeSet<_>>()
-        .len();
-    let label = state
+        .find(|model| model.analysis_key == key.analysis)?;
+    state
         .simulation
         .active_run()
         .and_then(|run| run.analyses.get(model.analysis_index))
-        .map(|analysis| analysis.label.clone());
-    (label, Some((visible, bound)), Some(runs))
+        .map(|analysis| analysis.label.clone())
 }
 
 /// The active pane's X and Y intervals, formatted through the strip's own
@@ -800,63 +742,24 @@ pub(crate) fn set_active_pane_axis_range(
     true
 }
 
-/// The active pane's two intervals as the inspector states them, and the
-/// unit its shared X axis is measured in.
-#[derive(Default)]
-struct PaneViewports {
-    x: Option<String>,
-    y: Option<String>,
-    x_unit: Option<String>,
-}
-
-fn active_pane_viewports(tokens: &Tokens, state: &mut AppState) -> PaneViewports {
-    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
-        return PaneViewports::default();
-    };
+/// The unit the active pane's shared X axis is measured in.
+fn active_pane_x_unit(tokens: &Tokens, state: &mut AppState) -> Option<String> {
+    let key = state.ui.results.session.active_wave_pane.clone()?;
     let presentation = state.ui.preferences.result_presentation_policy();
-    let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         tokens,
     );
-    let Some(model) = models
+    let model = models
         .iter()
-        .find(|model| model.analysis_key == key.analysis)
-    else {
-        return PaneViewports::default();
-    };
-    let panes = model.unit_panes();
-    let Some((ordinal, pane)) = panes
+        .find(|model| model.analysis_key == key.analysis)?;
+    model
+        .unit_panes()
         .iter()
-        .enumerate()
-        .find(|(_, pane)| pane.unit == key.unit)
-    else {
-        return PaneViewports::default();
-    };
-    let x = model.x_range.map(|full| {
-        let view =
-            shared_x_view(&state.ui.results.session, key.analysis, panes.len()).unwrap_or(full);
-        x_range_text(model, view, quantity_policy)
-    });
-    let pinned = state
-        .ui
-        .results
-        .session
-        .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
-        .y;
-    let unit = pane.unit;
-    let y = match pinned {
-        Some(range) => Some(range),
-        None => displayed_pane_auto_y(state, model, pane, ordinal, tokens),
-    }
-    .map(|range| super::axis_range::format_axis_range(range, unit));
-    PaneViewports {
-        x,
-        y,
-        x_unit: Some(model.x_unit.clone()),
-    }
+        .any(|pane| pane.unit == key.unit)
+        .then(|| model.x_unit.clone())
 }
 
 /// The Y interval one pane of a strip is showing right now, automatic fit

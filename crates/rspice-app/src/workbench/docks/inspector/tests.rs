@@ -224,19 +224,19 @@ fn inspector_header_exposes_its_workspace_heading() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly() {
+fn convergence_inspector_speaks_only_of_forced_acceptances() {
     use crate::state::{AnalysisResult, AnalysisType, TransientConvergenceEvidence};
-    // Each status is a row on the section's label/value grid — a fact with a
-    // name — never a sentence added to the panel body on its own edge.
-    for (label, expected) in [
-        ("Solver evidence", "not retained"),
-        ("LTE acceptances", "none forced"),
-        ("LTE acceptances", "1 forced"),
+    // A forced acceptance is a row on the section's label/value grid; no
+    // evidence, or evidence that forced nothing, has no section at all.
+    for (evidence, forced, expected) in [
+        (false, false, None),
+        (true, false, None),
+        (true, true, Some("1 forced")),
     ] {
         let mut analysis = AnalysisResult::new(1, AnalysisType::Transient, "Transient");
-        if expected != "not retained" {
+        if evidence {
             let mut quality = rspice_core::diagnostics::ConvergenceQuality::default();
-            if expected == "1 forced" {
+            if forced {
                 quality.record_force_accept(1);
             }
             analysis.convergence = Some(std::sync::Arc::new(
@@ -258,18 +258,17 @@ fn convergence_inspector_exposes_unknown_and_forced_acceptance_status_accessibly
             });
         });
         let nodes = output.platform_output.accesskit_update.unwrap().nodes;
-        assert!(
-            nodes
-                .iter()
-                .any(|(_, node)| { node.label() == Some(label) && node.value() == Some(expected) }),
-            "Missing accessible quality row: {label} = {expected}"
-        );
+        let row = nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("LTE acceptances"))
+            .and_then(|(_, node)| node.value());
+        assert_eq!(row, expected, "evidence {evidence}, forced {forced}");
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn dc_inspector_exposes_exact_secondary_coordinates_and_primary_traversal() {
+fn dc_inspector_names_its_sources_and_primary_traversal() {
     use crate::simulation::controller::dc_history_tests::{nested_config, retain, solve};
     let mut config = nested_config();
     config.start = 1.0;
@@ -286,7 +285,7 @@ fn dc_inspector_exposes_exact_secondary_coordinates_and_primary_traversal() {
         });
     });
     let nodes = output.platform_output.accesskit_update.unwrap().nodes;
-    for expected in ["V1", "V2", "Descending", "3", "2.9999999999999999e-7"] {
+    for expected in ["V1", "V2", "Descending", "3"] {
         assert!(
             nodes.iter().any(|(_, n)| n.value() == Some(expected)),
             "Missing DC evidence: {expected}"
@@ -386,20 +385,6 @@ fn result_trace_statistics_ignore_non_finite_samples() {
     assert_eq!(statistics.maximum, 4.0);
     assert_eq!(statistics.mean, 1.0);
     assert!(finite_trace_statistics(&[f64::NAN, f64::INFINITY]).is_none());
-}
-
-#[test]
-fn result_qualification_rows_never_infer_unretained_release_authority() {
-    assert_eq!(
-        result_authority::RESULT_QUALIFICATION_GAPS,
-        [
-            ("Qualification receipt", "not retained"),
-            ("Requirements mapping", "not retained"),
-            ("Release gates", "not assessed"),
-            ("Sign-off eligibility", "not assessed"),
-            ("Approval authority", "not retained"),
-        ]
-    );
 }
 
 #[test]
@@ -1164,12 +1149,69 @@ fn the_waves_details_panel_keeps_every_line_inside_the_row_inset() {
     }
 }
 
-/// What James read off the panel, pinned on the panel: each range field shows
-/// the shortest form of its axis interval with the unit, the convergence
-/// status is a row, and how the measurements were computed is their section
-/// header's metadata.
+/// The Results inspector names the run and leaves its provenance to Run
+/// details…, which holds the identifiers and the executed deck the panel no
+/// longer shows.
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn the_waves_details_panel_states_ranges_status_and_method_as_rows_and_meta() {
+fn run_provenance_lives_in_run_details_not_on_the_panel() {
+    let mut app = waves_details_app();
+    let (_, nodes) = run_inspector(&mut app, INSPECTOR_DEFAULT_WIDTH, 2400.0);
+    let labelled = |nodes: &[(egui::accesskit::NodeId, egui::accesskit::Node)], label: &str| {
+        nodes.iter().any(|(_, node)| node.label() == Some(label))
+    };
+    assert!(
+        labelled(&nodes, "Run details\u{2026}"),
+        "no route to the run's details"
+    );
+    for gone in [
+        "Dataset ID",
+        "Run sequence",
+        "Execution target",
+        "Samples",
+        "Visibility",
+    ] {
+        assert!(!labelled(&nodes, gone), "{gone} is still on the panel");
+    }
+
+    let run_id = app.state.simulation.active_run().expect("retained run").id;
+    run_details::open(&mut app.state, run_id);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            run_details::show(ui.ctx(), &mut app);
+        });
+        nodes = output
+            .platform_output
+            .accesskit_update
+            .map(|update| update.nodes)
+            .unwrap_or_default();
+    }
+    for present in ["Dataset ID", "Dataset digest", "Run ID"] {
+        assert!(labelled(&nodes, present), "Run details lacks {present}");
+    }
+
+    run_details::open(&mut app.state, u64::MAX);
+    assert_eq!(
+        app.state
+            .dialogs
+            .run_details
+            .as_ref()
+            .map(|details| details.run_id),
+        Some(run_id),
+        "a run no longer retained opens nothing"
+    );
+}
+
+/// What James read off the panel, pinned on the panel: each range field shows
+/// the shortest form of its axis interval with the unit, a run that forced no
+/// acceptance says nothing of convergence, and how the measurements were
+/// computed is their section header's metadata.
+#[test]
+fn the_waves_details_panel_states_ranges_and_method_as_rows_and_meta() {
     let mut app = waves_details_app();
     let (_, nodes) = run_inspector(&mut app, INSPECTOR_DEFAULT_WIDTH, 2400.0);
     let value_of = |label: &str| {
@@ -1182,7 +1224,12 @@ fn the_waves_details_panel_states_ranges_status_and_method_as_rows_and_meta() {
     };
     assert_eq!(value_of("X range"), "0 \u{2026} 1 ms");
     assert_eq!(value_of("Y range"), "4 \u{2026} 6 V");
-    assert_eq!(value_of("LTE acceptances"), "none forced");
+    assert!(
+        !nodes
+            .iter()
+            .any(|(_, node)| node.label() == Some("LTE acceptances")),
+        "a run that forced nothing has no convergence row"
+    );
     assert!(
         nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Heading

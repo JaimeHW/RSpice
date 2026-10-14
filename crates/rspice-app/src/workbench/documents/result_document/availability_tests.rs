@@ -1436,15 +1436,10 @@ fn the_axis_editor_opens_on_what_the_sheet_actually_drew() {
         unit: None,
         x_unit: None,
         analysis: None,
-        traces: None,
-        runs: None,
         scale: None,
         limit_mask: "none bound",
-        x_viewport: None,
-        y_viewport: None,
         x_extent: None,
         y_extent: None,
-        pinned: None,
     };
     let x = active_axis_range(&app.state, &facts, PaneAxis::X)
         .expect("the Smith sheet recorded the interval it drew");

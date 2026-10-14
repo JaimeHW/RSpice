@@ -186,8 +186,8 @@ pub(crate) use dialogs::state::{
     EngineeringTableExportScope, GridSnapRoutingDialogState, GridSnapRoutingDraft,
     GridSnapRoutingFocusTarget, GridSnapSpacingChoice, HelpCenterPage, HierarchyDescendEditMode,
     HierarchyParentContext, NewWindowInitialContent, PlanRemovalConsequence, PlanRemovalTarget,
-    PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen, TechnologyAttachmentDialogState,
-    WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
+    PlanRemovalTone, RenameSelectionTarget, ReplaceInstanceOpen, RunDetailsDialogState,
+    TechnologyAttachmentDialogState, WindowLayoutChoice, WindowSessionPage, WindowWorkflow,
 };
 pub use dialogs::state::{DialogState, LicensePhase};
 

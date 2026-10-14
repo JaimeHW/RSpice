@@ -171,6 +171,14 @@ impl WindowSessionDialogState {
     }
 }
 
+/// The run Run details… is open on, with its manifest taken once when the
+/// dialog opened: projecting a run digests every sample it retained.
+#[derive(Debug, Clone)]
+pub(crate) struct RunDetailsDialogState {
+    pub(crate) run_id: u64,
+    pub(crate) manifest: rspice_results::manifest::ManifestViewModel,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DialogState {
     /// About dialog
@@ -372,6 +380,9 @@ pub struct DialogState {
     pub(crate) unpublish_web:
         crate::workbench::app::dialogs::unpublish_web::UnpublishWebDialogState,
 
+    /// Run details…: the provenance of one retained run.
+    pub(crate) run_details: Option<RunDetailsDialogState>,
+
     /// Command palette state
     pub command_palette: CommandPaletteState,
 
@@ -538,6 +549,7 @@ impl DialogState {
             || self.publish_web.open
             || self.live_session.open
             || self.unpublish_web.open
+            || self.run_details.is_some()
             || self.command_palette.open
             || self.bus_tap.open
             || self.builtin_xspice_placement.open

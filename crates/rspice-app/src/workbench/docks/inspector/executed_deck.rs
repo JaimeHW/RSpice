@@ -23,9 +23,10 @@ use egui::Ui;
 
 use crate::ui::widgets::Button;
 
-use super::super::super::design_system::{property_row, section_block_gap, section_header};
+use super::super::super::design_system::{property_row, property_row_wrapped};
 
-/// The run's sealed model sources, and the control that opens its deck.
+/// The run's sealed model sources, and the control that opens its deck: the
+/// rows of Run details…'s Executed deck group.
 ///
 /// `executed` is `None` when the archive holds no deck for this run. That is
 /// stated rather than papered over: the working deck is a different document
@@ -39,29 +40,14 @@ use super::super::super::design_system::{property_row, section_block_gap, sectio
 /// [`crate::state::absent_deck_reason`] now says once, for every surface that
 /// reports the absence.
 pub(super) fn record(ui: &mut Ui, run_id: u64, executed: Option<&[String]>) -> Option<u64> {
-    section_header(ui, "Executed deck", None);
     let Some(sources) = executed else {
-        property_row(
-            ui,
-            "Deck",
-            &format!(
-                "not retained \u{2014} {}",
-                crate::state::absent_deck_reason()
-            ),
-        );
+        property_row_wrapped(ui, "Deck", crate::state::absent_deck_reason());
         return None;
     };
-    if sources.is_empty() {
-        property_row(ui, "Sealed model sources", "none in this deck");
-    } else {
-        for source in sources {
-            property_row(ui, "Sealed model source", source);
-        }
+    for source in sources {
+        property_row(ui, "Model source", source);
     }
-    // Across the panel body, as the producing-plan route above it is.
-    section_block_gap(ui);
     Button::new("Open executed deck")
-        .min_width(ui.available_width())
         .show(ui)
         .on_hover_text(
             "Opens the exact source this run's engine read, as a read-only document sealed with \

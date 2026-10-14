@@ -164,39 +164,6 @@ pub(crate) fn fit_active_strip(state: &mut AppState) {
     }
 }
 
-/// Whether the active pane is showing a viewport the user pinned rather than
-/// the retained data's own extent.
-///
-/// The waveform stack keys its viewports by analysis, not by the legacy
-/// `Global` plot index, so this is the only honest reading for these sheets.
-pub(super) fn active_pane_is_pinned(tokens: &Tokens, state: &mut AppState) -> bool {
-    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
-        return false;
-    };
-    let presentation = state.ui.preferences.result_presentation_policy();
-    let models = cached_models(
-        &state.simulation,
-        &mut state.ui.results,
-        presentation.complex_number_display(),
-        tokens,
-    );
-    let Some(model) = models
-        .iter()
-        .find(|model| model.analysis_key == key.analysis)
-    else {
-        return false;
-    };
-    let panes = model.unit_panes();
-    (0..panes.len()).any(|ordinal| {
-        state
-            .ui
-            .results
-            .session
-            .analysis_plot_view_pane(super::super::ResultViewer::Waves, key.analysis, ordinal)
-            .is_zoomed()
-    })
-}
-
 /// Move a placed cursor by a fraction of the visible X interval.
 ///
 /// The nudge is expressed in the window the reader is looking at, not the

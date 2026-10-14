@@ -5,6 +5,7 @@ mod drawers;
 mod inspector;
 mod navigator;
 
+pub(crate) use inspector::run_details::show as show_run_details;
 pub(crate) use inspector::{
     bind_component_model_from_catalog, validate_component_model_catalog_binding,
 };

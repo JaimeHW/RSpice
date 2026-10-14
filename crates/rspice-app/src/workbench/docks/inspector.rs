@@ -4,6 +4,9 @@ mod design;
 mod executed_deck;
 mod models;
 mod result_authority;
+/// Visible to the dock layer: the data browser opens it from a run's row, and
+/// the frame draws it whichever dock is showing.
+pub(super) mod run_details;
 mod simulation;
 /// Visible to the dock layer so the library browser's own gate can render this
 /// pane beside it: the two docks state the same counts about the same design,
@@ -18,8 +21,8 @@ pub(super) use design::analysis_soa_display;
 
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
-    PANEL_INSET, Problem, code_inspector_section, panel_bleed, panel_body, panel_inset,
-    section_block_gap, section_header,
+    PANEL_INSET, Problem, code_inspector_section, panel_body, panel_inset, section_block_gap,
+    section_header,
 };
 
 use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
@@ -38,8 +41,8 @@ use rspice_results_ui::session::PaneAxis;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    PANEL_HEADER_H, PANEL_SECTION_H, StatusMark, WorkbenchIcon, property_row,
-    property_row_input_action, property_row_status,
+    PANEL_HEADER_H, StatusMark, WorkbenchIcon, property_row, property_row_input_action,
+    property_row_problem, property_row_status,
 };
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
@@ -1134,44 +1137,15 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 
     // The workspace's memoized projection: taking it fresh re-digested the run.
     let manifest = active_manifest(&mut app.state);
-    let mut routes = result_authority::AuthorityRoutes::default();
-    if let Some((run, manifest)) = app.state.simulation.active_run().zip(manifest.as_deref()) {
-        let executed = app
-            .state
-            .simulation
-            .retained
-            .executed_decks
-            .get(run.id)
-            .map(crate::state::ExecutedDeck::model_sources);
-        // Resolved beside the record it annotates, and while the same
-        // immutable borrow of the session is held, so the control cannot
-        // disagree with the rows above it.
-        let plan_block = crate::workbench::state::plan_provenance::producing_plan_block(
-            &app.state.simulation,
-            app.state.sim_setup.stable_analysis_plan().ok(),
-        );
-        routes = result_authority::result_dataset_authority(
-            ui,
-            run,
-            &manifest.model,
-            executed.as_deref(),
-            plan_block,
-        );
-    } else {
-        section_header(ui, "Dataset identity", None);
-        property_row(ui, "Selection", "No active dataset");
-        property_row(
-            ui,
-            "Available runs",
-            &app.state.simulation.retained.runs.len().to_string(),
-        );
-        result_authority::result_qualification_gaps(ui);
-    }
-    if let Some(run_id) = routes.reveal_executed_deck {
-        executed_deck::reveal(&mut app.state, run_id);
-    }
-    if routes.open_producing_plan {
-        Command::OpenProducingPlan.execute(app);
+    let details = match app.state.simulation.active_run().zip(manifest.as_deref()) {
+        Some((run, manifest)) => result_authority::result_run(ui, run, &manifest.model),
+        None => {
+            muted_inspector_copy(ui, "No run selected.");
+            None
+        }
+    };
+    if let Some(run_id) = details {
+        run_details::open(&mut app.state, run_id);
     }
 
     // The active viewer owns its engineering readout (measurements, margins,
@@ -1185,118 +1159,12 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let Some(run) = app.state.simulation.active_run() else {
         return;
     };
-
-    // The analysis's own provenance belongs to the same folded record as the
-    // dataset's, even though a different owner draws it.
     if let Some(index) = app.state.simulation.view.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)
     {
         result_authority::result_convergence(ui, analysis);
         result_authority::result_dc_sweep(ui, analysis);
     }
-    if inspector_disclosure_open(ui.ctx(), "result-provenance")
-        && let Some(index) = app.state.simulation.view.active_analysis_idx
-        && let Some(analysis) = run.analyses.get(index)
-    {
-        section_header(ui, "Active analysis provenance", None);
-        property_row(ui, "Analysis", &analysis.label);
-        property_row(
-            ui,
-            "Result digest",
-            &analysis.result_data_digest().to_string(),
-        );
-        if let Some(provenance) = &analysis.provenance {
-            property_row(
-                ui,
-                "Source instance",
-                &provenance.source_instance_id().to_string(),
-            );
-            property_row(
-                ui,
-                "Source revision",
-                &provenance.source_revision().get().to_string(),
-            );
-            property_row(
-                ui,
-                "Prepared snapshot",
-                &provenance.prepared_snapshot_digest().to_string(),
-            );
-            property_row(
-                ui,
-                "Dependencies",
-                &provenance.dependency_ids().len().to_string(),
-            );
-        } else {
-            property_row(ui, "Source identity", "Legacy result · unavailable");
-        }
-    }
-}
-
-/// Whether a folded group is showing, for rows that belong to it but are
-/// drawn by a different owner.
-fn inspector_disclosure_open(ctx: &egui::Context, key: &str) -> bool {
-    ctx.data(|data| data.get_temp::<bool>(egui::Id::new(("workbench.inspector.disclosure", key))))
-        .unwrap_or(false)
-}
-
-/// A folded group of rows, named on the left and standing on the right.
-///
-/// A result's provenance runs to dozens of digests and is rarely the thing a
-/// reader came for. Folding it behind one row keeps every fact reachable
-/// without pushing the pane and trace readouts off the panel.
-fn inspector_disclosure(ui: &mut Ui, key: &str, title: &str, status: &str) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let c = &t.color;
-    let memory = egui::Id::new(("workbench.inspector.disclosure", key));
-    let open = inspector_disclosure_open(ui.ctx(), key);
-    let inset = panel_inset(ui);
-    let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), PANEL_SECTION_H),
-        Sense::click(),
-    );
-    let label = format!(
-        "{title}, {status}, {}",
-        if open { "expanded" } else { "collapsed" }
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label.clone())
-    });
-    if response.clicked() {
-        ui.ctx().data_mut(|data| data.insert_temp(memory, !open));
-    }
-    let painter = ui.painter();
-    if response.hovered() {
-        painter.rect_filled(panel_bleed(ui, rect), 0.0, c.bg_hover);
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    }
-    let text = if response.hovered() {
-        c.text
-    } else {
-        c.text_dim
-    };
-    painter.text(
-        Pos2::new(rect.left() + inset, rect.center().y),
-        Align2::LEFT_CENTER,
-        if open { "\u{2304}" } else { "\u{203a}" },
-        theme::mono(tokens::FS_1, FontWeight::Regular),
-        text,
-    );
-    painter.text(
-        Pos2::new(rect.left() + inset + 12.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        title,
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        text,
-    );
-    painter.text(
-        Pos2::new(rect.right() - inset, rect.center().y),
-        Align2::RIGHT_CENTER,
-        status,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        c.ok,
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    open
 }
 
 fn selected_result_artifact(
@@ -1304,62 +1172,21 @@ fn selected_result_artifact(
     app: &mut RSpiceApp,
     selected: &rspice_results_ui::selection::ResultArtifactPresentationKey,
 ) {
-    use crate::state::SimulationRunLifecycle;
-
     let Some((run_index, _, analysis)) = selected.resolve(&app.state.simulation.retained.runs)
     else {
         return;
     };
     let run = &app.state.simulation.retained.runs[run_index];
-    let analysis_identity = analysis.provenance().map_or_else(
-        || format!("legacy-{}", analysis.id),
-        |provenance| provenance.source_instance_id().to_string(),
-    );
-    let source_domain =
-        analysis.provenance().map_or("Legacy result", |provenance| {
-            match provenance.source_domain() {
-                crate::state::AnalysisResultSourceDomain::SimulationPlan => "Simulation plan",
-                crate::state::AnalysisResultSourceDomain::ManualDeck => "Manual source deck",
-                crate::state::AnalysisResultSourceDomain::LegacyUnclassified => {
-                    "Legacy unclassified producer"
-                }
-            }
-        });
-    let lifecycle = match run.lifecycle {
-        SimulationRunLifecycle::LegacyUnknown => "Legacy / unknown",
-        SimulationRunLifecycle::Preparing => "Preparing",
-        SimulationRunLifecycle::Running => "Loading",
-        SimulationRunLifecycle::Cancelling => "Cancelling",
-        SimulationRunLifecycle::Completed => "Complete",
-        SimulationRunLifecycle::Failed => "Failed",
-        SimulationRunLifecycle::Aborted => "Cancelled",
-        SimulationRunLifecycle::Interrupted => "Interrupted",
-    };
-    // Memoized per dataset generation: the validator walks every retained sample.
-    let integrity = analysis_evidence_failure(&app.state, run.dataset_id, analysis).map_or_else(
-        || "Verified".to_owned(),
-        |error| format!("Corrupted: {error}"),
-    );
-    let canonical = selected.canonical_name().to_owned();
-    let stable_path = format!(
-        "dataset/{}/analysis/{analysis_identity}/artifact/{canonical}",
-        run.dataset_id
-    );
+    // Memoized per dataset generation: the validator walks every retained
+    // sample. Intact data is the normal state and says nothing.
+    let corrupted = analysis_evidence_failure(&app.state, run.dataset_id, analysis);
     let analysis_label = analysis.label.clone();
-    let analysis_kind = analysis.kind_display_name().to_owned();
-    let dataset = run.dataset_id.to_string();
 
-    section_header(ui, "Typed result selection", None);
-    property_row(ui, "Canonical name", &canonical);
+    section_header(ui, "Selected result", None);
+    property_row(ui, "Name", selected.canonical_name());
     property_row(ui, "Analysis", &analysis_label);
-    property_row(ui, "Quantity family", &analysis_kind);
-    property_row(ui, "Producer", source_domain);
-    property_row(ui, "Lifecycle", lifecycle);
-    property_row(ui, "Integrity", &integrity);
-    property_row(ui, "Dataset", &dataset);
-    section_block_gap(ui);
-    if ui.button("Copy stable source path").clicked() {
-        ui.ctx().copy_text(stable_path);
+    if let Some(error) = corrupted {
+        property_row_problem(ui, "Data", &error.to_string(), Some(Problem::Failure));
     }
 }
 
@@ -1375,7 +1202,6 @@ fn selected_result_trace(
         return;
     };
 
-    let analysis_label = analysis.label.clone();
     let waveform_name = waveform.name.clone();
     let waveform_color = waveform.color.clone();
     let waveform_visible = waveform.visible;
@@ -1399,25 +1225,20 @@ fn selected_result_trace(
             .displayed_significant_digits()
             .get(),
     );
-    let measured = |value: f64| rspice_results_ui::waves::fmt_in_unit(value, &unit, digits);
+    let measured = |value: f64| engineering_readout(value, &unit, digits);
 
     section_header(ui, "Selected trace", None);
     property_row(ui, "Name", &waveform_name);
-    property_row(ui, "Analysis", &analysis_label);
-    property_row(ui, "Dataset", &selected.dataset_id().to_string());
-    property_row(ui, "Samples", &sample_count.to_string());
+    // Samples the solver could not give a finite value are a problem with
+    // the trace; a complete trace says nothing about its sample count.
     if available_sample_count < sample_count {
-        property_row(ui, "Available samples", &available_sample_count.to_string());
+        property_row_problem(
+            ui,
+            "Finite samples",
+            &format!("{available_sample_count} of {sample_count}"),
+            Some(Problem::Warning),
+        );
     }
-    property_row(
-        ui,
-        "Visibility",
-        if waveform_visible {
-            "visible"
-        } else {
-            "hidden"
-        },
-    );
     if let Some(statistics) = statistics {
         property_row(ui, "Minimum", &measured(statistics.minimum));
         property_row(ui, "Maximum", &measured(statistics.maximum));
@@ -1517,86 +1338,28 @@ fn active_result_pane(
         return;
     };
     let pane_label = analysis.label.clone();
-    let bound = analysis.waveforms.len();
-    let visible = analysis
-        .waveforms
-        .iter()
-        .filter(|waveform| waveform.visible)
-        .count();
     // The unit names the pane in a unit-scoped stack; the viewer name is
     // already on the sheet tab above.
     let tokens = Tokens::get(ui.ctx());
     let facts =
         crate::workbench::documents::result_document::active_pane_facts(&tokens, &mut app.state);
-    // The waveform stack keys its viewports by analysis; only the
-    // single-canvas viewers keep one under a plot ordinal. Reading the wrong
-    // store here reported "automatic fit" over a pinned pane and left the fit
-    // button permanently disabled.
-    let wave_stack = crate::workbench::documents::result_document::viewer_uses_wave_stack(viewer);
-    let view = app.state.ui.results.session.plot_view(viewer, 0);
-    let pinned = if wave_stack {
-        facts.pinned.unwrap_or(false)
-    } else {
-        view.is_zoomed()
-    };
-    let view_label = if pinned {
-        "manual range"
-    } else {
-        "automatic fit"
-    };
     section_header(
         ui,
         "Active pane",
         Some(facts.unit.as_deref().unwrap_or_else(|| viewer.label())),
     );
     // The pane names the analysis it draws, which on a sheet outside the
-    // waveform stack is not the one the run's analysis selector points at,
-    // and counts only the traces its own axis carries.
+    // waveform stack is not the one the run's analysis selector points at.
     property_row(ui, "Pane", facts.analysis.as_deref().unwrap_or(&pane_label));
-    let (visible, bound) = facts.traces.unwrap_or((visible, bound));
-    property_row(ui, "Traces", &format!("{visible} visible · {bound} bound"));
-    property_row(ui, "View", view_label);
-    if let Some(x_viewport) = facts.x_viewport.as_deref() {
-        property_row(ui, "X viewport", x_viewport);
-    }
-    if let Some(y_viewport) = facts.y_viewport.as_deref() {
-        property_row(ui, "Y viewport", y_viewport);
-    }
     if let Some(scale) = facts.scale {
         property_row(ui, "Scale", scale);
     }
     property_row(ui, "Limit mask", facts.limit_mask);
-    // Where the mockup states a corner family, this workspace states the run
-    // composition: overlaying runs is how a pane here comes to draw the same
-    // signal more than once.
-    if let Some(runs) = facts.runs {
-        let composition = if runs > 1 {
-            format!("{runs} runs overlaid")
-        } else {
-            "active run only".to_owned()
-        };
-        property_row(ui, "Composition", &composition);
-    }
-    // Explicit limits, not just a readout of the gesture that got here.
-    // Comparing two runs on identical axes, or holding a decade while a
-    // parameter sweeps, cannot be done by dragging.
+    // Explicit limits, each with its own fit. Comparing two runs on identical
+    // axes, or holding a decade while a parameter sweeps, cannot be done by
+    // dragging; the fields show the viewport, so no row restates it.
     axis_limit_row(ui, app, &facts, PaneAxis::X, "X range");
     axis_limit_row(ui, app, &facts, PaneAxis::Y, "Y range");
-    let fit_label = if wave_stack {
-        "Fit active strip"
-    } else {
-        "Fit active pane"
-    };
-    section_block_gap(ui);
-    if ui
-        .add_enabled(pinned, egui::Button::new(fit_label))
-        .clicked()
-    {
-        crate::workbench::documents::result_document::request_view_gesture(
-            &mut app.state,
-            rspice_results_ui::session::ViewGesture::Fit,
-        );
-    }
 }
 
 /// An explicit interval for one axis of the active pane, or automatic fit.

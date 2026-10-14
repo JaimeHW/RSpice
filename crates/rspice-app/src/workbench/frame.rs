@@ -158,6 +158,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         preflight::run_and_queue(app);
     }
     preflight::show(ctx, app);
+    docks::show_run_details(ctx, app);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
