@@ -842,6 +842,7 @@ impl RSpiceApp {
                 ui,
                 &messages.text(MessageId::CodeSourceWorkspaceClosure),
                 None,
+                None,
                 |ui| {
                     code_inspector_property_list(ui, |ui| {
                         property_row_input(
@@ -948,7 +949,6 @@ fn netlist_lifecycle_body(
     facts: &NetlistLifecycleFacts,
     messages: MessageCatalog,
 ) -> NetlistLifecycleAction {
-    let t = Tokens::get(ui.ctx());
     let mut action = NetlistLifecycleAction::None;
     ScrollArea::vertical()
         .id_salt("netlist-document-lifecycle")
@@ -957,10 +957,8 @@ fn netlist_lifecycle_body(
             code_inspector_section(
                 ui,
                 &messages.text(MessageId::CodeSourceCurrentDocument),
-                Some((
-                    &messages.text(MessageId::CodeSourceOwnedEditable),
-                    t.color.ok,
-                )),
+                Some(&messages.text(MessageId::CodeSourceOwnedEditable)),
+                None,
                 |ui| {
                     code_inspector_property_list(ui, |ui| {
                         if facts.include_identity.is_some() {
@@ -1040,6 +1038,7 @@ fn netlist_lifecycle_body(
             code_inspector_section(
                 ui,
                 &messages.text(MessageId::CodeSourceFileOperations),
+                None,
                 None,
                 |ui| {
                     ui.add_space(6.0);
@@ -1177,13 +1176,11 @@ fn include_search_paths(
     code_inspector_section(
         ui,
         &messages.text(MessageId::NetlistIncludeSearchPaths),
-        Some((
-            &messages.format(
-                MessageId::NetlistIncludeSearchPathCount,
-                &[("count", &authored.len().to_string())],
-            ),
-            t.color.text_dim,
+        Some(&messages.format(
+            MessageId::NetlistIncludeSearchPathCount,
+            &[("count", &authored.len().to_string())],
         )),
+        None,
         |ui| {
             ui.add_space(4.0);
             if authored.is_empty() {
@@ -1383,10 +1380,8 @@ fn netlist_operation_review(
     code_inspector_section(
         ui,
         &messages.text(title),
-        Some((
-            &messages.text(MessageId::CodeSourceOpenTransaction),
-            t.color.accent,
-        )),
+        Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 if deleting {
@@ -1484,10 +1479,8 @@ fn netlist_include_operation_review(
     code_inspector_section(
         ui,
         &messages.text(title),
-        Some((
-            &messages.text(MessageId::CodeSourceOpenTransaction),
-            t.color.accent,
-        )),
+        Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -1547,16 +1540,17 @@ fn current_document(
     accent: egui::Color32,
     messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
-    let ownership = if facts.editable {
-        (messages.text(MessageId::CodeSourceOwnedEditable), ok)
+    let ownership = messages.text(if facts.editable {
+        MessageId::CodeSourceOwnedEditable
     } else {
-        (messages.text(MessageId::CodeSourceOwnedReadOnly), accent)
-    };
+        MessageId::CodeSourceOwnedReadOnly
+    });
     let mut action = None;
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeSourceCurrentDocument),
-        Some((&ownership.0, ownership.1)),
+        Some(&ownership),
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -1668,6 +1662,7 @@ fn operations(
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeSourceFileOperations),
+        None,
         None,
         |ui| {
             ui.add_space(6.0);
@@ -1794,10 +1789,8 @@ fn operation_review(
     code_inspector_section(
         ui,
         &messages.text(title),
-        Some((
-            &messages.text(MessageId::CodeSourceOpenTransaction),
-            t.color.accent,
-        )),
+        Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 if deleting {
@@ -1873,7 +1866,8 @@ fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeSourceRecordedIncludes),
-        Some((&total.to_string(), t.color.text_dim)),
+        Some(&total.to_string()),
+        None,
         |ui| {
             if total == 0 {
                 ui.add_space(6.0);
@@ -1913,7 +1907,8 @@ fn revision_history(
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeSourceRetainedRevisions),
-        Some((&facts.history.len().to_string(), t.color.text_dim)),
+        Some(&facts.history.len().to_string()),
+        None,
         |ui| {
             if facts.history.is_empty() {
                 ui.add_space(6.0);

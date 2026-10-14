@@ -2098,12 +2098,16 @@ pub fn heading(ui: &mut Ui, title: &str, description: Option<&str>) {
 
 /// One canonical section of the embedded Code-workspace inspector.
 ///
-/// The section owns its 29 px header and bottom divider. `status` uses the
-/// mockup's row-status grammar: a five-point dot, six-point gap, and mono text.
+/// The section owns its header and bottom divider. `status` is the header's
+/// trailing metadata — a count, a state — in faint mono, the grammar of
+/// [`section_header`]'s metadata. A `problem` paints its mark in front of the
+/// status, or alone at the trailing edge, and is the header's only colour.
+/// The title is painted as written.
 pub fn code_inspector_section(
     ui: &mut Ui,
     title: &str,
-    status: Option<(&str, Color32)>,
+    status: Option<&str>,
+    problem: Option<Problem>,
     body: impl FnOnce(&mut Ui),
 ) {
     let t = Tokens::get(ui.ctx());
@@ -2124,35 +2128,41 @@ pub fn code_inspector_section(
             ),
         );
 
-        let status_left = if let Some((label, tone)) = status {
+        let mut trailing = rect.right() - 10.0;
+        if let Some(label) = status {
             let galley = ui.painter().layout_no_wrap(
                 label.to_owned(),
                 theme::mono(tokens::FS_0, FontWeight::Medium),
-                tone,
+                t.color.text_faint,
             );
             let label_pos = Pos2::new(
-                rect.right() - 10.0 - galley.size().x,
+                trailing - galley.size().x,
                 rect.center().y - galley.size().y * 0.5,
             );
-            ui.painter().galley(label_pos, galley, tone);
-            let dot_center = Pos2::new(label_pos.x - 8.5, rect.center().y);
-            ui.painter().circle_filled(dot_center, 2.5, tone);
-            dot_center.x - 2.5
+            ui.painter().galley(label_pos, galley, t.color.text_faint);
+            trailing = label_pos.x
+                - (crate::widgets::PROBLEM_MARK_ADVANCE - crate::widgets::PROBLEM_MARK_SIDE);
+        }
+        if let Some(problem) = problem {
+            let side = crate::widgets::PROBLEM_MARK_SIDE;
+            let mark = Rect::from_center_size(
+                Pos2::new(trailing - side * 0.5, rect.center().y),
+                Vec2::splat(side),
+            );
+            paint_problem_mark(ui.painter(), mark, problem);
+            trailing = mark.left();
+        }
+        let status_left = if status.is_some() || problem.is_some() {
+            trailing
         } else {
             rect.right()
         };
 
-        let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-        let title_job = egui::text::LayoutJob::single_section(
-            title.to_uppercase(),
-            egui::TextFormat {
-                font_id: title_font,
-                color: t.color.text_dim,
-                extra_letter_spacing: 0.055 * tokens::FS_0,
-                ..Default::default()
-            },
+        let title_galley = ui.painter().layout_no_wrap(
+            title.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::SemiBold),
+            t.color.text_dim,
         );
-        let title_galley = ui.fonts_mut(|fonts| fonts.layout_job(title_job));
         ui.painter()
             .with_clip_rect(Rect::from_min_max(
                 Pos2::new(rect.left() + 10.0, rect.top()),

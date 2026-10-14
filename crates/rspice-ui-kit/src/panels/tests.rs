@@ -669,6 +669,58 @@ fn a_problem_row_keeps_its_value_neutral_and_only_marks_a_problem() {
     );
 }
 
+/// A code inspector section's status is faint metadata with no dot in front of
+/// it; a problem adds its mark, and is the only colour in the header. The
+/// title is painted as written.
+#[test]
+fn a_code_inspector_section_paints_no_status_dot() {
+    fn walk(shape: &Shape, circles: &mut usize, texts: &mut Vec<egui::epaint::TextShape>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, circles, texts)),
+            Shape::Circle(_) => *circles += 1,
+            Shape::Text(text) => texts.push(text.clone()),
+            _ => {}
+        }
+    }
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let palette = Tokens::default().color;
+    for problem in [None, Some(Problem::Warning), Some(Problem::Failure)] {
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                code_inspector_section(ui, "Diagnostics", Some("2 advisories"), problem, |_| {});
+                code_inspector_section(ui, "Build targets", Some("3"), None, |_| {});
+            });
+        });
+        let mut circles = 0;
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut circles, &mut texts);
+        }
+        assert_eq!(circles, 0, "{problem:?}: a status dot was painted");
+        for status in ["2 advisories", "3"] {
+            let painted = texts
+                .iter()
+                .find(|text| text.galley.text() == status)
+                .unwrap_or_else(|| panic!("{status:?} not painted"));
+            assert_eq!(painted.fallback_color, palette.text_faint, "{status:?}");
+        }
+        assert!(texts.iter().any(|text| text.galley.text() == "Diagnostics"));
+        // Every stroke but the section's own divider.
+        let marks = stroke_colors(&output.shapes)
+            .into_iter()
+            .filter(|color| *color != palette.border)
+            .collect::<Vec<_>>();
+        match problem {
+            None => assert!(marks.is_empty(), "a clear header paints a mark"),
+            Some(problem) => {
+                assert!(!marks.is_empty(), "{problem:?} painted no mark");
+                assert!(marks.iter().all(|color| *color == problem.color(&palette)));
+            }
+        }
+    }
+}
+
 /// An inspector problem starts on the inset a note starts on, with its words
 /// after the mark.
 #[test]

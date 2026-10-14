@@ -622,7 +622,7 @@ fn page_settings(
         .map(|index| page_marker(index, page.title()))
         .unwrap_or("+");
     let section_title = format!("Page settings · {page_marker}");
-    code_inspector_section(ui, &section_title, None, |ui| {
+    code_inspector_section(ui, &section_title, None, None, |ui| {
         egui::Frame::new()
             .inner_margin(egui::Margin {
                 left: 10,

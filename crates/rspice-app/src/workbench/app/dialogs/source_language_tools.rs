@@ -288,13 +288,11 @@ fn tools_body(
             code_inspector_section(
                 ui,
                 &messages.text(MessageId::CodeToolsIndexedClosure),
-                Some((
-                    &messages.format(
-                        MessageId::CodeToolsIndexRevision,
-                        &[("revision", &tools.index.bundle_revision.to_string())],
-                    ),
-                    t.color.text_dim,
+                Some(&messages.format(
+                    MessageId::CodeToolsIndexRevision,
+                    &[("revision", &tools.index.bundle_revision.to_string())],
                 )),
+                None,
                 |ui| {
                     code_inspector_property_list(ui, |ui| {
                         property_row(
@@ -479,7 +477,8 @@ fn symbol_table(
     code_inspector_section(
         ui,
         &messages.text(title),
-        Some((&rows.len().to_string(), t.color.text_dim)),
+        Some(&rows.len().to_string()),
+        None,
         |ui| {
             if rows.is_empty() {
                 muted_line(ui, t, &messages.text(MessageId::CodeToolsNoAnswer));
@@ -545,7 +544,8 @@ fn completions(
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeToolsCompletion),
-        Some((&offered.len().to_string(), t.color.text_dim)),
+        Some(&offered.len().to_string()),
+        None,
         |ui| {
             if offered.is_empty() {
                 muted_line(ui, t, &messages.text(MessageId::CodeToolsNoCompletion));
@@ -591,7 +591,8 @@ fn code_actions(
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeToolsCodeActions),
-        Some((&count.to_string(), t.color.text_dim)),
+        Some(&count.to_string()),
+        None,
         |ui| match &offered {
             // The formatter refuses documents it cannot prove it would not
             // corrupt. That refusal is the finding, so it is shown as one.
@@ -650,6 +651,7 @@ fn rename_transaction(
         ui,
         &messages.text(MessageId::CodeToolsRenameSymbol),
         None,
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -706,7 +708,7 @@ fn prose(
     body: Option<String>,
     empty: String,
 ) -> Option<ToolAction> {
-    code_inspector_section(ui, &title, None, |ui| {
+    code_inspector_section(ui, &title, None, None, |ui| {
         ui.add_space(6.0);
         match body {
             Some(text) => {

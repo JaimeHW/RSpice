@@ -46,7 +46,7 @@ pub fn show(
         ScrollArea::vertical()
             .id_salt("report-authoring.inspector")
             .show(ui, |ui| {
-                code_inspector_section(ui, "Output formats", None, |ui| {
+                code_inspector_section(ui, "Output formats", None, None, |ui| {
                     code_inspector_property_list(ui, |ui| {
                         let mut output_formats = document.output_formats();
                         let enabled_count = [
@@ -101,7 +101,7 @@ pub fn show(
                         }
                     });
                 });
-                code_inspector_section(ui, "Publication", None, |ui| {
+                code_inspector_section(ui, "Publication", None, None, |ui| {
                     code_inspector_property_list(ui, |ui| {
                         let mut profile = document.publication_profile();
                         let mut changed = false;
@@ -201,7 +201,7 @@ pub fn show(
                         }
                     });
                 });
-                code_inspector_section(ui, "Release handoff", None, |ui| {
+                code_inspector_section(ui, "Release handoff", None, None, |ui| {
                     code_inspector_property_list(ui, |ui| {
                         let (bound_result, exact_binding) = host.bound_result_label(document);
                         property_row(ui, "Artifact identity", &document.id().to_string());

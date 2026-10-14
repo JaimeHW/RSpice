@@ -205,91 +205,97 @@ fn find_body(
                 return;
             };
             let has_selection = search.selection_char_range.is_some();
-            code_inspector_section(ui, &messages.text(MessageId::CodeSearchQuery), None, |ui| {
-                code_inspector_property_list(ui, |ui| {
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSearchActiveDocument),
-                        &search.active_path,
-                    );
-                    crate::workbench::design_system::property_row_text_edit(
-                        ui,
-                        &messages.text(MessageId::CommonFind),
-                        egui::TextEdit::singleline(&mut search.query)
-                            .id(code_workspace::source_search_query_id()),
-                        false,
-                    );
-                    let replace_with = messages.text(MessageId::CodeSearchReplaceWith);
-                    if replaceable {
-                        crate::workbench::design_system::property_row_input(
-                            ui,
-                            &replace_with,
-                            &mut search.replacement,
-                            false,
-                        );
-                    } else {
+            code_inspector_section(
+                ui,
+                &messages.text(MessageId::CodeSearchQuery),
+                None,
+                None,
+                |ui| {
+                    code_inspector_property_list(ui, |ui| {
                         property_row(
                             ui,
-                            &replace_with,
-                            &messages.text(MessageId::CodeSearchReplaceUnavailable),
+                            &messages.text(MessageId::CodeSearchActiveDocument),
+                            &search.active_path,
                         );
-                    }
-                    let options = SCOPES
-                        .iter()
-                        // Offering a scope the search will refuse is worse than
-                        // not offering it, so Selection appears only when the
-                        // editor captured one.
-                        .filter(|(scope, _)| {
-                            has_selection || *scope != CodeSourceSearchScope::Selection
-                        })
-                        .map(|(_, id)| (messages.text(*id), messages.text(*id)))
-                        .collect::<Vec<_>>();
-                    let mut chosen = scope_label(messages, search.scope);
-                    if property_row_combo(
-                        ui,
-                        &messages.text(MessageId::CommonScope),
-                        "source-find-scope",
-                        &mut chosen,
-                        &options,
-                        true,
-                    ) && let Some((scope, _)) =
-                        SCOPES.iter().find(|(_, id)| messages.text(*id) == chosen)
-                    {
-                        search.scope = *scope;
-                    }
-                });
-                ui.add_space(6.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
-                    ui.checkbox(
-                        &mut search.match_case,
-                        messages.text(MessageId::CodeSearchMatchCase),
-                    );
-                    ui.checkbox(
-                        &mut search.whole_symbol,
-                        messages.text(MessageId::CodeSearchWholeSymbol),
-                    );
-                    ui.checkbox(
-                        &mut search.regular_expression,
-                        messages.text(MessageId::CodeSearchRegularExpression),
-                    );
-                    ui.checkbox(
-                        &mut search.include_comments,
-                        messages.text(MessageId::CodeSearchIncludeComments),
-                    );
-                    ui.add_enabled(
-                        search.scope == CodeSourceSearchScope::ActiveLanguageProject,
-                        egui::Checkbox::new(
-                            &mut search.include_generated_references,
-                            messages.text(MessageId::CodeSearchIncludeGenerated),
-                        ),
-                    )
-                    .on_disabled_hover_text(
-                        messages.text(MessageId::CodeSearchIncludeGeneratedHint),
-                    );
-                });
-                ui.add_space(6.0);
-            });
+                        crate::workbench::design_system::property_row_text_edit(
+                            ui,
+                            &messages.text(MessageId::CommonFind),
+                            egui::TextEdit::singleline(&mut search.query)
+                                .id(code_workspace::source_search_query_id()),
+                            false,
+                        );
+                        let replace_with = messages.text(MessageId::CodeSearchReplaceWith);
+                        if replaceable {
+                            crate::workbench::design_system::property_row_input(
+                                ui,
+                                &replace_with,
+                                &mut search.replacement,
+                                false,
+                            );
+                        } else {
+                            property_row(
+                                ui,
+                                &replace_with,
+                                &messages.text(MessageId::CodeSearchReplaceUnavailable),
+                            );
+                        }
+                        let options = SCOPES
+                            .iter()
+                            // Offering a scope the search will refuse is worse than
+                            // not offering it, so Selection appears only when the
+                            // editor captured one.
+                            .filter(|(scope, _)| {
+                                has_selection || *scope != CodeSourceSearchScope::Selection
+                            })
+                            .map(|(_, id)| (messages.text(*id), messages.text(*id)))
+                            .collect::<Vec<_>>();
+                        let mut chosen = scope_label(messages, search.scope);
+                        if property_row_combo(
+                            ui,
+                            &messages.text(MessageId::CommonScope),
+                            "source-find-scope",
+                            &mut chosen,
+                            &options,
+                            true,
+                        ) && let Some((scope, _)) =
+                            SCOPES.iter().find(|(_, id)| messages.text(*id) == chosen)
+                        {
+                            search.scope = *scope;
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
+                        ui.checkbox(
+                            &mut search.match_case,
+                            messages.text(MessageId::CodeSearchMatchCase),
+                        );
+                        ui.checkbox(
+                            &mut search.whole_symbol,
+                            messages.text(MessageId::CodeSearchWholeSymbol),
+                        );
+                        ui.checkbox(
+                            &mut search.regular_expression,
+                            messages.text(MessageId::CodeSearchRegularExpression),
+                        );
+                        ui.checkbox(
+                            &mut search.include_comments,
+                            messages.text(MessageId::CodeSearchIncludeComments),
+                        );
+                        ui.add_enabled(
+                            search.scope == CodeSourceSearchScope::ActiveLanguageProject,
+                            egui::Checkbox::new(
+                                &mut search.include_generated_references,
+                                messages.text(MessageId::CodeSearchIncludeGenerated),
+                            ),
+                        )
+                        .on_disabled_hover_text(
+                            messages.text(MessageId::CodeSearchIncludeGeneratedHint),
+                        );
+                    });
+                    ui.add_space(6.0);
+                },
+            );
 
             if replaceable {
                 ui.add_space(4.0);
@@ -346,14 +352,8 @@ fn results_table(
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeSearchMatchesHeading),
-        Some((
-            &summary,
-            if found.total_matches == 0 {
-                t.color.text_dim
-            } else {
-                t.color.ok
-            },
-        )),
+        Some(&summary),
+        None,
         |ui| {
             if found.matches.is_empty() {
                 ui.add_space(6.0);

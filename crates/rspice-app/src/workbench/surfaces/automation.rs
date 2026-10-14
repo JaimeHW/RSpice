@@ -11,8 +11,8 @@ use crate::ui::widgets::Button;
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp, ScalarPreference};
 
 use super::super::design_system::{
-    WorkbenchIcon, code_inspector_property_list, code_inspector_section, heading, property_row,
-    workspace_title_row,
+    Problem, WorkbenchIcon, code_inspector_property_list, code_inspector_section, heading,
+    property_row, workspace_title_row,
 };
 use crate::workbench::documents::code_workspace::{
     AutomationExecutionState, CodeDiagnosticCollection, CodeEditorLanguage, CodeWorkspacePage,
@@ -909,6 +909,7 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         &messages.text(MessageId::AutomationRuntimeApi),
         None,
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -950,6 +951,7 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationPermissions),
+        None,
         None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
@@ -1007,14 +1009,8 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationDiagnostics),
-        Some((
-            &diagnostic_status,
-            if diagnostic_count == 0 {
-                t.color.ok
-            } else {
-                t.color.err
-            },
-        )),
+        Some(&diagnostic_status),
+        (diagnostic_count > 0).then_some(Problem::Failure),
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -1037,15 +1033,11 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
             });
         },
     );
-    let preview_tone = if preview.release_ready {
-        t.color.accent
-    } else {
-        t.color.warn
-    };
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationExecutionPreview),
-        Some((&preview_status, preview_tone)),
+        Some(&preview_status),
+        (!preview.release_ready).then_some(Problem::Warning),
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -1089,6 +1081,7 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         &messages.text(MessageId::AutomationArtifacts),
         None,
+        None,
         |ui| {
             ui.add_space(4.0);
             artifact_row(
@@ -1116,6 +1109,7 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationSessionSafety),
+        None,
         None,
         |ui| {
             egui::Frame::new()
@@ -1145,17 +1139,19 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.ui.messages();
     let redacted = messages.text(MessageId::AutomationRedacted);
     let phase = app.state.ui.code_workspace.automation.debug.phase;
-    let tone = match phase {
-        AutomationDebugPhase::Paused => t.color.warn,
-        AutomationDebugPhase::Running => t.color.info,
-        AutomationDebugPhase::Failed => t.color.err,
-        AutomationDebugPhase::Inactive | AutomationDebugPhase::Stopped => t.color.text_dim,
+    let problem = match phase {
+        AutomationDebugPhase::Paused => Some(Problem::Warning),
+        AutomationDebugPhase::Failed => Some(Problem::Failure),
+        AutomationDebugPhase::Running
+        | AutomationDebugPhase::Inactive
+        | AutomationDebugPhase::Stopped => None,
     };
     let phase_label = automation_debug_phase_label(phase, messages);
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationDebug),
-        Some((&phase_label, tone)),
+        Some(&phase_label),
+        problem,
         |ui| {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {

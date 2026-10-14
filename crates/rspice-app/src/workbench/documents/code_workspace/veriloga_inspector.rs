@@ -16,8 +16,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::design_system::{
-    StatusMark, WorkbenchIcon, code_inspector_property_list, code_inspector_section, property_row,
-    property_row_control_columns, property_row_height, property_row_status, property_row_toned,
+    Problem, StatusMark, WorkbenchIcon, code_inspector_property_list, code_inspector_section,
+    property_row, property_row_control_columns, property_row_height, property_row_status,
+    property_row_toned,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -155,7 +156,6 @@ pub(crate) fn show_veriloga_inspector(
         ui,
         compiled.then(|| veriloga_diagnostics(state, project_id, selected)),
         messages,
-        &t,
     );
     parameters_section(ui, receipt, messages, &t);
     abi_section(ui, receipt, messages);
@@ -188,14 +188,15 @@ fn parameters_section(
     let count = parameters
         .as_ref()
         .map(|parameters| parameters.len().to_string());
-    let status = match count.as_deref() {
-        Some(count) => (count, t.color.text_dim),
-        None => (required.as_str(), t.color.warn),
+    let (status, problem) = match count.as_deref() {
+        Some(count) => (count, None),
+        None => (required.as_str(), Some(Problem::Warning)),
     };
     code_inspector_section(
         ui,
         &messages.text(MessageId::VerilogAParameters),
         Some(status),
+        problem,
         |ui| match parameters.as_deref() {
             None => muted_row(ui, &messages.text(MessageId::VerilogAParametersNotCompiled)),
             Some([]) => muted_row(ui, &messages.text(MessageId::VerilogANoParameters)),
@@ -435,6 +436,7 @@ fn module_section(
         ui,
         &messages.text(MessageId::VerilogAModuleSection),
         None,
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 property_row(
@@ -584,6 +586,7 @@ fn build_targets_section(
         ui,
         &messages.text(MessageId::VerilogABuildTargets),
         None,
+        None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
                 let Some(receipt) = receipt else {
@@ -650,7 +653,6 @@ fn diagnostics_section(
     ui: &mut Ui,
     diagnostics: Option<Arc<CodeDiagnosticCollection>>,
     messages: MessageCatalog,
-    t: &Tokens,
 ) {
     const INSPECTOR_DIAGNOSTIC_PREVIEW: usize = 50;
 
@@ -658,10 +660,8 @@ fn diagnostics_section(
         code_inspector_section(
             ui,
             &messages.text(MessageId::VerilogADiagnostics),
-            Some((
-                &messages.text(MessageId::VerilogACompileRequired),
-                t.color.warn,
-            )),
+            Some(&messages.text(MessageId::VerilogACompileRequired)),
+            Some(Problem::Warning),
             |ui| {
                 muted_row(
                     ui,
@@ -674,7 +674,7 @@ fn diagnostics_section(
     let summary = diagnostics.summary();
     let error_count = summary.errors;
     let advisory_count = summary.total().saturating_sub(error_count);
-    let (status, tone) = if error_count > 0 {
+    let (status, problem) = if error_count > 0 {
         let count = error_count.to_string();
         (
             messages.format(
@@ -685,7 +685,7 @@ fn diagnostics_section(
                 },
                 &[("count", &count)],
             ),
-            t.color.err,
+            Some(Problem::Failure),
         )
     } else if advisory_count > 0 {
         let count = advisory_count.to_string();
@@ -698,15 +698,16 @@ fn diagnostics_section(
                 },
                 &[("count", &count)],
             ),
-            t.color.warn,
+            Some(Problem::Warning),
         )
     } else {
-        (messages.text(MessageId::VerilogAClean), t.color.ok)
+        (messages.text(MessageId::VerilogAClean), None)
     };
     code_inspector_section(
         ui,
         &messages.text(MessageId::VerilogADiagnostics),
-        Some((&status, tone)),
+        Some(&status),
+        problem,
         |ui| {
             if diagnostics.is_empty() {
                 muted_row(ui, &messages.text(MessageId::VerilogANoDiagnostics));
@@ -730,6 +731,7 @@ fn abi_section(ui: &mut Ui, receipt: Option<&VerilogACompileReceipt>, messages: 
     code_inspector_section(
         ui,
         &messages.text(MessageId::VerilogAAbiContract),
+        None,
         None,
         |ui| {
             code_inspector_property_list(ui, |ui| {
