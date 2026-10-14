@@ -5,6 +5,7 @@
 //! bounded, so two schematic subjects cannot inherit each other's offset.
 
 use super::*;
+use crate::state::ComponentType;
 
 fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};

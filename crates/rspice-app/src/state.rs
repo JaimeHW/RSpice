@@ -132,6 +132,7 @@ pub use rspice_model_library::sealed_model_sources;
 pub use rspice_results::noise::{NoiseFigureEvidence, NoiseSummary};
 #[cfg(test)]
 pub use simulation::DcMismatchEvidence;
+pub use simulation::DcSweepFamily;
 pub(crate) use simulation::RunHistoryRevision;
 #[cfg(test)]
 pub use simulation::SensitivityBasisEvidence;
@@ -169,9 +170,8 @@ pub use simulation::{
     TransferFunctionScalarEvidence,
 };
 pub use simulation::{ConvergenceReport, PeriodicInitializationMethod};
-pub use simulation::{DcCurveSelection, DcSweepFamily};
 #[cfg(test)]
-pub use simulation::{DcMismatchContributorEvidence, DcMismatchScopeEvidence};
+pub use simulation::{DcCurveSelection, DcMismatchContributorEvidence, DcMismatchScopeEvidence};
 #[cfg(test)]
 pub use simulation::{DcSweepDirection, DcSweepQuantity};
 #[cfg(test)]

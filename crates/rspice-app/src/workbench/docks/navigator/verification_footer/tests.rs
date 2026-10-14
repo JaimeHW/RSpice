@@ -428,7 +428,7 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
         .iter()
     {
         if node.role() == egui::accesskit::Role::TextInput
-            && node.label() == Some("Find canonical name, path, unit, or type…")
+            && node.label() == Some("Find signal…")
             && let Some(bounds) = node.bounds()
         {
             search_rect = Some(egui::Rect::from_min_max(

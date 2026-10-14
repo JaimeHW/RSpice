@@ -29,7 +29,7 @@ use egui::{Align2, Color32, Pos2, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 
 use crate::diagnostics::ConsoleMessage;
 use crate::state::model_library::ModelConsumerScope;
-use crate::state::{CellViewRef, Component, ComponentType, ViewType, explicit_component_model};
+use crate::state::{CellViewRef, Component, ViewType, explicit_component_model};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app_state::DesignCheckStatus;
