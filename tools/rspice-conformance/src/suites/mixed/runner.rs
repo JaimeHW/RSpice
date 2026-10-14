@@ -18,7 +18,7 @@ use super::case::{CaseResult, Observation};
 use super::classify::{CaseEnd, Classification, QuantityOutcome, QuantityVerdict, classify};
 use super::compare::{Expected, Tolerance, Verdict, compare, lattice, ratio};
 use super::design::{Design, Quantity, analysis_kind, discover, integrity};
-use super::measure::{MeasureError, Measured, evaluate, statistic};
+use super::measure::{MeasureError, Measured, evaluate, onto_axis, statistic};
 use super::outcomes::{self, Drift, Row};
 use super::{Outcome, Route, analytic, events, oracle, probes};
 
@@ -734,6 +734,8 @@ fn evaluate_quantity(
         ),
         "per_trial" => per_trial_quantity(quantity, variant, rspice, tolerance),
         _ => {
+            let on_axis = closed_form_on_axis(quantity, rspice);
+            let quantity = on_axis.as_ref().unwrap_or(quantity);
             let actual = match evaluate(&quantity.measure, variant, rspice) {
                 Ok(actual) => actual,
                 Err(error) => return measure_failure(error),
@@ -769,6 +771,23 @@ fn evaluate_quantity(
             QuantityOutcome::Compared(compare(&actual, &expected, tolerance))
         }
     }
+}
+
+/// `quantity` with its points moved onto the frequencies RSpice solved, for an
+/// ac or noise quantity compared against a closed form (O6); see
+/// [`onto_axis`]. `None` for any other quantity, or when every point already
+/// is one of those frequencies.
+fn closed_form_on_axis(quantity: &Quantity, rspice: &Observation) -> Option<Quantity> {
+    if quantity.oracle != "O6" || !matches!(quantity.measure.kind.as_str(), "ac" | "noise") {
+        return None;
+    }
+    let points = quantity.measure.points.as_ref()?;
+    let moved = onto_axis(&rspice.axis, points);
+    (moved != *points).then(|| {
+        let mut quantity = quantity.clone();
+        quantity.measure.points = Some(moved);
+        quantity
+    })
 }
 
 fn measure_failure(error: MeasureError) -> QuantityOutcome {

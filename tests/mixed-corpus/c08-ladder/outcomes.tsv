@@ -9,5 +9,5 @@ sv	tran	interp	refused	compile_refusal; label="net/biquad_sv.sv"; instance=biqua
 sv	tran	native	refused	compile_refusal; label="net/biquad_sv.sv"; instance=biquad_sv.sv form=structured; token-form=structured; analysis-form=location; site=net/biquad_sv.sv
 tr	ac	interp	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°
 tr	ac	native	pass	acH (O6) [1] Δ=-6.322e-2 dB, -2.252e-2° allowed 1e-1 dB, 1e0°
-va	ac	interp	wrong	acH (O6) [4] Δ=2.903e-3 dB, 2.779e-2° allowed 1e-3 dB, 1e-2°
-va	ac	native	wrong	acH (O6) [4] Δ=2.903e-3 dB, 2.779e-2° allowed 1e-3 dB, 1e-2°
+va	ac	interp	pass	acH (O6) [6] Δ=1.080e-13 dB, 0.000e0° allowed 1e-3 dB, 1e-2°
+va	ac	native	pass	acH (O6) [6] Δ=1.080e-13 dB, 0.000e0° allowed 1e-3 dB, 1e-2°

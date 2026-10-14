@@ -735,6 +735,42 @@ fn same_point(value: f64, point: f64) -> bool {
     (value - point).abs() <= 1e-9 * point.abs().max(1e-30)
 }
 
+/// `points` moved onto `axis`: each to the axis value nearest it on a log
+/// scale. A point that already is an axis value ([`same_point`]) stays as
+/// written, and so does one outside the axis or not positive, which the
+/// measure then reports as it would have.
+///
+/// For a frequency quantity compared against a closed form. The closed form
+/// is exact at any frequency, so it is taken where the producer solved: a
+/// point between two grid values would interpolate the producer's response,
+/// and the comparison would hold the interpolation's error rather than the
+/// producer's.
+pub fn onto_axis(axis: &[f64], points: &[f64]) -> Vec<f64> {
+    let (low, high) = axis
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {
+            (low.min(*value), high.max(*value))
+        });
+    points
+        .iter()
+        .map(|&point| {
+            if point <= 0.0
+                || point < low
+                || point > high
+                || axis.iter().any(|value| same_point(*value, point))
+            {
+                return point;
+            }
+            let distance = |value: f64| (value.ln() - point.ln()).abs();
+            axis.iter()
+                .copied()
+                .filter(|value| *value > 0.0)
+                .min_by(|a, b| distance(*a).total_cmp(&distance(*b)))
+                .unwrap_or(point)
+        })
+        .collect()
+}
+
 /// Indices bracketing `point`; equal when `point` is a grid value
 /// ([`same_point`]) — the usual case, since both sides run the same sweep card.
 fn bracket(axis: &[f64], point: f64) -> MeasureResult<(usize, usize)> {
@@ -1197,6 +1233,25 @@ mod tests {
         assert!((values[0] - 0.2).abs() < 1e-5, "{values:?}");
         fft.window = Some([5e-4, 2e-3]);
         assert!(evaluate(&fft, "x", &observation).is_err());
+    }
+
+    #[test]
+    fn points_move_onto_the_nearest_frequency_the_producer_solved() {
+        // `.ac dec 20 100 1meg`, as C8 sweeps it.
+        let axis: Vec<f64> = (0..=80)
+            .map(|k| 10f64.powf(2.0 + k as f64 / 20.0))
+            .collect();
+        let moved = onto_axis(&axis, &[100.0, 1e3, 5e3, 2e4, 1e6, 50.0, 2e6, 0.0]);
+        // On the grid, a point stays as written, not as the sweep spelled it.
+        assert_eq!(moved[0].to_bits(), 100f64.to_bits());
+        assert_eq!(moved[1].to_bits(), 1e3f64.to_bits());
+        assert_eq!(moved[4].to_bits(), 1e6f64.to_bits());
+        // Between grid points, the nearest on a log scale.
+        assert_eq!(moved[2].to_bits(), axis[34].to_bits(), "5 kHz -> 10^3.7");
+        assert_eq!(moved[3].to_bits(), axis[46].to_bits(), "20 kHz -> 10^4.3");
+        // Outside the sweep, or not a frequency: the measure reports it.
+        assert_eq!(&moved[5..], &[50.0, 2e6, 0.0]);
+        assert!(bracket(&axis, moved[2]).is_ok_and(|(low, high)| low == high));
     }
 
     #[test]
