@@ -624,6 +624,50 @@ fn finite_goal_miss_counts_as_executed_but_not_passed() {
     assert_eq!(coverage.passed, 0);
 }
 
+/// A run that retains an SOA verdict states it, as an instance's Checks row
+/// does; "verdict unavailable" is said only of evidence that holds none.
+#[test]
+fn the_device_safety_flow_states_the_retained_soa_verdict() {
+    let mut app = RSpiceApp::test_instance();
+    let evaluation = crate::state::SoaEvaluationEvidence {
+        duration: None,
+        thresholds: Default::default(),
+        envelope: None,
+        derating: None,
+        device_id: "M1".to_owned(),
+        parameter: crate::state::SoaParameterEvidence::DrainSourceVoltage,
+        limit_value: 3.3,
+        worst_actual_value: 3.0,
+        worst_time_s: 1.0e-9,
+        sample_count: 2,
+        unit: "V".to_owned(),
+        description: "Maximum drain-source voltage".to_owned(),
+        verdict: crate::state::SoaRuleVerdictEvidence::Warning,
+    };
+    let analysis = AnalysisResult::new(1, AnalysisType::Soa, "SOA")
+        .with_result_payload(AnalysisResultPayload::Soa {
+            source_history: None,
+            evaluations: vec![evaluation],
+            violations: Vec::new(),
+        })
+        .with_provenance(
+            crate::state::AnalysisResultProvenance::new(
+                AnalysisInstanceId::new(),
+                ObjectRevision::INITIAL,
+                ContentDigest::from_bytes([0x5c; 32]),
+                Vec::new(),
+            )
+            .expect("test provenance is valid"),
+        );
+    let mut run = SimulationRun::new(1);
+    run.add_analysis(analysis);
+    app.state.simulation.retained.runs = vec![run].into();
+    app.state.simulation.view.active_run_idx = Some(0);
+
+    let flow = super::verification_flow_presentation(&app, VerificationPage::DeviceSafety);
+    assert_eq!(flow.status, "9.1% margin");
+}
+
 #[test]
 fn verification_navigator_scrolls_when_flows_exceed_compact_height() {
     assert!(verification_navigator_requires_scroll(503.0));

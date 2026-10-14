@@ -12,6 +12,10 @@ pub(super) mod stimulus;
 mod symbol;
 mod veriloga;
 
+/// The SOA verdict the Verify flow states is the one an instance's Checks row
+/// states, read the same way.
+pub(super) use design::analysis_soa_display;
+
 use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 use rspice_ui_kit::panels::{
     PANEL_INSET, Problem, code_inspector_section, panel_bleed, panel_body, panel_inset,

@@ -940,25 +940,6 @@ pub fn property_row_status(
     )
 }
 
-/// Status-bearing counterpart to [`schematic_property_row`].
-pub fn schematic_property_row_status(
-    ui: &mut Ui,
-    label: &str,
-    value: &str,
-    value_tone: Color32,
-    mark: StatusMark,
-) -> Response {
-    property_row_with_tone(
-        ui,
-        label,
-        value,
-        value_tone,
-        Some((mark, value_tone)),
-        tokens::FS_1,
-        elide_text,
-    )
-}
-
 /// Gap between a property row's label and value columns.
 const PROPERTY_ROW_GAP: f32 = 8.0;
 /// Share of the column space the label takes while the row is narrow enough

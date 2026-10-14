@@ -1165,98 +1165,35 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         }
     }
 
-    let current = checks_current(&app.state);
-    let findings = current.then(|| {
-        app.state
-            .dialogs
-            .drc_results
-            .as_ref()
-            .map(|result| {
-                result
-                    .violations()
-                    .iter()
-                    .filter(|violation| violation_targets_net(violation, net))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+    // Only this net's own findings, and only from a check of the drawing as it
+    // stands. A clean or unchecked net is the normal state.
+    let findings = current_findings(&app.state, |violation| {
+        violation_targets_net(violation, net)
     });
-    let collision_count = current.then(|| net_name_collision_count(&app.state, net));
-    section_header(ui, "Checks", Some(&checks_status(&app.state)));
-    let t = Tokens::get(ui.ctx());
-    let (connectivity, connectivity_tone, connectivity_mark) = match findings.as_ref() {
-        None => (
-            "pending recheck".to_owned(),
-            t.color.warn,
-            StatusMark::Warning,
-        ),
-        Some(findings) if findings.is_empty() => (
-            if terminals.len() >= 2 {
-                "conductor closed".to_owned()
-            } else {
-                "declared".to_owned()
-            },
-            t.color.ok,
-            StatusMark::Success,
-        ),
-        Some(findings) => {
-            let severity = findings
-                .iter()
-                .map(|finding| finding.severity)
-                .max()
-                .unwrap_or(DrcSeverity::Info);
-            (
-                format!(
-                    "{} finding{}",
-                    findings.len(),
-                    if findings.len() == 1 { "" } else { "s" }
-                ),
-                if severity >= DrcSeverity::Error {
-                    t.color.err
-                } else {
-                    t.color.warn
-                },
-                if severity >= DrcSeverity::Error {
-                    StatusMark::Failure
-                } else {
-                    StatusMark::Warning
-                },
-            )
+    let collisions = if checks_current(&app.state) {
+        net_name_collision_count(&app.state, net)
+    } else {
+        0
+    };
+    if !findings.is_empty() || collisions > 0 {
+        section_header(ui, "Checks", None);
+        if !findings.is_empty() {
+            property_row_problem(
+                ui,
+                "Connectivity",
+                &count_label(findings.len(), "finding"),
+                Some(findings_problem(&findings)),
+            );
         }
-    };
-    property_row_status(
-        ui,
-        "Connectivity",
-        &connectivity,
-        connectivity_tone,
-        connectivity_mark,
-    );
-    let (collision_label, collision_tone, collision_mark) = match collision_count {
-        None => (
-            "pending recheck".to_owned(),
-            t.color.warn,
-            StatusMark::Warning,
-        ),
-        Some(0) => (
-            "unique on sheet".to_owned(),
-            t.color.ok,
-            StatusMark::Success,
-        ),
-        Some(count) => (
-            format!(
-                "{count} conflicting name{}",
-                if count == 1 { "" } else { "s" }
-            ),
-            t.color.err,
-            StatusMark::Failure,
-        ),
-    };
-    property_row_status(
-        ui,
-        "Name collisions",
-        &collision_label,
-        collision_tone,
-        collision_mark,
-    );
+        if collisions > 0 {
+            property_row_problem(
+                ui,
+                "Name collisions",
+                &count_label(collisions, "conflicting name"),
+                Some(Problem::Failure),
+            );
+        }
+    }
 
     let plottable = class != NetClass::Ground;
     let connected: Vec<u64> = terminals

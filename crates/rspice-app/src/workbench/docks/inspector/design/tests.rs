@@ -552,14 +552,16 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
     state.dialogs.drc_results = Some(result);
     state.dialogs.drc_checked_version = state.schematic.topology_version();
 
-    assert_eq!(
-        current_violation_count(&state, rspice_design::drc::DrcViolationType::UnconnectedPin),
-        1
-    );
-    assert_eq!(
-        current_violation_count(&state, rspice_design::drc::DrcViolationType::FloatingNode),
-        1
-    );
+    fn of_type(state: &AppState, violation_type: rspice_design::drc::DrcViolationType) -> usize {
+        current_findings(state, |violation| violation.violation_type == violation_type).len()
+    }
+    use rspice_design::drc::DrcViolationType::{FloatingNode, UnconnectedPin};
+    assert_eq!(of_type(&state, UnconnectedPin), 1);
+    assert_eq!(of_type(&state, FloatingNode), 1);
+
+    // A check of an earlier drawing reports nothing about this one.
+    state.dialogs.drc_checked_version = state.schematic.topology_version() + 1;
+    assert_eq!(of_type(&state, UnconnectedPin), 0);
 }
 
 #[test]
@@ -595,20 +597,53 @@ fn soa_display_reports_real_worst_margin_and_failures() {
         verdict: SoaRuleVerdictEvidence::Warning,
     };
 
-    let display = component_soa_display(&[&pass, &warning], 0);
-    assert_eq!(display.label, "warning · 25.0% margin");
-    assert_eq!(display.tone, ComponentSoaTone::Warning);
+    let display = component_soa_display(&[&pass, &warning], 0).expect("a verdict");
+    assert_eq!(display.label, "25.0% margin");
+    assert_eq!(display.problem, Some(Problem::Warning));
 
-    let failed = component_soa_display(&[&pass], 2);
-    assert_eq!(failed.label, "2 retained violations");
-    assert_eq!(failed.tone, ComponentSoaTone::Failure);
+    let passed = component_soa_display(&[&pass], 0).expect("a verdict");
+    assert_eq!(passed.label, "40.0% margin");
+    assert_eq!(passed.problem, None, "a pass is neutral");
+
+    let failed = component_soa_display(&[&pass], 2).expect("a verdict");
+    assert_eq!(failed.label, "2 violations");
+    assert_eq!(failed.problem, Some(Problem::Failure));
 }
 
 #[test]
 fn soa_display_does_not_invent_evidence() {
-    let display = component_soa_display(&[], 0);
-    assert_eq!(display.label, "No retained device evidence");
-    assert_eq!(display.tone, ComponentSoaTone::NoEvidence);
+    assert_eq!(component_soa_display(&[], 0), None);
+}
+
+/// An instance's Checks section lists only what is wrong with it. A clean
+/// instance, or one whose check predates the drawing, has no section: the
+/// sheet's own Checks section owns the check.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_instance_has_a_checks_section_only_for_its_own_findings() {
+    let (mut app, id) = app_with_model_bound_instance();
+    let component = app.state.schematic.document().components[0].clone();
+    let painted = painted_panel(|ui| component_checks(ui, &app, &component));
+    assert!(painted.is_empty(), "unchecked: {painted}");
+
+    let mut result = rspice_design::drc::DrcResult::new();
+    app.state.dialogs.drc_results = Some(result.clone());
+    app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+    let painted = painted_panel(|ui| component_checks(ui, &app, &component));
+    assert!(painted.is_empty(), "clean: {painted}");
+
+    result.add_violation(rspice_design::drc::DrcViolation::new(
+        1,
+        rspice_design::drc::DrcViolationType::UnconnectedPin,
+        "XU1.1 is open",
+        rspice_design::drc::DrcLocation::Component {
+            id,
+            name: "XU1".to_owned(),
+        },
+    ));
+    app.state.dialogs.drc_results = Some(result);
+    let painted = painted_panel(|ui| component_checks(ui, &app, &component));
+    assert_eq!(painted, "Checks\nConnectivity\n1 finding\n");
 }
 
 #[test]

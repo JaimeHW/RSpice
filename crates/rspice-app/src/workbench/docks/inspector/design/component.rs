@@ -1134,84 +1134,30 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
     }
 }
 
+/// This instance's own findings from a check of the drawing as it stands,
+/// and its stress against the safe operating area when a run measured it.
+/// With neither, the section is absent: a clean or unchecked instance is the
+/// normal state, and the sheet's Checks section owns the check itself.
 pub(super) fn component_checks(ui: &mut Ui, app: &RSpiceApp, component: &Component) {
-    let topology = app.state.schematic.topology_version();
-    let current = checks_current(&app.state);
-    let findings = current
-        .then(|| {
-            app.state.dialogs.drc_results.as_ref().map(|result| {
-                result
-                    .violations()
-                    .iter()
-                    .filter(|violation| violation_targets_component(violation, component))
-                    .collect::<Vec<_>>()
-            })
-        })
-        .flatten();
-    section_header(ui, "Checks", Some(&checks_status(&app.state)));
-    let t = Tokens::get(ui.ctx());
-    let (connectivity, tone, mark) = if let Some(findings) = findings {
-        if findings.is_empty() {
-            ("checked".to_owned(), t.color.ok, StatusMark::Success)
-        } else {
-            let severity = findings
-                .iter()
-                .map(|finding| finding.severity)
-                .max()
-                .unwrap_or(DrcSeverity::Info);
-            (
-                format!(
-                    "{} finding{}",
-                    findings.len(),
-                    if findings.len() == 1 { "" } else { "s" }
-                ),
-                if severity >= DrcSeverity::Error {
-                    t.color.err
-                } else {
-                    t.color.warn
-                },
-                if severity >= DrcSeverity::Error {
-                    StatusMark::Failure
-                } else {
-                    StatusMark::Warning
-                },
-            )
-        }
-    } else {
-        (
-            "pending recheck".to_owned(),
-            t.color.warn,
-            StatusMark::Warning,
-        )
-    };
-    property_row_status(ui, "Connectivity", &connectivity, tone, mark);
+    let findings = current_findings(&app.state, |violation| {
+        violation_targets_component(violation, component)
+    });
     let soa = retained_component_soa(&app.state, &component.name);
-    property_row_status(
-        ui,
-        "Safe operating area",
-        &soa.label,
-        match soa.tone {
-            ComponentSoaTone::Pass => t.color.ok,
-            ComponentSoaTone::Warning => t.color.warn,
-            ComponentSoaTone::Failure => t.color.err,
-            ComponentSoaTone::NoEvidence => t.color.text_dim,
-        },
-        match soa.tone {
-            ComponentSoaTone::Pass => StatusMark::Success,
-            ComponentSoaTone::Warning => StatusMark::Warning,
-            ComponentSoaTone::Failure => StatusMark::Failure,
-            ComponentSoaTone::NoEvidence => StatusMark::Neutral,
-        },
-    );
-    property_row(
-        ui,
-        "Last checked",
-        &if current {
-            format!("topology revision {topology}")
-        } else {
-            format!("rerun for topology revision {topology}")
-        },
-    );
+    if findings.is_empty() && soa.is_none() {
+        return;
+    }
+    section_header(ui, "Checks", None);
+    if !findings.is_empty() {
+        property_row_problem(
+            ui,
+            "Connectivity",
+            &count_label(findings.len(), "finding"),
+            Some(findings_problem(&findings)),
+        );
+    }
+    if let Some(soa) = soa {
+        property_row_problem(ui, "Safe operating area", &soa.label, soa.problem);
+    }
 }
 
 pub(super) fn violation_targets_component(violation: &DrcViolation, component: &Component) -> bool {
@@ -1224,18 +1170,13 @@ pub(super) fn violation_targets_component(violation: &DrcViolation, component: &
         .any(|item| item.eq_ignore_ascii_case(&component.name))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ComponentSoaTone {
-    Pass,
-    Warning,
-    Failure,
-    NoEvidence,
-}
-
+/// A safe-operating-area verdict as a row states it: the worst margin, or the
+/// violation count, with a problem's mark when the stress is near or past a
+/// limit. A pass is neutral.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct ComponentSoaDisplay {
-    pub(super) label: String,
-    pub(super) tone: ComponentSoaTone,
+pub(crate) struct ComponentSoaDisplay {
+    pub(crate) label: String,
+    pub(crate) problem: Option<Problem>,
 }
 
 /// Resolve only current, source-attributed SOA evidence for the selected
@@ -1244,15 +1185,11 @@ pub(super) struct ComponentSoaDisplay {
 pub(super) fn retained_component_soa(
     state: &AppState,
     component_name: &str,
-) -> ComponentSoaDisplay {
-    let Some(run) = state.simulation.active_run() else {
-        return no_component_soa();
-    };
-    let Some(receipt) = run.prepared_receipt() else {
-        return no_component_soa();
-    };
+) -> Option<ComponentSoaDisplay> {
+    let run = state.simulation.active_run()?;
+    let receipt = run.prepared_receipt()?;
     if receipt.project_revision() != state.workspace.content.project.revision() {
-        return no_component_soa();
+        return None;
     }
 
     let mut evaluations = Vec::new();
@@ -1283,28 +1220,37 @@ pub(super) fn retained_component_soa(
     component_soa_display(&evaluations, violations)
 }
 
-pub(super) fn no_component_soa() -> ComponentSoaDisplay {
-    ComponentSoaDisplay {
-        label: "No retained device evidence".to_owned(),
-        tone: ComponentSoaTone::NoEvidence,
-    }
+/// The worst verdict one SOA analysis holds across every device it checked,
+/// or `None` when the analysis carries no evaluations to judge.
+pub(crate) fn analysis_soa_display(
+    analysis: &crate::state::AnalysisResult,
+) -> Option<ComponentSoaDisplay> {
+    let Some(AnalysisResultPayload::Soa {
+        evaluations,
+        violations,
+        ..
+    }) = analysis.result_payload.as_ref()
+    else {
+        return None;
+    };
+    component_soa_display(&evaluations.iter().collect::<Vec<_>>(), violations.len())
 }
 
+/// The verdict a set of evaluations and violations amounts to: the violation
+/// count when any limit was crossed, else the worst margin. `None` when there
+/// is nothing to judge.
 pub(super) fn component_soa_display(
     evaluations: &[&crate::state::SoaEvaluationEvidence],
     violations: usize,
-) -> ComponentSoaDisplay {
+) -> Option<ComponentSoaDisplay> {
     if violations > 0 {
-        return ComponentSoaDisplay {
-            label: format!(
-                "{violations} retained violation{}",
-                if violations == 1 { "" } else { "s" }
-            ),
-            tone: ComponentSoaTone::Failure,
-        };
+        return Some(ComponentSoaDisplay {
+            label: count_label(violations, "violation"),
+            problem: Some(Problem::Failure),
+        });
     }
     if evaluations.is_empty() {
-        return no_component_soa();
+        return None;
     }
 
     let verdict = evaluations
@@ -1320,15 +1266,18 @@ pub(super) fn component_soa_display(
                 .then_some((limit - evaluation.worst_actual_value.abs()) / limit * 100.0)
         })
         .min_by(f64::total_cmp);
-    let margin = margin_percent
-        .map(|value| format!(" · {value:.1}% margin"))
-        .unwrap_or_default();
-    let (label, tone) = match verdict {
-        SoaRuleVerdictEvidence::Pass => (format!("pass{margin}"), ComponentSoaTone::Pass),
-        SoaRuleVerdictEvidence::Warning => (format!("warning{margin}"), ComponentSoaTone::Warning),
+    let (problem, without_margin) = match verdict {
+        SoaRuleVerdictEvidence::Pass => (None, "within limits"),
+        SoaRuleVerdictEvidence::Warning => (Some(Problem::Warning), "near a limit"),
         SoaRuleVerdictEvidence::Violation | SoaRuleVerdictEvidence::Critical => {
-            (format!("failed{margin}"), ComponentSoaTone::Failure)
+            (Some(Problem::Failure), "past a limit")
         }
     };
-    ComponentSoaDisplay { label, tone }
+    Some(ComponentSoaDisplay {
+        label: margin_percent.map_or_else(
+            || without_margin.to_owned(),
+            |margin| format!("{margin:.1}% margin"),
+        ),
+        problem,
+    })
 }

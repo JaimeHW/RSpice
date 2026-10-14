@@ -6300,6 +6300,24 @@ fn verification_flow_presentation(
             let soa_evidence =
                 active_run.and_then(|run| verified_analysis(run, crate::state::AnalysisType::Soa));
             let has_evidence = soa_evidence.is_some();
+            // A retained verdict is stated as the instance inspector states
+            // it; only evidence without one is said to lack it.
+            if let Some(verdict) = soa_evidence.and_then(super::inspector::analysis_soa_display) {
+                use super::super::design_system::Problem;
+                let (mark, tone) = match verdict.problem {
+                    Some(Problem::Failure) => (StatusMark::Failure, FlowTone::Error),
+                    Some(Problem::Warning) => (StatusMark::Warning, FlowTone::Warn),
+                    None => (StatusMark::Neutral, FlowTone::Neutral),
+                };
+                return VerificationFlowPresentation {
+                    label: verification_flow_label(page).to_owned(),
+                    detail: "Worst device stress against its SOA limits".to_owned(),
+                    status: verdict.label,
+                    mark: VerificationFlowMark::Status(mark),
+                    icon_tone: tone,
+                    status_tone: tone,
+                };
+            }
             VerificationFlowPresentation {
                 label: verification_flow_label(page).to_owned(),
                 detail: if has_evidence {

@@ -8,7 +8,7 @@
 
 mod component;
 
-pub(crate) use component::apply_bound_model_choice;
+pub(crate) use component::{analysis_soa_display, apply_bound_model_choice};
 
 use component::*;
 
@@ -37,10 +37,10 @@ use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
-    Problem, PropertyRowCaption, StatusMark, WorkbenchIcon, property_row_captioned,
-    property_row_combo, property_row_flagged, property_row_input_action,
-    property_row_input_captioned, property_row_input_with_hint,
-    schematic_property_row as property_row, schematic_property_row_status as property_row_status,
+    Problem, PropertyRowCaption, WorkbenchIcon, property_row_captioned, property_row_combo,
+    property_row_flagged, property_row_input_action, property_row_input_captioned,
+    property_row_input_with_hint, schematic_property_row as property_row,
+    schematic_property_row_problem as property_row_problem,
 };
 use crate::workbench::state::{InlineEditField, ModelsPage, VerificationPage, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
@@ -637,16 +637,45 @@ fn sheet_row(ui: &mut Ui, state: &AppState, object_id: u64) {
     property_row(ui, "Sheet", &format!("Sheet {page} \u{00b7} {name}"));
 }
 
-fn tone_for(ui: &Ui, ok: bool) -> Color32 {
-    let t = Tokens::get(ui.ctx());
-    if ok { t.color.ok } else { t.color.warn }
+/// `count` things, as a row's value states them: "1 finding", "3 findings".
+fn count_label(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
-fn mark_for(ok: bool) -> StatusMark {
-    if ok {
-        StatusMark::Success
+/// The findings a check of the drawing as it stands reported for whatever
+/// `targets` picks out. A check run against an earlier drawing reports none:
+/// its findings may name objects that have since moved or gone.
+fn current_findings<'a>(
+    state: &'a AppState,
+    targets: impl Fn(&DrcViolation) -> bool,
+) -> Vec<&'a DrcViolation> {
+    if !checks_current(state) {
+        return Vec::new();
+    }
+    state
+        .dialogs
+        .drc_results
+        .as_ref()
+        .map(|result| {
+            result
+                .violations()
+                .iter()
+                .filter(|violation| targets(violation))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The problem a set of findings amounts to: a failure when any of them is
+/// an error, else a warning.
+fn findings_problem(findings: &[&DrcViolation]) -> Problem {
+    if findings
+        .iter()
+        .any(|finding| finding.severity >= DrcSeverity::Error)
+    {
+        Problem::Failure
     } else {
-        StatusMark::Warning
+        Problem::Warning
     }
 }
 
@@ -677,7 +706,6 @@ use inline_instance::*;
 
 fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
     let reference = app.state.workspace.content.active_view.clone();
-    let current = checks_current(&app.state);
     let depth = app
         .state
         .workspace
@@ -697,14 +725,6 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
                 .is_some()
         })
         .count();
-    let open_pins = current_violation_count(
-        &app.state,
-        rspice_design::drc::DrcViolationType::UnconnectedPin,
-    );
-    let floating_nets = current_violation_count(
-        &app.state,
-        rspice_design::drc::DrcViolationType::FloatingNode,
-    );
 
     section_header(ui, "Sheet", None);
     property_row(
@@ -796,50 +816,31 @@ fn sheet_panel(ui: &mut Ui, app: &mut RSpiceApp, nets: &[DesignNet]) {
         },
     );
 
+    // The header says whether the check is current and how many errors it
+    // found; a row appears only for a finding to act on.
     section_header(ui, "Checks", Some(&checks_status(&app.state)));
-    let connectivity_ok = current && open_pins == 0;
-    property_row_status(
-        ui,
-        "Connectivity",
-        &if !current {
-            "pending recheck".to_owned()
-        } else if open_pins == 0 {
-            "all pins bound".to_owned()
-        } else {
-            format!(
-                "{open_pins} unconnected pin{}",
-                if open_pins == 1 { "" } else { "s" }
-            )
-        },
-        tone_for(ui, connectivity_ok),
-        mark_for(connectivity_ok),
-    );
-    let floating_ok = current && floating_nets == 0;
-    property_row_status(
-        ui,
-        "Floating nets",
-        &if !current {
-            "pending recheck".to_owned()
-        } else if floating_nets == 0 {
-            "none".to_owned()
-        } else {
-            floating_nets.to_string()
-        },
-        tone_for(ui, floating_ok),
-        mark_for(floating_ok),
-    );
-    let topology = app.state.schematic.topology_version();
-    property_row_status(
-        ui,
-        "Last checked",
-        &if current {
-            format!("topology revision {topology}")
-        } else {
-            format!("rerun for topology revision {topology}")
-        },
-        tone_for(ui, current),
-        mark_for(current),
-    );
+    let open_pins = current_findings(&app.state, |violation| {
+        violation.violation_type == rspice_design::drc::DrcViolationType::UnconnectedPin
+    });
+    let floating_nets = current_findings(&app.state, |violation| {
+        violation.violation_type == rspice_design::drc::DrcViolationType::FloatingNode
+    });
+    if !open_pins.is_empty() {
+        property_row_problem(
+            ui,
+            "Connectivity",
+            &count_label(open_pins.len(), "unconnected pin"),
+            Some(findings_problem(&open_pins)),
+        );
+    }
+    if !floating_nets.is_empty() {
+        property_row_problem(
+            ui,
+            "Floating nets",
+            &floating_nets.len().to_string(),
+            Some(findings_problem(&floating_nets)),
+        );
+    }
     action_stack(ui, |ui| {
         command_action(
             ui,
@@ -890,19 +891,8 @@ fn drawing_sheet_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         &format!("{} · {}", sheet.page_label, sheet.sheet_name),
     );
 
-    let advisory_count = overflow.finding_count();
-    property_row_status(
-        ui,
-        "Content",
-        &if overflow.is_clear() {
-            "inside the sheet".to_owned()
-        } else {
-            format!("{advisory_count} outside")
-        },
-        tone_for(ui, overflow.is_clear()),
-        mark_for(overflow.is_clear()),
-    );
-
+    // Content inside the sheet is the normal state; content outside it is the
+    // box below, which counts it.
     if !overflow.is_clear() {
         drawing_sheet_overflow_advisory(ui, app, &overflow);
     }
@@ -1159,22 +1149,6 @@ fn schematic_grid_label(pitch: crate::state::SchematicGridPitch) -> &'static str
         crate::state::SchematicGridPitch::Mil25 => "25 mil",
         crate::state::SchematicGridPitch::Metric => "metric",
     }
-}
-
-fn current_violation_count(
-    state: &AppState,
-    violation_type: rspice_design::drc::DrcViolationType,
-) -> usize {
-    if !checks_current(state) {
-        return 0;
-    }
-    state.dialogs.drc_results.as_ref().map_or(0, |result| {
-        result
-            .violations()
-            .iter()
-            .filter(|violation| violation.violation_type == violation_type)
-            .count()
-    })
 }
 
 // =============================================================================
