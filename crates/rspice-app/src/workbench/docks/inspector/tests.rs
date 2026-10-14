@@ -1162,10 +1162,11 @@ fn veriloga_inspector_app() -> RSpiceApp {
     app.state.open_workspace_view(reference);
     app.state.workbench.activate(Workspace::Design);
     let project = app.state.workspace.content.project.id();
-    let diagnostics =
+    let Err(diagnostics) =
         code_workspace::compile_project_bundle_receipt(project, &bundle, Some("gain_cell"))
-            .err()
-            .expect("an undeclared identifier refuses the compile");
+    else {
+        panic!("an undeclared identifier refuses the compile");
+    };
     let veriloga = &mut app.state.ui.code_workspace.veriloga;
     veriloga.last_failure = std::sync::Arc::new(
         code_workspace::CodeDiagnosticCollection::try_new(diagnostics).expect("few findings"),
@@ -1180,6 +1181,9 @@ fn veriloga_inspector_app() -> RSpiceApp {
     app
 }
 
+/// One review panel: its file name and the app state it renders.
+type ReviewPanel = (&'static str, fn() -> RSpiceApp);
+
 /// The inspector's panels as PNGs, with their measured geometry beside each,
 /// at the dock's default and minimum widths. `RSPICE_RASTER_DIR` names the
 /// directory; the system temp directory otherwise.
@@ -1188,7 +1192,7 @@ fn veriloga_inspector_app() -> RSpiceApp {
 fn render_the_inspector_panels_for_review() {
     let directory = std::env::var("RSPICE_RASTER_DIR")
         .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    let panels: [(&str, fn() -> RSpiceApp); 3] = [
+    let panels: [ReviewPanel; 3] = [
         ("design-component", design_component_app),
         ("veriloga-inspector", veriloga_inspector_app),
         ("waves-details", waves_details_app),
