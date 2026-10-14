@@ -732,7 +732,7 @@ impl<'a> RunContext<'a> {
 
     /// The transient state the result being published linearized around.
     pub(super) fn transient_state(&self) -> Option<super::frequency::StatePublication> {
-        self.transient_state.borrow().clone()
+        *self.transient_state.borrow()
     }
 
     pub(super) fn ensure_planned_namespaces_consumed(&self) -> Result<(), CliError> {
