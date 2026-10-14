@@ -71,7 +71,6 @@ pub(super) fn render(
         closed = shell::header(
             ui,
             &shell::Identity {
-                eyebrow: "STIMULUS LIBRARY",
                 title: &title,
                 card: &session.card,
                 chip: &session.chip,

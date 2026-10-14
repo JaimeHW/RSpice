@@ -23,12 +23,11 @@ const PHONE_MAX_WIDTH: f32 = 560.0;
 const NARROW_MAX_WIDTH: f32 = 820.0;
 const SCOPE_NARROW_MAX_WIDTH: f32 = 760.0;
 const SECTION_LABEL_NARROW_MAX_WIDTH: f32 = 620.0;
-const HEADER_HEIGHT: f32 = 57.0;
+const HEADER_HEIGHT: f32 = 48.0;
 const FOOTER_HEIGHT: f32 = 48.0;
 const CATEGORY_RAIL_WIDTH: f32 = 208.0;
 const CATEGORY_ROW_HEIGHT: f32 = 36.0;
 const TOUCH_TARGET: f32 = 44.0;
-const HEADER_COPY_GAP: f32 = 3.0;
 const FOOTER_ITEM_GAP: f32 = 6.0;
 const SWITCH_TRACK_WIDTH: f32 = 30.0;
 const SWITCH_TRACK_HEIGHT: f32 = 17.0;
@@ -364,42 +363,22 @@ fn render_header(surface: &mut Ui, rect: Rect, large_targets: bool) -> egui::Res
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
-    let eyebrow_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let heading_font = theme::sans(tokens::FS_3, FontWeight::SemiBold);
-    let eyebrow_size = surface
-        .painter()
-        .layout_no_wrap("WORKSPACE".to_owned(), eyebrow_font, t.color.text_faint)
-        .size();
     let heading_size = surface
         .painter()
-        .layout_no_wrap("Preferences".to_owned(), heading_font, t.color.text)
+        .layout_no_wrap("Preferences".to_owned(), heading_font.clone(), t.color.text)
         .size();
-    let copy_size = vec2(
-        eyebrow_size.x.max(heading_size.x) + 1.0,
-        eyebrow_size.y + HEADER_COPY_GAP + heading_size.y,
-    );
-    let copy_rect = centered_header_copy_rect(rect, copy_size, 15.0);
+    let copy_rect = centered_header_copy_rect(rect, heading_size + vec2(1.0, 0.0), 15.0);
     let mut copy_ui = surface.new_child(
         egui::UiBuilder::new()
             .max_rect(copy_rect)
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
-    let heading_response = copy_ui
-        .vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = HEADER_COPY_GAP;
-            ui.label(
-                egui::RichText::new("WORKSPACE")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.text_faint)
-                    .extra_letter_spacing(0.09 * tokens::FS_0),
-            );
-            ui.label(
-                egui::RichText::new("Preferences")
-                    .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
-                    .color(t.color.text),
-            )
-        })
-        .inner;
+    let heading_response = copy_ui.label(
+        egui::RichText::new("Preferences")
+            .font(heading_font)
+            .color(t.color.text),
+    );
     surface
         .ctx()
         .accesskit_node_builder(heading_response.id, |node| {
@@ -1202,7 +1181,7 @@ mod tests {
 
     #[test]
     fn shell_structure_matches_preferences_mockup_tokens() {
-        assert_eq!(HEADER_HEIGHT, 57.0);
+        assert_eq!(HEADER_HEIGHT, 48.0);
         assert_eq!(FOOTER_HEIGHT, 48.0);
         assert_eq!(CATEGORY_RAIL_WIDTH, 208.0);
         assert_eq!(CATEGORY_ROW_HEIGHT, 36.0);
@@ -1211,7 +1190,6 @@ mod tests {
         assert_eq!(SECTION_LABEL_NARROW_MAX_WIDTH, 620.0);
         assert_eq!(PHONE_MAX_WIDTH, 560.0);
         assert_eq!(TOUCH_TARGET, 44.0);
-        assert_eq!(HEADER_COPY_GAP, 3.0);
         assert_eq!(FOOTER_ITEM_GAP, 6.0);
         assert_eq!(SWITCH_TRACK_WIDTH, 30.0);
         assert_eq!(SWITCH_TRACK_HEIGHT, 17.0);

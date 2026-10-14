@@ -34,8 +34,6 @@ pub(super) const PANE_INSET: i8 = 16;
 
 /// What the header says about the instance this transaction is over.
 pub(super) struct Identity<'a> {
-    /// `STIMULUS LIBRARY`.
-    pub eyebrow: &'a str,
     /// `Adopt a definition onto V1`.
     pub title: &'a str,
     /// The instance's card exactly as the netlister writes it.
@@ -49,8 +47,8 @@ pub(super) struct Identity<'a> {
 /// The dialog's own header: what this is, what it is about, and where the
 /// instance stands.
 ///
-/// The kit's header paints an eyebrow, a title and a close mark, which is one
-/// line short of what this transaction needs: the card the reader is about to
+/// The kit's header paints a title and a close mark, which is one line short
+/// of what this transaction needs: the card the reader is about to
 /// change is the subject of both modes, and a dialog that named the instance
 /// without showing what it currently says would make the reader trust a
 /// sentence instead of reading the deck. Returns whether the close mark was
@@ -78,8 +76,10 @@ pub(super) fn header(ui: &mut Ui, identity: &Identity<'_>) -> bool {
         )
     });
 
+    // The close mark and the chip sit on the title's line, as the kit's close
+    // mark sits on its title's.
     let close_rect = Rect::from_min_size(
-        egui::pos2(band.right() - 14.0 - CLOSE_WIDTH, band.top() + 12.0),
+        egui::pos2(band.right() - 14.0 - CLOSE_WIDTH, band.top() + 9.0),
         vec2(CLOSE_WIDTH, 26.0),
     );
     let mut close_ui = ui.new_child(
@@ -100,7 +100,7 @@ pub(super) fn header(ui: &mut Ui, identity: &Identity<'_>) -> bool {
     let chip_rect = Rect::from_min_size(
         egui::pos2(
             close_rect.left() - 10.0 - chip_track - 2.0 * CHIP_PAD,
-            band.top() + 16.0,
+            band.top() + 13.0,
         ),
         vec2(chip_track + 2.0 * CHIP_PAD, 18.0),
     );
@@ -130,25 +130,11 @@ pub(super) fn header(ui: &mut Ui, identity: &Identity<'_>) -> bool {
 
     let left = band.left() + 20.0;
     let text_right = (chip_rect.left() - 12.0).max(left + 120.0);
-    let mut eyebrow = egui::text::LayoutJob::default();
-    eyebrow.append(
-        identity.eyebrow,
-        0.0,
-        egui::TextFormat {
-            font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
-            color: c.text_faint,
-            extra_letter_spacing: 0.09 * tokens::FS_0,
-            ..Default::default()
-        },
-    );
-    let eyebrow = ui.fonts_mut(|fonts| fonts.layout_job(eyebrow));
-    ui.painter()
-        .galley(egui::pos2(left, band.top() + 12.0), eyebrow, c.text_faint);
     painted_run(
         ui,
         Rect::from_min_max(
-            egui::pos2(left, band.top() + 29.0),
-            egui::pos2(text_right, band.top() + 48.0),
+            egui::pos2(left, band.top() + 12.0),
+            egui::pos2(text_right, band.top() + 32.0),
         ),
         false,
         identity.title,
@@ -156,8 +142,8 @@ pub(super) fn header(ui: &mut Ui, identity: &Identity<'_>) -> bool {
         c.text,
     );
     let card_rect = Rect::from_min_max(
-        egui::pos2(left, band.top() + 51.0),
-        egui::pos2(band.right() - 14.0, band.top() + 65.0),
+        egui::pos2(left, band.top() + 35.0),
+        egui::pos2(band.right() - 14.0, band.top() + 49.0),
     );
     if painted_run(
         ui,
@@ -175,8 +161,9 @@ pub(super) fn header(ui: &mut Ui, identity: &Identity<'_>) -> bool {
     closed
 }
 
-/// The header band: twelve points of lead, three stacked lines, twelve below.
-pub(super) const HEADER_HEIGHT: f32 = 77.0;
+/// The header band: twelve points of lead, the title and the card, twelve
+/// below.
+pub(super) const HEADER_HEIGHT: f32 = 61.0;
 /// The close mark's target.
 const CLOSE_WIDTH: f32 = 30.0;
 /// Air inside the provenance chip, either side of its word.
