@@ -24,10 +24,13 @@ pub enum ShortcutContext {
     VerificationWorkspace,
     ViolationNavigation,
     RunnableProject,
+    /// The source editor a page shows as its document. Its keys act only
+    /// while that editor holds keyboard focus.
+    SourceEditor,
 }
 
 impl ShortcutContext {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Global,
         Self::ApplicationChrome,
         Self::EditContext,
@@ -39,6 +42,7 @@ impl ShortcutContext {
         Self::VerificationWorkspace,
         Self::ViolationNavigation,
         Self::RunnableProject,
+        Self::SourceEditor,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -54,11 +58,17 @@ impl ShortcutContext {
             Self::VerificationWorkspace => "verification-workspace",
             Self::ViolationNavigation => "violation-navigation",
             Self::RunnableProject => "runnable-project",
+            Self::SourceEditor => "source-editor",
         }
     }
 
+    /// The source editor is itself the text that has focus, so its context is
+    /// the one text focus activates rather than suppresses.
     pub const fn suppressed_by_text_focus(self) -> bool {
-        !matches!(self, Self::Global | Self::RunnableProject)
+        !matches!(
+            self,
+            Self::Global | Self::RunnableProject | Self::SourceEditor
+        )
     }
 
     pub fn matches(self, app: &RSpiceApp) -> bool {
@@ -106,6 +116,7 @@ impl ShortcutContext {
                 app.state.workbench.workspace,
                 Workspace::Design | Workspace::Verify
             ),
+            Self::SourceEditor => app.state.ui.active_source_editor.is_some(),
         }
     }
 }
@@ -288,6 +299,40 @@ const RENAME_SELECTION: &[ShortcutBinding] = &[primary(
 )];
 const OBJECT_PROPERTIES: &[ShortcutBinding] =
     &[primary(chord(Key::Q, false, false, false, "Q"), ALL)];
+// The source editor's own keys. Ctrl+D is Duplicate on a schematic too; the
+// two contexts never hold focus at once, so the focused surface decides.
+const TOGGLE_LINE_COMMENT: &[ShortcutBinding] = &[primary(
+    chord(Key::Slash, true, false, false, "Ctrl+/"),
+    ALL,
+)];
+const DUPLICATE_LINE: &[ShortcutBinding] =
+    &[primary(chord(Key::D, true, false, false, "Ctrl+D"), ALL)];
+const DELETE_LINE: &[ShortcutBinding] = &[primary(
+    chord(Key::K, true, false, true, "Ctrl+Shift+K"),
+    ALL,
+)];
+const MOVE_LINE_UP: &[ShortcutBinding] = &[primary(
+    chord(Key::ArrowUp, false, true, false, "Alt+Up"),
+    ALL,
+)];
+const MOVE_LINE_DOWN: &[ShortcutBinding] = &[primary(
+    chord(Key::ArrowDown, false, true, false, "Alt+Down"),
+    ALL,
+)];
+const GO_TO_MATCHING_BRACKET: &[ShortcutBinding] = &[primary(
+    chord(Key::Backslash, true, false, true, "Ctrl+Shift+\\"),
+    ALL,
+)];
+const GO_TO_LINE: &[ShortcutBinding] =
+    &[primary(chord(Key::G, true, false, false, "Ctrl+G"), ALL)];
+const FOLD_SELECTION: &[ShortcutBinding] = &[primary(
+    chord(Key::OpenBracket, true, false, true, "Ctrl+Shift+["),
+    ALL,
+)];
+const UNFOLD_AT_CARET: &[ShortcutBinding] = &[primary(
+    chord(Key::CloseBracket, true, false, true, "Ctrl+Shift+]"),
+    ALL,
+)];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
 const ZOOM_IN: &[ShortcutBinding] = &[
@@ -762,8 +807,28 @@ impl Command {
                 ShortcutContext::VerificationWorkspace
             }
             Self::RunSimulation | Self::StopSimulation => ShortcutContext::RunnableProject,
+            Self::ToggleLineComment
+            | Self::IndentLines
+            | Self::OutdentLines
+            | Self::DuplicateLine
+            | Self::DeleteLine
+            | Self::MoveLineUp
+            | Self::MoveLineDown
+            | Self::GoToMatchingBracket
+            | Self::GoToLine
+            | Self::FormatDocument
+            | Self::FoldSelection
+            | Self::UnfoldAtCaret
+            | Self::FoldAll
+            | Self::UnfoldAll => ShortcutContext::SourceEditor,
             _ => ShortcutContext::Global,
         }
+    }
+
+    /// Whether this command exists only for the source editor in front of the
+    /// reader. Elsewhere it is hidden rather than offered disabled.
+    pub(crate) const fn source_editor_only(self) -> bool {
+        matches!(self.shortcut_context(), ShortcutContext::SourceEditor)
     }
 
     pub const fn shortcut_bindings(self) -> &'static [ShortcutBinding] {
@@ -885,6 +950,17 @@ impl Command {
             Self::AutomationConsole => AUTOMATION_CONSOLE,
             Self::CommandPalette => COMMAND_PALETTE,
             Self::Cancel => CANCEL,
+            Self::ToggleLineComment => TOGGLE_LINE_COMMENT,
+            // Tab and Shift+Tab stay the focused editor's own keys.
+            Self::IndentLines | Self::OutdentLines => NONE,
+            Self::DuplicateLine => DUPLICATE_LINE,
+            Self::DeleteLine => DELETE_LINE,
+            Self::MoveLineUp => MOVE_LINE_UP,
+            Self::MoveLineDown => MOVE_LINE_DOWN,
+            Self::GoToMatchingBracket => GO_TO_MATCHING_BRACKET,
+            Self::GoToLine => GO_TO_LINE,
+            Self::FoldSelection => FOLD_SELECTION,
+            Self::UnfoldAtCaret => UNFOLD_AT_CARET,
             _ => NONE,
         }
     }
@@ -916,10 +992,14 @@ impl Command {
                 "finish or cancel the active application dialog before changing window ownership",
             );
         }
+        if self.source_editor_only() && app.state.ui.active_source_editor.is_none() {
+            return CommandAvailability::Hidden;
+        }
         if self.is_enabled(app) {
             return CommandAvailability::Available;
         }
         let reason = match self {
+            _ if self.source_editor_only() => "the source document is read-only",
             Self::OpenWorkspace(workspace) if workspace != Workspace::Project => {
                 "no project is open"
             }

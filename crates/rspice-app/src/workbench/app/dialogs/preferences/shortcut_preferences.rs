@@ -1192,6 +1192,7 @@ fn editor_context(command: Command) -> ShortcutEditorContext {
         ShortcutContext::Global
         | ShortcutContext::ApplicationChrome
         | ShortcutContext::RunnableProject => ShortcutEditorContext::Global,
+        ShortcutContext::SourceEditor => ShortcutEditorContext::SourceEditor,
     }
 }
 

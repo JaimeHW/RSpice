@@ -324,17 +324,40 @@ impl Command {
         self,
     ) -> Option<crate::workbench::documents::text_editor_commands::SourceEditorRequest> {
         use crate::workbench::documents::text_editor_commands::{
-            SourceEditorRequest, StandardCommand,
+            EditorViewCommand, SourceEditorRequest, StandardCommand, StructuralCommand,
         };
-        Some(SourceEditorRequest::Standard(match self {
-            Self::Undo => StandardCommand::Undo,
-            Self::Redo => StandardCommand::Redo,
-            Self::Cut => StandardCommand::Cut,
-            Self::Copy => StandardCommand::Copy,
-            Self::Paste => StandardCommand::Paste,
-            Self::SelectAll => StandardCommand::SelectAll,
+        Some(match self {
+            Self::Undo => SourceEditorRequest::Standard(StandardCommand::Undo),
+            Self::Redo => SourceEditorRequest::Standard(StandardCommand::Redo),
+            Self::Cut => SourceEditorRequest::Standard(StandardCommand::Cut),
+            Self::Copy => SourceEditorRequest::Standard(StandardCommand::Copy),
+            Self::Paste => SourceEditorRequest::Standard(StandardCommand::Paste),
+            Self::Delete => SourceEditorRequest::Standard(StandardCommand::Delete),
+            Self::SelectAll => SourceEditorRequest::Standard(StandardCommand::SelectAll),
+            Self::ToggleLineComment => {
+                SourceEditorRequest::Structural(StructuralCommand::ToggleComment)
+            }
+            Self::IndentLines => SourceEditorRequest::Structural(StructuralCommand::Indent),
+            Self::OutdentLines => SourceEditorRequest::Structural(StructuralCommand::Outdent),
+            Self::DuplicateLine => {
+                SourceEditorRequest::Structural(StructuralCommand::DuplicateLine)
+            }
+            Self::DeleteLine => SourceEditorRequest::Structural(StructuralCommand::DeleteLine),
+            Self::MoveLineUp => SourceEditorRequest::Structural(StructuralCommand::MoveLineUp),
+            Self::MoveLineDown => {
+                SourceEditorRequest::Structural(StructuralCommand::MoveLineDown)
+            }
+            Self::GoToMatchingBracket => {
+                SourceEditorRequest::Structural(StructuralCommand::MatchBracket)
+            }
+            Self::GoToLine => SourceEditorRequest::GoToLine,
+            Self::FormatDocument => SourceEditorRequest::FormatDocument,
+            Self::FoldSelection => SourceEditorRequest::View(EditorViewCommand::FoldSelection),
+            Self::UnfoldAtCaret => SourceEditorRequest::View(EditorViewCommand::UnfoldAtCaret),
+            Self::FoldAll => SourceEditorRequest::View(EditorViewCommand::FoldAll),
+            Self::UnfoldAll => SourceEditorRequest::View(EditorViewCommand::UnfoldAll),
             _ => return None,
-        }))
+        })
     }
 
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
@@ -820,6 +843,21 @@ impl Command {
                 code_document_is_visible(state)
                     && crate::workbench::app::language_tools_are_available(state)
             }
+            // With a source editor on screen these were answered above.
+            Self::ToggleLineComment
+            | Self::IndentLines
+            | Self::OutdentLines
+            | Self::DuplicateLine
+            | Self::DeleteLine
+            | Self::MoveLineUp
+            | Self::MoveLineDown
+            | Self::GoToMatchingBracket
+            | Self::GoToLine
+            | Self::FormatDocument
+            | Self::FoldSelection
+            | Self::UnfoldAtCaret
+            | Self::FoldAll
+            | Self::UnfoldAll => false,
             // This gate was written for the compile command and never
             // attached, so the button stayed enabled with no bundle, no
             // selected source, an empty root, a compile already running, or a
@@ -1927,6 +1965,22 @@ impl Command {
                         .push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
                 }
             }
+            // Routed to the active source editor above; with none on screen
+            // there is nothing for them to act on.
+            Self::ToggleLineComment
+            | Self::IndentLines
+            | Self::OutdentLines
+            | Self::DuplicateLine
+            | Self::DeleteLine
+            | Self::MoveLineUp
+            | Self::MoveLineDown
+            | Self::GoToMatchingBracket
+            | Self::GoToLine
+            | Self::FormatDocument
+            | Self::FoldSelection
+            | Self::UnfoldAtCaret
+            | Self::FoldAll
+            | Self::UnfoldAll => {}
             Self::CompareGeneratedRevisions => {
                 app.state.ui.netlist.comparison_dialog.open = true;
                 app.state

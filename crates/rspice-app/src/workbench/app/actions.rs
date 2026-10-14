@@ -62,10 +62,17 @@ impl RSpiceApp {
             ctx.input(|input| std::time::Duration::from_secs_f64(input.time.max(0.0)));
         let profile = self.state.ui.preferences.shortcuts().clone();
         let platform = runtime_command_platform(ctx);
+        // The editor the page drew last frame, as the menus also see it.
+        let source_editor_focus = self
+            .state
+            .ui
+            .active_source_editor
+            .is_some_and(|editor| ctx.memory(|memory| memory.has_focus(editor.id)));
         let environment = ShortcutEnvironment {
             workspace: self.state.workbench.workspace,
             active_view,
             canvas_focus,
+            source_editor_focus,
         };
         let mut resolver = std::mem::take(&mut self.state.shortcut_resolver);
         let resolution = resolver.resolve(
@@ -1188,6 +1195,7 @@ mod shortcut_ownership_tests {
             workspace: app.state.workbench.workspace,
             active_view: app.state.workspace.content.active_view_type(),
             canvas_focus: false,
+            source_editor_focus: false,
         };
         let mut resolver = std::mem::take(&mut app.state.shortcut_resolver);
         let resolution = resolver.resolve(

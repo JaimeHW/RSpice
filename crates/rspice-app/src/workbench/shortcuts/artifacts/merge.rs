@@ -1286,9 +1286,12 @@ fn collision_bindings(
 
 fn binding_class(context: ShortcutContext) -> Option<ImportBindingClass> {
     Some(match context {
+        // The source editor serves every source page rather than one
+        // engineering surface, so its keys import with the global ones.
         ShortcutContext::Global
         | ShortcutContext::ApplicationChrome
-        | ShortcutContext::RunnableProject => ImportBindingClass::Global,
+        | ShortcutContext::RunnableProject
+        | ShortcutContext::SourceEditor => ImportBindingClass::Global,
         ShortcutContext::EditContext
         | ShortcutContext::EngineeringCanvas
         | ShortcutContext::SymbolCanvas

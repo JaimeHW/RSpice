@@ -25,12 +25,18 @@ pub(crate) enum StandardCommand {
     Cut,
     Copy,
     Paste,
+    /// What the Delete key does: the selection, or the character after the
+    /// caret.
+    Delete,
     SelectAll,
 }
 
 impl StandardCommand {
     pub(crate) const fn mutates_source(self) -> bool {
-        matches!(self, Self::Undo | Self::Redo | Self::Cut | Self::Paste)
+        matches!(
+            self,
+            Self::Undo | Self::Redo | Self::Cut | Self::Paste | Self::Delete
+        )
     }
 }
 
@@ -106,8 +112,10 @@ pub(crate) struct StructuralEditResult {
     pub selection: ByteSelection,
 }
 
-/// Consume one structural editor shortcut when `editor_id` owns focus.
-/// Returns true only when source bytes changed.
+/// Apply a structural command the application queued for `editor_id`, or the
+/// editor's own Tab and Shift+Tab while it owns focus. Every other line
+/// command is an application command with a rebindable shortcut, so it
+/// arrives queued. Returns true only when source bytes changed.
 pub(crate) fn consume_structural_shortcut(
     ui: &Ui,
     editor_id: Id,
@@ -121,30 +129,10 @@ pub(crate) fn consume_structural_shortcut(
     }
     let command = queued.or_else(|| {
         ui.ctx().input_mut(|input| {
-            let command_shift = Modifiers::COMMAND | Modifiers::SHIFT;
             if editable && input.consume_key(Modifiers::NONE, Key::Tab) {
                 Some(StructuralCommand::Indent)
             } else if editable && input.consume_key(Modifiers::SHIFT, Key::Tab) {
                 Some(StructuralCommand::Outdent)
-            } else if editable
-                && input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Slash))
-            {
-                Some(StructuralCommand::ToggleComment)
-            } else if editable
-                && input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::D))
-            {
-                Some(StructuralCommand::DuplicateLine)
-            } else if editable
-                && input.consume_shortcut(&KeyboardShortcut::new(command_shift, Key::K))
-            {
-                Some(StructuralCommand::DeleteLine)
-            } else if editable && input.consume_key(Modifiers::ALT, Key::ArrowUp) {
-                Some(StructuralCommand::MoveLineUp)
-            } else if editable && input.consume_key(Modifiers::ALT, Key::ArrowDown) {
-                Some(StructuralCommand::MoveLineDown)
-            } else if input.consume_shortcut(&KeyboardShortcut::new(command_shift, Key::Backslash))
-            {
-                Some(StructuralCommand::MatchBracket)
             } else {
                 None
             }
@@ -153,6 +141,9 @@ pub(crate) fn consume_structural_shortcut(
     let Some(command) = command else {
         return false;
     };
+    if command.mutates_source() && !editable {
+        return false;
+    }
     let mut state = egui::text_edit::TextEditState::load(ui.ctx(), editor_id).unwrap_or_default();
     let char_range = state
         .cursor
@@ -243,12 +234,22 @@ pub(crate) struct ActiveSourceEditor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SourceEditorRequest {
     Standard(StandardCommand),
+    Structural(StructuralCommand),
+    View(EditorViewCommand),
+    GoToLine,
+    /// Format the whole document; the page that owns the editor applies it.
+    FormatDocument,
+    /// Put the caret at the start of a one-based line and scroll it into view.
+    RevealLine(usize),
 }
 
 impl SourceEditorRequest {
     pub(crate) const fn mutates_source(self) -> bool {
         match self {
             Self::Standard(command) => command.mutates_source(),
+            Self::Structural(command) => command.mutates_source(),
+            Self::FormatDocument => true,
+            Self::View(_) | Self::GoToLine | Self::RevealLine(_) => false,
         }
     }
 }
@@ -264,6 +265,13 @@ pub(crate) fn queue_source_editor_request(
         SourceEditorRequest::Standard(command) => {
             queue_standard_command(context, editor_id, command);
         }
+        SourceEditorRequest::Structural(command) => {
+            queue_structural_command(context, editor_id, command);
+        }
+        SourceEditorRequest::View(command) => queue_view_command(context, editor_id, command),
+        SourceEditorRequest::GoToLine => queue_go_to_line(context, editor_id),
+        SourceEditorRequest::FormatDocument => queue_format_document(context, editor_id),
+        SourceEditorRequest::RevealLine(line) => queue_reveal_line(context, editor_id, line),
     }
     context.request_repaint();
 }
@@ -327,6 +335,25 @@ pub(crate) fn consume_standard_command(
         StandardCommand::Paste => {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+        }
+        StandardCommand::Delete => {
+            let sorted = char_range.as_sorted_char_range();
+            let start = char_to_byte(source, sorted.start.0);
+            let end = if char_range.is_empty() {
+                char_to_byte(source, sorted.start.0 + 1)
+            } else {
+                char_to_byte(source, sorted.end.0)
+            };
+            if start < end {
+                let mut undoer = state.undoer();
+                undoer.add_undo(&(char_range, source.clone()));
+                state.set_undoer(undoer);
+                source.replace_range(start..end, "");
+                state
+                    .cursor
+                    .set_char_range(Some(CCursorRange::one(CCursor::new(sorted.start.0))));
+                changed = true;
+            }
         }
         StandardCommand::SelectAll => {
             state.cursor.set_char_range(Some(CCursorRange::two(
@@ -415,17 +442,9 @@ pub(crate) fn take_reveal_line(ui: &Ui, editor_id: Id, source: &str) -> Option<u
     Some(line)
 }
 
-/// Process Ctrl/Cmd+G and render the shared line-navigation dialog. Returns
-/// the accepted one-based logical line exactly once.
+/// Render the shared line-navigation dialog once Go to line has been asked
+/// for. Returns the accepted one-based logical line exactly once.
 pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<usize> {
-    if ui.ctx().memory(|memory| memory.has_focus(editor_id))
-        && ui.ctx().input_mut(|input| {
-            input.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::G))
-        })
-    {
-        queue_go_to_line(ui.ctx(), editor_id);
-    }
-
     let state_id = editor_id.with("go-to-line-state");
     let mut state = ui
         .ctx()

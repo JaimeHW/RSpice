@@ -23,6 +23,9 @@ pub(crate) struct ShortcutEnvironment {
     pub(crate) workspace: Workspace,
     pub(crate) active_view: ViewType,
     pub(crate) canvas_focus: bool,
+    /// The source editor the page shows as its document holds keyboard
+    /// focus. Its line and fold keys act only then.
+    pub(crate) source_editor_focus: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -498,6 +501,7 @@ fn context_is_active(context: ShortcutContext, environment: ShortcutEnvironment)
             matches!(environment.workspace, Workspace::Design | Workspace::Verify)
         }
         ShortcutContext::RunnableProject => true,
+        ShortcutContext::SourceEditor => environment.source_editor_focus,
     }
 }
 
@@ -539,6 +543,7 @@ mod tests {
             workspace: Workspace::Design,
             active_view: ViewType::Schematic,
             canvas_focus,
+            source_editor_focus: false,
         }
     }
 
@@ -547,6 +552,7 @@ mod tests {
             workspace: Workspace::Results,
             active_view: ViewType::Schematic,
             canvas_focus: false,
+            source_editor_focus: false,
         }
     }
 
@@ -555,6 +561,7 @@ mod tests {
             workspace: Workspace::Models,
             active_view: ViewType::Symbol,
             canvas_focus,
+            source_editor_focus: false,
         }
     }
 
@@ -563,6 +570,17 @@ mod tests {
             workspace: Workspace::Verify,
             active_view: ViewType::Schematic,
             canvas_focus: false,
+            source_editor_focus: false,
+        }
+    }
+
+    /// A Verilog-A cell view in Design with its source editor focused.
+    fn focused_source_editor() -> ShortcutEnvironment {
+        ShortcutEnvironment {
+            workspace: Workspace::Design,
+            active_view: ViewType::VerilogA,
+            canvas_focus: false,
+            source_editor_focus: true,
         }
     }
 
@@ -1391,5 +1409,46 @@ mod tests {
             );
             assert_eq!(resolved.command, Some(Command::NextViolation));
         }
+    }
+
+    /// Ctrl+D belongs to whichever surface holds focus: the focused source
+    /// editor duplicates its line, the focused canvas its selection.
+    #[test]
+    fn ctrl_d_duplicates_the_line_in_a_focused_source_editor_and_the_selection_on_a_canvas() {
+        let profile = ShortcutPreferences::default();
+        let mut state = ShortcutResolverState::default();
+        let in_editor = state.resolve(
+            &snapshot(&[event(Key::D, primary(), false)], true),
+            &profile,
+            CommandPlatform::Desktop,
+            focused_source_editor(),
+            Duration::ZERO,
+            |_| true,
+        );
+        assert_eq!(in_editor.command, Some(Command::DuplicateLine));
+        let on_canvas = state.resolve(
+            &snapshot(&[event(Key::D, primary(), false)], false),
+            &profile,
+            CommandPlatform::Desktop,
+            design(true),
+            Duration::from_millis(1),
+            |_| true,
+        );
+        assert_eq!(on_canvas.command, Some(Command::Duplicate));
+        let unfocused = state.resolve(
+            &snapshot(&[event(Key::Slash, primary(), false)], true),
+            &profile,
+            CommandPlatform::Desktop,
+            ShortcutEnvironment {
+                source_editor_focus: false,
+                ..focused_source_editor()
+            },
+            Duration::from_millis(2),
+            |_| true,
+        );
+        assert_eq!(
+            unfocused.command, None,
+            "a line key does nothing while another text field holds focus"
+        );
     }
 }

@@ -209,3 +209,113 @@ fn edit_select_all_then_copy_reach_the_source_editor() {
     );
     assert_eq!(root_text(&app, bundle_id), original);
 }
+
+/// The Verilog-A source with its caret on the first line, in a focused
+/// editor.
+fn veriloga_with_focused_editor() -> (egui::Context, RSpiceApp, ProjectSourceId) {
+    let mut app = open_project_app();
+    let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
+    open_in_design(&mut app.state, &reference);
+    let ctx = themed_context();
+    frame(&ctx, &mut app, DESKTOP);
+    frame(&ctx, &mut app, DESKTOP);
+    let editor =
+        code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
+    ctx.memory_mut(|memory| memory.request_focus(editor));
+    frame(&ctx, &mut app, DESKTOP);
+    (ctx, app, bundle_id)
+}
+
+#[test]
+fn ctrl_d_in_a_focused_source_editor_duplicates_the_caret_line_once() {
+    let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
+    let original = root_text(&app, bundle_id);
+    frame_with(
+        &ctx,
+        &mut app,
+        vec![key(
+            egui::Key::D,
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+        )],
+    );
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(
+        root_text(&app, bundle_id),
+        format!("{FIRST_LINE}\n{original}"),
+        "Ctrl+D duplicated the caret's line, exactly once"
+    );
+}
+
+#[test]
+fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewhere() {
+    let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
+    let original = root_text(&app, bundle_id);
+    let second_line = original.lines().nth(1).expect("a second line").to_owned();
+    frame_with(
+        &ctx,
+        &mut app,
+        vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+    );
+
+    assert!(Command::ToggleLineComment.availability(&app).is_available());
+    Command::ToggleLineComment.execute(&mut app);
+    frame(&ctx, &mut app, DESKTOP);
+    assert_eq!(
+        root_text(&app, bundle_id),
+        original.replacen(&second_line, &format!("// {second_line}"), 1),
+        "Toggle line comment commented the caret's line"
+    );
+
+    // On a drawing there is no source editor: the source commands are not
+    // offered at all, rather than offered disabled.
+    app.state.workbench.activate(Workspace::Project);
+    frame(&ctx, &mut app, DESKTOP);
+    for command in [
+        Command::ToggleLineComment,
+        Command::DuplicateLine,
+        Command::GoToLine,
+        Command::FoldAll,
+    ] {
+        assert_eq!(
+            command.availability(&app),
+            crate::workbench::commands::CommandAvailability::Hidden,
+            "{command:?} off a source page"
+        );
+    }
+}
+
+/// The palette row's shortcut, as a screen reader is told it.
+fn palette_shortcut(output: &egui::FullOutput, label: &str) -> Option<String> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()?
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.role() == egui::accesskit::Role::ListBoxOption && node.label() == Some(label)
+        })
+        .and_then(|(_, node)| node.keyboard_shortcut().map(str::to_owned))
+}
+
+#[test]
+fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
+    for (os, expected) in [
+        (egui::os::OperatingSystem::Windows, "Ctrl+/"),
+        (egui::os::OperatingSystem::Mac, "Cmd+/"),
+    ] {
+        let (ctx, mut app, _) = veriloga_with_focused_editor();
+        ctx.set_os(os);
+        Command::CommandPalette.execute(&mut app);
+        app.state.dialogs.command_palette.query = "Toggle line comment".to_owned();
+        let mut output = frame(&ctx, &mut app, DESKTOP);
+        for _ in 0..6 {
+            output = frame(&ctx, &mut app, DESKTOP);
+        }
+        assert_eq!(
+            palette_shortcut(&output, "Toggle line comment").as_deref(),
+            Some(expected),
+            "{os:?}"
+        );
+    }
+}

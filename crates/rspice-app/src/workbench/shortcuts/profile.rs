@@ -599,6 +599,7 @@ pub const fn shortcut_context_precedence_rank(
         ShortcutContext::EditContext
             | ShortcutContext::EngineeringCanvas
             | ShortcutContext::SymbolCanvas
+            | ShortcutContext::SourceEditor
     );
     if modal {
         return match policy {
@@ -636,6 +637,10 @@ const fn context_workspace_mask(context: ShortcutContext) -> u8 {
         ShortcutContext::ResultsWorkspace => 0b0_0100,
         ShortcutContext::VerificationWorkspace => 0b0_1000,
         ShortcutContext::ViolationNavigation => 0b0_1001,
+        // A Verilog-A view is a Design document. The Netlist workspace's
+        // pages have no bit of their own; the global contexts that share
+        // them are compared here through Design.
+        ShortcutContext::SourceEditor => 0b0_0001,
     }
 }
 
@@ -646,6 +651,9 @@ const fn context_view_mask(context: ShortcutContext) -> u8 {
         ShortcutContext::EditContext => 0b0111,
         ShortcutContext::EngineeringCanvas => 0b0011,
         ShortcutContext::SymbolCanvas => 0b0100,
+        // Source documents: never a schematic or symbol canvas, so Ctrl+D can
+        // be Duplicate line here and Duplicate on a drawing.
+        ShortcutContext::SourceEditor => 0b1000,
         ShortcutContext::Global
         | ShortcutContext::ApplicationChrome
         | ShortcutContext::DesignWorkspace

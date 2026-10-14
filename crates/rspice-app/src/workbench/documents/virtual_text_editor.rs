@@ -764,30 +764,8 @@ fn handle_key(
                 session.model.insert_at_selections("");
                 return;
             }
-            Key::D if editable => {
-                apply_model_structural(
-                    &mut session.model,
-                    syntax,
-                    StructuralCommand::DuplicateLine,
-                );
-                return;
-            }
-            Key::Slash if editable => {
-                apply_model_structural(
-                    &mut session.model,
-                    syntax,
-                    StructuralCommand::ToggleComment,
-                );
-                return;
-            }
-            Key::K if editable && modifiers.shift => {
-                apply_model_structural(&mut session.model, syntax, StructuralCommand::DeleteLine);
-                return;
-            }
-            Key::Backslash if modifiers.shift => {
-                apply_model_structural(&mut session.model, syntax, StructuralCommand::MatchBracket);
-                return;
-            }
+            // Line, bracket and fold commands are application commands with
+            // rebindable shortcuts; they arrive queued, never as raw keys.
             Key::ArrowLeft | Key::ArrowRight => {
                 move_horizontal(
                     &mut session.model,
@@ -834,12 +812,6 @@ fn handle_key(
             apply_model_structural(&mut session.model, syntax, StructuralCommand::Outdent);
             session.preferred_column = None;
         }
-        Key::ArrowUp if editable && modifiers.alt => {
-            apply_model_structural(&mut session.model, syntax, StructuralCommand::MoveLineUp);
-        }
-        Key::ArrowDown if editable && modifiers.alt => {
-            apply_model_structural(&mut session.model, syntax, StructuralCommand::MoveLineDown);
-        }
         Key::Escape => {
             if session.model.selections().len() > 1 {
                 let primary = session
@@ -850,16 +822,6 @@ fn handle_key(
                     .unwrap_or(TextSelection::caret(0));
                 session.model.set_selections(vec![primary]);
             }
-        }
-        Key::OpenBracket if editable && command && modifiers.shift => fold_selection(session),
-        Key::CloseBracket if command && modifiers.shift => {
-            let cursor = session
-                .model
-                .selections()
-                .last()
-                .map_or(0, |selection| selection.cursor);
-            let line = session.model.line_column_for_char(cursor).0;
-            session.model.unfold_at_line(line);
         }
         _ => {}
     }
@@ -884,6 +846,10 @@ fn handle_standard_command(
         StandardCommand::Paste if editable => ui
             .ctx()
             .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+        StandardCommand::Delete if editable => {
+            session.model.delete_forward();
+            session.preferred_column = None;
+        }
         StandardCommand::SelectAll => session.model.set_selections(vec![TextSelection {
             anchor: 0,
             cursor: session.model.len_chars(),

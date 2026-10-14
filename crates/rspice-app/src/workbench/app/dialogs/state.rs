@@ -34,16 +34,18 @@ pub(crate) enum ShortcutEditorContext {
     Simulation,
     Results,
     Verification,
+    SourceEditor,
 }
 
 impl ShortcutEditorContext {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::All,
         Self::Global,
         Self::Schematic,
         Self::Simulation,
         Self::Results,
         Self::Verification,
+        Self::SourceEditor,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
@@ -54,6 +56,7 @@ impl ShortcutEditorContext {
             Self::Simulation => "Simulation",
             Self::Results => "Results",
             Self::Verification => "Verification",
+            Self::SourceEditor => "Source editor",
         }
     }
 }
