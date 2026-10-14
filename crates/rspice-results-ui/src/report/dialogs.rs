@@ -52,7 +52,6 @@ fn create_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
     let writable = host.writable();
     let error = host.editor().transaction_error.clone();
     let choice = Dialog::new(
-        "REPORT AUTHORING · TRACEABLE DERIVED EVIDENCE",
         "Plan report artifact",
         "Create report document",
     )
@@ -127,22 +126,18 @@ fn add_page_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
     }
     let valid = valid_title(&host.editor().add_page_title);
     let error = host.editor().transaction_error.clone();
-    let choice = Dialog::new(
-        "REPORTING · DOCUMENT COMPOSITION",
-        "Add report page",
-        "Add page",
-    )
-    .description("Add one versioned page to the project-owned report document.")
-    .ghost("Cancel")
-    .primary_enabled(valid)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let response = input_row(ui, "Page title", &mut host.editor().add_page_title);
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-        Some(response.id)
-    });
+    let choice = Dialog::new("Add report page", "Add page")
+        .description("Add one versioned page to the project-owned report document.")
+        .ghost("Cancel")
+        .primary_enabled(valid)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .show_with_initial_body_focus(ctx, |ui| {
+            let response = input_row(ui, "Page title", &mut host.editor().add_page_title);
+            if let Some(error) = &error {
+                ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+            }
+            Some(response.id)
+        });
     match choice {
         DialogChoice::Primary if valid => host.commit_add_page(),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -188,100 +183,97 @@ fn page_properties_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
         "Refresh linked figures automatically",
         "Freeze selected figure revision",
     ];
-    let choice = Dialog::new(
-        "REPORTING · DOCUMENT COMPOSITION",
-        "Report page properties",
-        "Save page properties",
-    )
-    .description("Edit the selected page through one revision-checked report transaction.")
-    .ghost("Cancel")
-    .primary_enabled(valid)
-    .initial_focus(DialogInitialFocus::BodyControl)
-    .show_with_initial_body_focus(ctx, |ui| {
-        let label_width = 130.0_f32.min(ui.available_width() * 0.32);
-        ui.horizontal(|ui| {
-            ui.set_width(ui.available_width());
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Template"),
-            );
-            let selected_index = host
-                .editor()
-                .report_template_draft
-                .min(TEMPLATE_LABELS.len() - 1);
-            let options = TEMPLATE_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-page-template",
-                "Report template",
-                TEMPLATE_LABELS[selected_index],
-                &options,
-                ui.available_width(),
-            ) {
-                host.editor().report_template_draft = index;
+    let choice = Dialog::new("Report page properties", "Save page properties")
+        .description("Edit the selected page through one revision-checked report transaction.")
+        .ghost("Cancel")
+        .primary_enabled(valid)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .show_with_initial_body_focus(ctx, |ui| {
+            let label_width = 130.0_f32.min(ui.available_width() * 0.32);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Template"),
+                );
+                let selected_index = host
+                    .editor()
+                    .report_template_draft
+                    .min(TEMPLATE_LABELS.len() - 1);
+                let options = TEMPLATE_LABELS
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                if let Some(index) = select(
+                    ui,
+                    "report-page-template",
+                    "Report template",
+                    TEMPLATE_LABELS[selected_index],
+                    &options,
+                    ui.available_width(),
+                ) {
+                    host.editor().report_template_draft = index;
+                }
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Page"),
+                );
+                if let Some(index) = select(
+                    ui,
+                    "report-page-selection",
+                    "Report page",
+                    page_options
+                        .get(page_index)
+                        .map_or("No page", String::as_str),
+                    &page_options,
+                    ui.available_width(),
+                ) && let Some(page) = document.pages().get(index)
+                {
+                    let editor = host.editor();
+                    editor.page_properties_page = Some(page.id());
+                    editor.page_title_draft = page.title().to_owned();
+                    editor.page_update_policy_draft =
+                        page_update_policy_index(page.update_policy());
+                    editor.transaction_error = None;
+                }
+            });
+            ui.add_space(8.0);
+            let response = input_row(ui, "Page title", &mut host.editor().page_title_draft);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.set_width(ui.available_width());
+                ui.add_sized(
+                    Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
+                    egui::Label::new("Update policy"),
+                );
+                let selected_index = host
+                    .editor()
+                    .page_update_policy_draft
+                    .min(UPDATE_POLICY_LABELS.len() - 1);
+                let options = UPDATE_POLICY_LABELS
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>();
+                if let Some(index) = select(
+                    ui,
+                    "report-page-update-policy",
+                    "Report page update policy",
+                    UPDATE_POLICY_LABELS[selected_index],
+                    &options,
+                    ui.available_width(),
+                ) {
+                    host.editor().page_update_policy_draft = index;
+                }
+            });
+            if let Some(error) = &error {
+                ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
             }
+            Some(response.id)
         });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.set_width(ui.available_width());
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Page"),
-            );
-            if let Some(index) = select(
-                ui,
-                "report-page-selection",
-                "Report page",
-                page_options
-                    .get(page_index)
-                    .map_or("No page", String::as_str),
-                &page_options,
-                ui.available_width(),
-            ) && let Some(page) = document.pages().get(index)
-            {
-                let editor = host.editor();
-                editor.page_properties_page = Some(page.id());
-                editor.page_title_draft = page.title().to_owned();
-                editor.page_update_policy_draft = page_update_policy_index(page.update_policy());
-                editor.transaction_error = None;
-            }
-        });
-        ui.add_space(8.0);
-        let response = input_row(ui, "Page title", &mut host.editor().page_title_draft);
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.set_width(ui.available_width());
-            ui.add_sized(
-                Vec2::new(label_width, Tokens::get(ui.ctx()).metrics.ctl_h),
-                egui::Label::new("Update policy"),
-            );
-            let selected_index = host
-                .editor()
-                .page_update_policy_draft
-                .min(UPDATE_POLICY_LABELS.len() - 1);
-            let options = UPDATE_POLICY_LABELS
-                .iter()
-                .map(|label| (*label).to_owned())
-                .collect::<Vec<_>>();
-            if let Some(index) = select(
-                ui,
-                "report-page-update-policy",
-                "Report page update policy",
-                UPDATE_POLICY_LABELS[selected_index],
-                &options,
-                ui.available_width(),
-            ) {
-                host.editor().page_update_policy_draft = index;
-            }
-        });
-        if let Some(error) = &error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-        }
-        Some(response.id)
-    });
     match choice {
         DialogChoice::Primary if valid => host.commit_page_properties(),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
@@ -300,7 +292,6 @@ fn remove_report_block_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) 
     let writable = host.writable();
     let error = host.editor().transaction_error.clone();
     let choice = Dialog::new(
-        "REPORT AUTHORING · PAGE ELEMENT",
         "Remove page element",
         "Remove",
     )
@@ -361,7 +352,6 @@ fn insert_result_document_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut 
     let writable = host.writable();
     let error = host.editor().transaction_error.clone();
     let choice = Dialog::new(
-        "REPORT AUTHORING · IMMUTABLE RESULT SOURCE",
         "Insert result document",
         "Insert result document",
     )
@@ -497,7 +487,6 @@ fn add_report_element_dialog<H: DialogHost>(ctx: &egui::Context, host: &mut H) {
     let writable = host.writable();
     let error = host.editor().transaction_error.clone();
     let choice = Dialog::new(
-        "REPORT AUTHORING · PAGE ELEMENT CATALOG",
         "Add report element",
         "Add element",
     )
