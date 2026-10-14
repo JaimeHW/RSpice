@@ -3201,6 +3201,12 @@ impl SemanticAnalyzer {
                     "`{name}` is an IEEE 1364-2005 annex C informative task, which RSpice does \
                      not implement (RSpice checkpoints replace `$save`/`$restart`)"
                 )
+            } else if name.starts_with("$dumpports") {
+                format!(
+                    "`{name}` is an extended value change dump task (IEEE 1364-2005 section \
+                     18.3), which RSpice does not implement; `$dumpvars` writes a four-state \
+                     value change dump"
+                )
             } else if name.starts_with("$q_")
                 || name.starts_with("$async$")
                 || name.starts_with("$sync$")

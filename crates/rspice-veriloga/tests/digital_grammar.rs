@@ -3088,6 +3088,14 @@ fn system_calls_outside_the_subset_are_refused_by_name() {
         ("$foo(q);", "`$foo` is not a system task or function"),
         ("$countdrivers(q);", "annex C informative task"),
         (
+            "$dumpports(q, \"p.evcd\");",
+            "`$dumpports` is an extended value change dump task (IEEE 1364-2005 section 18.3)",
+        ),
+        (
+            "$dumpportsoff;",
+            "`$dumpportsoff` is an extended value change dump",
+        ),
+        (
             "$sdf_annotate(\"x.sdf\");",
             "`$sdf_annotate` is not supported yet: SDF back-annotation",
         ),
