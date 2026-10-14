@@ -28,6 +28,21 @@ VERILOGA_GATED_CORE_TEST_EXCLUSIONS = {
     ),
 }
 
+# Core targets that are not gated on `veriloga` but that a route's steps run
+# as well, by route feature. The default-feature core lane runs each of them
+# already; the route runs it again because the feature changes what it
+# measures.
+VERILOGA_ROUTE_UNGATED_CORE_TEST_TARGETS = {
+    "veriloga": {
+        "expression_stack_safety": (
+            "bounds the stack a deeply nested expression may take on a 1 MiB "
+            "thread, and the feature deepens the elaboration frames beneath the "
+            "parser. The shipped application carries the feature."
+        ),
+    },
+    "veriloga-native": {},
+}
+
 # The two routes a Verilog-A module can reach the solver through, and the steps
 # that run the gated core suites on each. Both lower the same modules, so a
 # suite passing on one says nothing about the other.
@@ -847,9 +862,24 @@ class CiConfigurationTests(unittest.TestCase):
                 f"{name} is excluded but is no longer a Verilog-A-gated target",
             )
             self.assertGreater(len(reason), 40, f"{name} needs a written reason")
-        expected = gated - set(VERILOGA_GATED_CORE_TEST_EXCLUSIONS)
+        gated_expected = gated - set(VERILOGA_GATED_CORE_TEST_EXCLUSIONS)
+        test_directory = ROOT / "crates" / "rspice-core" / "tests"
 
         for job_name, feature, step_names in VERILOGA_GATED_CORE_TEST_STEPS:
+            extras = VERILOGA_ROUTE_UNGATED_CORE_TEST_TARGETS[feature]
+            for name, reason in extras.items():
+                with self.subTest(route=feature, extra=name):
+                    self.assertTrue(
+                        (test_directory / f"{name}.rs").is_file(),
+                        f"{name} is run on {feature} but is no longer a core target",
+                    )
+                    self.assertNotIn(
+                        name,
+                        gated,
+                        f"{name} is gated now; list it as a gated target instead",
+                    )
+                    self.assertGreater(len(reason), 40, f"{name} needs a written reason")
+            expected = gated_expected | set(extras)
             job = workflow_job_body(workflow, job_name)
             covered: list[str] = []
             for step_name in step_names:
