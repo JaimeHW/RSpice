@@ -1368,6 +1368,17 @@ fn command_icon(command: Command) -> WorkbenchIcon {
         Command::CloseActiveDocument => WorkbenchIcon::File,
         Command::CloseProject => WorkbenchIcon::Folder,
         Command::Cancel => WorkbenchIcon::Close,
+        Command::ToggleLineComment | Command::GoToMatchingBracket => WorkbenchIcon::Code,
+        Command::IndentLines => WorkbenchIcon::ArrowRight,
+        Command::OutdentLines => WorkbenchIcon::ArrowLeft,
+        Command::DuplicateLine => WorkbenchIcon::Copy,
+        Command::DeleteLine => WorkbenchIcon::Trash,
+        Command::MoveLineUp => WorkbenchIcon::ArrowUp,
+        Command::MoveLineDown => WorkbenchIcon::ChevronDown,
+        Command::GoToLine => WorkbenchIcon::Target,
+        Command::FormatDocument => WorkbenchIcon::Format,
+        Command::FoldSelection | Command::FoldAll => WorkbenchIcon::ChevronRight,
+        Command::UnfoldAtCaret | Command::UnfoldAll => WorkbenchIcon::ChevronDown,
         _ => WorkbenchIcon::File,
     }
 }
@@ -1466,7 +1477,10 @@ const fn file_menu_shows_exit(
     )
 }
 
+/// Edit acts on what the page shows: with a source editor as the document,
+/// on its text; otherwise on the drawing's selection.
 fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
+    let source = app.state.ui.active_source_editor.is_some();
     for command in [Command::Undo, Command::Redo] {
         command_item(ui, app, command);
     }
@@ -1475,23 +1489,51 @@ fn edit_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::Cut,
         Command::Copy,
         Command::Paste,
-        Command::Duplicate,
+        if source {
+            Command::DuplicateLine
+        } else {
+            Command::Duplicate
+        },
         Command::Delete,
         Command::SelectAll,
     ] {
         command_item(ui, app, command);
     }
     menu_separator(ui);
-    command_item(ui, app, Command::RenameSelection);
-    command_item(ui, app, Command::ObjectProperties);
+    if source {
+        for command in [
+            Command::ToggleLineComment,
+            Command::FormatDocument,
+            Command::GoToLine,
+        ] {
+            command_item(ui, app, command);
+        }
+    } else {
+        command_item(ui, app, Command::RenameSelection);
+        command_item(ui, app, Command::ObjectProperties);
+    }
     command_item(ui, app, Command::FindInDesign);
     menu_separator(ui);
     command_item(ui, app, Command::Preferences);
 }
 
+/// Folding, offered while a source editor is the document on screen.
+const VIEW_SOURCE_FOLD_COMMANDS: [Command; 4] = [
+    Command::FoldSelection,
+    Command::UnfoldAtCaret,
+    Command::FoldAll,
+    Command::UnfoldAll,
+];
+
 fn view_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     for command in VIEW_VIEWPORT_COMMANDS {
         command_item(ui, app, command);
+    }
+    if app.state.ui.active_source_editor.is_some() {
+        menu_separator(ui);
+        for command in VIEW_SOURCE_FOLD_COMMANDS {
+            command_item(ui, app, command);
+        }
     }
     menu_separator(ui);
     command_item_as(
