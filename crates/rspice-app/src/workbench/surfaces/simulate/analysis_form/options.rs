@@ -20,7 +20,7 @@
 use egui::Ui;
 
 use crate::product::AnalysisInstanceId;
-use crate::simulation::plan::{AnalysisDraft, OverrideValueKind};
+use crate::simulation::plan::{AnalysisDraft, NumericOverrideOption, OverrideValueKind};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::select;
 use crate::workbench::RSpiceApp;
@@ -166,19 +166,8 @@ fn field(ui: &mut Ui, row: &AdvancedOptionRow) -> Option<OptionEdit> {
         _ => {
             let mut text = well_text(ui, row);
             let response = option_field(ui, label, |ui| {
-                // The shape a value has to take is the hover — and with it the
-                // engine field the option lands on and the site that reads it,
-                // which is what tells a reader the bound they are typing
-                // reaches a solve at all.
-                super::defaulted_input(ui, label, &mut text, ui.available_width()).on_hover_text(
-                    format!(
-                        "{}\n\n{} resolves onto {}, read at {}.",
-                        row.option.value_hint(),
-                        row.option.key(),
-                        row.option.config_field(),
-                        row.option.consumer()
-                    ),
-                )
+                super::defaulted_input(ui, label, &mut text, ui.available_width())
+                    .on_hover_text(option_tooltip(row.option, &row.preset))
             });
             retain_well_text(ui, row, &text, &response);
             // Committed when the well is let go of, not per keystroke: one
@@ -204,13 +193,73 @@ fn option_field<R>(ui: &mut Ui, label: &str, add_control: impl FnOnce(&mut Ui) -
     super::full_width_field(ui, label, None, height, add_control)
 }
 
+/// What hovering an option's well says: what the option does, in a designer's
+/// words, its SPICE option name, and the value an empty well resolves to.
+///
+/// `preset` is the plan's own value for the option, or the engine-default
+/// words where the plan states none.
+fn option_tooltip(option: NumericOverrideOption, preset: &str) -> String {
+    let default = if preset == advanced_options::ENGINE_ORIGIN || preset.trim().is_empty() {
+        "Empty uses the engine's default.".to_owned()
+    } else {
+        format!("Default {preset}.")
+    };
+    format!("{} ({}). {default}", option_meaning(option), option.key())
+}
+
+/// One line on what an option does to the solve.
+fn option_meaning(option: NumericOverrideOption) -> &'static str {
+    use NumericOverrideOption as O;
+
+    match option {
+        O::Reltol => "Relative tolerance on the Newton update of voltages and currents",
+        O::Abstol => "Absolute current tolerance for Newton convergence",
+        O::Vntol => "Absolute voltage tolerance for Newton convergence",
+        O::ResidualReltol => "Relative tolerance on the KCL residual for Newton convergence",
+        O::Gmin => "Conductance added across every junction; 0 adds none",
+        O::Itl1 => "Maximum Newton iterations for the DC operating point",
+        O::Itl4 => "Maximum Newton iterations per transient step",
+        O::GminStepping => "Retry a failed operating point by stepping Gmin down",
+        O::SourceStepping => "Retry a failed operating point by ramping the sources up",
+        O::PseudoTransient => "Retry a failed operating point with a pseudo-transient ramp",
+        O::ArcLength => "Retry a failed operating point with arc-length continuation",
+        O::Damping => "How each Newton update is limited",
+        O::Chgtol => "Charge floor in the truncation-error estimate",
+        O::Trtol => "Truncation-error overestimate factor; larger allows longer steps",
+        O::IntegrationMethod => "Integration method for time stepping",
+        O::LteReltol => "Relative bound on the local truncation error per step",
+        O::LteAbstol => "Absolute bound on the local truncation error per step",
+        O::MinTimestep => "Smallest time step before the transient stops",
+        O::MaximumTimestep => "Largest time step the transient may take",
+        O::Pivrel => "Relative pivot threshold for the matrix factorization",
+        O::Pivtol => "Smallest pivot the matrix factorization accepts",
+        O::Solver => "Sparse matrix solver",
+        O::Bypass => "Skip devices whose terminal voltages have not moved",
+        O::BypassReltol => "Relative voltage change below which a device is skipped",
+        O::BypassAbstol => "Voltage change below which a device is skipped",
+        O::TransientNewtonReltol => "Relative tolerance on the Newton update within a step",
+        O::TransientNewtonAbstol => "Absolute tolerance on the Newton update within a step",
+        O::TransientNewtonUpdateBound => "Largest weighted Newton correction a step accepts",
+        O::TransientNewtonResidualBound => "Largest residual norm a step accepts",
+        O::TransientNewtonBudget => "Maximum Newton iterations per time step",
+        O::TransientDeviceConvergence => {
+            "Require every device to converge before a step is accepted"
+        }
+        O::TransientNoxSolver => "Solve each step's Newton iteration with NOX",
+        O::StrobeInterval => "Interval between reported time points",
+        O::OutputTimePoints => "Report at exactly these times, space or comma separated",
+        O::RetainEverySignal => "Keep every node and branch signal, not only the saved outputs",
+        O::HbInitialState => "How the first harmonic-balance iterate is built",
+    }
+}
+
 /// The settings a chooser offers for one option, in the enum's own order.
 ///
 /// Read out of the same enumerations the record parses against, so a chooser
 /// cannot offer a setting the deck could not carry. The display name is what is
 /// offered and what is committed: the record accepts either spelling and
 /// renders the one a reader saw.
-fn settings_of(option: crate::simulation::plan::NumericOverrideOption) -> Vec<String> {
+fn settings_of(option: NumericOverrideOption) -> Vec<String> {
     use crate::simulation::dialog::{
         DampingStrategy, HbTimeDomainMode, IntegrationMethod, MatrixSolver,
     };
@@ -277,4 +326,56 @@ fn retain_well_text(ui: &Ui, row: &AdvancedOptionRow, text: &str, response: &egu
 /// the form drawing it, so two analyses on one route cannot share a buffer.
 fn well_id(ui: &Ui, row: &AdvancedOptionRow) -> egui::Id {
     ui.id().with(("analysis-option-well", row.option.key()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Engine internals a reader cannot act on: a source path and line, the
+    /// config field an option lands on, or the resolver's own vocabulary.
+    const INTERNALS: [&str; 5] = [".rs:", "resolves onto", "read at", "engine/", "_config"];
+
+    /// An option's hover says what it does, its SPICE name and its default,
+    /// and never where the engine reads it.
+    ///
+    /// The hover once read "iteration count — ITL4 resolves onto
+    /// transient_max_iterations, read at engine/transient/step_control.rs:191".
+    #[test]
+    fn an_option_tooltip_states_meaning_name_and_default_without_engine_internals() {
+        for option in NumericOverrideOption::all() {
+            for preset in ["10", advanced_options::ENGINE_ORIGIN] {
+                let tooltip = option_tooltip(option, preset);
+                for internal in INTERNALS {
+                    assert!(
+                        !tooltip.contains(internal),
+                        "{} hovers {tooltip:?}, which names {internal:?}",
+                        option.key()
+                    );
+                }
+                assert!(
+                    tooltip.contains(&format!("({})", option.key())),
+                    "{tooltip:?} names its option"
+                );
+                assert!(!tooltip.contains(option.config_field()), "{tooltip:?}");
+            }
+        }
+        assert_eq!(
+            option_tooltip(NumericOverrideOption::Itl4, "10"),
+            "Maximum Newton iterations per transient step (ITL4). Default 10."
+        );
+    }
+
+    /// The form builds its hovers from the catalogue's meaning, not from the
+    /// engine site an option is admitted on.
+    #[test]
+    fn the_option_form_never_reads_the_engine_site_into_product_text() {
+        let source = crate::source_guard::production_source(include_str!("options.rs"));
+        for internal in [".consumer()", ".config_field()", "resolves onto"] {
+            assert!(
+                !source.contains(internal),
+                "options.rs builds product text from {internal}"
+            );
+        }
+    }
 }
