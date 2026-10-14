@@ -1,11 +1,8 @@
 //! App availability and command dispatch for source-bound touch viewport requests.
 
-use crate::diagnostics::ConsoleMessage;
 use crate::workbench::RSpiceApp;
+use crate::workbench::SurfaceId;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::{
-    CapabilityWorkflowId, RouteTransitionSource, SurfaceId, SurfaceRoute, route_availability,
-};
 use egui::{Context, Rect};
 use rspice_schematic_editor::view::mobile_controls::{
     self, MobileCanvasAction, MobileCanvasCapabilities, MobileCanvasRequest,
@@ -22,31 +19,22 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp, content_rect: Rect) {
         zoom_out: action_enabled(app, MobileCanvasAction::ZoomOut),
         zoom_fit: action_enabled(app, MobileCanvasAction::ZoomFit),
         zoom_in: action_enabled(app, MobileCanvasAction::ZoomIn),
-        touch_edit_guide: action_enabled(app, MobileCanvasAction::TouchEditGuide),
     };
     if let Some(request) = mobile_controls::show(ctx, content_rect, &source, capabilities) {
         execute_action(app, request);
     }
 }
 
-fn product_command(action: MobileCanvasAction) -> Option<Command> {
+const fn product_command(action: MobileCanvasAction) -> Command {
     match action {
-        MobileCanvasAction::ZoomOut => Some(Command::ZoomOut),
-        MobileCanvasAction::ZoomFit => Some(Command::ZoomFit),
-        MobileCanvasAction::ZoomIn => Some(Command::ZoomIn),
-        MobileCanvasAction::TouchEditGuide => None,
+        MobileCanvasAction::ZoomOut => Command::ZoomOut,
+        MobileCanvasAction::ZoomFit => Command::ZoomFit,
+        MobileCanvasAction::ZoomIn => Command::ZoomIn,
     }
 }
 
 fn action_enabled(app: &RSpiceApp, action: MobileCanvasAction) -> bool {
-    if let Some(command) = product_command(action) {
-        command.is_enabled(app)
-    } else {
-        route_availability(SurfaceRoute::capability_workflow(
-            CapabilityWorkflowId::TouchEditGuide,
-        ))
-        .can_open()
-    }
+    product_command(action).is_enabled(app)
 }
 
 fn execute_action(app: &mut RSpiceApp, request: MobileCanvasRequest) {
@@ -61,19 +49,7 @@ fn execute_action(app: &mut RSpiceApp, request: MobileCanvasRequest) {
     {
         return;
     }
-    if let Some(command) = product_command(request.action) {
-        command.execute(app);
-    } else {
-        let route = SurfaceRoute::capability_workflow(CapabilityWorkflowId::TouchEditGuide);
-        if let Err(error) = app
-            .state
-            .workbench
-            .navigate(route, RouteTransitionSource::User)
-        {
-            app.state
-                .push_user_message(ConsoleMessage::warning(error.to_string()));
-        }
-    }
+    product_command(request.action).execute(app);
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -121,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn actions_execute_the_schematic_camera_and_touch_guide_route() {
+    fn actions_execute_the_schematic_camera_commands() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Design);
         assert!(matches!(
@@ -152,15 +128,5 @@ mod tests {
         Command::FitSchematicContent.execute(&mut app);
         assert!(app.state.schematic.session.editor.needs_fit);
         assert!(!app.state.schematic.session.editor.needs_drawing_sheet_fit);
-
-        execute_current(&mut app, MobileCanvasAction::TouchEditGuide);
-        assert_eq!(
-            app.state.workbench.current_route(),
-            SurfaceRoute::capability_workflow(CapabilityWorkflowId::TouchEditGuide)
-        );
-        assert_eq!(
-            app.state.workbench.current_route().surface_id(),
-            SurfaceId::FeatureAvailability
-        );
     }
 }

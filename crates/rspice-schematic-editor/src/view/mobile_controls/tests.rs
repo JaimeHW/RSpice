@@ -16,16 +16,43 @@ fn source() -> EditorRequestSource {
 }
 
 #[test]
-fn compact_geometry_matches_the_mockup_four_by_forty_four_cluster() {
+fn compact_geometry_is_a_three_by_forty_four_cluster() {
     let content = Rect::from_min_size(egui::pos2(7.0, 91.0), egui::vec2(606.0, 700.0));
     let rect = mobile_canvas_controls_rect(content, 620.0)
         .expect("the controls appear at the inclusive 620 px breakpoint");
 
-    assert_eq!(rect.width(), 198.0);
-    assert_eq!(rect.height(), 93.0);
+    assert_eq!(rect.width(), 150.0);
+    assert_eq!(rect.height(), 108.0);
     assert_eq!(content.right() - rect.right(), 9.0);
     assert_eq!(content.bottom() - rect.bottom(), 10.0);
     assert!(mobile_canvas_controls_rect(content, 620.01).is_none());
+}
+
+#[test]
+fn guidance_fits_its_band_one_gesture_per_row() {
+    let ctx = Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let mut size = None;
+    let _ = ctx.run_ui(egui::RawInput::default(), |root| {
+        let t = Tokens::get(root.ctx());
+        let galley = egui::WidgetText::from(guidance_text(&t)).into_galley(
+            root,
+            Some(egui::TextWrapMode::Wrap),
+            MOBILE_CANVAS_CONTROLS_INNER_WIDTH - 10.0,
+            egui::FontSelection::Default,
+        );
+        size = Some((galley.rows.len(), galley.size()));
+    });
+    let (rows, size) = size.expect("guidance laid out");
+    assert_eq!(rows, 3, "each gesture keeps its own row");
+    assert!(
+        size.x <= MOBILE_CANVAS_CONTROLS_INNER_WIDTH - 10.0,
+        "guidance wider than the track: {size:?}"
+    );
+    assert!(
+        size.y <= MOBILE_CANVAS_GUIDANCE_HEIGHT,
+        "guidance taller than its band: {size:?}"
+    );
 }
 
 #[test]
@@ -36,7 +63,6 @@ fn controls_keep_the_action_order_and_accessible_labels() {
             MobileCanvasAction::ZoomOut,
             MobileCanvasAction::ZoomFit,
             MobileCanvasAction::ZoomIn,
-            MobileCanvasAction::TouchEditGuide,
         ]
     );
     assert!(
@@ -126,7 +152,7 @@ fn pointer_requests_keep_the_pressed_document_and_honor_disabled_controls() {
 }
 
 #[test]
-fn rendered_controls_preserve_four_touch_targets_and_four_point_gaps() {
+fn rendered_controls_preserve_three_touch_targets_and_four_point_gaps() {
     let ctx = Context::default();
     rspice_ui_kit::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -152,7 +178,6 @@ fn rendered_controls_preserve_four_touch_targets_and_four_point_gaps() {
                             zoom_out: true,
                             zoom_fit: true,
                             zoom_in: true,
-                            touch_edit_guide: true,
                         },
                     );
                 });
