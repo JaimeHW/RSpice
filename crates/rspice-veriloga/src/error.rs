@@ -169,6 +169,14 @@ pub enum ParseErrorKind {
     #[error("Invalid port declaration")]
     InvalidPort,
 
+    /// A port declared with unpacked dimensions. See
+    /// [`SemanticErrorKind::UnpackedPortArray`].
+    #[error(
+        "Port '{name}' is declared as an unpacked array; IEEE 1364-2005 section 12.3.3 \
+         declares a port with no unpacked dimensions"
+    )]
+    UnpackedPortArray { name: String },
+
     #[error("Invalid parameter declaration: {0}")]
     InvalidParameter(String),
 
@@ -247,6 +255,7 @@ impl ParseErrorKind {
             Self::UnexpectedEof => "VA-PARSE-UNEXPECTED-EOF",
             Self::InvalidModule => "VA-PARSE-INVALID-MODULE",
             Self::InvalidPort => "VA-PARSE-INVALID-PORT",
+            Self::UnpackedPortArray { .. } => "VA-PARSE-UNPACKED-PORT-ARRAY",
             Self::InvalidParameter(_) => "VA-PARSE-INVALID-PARAMETER",
             Self::InvalidAnalogStatement => "VA-PARSE-INVALID-ANALOG-STATEMENT",
             Self::InvalidEventExpression(_) => "VA-PARSE-INVALID-EVENT-EXPRESSION",
@@ -304,6 +313,19 @@ pub enum SemanticErrorKind {
 
     #[error("Port '{0}' has no discipline assigned")]
     PortNoDiscipline(String),
+
+    /// A port given unpacked dimensions, in its port declaration or in the net
+    /// or variable declaration that completes it.
+    ///
+    /// IEEE 1364-2005 section 12.3.3 declares a port as a list of plain
+    /// identifiers, so a port is a scalar or a vector and never an array.
+    /// Arrays of ports are SystemVerilog (IEEE 1800-2017 section 23.2.2), which
+    /// this front end does not read.
+    #[error(
+        "Port '{name}' is declared as an unpacked array; IEEE 1364-2005 section 12.3.3 \
+         declares a port with no unpacked dimensions"
+    )]
+    UnpackedPortArray { name: smol_str::SmolStr },
 
     #[error("Invalid contribution: cannot contribute to {0}")]
     InvalidContribution(String),
@@ -378,6 +400,7 @@ impl SemanticErrorKind {
             Self::TypeMismatch { .. } => "VA-SEM-TYPE-MISMATCH",
             Self::DuplicateSymbol { .. } => "VA-SEM-DUPLICATE-SYMBOL",
             Self::PortNoDiscipline(_) => "VA-SEM-PORT-WITHOUT-DISCIPLINE",
+            Self::UnpackedPortArray { .. } => "VA-SEM-UNPACKED-PORT-ARRAY",
             Self::InvalidContribution(_) => "VA-SEM-INVALID-CONTRIBUTION",
             Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
             Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",

@@ -521,6 +521,7 @@ impl<'a> Parser<'a> {
                     let (signedness, range) = self.parse_port_shape(net_type, span)?;
 
                     let name: SmolStr = self.expect_identifier("port name")?.into();
+                    self.reject_unpacked_port(&name)?;
                     module.ports.push(Port {
                         name: name.clone(),
                         span,
@@ -555,6 +556,7 @@ impl<'a> Parser<'a> {
                     // discipline, and vector shape of the preceding declared
                     // port.
                     if let Some(context) = &ansi_context {
+                        self.reject_unpacked_port(&name)?;
                         let initializers = self.parse_port_initializer(
                             context.direction,
                             context.net_type,
@@ -1151,6 +1153,7 @@ impl<'a> Parser<'a> {
         let mut initializers = Vec::new();
         loop {
             let name: SmolStr = self.expect_identifier("port name")?.into();
+            self.reject_unpacked_port(&name)?;
             initializers.extend(self.parse_port_initializer(direction, net_type, &name)?);
             names.push(name);
             if !self.match_token(TokenKind::Comma) {
@@ -1197,7 +1200,9 @@ impl<'a> Parser<'a> {
                             | TokenKind::Signed
                             | TokenKind::Unsigned
                     )
-                )) {
+                )
+                && !self.names_unpacked_port())
+        {
             Some(self.expect_identifier("discipline")?.into())
         } else {
             None
@@ -1262,6 +1267,49 @@ impl<'a> Parser<'a> {
                 || self.peek_is(TokenKind::Identifier))
         {
             return Err(self.error(ParseErrorKind::InvalidPort));
+        }
+        Ok(())
+    }
+
+    /// Whether the identifier at the cursor is a port name followed by unpacked
+    /// dimensions (`input wire a [0:1])`) rather than a discipline followed by
+    /// a packed range (`input electrical [3:0] bus`). A discipline's range
+    /// leads to the port name; a port's dimensions end the port.
+    fn names_unpacked_port(&self) -> bool {
+        let mut at = self.pos + 1;
+        while self.tokens.get(at).map(|token| token.kind) == Some(TokenKind::LBracket) {
+            let mut depth = 0_usize;
+            loop {
+                match self.tokens.get(at).map(|token| token.kind) {
+                    Some(TokenKind::LBracket) => depth += 1,
+                    Some(TokenKind::RBracket) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    Some(_) => {}
+                    None => return false,
+                }
+                at += 1;
+            }
+            at += 1;
+        }
+        at > self.pos + 1
+            && !matches!(
+                self.tokens.get(at).map(|token| token.kind),
+                Some(TokenKind::Identifier | TokenKind::EscapedIdentifier)
+            )
+    }
+
+    /// A port declaration lists plain identifiers (IEEE 1364-2005 section
+    /// 12.3.3), so dimensions after a declared port's name make it an array of
+    /// ports, which is SystemVerilog.
+    fn reject_unpacked_port(&self, name: &str) -> Result<(), ParseError> {
+        if self.check(TokenKind::LBracket) {
+            return Err(self.error(ParseErrorKind::UnpackedPortArray {
+                name: name.to_owned(),
+            }));
         }
         Ok(())
     }

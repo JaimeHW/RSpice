@@ -1196,7 +1196,7 @@ mod tests {
         );
         assert_eq!(
             refused(
-                "Semantic error at offset 3: Unsupported feature: unpacked net/port array `mem` requires array connection elaboration"
+                "Semantic error at offset 3: Unsupported feature: slice of unpacked array `mem` requires whole-array value lowering"
             ),
             Some("feature".to_owned())
         );
@@ -1255,6 +1255,8 @@ mod tests {
             "Parse error at offset 12: Expected ';', found 'endmodule'",
             "Semantic error at offset 3: Undeclared symbol: 'b'",
             "Semantic error at offset 3: Undefined module: 'sub'",
+            "Semantic error at offset 3: Port 'mem' is declared as an unpacked array; IEEE \
+             1364-2005 section 12.3.3 declares a port with no unpacked dimensions",
             "Lexer error at offset 0: Unterminated string literal",
         ] {
             assert_eq!(refused(language_error), None, "{language_error}");

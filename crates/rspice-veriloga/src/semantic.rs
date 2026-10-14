@@ -2047,10 +2047,9 @@ impl SemanticAnalyzer {
                     }
                     if !item.dimensions.is_empty() {
                         return Err(SemanticError::new(
-                            SemanticErrorKind::UnsupportedFeature(format!(
-                                "unpacked integer port `{}` requires array connection elaboration",
-                                item.name
-                            )),
+                            SemanticErrorKind::UnpackedPortArray {
+                                name: item.name.clone(),
+                            },
                             item.span,
                         )
                         .into());

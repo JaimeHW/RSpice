@@ -206,6 +206,70 @@ fn an_output_port_may_be_redeclared_as_a_register() {
     assert!(signal.redeclares_port);
 }
 
+/// IEEE 1364-2005 section 12.3.3 declares a port as a list of plain
+/// identifiers, so a port is never an unpacked array: not through its port
+/// declaration, and not through the net or variable declaration that completes
+/// it, at a root or in a child. An RSpice-authored probe has Icarus `-g2005`
+/// reject the ANSI and non-ANSI forms, at a root and in a child, with "Ports
+/// cannot be unpacked arrays".
+#[test]
+fn an_unpacked_port_array_is_a_language_error() {
+    for (form, source) in [
+        ("ANSI net", "module top(input wire a [0:1]); endmodule\n"),
+        (
+            "ANSI variable",
+            "module top(output reg q [0:1]); endmodule\n",
+        ),
+        (
+            "ANSI inherited name",
+            "module top(input wire b, a [0:1]); endmodule\n",
+        ),
+        (
+            "ANSI integer",
+            "module top(output integer q [0:1]); endmodule\n",
+        ),
+        (
+            "port declaration",
+            "module top(a); input a [0:1]; endmodule\n",
+        ),
+        (
+            "net redeclaration",
+            "module top(a); input a; wire a [0:1]; endmodule\n",
+        ),
+        (
+            "variable redeclaration",
+            "module top(q); output q; reg q [0:1]; endmodule\n",
+        ),
+        (
+            "integer redeclaration",
+            "module top(q); output q; integer q [0:1]; initial q[0] = 1; endmodule\n",
+        ),
+        (
+            "child",
+            "module leaf(a, y); input a; output y; wire a [0:1]; endmodule\n\
+             module top; wire w [0:1]; wire y; leaf u(w, y); endmodule\n",
+        ),
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir_module(source, Some("top"))
+            .expect_err(form);
+        let message = error.to_string();
+        assert!(
+            message.contains("unpacked array") && message.contains("12.3.3"),
+            "{form}: {message}"
+        );
+        assert!(
+            !message.contains("Unsupported"),
+            "{form} is a language error, not a refusal: {message}"
+        );
+        assert!(
+            error.diagnostic_code().ends_with("-UNPACKED-PORT-ARRAY"),
+            "{form}: {}",
+            error.diagnostic_code()
+        );
+    }
+}
+
 #[test]
 fn a_digital_name_may_not_collide_with_an_analog_one() {
     let message = analyze_error(&digital_module("    reg gain;"));

@@ -1359,6 +1359,17 @@ impl SemanticAnalyzer {
                 VarType::String => continue,
             };
             for item in &declaration.items {
+                if !item.dimensions.is_empty()
+                    && module.ports.iter().any(|port| port.name == item.name)
+                {
+                    self.record_error_at(
+                        SemanticErrorKind::UnpackedPortArray {
+                            name: item.name.clone(),
+                        },
+                        item.span,
+                    );
+                    continue;
+                }
                 let integer_port = (declaration.var_type == VarType::Integer)
                     .then(|| {
                         module
@@ -1415,17 +1426,6 @@ impl SemanticAnalyzer {
                     // value the analog half assigned, published in the coupled
                     // trial that assigned it.
                     if analog_writes.contains(&item.name) && !written.contains(&item.name) {
-                        if !item.dimensions.is_empty() {
-                            self.record_error_at(
-                                SemanticErrorKind::UnsupportedFeature(format!(
-                                    "analog-owned integer output port `{}` is an array; only \
-                                     a scalar integer port can be driven from the analog body",
-                                    item.name
-                                )),
-                                item.span,
-                            );
-                            continue;
-                        }
                         self.analog_owned_ports.insert(item.name.clone());
                     }
                 }
@@ -1740,10 +1740,9 @@ impl SemanticAnalyzer {
 
         if !item.dimensions.is_empty() && redeclares_port {
             self.record_error_at(
-                SemanticErrorKind::UnsupportedFeature(format!(
-                    "unpacked net/port array `{}` requires array connection elaboration",
-                    item.name
-                )),
+                SemanticErrorKind::UnpackedPortArray {
+                    name: item.name.clone(),
+                },
                 item.span,
             );
             return;
