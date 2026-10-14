@@ -662,7 +662,11 @@ impl DigitalElaborator<'_> {
             time_scale: child.digital.time_scale,
             elaboration_parameters: child.digital.elaboration_parameters.clone(),
             path: path.into(),
-            module: instance.module.clone(),
+            // A library binding's `library.cell`, which `%l` prints.
+            module: child_source.binding.as_ref().map_or_else(
+                || instance.module.clone(),
+                |binding| binding.display.clone(),
+            ),
             signals,
             processes: child.digital.processes.clone(),
             routines: child.digital.routines.clone(),

@@ -222,7 +222,9 @@ pub struct ConnectSpecification {
 
 pub use connection_artifact::ConnectionLibraryArtifact;
 pub use connection_configuration::ConnectionConfiguration;
-pub use prepared_source::{PreparedRuntimeSource, PreparedSourceDependency, UnitFile};
+pub use prepared_source::{
+    MapConfig, PreparedRuntimeSource, PreparedSourceDependency, UnitFile, UnitLibraries,
+};
 pub use prepared_virtual_source::PreparedVirtualSource;
 pub use source_diagnostics::SourceCompileDiagnostic;
 
@@ -1220,6 +1222,9 @@ impl VerilogACompiler {
         trace_compiler_phase(trace, &target, "parse", None, None);
         let phase_started = web_time::Instant::now();
         let mut source_file = Parser::new(&tokens).parse()?;
+        // Library maps and configurations (IEEE 1364-2005 clause 13) leave an
+        // ordinary module set, which a configuration's name selects from.
+        semantic::library_binding::bind(&mut source_file)?;
         let mut source_specialization = Vec::new();
         if !parameters.is_empty() {
             let selected = source_file
@@ -2033,7 +2038,41 @@ impl VerilogACompiler {
         limits: preprocessor::SourceProviderLimits,
         control: &dyn PipelineControl,
     ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
-        self.prepare_files_runtime_source(&[path], limits, control)
+        self.prepare_files_runtime_source(&[path], None, limits, control)
+    }
+
+    /// Prepare the compilation unit a library map arranged (IEEE 1364-2005
+    /// clause 13): [`Self::prepare_unit_runtime_source_with_diagnostics`],
+    /// with each file's modules the cells of the library `libraries` puts it
+    /// in. A module name is declared once per library rather than once per
+    /// unit, an instance binds to the first library in the map's declaration
+    /// order that declares its cell, and each `config` of the sources and of
+    /// the map is selectable by its name. Even one file is a unit here.
+    pub fn prepare_library_unit_runtime_source_with_diagnostics(
+        &self,
+        paths: &[&std::path::Path],
+        libraries: &UnitLibraries,
+        limits: preprocessor::SourceProviderLimits,
+        control: &dyn PipelineControl,
+    ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
+        if paths.is_empty() || libraries.files.len() != paths.len() {
+            return Err(CompileError::io_error(
+                "a library unit names one library for each of its files, and has a file",
+            )
+            .into());
+        }
+        if let Some(name) = libraries
+            .files
+            .iter()
+            .chain(&libraries.declared)
+            .find(|name| !UnitLibraries::is_library_name(name))
+        {
+            return Err(CompileError::ModuleSelection(format!(
+                "'{name}' is not a library name: a library is named by a simple identifier"
+            ))
+            .into());
+        }
+        self.prepare_files_runtime_source(paths, Some(libraries), limits, control)
     }
 
     /// Prepare several filesystem sources as one compilation unit, the
@@ -2056,12 +2095,13 @@ impl VerilogACompiler {
                 CompileError::io_error("a compilation unit needs at least one file").into(),
             );
         }
-        self.prepare_files_runtime_source(paths, limits, control)
+        self.prepare_files_runtime_source(paths, None, limits, control)
     }
 
     fn prepare_files_runtime_source(
         &self,
         paths: &[&std::path::Path],
+        libraries: Option<&UnitLibraries>,
         limits: preprocessor::SourceProviderLimits,
         control: &dyn PipelineControl,
     ) -> Result<PreparedRuntimeSource, ProviderCompileError> {
@@ -2092,13 +2132,13 @@ impl VerilogACompiler {
             usize::MAX,
             control,
         );
-        let (preprocessed, unit_ranges) = if paths.len() == 1 {
+        let (preprocessed, unit_ranges) = if paths.len() == 1 && libraries.is_none() {
             (
                 pp.preprocess_provider_root_mapped(&provider, path)?,
                 Vec::new(),
             )
         } else {
-            pp.preprocess_provider_roots_mapped(&provider, paths)?
+            pp.preprocess_provider_roots_mapped(&provider, paths, libraries)?
         };
         let dependencies: Vec<_> = pp
             .dependency_documents()

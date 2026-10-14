@@ -60,7 +60,8 @@ pub(crate) struct FormatContext<'a> {
     pub radix: DigitalRadix,
     /// `%m`: the calling scope's full path.
     pub scope: &'a str,
-    /// `%l`: the calling module's definition name.
+    /// `%l`: the calling module's definition name, or the `library.cell` of
+    /// its library binding.
     pub module: &'a str,
     /// The calling module's time unit, which a `%t` operand is counted in.
     pub time_unit: i8,
@@ -191,7 +192,14 @@ fn interpret(
             '%' => out.push('%'),
             'm' => pad(out, context.scope, &spec, context.scope.len()),
             'l' => {
-                let library = format!("work.{}", context.module);
+                // IEEE 1364-2005 section 13.6: `library.cell`. A module a
+                // library binding placed is known by that name already; any
+                // other is the library `work`'s.
+                let library = if context.module.contains('.') {
+                    context.module.to_owned()
+                } else {
+                    format!("work.{}", context.module)
+                };
                 pad(out, &library, &spec, library.len());
             }
             'h' | 'x' | 'd' | 'o' | 'b' | 'c' | 's' | 't' | 'e' | 'f' | 'g' | 'v' | 'u' | 'z' => {
@@ -931,6 +939,25 @@ mod tests {
             "pct:[%][\\][\"][\t]"
         );
         assert_eq!(run(&[Literal("m:[%m]")]), "m:[f1]");
+        assert_eq!(run(&[Literal("l:[%l]")]), "l:[work.f1]");
+    }
+
+    /// IEEE 1364-2005 section 13.6: `%l` prints `library.cell`. A module a
+    /// library binding placed is known by that name already.
+    #[test]
+    fn library_binding_prints_the_bound_library() {
+        let time_format = TimeFormat::default_for(-10);
+        let context = FormatContext {
+            radix: DigitalRadix::Decimal,
+            scope: "x1.u2",
+            module: "gateLib.leaf",
+            time_unit: -9,
+            time_format: &time_format,
+        };
+        assert_eq!(
+            format(&[Literal("%m %l")], &context),
+            "x1.u2 gateLib.leaf"
+        );
     }
 
     #[test]

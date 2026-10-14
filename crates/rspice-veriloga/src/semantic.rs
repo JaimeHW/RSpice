@@ -393,6 +393,7 @@ mod discrete_projection;
 mod elaboration;
 mod flow_probes;
 mod hierarchy_connections;
+pub(crate) mod library_binding;
 mod net_types;
 mod node_vectors;
 mod parameter_arrays;

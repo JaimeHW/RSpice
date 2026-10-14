@@ -354,6 +354,11 @@ pub enum SemanticErrorKind {
     )]
     PortWithoutDirection { name: smol_str::SmolStr },
 
+    /// A configuration or library map that binds no cell, or binds one two
+    /// ways (IEEE 1364-2005 clause 13).
+    #[error("Library binding error: {0}")]
+    LibraryBinding(String),
+
     #[error("Invalid contribution: cannot contribute to {0}")]
     InvalidContribution(String),
 
@@ -430,6 +435,7 @@ impl SemanticErrorKind {
             Self::UnpackedPortArray { .. } => "VA-SEM-UNPACKED-PORT-ARRAY",
             Self::VariableInputPort { .. } => "VA-SEM-VARIABLE-INPUT-PORT",
             Self::PortWithoutDirection { .. } => "VA-SEM-PORT-WITHOUT-DIRECTION",
+            Self::LibraryBinding(_) => "VA-SEM-LIBRARY-BINDING",
             Self::InvalidContribution(_) => "VA-SEM-INVALID-CONTRIBUTION",
             Self::InvalidBranch(_) => "VA-SEM-INVALID-BRANCH",
             Self::InvalidNodeReference { .. } => "VA-SEM-INVALID-NODE-REFERENCE",

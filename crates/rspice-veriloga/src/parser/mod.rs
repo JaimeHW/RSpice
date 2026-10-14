@@ -10,11 +10,14 @@ use crate::numeric_literal::parse_numeric_literal;
 use crate::source::Span;
 use smol_str::SmolStr;
 
+mod config;
 mod digital;
 mod digital_routines;
 mod generate;
 mod hierarchical_names;
 mod implicit_nets;
+
+pub(crate) use config::WORK_LIBRARY;
 
 /// Declared attributes carried forward to the bare names that follow a typed
 /// port in an ANSI port list.
@@ -40,6 +43,10 @@ pub struct Parser<'a> {
     next_reference_id: usize,
     reference_symbols: std::collections::HashMap<Span, SmolStr>,
     authored_identifiers: std::sync::Arc<std::collections::HashSet<SmolStr>>,
+    /// The library the source being read goes into, after a library marker.
+    library: Option<SmolStr>,
+    /// The library map's declaration order, after its marker.
+    library_order: Option<Vec<SmolStr>>,
 }
 
 impl<'a> Parser<'a> {
@@ -70,6 +77,8 @@ impl<'a> Parser<'a> {
             authored_identifiers,
             reference_symbols: Default::default(),
             next_reference_id: 0,
+            library: None,
+            library_order: None,
         }
     }
 
@@ -77,6 +86,7 @@ impl<'a> Parser<'a> {
     pub fn parse(&mut self) -> Result<SourceFile, ParseError> {
         let start_span = self.current_span();
         let mut items = Vec::new();
+        let mut configs = Vec::new();
 
         while !self.at_end() {
             // Skip directives for now (handled by preprocessor)
@@ -87,6 +97,14 @@ impl<'a> Parser<'a> {
 
             if self.check_identifier_text("__rspice_default_nettype") {
                 self.parse_default_nettype()?;
+                continue;
+            }
+            if self.check_identifier_text(crate::preprocessor::LIBRARY_MARKER) {
+                self.parse_library_marker()?;
+                continue;
+            }
+            if self.check_identifier_text(crate::preprocessor::LIBRARY_ORDER_MARKER) {
+                self.parse_library_order_marker()?;
                 continue;
             }
 
@@ -123,7 +141,15 @@ impl<'a> Parser<'a> {
                 let mut combined_attributes = attributes;
                 combined_attributes.append(&mut module.attributes);
                 module.attributes = combined_attributes;
+                module.library = self.library.clone();
                 items.push(Item::Module(module));
+            } else if self.at_config_declaration() {
+                if !attributes.is_empty() {
+                    return Err(self.error(ParseErrorKind::UnexpectedToken(
+                        "attributes before `config`".to_string(),
+                    )));
+                }
+                configs.push(self.parse_config()?);
             } else if self.check(TokenKind::Connectmodule) {
                 // Verilog-AMS LRM 2.4 Syntax 7-4 makes `connectmodule` a third
                 // `module_keyword`, so the body and the `endmodule` terminator
@@ -166,6 +192,8 @@ impl<'a> Parser<'a> {
         let end_span = self.previous_span();
         Ok(SourceFile {
             items,
+            configs,
+            library_order: self.library_order.take(),
             span: start_span.extend(end_span),
         })
     }

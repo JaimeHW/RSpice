@@ -3623,3 +3623,118 @@ fn indexed_part_selects_parse_and_check_their_width_base_and_target() {
         assert!(error.contains(expected), "{source}: {error}");
     }
 }
+
+/// IEEE 1364-2005 section 13.3.1: a `config` is a file-scope declaration
+/// beside the modules, with one `design` statement and its rules.
+#[test]
+fn a_config_declaration_parses_beside_the_modules() {
+    let parsed = parse(
+        "module leaf; endmodule\n\
+         config cfg;\n\
+           design work.top;\n\
+           default liblist rtlLib gateLib;\n\
+           instance top.u1.u2 use gateLib.leaf;\n\
+           instance top.u3 liblist gateLib;\n\
+           cell leaf use rtlLib.leaf;\n\
+           cell gateLib.adder liblist gateLib work;\n\
+           cell top use mid;\n\
+         endconfig\n\
+         module top; endmodule\n",
+    );
+    assert_eq!(parsed.items.len(), 2, "both modules remain items");
+    let [config] = parsed.configs.as_slice() else {
+        panic!("one configuration: {:?}", parsed.configs);
+    };
+    assert_eq!(config.name, "cfg");
+    assert_eq!(config.library, "work", "a source without a marker is in `work`");
+    let cell = |library: Option<&str>, cell: &str| (library.map(str::to_owned), cell.to_owned());
+    let written = |value: &LibraryCell| {
+        (
+            value.library.as_ref().map(|library| library.to_string()),
+            value.cell.to_string(),
+        )
+    };
+    assert_eq!(
+        config.design.iter().map(written).collect::<Vec<_>>(),
+        [cell(Some("work"), "top")]
+    );
+    let rules: Vec<String> = config
+        .rules
+        .iter()
+        .map(|rule| {
+            let selection = match &rule.selection {
+                ConfigSelection::Default => "default".to_owned(),
+                ConfigSelection::Instance(path) => format!(
+                    "instance {}",
+                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
+                ),
+                ConfigSelection::Cell(value) => {
+                    let (library, name) = written(value);
+                    format!("cell {}{name}", library.map_or(String::new(), |l| l + "."))
+                }
+            };
+            let expansion = match &rule.expansion {
+                ConfigExpansion::Liblist(libraries) => format!(
+                    "liblist {}",
+                    libraries.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")
+                ),
+                ConfigExpansion::Use {
+                    cell: value,
+                    configuration,
+                } => {
+                    let (library, name) = written(value);
+                    format!(
+                        "use {}{name}{}",
+                        library.map_or(String::new(), |l| l + "."),
+                        if *configuration { ":config" } else { "" }
+                    )
+                }
+            };
+            format!("{selection} {expansion}")
+        })
+        .collect();
+    assert_eq!(
+        rules,
+        [
+            "default liblist rtlLib gateLib",
+            "instance top.u1.u2 use gateLib.leaf",
+            "instance top.u3 liblist gateLib",
+            "cell leaf use rtlLib.leaf",
+            "cell gateLib.adder liblist gateLib work",
+            "cell top use mid",
+        ]
+    );
+}
+
+/// None of a configuration's words is reserved outside one: a Verilog-A
+/// source may still name a net `cell`, `design`, `use`, `instance`,
+/// `library` or `config`.
+#[test]
+fn configuration_words_stay_identifiers_outside_a_config() {
+    let parsed = parse(
+        "`include \"disciplines.vams\"\n\
+         module m(config, cell);\n\
+           inout config, cell; electrical config, cell, design, use, instance, library;\n\
+           analog V(config, cell) <+ 0;\n\
+         endmodule\n",
+    );
+    assert!(parsed.configs.is_empty());
+    assert_eq!(parsed.items.len(), 1);
+}
+
+#[test]
+fn a_malformed_config_is_a_parse_error() {
+    for (source, expected) in [
+        ("config cfg; default liblist a; endconfig", "`design` statement"),
+        ("config cfg; design top; default use a.b; endconfig", "`default` clause"),
+        ("config cfg; design top; cell leaf; endconfig", "`liblist` or `use`"),
+        ("config cfg; design top; endconfig : other", "closes configuration `cfg`"),
+        ("config cfg; localparam P = 1; design top; endconfig", "localparam"),
+        ("config cfg; design top; instance top.u1 use a.b;", "end of input"),
+    ] {
+        let error = parse_error(source);
+        assert!(error.contains(expected), "{source}: {error}");
+    }
+    // IEEE 1800-2017's closing label is accepted when it names the config.
+    assert_eq!(parse("config cfg; design top; endconfig : cfg").configs.len(), 1);
+}

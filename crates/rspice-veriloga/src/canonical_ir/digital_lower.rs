@@ -679,8 +679,13 @@ fn lower_with_analog_variables(
         )),
         ..PlanCalls::default()
     };
+    // A library binding's root is known by its `library.cell` (`%l`).
+    let root_definition = digital
+        .definition
+        .clone()
+        .unwrap_or_else(|| root_name.into());
     let root_scope =
-        calls.add_module_scope(None, root_name.into(), root_name.into(), digital.time_scale);
+        calls.add_module_scope(None, root_name.into(), root_definition, digital.time_scale);
     let frame_scope_frames: Vec<ScopeFrame> = digital
         .instances
         .iter()

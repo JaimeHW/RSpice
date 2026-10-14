@@ -388,8 +388,16 @@ impl ProcessLowerer<'_> {
             .first()
             .cloned()
             .unwrap_or_else(|| scope.clone());
-        let found =
-            if name == module.module.as_str() || module.path.rsplit('.').next() == Some(name) {
+        // A library binding's module is known by `library.cell`; its source
+        // names the cell.
+        let cell = module
+            .module
+            .rsplit_once('.')
+            .map_or(module.module.as_str(), |(_, cell)| cell);
+        let found = if name == module.module.as_str()
+            || name == cell
+            || module.path.rsplit('.').next() == Some(name)
+        {
                 // The module's own name (`$printtimescale(top)` inside `top`).
                 Some(module.id)
             } else {

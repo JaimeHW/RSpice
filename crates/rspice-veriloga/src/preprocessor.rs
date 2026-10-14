@@ -16,6 +16,13 @@ use std::path::{Path, PathBuf};
 mod admission;
 pub use admission::{BoundedFileSystemSourceProvider, SourceResource, SourceResourceLimit};
 
+/// `__rspice_library (name);`, written ahead of each file of a unit a library
+/// map arranged: the file's modules are cells of library `name`.
+pub(crate) const LIBRARY_MARKER: &str = "__rspice_library";
+/// `__rspice_libraries (a, b, ...);`, written once at the head of such a
+/// unit: the map's libraries in declaration order.
+pub(crate) const LIBRARY_ORDER_MARKER: &str = "__rspice_libraries";
+
 /// Origin of an exact source document consumed by preprocessing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceDocumentOrigin {
@@ -717,15 +724,32 @@ impl Preprocessor {
     /// the next (IEEE 1364-2005 sections 19.3 and 19.8), and the dependency
     /// closure covers every root. Returns the expanded unit and the expanded
     /// byte range each root produced; each root starts on a line of its own.
+    ///
+    /// With `libraries`, the unit is the one a library map arranged (IEEE
+    /// 1364-2005 clause 13): a [`LIBRARY_ORDER_MARKER`] heads it, each root
+    /// begins with the [`LIBRARY_MARKER`] of its library, and the map's own
+    /// `config` blocks follow the last root, in the library `work`.
     pub(crate) fn preprocess_provider_roots_mapped(
         &mut self,
         provider: &dyn SourceProvider,
         roots: &[&Path],
+        libraries: Option<&crate::UnitLibraries>,
     ) -> Result<(PreprocessedSource, Vec<std::ops::Range<usize>>), PreprocessorError> {
         self.reset_dependency_capture();
         let mut unit = PreprocessedSource::default();
         let mut ranges = Vec::with_capacity(roots.len());
-        for root in roots {
+        if let (Some(libraries), Some(first)) = (libraries, roots.first()) {
+            let mut declared = libraries.declared.clone();
+            if !declared.iter().any(|library| library == "work") {
+                declared.push("work".into());
+            }
+            unit.push_source(
+                &format!("{LIBRARY_ORDER_MARKER} ({});\n", declared.join(", ")),
+                first,
+                1,
+            );
+        }
+        for (index, root) in roots.iter().enumerate() {
             provider.checkpoint()?;
             let document = provider.load_root(root)?;
             let logical_path = document.logical_path.clone();
@@ -738,8 +762,26 @@ impl Preprocessor {
                 expanded.push_source("\n", &logical_path, line);
             }
             let start = unit.source.len();
+            if let Some(library) = libraries.and_then(|libraries| libraries.files.get(index)) {
+                unit.push_source(
+                    &format!("{LIBRARY_MARKER} ({library});\n"),
+                    &logical_path,
+                    1,
+                );
+            }
             unit.append(expanded);
             ranges.push(start..unit.source.len());
+        }
+        for config in libraries.iter().flat_map(|libraries| &libraries.configs) {
+            unit.push_source(
+                &format!("{LIBRARY_MARKER} (work);\n"),
+                &config.path,
+                config.line,
+            );
+            unit.push_source(&config.text, &config.path, config.line);
+            if !config.text.ends_with('\n') {
+                unit.push_source("\n", &config.path, config.line);
+            }
         }
         Ok((unit, ranges))
     }

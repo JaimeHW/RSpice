@@ -34,6 +34,10 @@ use std::collections::HashMap;
 /// to report the unsupported construct.
 #[derive(Debug, Clone, Default)]
 pub struct AnalyzedDigital {
+    /// The library binding's `library.cell` this module stands for, which
+    /// `%l` prints at the root (IEEE 1364-2005 section 13.6); `None` outside
+    /// a library binding.
+    pub(crate) definition: Option<SmolStr>,
     pub analog_events: Vec<super::AnalogEventBinding>,
     pub event_assigned_variables: Vec<SmolStr>,
     pub immutable_analog_variables: Vec<SmolStr>,
@@ -806,6 +810,10 @@ impl SemanticAnalyzer {
             // module it selects.
             instances: Vec::new(),
             constants: self.digital_selector_constants.clone(),
+            definition: module
+                .binding
+                .as_ref()
+                .map(|binding| binding.display.clone()),
         };
         let ranges = module
             .digital_nets

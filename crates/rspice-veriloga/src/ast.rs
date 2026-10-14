@@ -20,8 +20,82 @@ pub(crate) use walk::visit_expression;
 pub struct SourceFile {
     /// All items in the file (modules, disciplines, natures)
     pub items: Vec<Item>,
+    /// `config` declarations, in source order (IEEE 1364-2005 section 13.3).
+    pub configs: Vec<ConfigDecl>,
+    /// The libraries a library map declares, in declaration order, when the
+    /// sources were read under one (IEEE 1364-2005 section 13.2).
+    pub library_order: Option<Vec<SmolStr>>,
     /// Span of the entire file
     pub span: Span,
+}
+
+/// `[library.]cell`, as a `design`, `cell` or `use` clause writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryCell {
+    /// `None` when the clause names the cell alone.
+    pub library: Option<SmolStr>,
+    pub cell: SmolStr,
+    pub span: Span,
+}
+
+/// Which instances a configuration rule applies to (IEEE 1364-2005 sections
+/// 13.3.1.2 to 13.3.1.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigSelection {
+    /// `default`: every instance no more specific clause selects.
+    Default,
+    /// `instance top.u1.u2`: one instance, by its hierarchical name from the
+    /// design's top cell.
+    Instance(Vec<SmolStr>),
+    /// `cell [lib.]cell`: every instance of the cell; with a library, only
+    /// those that would otherwise bind to that library's cell.
+    Cell(LibraryCell),
+}
+
+/// What a configuration rule binds its instances with (IEEE 1364-2005
+/// sections 13.3.1.5 and 13.3.1.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigExpansion {
+    /// `liblist a b`: the libraries searched for the instance's cell, in
+    /// order. The instances below inherit it.
+    Liblist(Vec<SmolStr>),
+    /// `use [lib.]cell[:config]`. `configuration` is the `:config` suffix,
+    /// which names a hierarchical configuration.
+    Use {
+        cell: LibraryCell,
+        configuration: bool,
+    },
+}
+
+/// One rule of a configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigRule {
+    pub selection: ConfigSelection,
+    pub expansion: ConfigExpansion,
+    pub span: Span,
+}
+
+/// `config name; design ...; rules... endconfig` (IEEE 1364-2005 section
+/// 13.3.1). The library binding pass applies it right after parsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigDecl {
+    pub name: SmolStr,
+    /// The library the source that declared it was read into, which a
+    /// `design` cell written without one is looked up in (section 13.3.1.1).
+    pub library: SmolStr,
+    pub design: Vec<LibraryCell>,
+    pub rules: Vec<ConfigRule>,
+    pub span: Span,
+}
+
+/// The library binding a module stands for (IEEE 1364-2005 clause 13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleBinding {
+    /// `library.cell`, which `%l` prints (section 13.6).
+    pub display: SmolStr,
+    /// A module a configuration's binding added, rather than one a source
+    /// declared under this name.
+    pub copy: bool,
 }
 
 /// Top-level item in a source file
@@ -238,6 +312,11 @@ pub struct Module {
     pub(crate) foreign_physical: std::collections::BTreeMap<SmolStr, ForeignPhysicalReference>,
     pub(crate) hierarchical_parameter_values: std::collections::HashSet<SmolStr>,
     pub(crate) hierarchical_parameter_given: std::collections::HashSet<SmolStr>,
+    /// The library the source declaring this module was read into, when a
+    /// library map placed it; `None` is the library `work`.
+    pub(crate) library: Option<SmolStr>,
+    /// The library binding this module stands for, once bound.
+    pub(crate) binding: Option<ModuleBinding>,
     /// Module attributes
     pub attributes: Vec<Attribute>,
     /// Source span
@@ -337,9 +416,16 @@ impl Module {
             foreign_physical: Default::default(),
             hierarchical_parameter_values: Default::default(),
             hierarchical_parameter_given: Default::default(),
+            library: None,
+            binding: None,
             attributes: Vec::new(),
             span,
         }
+    }
+
+    /// Whether a configuration's binding added this module.
+    pub(crate) fn is_binding_copy(&self) -> bool {
+        self.binding.as_ref().is_some_and(|binding| binding.copy)
     }
 }
 

@@ -49,11 +49,48 @@ pub struct UnitFile {
     pub modules: Vec<smol_str::SmolStr>,
 }
 
-/// A module name two files of a unit both declare, refused before analysis
-/// so the refusal can name both files: the unit is one library, in which a
-/// module name is declared once. Returns the message and a diagnostic at the
-/// second declaration; `None` when every name is unique across files (a
-/// source that does not lex is left to the analysis to report).
+/// How a library map arranged a compilation unit (IEEE 1364-2005 clause 13).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UnitLibraries {
+    /// The library of each file of the unit, in the files' order.
+    pub files: Vec<String>,
+    /// The libraries the map declares, in declaration order: the search order
+    /// of an instance no configuration rule selects (section 13.5.1).
+    pub declared: Vec<String>,
+    /// The `config` blocks the map holds, in map order.
+    pub configs: Vec<MapConfig>,
+}
+
+impl UnitLibraries {
+    /// A library is named by a simple identifier (IEEE 1364-2005 section
+    /// 13.2.1, `library_identifier`).
+    pub fn is_library_name(name: &str) -> bool {
+        let mut characters = name.chars();
+        characters
+            .next()
+            .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+            && characters.all(|character| character.is_ascii_alphanumeric() || "_$".contains(character))
+    }
+}
+
+/// One `config` block of a library map, as written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapConfig {
+    /// The map file that holds it.
+    pub path: PathBuf,
+    /// The line of that file it starts on.
+    pub line: usize,
+    /// `config` through `endconfig`.
+    pub text: String,
+}
+
+/// A module name two files of one library both declare, refused before
+/// analysis so the refusal can name both files: a library declares a module
+/// name once. Without a library map the unit is the one library `work`; with
+/// one, each file's library marker says which library it is in. Returns the
+/// message and a diagnostic at the second declaration; `None` when every name
+/// is unique in its library (a source that does not lex is left to the
+/// analysis to report).
 pub(crate) fn unit_duplicate_module(
     paths: &[&std::path::Path],
     ranges: &[std::ops::Range<usize>],
@@ -63,28 +100,47 @@ pub(crate) fn unit_duplicate_module(
     let tokens = Lexer::new(&preprocessed.source, crate::SourceId::new(0))
         .collect_tokens()
         .ok()?;
-    let mut declared: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    for pair in tokens.windows(2) {
-        if !matches!(pair[0].kind, TokenKind::Module | TokenKind::Macromodule) {
+    let mut declared: std::collections::HashMap<(Option<&str>, &str), usize> =
+        std::collections::HashMap::new();
+    let mut library = None;
+    for (index, token) in tokens.iter().enumerate() {
+        if token.kind == TokenKind::Identifier
+            && token.text.as_deref() == Some(crate::preprocessor::LIBRARY_MARKER)
+        {
+            library = tokens.get(index + 2).and_then(|name| name.text.as_deref());
             continue;
         }
-        let Some(name) = pair[1].text.as_deref() else {
+        if !matches!(token.kind, TokenKind::Module | TokenKind::Macromodule) {
+            continue;
+        }
+        let Some(declaration) = tokens.get(index + 1) else {
             continue;
         };
-        let offset = pair[1].span.start as usize;
+        let Some(name) = declaration.text.as_deref() else {
+            continue;
+        };
+        let offset = declaration.span.start as usize;
         let Some(file) = ranges.iter().position(|range| range.contains(&offset)) else {
             continue;
         };
-        let first = *declared.entry(name).or_insert(file);
+        let first = *declared.entry((library, name)).or_insert(file);
         if first == file {
             continue;
         }
-        let message = format!(
-            "module '{name}' is declared in both '{}' and '{}'; the HDL sources of a run form \
-             one library, in which a module name is declared once",
-            paths[first].display(),
-            paths[file].display()
-        );
+        let message = match library {
+            None => format!(
+                "module '{name}' is declared in both '{}' and '{}'; the HDL sources of a run form \
+                 one library, in which a module name is declared once",
+                paths[first].display(),
+                paths[file].display()
+            ),
+            Some(library) => format!(
+                "module '{name}' is declared in both '{}' and '{}', which the library map puts in \
+                 one library '{library}'; a library declares a module name once",
+                paths[first].display(),
+                paths[file].display()
+            ),
+        };
         let location = preprocessed.segment_at(offset);
         let diagnostic = crate::SourceCompileDiagnostic {
             severity: crate::CompileDiagnosticSeverity::Error,
@@ -133,6 +189,10 @@ pub(crate) fn unit_layout(
         let crate::ast::Item::Module(module) = item else {
             continue;
         };
+        // A configuration's copy is no module the file declares.
+        if module.is_binding_copy() {
+            continue;
+        }
         let Some(index) = file_at(module.span.start) else {
             continue;
         };
@@ -245,6 +305,20 @@ impl PreparedRuntimeSource {
                 ordinary.join(", ")
             )));
         }
+        // A configuration is selected by name: its copies never make an
+        // unnamed selection ambiguous.
+        let ordinary: Vec<_> = self
+            .analyzed
+            .source
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::ast::Item::Module(module) if !module.is_binding_copy() => {
+                    Some(module.name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
         match ordinary.as_slice() {
             [name] => Ok(*name),
             [] => Err(crate::CompileError::ModuleSelection(
