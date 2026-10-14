@@ -306,17 +306,79 @@ pub(super) fn pane_menu(
     let Some(document) = state.workspace.content.visualization_document(document_id) else {
         return PaneMenu::default();
     };
-    let Some(pane) = document.panes().iter().find(|pane| pane.id == pane_id) else {
+    let Some((position, page_panes)) = page_order(document, pane_id) else {
         return PaneMenu::default();
     };
-    let page_panes = document
+    PaneMenu {
+        earlier: position > 0,
+        later: position + 1 < page_panes.len(),
+        removable: page_panes.len() > 1,
+    }
+}
+
+/// The pane's place in its page's reading order, with that order.
+fn page_order(document: &VisualizationDocument, pane_id: PaneId) -> Option<(usize, Vec<PaneId>)> {
+    let pane = document.panes().iter().find(|pane| pane.id == pane_id)?;
+    let page = document
+        .pages()
+        .iter()
+        .find(|page| page.id == pane.page_id)?;
+    let order = super::persistent_document::ordered_page_panes(document.panes(), page)
+        .into_iter()
+        .map(|pane| pane.id)
+        .collect::<Vec<_>>();
+    let position = order.iter().position(|candidate| *candidate == pane_id)?;
+    Some((position, order))
+}
+
+/// Which way a pane moves in its page's order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PaneMove {
+    Earlier,
+    Later,
+}
+
+/// Change places with the pane's neighbour in its page's order. The page
+/// keeps its layout; the panes fill its slots in the new order.
+pub(super) fn move_pane(
+    state: &mut AppState,
+    document_id: ResultDocumentId,
+    pane_id: PaneId,
+    direction: PaneMove,
+) {
+    let result = move_pane_edit(state, document_id, pane_id, direction)
+        .and_then(|edit| transact(state, document_id, vec![edit]).map(|_| ()));
+    report(state, result);
+}
+
+fn move_pane_edit(
+    state: &AppState,
+    document_id: ResultDocumentId,
+    pane_id: PaneId,
+    direction: PaneMove,
+) -> Result<DocumentEdit, String> {
+    let document = project_document(state, document_id)?;
+    let (position, mut order) = page_order(document, pane_id)
+        .ok_or_else(|| "The pane is no longer in this document.".to_owned())?;
+    let neighbour = match direction {
+        PaneMove::Earlier => position.checked_sub(1),
+        PaneMove::Later => Some(position + 1).filter(|next| *next < order.len()),
+    }
+    .ok_or_else(|| match direction {
+        PaneMove::Earlier => "The pane is already first on its page.".to_owned(),
+        PaneMove::Later => "The pane is already last on its page.".to_owned(),
+    })?;
+    order.swap(position, neighbour);
+    let page_id = document
         .panes()
         .iter()
-        .filter(|candidate| candidate.page_id == pane.page_id)
-        .count();
-    PaneMenu {
-        removable: page_panes > 1,
-    }
+        .find(|pane| pane.id == pane_id)
+        .map(|pane| pane.page_id)
+        .ok_or_else(|| "The pane is no longer in this document.".to_owned())?;
+    Ok(DocumentEdit::ReorderPagePanes {
+        page_id,
+        pane_ids: order,
+    })
 }
 
 /// Take one pane out of the document, with its axes, traces, cursors,

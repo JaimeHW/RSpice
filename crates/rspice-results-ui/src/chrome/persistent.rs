@@ -201,6 +201,10 @@ pub struct PaneCounts {
 pub enum PaneHeaderAction {
     /// Work in this pane.
     Activate,
+    /// Move this pane one place earlier in its page's order.
+    MoveEarlier,
+    /// Move this pane one place later in its page's order.
+    MoveLater,
     /// Take this pane out of the document.
     Remove,
 }
@@ -208,6 +212,10 @@ pub enum PaneHeaderAction {
 /// Which of the header's context-menu edits the host can carry out.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PaneMenu {
+    /// The pane has a predecessor on its page to change places with.
+    pub earlier: bool,
+    /// The pane has a successor on its page to change places with.
+    pub later: bool,
     /// A page keeps at least one pane, so its last one cannot be removed.
     pub removable: bool,
 }
@@ -273,13 +281,26 @@ pub fn pane_header(
     });
     let mut action = None;
     response.context_menu(|ui| {
-        if ui
-            .add_enabled(menu.removable, egui::Button::new("Remove pane"))
-            .clicked()
-        {
-            action = Some(PaneHeaderAction::Remove);
-            ui.close();
-        }
+        let mut item = |ui: &mut Ui, enabled: bool, label: &str, chosen: PaneHeaderAction| {
+            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                action = Some(chosen);
+                ui.close();
+            }
+        };
+        item(
+            ui,
+            menu.earlier,
+            "Move pane earlier",
+            PaneHeaderAction::MoveEarlier,
+        );
+        item(
+            ui,
+            menu.later,
+            "Move pane later",
+            PaneHeaderAction::MoveLater,
+        );
+        ui.separator();
+        item(ui, menu.removable, "Remove pane", PaneHeaderAction::Remove);
     });
     let clicked = response
         .on_hover_cursor(egui::CursorIcon::PointingHand)

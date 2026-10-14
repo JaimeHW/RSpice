@@ -284,6 +284,37 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
     );
 }
 
+/// A pane moved earlier keeps its new place through a save and reload, and
+/// the menu stops offering moves past either end of the page.
+#[test]
+fn a_moved_pane_keeps_its_place_in_the_saved_document() {
+    let (mut app, document_id) = document_fixture("two-linked-panes");
+    show_document(&mut app, document_id);
+    let before = ordered_panes(&app, document_id);
+    let (first, second) = (before[0].id, before[1].id);
+    let menu = pane_menu(&app.state, document_id, second);
+    assert!(menu.earlier && !menu.later);
+
+    move_pane(&mut app.state, document_id, second, PaneMove::Earlier);
+    reload(&mut app, document_id);
+    show_document(&mut app, document_id);
+
+    let after = ordered_panes(&app, document_id)
+        .iter()
+        .map(|pane| pane.id)
+        .collect::<Vec<_>>();
+    assert_eq!(after, vec![second, first]);
+    let menu = pane_menu(&app.state, document_id, second);
+    assert!(!menu.earlier && menu.later);
+    let revision = retained(&app, document_id).revision();
+    move_pane(&mut app.state, document_id, second, PaneMove::Earlier);
+    assert_eq!(
+        retained(&app, document_id).revision(),
+        revision,
+        "the first pane cannot move earlier"
+    );
+}
+
 #[test]
 fn the_last_pane_on_a_page_is_not_removable() {
     let (mut app, document_id) = document_fixture("single-pane");

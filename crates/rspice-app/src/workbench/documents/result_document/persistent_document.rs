@@ -771,6 +771,16 @@ fn pane_header(
         persistent::PaneHeaderAction::Activate => select_pane_context(&mut app.state, pane)
             .is_ok()
             .then_some(pane.id.get()),
+        persistent::PaneHeaderAction::MoveEarlier => {
+            let direction = super::document_edit::PaneMove::Earlier;
+            super::document_edit::move_pane(&mut app.state, pane.document_id, pane.id, direction);
+            None
+        }
+        persistent::PaneHeaderAction::MoveLater => {
+            let direction = super::document_edit::PaneMove::Later;
+            super::document_edit::move_pane(&mut app.state, pane.document_id, pane.id, direction);
+            None
+        }
         persistent::PaneHeaderAction::Remove => {
             super::document_edit::remove_pane(&mut app.state, pane.document_id, pane.id);
             None
