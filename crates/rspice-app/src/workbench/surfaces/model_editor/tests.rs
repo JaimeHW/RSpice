@@ -131,28 +131,23 @@ fn fixed_workspace_geometry_does_not_depend_on_selected_section() {
     }
 }
 
+/// The candidate band is one line at every width.
+///
+/// It had two layouts, 82 px and 124 px, to stack a purpose blurb under the
+/// title at middling widths. The band now carries the candidate's name and
+/// what is wrong with it, which is one line, so a narrow workspace no longer
+/// pays 78 px of chrome before its first row.
 #[test]
-fn specialist_header_preserves_the_mockup_ownership_breakpoint() {
-    assert_eq!(SPECIALIST_HEADER_H, 82.0);
-    assert_eq!(SPECIALIST_HEADER_MEDIUM_H, 124.0);
-    assert_eq!(specialist_header_height(820.0), SPECIALIST_HEADER_H);
-    assert_eq!(specialist_header_height(821.0), SPECIALIST_HEADER_MEDIUM_H);
-    assert_eq!(
-        specialist_header_height(1_120.0),
-        SPECIALIST_HEADER_MEDIUM_H
-    );
-    assert_eq!(specialist_header_height(1_121.0), SPECIALIST_HEADER_H);
+fn the_specialist_header_is_one_line_at_every_width() {
+    assert_eq!(SPECIALIST_HEADER_H, 46.0);
 }
 
+/// The rail holds the six section entries and nothing else, so a short
+/// workspace scrolls them rather than clipping one.
 #[test]
-fn navigation_scroll_extent_always_contains_all_tabs_and_evidence() {
-    const NOTE_H: f32 = 119.0;
-    let required = SECTION_SPECS.len() as f32 * NAV_ROW_H + NOTE_H;
-    assert_eq!(required, 335.0);
-    assert!(
-        required > 220.0,
-        "short workspaces must scroll, not clip tabs"
-    );
+fn navigation_scroll_extent_always_contains_all_tabs() {
+    let required = SECTION_SPECS.len() as f32 * NAV_ROW_H;
+    assert_eq!(required, 216.0);
 }
 
 #[test]
@@ -391,20 +386,19 @@ fn the_navigation_rail_projects_only_section_owned_counts() {
 
     assert_eq!(
         navigation_meta(&app, &records, ModelEditorSection::Parameters),
-        Some((parameters.to_string(), MetricTone::Neutral))
+        Some(parameters.to_string())
     );
     assert_eq!(
         navigation_meta(&app, &records, ModelEditorSection::Sections),
-        Some((sections.to_string(), MetricTone::Neutral))
+        Some(sections.to_string())
     );
     assert_eq!(
         navigation_meta(&app, &records, ModelEditorSection::Tests),
-        Some((
-            format!("{}/{}", qualification.desktop_passed, qualification.total),
-            qualification.desktop_tone
+        Some(format!(
+            "{}/{}",
+            qualification.desktop_passed, qualification.total
         ))
     );
-    assert_eq!(qualification.desktop_tone, MetricTone::Warning);
     for section in [
         ModelEditorSection::Statistics,
         ModelEditorSection::Temperature,
@@ -414,22 +408,55 @@ fn the_navigation_rail_projects_only_section_owned_counts() {
     }
 }
 
-/// A rejected persisted schema tones both count entries and the parameter
-/// split, because a count read off a rejected definition is exactly the fact
-/// whose health is in doubt.
+/// A rejected persisted schema is stated once, by the header, as a failure
+/// mark in front of neutral words. The counts read off it stay plain: a rail
+/// entry painted red is the same rejection said a fourth time, and it names
+/// no field the reader could repair.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn a_rejected_schema_tones_every_count_read_off_it() {
+fn a_rejected_schema_is_announced_once_by_the_header() {
     let app = app_with_open_candidate();
     let mut records = persisted_records(&app);
     records.metadata_error = Some("parameters[0]: out of declared bounds".to_owned());
+
+    assert_eq!(
+        candidate_status(&app, &records),
+        Some((
+            "metadata invalid · parameters[0]: out of declared bounds".to_owned(),
+            Some(Problem::Failure)
+        ))
+    );
     for section in [ModelEditorSection::Parameters, ModelEditorSection::Sections] {
-        let (_, tone) = navigation_meta(&app, &records, section).expect("count");
-        assert_eq!(tone, MetricTone::Error);
+        let count = navigation_meta(&app, &records, section).expect("count");
+        assert!(count.chars().all(|c| c.is_ascii_digit()), "{count}");
     }
-    let (_, tone) =
-        section_header_fact(&app, &records, ModelEditorSection::Parameters).expect("split");
-    assert_eq!(tone, MetricTone::Error);
+}
+
+/// A validated candidate says nothing at all, and an unvalidated one says so
+/// without a mark: not having been validated yet is where every candidate
+/// starts, not a problem the reader has to act on.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_header_announces_no_status_for_a_validated_candidate() {
+    let mut app = app_with_open_candidate();
+    let records = persisted_records(&app);
+    assert_eq!(
+        candidate_status(&app, &records),
+        Some(("Not validated".to_owned(), None))
+    );
+
+    let revision = app.state.workspace.content.project.revision();
+    let evidence = app
+        .state
+        .workbench
+        .model_editor
+        .draft
+        .as_ref()
+        .expect("open candidate")
+        .validate(&app.state.model_library_manager, revision)
+        .expect("the fixture candidate validates");
+    app.state.workbench.model_editor.validation = Some(evidence);
+    assert_eq!(candidate_status(&app, &records), None);
 }
 
 /// The parameter source split and runtime parity are section aggregates: no
@@ -445,19 +472,17 @@ fn section_headers_own_the_aggregates_no_row_can_carry() {
 
     assert_eq!(
         section_header_fact(&app, &records, ModelEditorSection::Parameters),
-        Some((
-            format!("{declared} declared · {inherited} inherited · {overridden} override"),
-            MetricTone::Neutral
+        Some(format!(
+            "{declared} declared · {inherited} inherited · {overridden} override"
         ))
     );
+    // The parity ratio, and not a word about what is unresolved: that is the
+    // Tests table's own Status column, one row at a time.
     assert_eq!(
         section_header_fact(&app, &records, ModelEditorSection::Tests),
-        Some((
-            format!(
-                "{} / {} WebAssembly · {}",
-                qualification.wasm_passed, qualification.total, qualification.wasm_detail
-            ),
-            qualification.wasm_tone
+        Some(format!(
+            "{} / {} WebAssembly",
+            qualification.wasm_passed, qualification.total
         ))
     );
     // Section names, statistical variables, temperature laws, and release
@@ -484,14 +509,11 @@ fn every_owned_fact_is_painted_by_its_owner() {
     crate::ui::Theme::default().apply(&ctx);
     let t = Tokens::get(&ctx);
 
-    let (parameters, _) =
+    let parameters =
         navigation_meta(&app, &records, ModelEditorSection::Parameters).expect("count");
-    let (tests, tests_tone) =
-        navigation_meta(&app, &records, ModelEditorSection::Tests).expect("ratio");
-    let (split, _) =
-        section_header_fact(&app, &records, ModelEditorSection::Parameters).expect("split");
-    let (parity, parity_tone) =
-        section_header_fact(&app, &records, ModelEditorSection::Tests).expect("parity");
+    let tests = navigation_meta(&app, &records, ModelEditorSection::Tests).expect("ratio");
+    let split = section_header_fact(&app, &records, ModelEditorSection::Parameters).expect("split");
+    let parity = section_header_fact(&app, &records, ModelEditorSection::Tests).expect("parity");
 
     let parameters_page = painted_surface(&mut app, ModelEditorSection::Parameters);
     assert!(
@@ -499,7 +521,7 @@ fn every_owned_fact_is_painted_by_its_owner() {
         "{parameters_page:?}"
     );
     assert!(
-        parameters_page.contains(&(tests, meta_color(&t, tests_tone))),
+        parameters_page.contains(&(tests, t.color.text_dim)),
         "{parameters_page:?}"
     );
     assert!(
@@ -509,7 +531,7 @@ fn every_owned_fact_is_painted_by_its_owner() {
 
     let tests_page = painted_surface(&mut app, ModelEditorSection::Tests);
     assert!(
-        tests_page.contains(&(parity, meta_color(&t, parity_tone))),
+        tests_page.contains(&(parity, t.color.text_dim)),
         "{tests_page:?}"
     );
     for page in [parameters_page, tests_page] {
@@ -558,7 +580,7 @@ fn the_workspace_body_tiles_the_surface_under_the_specialist_header() {
     for clipped in &output.shapes {
         walk(&clipped.shape, fill, &mut panels);
     }
-    let body_top = OUTER_IDENTITY_H + specialist_header_height(size.x);
+    let body_top = OUTER_IDENTITY_H + SPECIALIST_HEADER_H;
     let nav_w = NAV_W.min((size.x * 0.31).max(150.0));
     assert!(
         panels.iter().any(|rect| {

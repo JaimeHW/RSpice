@@ -31,7 +31,7 @@ use crate::state::model_library::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
 
 use super::super::design_system::{self, WorkbenchIcon};
@@ -46,8 +46,11 @@ use crate::workbench::documents::model_editor::{
     QualificationAuthoringAnalysis, QualificationAuthoringProbe, QualificationAuthoringSample,
 };
 
-const SPECIALIST_HEADER_H: f32 = 82.0;
-const SPECIALIST_HEADER_MEDIUM_H: f32 = 124.0;
+/// The candidate band: one line, the open candidate's name and whatever is
+/// wrong with it. It was 82 px when it also carried a monogram, a kicker, a
+/// sentence restating the six sections below it, and a blurb about what the
+/// document owns.
+const SPECIALIST_HEADER_H: f32 = 46.0;
 const OUTER_IDENTITY_H: f32 = 60.0;
 const NAV_W: f32 = 214.0;
 const NAV_ROW_H: f32 = 36.0;
@@ -59,9 +62,16 @@ const QUALIFICATION_MULTILINE_ROW_H: f32 = 118.0;
 const QUALIFICATION_STATUS_H: f32 = 86.0;
 const QUALIFICATION_ERROR_H: f32 = 50.0;
 const QUALIFICATION_PLAN_STATE_ID: &str = "model-editor-qualification-plan-state";
+const RELEASE_FACT_ROW_H: f32 = 35.0;
 
-const SPECIALIST_SUMMARY: &str = "Inspect inherited parameters, sections, geometry equations, statistical groups, temperature behavior, tests, documentation, and release promotion.";
-const EVIDENCE_CONTRACT: &str = "Source definition, parameter schema, inheritance, units, bounds, equations, sections, statistics, compilation, tests, provenance, and approvals form one model revision.";
+/// Side of a problem mark painted in front of one of this surface's values,
+/// and the advance from its left edge to where the text after it begins.
+///
+/// The kit keeps both values to itself, so they are restated here once. They
+/// are the kit's own, which is what makes a marked line and an unmarked one
+/// beside it differ by exactly the advance.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SurfaceAction {
@@ -129,10 +139,15 @@ struct PersistedModelRecords {
     qualification_error: Option<String>,
 }
 
+/// What a verdict column says about one row.
+///
+/// Only a column whose job is to judge its rows reaches for a tone, and only
+/// for the two verdicts that need acting on. A row that passed is painted
+/// exactly like a row that states a fact, because a passing row is the normal
+/// case and the normal case is not decorated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MetricTone {
     Neutral,
-    Good,
     Warning,
     Error,
 }
@@ -144,8 +159,7 @@ struct QualificationRow {
     desktop: String,
     wasm: String,
     reference_error: String,
-    status: String,
-    tone: MetricTone,
+    status: DisplayCell,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -192,11 +206,12 @@ impl Default for QualificationPlanUiState {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct DisplayCell {
     text: String,
     mono: bool,
     tone: MetricTone,
+    mark: Option<Problem>,
 }
 
 impl DisplayCell {
@@ -205,6 +220,7 @@ impl DisplayCell {
             text: value.into(),
             mono: false,
             tone: MetricTone::Neutral,
+            mark: None,
         }
     }
 
@@ -213,14 +229,28 @@ impl DisplayCell {
             text: value.into(),
             mono: true,
             tone: MetricTone::Neutral,
+            mark: None,
         }
     }
 
+    /// A verdict cell, in the tone its column judges by.
     fn toned(value: impl Into<String>, tone: MetricTone) -> Self {
         Self {
             text: value.into(),
             mono: false,
             tone,
+            mark: None,
+        }
+    }
+
+    /// A cell outside a verdict column that still has to be noticed: the mark
+    /// carries the severity and the words stay the colour of every other cell.
+    fn problem(value: impl Into<String>, problem: Problem) -> Self {
+        Self {
+            text: value.into(),
+            mono: false,
+            tone: MetricTone::Neutral,
+            mark: Some(problem),
         }
     }
 }
@@ -300,18 +330,10 @@ fn outer_identity_header(ui: &mut Ui, app: &RSpiceApp) {
     paint_elided(
         ui,
         copy,
-        "MODELS · TYPED PARAMETERS · VERSIONED DEFINITIONS",
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.text_faint,
-        9.0,
-    );
-    paint_elided(
-        ui,
-        copy,
         "Device model and parameter editor",
         theme::sans(14.0, FontWeight::SemiBold),
         t.color.text,
-        29.0,
+        21.0,
     );
 
     let button_rect = Rect::from_center_size(
@@ -405,214 +427,95 @@ fn action_button(
 fn specialist_header(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRecords) {
     let t = Tokens::get(ui.ctx());
     let available_width = ui.available_width().max(1.0);
-    let medium_layout = available_width > 820.0 && available_width <= 1120.0;
-    let header_h = specialist_header_height(available_width);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(available_width, header_h), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(available_width, SPECIALIST_HEADER_H),
+        Sense::hover(),
+    );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     bottom_rule(ui, rect, t.color.border);
 
-    let mark = Rect::from_min_size(
-        Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
-        Vec2::splat(48.0),
-    );
-    ui.painter().rect(
-        mark,
-        t.radius,
-        t.color.bg_panel_2,
-        Stroke::new(1.0, t.color.border),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().text(
-        mark.center(),
-        Align2::CENTER_CENTER,
-        "M",
-        theme::mono(tokens::FS_4, FontWeight::SemiBold),
-        t.color.accent,
-    );
-
-    let left = mark.right() + 12.0;
+    let left = rect.left() + 14.0;
     let status_w = 174.0_f32.min(rect.width() * 0.26);
-    let purpose_w = if rect.width() > 1120.0 {
-        (rect.width() * 0.21).clamp(190.0, 280.0)
-    } else {
-        0.0
-    };
     let status_left = rect.right() - status_w - 10.0;
-    let purpose_right = status_left - 12.0;
-    let purpose_left = purpose_right - purpose_w;
-    let text_right = if purpose_w > 0.0 {
-        purpose_left - 12.0
-    } else {
-        status_left - 8.0
-    }
-    .max(left + 80.0);
+    let text_right = (status_left - 8.0).max(left + 80.0);
     let text_clip = Rect::from_min_max(
         Pos2::new(left, rect.top()),
         Pos2::new(text_right, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(text_clip).text(
-        Pos2::new(left, rect.top() + 9.0),
-        Align2::LEFT_TOP,
-        "COMPACT MODEL · MACROMODEL · BEHAVIORAL",
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.text_faint,
     );
     let title = app.state.workbench.model_editor.draft.as_ref().map_or_else(
         || "No model candidate".to_owned(),
         |draft| format!("{} model candidate", draft.name),
     );
+    let title_font = theme::sans(14.0, FontWeight::SemiBold);
+    let title = design_system::elide_text(ui, &title, &title_font, text_clip.width().max(1.0));
     ui.painter().with_clip_rect(text_clip).text(
-        Pos2::new(left, rect.top() + 28.0),
-        Align2::LEFT_TOP,
+        Pos2::new(left, rect.center().y),
+        Align2::LEFT_CENTER,
         title,
-        theme::sans(14.0, FontWeight::SemiBold),
+        title_font,
         t.color.text,
     );
-    let summary_bottom = if medium_layout {
-        rect.top() + 72.0
-    } else {
-        (rect.top() + 78.0).min(rect.bottom())
+
+    let Some((status, problem)) = candidate_status(app, records) else {
+        return;
     };
-    let summary_rect = Rect::from_min_max(
-        Pos2::new(left, rect.top() + 50.0),
-        Pos2::new(text_right, summary_bottom),
-    );
-    let summary = ui.painter().layout(
-        SPECIALIST_SUMMARY.to_owned(),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        summary_rect.width().max(1.0),
-    );
-    ui.painter()
-        .with_clip_rect(summary_rect)
-        .galley(summary_rect.min, summary, t.color.text_dim);
-
-    if purpose_w > 0.0 {
-        let purpose_rect = Rect::from_min_max(
-            Pos2::new(purpose_left, rect.top() + 10.0),
-            Pos2::new(purpose_right, rect.bottom() - 10.0),
-        );
-        ui.painter().vline(
-            purpose_rect.left(),
-            purpose_rect.y_range(),
-            Stroke::new(1.0, t.color.border),
-        );
-        let purpose_text = purpose_rect.shrink2(Vec2::new(12.0, 0.0));
-        paint_elided(
-            ui,
-            purpose_text,
-            "PURPOSE",
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.text_faint,
-            0.0,
-        );
-        paint_elided(
-            ui,
-            purpose_text,
-            "Engineering document",
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-            15.0,
-        );
-        let boundary_rect = Rect::from_min_max(
-            Pos2::new(purpose_text.left(), purpose_text.top() + 30.0),
-            purpose_text.max,
-        );
-        let boundary = ui.painter().layout(
-            "Owns the active definition and exposes downstream effects without duplicating source evidence."
-                .to_owned(),
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-            boundary_rect.width().max(1.0),
-        );
-        ui.painter().with_clip_rect(boundary_rect).galley(
-            boundary_rect.min,
-            boundary,
-            t.color.text_faint,
-        );
-    }
-
-    if medium_layout {
-        let purpose_rect = Rect::from_min_max(
-            Pos2::new(left, rect.top() + 82.0),
-            Pos2::new(status_left - 8.0, rect.bottom() - 7.0),
-        );
-        paint_elided(
-            ui,
-            purpose_rect,
-            "PURPOSE",
-            theme::mono(tokens::FS_0, FontWeight::Medium),
-            t.color.text_faint,
-            4.0,
-        );
-        paint_elided(
-            ui,
-            purpose_rect,
-            "Engineering document",
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-            17.0,
-        );
-        paint_elided(
-            ui,
-            purpose_rect,
-            "Owns the active definition and exposes downstream effects without duplicating source evidence.",
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-            30.0,
-        );
-    }
-
-    let (status, tone) = candidate_status(app, records);
     let status_rect = Rect::from_min_max(
         Pos2::new(status_left, rect.top()),
         Pos2::new(rect.right() - 14.0, rect.bottom()),
     );
-    let status_color = tone_color(&t, tone);
-    let status_y = rect.top() + 16.0;
-    ui.painter().circle_filled(
-        Pos2::new(status_rect.left() + 4.0, status_y),
-        2.5,
-        status_color,
-    );
+    let status_y = rect.center().y;
+    let mut text_left = status_rect.left();
+    let mut available = (status_rect.width() - 1.0).max(1.0);
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                Pos2::new(text_left + MARK_SIDE * 0.5, status_y),
+                Vec2::splat(MARK_SIDE),
+            ),
+            problem,
+        );
+        text_left += MARK_ADVANCE;
+        available = (available - MARK_ADVANCE).max(1.0);
+    }
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let label =
-        design_system::elide_text(ui, &status, &font, (status_rect.width() - 14.0).max(1.0));
+    let label = design_system::elide_text(ui, &status, &font, available);
     ui.painter().text(
-        Pos2::new(status_rect.left() + 13.0, status_y),
+        Pos2::new(text_left, status_y),
         Align2::LEFT_CENTER,
         label,
         font,
-        status_color,
+        t.color.text_dim,
     );
 }
 
-fn specialist_header_height(width: f32) -> f32 {
-    if width > 820.0 && width <= 1120.0 {
-        SPECIALIST_HEADER_MEDIUM_H
-    } else {
-        SPECIALIST_HEADER_H
-    }
-}
-
-fn candidate_status(app: &RSpiceApp, records: &PersistedModelRecords) -> (String, MetricTone) {
+/// What the header says about the open candidate, and `None` when there is
+/// nothing to say: a validated candidate is the normal state, and the normal
+/// state is not announced.
+fn candidate_status(
+    app: &RSpiceApp,
+    records: &PersistedModelRecords,
+) -> Option<(String, Option<Problem>)> {
     if let Some(error) = records.metadata_error.as_ref() {
-        return (format!("metadata invalid · {error}"), MetricTone::Error);
+        return Some((
+            format!("metadata invalid · {error}"),
+            Some(Problem::Failure),
+        ));
     }
     if let Some(error) = records.qualification_error.as_ref() {
-        return (
+        return Some((
             format!("qualification invalid · {error}"),
-            MetricTone::Error,
-        );
+            Some(Problem::Failure),
+        ));
     }
     let editor = &app.state.workbench.model_editor;
     if let Some(diagnostic) = editor.diagnostics.first() {
-        return (diagnostic.message.clone(), MetricTone::Error);
+        return Some((diagnostic.message.clone(), Some(Problem::Failure)));
     }
     if editor.validation.is_some() {
-        return ("candidate validated".to_owned(), MetricTone::Good);
+        return None;
     }
-    ("validation required".to_owned(), MetricTone::Warning)
+    Some(("Not validated".to_owned(), None))
 }
 
 /// Section overrides count with the model-level overrides because both replace
@@ -645,12 +548,7 @@ fn navigation_meta(
     app: &RSpiceApp,
     records: &PersistedModelRecords,
     section: ModelEditorSection,
-) -> Option<(String, MetricTone)> {
-    let record_tone = if records.metadata_error.is_some() {
-        MetricTone::Error
-    } else {
-        MetricTone::Neutral
-    };
+) -> Option<String> {
     match section {
         ModelEditorSection::Parameters => {
             // Without persisted schema the open source's own values are the
@@ -666,21 +564,20 @@ fn navigation_meta(
                 },
                 |metadata| metadata.parameters.len(),
             );
-            Some((count.to_string(), record_tone))
+            Some(count.to_string())
         }
-        ModelEditorSection::Sections => Some((
+        ModelEditorSection::Sections => Some(
             records
                 .metadata
                 .as_ref()
                 .map_or(0, |metadata| metadata.sections.len())
                 .to_string(),
-            record_tone,
-        )),
+        ),
         ModelEditorSection::Tests => {
             let qualification = qualification_totals(app, records);
-            Some((
-                format!("{}/{}", qualification.desktop_passed, qualification.total),
-                qualification.desktop_tone,
+            Some(format!(
+                "{}/{}",
+                qualification.desktop_passed, qualification.total
             ))
         }
         ModelEditorSection::Statistics
@@ -695,30 +592,23 @@ fn section_header_fact(
     app: &RSpiceApp,
     records: &PersistedModelRecords,
     section: ModelEditorSection,
-) -> Option<(String, MetricTone)> {
+) -> Option<String> {
     match section {
         ModelEditorSection::Parameters => {
             let metadata = records.metadata.as_ref()?;
             let (declared, inherited, overridden) = parameter_source_split(metadata);
-            Some((
-                format!("{declared} declared · {inherited} inherited · {overridden} override"),
-                if records.metadata_error.is_some() {
-                    MetricTone::Error
-                } else {
-                    MetricTone::Neutral
-                },
+            Some(format!(
+                "{declared} declared · {inherited} inherited · {overridden} override"
             ))
         }
         ModelEditorSection::Tests => {
             // Suite rows state desktop and WebAssembly runs one suite at a
             // time; runtime parity is a property of the candidate as a whole.
+            // The detail after it was the Tests table's own Status column.
             let qualification = qualification_totals(app, records);
-            Some((
-                format!(
-                    "{} / {} WebAssembly · {}",
-                    qualification.wasm_passed, qualification.total, qualification.wasm_detail
-                ),
-                qualification.wasm_tone,
+            Some(format!(
+                "{} / {} WebAssembly",
+                qualification.wasm_passed, qualification.total
             ))
         }
         ModelEditorSection::Sections
@@ -733,9 +623,6 @@ struct QualificationTotals {
     total: usize,
     desktop_passed: usize,
     wasm_passed: usize,
-    wasm_detail: String,
-    desktop_tone: MetricTone,
-    wasm_tone: MetricTone,
 }
 
 fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> QualificationTotals {
@@ -744,9 +631,6 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
             total: 0,
             desktop_passed: 0,
             wasm_passed: 0,
-            wasm_detail: "no bound qualification evidence".to_owned(),
-            desktop_tone: MetricTone::Warning,
-            wasm_tone: MetricTone::Warning,
         };
     };
     if records.qualification_error.is_some() {
@@ -758,9 +642,6 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
                 .sum(),
             desktop_passed: 0,
             wasm_passed: 0,
-            wasm_detail: "persisted qualification state is invalid".to_owned(),
-            desktop_tone: MetricTone::Error,
-            wasm_tone: MetricTone::Error,
         };
     }
     let source = app.state.workbench.model_editor.draft.as_ref();
@@ -788,25 +669,6 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
         total,
         desktop_passed,
         wasm_passed,
-        wasm_detail: if total == 0 {
-            "no qualification vectors".to_owned()
-        } else if wasm_passed == total {
-            "WebAssembly source-bound evidence".to_owned()
-        } else {
-            format!("{} unresolved or failed", total - wasm_passed)
-        },
-        desktop_tone: pass_tone(desktop_passed, total),
-        wasm_tone: pass_tone(wasm_passed, total),
-    }
-}
-
-fn pass_tone(passed: usize, total: usize) -> MetricTone {
-    if total == 0 {
-        MetricTone::Warning
-    } else if passed == total {
-        MetricTone::Good
-    } else {
-        MetricTone::Warning
     }
 }
 
@@ -901,13 +763,13 @@ fn render_navigation(
                 let meta = navigation_meta(app, records, spec.section);
                 let accessible = meta.as_ref().map_or_else(
                     || spec.section.label().to_owned(),
-                    |(value, _)| format!("{} · {value}", spec.section.label()),
+                    |value| format!("{} · {value}", spec.section.label()),
                 );
-                let meta = meta.map(|(value, tone)| {
+                let meta = meta.map(|value| {
                     ui.painter().layout_no_wrap(
                         value,
                         theme::mono(tokens::FS_0, FontWeight::Regular),
-                        meta_color(&t, tone),
+                        t.color.text_dim,
                     )
                 });
                 let label_font = theme::sans(
@@ -961,48 +823,7 @@ fn render_navigation(
                     *action = Some(SurfaceAction::SelectSection(spec.section));
                 }
             }
-
-            const NOTE_H: f32 = 119.0;
-            let rows_h = SECTION_SPECS.len() as f32 * NAV_ROW_H;
-            ui.add_space((viewport_h - rows_h - NOTE_H).max(0.0));
-            navigation_evidence_note(ui, NOTE_H);
         });
-}
-
-fn navigation_evidence_note(ui: &mut Ui, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let (note_rect, response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width().max(1.0), height),
-        Sense::hover(),
-    );
-    ui.painter().hline(
-        note_rect.x_range(),
-        note_rect.top(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let clip = note_rect.shrink2(Vec2::new(11.0, 8.0));
-    paint_elided(
-        ui,
-        clip,
-        "EVIDENCE CONTRACT",
-        theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text_faint,
-        0.0,
-    );
-    let galley = ui.painter().layout(
-        EVIDENCE_CONTRACT.to_owned(),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        clip.width(),
-    );
-    ui.painter().with_clip_rect(clip).galley(
-        Pos2::new(clip.left(), clip.top() + 22.0),
-        galley,
-        t.color.text_dim,
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(format!("Evidence contract. {EVIDENCE_CONTRACT}"));
-    });
 }
 
 fn render_section(
@@ -1069,11 +890,10 @@ fn section_header(
     // The section's aggregate shares the kicker line: it is elided first so the
     // kicker gives up width to it rather than overprinting it.
     let fact = section_header_fact(app, records, spec.section);
-    let fact_galley = fact.as_ref().map(|(text, tone)| {
+    let fact_galley = fact.as_ref().map(|text| {
         let font = theme::mono(tokens::FS_0, FontWeight::Regular);
         let text = design_system::elide_text(ui, text, &font, (copy_rect.width() * 0.66).max(1.0));
-        ui.painter()
-            .layout_no_wrap(text, font, meta_color(&t, *tone))
+        ui.painter().layout_no_wrap(text, font, t.color.text_dim)
     });
     let kicker_rect = Rect::from_min_max(
         copy_rect.min,
@@ -1088,7 +908,7 @@ fn section_header(
     paint_elided(
         ui,
         kicker_rect,
-        &format!("MODEL · {}", spec.section.label().to_uppercase()),
+        &format!("Model · {}", spec.section.label()),
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_faint,
         9.0,
@@ -1105,7 +925,7 @@ fn section_header(
     }
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(match fact.as_ref() {
-            Some((fact, _)) => format!("{}. {}. {fact}", spec.section.label(), spec.title),
+            Some(fact) => format!("{}. {}. {fact}", spec.section.label(), spec.title),
             None => format!("{}. {}", spec.section.label(), spec.title),
         });
     });
@@ -1261,24 +1081,28 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
                 let diagnostic = diagnostics
                     .iter()
                     .find(|value| value.field.starts_with(&format!("parameters[{index}]")));
-                let tone = if diagnostic.is_some() {
-                    MetricTone::Error
-                } else if changed.contains(&parameter.name.to_lowercase()) {
-                    MetricTone::Warning
-                } else if meta.is_some() {
-                    MetricTone::Good
-                } else {
-                    MetricTone::Warning
-                };
+                // Only the rejection is attached to the field it rejects. A
+                // parameter that reads back exactly as the schema declares it
+                // leaves the cell empty: "declared" on every untouched row is
+                // a constant, and the rows that differ are what the column is
+                // for.
                 let status = diagnostic.map_or_else(
-                    || match tone {
-                        MetricTone::Warning if meta.is_none() => "schema unavailable".to_owned(),
-                        MetricTone::Warning => "changed".to_owned(),
-                        MetricTone::Good => "declared".to_owned(),
-                        _ => "review".to_owned(),
+                    || {
+                        if meta.is_none() {
+                            "schema unavailable".to_owned()
+                        } else if changed.contains(&parameter.name.to_lowercase()) {
+                            "changed".to_owned()
+                        } else {
+                            String::new()
+                        }
                     },
                     |value| value.message.clone(),
                 );
+                let tone = if diagnostic.is_some() {
+                    MetricTone::Error
+                } else {
+                    MetricTone::Neutral
+                };
                 let unit = if parameter.unit.is_empty() {
                     "not declared"
                 } else {
@@ -1381,13 +1205,12 @@ fn sections_table(ui: &mut Ui, records: &PersistedModelRecords) {
             .sections
             .iter()
             .map(|section| {
-                let (qualification, tone) = section_qualification(&section.qualification);
                 vec![
                     DisplayCell::mono(&section.name),
                     DisplayCell::plain(section.parent.as_deref().unwrap_or("base")),
                     DisplayCell::mono(section.overrides.len().to_string()),
                     DisplayCell::plain(model_files_label(&section.model_files)),
-                    DisplayCell::toned(qualification, tone),
+                    section_qualification(&section.qualification),
                 ]
             })
             .collect()
@@ -1401,26 +1224,25 @@ fn sections_table(ui: &mut Ui, records: &PersistedModelRecords) {
     );
 }
 
-fn section_qualification(value: &ModelSectionQualification) -> (String, MetricTone) {
+/// Where one process section stands.
+///
+/// This is a definition table, not a results table, so the column states each
+/// section's recorded state in the same words and the same ink. The two that
+/// stop a promotion carry a mark instead of a tone, and the digest behind a
+/// qualified section is not a fact anyone reads off a row.
+fn section_qualification(value: &ModelSectionQualification) -> DisplayCell {
     match value {
-        ModelSectionQualification::Unqualified => ("unqualified".to_owned(), MetricTone::Warning),
-        ModelSectionQualification::Pending => ("pending".to_owned(), MetricTone::Warning),
+        ModelSectionQualification::Unqualified => DisplayCell::plain("unqualified"),
+        ModelSectionQualification::Pending => DisplayCell::plain("pending"),
         ModelSectionQualification::Qualified { evidence_digest } => {
-            evidence_digest.as_ref().map_or(
-                (
-                    "invalid · qualification evidence not retained".to_owned(),
-                    MetricTone::Error,
-                ),
-                |digest| {
-                    (
-                        format!("qualified · {}", short_identity(digest)),
-                        MetricTone::Good,
-                    )
-                },
-            )
+            if evidence_digest.is_some() {
+                DisplayCell::plain("qualified")
+            } else {
+                DisplayCell::problem("evidence missing", Problem::Failure)
+            }
         }
         ModelSectionQualification::Failed { summary } => {
-            (format!("failed · {summary}"), MetricTone::Error)
+            DisplayCell::problem(format!("failed · {summary}"), Problem::Failure)
         }
     }
 }
@@ -1583,7 +1405,7 @@ fn qualification_table(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRec
                 DisplayCell::plain(row.desktop),
                 DisplayCell::plain(row.wasm),
                 DisplayCell::mono(row.reference_error),
-                DisplayCell::toned(row.status, row.tone),
+                row.status,
             ]
         })
         .collect::<Vec<_>>();
@@ -1610,16 +1432,16 @@ fn qualification_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<Q
             let desktop = bound_platform_run(state, suite, source, QualificationPlatform::Desktop);
             let wasm = bound_platform_run(state, suite, source, QualificationPlatform::WebAssembly);
             let worst = evidence.and_then(worst_relative_error);
-            let invalid_state = records.qualification_error.is_some();
-            let (status, tone) = if invalid_state {
-                ("invalid persisted state".to_owned(), MetricTone::Error)
+            // The suite's verdict. A suite that passed is the normal case and
+            // reads in the same ink as the rest of its row; a suite with
+            // failures is the one the column exists to find. A state too
+            // broken to read is not a verdict at all, so it carries a mark.
+            let status = if records.qualification_error.is_some() {
+                DisplayCell::problem("unreadable", Problem::Failure)
             } else if evidence.is_none() {
-                (
-                    "awaiting cross-platform evidence".to_owned(),
-                    MetricTone::Warning,
-                )
+                DisplayCell::plain("not run")
             } else if evidence.is_some_and(|evidence| evidence.passed) {
-                ("pass".to_owned(), MetricTone::Good)
+                DisplayCell::plain("pass")
             } else {
                 let unresolved = evidence.map_or(total, |evidence| {
                     evidence
@@ -1628,9 +1450,9 @@ fn qualification_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<Q
                         .filter(|outcome| !outcome.passed)
                         .count()
                 });
-                (
+                DisplayCell::toned(
                     format!("{unresolved} unresolved or failed"),
-                    MetricTone::Warning,
+                    MetricTone::Error,
                 )
             };
             QualificationRow {
@@ -1642,7 +1464,6 @@ fn qualification_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<Q
                     .map(format_percentage)
                     .unwrap_or_else(|| "not available".to_owned()),
                 status,
-                tone,
             }
         })
         .collect()
@@ -1767,7 +1588,7 @@ fn release_panel(
     let split = width >= 720.0;
     let left_w = if split { width * 0.5 } else { width };
     let facts = release_facts(candidate);
-    let facts_h = facts.len() as f32 * 35.0;
+    let facts_h = facts.len().max(1) as f32 * RELEASE_FACT_ROW_H;
     let note_h = 154.0;
     let height = if split {
         facts_h.max(note_h)
@@ -1812,8 +1633,11 @@ fn release_panel(
             .layout(Layout::top_down(Align::Min)),
     );
     facts_ui.spacing_mut().item_spacing = Vec2::ZERO;
-    for (label, value, tone) in facts {
-        release_fact_row(&mut facts_ui, &label, &value, tone);
+    if facts.is_empty() {
+        release_no_candidate_row(&mut facts_ui);
+    }
+    for (label, value) in facts {
+        release_fact_row(&mut facts_ui, &label, &value);
     }
 
     let note_clip = note_rect.shrink2(Vec2::new(12.0, 10.0));
@@ -1906,78 +1730,45 @@ fn current_candidate<'a>(
     matches.next().is_none().then_some(first)
 }
 
-fn release_facts(candidate: Option<&ModelReleaseCandidate>) -> Vec<(String, String, MetricTone)> {
+/// What the four release gates stand at, for a candidate that exists.
+///
+/// With no candidate open there is one fact, not four: the panel states it on
+/// its own line rather than writing "no release candidate" into every row of
+/// a table whose rows have nothing to read off.
+fn release_facts(candidate: Option<&ModelReleaseCandidate>) -> Vec<(String, String)> {
     let Some(candidate) = candidate else {
-        return vec![
-            (
-                "Documentation".to_owned(),
-                "no release candidate".to_owned(),
-                MetricTone::Warning,
-            ),
-            (
-                "License".to_owned(),
-                "no release candidate".to_owned(),
-                MetricTone::Warning,
-            ),
-            (
-                "Consumer impact".to_owned(),
-                "no release candidate".to_owned(),
-                MetricTone::Warning,
-            ),
-            (
-                "Compatibility".to_owned(),
-                "no release candidate".to_owned(),
-                MetricTone::Warning,
-            ),
-        ];
+        return Vec::new();
     };
     let documentation = if candidate.documentation.validate_complete().is_ok() {
-        ("complete".to_owned(), MetricTone::Good)
+        "complete".to_owned()
     } else {
-        (
-            format!(
-                "{} required documents declared",
-                candidate.documentation.declarations.len()
-            ),
-            MetricTone::Warning,
+        format!(
+            "{} required documents declared",
+            candidate.documentation.declarations.len()
         )
     };
     let license = candidate.license.as_ref().map_or_else(
-        || ("not declared".to_owned(), MetricTone::Warning),
+        || "not declared".to_owned(),
         |license| {
-            (
-                format!(
-                    "{} · {}",
-                    license.expression,
-                    license_scope_label(license.scope)
-                ),
-                if license.validate_for_release().is_ok() {
-                    MetricTone::Good
-                } else {
-                    MetricTone::Warning
-                },
+            format!(
+                "{} · {}",
+                license.expression,
+                license_scope_label(license.scope)
             )
         },
     );
     let impact = candidate.consumer_impact.as_ref().map_or_else(
-        || ("not assessed".to_owned(), MetricTone::Warning),
+        || "not assessed".to_owned(),
         |impact| {
-            (
-                format!(
-                    "{} consumers · {}",
-                    impact.affected_consumer_ids.len(),
-                    consumer_change_label(impact.change)
-                ),
-                if impact.validate_for_release().is_ok() {
-                    MetricTone::Good
-                } else {
-                    MetricTone::Warning
-                },
+            format!(
+                "{} consumers · {}",
+                impact.affected_consumer_ids.len(),
+                consumer_change_label(impact.change)
             )
         },
     );
     let compatibility = candidate.compatibility.as_ref().map_or_else(
-        || ("not assessed".to_owned(), MetricTone::Warning),
+        || "not assessed".to_owned(),
         |compatibility| {
             let ready = candidate
                 .consumer_impact
@@ -1989,25 +1780,18 @@ fn release_facts(candidate: Option<&ModelReleaseCandidate>) -> Vec<(String, Stri
                 .iter()
                 .filter(|platform| platform.disposition != CompatibilityDisposition::Compatible)
                 .count();
-            (
-                if ready {
-                    "desktop · WASM complete".to_owned()
-                } else {
-                    format!("{declared}/2 platforms declared · {unresolved} incompatible")
-                },
-                if ready {
-                    MetricTone::Good
-                } else {
-                    MetricTone::Warning
-                },
-            )
+            if ready {
+                "desktop and WebAssembly declared".to_owned()
+            } else {
+                format!("{declared}/2 platforms declared · {unresolved} incompatible")
+            }
         },
     );
     vec![
-        ("Documentation".to_owned(), documentation.0, documentation.1),
-        ("License".to_owned(), license.0, license.1),
-        ("Consumer impact".to_owned(), impact.0, impact.1),
-        ("Compatibility".to_owned(), compatibility.0, compatibility.1),
+        ("Documentation".to_owned(), documentation),
+        ("License".to_owned(), license),
+        ("Consumer impact".to_owned(), impact),
+        ("Compatibility".to_owned(), compatibility),
     ]
 }
 
@@ -2027,10 +1811,10 @@ fn license_scope_label(value: LicenseScope) -> &'static str {
     }
 }
 
-fn release_fact_row(ui: &mut Ui, label: &str, value: &str, tone: MetricTone) {
+fn release_fact_row(ui: &mut Ui, label: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 35.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, RELEASE_FACT_ROW_H), Sense::hover());
     bottom_rule(ui, rect, t.color.border);
     let label_rect = Rect::from_min_max(
         Pos2::new(rect.left() + 11.0, rect.top()),
@@ -2041,7 +1825,28 @@ fn release_fact_row(ui: &mut Ui, label: &str, value: &str, tone: MetricTone) {
         Pos2::new(rect.right() - 10.0, rect.bottom()),
     );
     paint_cell(ui, label_rect, &DisplayCell::plain(label));
-    paint_cell(ui, value_rect, &DisplayCell::toned(value, tone));
+    paint_cell(ui, value_rect, &DisplayCell::plain(value));
+}
+
+/// The one line the release column shows when no candidate has been created.
+fn release_no_candidate_row(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width().max(1.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, RELEASE_FACT_ROW_H), Sense::hover());
+    bottom_rule(ui, rect, t.color.border);
+    let inner = Rect::from_min_max(
+        Pos2::new(rect.left() + 11.0, rect.top()),
+        Pos2::new(rect.right() - 10.0, rect.bottom()),
+    );
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let text = design_system::elide_text(ui, "No release candidate", &font, inner.width());
+    ui.painter().with_clip_rect(inner).text(
+        inner.left_center(),
+        Align2::LEFT_CENTER,
+        text,
+        font,
+        t.color.text_dim,
+    );
 }
 
 fn apply_action(app: &mut RSpiceApp, action: SurfaceAction) {
@@ -2178,8 +1983,8 @@ fn release_comparison_dialog(
                 rows.iter()
                 .map(|row| {
                     let (status, tone) = match row.disposition {
-                        ModelComparisonDisposition::Unchanged => ("unchanged", MetricTone::Good),
-                        ModelComparisonDisposition::Improved => ("improved", MetricTone::Good),
+                        ModelComparisonDisposition::Unchanged => ("unchanged", MetricTone::Neutral),
+                        ModelComparisonDisposition::Improved => ("improved", MetricTone::Neutral),
                         ModelComparisonDisposition::Review => ("review", MetricTone::Warning),
                         ModelComparisonDisposition::Blocking => ("blocking", MetricTone::Error),
                     };
@@ -2286,15 +2091,7 @@ fn table_header(ui: &mut Ui, width: f32, columns: &[(&str, f32)]) {
                 Stroke::new(1.0, t.color.border),
             );
         }
-        paint_cell(
-            ui,
-            cell,
-            &DisplayCell {
-                text: label.to_uppercase(),
-                mono: false,
-                tone: MetricTone::Neutral,
-            },
-        );
+        paint_cell(ui, cell, &DisplayCell::plain(*label));
     }
     bottom_rule(ui, rect, t.color.border);
 }
@@ -2391,9 +2188,23 @@ fn paint_cell(ui: &Ui, rect: Rect, cell: &DisplayCell) {
     } else {
         theme::sans(tokens::FS_0, FontWeight::Regular)
     };
-    let text = design_system::elide_text(ui, &cell.text, &font, inner.width());
+    let mut text_left = inner.left();
+    let mut available = inner.width();
+    if let Some(problem) = cell.mark {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                Pos2::new(text_left + MARK_SIDE * 0.5, inner.center().y),
+                Vec2::splat(MARK_SIDE),
+            ),
+            problem,
+        );
+        text_left += MARK_ADVANCE;
+        available = (available - MARK_ADVANCE).max(1.0);
+    }
+    let text = design_system::elide_text(ui, &cell.text, &font, available);
     ui.painter().with_clip_rect(inner).text(
-        inner.left_center(),
+        Pos2::new(text_left, inner.center().y),
         Align2::LEFT_CENTER,
         text,
         font,
@@ -2422,18 +2233,8 @@ fn paint_elided(
 fn tone_color(t: &Tokens, tone: MetricTone) -> Color32 {
     match tone {
         MetricTone::Neutral => t.color.text,
-        MetricTone::Good => t.color.ok,
         MetricTone::Warning => t.color.warn,
         MetricTone::Error => t.color.err,
-    }
-}
-
-/// A rail or header meta value qualifies the label beside it, so an untoned one
-/// stays subordinate instead of reading at full text weight.
-fn meta_color(t: &Tokens, tone: MetricTone) -> Color32 {
-    match tone {
-        MetricTone::Neutral => t.color.text_dim,
-        tone => tone_color(t, tone),
     }
 }
 
