@@ -19,8 +19,8 @@ use crate::workbench::{
 };
 
 use super::preferences_shell::{
-    PreferenceCategory, control_width, preference_switch, section_heading, segmented, setting_row,
-    value_column,
+    PreferenceCategory, control_width, preference_row, preference_switch, section_heading,
+    segmented, value_column,
 };
 use super::{AppState, PreferencePageActions};
 
@@ -56,7 +56,7 @@ fn toggle_row(
     detail: &'static str,
     accessible_label: &'static str,
 ) {
-    setting_row(ui, title, detail, |ui| {
+    preference_row(ui, title, detail, |ui| {
         value_column(ui, |ui| {
             let mut value = state.ui.preferences.toggle(key);
             if preference_switch(ui, key.stable_id(), accessible_label, &mut value) {
@@ -74,7 +74,7 @@ fn scalar_row(
     detail: &'static str,
     range: std::ops::RangeInclusive<u32>,
 ) {
-    setting_row(ui, title, detail, |ui| {
+    preference_row(ui, title, detail, |ui| {
         value_column(ui, |ui| {
             let mut value = state.ui.preferences.scalar(key);
             // A field holding at most two digits, at the width two digits
@@ -101,6 +101,56 @@ fn scalar_row(
     });
 }
 
+/// The ceiling on concurrent solver workers for one run.
+///
+/// Its own row rather than a `scalar_row` for two reasons: the help line has
+/// to state how many cores this machine actually has, and zero is not a
+/// quantity here but the word "All", so the field prints it rather than the
+/// digit. The engine narrows whatever is asked for to the parallelism the
+/// host reports, which is why a value above the detected count is accepted
+/// instead of refused — a session carried to a smaller machine stays valid.
+fn solver_threads_row(ui: &mut Ui, state: &mut AppState) {
+    let detected = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let help = format!(
+        "Concurrent workers for one run. {detected} logical core{} on this machine.",
+        if detected == 1 { "" } else { "s" }
+    );
+    preference_row(ui, "Solver threads", &help, |ui| {
+        value_column(ui, |ui| {
+            let mut value = state
+                .ui
+                .preferences
+                .scalar(ScalarPreference::LocalParallelSlots);
+            let response = ui.add_sized(
+                [
+                    NUMERIC_FIELD_WIDTH.min(control_width(ui)),
+                    Tokens::get(ui.ctx()).metrics.ctl_h,
+                ],
+                egui::DragValue::new(&mut value)
+                    .range(0..=u32::try_from(detected).unwrap_or(u32::MAX))
+                    .speed(1.0)
+                    .custom_formatter(|value, _| {
+                        if value < 1.0 {
+                            "All".to_owned()
+                        } else {
+                            format!("{value:.0}")
+                        }
+                    }),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Solver threads")
+            });
+            if response.changed() {
+                state
+                    .ui
+                    .preferences
+                    .set_scalar(ScalarPreference::LocalParallelSlots, value)
+                    .expect("the detected core count is inside the preference domain");
+            }
+        });
+    });
+}
+
 fn action_row(
     ui: &mut Ui,
     title: &'static str,
@@ -109,7 +159,7 @@ fn action_row(
     label: &'static str,
 ) -> bool {
     let mut clicked = false;
-    setting_row(ui, title, detail, |ui| {
+    preference_row(ui, title, detail, |ui| {
         value_column(ui, |ui| {
             clicked = ui
                 .push_id(action_id, |ui| Button::new(label).show(ui).clicked())
@@ -127,7 +177,7 @@ fn choice_row(
     detail: &'static str,
     options: &'static [&'static str],
 ) {
-    setting_row(ui, title, detail, |ui| {
+    preference_row(ui, title, detail, |ui| {
         value_column(ui, |ui| {
             let active = state.ui.preferences.choice(key);
             let labels = options
@@ -149,7 +199,7 @@ fn choice_row(
 }
 
 fn appearance(ui: &mut Ui, state: &mut AppState) {
-    setting_row(ui, "Color mode", "", |ui| {
+    preference_row(ui, "Color mode", "", |ui| {
         value_column(ui, |ui| {
             let mut selected = Mode::ALL
                 .iter()
@@ -165,7 +215,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
             }
         });
     });
-    setting_row(ui, "Density", "", |ui| {
+    preference_row(ui, "Density", "", |ui| {
         value_column(ui, |ui| {
             let mut selected = usize::from(state.ui.theme.density == Density::Relaxed);
             if segmented(
@@ -193,7 +243,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
         "",
         &["100%", "110%", "125%", "150%"],
     );
-    setting_row(
+    preference_row(
         ui,
         "Engineering canvas theme",
         "Schematic, layout, waveform and field-view backgrounds, as one palette.",
@@ -221,7 +271,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
             });
         },
     );
-    setting_row(
+    preference_row(
         ui,
         "Canvas contrast",
         "Separation between symbols, wires and the grid.",
@@ -244,7 +294,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
             });
         },
     );
-    setting_row(
+    preference_row(
         ui,
         "Color-safe traces",
         "Distinguish traces by line style and marker as well as color.",
@@ -265,7 +315,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     // No static help on this row: the line under the control says what the
     // selected profile actually covers, which is the same question answered
     // concretely. Two explanations of one setting is one too many.
-    setting_row(ui, "Engineering profile", "", |ui| {
+    preference_row(ui, "Engineering profile", "", |ui| {
         let profiles = crate::workbench::EngineeringProfile::ALL;
         let labels = profiles
             .iter()
@@ -301,7 +351,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     }
 
     section_heading(ui, "Layout");
-    setting_row(
+    preference_row(
         ui,
         "Workspace preset",
         "Which panes a workspace opens with.",
@@ -328,12 +378,13 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
                         .workspace_mut()
                         .expect("the compatible Workspace domain was checked above")
                         .set_preset(preset);
+                    state.workbench.set_workspace_preset(preset);
                     state.workbench.apply_workspace_preset(preset);
                 }
             });
         },
     );
-    setting_row(
+    preference_row(
         ui,
         "Console on launch",
         "Errors and explicit Problem navigation always open it.",
@@ -382,7 +433,8 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     }
 
     section_heading(ui, "Background work");
-    setting_row(
+    solver_threads_row(ui, state);
+    preference_row(
         ui,
         "Task attention",
         "Whether a finished or failed background run may take the foreground.",
@@ -425,7 +477,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
 }
 
 fn units(ui: &mut Ui, state: &mut AppState) {
-    setting_row(
+    preference_row(
         ui,
         "Unit system",
         "Display only. A project keeps the units its values were stored in.",
@@ -521,7 +573,7 @@ fn units(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn schematic(ui: &mut Ui, state: &mut AppState) {
-    setting_row(
+    preference_row(
         ui,
         "Grid and snap",
         "A project may declare a stricter increment.",
@@ -706,7 +758,7 @@ fn projects(ui: &mut Ui, state: &mut AppState) {
         "The preset a new project starts from. Each plan may override it.",
         &["Balanced", "Fast", "Accurate", "Robust"],
     );
-    setting_row(
+    preference_row(
         ui,
         "Autosave interval",
         "Checkpoints open editable documents.",
@@ -745,7 +797,7 @@ fn projects(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn accessibility(ui: &mut Ui, state: &mut AppState) {
-    setting_row(
+    preference_row(
         ui,
         "Reduced motion",
         "Disables non-essential transitions and animated progress.",
@@ -766,7 +818,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
             });
         },
     );
-    setting_row(
+    preference_row(
         ui,
         "Canvas keyboard navigation",
         "Traverse symbols, nets, markers, traces and annotations without a pointer.",
@@ -791,7 +843,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         },
     );
     #[cfg(target_arch = "wasm32")]
-    setting_row(
+    preference_row(
         ui,
         "Speak control changes (browser)",
         "Uses the browser speech fallback while a semantic accessibility tree is unavailable.",
@@ -861,10 +913,12 @@ pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppStat
         ),
         PreferenceCategory::Workspace => {
             state.workbench.engineering_profile = crate::workbench::EngineeringProfile::default();
+            preferences.restore_defaults(&[], &[], &[ScalarPreference::LocalParallelSlots]);
             if let Ok(workspace) = preferences.workspace_mut() {
                 *workspace = WorkspacePreferences::default();
                 let preset = workspace.preset();
                 let console = workspace.console_on_launch();
+                state.workbench.set_workspace_preset(preset);
                 state.workbench.apply_workspace_preset(preset);
                 state
                     .workbench
@@ -1025,7 +1079,6 @@ mod tests {
             "TogglePreference::SynchronizeResultFamilyCrossProbes",
             "TogglePreference::AutomaticDiagnostics",
             "TogglePreference::PythonAutomationApi",
-            "ScalarPreference::LocalParallelSlots",
             "ScalarPreference::ParallelTaskCeiling",
         ] {
             assert!(
@@ -1064,6 +1117,41 @@ mod tests {
                 < f32::EPSILON,
             "the first option on the row has to be the scale RSpice ships"
         );
+    }
+
+    /// The solver's worker ceiling is the other counter-example: the engine
+    /// has always taken one, the command line has always exposed it as
+    /// `--jobs`, and the desktop had no control for it at all. The stored key
+    /// existed and was *printed* in the Automation preview, which is worse
+    /// than absent — a number shown to a reader that nothing honoured.
+    #[test]
+    fn the_worker_ceiling_the_engine_takes_is_reachable_from_workspace() {
+        let workspace = production_source()
+            .split("fn solver_threads_row(")
+            .nth(1)
+            .and_then(|source| source.split("\nfn ").next())
+            .expect("solver threads row source");
+        assert!(workspace.contains("ScalarPreference::LocalParallelSlots"));
+        assert!(
+            production_code().contains("solver_threads_row(ui, state)"),
+            "the row has to be on a page, not merely defined"
+        );
+        assert_eq!(
+            crate::workbench::UserPreferences::default().solver_worker_limit(),
+            None,
+            "shipped default leaves the engine's own ceiling in place"
+        );
+    }
+
+    /// Zero on that row is the word "All", not the number none.
+    ///
+    /// A ceiling of zero workers would refuse to solve anything, so the
+    /// sentinel has to read as what it means wherever it is shown.
+    #[test]
+    fn the_worker_row_spells_its_sentinel_rather_than_printing_zero() {
+        let production = production_code();
+        assert!(production.contains("custom_formatter"));
+        assert!(production.contains("\"All\".to_owned()"));
     }
 
     /// Rows the pages used to carry that set nothing.
