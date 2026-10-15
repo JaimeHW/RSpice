@@ -47,8 +47,6 @@ struct FftModel {
     revision: u64,
     subtitle: String,
     source: String,
-    window: crate::fft::WindowFunction,
-    fft_size: usize,
     resolution_bandwidth: Option<f64>,
     normalization: crate::fft::data::SpectrumNormalization,
     frequency: Arc<[f64]>,
@@ -107,8 +105,6 @@ fn build_model(fft: &FftState, series: &mut Option<FftSeries>) -> Option<FftMode
             .source_cache
             .as_ref()
             .map_or_else(|| data.name.clone(), |source| source.name.clone()),
-        window: data.window,
-        fft_size: data.fft_size,
         resolution_bandwidth: resolution_bandwidth(data),
         normalization: data.normalization,
         frequency,
@@ -174,11 +170,6 @@ fn spectrum_subtitle(source: &str, window: crate::fft::WindowFunction, fft_size:
         "{source} · {} · {fft_size}-point transform",
         window.display_name().to_lowercase()
     )
-}
-
-/// How the panel labels the transform length.
-fn transform_size_row(fft_size: usize) -> (&'static str, String) {
-    ("Transform size", format!("{fft_size} samples"))
 }
 
 fn trace_cache_key(revision: u64) -> u64 {
@@ -395,15 +386,15 @@ pub fn right_panel(
     series: &mut Option<FftSeries>,
     quantity_policy: &QuantityPresentationPolicy,
 ) {
-    section_header(ui, "Spectrum", None);
+    // The plot well already says the FFT has not run; a section header over
+    // an explanation of that is the same sentence a second time.
     let Some(model) = build_model(fft, series) else {
-        crate::presentation::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
         return;
     };
     let Some(analysis) = fft.analysis.as_ref() else {
-        crate::presentation::panel_note(ui, "Spectrum metrics appear once the FFT is computed.");
         return;
     };
+    section_header(ui, "Spectrum", None);
     let level_unit = spectrum_level_unit(&model.source, model.normalization);
 
     let f = |v: Option<f64>, digits: usize| {
@@ -440,22 +431,12 @@ pub fn right_panel(
         _ => "—".to_owned(),
     };
 
-    let (transform_label, transform_value) = transform_size_row(model.fft_size);
+    // The strip subtitle reads "V(out) · blackman-harris · 1024-point
+    // transform" and the window and normalization are combos above the plot,
+    // so the panel states only what is derived from them.
     let rows = [
-        ("Source", model.source, false),
-        ("Window", model.window.display_name().to_owned(), false),
-        (transform_label, transform_value, false),
         ("Resolution BW", resolution_bandwidth, false),
-        (
-            "Normalization",
-            model.normalization.display_name().to_owned(),
-            false,
-        ),
-        (
-            "Dominant carrier",
-            f(analysis.fundamental_frequency, 1),
-            false,
-        ),
+        ("Fundamental", f(analysis.fundamental_frequency, 1), false),
         ("Amplitude", amplitude, false),
         ("THD", thd, true),
         ("SNR", db(analysis.snr_db), false),
@@ -575,9 +556,8 @@ mod tests {
     }
 
     /// The number beside a spectrum is the transform length, not the count
-    /// of points drawn — a 1024-point transform plots 513 bins. Both the
-    /// strip and the panel called it "points", which is the one reading the
-    /// number does not have.
+    /// of points drawn — a 1024-point transform plots 513 bins. The strip
+    /// called it "points", which is the one reading the number does not have.
     #[test]
     fn the_transform_length_is_never_called_a_count_of_plotted_points() {
         let subtitle = spectrum_subtitle("V(out)", WindowFunction::BlackmanHarris, 1024);
@@ -586,13 +566,6 @@ mod tests {
             !subtitle.contains("points"),
             "the strip calls the transform length a count of plotted points: {subtitle}"
         );
-
-        let (label, value) = transform_size_row(1024);
-        assert_ne!(
-            label, "Points",
-            "the panel calls the transform length a count of plotted points"
-        );
-        assert!(value.contains("1024"), "{value}");
     }
 
     /// One spectrum, rendered.
