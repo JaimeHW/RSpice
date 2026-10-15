@@ -262,7 +262,7 @@ fn last_attempt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             }
             Some(Err(reason)) => {
                 property(ui, "Outcome", state.label(), "refused");
-                ui.label(RichText::new(reason).small().color(t.color.err));
+                problem_line(ui, Problem::Failure, &reason);
                 ui.label(
                     RichText::new(state.consequence())
                         .small()

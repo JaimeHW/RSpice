@@ -894,11 +894,14 @@ fn instance_binding_card(
                         .color(t.color.text_faint),
                 );
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    // The row already carries a failure mark; the name that
+                    // does not resolve is what the row is about, not a second
+                    // severity.
                     ui.label(
                         RichText::new(&instance.reference)
                             .monospace()
                             .small()
-                            .color(t.color.warn),
+                            .color(t.color.text_dim),
                     );
                 });
             });

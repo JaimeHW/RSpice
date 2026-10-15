@@ -243,15 +243,24 @@ pub(in crate::workbench::surfaces) fn findings_for<'a>(
 /// whose bytes still match says nothing at all.
 pub(super) fn paint_source_chip(ui: &Ui, rect: egui::Rect, column_end: f32) {
     let t = Tokens::get(ui.ctx());
-    ui.painter().text(
-        egui::pos2(
-            rect.left() + rect.width() * column_end - 5.0,
-            rect.center().y,
-        ),
+    let right = rect.left() + rect.width() * column_end - 5.0;
+    let word = ui.painter().text(
+        egui::pos2(right, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         "drift",
         theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.warn,
+        t.color.text_dim,
+    );
+    paint_problem_mark(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(
+                word.left() - MARK_ADVANCE + MARK_SIDE * 0.5,
+                rect.center().y,
+            ),
+            egui::Vec2::splat(MARK_SIDE),
+        ),
+        Problem::Warning,
     );
 }
 
@@ -289,19 +298,12 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.warn))
+        .stroke(Stroke::new(1.0, t.color.border_strong))
         .inner_margin(egui::Margin::symmetric(12, 6))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
             ui.spacing_mut().item_spacing.y = 3.0;
-            hub::announced(
-                ui,
-                RichText::new(&headline)
-                    .small()
-                    .strong()
-                    .color(t.color.warn),
-                &headline,
-            );
+            hub::marked_line(ui, Problem::Warning, &headline);
             hub::announced(
                 ui,
                 RichText::new(&digests)

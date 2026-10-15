@@ -1045,9 +1045,10 @@ fn family_table(
                     } else if tally.shared > 0 {
                         (format!("{} on a boundary", tally.shared), t.color.warn)
                     } else {
-                        // Green "clean" on every family that is fine is
-                        // wallpaper behind the two that are not.
-                        ("clean".to_owned(), t.color.text_faint)
+                        // Nothing at all on every family that is fine: a word
+                        // for it on each row is wallpaper behind the two rows
+                        // that have something to answer for.
+                        (String::new(), t.color.text_faint)
                     };
                     let cards = family.cards.len().to_string();
                     let placed = if tally.instances == 0 {
@@ -1086,8 +1087,12 @@ fn family_table(
                         theme::sans(tokens::FS_0, FontWeight::Regular),
                         tone,
                     );
-                    let announcement =
-                        format!("{key} · {device} · {cards} cards · {placed} placed · {phrase}");
+                    let mut announcement =
+                        format!("{key} · {device} · {cards} cards · {placed} placed");
+                    if !phrase.is_empty() {
+                        announcement.push_str(" · ");
+                        announcement.push_str(&phrase);
+                    }
                     ui.ctx().accesskit_node_builder(response.id, |node| {
                         node.set_label(announcement.clone());
                     });

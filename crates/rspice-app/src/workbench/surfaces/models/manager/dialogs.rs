@@ -414,7 +414,7 @@ pub(super) fn render_dialog(
                 ui.label("Engineering audit reason");
                 ui.text_edit_multiline(&mut reason);
                 if let Some(error) = &error {
-                    ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+                    problem_line(ui, Problem::Failure, error);
                 }
                 // Withdrawing a published decision is not the transaction this
                 // dialog commits, so it sits beside the record it withdraws
@@ -802,12 +802,6 @@ pub(super) fn render_dialog(
                         section = candidate.clone();
                     }
                 });
-                if sections.is_empty() {
-                    ui.colored_label(
-                        Tokens::get(ui.ctx()).color.err,
-                        "The authenticated source catalog defines no non-empty sections.",
-                    );
-                }
             });
             let decision = match choice {
                 DialogChoice::Primary => Some(true),

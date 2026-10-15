@@ -104,7 +104,7 @@ pub(super) fn pane(
 fn what_changed(ui: &mut Ui, diff: &ReleaseDiff) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(6.0);
-    let headline = format!("WHAT CHANGED · {} → {}", diff.key.from, diff.key.to);
+    let headline = format!("What changed · {} → {}", diff.key.from, diff.key.to);
     announced(
         ui,
         RichText::new(&headline)
@@ -117,22 +117,16 @@ fn what_changed(ui: &mut Ui, diff: &ReleaseDiff) {
         .max_height(84.0)
         .show(ui, |ui| {
             for added in &diff.added {
-                changed_line(ui, "+", added, "added by this release", t.color.text_dim);
+                changed_line(ui, "+", added, "added by this release");
             }
             for removed in &diff.removed {
                 // ASCII `+`/`-`, not typographic signs. It is the vocabulary
                 // every reader already knows a diff by, and it is the pair
                 // that is certain to paint at this size on every face.
-                changed_line(
-                    ui,
-                    "-",
-                    removed,
-                    "not published by this release",
-                    t.color.warn,
-                );
+                changed_line(ui, "-", removed, "not published by this release");
             }
             for part in &diff.changed {
-                changed_line(ui, "~", &part.part_id, &facts_of(part), t.color.warn);
+                changed_line(ui, "~", &part.part_id, &facts_of(part));
             }
             if diff.is_empty() {
                 let phrase = "The catalog states no difference in the part lists.";
@@ -148,12 +142,12 @@ fn what_changed(ui: &mut Ui, diff: &ReleaseDiff) {
             diff.licence
                 .as_ref()
                 .map(|(from, to)| format!("Licence {from} → {to}")),
-            t.color.warn,
+            t.color.text_dim,
         ),
         (
             (!diff.capabilities_added.is_empty())
                 .then(|| format!("Now requires {}", plain_list(&diff.capabilities_added))),
-            t.color.warn,
+            t.color.text_dim,
         ),
         (
             (!diff.capabilities_removed.is_empty()).then(|| {
@@ -203,9 +197,19 @@ fn facts_of(part: &crate::state::model_hub::ChangedPart) -> String {
 }
 
 /// One line of the diff: a sign, the part, and what the catalog says about it.
-fn changed_line(ui: &mut Ui, sign: &str, part_id: &str, detail: &str, colour: Color32) {
+///
+/// Every line reads in the same ink. The sign is what distinguishes a part
+/// this release drops from one it adds, and painting the drop in the warning
+/// tone made a diff — a list of facts about two releases — look like a list
+/// of three severities.
+fn changed_line(ui: &mut Ui, sign: &str, part_id: &str, detail: &str) {
+    let t = Tokens::get(ui.ctx());
     let line = format!("{sign} {part_id} · {detail}");
-    announced(ui, RichText::new(&line).small().color(colour), &line);
+    announced(
+        ui,
+        RichText::new(&line).small().color(t.color.text_dim),
+        &line,
+    );
 }
 
 /// One decision per part this project pinned to the release being superseded.
@@ -222,7 +226,7 @@ fn adopt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedgerRow, di
     }
     ui.add_space(6.0);
     let headline = format!(
-        "ADOPT · {} part{} pinned to {}",
+        "Adopt · {} part{} pinned to {}",
         pinned.len(),
         if pinned.len() == 1 { "" } else { "s" },
         diff.key.from
@@ -303,15 +307,23 @@ fn adopt_line(
             }
             let line = format!("{} · {summary}", pin.part_id);
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                // A part the offered release does not publish is the one row
+                // here the reader has to act on, and the mark is what says so
+                // — the words beside it are the same ink as every other row's.
+                if matches!(standing, PartStanding::Withdrawn) {
+                    ui.spacing_mut().item_spacing.x = MARK_ADVANCE - MARK_SIDE;
+                    let (mark, _) =
+                        ui.allocate_exact_size(egui::Vec2::splat(MARK_SIDE), Sense::hover());
+                    paint_problem_mark(ui.painter(), mark, Problem::Warning);
+                }
                 announced_widget(
                     ui,
-                    egui::Label::new(RichText::new(&line).small().monospace().color(
-                        if matches!(standing, PartStanding::Withdrawn) {
-                            t.color.warn
-                        } else {
-                            t.color.text_dim
-                        },
-                    ))
+                    egui::Label::new(
+                        RichText::new(&line)
+                            .small()
+                            .monospace()
+                            .color(t.color.text_dim),
+                    )
                     .truncate(),
                     &line,
                 );
