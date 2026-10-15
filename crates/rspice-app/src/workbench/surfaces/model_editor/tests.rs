@@ -126,7 +126,10 @@ fn fixed_workspace_geometry_does_not_depend_on_selected_section() {
     for section in ModelEditorSection::ALL {
         assert_eq!(section_spec(section).section, section);
         assert_eq!(NAV_ROW_H, 36.0);
-        assert_eq!(SECTION_HEADER_H, 70.0);
+        // 51, not 70: the band carries its kicker and its title, and the
+        // sentence that described the section below it is gone with the 19 px
+        // of ink and lead it occupied.
+        assert_eq!(SECTION_HEADER_H, 51.0);
         assert_eq!(TABLE_HEADER_H, 27.0);
     }
 }

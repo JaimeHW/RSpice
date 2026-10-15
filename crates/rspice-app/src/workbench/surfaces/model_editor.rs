@@ -54,7 +54,11 @@ const SPECIALIST_HEADER_H: f32 = 46.0;
 const OUTER_IDENTITY_H: f32 = 60.0;
 const NAV_W: f32 = 214.0;
 const NAV_ROW_H: f32 = 36.0;
-const SECTION_HEADER_H: f32 = 70.0;
+/// The section band: its kicker line and the section's title. It was 70 px
+/// when a sentence under the title described what the section below it is
+/// for, and the rule has come up by exactly that sentence's ink and lead, so
+/// the title keeps the padding under it that it always had.
+const SECTION_HEADER_H: f32 = 51.0;
 const TABLE_HEADER_H: f32 = 27.0;
 const TABLE_MIN_W: f32 = 760.0;
 const QUALIFICATION_FIELD_ROW_H: f32 = 54.0;
@@ -88,7 +92,6 @@ enum SurfaceAction {
 struct SectionSpec {
     section: ModelEditorSection,
     title: &'static str,
-    description: &'static str,
     action_label: Option<&'static str>,
 }
 
@@ -96,37 +99,31 @@ const SECTION_SPECS: [SectionSpec; 6] = [
     SectionSpec {
         section: ModelEditorSection::Parameters,
         title: "Typed parameters, inheritance, units, and bounds",
-        description: "Search and edit model parameters with source, equation, unit, and consumer visibility.",
         action_label: Some("Parameter schema…"),
     },
     SectionSpec {
         section: ModelEditorSection::Sections,
         title: "Process sections and inheritance graph",
-        description: "Show exact override deltas instead of copying complete parameter blocks.",
         action_label: Some("New section…"),
     },
     SectionSpec {
         section: ModelEditorSection::Statistics,
         title: "Process, mismatch, hierarchy, and correlation groups",
-        description: "Statistical ownership and correlation are explicit and validated against device geometry.",
         action_label: Some("Correlation matrix…"),
     },
     SectionSpec {
         section: ModelEditorSection::Temperature,
         title: "Temperature equations, interpolation, and valid range",
-        description: "Inspect parameter temperature dependence and out-of-range behavior.",
         action_label: Some("Plot temperature law…"),
     },
     SectionSpec {
         section: ModelEditorSection::Tests,
         title: "Golden vectors, platform parity, and regression",
-        description: "Candidate models cannot be promoted without reference and runtime-parity evidence.",
         action_label: Some("Qualification plan…"),
     },
     SectionSpec {
         section: ModelEditorSection::Release,
         title: "Documentation, review, compatibility, and promotion",
-        description: "Promote a content-addressed model revision with explicit consumer impact.",
         action_label: None,
     },
 ];
@@ -936,14 +933,6 @@ fn section_header(
         theme::sans(13.0, FontWeight::SemiBold),
         t.color.text,
         29.0,
-    );
-    paint_elided(
-        ui,
-        copy_rect,
-        spec.description,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        51.0,
     );
 
     let Some(label) = spec.action_label else {
