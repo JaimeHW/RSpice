@@ -107,14 +107,9 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
         ui.allocate_exact_size(vec2(ui.available_width(), ROW_HEIGHT), Sense::click());
-    let announcement = announcement(row);
+    let spoken = spoken(row);
     response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::SelectableLabel,
-            true,
-            selected,
-            &announcement,
-        )
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &spoken)
     });
     if selected {
         ui.painter().rect_filled(rect, 0.0, t.color.accent_dim);
@@ -151,9 +146,10 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
     }
 
     let text_left = mini.right() + TEXT_GAP;
-    let revision = format!("r{}", row.revision);
-    let revision_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    let revision_width = measured(ui, &revision, revision_font.clone());
+    // No revision counter: it was "r3" down every row of the list, and the
+    // inspector states the selected definition's revision. A placed source
+    // left behind by one is what "outdated" in the meta says.
+    //
     // A definition with nothing to say in its second register takes the whole
     // row for its name rather than leaving a band of nothing under it: a
     // level the engine refused has no key figure, and with no adopters either
@@ -166,24 +162,18 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
             Some((rect.bottom() - 17.0, rect.bottom() - 3.0)),
         )
     };
+    let text_right = rect.right() - RIGHT_INSET - if row.dirty { DOT_TRACK } else { 0.0 };
+    let name_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    let name_elided =
+        measured(ui, &row.name, name_font.clone()) > (text_right - text_left).max(0.0);
     painted_run(
         ui,
         Rect::from_min_max(
             egui::pos2(text_left, name_band.0),
-            egui::pos2(
-                rect.right()
-                    - RIGHT_INSET
-                    - if row.dirty { DOT_TRACK } else { 0.0 }
-                    - if meta_band.is_some() {
-                        0.0
-                    } else {
-                        revision_width + 8.0
-                    },
-                name_band.1,
-            ),
+            egui::pos2(text_right, name_band.1),
         ),
         &row.name,
-        theme::mono(tokens::FS_0, FontWeight::Medium),
+        name_font,
         if selected {
             t.color.text
         } else {
@@ -191,27 +181,12 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
         },
         false,
     );
-    let revision_band = meta_band.unwrap_or(name_band);
-    painted_run(
-        ui,
-        Rect::from_min_max(
-            egui::pos2(rect.right() - RIGHT_INSET - revision_width, revision_band.0),
-            egui::pos2(rect.right() - RIGHT_INSET, revision_band.1),
-        ),
-        &revision,
-        revision_font,
-        t.color.text_faint,
-        true,
-    );
     if let Some(meta_band) = meta_band {
         painted_run(
             ui,
             Rect::from_min_max(
                 egui::pos2(text_left, meta_band.0),
-                egui::pos2(
-                    (rect.right() - RIGHT_INSET - revision_width - 8.0).max(text_left + 1.0),
-                    meta_band.1,
-                ),
+                egui::pos2(text_right.max(text_left + 1.0), meta_band.1),
             ),
             &row.meta,
             theme::mono(tokens::FS_MICRO, FontWeight::Regular),
@@ -220,32 +195,35 @@ pub(super) fn definition_row(ui: &mut Ui, row: &Row<'_>, selected: bool) -> egui
         );
     }
     theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_text(announcement)
+    match hover_text(row, name_elided) {
+        Some(hover) => response.on_hover_text(hover),
+        None => response,
+    }
 }
 
-/// The dot that says the editor is holding an unapplied draft of this
-/// definition, and whether that draft is one the deck would refuse.
+/// The mark that says the editor is holding an unapplied draft of this
+/// definition. A draft the deck would refuse carries the Failure mark rather
+/// than a dot in error ink: a dot is for live state, and this is a problem.
 ///
 /// A saved card the engine will not write is deliberately not marked here: the
 /// mini already carries that warning, in the slot the curve would have been in,
 /// and a second mark on the same row for the same fact is a column a reader has
 /// to learn twice.
 fn state_mark(ui: &Ui, row: &Row<'_>, t: &Tokens, centre: egui::Pos2) {
-    ui.painter().circle_filled(
-        centre,
-        DOT * 0.5,
-        if row.refused {
-            t.color.err
-        } else {
-            t.color.warn
-        },
-    );
+    if row.refused {
+        crate::ui::widgets::paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(centre, egui::Vec2::splat(DOT * 2.0)),
+            crate::ui::widgets::Problem::Failure,
+        );
+    } else {
+        ui.painter().circle_filled(centre, DOT * 0.5, t.color.warn);
+    }
 }
 
-/// The whole row as one sentence: what a reader working by ear is told, and
-/// what a reader whose name was elided sees under the pointer.
-fn announcement(row: &Row<'_>) -> String {
-    let mut line = format!("{}, r{}", row.name, row.revision);
+/// The whole row as one sentence, for a reader working by ear.
+fn spoken(row: &Row<'_>) -> String {
+    let mut line = row.name.clone();
     if !row.meta.is_empty() {
         line.push_str(", ");
         line.push_str(&row.meta);
@@ -262,6 +240,32 @@ fn announcement(row: &Row<'_>) -> String {
         line.push_str(refusal);
     }
     line
+}
+
+/// What the pointer reveals: only what the row could not say for itself.
+///
+/// The hover used to repeat the row — its name, its revision, its meta — and
+/// end with the refusal. A reader who can see the row needs the reason the
+/// deck would refuse it, and the full name when the row had to elide it.
+fn hover_text(row: &Row<'_>, name_elided: bool) -> Option<String> {
+    let mut parts = Vec::new();
+    if name_elided {
+        parts.push(row.name.clone());
+    }
+    if row.dirty {
+        parts.push(
+            if row.refused {
+                "draft refused"
+            } else {
+                "draft not applied"
+            }
+            .to_owned(),
+        );
+    }
+    if let Err(refusal) = row.curve {
+        parts.push(refusal.clone());
+    }
+    (!parts.is_empty()).then(|| parts.join(". "))
 }
 
 /// One run of text, vertically centred in `rect` and elided into its width.

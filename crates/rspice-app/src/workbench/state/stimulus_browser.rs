@@ -41,11 +41,13 @@ impl StimulusScope {
 
     /// The word on the switch.
     #[must_use]
+    /// "Adopted" is the library's own word for a placed source carrying a
+    /// copy; on a filter strip the reader sees it as "is this one used".
     pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::Adopted => "Adopted",
-            Self::Unadopted => "Unadopted",
+            Self::Adopted => "In use",
+            Self::Unadopted => "Unused",
         }
     }
 

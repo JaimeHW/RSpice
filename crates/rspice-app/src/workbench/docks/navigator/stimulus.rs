@@ -41,7 +41,7 @@ use crate::workbench::app::actions::stimulus::{self as stimulus_actions, Adopter
 use crate::workbench::state::{NavigatorTreeNode, StimulusBrowserState, StimulusScope, Workspace};
 use crate::workbench::{AppState, MessageId};
 
-use super::super::super::design_system::{WorkbenchIcon, labeled_icon_button};
+use super::super::super::design_system::{Problem, WorkbenchIcon, labeled_icon_button};
 use super::{empty_navigator_row, nav_matches};
 
 /// The scope strip's band, and the tally band under the tree.
@@ -63,10 +63,10 @@ struct Group<'a> {
 /// One definition, resolved before anything is painted.
 struct Row<'a> {
     name: String,
-    revision: u32,
     /// What the mini shows if this definition has no curve.
     gap: crate::properties::source_preview::MiniGap,
-    /// `I · PER 1 ms · →2 ↑`, assembled from the owner of each part.
+    /// `I · PER 1 ms · 2 uses · outdated`, assembled from the owner of each
+    /// part.
     meta: String,
     /// The editor is holding an unapplied draft for this definition.
     dirty: bool,
@@ -95,14 +95,16 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     let mut chosen = None;
     let mut folded = None;
 
+    let report = footer_report(state, &counts);
     let frame = ui.available_rect_before_wrap();
     let (rect, _) = ui.allocate_exact_size(frame.size(), Sense::hover());
     let scope_rect =
         Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + SCOPE_BAND));
+    let footer_band = if report.is_some() { FOOTER_BAND } else { 0.0 };
     let footer_rect = Rect::from_min_max(
         egui::pos2(
             rect.left(),
-            (rect.bottom() - FOOTER_BAND).max(scope_rect.bottom()),
+            (rect.bottom() - footer_band).max(scope_rect.bottom()),
         ),
         rect.max,
     );
@@ -146,7 +148,9 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
                 });
         });
     }
-    in_band(ui, footer_rect, |ui| footer(ui, state, &counts));
+    if let Some(report) = report.as_ref() {
+        in_band(ui, footer_rect, |ui| footer(ui, report));
+    }
 
     browser.scope = scope;
     state.workbench.stimulus_browser = browser;
@@ -306,7 +310,6 @@ fn row<'a>(
     let dirty = state.workbench.stimulus_editor.is_dirty(definition.name());
     Row {
         name: definition.name().to_owned(),
-        revision: definition.revision(),
         gap: crate::properties::source_preview::MiniGap::of(definition),
         meta: meta_line(definition, tally),
         dirty,
@@ -351,12 +354,13 @@ fn meta_line(definition: &StimulusDefinition, tally: Option<&AdopterTally>) -> S
     if !figure.is_empty() {
         parts.push(figure);
     }
+    // In words: an arrow and a bare number needed the tooltip to decode, and
+    // the up-arrow for a placed source behind this revision had no legend.
     if let Some(tally) = tally.filter(|tally| tally.adopters > 0) {
-        parts.push(format!(
-            "\u{2192}{}{}",
-            tally.adopters,
-            if tally.behind > 0 { " \u{2191}" } else { "" }
-        ));
+        parts.push(plural(tally.adopters, "use"));
+        if tally.behind > 0 {
+            parts.push("outdated".to_owned());
+        }
     }
     parts.join(" \u{b7} ")
 }
@@ -396,82 +400,78 @@ fn scope_strip(ui: &mut Ui, scope: StimulusScope, counts: &ScopeCounts) -> Stimu
     chosen
 }
 
-/// What the library amounts to: who is carrying it, and what the engine says
-/// about it.
+/// What the footer band would say, or `None` when the library has nothing to
+/// report.
 ///
-/// This counts placed sources where the scope strip above counts definitions,
-/// so it says "adopters" — the word the inspector's own section uses for them.
-/// Both spelled "adopted", the two numbers disagreed about a library they were
-/// describing correctly.
-fn footer(ui: &mut Ui, state: &AppState, counts: &ScopeCounts) {
+/// A placed source behind the definition it carries, and a finding the audit
+/// raised: the two states a reader has to act on. Every placed source in
+/// step and a clean audit is the normal state, and a permanent band spelling
+/// it "no adopters · 0 E · 0 W" reported the absence of a problem.
+fn footer_report(state: &AppState, counts: &ScopeCounts) -> Option<(String, Problem)> {
     let messages = state.ui.messages();
-    let palette = Tokens::get(ui.ctx()).color;
-    let adoption = if counts.total.adopters == 0 {
-        messages.text(MessageId::StimulusNoAdopters)
-    } else if counts.total.behind == 0 {
+    let behind = (counts.total.behind > 0).then(|| {
         messages.format(
-            if counts.total.adopters == 1 {
-                MessageId::StimulusBrowserAdoptedSingular
+            if counts.total.behind == 1 {
+                MessageId::StimulusBrowserBehindSingular
             } else {
-                MessageId::StimulusBrowserAdopted
+                MessageId::StimulusBrowserBehind
             },
-            &[("count", &counts.total.adopters.to_string())],
+            &[("behind", &counts.total.behind.to_string())],
         )
+    });
+    let mut findings = Vec::new();
+    if counts.errors > 0 {
+        findings.push(plural(counts.errors, "error"));
+    }
+    if counts.advisories > 0 {
+        findings.push(plural(counts.advisories, "warning"));
+    }
+    let findings = (!findings.is_empty()).then(|| findings.join(", "));
+    let problem = if counts.errors > 0 {
+        Problem::Failure
     } else {
-        messages.format(
-            if counts.total.adopters == 1 {
-                MessageId::StimulusBrowserAdoptedBehindSingular
-            } else {
-                MessageId::StimulusBrowserAdoptedBehind
-            },
-            &[
-                ("count", &counts.total.adopters.to_string()),
-                ("behind", &counts.total.behind.to_string()),
-            ],
-        )
+        Problem::Warning
     };
-    let audit = messages.format(
-        MessageId::StimulusAuditCounts,
-        &[
-            ("errors", &counts.errors.to_string()),
-            ("advisories", &counts.advisories.to_string()),
-        ],
-    );
+    match (behind, findings) {
+        (None, None) => None,
+        (Some(text), None) | (None, Some(text)) => Some((text, problem)),
+        (Some(behind), Some(findings)) => Some((format!("{behind} · {findings}"), problem)),
+    }
+}
+
+fn plural(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
+}
+
+/// The one line the library has to report, with the mark that owns its
+/// colour.
+fn footer(ui: &mut Ui, report: &(String, Problem)) {
+    let (text, problem) = report;
+    let palette = Tokens::get(ui.ctx()).color;
     let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
     ui.painter().hline(
         rect.x_range(),
         rect.top(),
         egui::Stroke::new(1.0, palette.border),
     );
-    let announcement = format!("{adoption} \u{b7} {audit}");
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
-    });
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    const MARK_SIDE: f32 = 11.0;
+    crate::ui::widgets::paint_problem_mark(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + INSET + MARK_SIDE * 0.5, rect.center().y),
+            egui::Vec2::splat(MARK_SIDE),
+        ),
+        *problem,
+    );
     ui.painter().text(
-        egui::pos2(rect.left() + INSET, rect.center().y),
+        egui::pos2(rect.left() + INSET + MARK_SIDE + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        &adoption,
+        text,
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        if counts.total.behind > 0 {
-            palette.warn
-        } else {
-            palette.text_dim
-        },
+        palette.text_dim,
     );
-    ui.painter().text(
-        egui::pos2(rect.right() - INSET, rect.center().y),
-        egui::Align2::RIGHT_CENTER,
-        &audit,
-        theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-        if counts.errors > 0 {
-            palette.err
-        } else if counts.advisories > 0 {
-            palette.warn
-        } else {
-            palette.text_faint
-        },
-    );
-    let _ = response.on_hover_text(messages.text(MessageId::StimulusBrowserFooterHint));
 }
 
 /// A library nobody has authored into, and the one verb that resolves it.

@@ -132,11 +132,14 @@ fn definitions_are_grouped_under_the_family_they_realize() {
     }
 }
 
-/// A row announces its name, its revision and its meta column together: the
-/// key figure and the adopter count are the whole of what tells two
+/// A row announces its name and its meta column together: the key figure and
+/// how many placed sources use the definition are the whole of what tells two
 /// definitions of one family apart, and a reader working by ear is owed them.
+///
+/// In words. "→1" needed the tooltip to decode, and the revision counter was
+/// "r1" down every row of a list whose selected row the inspector describes.
 #[test]
-fn a_row_announces_its_revision_and_its_meta_beside_its_name() {
+fn a_row_announces_its_meta_beside_its_name() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     adopt(&mut app.state, 1, "V1", "bridge_cal_step");
@@ -145,21 +148,19 @@ fn a_row_announces_its_revision_and_its_meta_beside_its_name() {
     assert!(
         published
             .iter()
-            .any(|run| run.starts_with("bridge_cal_step, r1, PER 1 ms")),
+            .any(|run| run == "bridge_cal_step, PER 1 ms \u{b7} 1 use"),
         "the meta column never reached AccessKit: {published:?}"
     );
     assert!(
-        published
-            .iter()
-            .any(|run| run.contains("bridge_cal_step, r1, PER 1 ms \u{b7} \u{2192}1")),
-        "the adopter count is missing: {published:?}"
+        !published.iter().any(|run| run.contains(", r1")),
+        "the revision counter is off the rows: {published:?}"
     );
     // A current source says so in front of its figure; a voltage source does
     // not, because it is the ordinary case.
     assert!(
         published
             .iter()
-            .any(|run| run.starts_with("load_step_50u, r1, I \u{b7} PER 5 ms")),
+            .any(|run| run.starts_with("load_step_50u, I \u{b7} PER 5 ms")),
         "a current definition did not state its quantity: {published:?}"
     );
 }
@@ -230,7 +231,7 @@ fn the_scope_strip_counts_the_library_and_narrows_the_tree() {
     adopt(&mut app.state, 2, "V2", "vdd_operate");
 
     let published = browser(&mut app.state);
-    for option in ["All 14", "Adopted 2", "Unadopted 12"] {
+    for option in ["All 14", "In use 2", "Unused 12"] {
         assert!(
             published.iter().any(|run| run == option),
             "{option} is not on the scope strip: {published:?}"
@@ -250,7 +251,7 @@ fn the_scope_strip_counts_the_library_and_narrows_the_tree() {
     );
     // The counts are the library's either way, so the strip still says how
     // much of it the reader is not looking at.
-    assert!(published.iter().any(|run| run == "Unadopted 12"));
+    assert!(published.iter().any(|run| run == "Unused 12"));
 }
 
 /// A filter opens every group it leaves standing: a reader who typed a name
@@ -300,12 +301,14 @@ fn an_unauthored_library_and_a_filter_that_matched_nothing_read_differently() {
     assert!(!published.contains(&"This project has no stimulus definitions".to_owned()));
 }
 
-/// The scope strip counts definitions and the footer counts placed sources, so
-/// the two say different numbers about the same library and each has to name
-/// what it counted. Spelled the same way — `Adopted 1` over `2 adopted` — a
-/// reader can only read one of them as a mistake.
+/// The footer band states what the reader has to act on: a placed source
+/// behind the definition it carries, and what the audit found.
+///
+/// It used to be permanent, and in a new or healthy project carried only "no
+/// adopters · 0 E · 0 W": thirty pixels reporting the absence of a problem,
+/// in compiler shorthand, under a count of placed sources nobody acts on.
 #[test]
-fn the_scope_strip_and_the_footer_name_the_different_things_they_count() {
+fn the_footer_states_only_what_the_library_needs_acting_on() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     adopt(&mut app.state, 1, "V1", "bridge_cal_step");
@@ -313,37 +316,24 @@ fn the_scope_strip_and_the_footer_name_the_different_things_they_count() {
 
     let published = browser(&mut app.state);
     assert!(
-        published.iter().any(|run| run == "Adopted 1"),
+        published.iter().any(|run| run == "In use 1"),
         "the scope strip counts definitions: {published:?}"
     );
+    // Every placed source is in step, so the band carries the audit alone,
+    // in words rather than in "0 E · 4 W".
     assert!(
         published
             .iter()
-            .any(|run| run.starts_with("2 adopters \u{b7} ")),
-        "the footer counts the placed sources: {published:?}"
+            .any(|run| run.ends_with(" warnings") && !run.contains("revision")),
+        "the footer did not state the library's findings: {published:?}"
     );
-}
-
-/// The footer states who is carrying the library and what the engine says
-/// about it, and warns while anything is behind.
-#[test]
-fn the_footer_states_the_adoption_and_the_library_audit() {
-    let mut app = RSpiceApp::test_instance();
-    library(&mut app.state);
-    assert!(
-        browser(&mut app.state)
-            .iter()
-            .any(|run| run.starts_with("no adopters \u{b7} ")),
-        "an unadopted library did not say so"
-    );
-
-    adopt(&mut app.state, 1, "V1", "bridge_cal_step");
-    assert!(
-        browser(&mut app.state)
-            .iter()
-            .any(|run| run.starts_with("1 adopter \u{b7} ")),
-        "the footer did not count the adopter"
-    );
+    for absent in ["adopter", " E \u{b7} "] {
+        assert!(
+            !published.iter().any(|run| run.contains(absent)),
+            "the footer counts no adopters and talks no shorthand, \
+             and said {absent:?}: {published:?}"
+        );
+    }
 
     let mut draft = DefinitionDraft::new(
         app.state
@@ -360,11 +350,12 @@ fn the_footer_states_the_adoption_and_the_library_audit() {
         .content
         .stimulus_library
         .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
+    let published = browser(&mut app.state);
     assert!(
-        browser(&mut app.state)
+        published
             .iter()
-            .any(|run| run.starts_with("1 adopter \u{b7} 1 behind \u{b7} ")),
-        "the footer did not count what the publish left behind"
+            .any(|run| run.starts_with("2 placed sources use an older revision \u{b7} ")),
+        "the footer did not state what the publish left behind: {published:?}"
     );
 }
 
