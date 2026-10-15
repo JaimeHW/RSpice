@@ -24,7 +24,7 @@ use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager}
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, Problem, problem_line, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 

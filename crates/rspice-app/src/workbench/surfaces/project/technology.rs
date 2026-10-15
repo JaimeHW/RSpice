@@ -404,7 +404,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
     .primary_enabled(primary.enabled)
     .show(ctx, |ui| {
         technology_warning(ui);
-        technology_dialog_label(ui, "MODEL LIBRARY");
+        technology_dialog_label(ui, "Model library");
         if let Some(index) = select(
             ui,
             "project-model-technology-library",
@@ -419,7 +419,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         }
 
         ui.add_space(10.0);
-        technology_dialog_label(ui, "SIGNED PDK PACKAGE");
+        technology_dialog_label(ui, "Signed PDK package");
         if let Some(index) = select(
             ui,
             "project-signed-technology-package",
@@ -437,7 +437,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         }
 
         ui.add_space(10.0);
-        technology_dialog_label(ui, "CHANGE AUTHORITY");
+        technology_dialog_label(ui, "Change authority");
         ui.add_enabled(
             !checkpoint_pending,
             egui::TextEdit::singleline(
@@ -470,7 +470,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         );
 
         ui.add_space(10.0);
-        technology_dialog_label(ui, "TECHNOLOGY MAPPING");
+        technology_dialog_label(ui, "Technology mapping");
         if let Some(candidate) = selected_index.and_then(|index| candidates.get(index)) {
             property_card(ui, "Resolved authenticated model contract", |ui| {
                 property_row(
@@ -534,7 +534,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         }
 
         ui.add_space(10.0);
-        technology_dialog_label(ui, "MIGRATION MODE");
+        technology_dialog_label(ui, "Migration mode");
         match migration_preview.as_ref() {
             Ok(Some(diff)) => {
                 property_row(
@@ -620,18 +620,16 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         }
 
         ui.add_space(10.0);
-        technology_dialog_label(ui, "BINDING GATES");
         technology_binding_gates(
             ui,
             selected_index.is_some(),
             selected_package_index.is_some(),
             selected_binding.is_some(),
             authority_ready,
-            checkpoint_pending,
         );
         if !catalog.diagnostics.is_empty() {
             ui.add_space(10.0);
-            technology_dialog_label(ui, "LIBRARY VALIDATION");
+            technology_dialog_label(ui, "Library validation");
             for diagnostic in &catalog.diagnostics {
                 technology_error(
                     ui,
@@ -1086,25 +1084,18 @@ fn validate_migration_evidence_for_binding(
     Ok(())
 }
 
+/// What attaching a technology does to the project, before it is done.
+///
+/// The mark carries the severity; the sentence says the consequence and the
+/// safeguard. It used to be three clauses of implementation — which bytes are
+/// authenticated, what is read back, what is not migrated — behind a warning
+/// wash that made a routine dialog look like a failure.
 pub(super) fn technology_warning(ui: &mut Ui) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .fill(theme::mix(t.color.bg_panel, t.color.warn, 0.08))
-        .stroke(Stroke::new(
-            1.0,
-            theme::mix(t.color.border, t.color.warn, 0.45),
-        ))
-        .inner_margin(Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.add(egui::Label::new(
-                egui::RichText::new(
-                    "Attachment changes the project's authenticated model-source, signed PDK, layer, and process-section execution contract. Before mutation, RSpice durably writes and read-back verifies a whole-project recovery checkpoint; editable design data is never migrated implicitly.",
-                )
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text),
-            ).wrap());
-        });
+    problem_line(
+        ui,
+        Problem::Warning,
+        "Attaching a technology changes how this project simulates. A recovery checkpoint is saved first.",
+    );
     ui.add_space(10.0);
 }
 
@@ -1112,8 +1103,8 @@ pub(super) fn technology_dialog_label(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
         egui::RichText::new(label)
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.accent),
+            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.text_faint),
     );
     ui.add_space(3.0);
 }
@@ -1127,86 +1118,55 @@ pub(super) fn technology_unavailable_message(ui: &mut Ui) {
     });
 }
 
+/// What the reader still has to supply before this attachment can commit.
+///
+/// Seven dotted rows stood here: five internal checks the dialog reported
+/// green the moment its own fields were filled in, and two disclaimers about
+/// capabilities the product never claimed. None of the seven was something a
+/// reader could act on, and the ones that were — a library, a package, a
+/// mapping, an authority — are the dialog's own four controls. So this states
+/// only the conditions that are unmet, in the order their controls appear, and
+/// nothing at all once they are met.
+pub(super) fn technology_missing_inputs(
+    has_model_candidate: bool,
+    has_signed_package: bool,
+    contract_ready: bool,
+    authority_ready: bool,
+) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if !has_model_candidate {
+        missing.push("a model library");
+    }
+    if !has_signed_package {
+        missing.push("a trusted signed PDK revision");
+    }
+    if !authority_ready {
+        missing.push("actor, authority and reason");
+    }
+    if !contract_ready {
+        missing.push("a technology mapping");
+    }
+    missing
+}
+
+/// [`technology_missing_inputs`] as the one line the dialog paints.
 pub(super) fn technology_binding_gates(
     ui: &mut Ui,
     has_model_candidate: bool,
     has_signed_package: bool,
     contract_ready: bool,
     authority_ready: bool,
-    checkpoint_pending: bool,
 ) {
-    let t = Tokens::get(ui.ctx());
-    status_dot(
-        ui,
-        if has_model_candidate {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
-        if has_model_candidate {
-            "Source authentication · retained bytes, SHA-256 pins, and dependency edges verified"
-        } else {
-            "Source authentication · attachable parsed models and authenticated bytes required"
-        },
+    let missing = technology_missing_inputs(
+        has_model_candidate,
+        has_signed_package,
+        contract_ready,
+        authority_ready,
     );
-    status_dot(
-        ui,
-        if authority_ready {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
-        if authority_ready {
-            "Change authority · actor, authority, and reason ready for immutable receipt"
-        } else {
-            "Change authority · actor, authority, and reason are required"
-        },
-    );
-    status_dot(
-        ui,
-        if checkpoint_pending {
-            t.color.warn
-        } else {
-            t.color.ok
-        },
-        if checkpoint_pending {
-            "Recovery checkpoint · writing and read-back verification in progress"
-        } else {
-            "Recovery checkpoint · whole-project digest verification required before commit"
-        },
-    );
-    status_dot(
-        ui,
-        if contract_ready {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
-        technology_runtime_gate_copy(contract_ready),
-    );
-    status_dot(
-        ui,
-        if has_signed_package {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
-        if has_signed_package {
-            "Package signature · publisher key, exact manifest bytes, archive, and artifacts verified"
-        } else {
-            "Package signature · a currently trusted signed PDK revision is required"
-        },
-    );
-    status_dot(
-        ui,
-        t.color.text_faint,
-        "DRC deck qualification · not supplied; no physical sign-off claim",
-    );
-    status_dot(
-        ui,
-        t.color.text_faint,
-        "License entitlement · not represented; no entitlement claim",
-    );
+    if missing.is_empty() {
+        return;
+    }
+    muted(ui, &format!("Still to choose: {}.", missing.join(", ")));
 }
 
 fn technology_authority_fields_ready(
@@ -1228,38 +1188,18 @@ fn technology_change_authority(
     .map_err(|error| format!("Technology change authority is invalid: {error}"))
 }
 
-pub(super) const fn technology_runtime_gate_copy(has_candidate: bool) -> &'static str {
-    if !has_candidate {
-        return "Model runtime compatibility · authenticated model binding required";
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        "Model runtime compatibility · retained browser bytes verified against accepted SHA-256"
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        "Model runtime compatibility · native source bytes reverified at attach and execution"
-    }
-}
-
+/// A refusal this dialog has to state.
+///
+/// The failure mark is the line's only colour: the error wash behind error
+/// text painted the same fact three times, and a dialog with two of them
+/// stacked read as a page in failure rather than a field that needs a choice.
 pub(super) fn technology_error(ui: &mut Ui, error: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(theme::mix(t.color.bg_panel, t.color.err, 0.08))
-        .stroke(Stroke::new(
-            1.0,
-            theme::mix(t.color.border, t.color.err, 0.5),
-        ))
+        .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(error)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.err),
-                )
-                .wrap(),
-            );
+            problem_line(ui, Problem::Failure, error);
         });
 }
