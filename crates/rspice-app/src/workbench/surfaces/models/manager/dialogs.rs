@@ -744,10 +744,10 @@ pub(super) fn render_dialog(
                 .iter()
                 .map(|candidate| candidate.label().to_owned())
                 .collect::<Vec<_>>();
-            let section_labels = sections
-                .iter()
-                .map(|candidate| candidate.to_uppercase())
-                .collect::<Vec<_>>();
+            // The authored spelling, not an upper-cased one: the list offers
+            // the names the source file declares, and a reader comparing this
+            // dialog with the file should be comparing the same string.
+            let section_labels = sections.clone();
             let mut dialog = Dialog::new("Bind corner section", "Bind section")
                 .description(format!(
                     "Bind one authenticated source section to {library} / {corner}."
@@ -788,7 +788,7 @@ pub(super) fn render_dialog(
                     let selected = if section.is_empty() {
                         "Select section".to_owned()
                     } else {
-                        section.to_uppercase()
+                        section.clone()
                     };
                     if let Some(index) = widgets::select(
                         ui,
