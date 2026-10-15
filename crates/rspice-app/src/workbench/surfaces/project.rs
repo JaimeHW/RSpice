@@ -1007,7 +1007,7 @@ mod tests {
     #[test]
     fn a_closed_project_lands_rather_than_dressing_up_the_bootstrap_placeholder() {
         let closed = render_project_workspace(false);
-        assert!(closed.contains("NO PROJECT OPEN"), "{closed}");
+        assert!(closed.contains("No project open"), "{closed}");
         for page in ProjectPage::ALL {
             assert!(
                 !closed.contains(page.label()),
@@ -1017,7 +1017,7 @@ mod tests {
         }
 
         let open = render_project_workspace(true);
-        assert!(!open.contains("NO PROJECT OPEN"), "{open}");
+        assert!(!open.contains("No project open"), "{open}");
         for page in ProjectPage::ALL {
             assert!(open.contains(page.label()), "{}", page.label());
         }
@@ -1517,6 +1517,34 @@ mod tests {
                 std::fs::write(&path, canvas.png(height)).expect("write the render");
                 writeln!(report_output, "{}", path.display()).ok();
             }
+        }
+        // The no-project landing: a closed project with recents behind it, so
+        // the recents table and its availability column are reviewed too.
+        {
+            use crate::workbench::app_state::{RecentFile, RecentKind};
+            let mut app = RSpiceApp::test_instance();
+            app.state.project_lifecycle.authority.close_project();
+            app.state.recent_files = ["C:/Engineering/afe.rspiceproj", "//lab/rf/rf_pa.rspiceproj"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, path)| RecentFile {
+                    kind: RecentKind::Project,
+                    path: path.into(),
+                    opened_at_unix_ms: 1_000,
+                    pinned: index == 0,
+                    owner: Some("Analog Design".to_owned()),
+                    tags: Vec::new(),
+                })
+                .collect();
+            let size = egui::vec2(1440.0, 900.0);
+            let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+            let path = directory.join("project-landing-1440x900.png");
+            std::fs::write(
+                &path,
+                canvas.png(canvas.content_height().max(1).max(size.y as usize)),
+            )
+            .expect("write the render");
+            writeln!(report_output, "{}", path.display()).ok();
         }
         // The populated project has no configuration set, so its Configuration
         // page is one empty state and none of the page's own panels. The

@@ -5,13 +5,13 @@
 //! dispatches the same file and lifecycle workflows as the application menu.
 
 use egui::{
-    Align, Align2, Color32, Frame, Layout, Margin, Rect, Response, ScrollArea, Sense, Stroke, Ui,
-    UiBuilder, Vec2, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Align2, Frame, Layout, Margin, Rect, Response, ScrollArea, Sense, Stroke, Ui, UiBuilder,
+    Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{RecentFile, RecentKind};
 use crate::workbench::commands::vocabulary::Command;
@@ -33,6 +33,9 @@ const TABLE_HEADER_HEIGHT: f32 = 27.0;
 const TABLE_ROW_HEIGHT: f32 = 32.0;
 const TABLE_TOOLBAR_HEIGHT: f32 = 34.0;
 const SECTION_HEADER_HEIGHT: f32 = 24.0;
+/// Side of a problem mark set in front of a card head's fact: the kit's own
+/// value, so a marked head and an unmarked one keep the same rhythm.
+const MARK_SIDE: f32 = 11.0;
 
 #[derive(Debug, Clone)]
 struct RecentProjectRow {
@@ -42,7 +45,6 @@ struct RecentProjectRow {
     owner: String,
     last_opened: String,
     availability: &'static str,
-    availability_color: Color32,
     pinned: bool,
 }
 
@@ -92,10 +94,9 @@ fn landing_header(ui: &mut Ui) {
     );
     header.add_space(26.0);
     header.label(
-        egui::RichText::new("NO PROJECT OPEN")
+        egui::RichText::new("No project open")
             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_faint)
-            .extra_letter_spacing(0.09 * tokens::FS_0),
+            .color(t.color.text_faint),
     );
     header.add_space(5.0);
     header.label(
@@ -194,9 +195,12 @@ fn recovery_card(
 ) {
     let t = Tokens::get(ui.ctx());
     let candidate = &candidates[0];
+    // A session the reader has to look at is worth one mark, in the card's
+    // head. Washing the card, its border, its heading, its count and its
+    // icon in the same tone said it five more times.
     let shown = Frame::new()
-        .fill(t.color.warn.gamma_multiply(0.055))
-        .stroke(Stroke::new(1.0, t.color.warn.gamma_multiply(0.58)))
+        .fill(t.color.bg_panel)
+        .stroke(Stroke::new(1.0, t.color.border))
         .corner_radius(t.radius)
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
@@ -204,7 +208,7 @@ fn recovery_card(
                 ui,
                 "Interrupted session",
                 &format!("{} to review", candidates.len()),
-                t.color.warn,
+                Some(Problem::Warning),
             );
             Frame::new()
                 .inner_margin(Margin::symmetric(10, 7))
@@ -215,7 +219,7 @@ fn recovery_card(
                         WorkbenchIcon::History.paint(
                             ui.painter(),
                             Rect::from_center_size(icon_rect.center(), Vec2::splat(14.0)),
-                            t.color.warn,
+                            t.color.text_dim,
                         );
                         ui.allocate_ui_with_layout(
                             vec2((ui.available_width() - 86.0).max(1.0), 34.0),
@@ -273,7 +277,7 @@ fn recovery_detail(candidate: &RecoveryCandidate) -> String {
 
 fn recent_projects(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAction>) {
     let t = Tokens::get(ui.ctx());
-    let rows = recent_project_rows(app, &t);
+    let rows = recent_project_rows(app);
     let compact = ui.available_width() < PHONE_RECENTS_BREAKPOINT;
     // A stacked landing page lives inside an outer scroll area, where the
     // available height can be unbounded. Keep the table useful without ever
@@ -499,7 +503,6 @@ fn recent_table_header(ui: &mut Ui) {
             "Availability",
         ],
         true,
-        None,
     );
 }
 
@@ -575,7 +578,7 @@ fn compact_recent_row(ui: &mut Ui, row: &RecentProjectRow) -> Response {
         Align2::RIGHT_CENTER,
         row.availability,
         theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-        row.availability_color,
+        t.color.text_dim,
     );
     if row.pinned {
         WorkbenchIcon::Pin.paint(
@@ -613,19 +616,12 @@ fn recent_table_row(ui: &mut Ui, row: &RecentProjectRow) -> Response {
         row.last_opened.as_str(),
         row.availability,
     ];
-    let (response, cells) = table_cells(ui, fields, false, Some(row.availability_color));
+    let (response, cells) = table_cells(ui, fields, false);
     if response.hovered() {
         ui.painter()
             .rect_filled(response.rect, 0.0, t.color.bg_hover);
         // Repaint the cells above the hover fill.
-        paint_table_text(
-            ui,
-            response.rect,
-            &cells,
-            fields,
-            false,
-            Some(row.availability_color),
-        );
+        paint_table_text(ui, response.rect, &cells, fields, false);
     }
     if row.pinned {
         WorkbenchIcon::Pin.paint(
@@ -658,7 +654,6 @@ fn table_cells<const N: usize>(
     ui: &mut Ui,
     fields: [&str; N],
     header: bool,
-    trailing_color: Option<Color32>,
 ) -> (Response, Vec<Rect>) {
     debug_assert_eq!(N, 5);
     let t = Tokens::get(ui.ctx());
@@ -684,7 +679,7 @@ fn table_cells<const N: usize>(
         Stroke::new(1.0, t.color.border),
     );
     let cells = table_cell_rects(rect);
-    paint_table_text(ui, rect, &cells, fields, header, trailing_color);
+    paint_table_text(ui, rect, &cells, fields, header);
     (response, cells)
 }
 
@@ -713,7 +708,6 @@ fn paint_table_text<const N: usize>(
     cells: &[Rect],
     fields: [&str; N],
     header: bool,
-    trailing_color: Option<Color32>,
 ) {
     let t = Tokens::get(ui.ctx());
     for (index, (cell, text)) in cells.iter().zip(fields).enumerate() {
@@ -724,11 +718,7 @@ fn paint_table_text<const N: usize>(
         } else {
             theme::sans(tokens::FS_0, FontWeight::Regular)
         };
-        let color = if header {
-            t.color.text_faint
-        } else if index == N - 1 {
-            trailing_color.unwrap_or(t.color.text_dim)
-        } else if index == 1 {
+        let color = if header || index == 1 {
             t.color.text_faint
         } else {
             t.color.text_dim
@@ -790,7 +780,7 @@ fn recent_empty_state(ui: &mut Ui, no_recents: bool) {
     });
 }
 
-fn recent_project_rows(app: &RSpiceApp, t: &Tokens) -> Vec<RecentProjectRow> {
+fn recent_project_rows(app: &RSpiceApp) -> Vec<RecentProjectRow> {
     let query = app
         .state
         .workbench
@@ -817,12 +807,14 @@ fn recent_project_rows(app: &RSpiceApp, t: &Tokens) -> Vec<RecentProjectRow> {
             if !matches_filter || (!query.is_empty() && !searchable.contains(&query)) {
                 return None;
             }
-            let (availability, availability_color) = if cfg!(target_arch = "wasm32") {
-                ("browse", t.color.warn)
+            // Where a project is kept is a category, not a state: a shared
+            // project is not better than a local one.
+            let availability = if cfg!(target_arch = "wasm32") {
+                "browse"
             } else if shared {
-                ("shared", t.color.ok)
+                "shared"
             } else {
-                ("local", t.color.text_dim)
+                "local"
             };
             Some(RecentProjectRow {
                 recent: recent.clone(),
@@ -831,7 +823,6 @@ fn recent_project_rows(app: &RSpiceApp, t: &Tokens) -> Vec<RecentProjectRow> {
                 owner,
                 last_opened: recent_age(recent.opened_at_unix_ms),
                 availability,
-                availability_color,
                 pinned: recent.pinned,
             })
         })
@@ -917,7 +908,10 @@ fn start_rail(ui: &mut Ui, action: &mut Option<LandingAction>) {
     }
 }
 
-fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
+/// A card's head: its name, and one fact about what is inside it. Both are
+/// written as authored — the workbench's headers are sentence case — and the
+/// fact carries a mark rather than a tone when the reader has to act on it.
+fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
         vec2(ui.available_width(), SECTION_HEADER_HEIGHT),
@@ -932,17 +926,30 @@ fn compact_section_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Colo
     ui.painter().text(
         pos2(rect.left() + 10.0, rect.center().y),
         Align2::LEFT_CENTER,
-        title.to_ascii_uppercase(),
+        title,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text_dim,
     );
-    ui.painter().text(
-        pos2(rect.right() - 10.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        meta.to_ascii_uppercase(),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        meta_color,
-    );
+    let meta_left = ui
+        .painter()
+        .text(
+            pos2(rect.right() - 10.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            meta,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        )
+        .left();
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(meta_left - 6.0 - MARK_SIDE * 0.5, rect.center().y),
+                Vec2::splat(MARK_SIDE),
+            ),
+            problem,
+        );
+    }
 }
 
 fn response_activated(ui: &mut Ui, response: &Response) -> bool {
@@ -1004,9 +1011,8 @@ mod tests {
         ];
         app.state.workbench.project_launcher_filter = ProjectLauncherFilter::Pinned;
         app.state.workbench.project_launcher_query = "analog".to_owned();
-        let tokens = Tokens::default();
 
-        let rows = recent_project_rows(&app, &tokens);
+        let rows = recent_project_rows(&app);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "afe");
@@ -1023,7 +1029,7 @@ mod tests {
         ];
         app.state.workbench.project_launcher_filter = ProjectLauncherFilter::Shared;
 
-        let rows = recent_project_rows(&app, &Tokens::default());
+        let rows = recent_project_rows(&app);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "rf_pa");

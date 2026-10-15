@@ -299,7 +299,7 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
         } else if draft.busy {
             transaction_status(
                 ui,
-                "The browser writer is waiting for a verified durable result. Keep this project open.",
+                "Waiting for the browser writer. Keep this project open.",
                 false,
             );
         }
@@ -429,17 +429,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
         if let Some(error) = draft.error.as_deref().or(lifecycle_error).or(field_error) {
             transaction_status(ui, error, true);
         } else if draft.busy {
-            transaction_status(
-                ui,
-                "Waiting for the browser file picker. No project state has changed.",
-                false,
-            );
-        } else if draft.artifact_bytes.is_some() {
-            transaction_status(
-                ui,
-                "The chosen artifact matches the retained receipt digest and size. Final rollback validation runs on confirmation.",
-                false,
-            );
+            transaction_status(ui, "Waiting for the browser file picker.", false);
         }
     });
 
@@ -699,28 +689,24 @@ fn audit_text_valid(value: &str) -> bool {
         && !value.chars().any(char::is_control)
 }
 
+/// What stopped the transaction, or what it is waiting for.
+///
+/// A refusal is a problem line: the kit's cross in front of neutral words.
+/// A wait is neither a problem nor news, so it is a line of dim text with no
+/// frame around it — the blue box it used to sit in read as an alert for
+/// something that is simply in progress.
 fn transaction_status(ui: &mut Ui, message: &str, error: bool) {
     let t = Tokens::get(ui.ctx());
     ui.add_space(8.0);
-    egui::Frame::new()
-        .fill(if error {
-            t.color.err.gamma_multiply(0.16)
-        } else {
-            t.color.info.gamma_multiply(0.14)
-        })
-        .stroke(Stroke::new(
-            1.0,
-            if error { t.color.err } else { t.color.info },
-        ))
-        .corner_radius(4.0)
-        .inner_margin(Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(message)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                    .color(if error { t.color.err } else { t.color.text }),
-            );
-        });
+    if error {
+        problem_line(ui, Problem::Failure, message);
+    } else {
+        ui.label(
+            egui::RichText::new(message)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text_dim),
+        );
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

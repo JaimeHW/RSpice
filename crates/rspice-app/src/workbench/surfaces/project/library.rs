@@ -218,16 +218,9 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
                 ui.separator();
                 context_value(ui, "Selection", &selection, t.color.text);
                 ui.separator();
-                context_value(
-                    ui,
-                    "Access",
-                    access,
-                    if access == "writable" {
-                        t.color.ok
-                    } else {
-                        t.color.text_dim
-                    },
-                );
+                // Writable is the ordinary library. Read-only is the one worth
+                // reading, and neither is a verdict.
+                context_value(ui, "Access", access, t.color.text_dim);
             });
         });
 }
@@ -479,13 +472,15 @@ fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
     } else if response.hovered() || response.has_focus() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
+    // The icon says what kind of row this is, not how it stands: accent on
+    // every writable row made the browser a column of yellow.
     spec.icon.paint(
         ui.painter(),
         Rect::from_center_size(pos2(rect.left() + 17.0, rect.center().y), vec2(14.0, 14.0)),
         if spec.read_only {
             t.color.text_faint
         } else {
-            t.color.accent
+            t.color.text_dim
         },
     );
     ui.painter().text(
@@ -509,11 +504,7 @@ fn browser_row(ui: &mut Ui, spec: BrowserRowSpec<'_>) -> egui::Response {
             Align2::RIGHT_CENTER,
             spec.status,
             theme::sans(tokens::FS_0, FontWeight::Regular),
-            if spec.status == "modified" {
-                t.color.warn
-            } else {
-                t.color.text_dim
-            },
+            t.color.text_dim,
         );
     }
     response.widget_info(|| {
@@ -561,7 +552,11 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                         ui.label(if *read_only { "read only" } else { "writable" });
                         if *modified {
                             ui.separator();
-                            ui.colored_label(t.color.warn, "working changes");
+                            // An unsaved edit is a marker, not an alarm.
+                            ui.label(
+                                egui::RichText::new("working changes")
+                                    .color(t.color.text_dim),
+                            );
                         }
                     }
                     None => {
