@@ -18,7 +18,6 @@ fn options(alignment: ComparisonAlignmentDraft) -> ComparisonOptions<'static> {
         maximum_lag_samples: 2,
         absolute_tolerance: 0.0,
         relative_tolerance: 0.0,
-        difference_trace: false,
     }
 }
 
@@ -32,8 +31,7 @@ fn comparison_records_threshold_and_cross_correlation_alignment_parameters() {
         &threshold_baseline,
         options(ComparisonAlignmentDraft::FirstThresholdCrossing),
     )
-    .expect("threshold alignment must execute")
-    .receipt;
+    .expect("threshold alignment must execute");
     assert!(matches!(
         threshold_receipt.policy.execution.alignment,
         ComparisonAlignmentMethod::FirstThresholdCrossing {
@@ -66,8 +64,7 @@ fn comparison_records_threshold_and_cross_correlation_alignment_parameters() {
         &correlation_baseline,
         options(ComparisonAlignmentDraft::CrossCorrelation),
     )
-    .expect("correlation alignment must execute")
-    .receipt;
+    .expect("correlation alignment must execute");
     assert!(matches!(
         correlation_receipt.policy.execution.alignment,
         ComparisonAlignmentMethod::CrossCorrelation {
@@ -119,7 +116,7 @@ fn comparison_requires_compatible_import_coordinates_and_retains_their_units() {
         2,
     )
     .unwrap();
-    assert_eq!(prepared.coordinate_unit.as_deref(), Some("A"));
+    assert_eq!(prepared.candidate.columns()[0].unit(), Some("A"));
     for unit in [Some("V"), None, Some("1")] {
         baseline.analyses[0]
             .import_source

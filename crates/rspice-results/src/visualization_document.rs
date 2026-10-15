@@ -678,6 +678,12 @@ impl SourceColumn {
     pub const fn role(&self) -> ColumnRole {
         self.role
     }
+
+    /// The engineering unit the column's values carry, when it has one.
+    #[must_use]
+    pub fn unit(&self) -> Option<&str> {
+        self.unit.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

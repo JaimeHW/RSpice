@@ -5,7 +5,6 @@ use crate::analysis_result::AnalysisResult;
 use crate::analysis_type::AnalysisType;
 use crate::result_digest::ResultDigestEncoding;
 use crate::run::SimulationRun;
-use crate::studio_presentation::MAX_DIFFERENCE_TRACE_NUMERIC_VALUES;
 use crate::visualization_document::{
     ColumnRole, ComparisonAlignmentMethod, ComparisonExecutionContract,
     ComparisonExtrapolationPolicy, ComparisonInterpolationPolicy, ComparisonPolicy,
@@ -50,32 +49,7 @@ struct PreparedComparisonSources {
     baseline: SourceDataset,
     candidate: SourceDataset,
     signal_names: Vec<String>,
-    coordinates: Vec<f64>,
-    baseline_values: Vec<Vec<f64>>,
-    candidate_values: Vec<Vec<f64>>,
-    coordinate_unit: Option<String>,
     execution: ComparisonExecutionContract,
-}
-
-#[derive(Debug, Clone)]
-pub struct DifferenceTrace {
-    pub baseline: DatasetBinding,
-    pub candidate: DatasetBinding,
-    pub signal_key: String,
-    pub signal_label: String,
-    pub coordinate_unit: Option<String>,
-    pub coordinates: Vec<f64>,
-    pub absolute: Vec<f64>,
-    pub relative: Vec<f64>,
-    pub normalized: Vec<f64>,
-    pub execution: ComparisonExecutionContract,
-    pub tolerance: NumericTolerance,
-}
-
-#[derive(Debug)]
-pub struct ComparisonExecution {
-    pub receipt: ComparisonReceipt,
-    pub difference_traces: Vec<DifferenceTrace>,
 }
 
 pub fn matching_comparison_analysis<'a, A, W>(
@@ -772,87 +746,8 @@ where
         baseline,
         candidate,
         signal_names,
-        coordinates,
-        baseline_values,
-        candidate_values,
-        coordinate_unit,
         execution,
     })
-}
-
-fn draft_difference_traces(
-    prepared: &PreparedComparisonSources,
-    tolerance: NumericTolerance,
-) -> Result<Vec<DifferenceTrace>, String> {
-    let retained_values = prepared
-        .coordinates
-        .len()
-        .checked_mul(prepared.signal_names.len())
-        .and_then(|values| values.checked_mul(4))
-        .ok_or_else(|| "Difference-trace retained-value count overflowed.".to_owned())?;
-    if retained_values > MAX_DIFFERENCE_TRACE_NUMERIC_VALUES {
-        return Err(format!(
-            "Difference traces require {retained_values} retained numeric values, exceeding the {MAX_DIFFERENCE_TRACE_NUMERIC_VALUES}-value document bound."
-        ));
-    }
-    prepared
-        .signal_names
-        .iter()
-        .enumerate()
-        .map(|(signal_index, signal_label)| {
-            let mut absolute = Vec::with_capacity(prepared.coordinates.len());
-            let mut relative = Vec::with_capacity(prepared.coordinates.len());
-            let mut normalized = Vec::with_capacity(prepared.coordinates.len());
-            for (baseline, candidate) in prepared.baseline_values[signal_index]
-                .iter()
-                .zip(&prepared.candidate_values[signal_index])
-            {
-                let difference = (candidate - baseline).abs();
-                let scale = baseline.abs().max(candidate.abs());
-                let relative_difference = if scale == 0.0 {
-                    0.0
-                } else {
-                    difference / scale
-                };
-                let allowed = tolerance.absolute + tolerance.relative * baseline.abs();
-                let normalized_difference = if allowed == 0.0 {
-                    if difference == 0.0 {
-                        0.0
-                    } else {
-                        return Err(format!(
-                            "Signal '{signal_label}' has a non-zero difference that cannot be normalized under zero tolerance."
-                        ));
-                    }
-                } else {
-                    difference / allowed
-                };
-                if !difference.is_finite()
-                    || !relative_difference.is_finite()
-                    || !normalized_difference.is_finite()
-                {
-                    return Err(format!(
-                        "Difference derivation for signal '{signal_label}' produced a non-finite value."
-                    ));
-                }
-                absolute.push(difference);
-                relative.push(relative_difference);
-                normalized.push(normalized_difference);
-            }
-            Ok(DifferenceTrace {
-                baseline: prepared.baseline.binding(),
-                candidate: prepared.candidate.binding(),
-                signal_key: format!("signal:{signal_index}"),
-                signal_label: signal_label.clone(),
-                coordinate_unit: prepared.coordinate_unit.clone(),
-                coordinates: prepared.coordinates.clone(),
-                absolute,
-                relative,
-                normalized,
-                execution: prepared.execution.clone(),
-                tolerance,
-            })
-        })
-        .collect()
 }
 
 /// Explicit policies for a single immutable comparison; no application selection state.
@@ -863,7 +758,6 @@ pub struct ComparisonOptions<'a> {
     pub maximum_lag_samples: u32,
     pub absolute_tolerance: f64,
     pub relative_tolerance: f64,
-    pub difference_trace: bool,
 }
 
 /// Align and compare exact retained samples without mutating either source.
@@ -872,7 +766,7 @@ pub fn execute_comparison<A, W>(
     active_analysis: &AnalysisResult<W>,
     baseline_run: &SimulationRun<A>,
     options: ComparisonOptions<'_>,
-) -> Result<ComparisonExecution, String>
+) -> Result<ComparisonReceipt, String>
 where
     A: AsRef<AnalysisResult<W>>,
     W: AsRef<RetainedWaveform>,
@@ -902,17 +796,8 @@ where
             execution: prepared.execution.clone(),
         },
     };
-    let receipt = compare_source_datasets(&prepared.baseline, &prepared.candidate, &request)
-        .map_err(|error| error.to_string())?;
-    let difference_traces = if options.difference_trace {
-        draft_difference_traces(&prepared, tolerance)?
-    } else {
-        Vec::new()
-    };
-    Ok(ComparisonExecution {
-        receipt,
-        difference_traces,
-    })
+    compare_source_datasets(&prepared.baseline, &prepared.candidate, &request)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

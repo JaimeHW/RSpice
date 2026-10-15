@@ -25,10 +25,7 @@ use rspice_design_model::design_management::{
 };
 use rspice_formats::project_results::ProjectSimulationResults;
 use rspice_hardcopy_contract::sources::MAX_HARDCOPY_SOURCE_SET_MEMBERS;
-use rspice_results::{
-    report_document::{ReportDocument, ReportReferenceInventory},
-    studio_presentation::VisualizationStudioPresentation,
-};
+use rspice_results::report_document::{ReportDocument, ReportReferenceInventory};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
@@ -73,15 +70,6 @@ pub enum RetainedHardcopySourceInput {
         project_id: ProjectId,
         run: HardcopyRun,
         presentation: ResultsQuickViewPresentation,
-        scope: HardcopyScope,
-    },
-    Studio {
-        source_key: String,
-        project_id: ProjectId,
-        studio: VisualizationStudioPresentation,
-        runs: Vec<HardcopyRun>,
-        pane_id: u64,
-        all_panes: bool,
         scope: HardcopyScope,
     },
     VisualizationDocument {
@@ -256,15 +244,6 @@ enum PreparedRetainedHardcopyWorkerPayload {
         presentation: ResultsQuickViewPresentation,
         scope: HardcopyScope,
     },
-    Studio {
-        source_key: String,
-        project_id: ProjectId,
-        studio: CanonicalHardcopyOwner,
-        simulation_results: CanonicalHardcopyOwner,
-        pane_id: u64,
-        all_panes: bool,
-        scope: HardcopyScope,
-    },
     VisualizationDocument {
         source_key: String,
         project_id: ProjectId,
@@ -387,36 +366,6 @@ macro_rules! validate_prepared_shape {
                 }
                 require_project_source_prefix(*project_id, source_key, "result-dataset")?;
             }
-            Self::Studio {
-                source_key,
-                project_id,
-                pane_id,
-                all_panes,
-                scope,
-                ..
-            } => {
-                validate_label("prepared studio source key", source_key, SOURCE_KEY_LIMIT)?;
-                let expected_key = format!(
-                    "project:{}:visualization-pane:{pane_id}",
-                    project_id.as_uuid()
-                );
-                if source_key != &expected_key {
-                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "studio pane identity does not match its source key".to_owned(),
-                    ));
-                }
-                if (*all_panes && !matches!(scope, HardcopyScope::AllSheetsOrPanes))
-                    || (!*all_panes
-                        && !matches!(
-                            scope,
-                            HardcopyScope::ActivePlotDocument | HardcopyScope::ActiveDocument
-                        ))
-                {
-                    return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "studio aggregate flag and scope are inconsistent".to_owned(),
-                    ));
-                }
-            }
             Self::VisualizationDocument {
                 source_key,
                 project_id,
@@ -533,22 +482,6 @@ impl RetainedHardcopySourceInput {
                 *project_id,
                 std::slice::from_ref(run),
                 presentation,
-            ),
-            Self::Studio {
-                source_key,
-                project_id,
-                studio,
-                runs,
-                pane_id,
-                all_panes,
-                ..
-            } => validate_prepared_studio_snapshot(
-                *project_id,
-                source_key,
-                studio,
-                runs,
-                *pane_id,
-                *all_panes,
             ),
             Self::VisualizationDocument {
                 source_key,
@@ -722,26 +655,6 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     scope,
                 }
             }
-            RetainedHardcopySourceInput::Studio {
-                source_key,
-                project_id,
-                studio,
-                runs,
-                pane_id,
-                all_panes,
-                scope,
-            } => Self::Studio {
-                source_key,
-                project_id,
-                studio: CanonicalHardcopyOwner::capture("prepared visualization studio", &studio)?,
-                simulation_results: CanonicalHardcopyOwner::capture(
-                    "prepared studio result history",
-                    &capture_prepared_result_history(&runs, false),
-                )?,
-                pane_id,
-                all_panes,
-                scope,
-            },
             RetainedHardcopySourceInput::VisualizationDocument {
                 source_key,
                 project_id,
@@ -882,40 +795,6 @@ impl PreparedRetainedHardcopyWorkerPayload {
                     project_id,
                     run,
                     presentation,
-                    scope,
-                }
-            }
-            Self::Studio {
-                source_key,
-                project_id,
-                studio,
-                simulation_results,
-                pane_id,
-                all_panes,
-                scope,
-            } => {
-                let studio = studio
-                    .restore::<VisualizationStudioPresentation>("prepared visualization studio")?;
-                let runs = restore_hardcopy_runs(
-                    simulation_results
-                        .restore::<ProjectSimulationResults>("prepared studio result history")?,
-                )
-                .map_err(HardcopySourceError::InvalidPreparedWorkerSnapshot)?;
-                validate_prepared_studio_snapshot(
-                    project_id,
-                    &source_key,
-                    &studio,
-                    &runs,
-                    pane_id,
-                    all_panes,
-                )?;
-                RetainedHardcopySourceInput::Studio {
-                    source_key,
-                    project_id,
-                    studio,
-                    runs,
-                    pane_id,
-                    all_panes,
                     scope,
                 }
             }
@@ -1220,72 +1099,6 @@ fn validate_prepared_schematic_identity(
     }
 }
 
-fn validate_prepared_studio_snapshot(
-    project_id: ProjectId,
-    source_key: &str,
-    studio: &VisualizationStudioPresentation,
-    runs: &[HardcopyRun],
-    pane_id: u64,
-    all_panes: bool,
-) -> Result<(), HardcopySourceError> {
-    let expected_key = format!(
-        "project:{}:visualization-pane:{pane_id}",
-        project_id.as_uuid()
-    );
-    if source_key != expected_key {
-        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-            "studio pane identity does not match its captured project".to_owned(),
-        ));
-    }
-    if studio.panes.is_empty() || studio.panes.len() > MAX_HARDCOPY_SOURCE_SET_MEMBERS {
-        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-            "prepared studio pane count is outside the governed boundary".to_owned(),
-        ));
-    }
-    if !all_panes
-        && (studio.panes.len() != 1
-            || studio.panes[0].id != pane_id
-            || studio.active_pane != Some(pane_id))
-    {
-        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-            "single-pane studio snapshot contains unrelated pane state".to_owned(),
-        ));
-    }
-    if all_panes && !studio.panes.iter().any(|pane| pane.id == pane_id) {
-        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-            "aggregate studio snapshot lost its selected pane".to_owned(),
-        ));
-    }
-    let mut pane_ids = std::collections::HashSet::new();
-    let expected_analyses = studio
-        .panes
-        .iter()
-        .map(|pane| {
-            if !pane_ids.insert(pane.id) {
-                return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(format!(
-                    "duplicate prepared studio pane {}",
-                    pane.id
-                )));
-            }
-            Ok((pane.dataset_id, pane.analysis_sequence))
-        })
-        .collect::<Result<std::collections::HashSet<_>, _>>()?;
-    let actual_analyses = runs
-        .iter()
-        .flat_map(|run| {
-            run.analyses
-                .iter()
-                .map(move |analysis| (run.dataset_id, analysis.id))
-        })
-        .collect::<std::collections::HashSet<_>>();
-    if expected_analyses != actual_analyses {
-        return Err(HardcopySourceError::InvalidPreparedWorkerSnapshot(
-            "studio result history is not the exact pane-owned analysis set".to_owned(),
-        ));
-    }
-    Ok(())
-}
-
 fn prepared_payload_identity(
     prepared: &PreparedRetainedHardcopyResolution,
 ) -> Result<(HardcopySourceIdentity, HardcopyScope), HardcopySourceError> {
@@ -1334,28 +1147,6 @@ fn prepared_payload_identity(
                     run,
                     analysis,
                 )?,
-                scope.clone(),
-            ))
-        }
-        RetainedHardcopySourceInput::Studio {
-            source_key,
-            project_id,
-            studio,
-            pane_id,
-            scope,
-            ..
-        } => {
-            let pane = studio
-                .panes
-                .iter()
-                .find(|pane| pane.id == *pane_id)
-                .ok_or_else(|| {
-                    HardcopySourceError::InvalidPreparedWorkerSnapshot(
-                        "prepared studio source lost its selected pane".to_owned(),
-                    )
-                })?;
-            Ok((
-                studio_source_identity(source_key, *project_id, studio.revision, pane)?,
                 scope.clone(),
             ))
         }
@@ -1606,30 +1397,6 @@ impl PreparedRetainedHardcopyResolution {
                     )?,
                     &presentation,
                 )
-            }
-            RetainedHardcopySourceInput::Studio {
-                source_key,
-                project_id,
-                studio,
-                runs,
-                pane_id,
-                all_panes,
-                scope,
-            } => {
-                let source = StudioHardcopySource {
-                    project_id,
-                    studio: (&studio).into(),
-                    runs: &runs,
-                    waveform_style: |waveform: &HardcopyWaveform| StudioWaveformStyle {
-                        color: &waveform.color,
-                        visible: waveform.visible,
-                    },
-                };
-                if all_panes {
-                    resolve_studio_document(&source)?.with_source_key(source_key)
-                } else {
-                    resolve_studio_pane(&source, source_key, pane_id, scope)
-                }
             }
             RetainedHardcopySourceInput::VisualizationDocument {
                 source_key,

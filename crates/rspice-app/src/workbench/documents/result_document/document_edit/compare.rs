@@ -183,7 +183,7 @@ pub(super) fn commit(
         let baseline_analysis = matching_comparison_analysis(analysis, baseline)
             .ok_or_else(|| "The baseline holds no matching analysis.".to_owned())?;
         let signal_names = comparison_signal_names(analysis, baseline_analysis)?;
-        let execution = execute_comparison(
+        let receipt = execute_comparison(
             run,
             analysis,
             baseline,
@@ -194,17 +194,9 @@ pub(super) fn commit(
                 maximum_lag_samples: numbers.maximum_lag,
                 absolute_tolerance: numbers.absolute_tolerance,
                 relative_tolerance: numbers.relative_tolerance,
-                difference_trace: false,
             },
         )?;
-        let outcome = outcome(
-            state,
-            analysis,
-            baseline,
-            &execution.receipt,
-            &signal_names,
-            &numbers,
-        );
+        let outcome = outcome(state, analysis, baseline, &receipt, &signal_names, &numbers);
         let edits = match active_document_id(state) {
             Some(document_id) => {
                 let document = project_document(state, document_id)?;
@@ -225,7 +217,7 @@ pub(super) fn commit(
                         DocumentEdit::AttachDataset(source)
                     });
                 }
-                edits.push(DocumentEdit::RecordComparison(execution.receipt));
+                edits.push(DocumentEdit::RecordComparison(receipt));
                 Some((document_id, edits))
             }
             None => None,
