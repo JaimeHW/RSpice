@@ -163,17 +163,17 @@ pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> 
     .to_owned()
 }
 
-/// Format one bound of a limit: the notation of the measured values it is
-/// held against, without the zeros nobody wrote it with.
+/// Format a panel readout: engineering notation to `significant_digits`,
+/// without the zeros that only pad it out.
 ///
-/// A limit is authored, not measured, so the digits past the ones its author
-/// typed are noise: `10 MHz` is the bound, `10.00 MHz` is four significant
-/// digits of a number that only ever had two. The prefix sits on the unit, as
-/// it does on every value beside it — `≥ 10 MHz`, never `≥ 10M Hz` — because a
-/// reader holds these against a datasheet.
+/// [`fmt_si_significant`] resolves digits the value does not have — a node
+/// sitting at exactly 4.1 V reads `4.100000 V` at the default preference,
+/// which claims seven measured digits and is the `{:?}`-grade default an
+/// engineering instrument never prints. A side panel states the number the
+/// reader would write down; full precision belongs to copy and export.
 #[must_use]
-pub fn fmt_si_bound(value: f64, unit: &str) -> String {
-    let text = fmt_si_significant(value, unit, 4);
+pub fn fmt_si_readout(value: f64, unit: &str, significant_digits: usize) -> String {
+    let text = fmt_si_significant(value, unit, significant_digits);
     let (number, suffix) = text.split_once(' ').unwrap_or((text.as_str(), ""));
     // Scientific notation past the ladder's end carries its own exponent, and
     // trimming its mantissa would change the number.
@@ -187,6 +187,19 @@ pub fn fmt_si_bound(value: f64, unit: &str) -> String {
     } else {
         format!("{number} {suffix}")
     }
+}
+
+/// Format one bound of a limit: the notation of the measured values it is
+/// held against, without the zeros nobody wrote it with.
+///
+/// A limit is authored, not measured, so the digits past the ones its author
+/// typed are noise: `10 MHz` is the bound, `10.00 MHz` is four significant
+/// digits of a number that only ever had two. The prefix sits on the unit, as
+/// it does on every value beside it — `≥ 10 MHz`, never `≥ 10M Hz` — because a
+/// reader holds these against a datasheet.
+#[must_use]
+pub fn fmt_si_bound(value: f64, unit: &str) -> String {
+    fmt_si_readout(value, unit, 4)
 }
 
 /// Format a unitless or fixed-unit value with an exact number of significant
@@ -462,5 +475,19 @@ mod tests {
         assert_eq!(fmt_si_significant(1.234_567_8e-6, "s", 7), "1.234568 µs");
         assert_eq!(fmt_significant(-179.999_9, 7, " °"), "-179.9999 °");
         assert_eq!(fmt_si_significant(0.0, "A", 3), "0.00 A");
+    }
+
+    /// A panel readout prints the digits the value has, not the digits the
+    /// preference allows: `4.100000 V` is a formatter default, not a reading.
+    #[test]
+    fn a_panel_readout_drops_the_zeros_that_only_pad_it_out() {
+        assert_eq!(fmt_si_readout(4.1, "V", 7), "4.1 V");
+        assert_eq!(fmt_si_readout(0.9, "V", 7), "900 mV");
+        assert_eq!(fmt_si_readout(0.0, "A", 7), "0 A");
+        // Digits the value does have are kept, to the stated precision.
+        assert_eq!(fmt_si_readout(12.345_678, "V", 7), "12.34568 V");
+        assert_eq!(fmt_si_readout(96.861_12e-6, "A", 4), "96.86 µA");
+        // A bound is the same readout at the compact precision.
+        assert_eq!(fmt_si_bound(1.0e7, "Hz"), "10 MHz");
     }
 }
