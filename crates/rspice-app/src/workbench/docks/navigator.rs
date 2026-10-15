@@ -1402,18 +1402,19 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 identity,
                                 name: waveform.name.clone(),
                                 color: waveform.color.clone(),
-                                meta: format!(
-                                    "{} · vector · {} {}",
-                                    quantity_kind,
-                                    grouped_count(samples),
-                                    if samples == 1 { "value" } else { "samples" },
-                                ),
-                                value: waveform
-                                    .y
-                                    .iter()
-                                    .rev()
-                                    .copied()
-                                    .find(|value| value.is_finite())
+                                // Nothing: every row of a waveform list is a
+                                // vector, the unit rides the value, and the
+                                // sample count is not something a reader acts
+                                // on from here.
+                                meta: String::new(),
+                                // A swept quantity has no one value: the last
+                                // sample is the end of the sweep, and read
+                                // against the row's name it passes for "the
+                                // value of V(out)". A solved scalar does have
+                                // one, and states it.
+                                value: (samples == 1)
+                                    .then(|| waveform.y.iter().copied().find(|v| v.is_finite()))
+                                    .flatten()
                                     .map(|value| {
                                         // Degrees carry no SI prefix; a
                                         // near-zero phase as "f°" misreads.
@@ -1829,7 +1830,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if !plot_compatible {
                             show.clone().on_disabled_hover_text(
                                 exact_validation_error.as_deref().unwrap_or(
-                                    "Plot membership requires waveform-only selection; choose a compatible typed viewer for other evidence.",
+                                    "Only waveforms can be plotted",
                                 ),
                             );
                         }
@@ -1844,7 +1845,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if !plot_compatible {
                             hide.clone().on_disabled_hover_text(
                                 exact_validation_error.as_deref().unwrap_or(
-                                    "Plot membership requires waveform-only selection; typed scalars, arrays, events, and contributions remain selected for metadata actions.",
+                                    "Only waveforms can be plotted",
                                 ),
                             );
                         }
@@ -2051,14 +2052,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
             ResultsBrowserTab::Expressions => {
-                let Some(_analysis_index) = app.state.simulation.view.active_analysis_idx else {
-                    muted(ui, "Select a retained result analysis to own expressions.");
+                // Both ways of having no analysis read the same to the
+                // reader: there is one to pick and they have not picked it.
+                if app.state.simulation.view.active_analysis_idx.is_none()
+                    || active_analysis_key.is_none()
+                {
+                    muted(ui, "Select an analysis to see its expressions.");
                     return;
-                };
-                let Some(_analysis_key) = active_analysis_key else {
-                    muted(ui, "The active retained analysis identity is unavailable.");
-                    return;
-                };
+                }
                 expression_header(ui, app);
                 let mut toggled_expression: Option<ResultExpressionPresentationKey> = None;
                 for (identity, expression_index, expression) in &expressions {
@@ -2070,7 +2071,9 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         ui,
                         row_id,
                         &expression.text,
-                        Some("expression"),
+                        // The tab the row sits under is the only place that
+                        // has to say these are expressions.
+                        None,
                         t.color.traces[*expression_index % t.color.traces.len()],
                         false,
                         expression.visible,
@@ -2973,7 +2976,7 @@ struct ResultSignal {
     color: String,
     visible: bool,
     value: Option<String>,
-    /// Typed metadata line: quantity kind and retained sample count.
+    /// The row's second register, empty when there is nothing to put in it.
     meta: String,
 }
 
@@ -3051,24 +3054,30 @@ fn retained_result_artifacts(
                     unit: &str,
                     value: Option<String>,
                     viewer: ResultViewer| {
+        // How much is in it and what it is in. The kind word used to be
+        // printed twice over — "Array / array[12] / V" — and the row's own
+        // glyph column already says which kind it is.
         let shape = match kind {
-            ResultArtifactKind::Scalar => "scalar".to_owned(),
-            ResultArtifactKind::Array => format!("array[{count}]"),
-            ResultArtifactKind::EventStream => format!("events[{count}]"),
-            ResultArtifactKind::Contribution => format!("contributions[{count}]"),
+            ResultArtifactKind::Scalar => String::new(),
+            ResultArtifactKind::Array => format!("{} values", grouped_count(count)),
+            ResultArtifactKind::EventStream => format!("{} events", grouped_count(count)),
+            ResultArtifactKind::Contribution => {
+                format!("{} contributions", grouped_count(count))
+            }
         };
         let unit_dimension = unit.to_owned();
-        let unit_suffix = if unit.is_empty() {
-            String::new()
-        } else {
-            format!(" / {unit}")
+        let meta = match (shape.is_empty(), unit.is_empty()) {
+            (true, true) => String::new(),
+            (true, false) => unit.to_owned(),
+            (false, true) => shape,
+            (false, false) => format!("{shape} · {unit}"),
         };
         artifacts.push(ResultArtifact {
             identity: ResultArtifactPresentationKey::new(presentation_key, canonical),
             name,
             kind,
             unit: unit_dimension,
-            meta: format!("{} / {shape}{unit_suffix}", kind.label()),
+            meta,
             value,
             viewer,
         });
@@ -3228,7 +3237,7 @@ fn retained_result_artifacts(
             ),
             AnalysisResultPayload::Qpss { operating_point } => (
                 "payload/qpss",
-                "QPSS signed spectral state",
+                "QPSS spectrum",
                 ResultArtifactKind::Array,
                 operating_point.spectra().iter().map(Vec::len).sum(),
                 Some(format!(
@@ -3273,7 +3282,7 @@ fn retained_result_artifacts(
                 poles.len() + zeros.len() + 3,
                 Some(format!(
                     "{} · poles {} · zeros {}",
-                    gain.map(|gain| format!("gain {gain:.6e}"))
+                    gain.map(|gain| format!("gain {}", crate::ui::plot::fmt_si(gain, "", 4)))
                         .unwrap_or_else(|| "gain unavailable".to_owned()),
                     pole_evidence.label(),
                     zero_evidence.label()
@@ -3282,23 +3291,17 @@ fn retained_result_artifacts(
             ),
             AnalysisResultPayload::PssFloquet {
                 multipliers,
-                floquet_evidence,
                 orbit_kind,
                 stability_verdict,
                 ..
             } => (
                 "payload/pss-floquet",
-                "PSS Floquet spectrum evidence",
+                "Floquet multipliers",
                 ResultArtifactKind::Array,
                 multipliers.len(),
                 Some(format!(
-                    "{} · {} · {} orbit · {}",
-                    floquet_count_navigator_label(
-                        multipliers.len(),
-                        floquet_evidence,
-                        "multipliers"
-                    ),
-                    floquet_evidence_navigator_label(floquet_evidence),
+                    "{} multipliers{} · {}",
+                    multipliers.len(),
                     floquet_orbit_navigator_label(*orbit_kind),
                     floquet_verdict_navigator_label(*stability_verdict),
                 )),
@@ -3306,7 +3309,6 @@ fn retained_result_artifacts(
             ),
             AnalysisResultPayload::Pstb {
                 modes,
-                floquet_evidence,
                 orbit_kind,
                 stability_verdict,
                 stability_classification,
@@ -3314,15 +3316,15 @@ fn retained_result_artifacts(
                 ..
             } => (
                 "payload/pstb-floquet",
-                "PSTB Floquet mode evidence",
+                "Floquet modes",
                 ResultArtifactKind::Array,
                 modes.len(),
                 Some(format!(
-                    "{} · {} unstable · {} · {} orbit · {} ({})",
-                    floquet_count_navigator_label(modes.len(), floquet_evidence, "modes"),
+                    "{} modes{}{} · {} ({})",
+                    modes.len(),
                     num_unstable
-                        .map_or_else(|| "legacy unknown".to_owned(), |count| count.to_string()),
-                    floquet_evidence_navigator_label(floquet_evidence),
+                        .map(|count| format!(", {count} unstable"))
+                        .unwrap_or_default(),
                     floquet_orbit_navigator_label(*orbit_kind),
                     floquet_verdict_navigator_label(*stability_verdict),
                     pstb_classification_navigator_label(*stability_classification),
@@ -3452,23 +3454,23 @@ fn retained_result_artifacts(
             }
         };
         // DC metadata alone lives in the inspector; this table route requires
-        // retained curves to display.
-        if !matches!(payload, AnalysisResultPayload::DcSweep { .. }) || count > 0 {
+        // retained curves to display. The raw MNA solution is the node
+        // voltages and branch currents listed above it, so it has no row of
+        // its own.
+        let duplicates_a_row = matches!(payload, AnalysisResultPayload::OperatingPoint { .. });
+        let needs_curves = matches!(payload, AnalysisResultPayload::DcSweep { .. }) && count == 0;
+        if !duplicates_a_row && !needs_curves {
             push(canonical, name.to_owned(), kind, count, "", value, viewer);
         }
     }
     if let Some(metadata) = &analysis.family_metadata {
         let (name, count, viewer) = match metadata {
-            AnalysisResultFamilyMetadata::Parametric { sweep_values, .. } => (
-                "Parametric family metadata",
-                sweep_values.len(),
-                ResultViewer::Waves,
-            ),
-            AnalysisResultFamilyMetadata::Corner { x_values, .. } => (
-                "Corner family metadata",
-                x_values.len(),
-                ResultViewer::Waves,
-            ),
+            AnalysisResultFamilyMetadata::Parametric { sweep_values, .. } => {
+                ("Sweep values", sweep_values.len(), ResultViewer::Waves)
+            }
+            AnalysisResultFamilyMetadata::Corner { x_values, .. } => {
+                ("Corner list", x_values.len(), ResultViewer::Waves)
+            }
             AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } => (
                 "Monte Carlo source samples",
                 variables
@@ -3486,7 +3488,7 @@ fn retained_result_artifacts(
                 ("SOA time coordinates", time.len(), ResultViewer::Soa)
             }
             AnalysisResultFamilyMetadata::PeriodicNoise { .. } => {
-                ("Periodic-noise authority", 1, ResultViewer::PhaseNoise)
+                ("Periodic noise", 1, ResultViewer::PhaseNoise)
             }
             AnalysisResultFamilyMetadata::SParameter {
                 reference_impedances_ohm,
@@ -3514,7 +3516,9 @@ fn retained_result_artifacts(
             ResultArtifactKind::Scalar,
             1,
             "",
-            measurement.value.map(|value| format!("{value:.6e}")),
+            measurement
+                .value
+                .map(|value| crate::ui::plot::fmt_si(value, "", 4)),
             ResultViewer::Specs,
         );
     }
@@ -3526,40 +3530,13 @@ fn retained_result_artifacts(
     artifacts
 }
 
-fn floquet_count_navigator_label(
-    count: usize,
-    evidence: &crate::state::FloquetSpectrumEvidence,
-    noun: &str,
-) -> String {
-    if matches!(
-        evidence,
-        crate::state::FloquetSpectrumEvidence::Qualified { .. }
-            | crate::state::FloquetSpectrumEvidence::NoDynamicModes
-    ) {
-        format!("{count} complete {noun}")
-    } else {
-        format!("{count} retained {noun}; completeness unavailable")
-    }
-}
-
-const fn floquet_evidence_navigator_label(
-    evidence: &crate::state::FloquetSpectrumEvidence,
-) -> &'static str {
-    match evidence {
-        crate::state::FloquetSpectrumEvidence::NotComputed => "not computed",
-        crate::state::FloquetSpectrumEvidence::NoDynamicModes => "no dynamic modes",
-        crate::state::FloquetSpectrumEvidence::Qualified { .. } => "strictly qualified",
-        crate::state::FloquetSpectrumEvidence::LegacyUnknown => "legacy evidence unknown",
-    }
-}
-
-const fn floquet_orbit_navigator_label(
-    orbit: crate::state::FloquetOrbitKindEvidence,
-) -> &'static str {
+/// Which orbit the multipliers were taken about, when the run recorded it.
+/// A run that did not is not a fact about the circuit, so it says nothing.
+fn floquet_orbit_navigator_label(orbit: crate::state::FloquetOrbitKindEvidence) -> String {
     match orbit {
-        crate::state::FloquetOrbitKindEvidence::Driven => "driven",
-        crate::state::FloquetOrbitKindEvidence::Autonomous => "autonomous",
-        crate::state::FloquetOrbitKindEvidence::LegacyUnknown => "legacy-unknown",
+        crate::state::FloquetOrbitKindEvidence::Driven => " · driven orbit".to_owned(),
+        crate::state::FloquetOrbitKindEvidence::Autonomous => " · autonomous orbit".to_owned(),
+        crate::state::FloquetOrbitKindEvidence::LegacyUnknown => String::new(),
     }
 }
 
@@ -3772,10 +3749,7 @@ fn show_virtualized_result_signals(
                             let run = &runs[run];
                             result_browser_virtual_omission(
                                 ui,
-                                &format!(
-                                    "No analysis in {} matches the analysis, kind, scope, and text filters.",
-                                    run.label
-                                ),
+                                &format!("No matches in {}", run.label),
                                 row_height,
                             );
                         }
@@ -3848,11 +3822,11 @@ fn show_virtualized_result_signals(
                             let reason = if analysis.total_signals == 0
                                 && analysis.domain == "scalar solution"
                             {
-                                "This analysis retained a scalar solution, not a sampled series. Its values are in the OP viewer."
+                                "Values are in the OP sheet"
                             } else if analysis.total_signals == 0 {
                                 "No waveform quantities were retained for this swept analysis. Place a probe or change Output selection, then run again."
                             } else {
-                                "Every quantity of this analysis is filtered out by the current query, kind, or scope."
+                                "Hidden by the filter"
                             };
                             result_browser_virtual_omission(ui, reason, row_height);
                         }
@@ -4396,17 +4370,18 @@ fn result_browser_analysis_head(
         c.text_faint,
     );
 
-    // 18x18 kind glyph in accent ink over an accent wash.
+    // 18x18 kind glyph. It says which kind of thing the group is, which is
+    // neither selection nor status, so it is neutral: it used to be painted
+    // in accent on every head, and in warn ink when the run had failed.
     let glyph_rect = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 5.0 + 14.0 + 9.0, rect.center().y),
         egui::vec2(18.0, 18.0),
     );
-    let glyph_color = if ok { c.accent } else { c.warn };
-    ui.painter().rect_filled(glyph_rect, 4.0, c.accent_dim);
+    ui.painter().rect_filled(glyph_rect, 4.0, c.bg_inset);
     ui.painter().rect_stroke(
         glyph_rect,
         4.0,
-        egui::Stroke::new(1.0, glyph_color.gamma_multiply(0.55)),
+        egui::Stroke::new(1.0, c.border_strong),
         egui::StrokeKind::Inside,
     );
     ui.painter().text(
@@ -4414,7 +4389,7 @@ fn result_browser_analysis_head(
         egui::Align2::CENTER_CENTER,
         glyph,
         theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
-        glyph_color,
+        c.text_dim,
     );
 
     // `shown / retained` while a filter hides part of the group, so the head
@@ -4443,8 +4418,21 @@ fn result_browser_analysis_head(
     );
 
     // Label and domain share one baseline; the domain elides first because the
-    // label is the identity the head exists to state.
-    let text_left = glyph_rect.right() + 5.0;
+    // label is the identity the head exists to state. A run that did not
+    // finish wears the mark that owns that colour, in front of its name.
+    let mut text_left = glyph_rect.right() + 5.0;
+    if !ok {
+        const MARK_SIDE: f32 = 11.0;
+        crate::ui::widgets::paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(text_left + MARK_SIDE * 0.5, rect.center().y),
+                egui::Vec2::splat(MARK_SIDE),
+            ),
+            crate::ui::widgets::Problem::Failure,
+        );
+        text_left += MARK_SIDE + 6.0;
+    }
     let text_right = rect.right() - 8.0 - count_width - 8.0;
     let label_end = ui
         .painter()
@@ -4492,13 +4480,8 @@ fn expression_header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    ui.painter().text(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        "EXPRESSIONS",
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text_dim,
-    );
+    // No caption: the tab above it says Expressions. The band is here for
+    // the calculator at its trailing edge.
     let add_size = responsive_result_control_height(EXPRESSION_HEADER_HEIGHT, t.metrics.ctl_h);
     let add_center_x = if add_size >= TOUCH_TARGET_HEIGHT {
         rect.right() - 10.0 - add_size * 0.5
@@ -4601,12 +4584,18 @@ fn result_quantity_row(
         )
     });
     let selection = ui.interact(selection_rect, id.with("selection"), egui::Sense::click());
+    // A row with nothing in its second register is spoken as its name.
+    let spoken = if meta.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{name}, {meta}")
+    };
     selection.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
             ui.is_enabled(),
             selected,
-            format!("{name}, {meta}"),
+            spoken.clone(),
         )
     });
     if !ui.is_rect_visible(rect) {
@@ -4657,13 +4646,19 @@ fn result_quantity_row(
     }
 
     // Two baselines inside the row: identity above, typed metadata below.
+    // A row with nothing to say in the second register keeps the row's
+    // height — the list is virtualized against one stride — and centres the
+    // name in it rather than leaving a blank line under the words.
     //
     // The name carries the trace's own colour while the signal is plotted,
     // so the list answers "which curve is this" in the place the eye already
     // is — no swatch column, and no second meaning loaded onto the checkbox.
     // A signal that is not on a pane stays neutral.
-    let name_y = rect.top() + 11.0;
-    let meta_y = rect.top() + 25.0;
+    let (name_y, meta_y) = if meta.is_empty() {
+        (rect.center().y, rect.center().y)
+    } else {
+        (rect.top() + 11.0, rect.top() + 25.0)
+    };
     let text_left = selection_rect.left();
     let name_end = ui
         .painter()
@@ -4766,13 +4761,15 @@ fn result_quantity_row(
         None
     };
 
-    ui.painter().text(
-        egui::pos2(text_left, meta_y),
-        egui::Align2::LEFT_CENTER,
-        meta,
-        theme::sans(tokens::FS_MICRO, FontWeight::Medium),
-        c.text_faint,
-    );
+    if !meta.is_empty() {
+        ui.painter().text(
+            egui::pos2(text_left, meta_y),
+            egui::Align2::LEFT_CENTER,
+            meta,
+            theme::sans(tokens::FS_MICRO, FontWeight::Medium),
+            c.text_faint,
+        );
+    }
 
     theme::paint_focus_ring(ui, &check, visibility_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
@@ -4873,8 +4870,11 @@ fn result_artifact_row(
         ui.painter()
             .rect_filled(box_rect.shrink(3.0), 1.0, c.accent);
     }
-    let name_y = rect.top() + 11.0;
-    let meta_y = rect.top() + 25.0;
+    let (name_y, meta_y) = if meta.is_empty() {
+        (rect.center().y, rect.center().y)
+    } else {
+        (rect.top() + 11.0, rect.top() + 25.0)
+    };
     let glyph = match kind {
         ResultArtifactKind::Scalar => "#",
         ResultArtifactKind::Array => "[]",
@@ -4941,13 +4941,15 @@ fn result_artifact_row(
             c.text_dim,
         );
     }
-    ui.painter().text(
-        egui::pos2(name_left, meta_y),
-        egui::Align2::LEFT_CENTER,
-        meta,
-        theme::sans(tokens::FS_MICRO, FontWeight::Medium),
-        c.text_faint,
-    );
+    if !meta.is_empty() {
+        ui.painter().text(
+            egui::pos2(name_left, meta_y),
+            egui::Align2::LEFT_CENTER,
+            meta,
+            theme::sans(tokens::FS_MICRO, FontWeight::Medium),
+            c.text_faint,
+        );
+    }
     theme::paint_focus_ring(ui, &check, check_rect);
     theme::paint_focus_ring(ui, &selection, selection_rect);
     ArtifactRowResponses {
@@ -5484,10 +5486,7 @@ fn result_artifact_context_menu(
             }
             ui.close();
         }
-        let table = ui.add_enabled(
-            exact_available,
-            egui::Button::new("Open exact evidence table"),
-        );
+        let table = ui.add_enabled(exact_available, egui::Button::new("Open as table"));
         if let Some(error) = exact_error.as_deref() {
             table.clone().on_disabled_hover_text(error);
         }
@@ -5557,7 +5556,7 @@ fn result_artifact_context_menu(
             open_result_artifact(app, artifact, true);
             ui.close();
         }
-        if ui.button("Reveal producer log").clicked() {
+        if ui.button("Show run log").clicked() {
             match result_artifact_stable_path(
                 &artifact.identity,
                 &app.state.simulation.retained.runs,
@@ -5638,10 +5637,7 @@ fn result_signal_context_menu(
             ui.close();
         }
         ui.separator();
-        let table = ui.add_enabled(
-            exact_available,
-            egui::Button::new("Open exact sample table"),
-        );
+        let table = ui.add_enabled(exact_available, egui::Button::new("Open as table"));
         if let Some(error) = exact_error.as_deref() {
             table.clone().on_disabled_hover_text(error);
         }
@@ -5751,7 +5747,7 @@ fn result_signal_context_menu(
             }
             ui.close();
         }
-        if ui.button("Reveal producer log").clicked() {
+        if ui.button("Show run log").clicked() {
             match result_signal_stable_path(&key, &app.state.simulation.retained.runs) {
                 Ok(path) => {
                     let quantity = key

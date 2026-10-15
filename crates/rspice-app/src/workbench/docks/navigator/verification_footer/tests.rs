@@ -1243,18 +1243,25 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
     assert!(bundle.contains("settling_time"));
 }
 
+/// A periodic payload's row names the data and states the physics: how many
+/// multipliers or modes, the orbit, and the stability verdict. How the
+/// spectrum was qualified is the engine's own bookkeeping and used to be
+/// spelled out twice on the row ("0 retained multipliers; completeness
+/// unavailable · legacy evidence unknown").
 #[test]
-fn periodic_payload_artifacts_report_authoritative_complete_counts_and_verdicts() {
-    for (analysis_type, canonical, expected_name) in [
+fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
+    for (analysis_type, canonical, expected_name, noun) in [
         (
             AnalysisType::Pss,
             "payload/pss-floquet",
-            "PSS Floquet spectrum evidence",
+            "Floquet multipliers",
+            "multipliers",
         ),
         (
             AnalysisType::Pstb,
             "payload/pstb-floquet",
-            "PSTB Floquet mode evidence",
+            "Floquet modes",
+            "modes",
         ),
     ] {
         let analysis = AnalysisResult::new(41, analysis_type, expected_name).with_result_payload(
@@ -1271,13 +1278,14 @@ fn periodic_payload_artifacts_report_authoritative_complete_counts_and_verdicts(
 
         assert_eq!(artifact.name, expected_name);
         assert_eq!(artifact.kind, super::ResultArtifactKind::Array);
-        assert!(artifact.meta.contains("array[0]"));
+        assert_eq!(artifact.meta, "0 values");
         assert_eq!(artifact.viewer, crate::workbench::ResultViewer::Table);
         let value = artifact.value.as_deref().unwrap();
-        assert!(value.contains("0 retained"), "{value}");
-        assert!(value.contains("completeness unavailable"), "{value}");
+        assert!(value.starts_with(&format!("0 {noun}")), "{value}");
         assert!(value.contains("indeterminate"), "{value}");
-        assert!(value.contains("legacy"), "{value}");
+        for internal in ["retained", "completeness", "legacy", "qualified"] {
+            assert!(!value.contains(internal), "{internal} in {value}");
+        }
     }
 }
 
