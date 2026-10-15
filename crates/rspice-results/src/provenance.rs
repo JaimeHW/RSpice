@@ -136,6 +136,29 @@ impl AnalysisResultPvtPoint {
     }
 }
 
+/// The transient state a small-signal result was linearized around, for a
+/// card that names one with `ACTIMES=` or `CHECKPOINT=`.
+///
+/// `parent` is the `.TRAN` analysis whose trajectory holds the state, and is
+/// always one of the result's dependencies; `time_s` is the state's time in
+/// seconds. A result linearized at the operating point carries none.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AnalysisResultTransientState {
+    pub parent: AnalysisInstanceId,
+    pub time_s: f64,
+}
+
+/// Bitwise, like [`AnalysisResultPvtPoint`], so the record is `Eq`; attaching
+/// it refuses a non-finite time.
+impl PartialEq for AnalysisResultTransientState {
+    fn eq(&self, other: &Self) -> bool {
+        self.parent == other.parent && self.time_s.to_bits() == other.time_s.to_bits()
+    }
+}
+
+impl Eq for AnalysisResultTransientState {}
+
 /// Immutable identity of the prepared analysis task that produced a result.
 ///
 /// A result created by the current execution pipeline always carries this
@@ -153,6 +176,8 @@ pub struct AnalysisResultProvenance {
     /// The PVT point this result was solved at, when the task was expanded to
     /// exactly one. Never inferred: a task with no point keeps `None`.
     pvt_point: Option<AnalysisResultPvtPoint>,
+    /// The transient state a small-signal result was linearized around.
+    transient_state: Option<AnalysisResultTransientState>,
 }
 
 impl AnalysisResultProvenance {
@@ -221,7 +246,42 @@ impl AnalysisResultProvenance {
             prepared_snapshot_digest,
             dependency_ids,
             pvt_point: None,
+            transient_state: None,
         })
+    }
+
+    /// Attach the transient state the producing task's small-signal card
+    /// linearized around. The parent must be one of the task's dependencies
+    /// and the time finite and not negative.
+    pub fn with_transient_state(
+        mut self,
+        state: Option<AnalysisResultTransientState>,
+    ) -> Result<Self, String> {
+        if let Some(state) = state {
+            if !self.dependency_ids.contains(&state.parent) {
+                return Err(format!(
+                    "analysis instance {} names transient {} as its state's parent, which is \
+                     not one of its dependencies",
+                    self.source_instance_id, state.parent
+                ));
+            }
+            if !state.time_s.is_finite() || state.time_s < 0.0 {
+                return Err(format!(
+                    "analysis instance {} has transient state time {}, which is not a finite \
+                     time at or after zero",
+                    self.source_instance_id, state.time_s
+                ));
+            }
+        }
+        self.transient_state = state;
+        Ok(self)
+    }
+
+    /// The transient state this result was linearized around, or `None`
+    /// when it was linearized at the operating point.
+    #[must_use]
+    pub const fn transient_state(&self) -> Option<&AnalysisResultTransientState> {
+        self.transient_state.as_ref()
     }
 
     /// Attach the PVT point the producing task was expanded to.

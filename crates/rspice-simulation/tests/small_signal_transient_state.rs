@@ -13,6 +13,7 @@
 use rspice_app_types::product::AnalysisInstanceId;
 use rspice_core::NoAbort;
 use rspice_core::engine::SmallSignalCardResult;
+use rspice_results::provenance::AnalysisResultProvenance;
 use rspice_simulation::analysis_preparation::analysis_spec_to_config;
 use rspice_simulation::execution::{
     HeadlessRunInput, HeadlessSourceResolver, HeadlessTaskRequest, PreparedRunAuthorization,
@@ -255,6 +256,101 @@ fn a_headless_card_runs_around_a_live_state_and_a_checkpoints_alike() {
     assert_ne!(
         live, operating_point,
         "the state at 20 us is not the operating point"
+    );
+}
+
+/// A headless state task names its `.TRAN` parent and its state's time, and
+/// its result's provenance records both as `rspice run`'s document does: the
+/// parent analysis, and the time the engine's state entry linearized at.
+#[test]
+fn a_headless_state_result_names_its_transient_and_its_time_as_the_command_line_does() {
+    let directory = directory("provenance");
+    let origin = directory.0.join("circuit.cir");
+    let transient = task(TRAN, &analysis_spec_line(TRAN), Vec::new());
+    let parent = transient.instance_id;
+    let live = task(AC, &format!("{AC} actimes=20u"), vec![parent]);
+    let read = task(
+        AC,
+        &format!("{AC} checkpoint=\"{CHECKPOINT}\""),
+        vec![parent],
+    );
+    let operating_point = task(AC, AC, Vec::new());
+    let (live_id, read_id, op_id) = (
+        live.instance_id,
+        read.instance_id,
+        operating_point.instance_id,
+    );
+    let mut input = HeadlessRunInput::new(
+        CIRCUIT,
+        &origin,
+        vec![transient, live, read, operating_point],
+    );
+    input.resolver = HeadlessSourceResolver::Native {
+        include_search_paths: Vec::new(),
+    };
+    let snapshot = prepare_headless_run(input, &NoAbort)
+        .unwrap_or_else(|error| panic!("the headless run prepares: {error}"));
+    let dispatch = PreparedRunAuthorization::default()
+        .authorize_campaign_member(snapshot)
+        .expect("the run is authorized");
+    let states = dispatch
+        .tasks()
+        .map(|task| {
+            // The provenance a retained result carries, built as `rspice
+            // study run` builds it.
+            let provenance = AnalysisResultProvenance::new(
+                task.instance_id(),
+                task.source_revision(),
+                task.snapshot_digest(),
+                task.dependencies().to_vec(),
+            )
+            .and_then(|provenance| provenance.with_transient_state(task.transient_state()))
+            .unwrap_or_else(|error| panic!("{}: the provenance builds: {error}", task.label()));
+            (task.instance_id(), provenance.transient_state().copied())
+        })
+        .collect::<HashMap<_, _>>();
+
+    // What `rspice run` computes for the same cards: its document's parent is
+    // the `.TRAN` card and its `state_time` the time the state entry returns.
+    let deck = |card: &str| {
+        rspice_core::Netlist::parse(&format!("{CIRCUIT}{TRAN}\n{card}\n.end\n"))
+            .expect("the deck parses")
+    };
+    let actimes = deck(&format!("{AC} actimes=20u"));
+    let rspice_core::netlist::SmallSignalStateSource::TransientTimes(times) =
+        &actimes.small_signal_states[0].source
+    else {
+        panic!("a card at a time");
+    };
+    let at_time = rspice_core::Engine::default()
+        .run_small_signal_at_transient_times(&actimes, 1, times, &NoAbort)
+        .expect("the engine runs the state");
+    let checkpoint = rspice_core::engine::TransientCheckpoint::load(&directory.0.join(CHECKPOINT))
+        .expect("the checkpoint loads");
+    let at_checkpoint = rspice_core::Engine::default()
+        .run_small_signal_at_checkpoint(
+            &deck(&format!("{AC} checkpoint=\"{CHECKPOINT}\"")),
+            1,
+            &checkpoint,
+            &NoAbort,
+        )
+        .expect("the engine runs the checkpoint's state");
+
+    for (what, id, expected) in [
+        ("ACTIMES=", live_id, at_time[0].state_time),
+        ("CHECKPOINT=", read_id, at_checkpoint.state_time),
+    ] {
+        let state = states[&id].unwrap_or_else(|| panic!("{what}: the result names its state"));
+        assert_eq!(state.parent, parent, "{what}: the parent is the .TRAN task");
+        assert!(
+            (state.time_s - expected).abs() <= 1e-15,
+            "{what}: the state time {} against the command line's {expected}",
+            state.time_s
+        );
+    }
+    assert_eq!(
+        states[&op_id], None,
+        "a card at the operating point names no state"
     );
 }
 

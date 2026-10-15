@@ -71,11 +71,23 @@ impl TransientCheckpointInput {
         limits: ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, SimulationError> {
-        decode_bytes(&bytes, limits, abort)?;
-        Ok(Self {
-            digest: checkpoint_digest(&bytes),
-            bytes,
-        })
+        Self::from_bytes_with_time(bytes, limits, abort).map(|(input, _)| input)
+    }
+    /// [`Self::from_bytes_with_limits`], with the time of the state the
+    /// checkpoint holds, from the one decode that validates it.
+    pub(crate) fn from_bytes_with_time(
+        bytes: Vec<u8>,
+        limits: ResourceLimits,
+        abort: &dyn AbortSignal,
+    ) -> Result<(Self, f64), SimulationError> {
+        let time = decode_bytes(&bytes, limits, abort)?.time;
+        Ok((
+            Self {
+                digest: checkpoint_digest(&bytes),
+                bytes,
+            },
+            time,
+        ))
     }
     pub fn digest(&self) -> ContentDigest {
         self.digest

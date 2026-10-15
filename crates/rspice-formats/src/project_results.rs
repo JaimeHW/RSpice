@@ -25,6 +25,7 @@ use rspice_results::noise::{NoiseContributorRow, NoiseSummary};
 use rspice_results::operating_point::{DcOpResult, OperatingPointValue};
 use rspice_results::provenance::{
     AnalysisResultProvenance, AnalysisResultPvtPoint, AnalysisResultSourceDomain,
+    AnalysisResultTransientState,
 };
 use rspice_results::result_digest::ResultDigestEncoding;
 use rspice_results::run::{ExecutionTarget, RunRetention, SimulationRun, SimulationRunLifecycle};
@@ -1070,6 +1071,11 @@ impl ProjectSimulationResultsData {
                             "runs[{run_idx}].analyses[{analysis_idx}].provenance.pvt_point was introduced after schema v{source_schema}"
                         ));
                     }
+                    if provenance.transient_state.is_some() {
+                        return Err(format!(
+                            "runs[{run_idx}].analyses[{analysis_idx}].provenance.transient_state was introduced after schema v{source_schema}"
+                        ));
+                    }
                 }
             }
         }
@@ -1808,6 +1814,11 @@ pub struct ProjectAnalysisResultProvenance {
     /// purpose, because neither may be read as evidence about a corner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pvt_point: Option<ProjectAnalysisResultPvtPoint>,
+    /// The transient state a small-signal result was linearized around
+    /// (`ACTIMES=` or `CHECKPOINT=`). Absent for every result linearized at
+    /// the operating point, which is every result written before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transient_state: Option<AnalysisResultTransientState>,
 }
 
 /// Project-file representation of one attributed PVT point.
@@ -1878,8 +1889,9 @@ impl ProjectAnalysisResultProvenance {
             self.source_revision,
             self.prepared_snapshot_digest,
             self.dependency_ids,
-        )
-        .map(|provenance| provenance.with_pvt_point(pvt_point))
+        )?
+        .with_pvt_point(pvt_point)
+        .with_transient_state(self.transient_state)
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -1897,7 +1909,8 @@ impl ProjectAnalysisResultProvenance {
             self.source_revision,
             self.prepared_snapshot_digest,
             self.dependency_ids.clone(),
-        )
+        )?
+        .with_transient_state(self.transient_state)
         .map(|_| ())
     }
 }
@@ -1916,6 +1929,7 @@ impl From<&AnalysisResultProvenance> for ProjectAnalysisResultProvenance {
             pvt_point: provenance
                 .pvt_point()
                 .map(ProjectAnalysisResultPvtPoint::from),
+            transient_state: provenance.transient_state().copied(),
         }
     }
 }

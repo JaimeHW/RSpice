@@ -338,6 +338,11 @@ pub struct PreparedTask {
     /// Checked selections are routed only after per-point source materialization.
     monte_carlo_resumes: Arc<[PreparedMonteCarloResume]>,
     transient_resumes: Arc<[rspice_results::transient_checkpoint::TransientCheckpointEvidence]>,
+    /// The transient state a small-signal card with `ACTIMES=` or
+    /// `CHECKPOINT=` linearizes around: the transient dependency whose state
+    /// it is, and the card's one time or the sealed checkpoint's. Known at
+    /// binding; `None` for every other task.
+    transient_state: Option<rspice_results::provenance::AnalysisResultTransientState>,
 }
 
 impl PreparedTask {
@@ -376,7 +381,17 @@ impl PreparedTask {
             bound_observation_cards: Vec::new(),
             monte_carlo_resumes: Arc::from([]),
             transient_resumes: Arc::from([]),
+            transient_state: None,
         }
+    }
+
+    /// Record the transient state this task's card linearizes around.
+    pub(crate) const fn with_transient_state(
+        mut self,
+        state: Option<rspice_results::provenance::AnalysisResultTransientState>,
+    ) -> Self {
+        self.transient_state = state;
+        self
     }
 
     /// Declare which points of the global Run Set this task runs at.
@@ -596,6 +611,7 @@ pub struct AuthorizedTaskDispatch {
     declared_point: Option<crate::point_family::DeclaredRunPoint>,
     execution_environment: Option<crate::runner::AnalysisExecutionEnvironment>,
     execution_limits: rspice_core::ResourceLimits,
+    transient_state: Option<rspice_results::provenance::AnalysisResultTransientState>,
 }
 
 /// A prepared task paired with the exact batch-local artifacts required by
@@ -686,6 +702,16 @@ impl AuthorizedTaskDispatch {
     /// The PVT declaration this task solves one point of, when it is one.
     pub(crate) const fn declared_point(&self) -> Option<&crate::point_family::DeclaredRunPoint> {
         self.declared_point.as_ref()
+    }
+
+    /// The transient state this task's small-signal card linearizes around
+    /// (`ACTIMES=` or `CHECKPOINT=`): its time, and the transient dependency
+    /// whose trajectory holds it, as the result's provenance records them.
+    /// `None` when the card linearizes at the operating point.
+    pub const fn transient_state(
+        &self,
+    ) -> Option<rspice_results::provenance::AnalysisResultTransientState> {
+        self.transient_state
     }
 
     pub const fn source_basis_digest(&self) -> ContentDigest {
@@ -1613,6 +1639,7 @@ impl PreparedRunSnapshot {
                     pvt_point: prepared.pvt_point,
                     declared_point: prepared.declared_point,
                     execution_environment: prepared.execution_environment,
+                    transient_state: prepared.transient_state,
                 }
             })
             .collect();

@@ -10,6 +10,7 @@ use std::collections::{BinaryHeap, HashMap, HashSet};
 use rspice_app_types::product::{AnalysisInstanceId, ObjectRevision};
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::{ResourceKind, ResourceLimitError, ResourceLimits};
+use rspice_results::provenance::AnalysisResultTransientState;
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 
 use super::PreparedTask;
@@ -137,7 +138,7 @@ pub(crate) fn prepare_headless_tasks_reading_checkpoints(
             ready.push(Reverse(index));
         }
     }
-    bind_transient_states(&mut requests, &positions, read_checkpoint, limits, abort)?;
+    let states = bind_transient_states(&mut requests, &positions, read_checkpoint, limits, abort)?;
 
     let count = requests.len();
     let mut requests = requests.into_iter().map(Some).collect::<Vec<_>>();
@@ -147,13 +148,16 @@ pub(crate) fn prepare_headless_tasks_reading_checkpoints(
         let request = requests[index]
             .take()
             .ok_or_else(|| invalid("Analysis was ordered twice"))?;
-        tasks.push(PreparedTask::new(
-            request.instance_id,
-            source_revision,
-            request.dependencies,
-            request.label,
-            request.analysis,
-        ));
+        tasks.push(
+            PreparedTask::new(
+                request.instance_id,
+                source_revision,
+                request.dependencies,
+                request.label,
+                request.analysis,
+            )
+            .with_transient_state(states[index]),
+        );
         for dependent in &dependents[index] {
             ensure_not_aborted(abort)?;
             remaining[*dependent] -= 1;
@@ -239,13 +243,17 @@ fn validate_request(request: &HeadlessTaskRequest) -> ServiceRunResult<()> {
 /// A `CHECKPOINT=` card's file is read once, here, with `read_checkpoint`,
 /// and sealed into the task as its transient checkpoint request, which
 /// carries the image to the worker as a transient resume's does.
+///
+/// Returns each request's state, by position: its transient parent, and the
+/// card's one time or the time of the state its checkpoint holds.
 fn bind_transient_states(
     requests: &mut [HeadlessTaskRequest],
     positions: &HashMap<AnalysisInstanceId, usize>,
     read_checkpoint: &CheckpointReader<'_>,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
-) -> ServiceRunResult<()> {
+) -> ServiceRunResult<Vec<Option<AnalysisResultTransientState>>> {
+    let mut states = vec![None; requests.len()];
     for index in 0..requests.len() {
         ensure_not_aborted(abort)?;
         let request = &requests[index];
@@ -286,19 +294,37 @@ fn bind_transient_states(
                     "the card does not read with its transient's: {error}"
                 ))
             })?;
-        let checkpoint = check_state_card(&netlist, &request.analysis.spec).map_err(context)?;
-        let resume = match (checkpoint, &request.analysis.spec_options.tran_checkpoint) {
-            (None, None) => None,
+        let state = check_state_card(&netlist, &request.analysis.spec).map_err(context)?;
+        let (resume, state_time) = match (state, &request.analysis.spec_options.tran_checkpoint) {
+            (CardState::Time(time), None) => (None, time),
             // The caller sealed the state the card names with the request.
-            (Some(_), Some(sealed)) if sealed.times.is_empty() && sealed.resume.is_some() => None,
-            (Some(name), None) => {
+            (CardState::Checkpoint(name), Some(sealed)) if sealed.times.is_empty() => {
+                let Some(resume) = &sealed.resume else {
+                    return Err(context(
+                        "a task's transient checkpoint request is the state its CHECKPOINT= \
+                         card reads, with no schedule"
+                            .to_owned(),
+                    ));
+                };
+                let time = resume
+                    .decode(limits, abort)
+                    .map_err(|error| {
+                        context(format!(
+                            "the checkpoint sealed for {name} does not read: {error}"
+                        ))
+                    })?
+                    .time;
+                (None, time)
+            }
+            (CardState::Checkpoint(name), None) => {
                 let bytes = read_checkpoint(name).map_err(context)?;
-                Some(
-                    TransientCheckpointInput::from_bytes_with_limits(bytes, limits, abort)
-                        .map_err(|error| {
-                            context(format!("its checkpoint file {name} does not read: {error}"))
-                        })?,
+                let (resume, time) = TransientCheckpointInput::from_bytes_with_time(
+                    bytes, limits, abort,
                 )
+                .map_err(|error| {
+                    context(format!("its checkpoint file {name} does not read: {error}"))
+                })?;
+                (Some(resume), time)
             }
             (_, Some(_)) => {
                 return Err(context(
@@ -308,6 +334,10 @@ fn bind_transient_states(
                 ));
             }
         };
+        states[index] = Some(AnalysisResultTransientState {
+            parent: requests[parent].instance_id,
+            time_s: state_time,
+        });
         let request = &mut requests[index].analysis;
         request.analysis_line = line;
         if let Some(resume) = resume {
@@ -317,17 +347,25 @@ fn bind_transient_states(
             });
         }
     }
-    Ok(())
+    Ok(states)
+}
+
+/// The one state a state task's card names.
+enum CardState<'a> {
+    /// `ACTIMES=` with its one time, in seconds.
+    Time(f64),
+    /// `CHECKPOINT=` with the file it names.
+    Checkpoint(&'a str),
 }
 
 /// Check that a state task's deck is its transient's one `.TRAN` card and
 /// its own card around one state, and that its card is its typed request:
-/// the engine runs the card, so the two must agree. Returns the checkpoint
-/// file a `CHECKPOINT=` card names.
+/// the engine runs the card, so the two must agree. Returns the state the
+/// card names.
 fn check_state_card<'a>(
     netlist: &'a rspice_core::Netlist,
     spec: &AnalysisSpec,
-) -> Result<Option<&'a str>, String> {
+) -> Result<CardState<'a>, String> {
     use rspice_core::netlist::{AnalysisCommand, SmallSignalStateSource};
     let (
         [AnalysisCommand::Tran { .. }, card],
@@ -346,19 +384,22 @@ fn check_state_card<'a>(
             "its deck is not one .TRAN card, its transient's, and then its own one card".to_owned(),
         );
     };
-    let checkpoint = match source {
-        SmallSignalStateSource::TransientTimes(times) if times.len() == 1 => None,
-        SmallSignalStateSource::TransientTimes(times) => {
-            return Err(format!(
-                "the card names {} times, and a task is one state: give each time a task of its own",
-                times.len()
-            ));
-        }
-        SmallSignalStateSource::CheckpointFile(name) => Some(name.as_str()),
+    let state = match source {
+        SmallSignalStateSource::TransientTimes(times) => match times.as_slice() {
+            [time] => CardState::Time(*time),
+            _ => {
+                return Err(format!(
+                    "the card names {} times, and a task is one state: give each time a task \
+                     of its own",
+                    times.len()
+                ));
+            }
+        },
+        SmallSignalStateSource::CheckpointFile(name) => CardState::Checkpoint(name.as_str()),
     };
     let lowered = crate::manual_deck::command_to_queue_item(27.0, netlist, card)?.spec;
     if same_request(lowered, spec) {
-        Ok(checkpoint)
+        Ok(state)
     } else {
         Err(
             "the card is not the task's typed specification; the engine runs the card, so the \

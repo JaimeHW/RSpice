@@ -117,6 +117,7 @@ fn execute_inner(args: &StudyRunArgs, config: &Config, quiet: bool) -> Result<Va
             task.snapshot_digest(),
             task.dependencies().to_vec(),
         )
+        .and_then(|provenance| provenance.with_transient_state(task.transient_state()))
         .map_err(internal)?;
         executed_netlists.insert(
             instance_id.to_string(),
