@@ -320,42 +320,41 @@ pub fn right_panel(
                 "∞".to_owned()
             }
         });
-    let marker = pin
-        .as_ref()
-        .and_then(|(slot, point)| {
-            let trace = visible_traces.get(*slot)?;
-            let sample = trace.points.get(*point)?;
-            let gamma = sample.s;
-            let readout = if let Some(reference_impedance_ohm) = trace.reference_impedance_ohm {
-                if let Some((resistance, reactance)) =
-                    impedance_from_gamma(gamma.re, gamma.im, reference_impedance_ohm)
-                {
-                    format!(
-                        "{} · {} {} j{}",
-                        quantity_policy.format_frequency(sample.frequency, 2),
-                        fmt_si(resistance, "Ω", 2),
-                        if reactance >= 0.0 { "+" } else { "−" },
-                        fmt_si(reactance.abs(), "Ω", 2)
-                    )
-                } else {
-                    format!(
-                        "{} · open",
-                        quantity_policy.format_frequency(sample.frequency, 2)
-                    )
-                }
+    let marker = pin.as_ref().and_then(|(slot, point)| {
+        let trace = visible_traces.get(*slot)?;
+        let sample = trace.points.get(*point)?;
+        let gamma = sample.s;
+        let readout = if let Some(reference_impedance_ohm) = trace.reference_impedance_ohm {
+            if let Some((resistance, reactance)) =
+                impedance_from_gamma(gamma.re, gamma.im, reference_impedance_ohm)
+            {
+                format!(
+                    "{} · {} {} j{}",
+                    quantity_policy.format_frequency(sample.frequency, 2),
+                    fmt_si(resistance, "Ω", 2),
+                    if reactance >= 0.0 { "+" } else { "−" },
+                    fmt_si(reactance.abs(), "Ω", 2)
+                )
             } else {
                 format!(
-                    "{} · |S| {:.3}",
-                    quantity_policy.format_frequency(sample.frequency, 2),
-                    gamma.norm()
+                    "{} · open",
+                    quantity_policy.format_frequency(sample.frequency, 2)
                 )
-            };
-            Some(format!("{} · {readout}", trace.name))
-        })
-        .unwrap_or_else(|| "No marker pinned".to_owned());
-    let rows = [
+            }
+        } else {
+            format!(
+                "{} · |S| {:.3}",
+                quantity_policy.format_frequency(sample.frequency, 2),
+                gamma.norm()
+            )
+        };
+        Some(format!("{} · {readout}", trace.name))
+    });
+    // The chart has no frequency axis, so the sweep states itself; the point
+    // count, an unpinned marker and a locus with no reference impedance have
+    // nothing for the reader to read.
+    let mut rows = vec![
         ("Network", trace.name.clone(), true),
-        ("Points", trace.points.len().to_string(), false),
         (
             "Sweep",
             match (first, last) {
@@ -368,30 +367,18 @@ pub fn right_panel(
             },
             false,
         ),
-        (
-            "Z₀",
-            trace.reference_impedance_ohm.map_or_else(
-                || "Not applicable to this locus".to_owned(),
-                |reference| format!("{reference} Ω"),
-            ),
-            false,
-        ),
-        ("Marker", marker, false),
-        (
-            "|Γ| max",
-            maximum_gamma.map_or_else(|| "Not retained".to_owned(), |value| format!("{value:.3}")),
-            true,
-        ),
-        (
-            "Max VSWR",
-            maximum_vswr.unwrap_or_else(|| "Not retained".to_owned()),
-            false,
-        ),
-        ("Reference plane", "Not retained".to_owned(), false),
     ];
+    if let Some(reference) = trace.reference_impedance_ohm {
+        rows.push(("Z₀", format!("{reference} Ω"), false));
+    }
+    if let Some(marker) = marker {
+        rows.push(("Marker", marker, false));
+    }
+    if let Some(value) = maximum_gamma {
+        rows.push(("|Γ| max", format!("{value:.3}"), true));
+    }
+    if let Some(vswr) = maximum_vswr {
+        rows.push(("Max VSWR", vswr, false));
+    }
     crate::presentation::stat_table(ui, &rows);
-    crate::presentation::panel_note(
-        ui,
-        "Loci are plotted on the reflection-coefficient plane. De-embedding is not asserted without retained reference-plane provenance.",
-    );
 }
