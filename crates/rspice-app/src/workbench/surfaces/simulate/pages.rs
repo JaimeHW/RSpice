@@ -398,7 +398,7 @@ mod tests {
     fn every_setup_route_states_the_preflight_report_it_was_frozen_against() {
         let mut app = RSpiceApp::test_instance();
         assert_eq!(preflight_currency(&app), PreflightCurrency::Absent);
-        assert!(!PreflightCurrency::Absent.is_stated());
+        assert!(!PreflightCurrency::Absent.wants_rerun());
 
         app.state.workbench.preflight.report = Some(current_report(
             &app.state,

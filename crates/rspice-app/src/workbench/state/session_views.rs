@@ -1481,14 +1481,6 @@ pub enum PreflightCurrency {
 }
 
 impl PreflightCurrency {
-    /// Whether a chip should be painted at all. Nothing is stated about a
-    /// preflight that was never run — an absent report is the ordinary state
-    /// of a session that has not reached dispatch yet, and a chip announcing
-    /// it on every route would be noise rather than evidence.
-    pub const fn is_stated(self) -> bool {
-        !matches!(self, Self::Absent)
-    }
-
     /// Whether the retained report leaves something for the reader to do
     /// before a run can be authorized — an expired report has to be rerun, a
     /// blocked one has findings to clear and then rerun.
