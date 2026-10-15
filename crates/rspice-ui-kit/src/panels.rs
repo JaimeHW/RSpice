@@ -1275,7 +1275,7 @@ pub(crate) fn hinted_edit<'t>(value: &'t mut String, hint: &str) -> egui::TextEd
 /// does: a row whose value is inherited is still an empty field.
 fn show_property_field(ui: &mut Ui, rect: Rect, edit: egui::TextEdit<'_>) -> Response {
     let faint = Tokens::get(ui.ctx()).color.text_faint;
-    let restored = std::mem::replace(&mut ui.visuals_mut().weak_text_color, Some(faint));
+    let restored = ui.visuals_mut().weak_text_color.replace(faint);
     let response = ui.put(rect, edit);
     ui.visuals_mut().weak_text_color = restored;
     response
