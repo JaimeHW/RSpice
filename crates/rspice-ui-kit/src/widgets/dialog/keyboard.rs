@@ -45,6 +45,16 @@ pub(super) fn unregister(ctx: &Context, layer: LayerId) {
     });
 }
 
+/// Reclaim the input a cancellation deferred, for a caller that renders the
+/// surface it belongs to in this same pass. Deferral costs two frames: one to
+/// deliver, and one more while egui retires the cancelled modal's layer.
+pub(super) fn take_deferred(ctx: &Context) -> Option<Vec<Event>> {
+    ctx.plugin_or_default::<DialogKeyboard>()
+        .lock()
+        .deferred
+        .remove(&ctx.viewport_id())
+}
+
 pub(super) fn resume_focus(ctx: &Context, target: Id) {
     ctx.plugin_or_default::<DialogKeyboard>()
         .lock()

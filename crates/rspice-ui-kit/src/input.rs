@@ -96,8 +96,15 @@ impl InputTransition {
 
     pub fn route(self, ctx: &Context, owner: Id) {
         ctx.input_mut(|input| input.events = self.before);
-        ctx.data_mut(|data| data.insert_temp(owner.with("opening-input"), self.following));
+        hand_opening_input(ctx, owner, self.following);
     }
+}
+
+/// Give a surface the input that follows the command opening it, when the
+/// caller already holds those events instead of splitting them out of the
+/// current batch. The surface collects them with [`InputScope::enter`].
+pub fn hand_opening_input(ctx: &Context, owner: Id, events: Vec<Event>) {
+    ctx.data_mut(|data| data.insert_temp(owner.with("opening-input"), events));
 }
 
 /// Give one surface its continuation without replaying it into later controls.

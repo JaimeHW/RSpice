@@ -598,6 +598,19 @@ struct DialogCancelFocus {
 }
 
 impl DialogResponse {
+    /// Hand the input that followed the cancelling Escape to the control the
+    /// returning page opens with, which the caller renders in this same pass.
+    /// Without it those keystrokes reach that control two frames later, after
+    /// the reader has already seen the page they belong to carrying stale text.
+    pub fn route_cancel_input(&self, target: Id) {
+        let Some(focus) = &self.cancel_focus else {
+            return;
+        };
+        if let Some(events) = keyboard::take_deferred(&focus.ctx) {
+            crate::input::hand_opening_input(&focus.ctx, target, events);
+        }
+    }
+
     /// Keep the cancelled dialog open and focus its confirmation control.
     /// Call only after applying the workflow's current close policy.
     pub fn retain_cancel_focus(&mut self, target: DialogInitialFocus) {
