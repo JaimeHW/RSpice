@@ -1,9 +1,8 @@
 //! Symbol cellview navigator.
 //!
 //! A symbol is a design document, so its structure lives in the shared left
-//! panel exactly as a schematic's hierarchy does: the ordered pin contract,
-//! the body geometry, the label anchors, and the interface the symbol is
-//! answerable to.
+//! panel exactly as a schematic's hierarchy does. It is three pick lists:
+//! the ordered pins, the body geometry, and the label anchors.
 
 use egui::{ScrollArea, Ui};
 
@@ -11,63 +10,39 @@ use crate::state::{
     PortDirection, PortSpec, SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata,
     SymbolElectricalType, SymbolPin, SymbolPinSide, SymbolShape,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::TreeRow;
 use crate::workbench::RSpiceApp;
 
-use super::super::super::design_system::{Problem, WorkbenchIcon, property_row, section_header};
+use super::super::super::design_system::{Problem, WorkbenchIcon, section_header};
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let reference = app.state.workspace.content.active_view.clone();
     let ports = app.state.active_symbol_ports();
-    let Ok(mut document) = app.state.load_active_symbol_document() else {
-        // The document could not be read. The editor surface reports the
-        // exact reason; the navigator must not invent a structure for it.
-        super::empty_navigator_row(ui, "This symbol cellview could not be read");
-        return;
+    // A document that will not load says why. The navigator must not invent
+    // a structure for one it cannot read.
+    let mut document = match app.state.load_active_symbol_document() {
+        Ok(document) => document,
+        Err(reason) => {
+            super::empty_navigator_row(ui, &format!("Symbol file is corrupt: {reason}"));
+            return;
+        }
     };
-    let Ok(metadata) = app.state.load_active_symbol_editor_metadata(&document) else {
-        super::empty_navigator_row(ui, "This symbol's authoring metadata could not be read");
-        return;
+    let metadata = match app.state.load_active_symbol_editor_metadata(&document) {
+        Ok(metadata) => metadata,
+        Err(reason) => {
+            super::empty_navigator_row(ui, &format!("Symbol layout data is corrupt: {reason}"));
+            return;
+        }
     };
 
-    hierarchy_path(ui, &reference);
+    // No path line: the document tab names the view, and a symbol has no
+    // hierarchy to ascend, so the line carried no click either.
     ScrollArea::vertical()
         .id_salt("workbench.symbol.navigator")
         .show(ui, |ui| {
             pins_section(ui, app, &mut document, &metadata, &ports);
             body_section(ui, app, &document);
             attributes_section(ui, app, &metadata);
-            interface_section(ui, app, &document, &ports);
         });
-}
-
-/// The `/ library / cell / view` line the symbol navigator opens with.
-fn hierarchy_path(ui: &mut Ui, reference: &crate::state::CellViewRef) {
-    let t = Tokens::get(ui.ctx());
-    let frame = egui::Frame::new()
-        .fill(t.color.bg_inset)
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(format!(
-                        "/ {} / {} / {}",
-                        reference.library, reference.cell, reference.view
-                    ))
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
-    ui.painter().hline(
-        frame.response.rect.x_range(),
-        frame.response.rect.bottom(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
 }
 
 /// The ordered pin contract. Row order **is** netlist order, so the index is
@@ -79,10 +54,20 @@ fn pins_section(
     metadata: &SymbolEditorMetadata,
     ports: &[PortSpec],
 ) {
+    // The interface the symbol answers to is stated here, on the list of
+    // pins that would have to change, rather than in a section of its own
+    // restating the inspector's pin contract.
+    let mismatched = !ports.is_empty()
+        && !matches!(document.pin_summary(ports), crate::state::PinSummary::Match);
+    let count = document.pins.len();
     section_header(
         ui,
-        "Pins · netlist order",
-        Some(&document.pins.len().to_string()),
+        "Pins (netlist order)",
+        Some(&if mismatched {
+            format!("{count} · mismatch")
+        } else {
+            count.to_string()
+        }),
     );
     ui.horizontal(|ui| {
         ui.add_space(8.0);
@@ -133,7 +118,7 @@ fn pins_section(
             if super::super::super::design_system::labeled_icon_button(
                 ui,
                 WorkbenchIcon::Refresh,
-                "Update pins from contract",
+                "Update pins from schematic",
                 false,
                 width,
             )
@@ -150,27 +135,19 @@ fn pins_section(
     }
     ui.add_space(4.0);
     if document.pins.is_empty() {
-        super::empty_navigator_row(ui, "No pins. Add one or generate the interface contract.");
+        // The two buttons that fill the list sit directly above this line.
+        super::empty_navigator_row(ui, "No pins.");
         return;
     }
     let mut select: Option<String> = None;
     for (index, pin) in document.pins.iter().enumerate() {
-        let declared = ports
-            .iter()
-            .any(|port| port.name.eq_ignore_ascii_case(&pin.name));
-        let placed = pin.position.is_some();
-        let meta = match (placed, declared) {
-            (false, _) => "unplaced".to_owned(),
-            (true, false) => "orphaned".to_owned(),
-            (true, true) if !pin.terminal_on_grid() => "off grid".to_owned(),
-            (true, true) => pin.direction.keyword().to_owned(),
-        };
+        let (meta, problem) = pin_meta(pin, ports);
         let label = format!("{}. {}", index + 1, pin.name);
         let row = TreeRow::new(&label)
             .mono()
             .indent(1)
             .meta(&meta)
-            .problem((!(placed && declared && pin.terminal_on_grid())).then_some(Problem::Warning))
+            .problem(problem)
             .selected(
                 app.state
                     .ui
@@ -190,6 +167,26 @@ fn pins_section(
     }
 }
 
+/// What one pin row says after its name, and whether that is a problem.
+///
+/// A pin is normal when it is placed on the grid and the interface declares
+/// it. With no schematic, no Verilog-A module and no generated ports there
+/// is no interface for a pin to be missing from, so a hand-drawn symbol's
+/// pins are not all of them orphans — which is how every one of them used to
+/// read.
+fn pin_meta(pin: &SymbolPin, ports: &[PortSpec]) -> (String, Option<Problem>) {
+    let declared = ports.is_empty()
+        || ports
+            .iter()
+            .any(|port| port.name.eq_ignore_ascii_case(&pin.name));
+    match (pin.position.is_some(), declared) {
+        (false, _) => ("unplaced".to_owned(), Some(Problem::Warning)),
+        (true, false) => ("not in schematic".to_owned(), Some(Problem::Warning)),
+        (true, true) if !pin.terminal_on_grid() => ("off grid".to_owned(), Some(Problem::Warning)),
+        (true, true) => (pin.direction.keyword().to_owned(), None),
+    }
+}
+
 fn next_pin_name(document: &SymbolDocument) -> String {
     (1_u64..)
         .map(|index| format!("PIN{index}"))
@@ -202,62 +199,35 @@ fn next_pin_name(document: &SymbolDocument) -> String {
         .expect("the symbol pin identity space is not exhausted")
 }
 
+/// What a body shape is, for a list whose job is picking one out from under
+/// another. Point counts, radii and sweeps are geometry the inspector edits.
 fn shape_label(shape: &SymbolShape) -> String {
     match shape {
-        SymbolShape::Polyline { points, closed } => format!(
-            "{} · {} points",
-            if *closed { "polygon" } else { "polyline" },
-            points.len()
-        ),
-        SymbolShape::Circle { radius, .. } => format!("circle · r{radius}"),
-        SymbolShape::Arc {
-            radius,
-            sweep_degrees,
-            ..
-        } => format!("arc · r{radius} · {sweep_degrees}°"),
+        SymbolShape::Polyline { closed, .. } => {
+            if *closed { "polygon" } else { "polyline" }.to_owned()
+        }
+        SymbolShape::Circle { .. } => "circle".to_owned(),
+        SymbolShape::Arc { .. } => "arc".to_owned(),
         SymbolShape::Arrow { .. } => "arrow".to_owned(),
-        SymbolShape::Dot { radius, .. } => format!("dot · r{radius}"),
-        SymbolShape::Text { text, size, .. } => {
+        SymbolShape::Dot { .. } => "dot".to_owned(),
+        SymbolShape::Text { text, .. } => {
             let label = text.trim();
             if label.is_empty() {
-                format!("text · {} · empty", size.label())
+                "text".to_owned()
             } else {
-                format!("text · {} · {label}", size.label())
+                format!("text {label}")
             }
         }
     }
 }
 
-fn shape_anchor(shape: &SymbolShape) -> crate::state::Point {
-    match shape {
-        SymbolShape::Polyline { points, .. } => points
-            .first()
-            .copied()
-            .unwrap_or_else(crate::state::Point::origin),
-        SymbolShape::Circle { center, .. }
-        | SymbolShape::Arc { center, .. }
-        | SymbolShape::Dot { center, .. } => *center,
-        SymbolShape::Arrow { tip, .. } => *tip,
-        SymbolShape::Text { anchor, .. } => *anchor,
-    }
-}
-
 fn body_section(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument) {
+    // A new symbol's empty list says so with the "0" on its header.
     section_header(ui, "Body geometry", Some(&document.body.len().to_string()));
-    if document.body.is_empty() {
-        super::empty_navigator_row(
-            ui,
-            "No body shapes. Draw with the line, rectangle, circle, arc, polygon or text tools.",
-        );
-        return;
-    }
     let mut select: Option<usize> = None;
     for (index, shape) in document.body.iter().enumerate() {
-        let anchor = shape_anchor(shape);
-        let meta = format!("{}, {}", anchor.x, anchor.y);
         let row = TreeRow::new(&shape_label(shape))
             .indent(1)
-            .meta(&meta)
             .selected(app.state.ui.symbol.editor.selection.shapes.contains(&index))
             .show(ui);
         if row.response.clicked() {
@@ -270,21 +240,20 @@ fn body_section(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument) {
 }
 
 fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorMetadata) {
-    section_header(
-        ui,
-        "Attributes",
-        Some(&metadata.attributes.len().to_string()),
-    );
+    // No count: the list is the three keys `SymbolAttributeKind::ALL` holds,
+    // in every symbol there is.
+    section_header(ui, "Attributes", None);
     for kind in SymbolAttributeKind::ALL {
         let Some(attribute) = metadata.attribute(kind) else {
             continue;
         };
+        // A label that is shown and carries a value is the normal case.
         let meta = if !attribute.shown {
             "hidden"
         } else if attribute.default_value.is_empty() {
             "empty"
         } else {
-            "shown"
+            ""
         };
         let row = TreeRow::new(kind.key())
             .mono()
@@ -306,70 +275,69 @@ fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorM
     }
 }
 
-/// The interface the symbol answers to, and whether it currently does.
-fn interface_section(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    document: &SymbolDocument,
-    ports: &[PortSpec],
-) {
-    let summary = document.pin_summary(ports);
-    let matched = matches!(summary, crate::state::PinSummary::Match);
-    section_header(
-        ui,
-        "Bound interface",
-        Some(if matched { "matched" } else { "mismatch" }),
-    );
-    property_row(
-        ui,
-        "Declared ports",
-        &if ports.is_empty() {
-            "no schematic interface".to_owned()
-        } else {
-            ports.len().to_string()
-        },
-    );
-    property_row(
-        ui,
-        "Port order",
-        &if ports.is_empty() {
-            "—".to_owned()
-        } else {
-            ports
-                .iter()
-                .map(|port| port.name.as_str())
-                .collect::<Vec<_>>()
-                .join(" ")
-        },
-    );
-    property_row(
-        ui,
-        "Cell",
-        &format!(
-            "{}/{}",
-            app.state.workspace.content.active_view.library,
-            app.state.workspace.content.active_view.cell
-        ),
-    );
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::Point;
 
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_space(10.0);
-        let width = (ui.available_width() - 10.0).max(1.0);
-        if crate::workbench::design_system::labeled_icon_button(
-            ui,
-            WorkbenchIcon::Models,
-            "Open in model manager",
-            false,
-            width,
-        )
-        .clicked()
-        {
-            crate::workbench::commands::vocabulary::Command::OpenWorkspace(
-                crate::workbench::state::Workspace::Models,
-            )
-            .execute(app);
-        }
-    });
-    ui.add_space(2.0);
+    /// A pin the interface does not declare is flagged — but only when there
+    /// is an interface. A hand-drawn symbol whose cell has no schematic, no
+    /// Verilog-A module and no generated ports read every one of its pins as
+    /// "orphaned", in warning tone, with nothing the reader could do.
+    #[test]
+    fn a_symbol_with_no_interface_does_not_orphan_its_own_pins() {
+        let on_grid = SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, 0)));
+
+        assert_eq!(pin_meta(&on_grid, &[]), ("in".to_owned(), None));
+
+        let declared = [PortSpec {
+            name: "in".to_owned(),
+            direction: PortDirection::In,
+        }];
+        assert_eq!(pin_meta(&on_grid, &declared), ("in".to_owned(), None));
+
+        let other = [PortSpec {
+            name: "OUT".to_owned(),
+            direction: PortDirection::Out,
+        }];
+        assert_eq!(
+            pin_meta(&on_grid, &other),
+            ("not in schematic".to_owned(), Some(Problem::Warning))
+        );
+
+        let unplaced = SymbolPin::new("IN", PortDirection::In, None);
+        assert_eq!(
+            pin_meta(&unplaced, &[]),
+            ("unplaced".to_owned(), Some(Problem::Warning))
+        );
+
+        let off_grid = SymbolPin::new("IN", PortDirection::In, Some(Point::new(-43, 0)));
+        assert_eq!(
+            pin_meta(&off_grid, &[]),
+            ("off grid".to_owned(), Some(Problem::Warning))
+        );
+    }
+
+    /// The body list is a pick list: a shape row says what the shape is, and
+    /// the text one carries its words. Point counts, radii and sweeps are the
+    /// inspector's editable geometry.
+    #[test]
+    fn a_body_row_names_the_shape_and_the_text_it_carries() {
+        assert_eq!(
+            shape_label(&SymbolShape::Polyline {
+                points: vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
+                closed: true,
+            }),
+            "polygon"
+        );
+        assert_eq!(
+            shape_label(&SymbolShape::Text {
+                anchor: Point::new(120, -40),
+                text: "VDD".to_owned(),
+                size: rspice_design::symbol::SymbolTextSize::Normal,
+                align: rspice_design::symbol::SymbolTextAlign::Center,
+            }),
+            "text VDD"
+        );
+    }
 }
