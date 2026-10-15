@@ -181,7 +181,11 @@ def main() -> None:
         f"http://127.0.0.1:{server.server_port}/wasm-jit-qualification.html"
         f"?{qualification_query}"
     )
-    with tempfile.TemporaryDirectory(prefix="rspice-wasm-jit-chrome-") as profile:
+    # Chromium's children can write the profile back while it is being deleted;
+    # the verdict comes from the worker, not from this scratch directory.
+    with tempfile.TemporaryDirectory(
+        prefix="rspice-wasm-jit-chrome-", ignore_cleanup_errors=True
+    ) as profile:
         browser = subprocess.Popen(
             [
                 find_chromium(),

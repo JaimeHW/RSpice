@@ -159,7 +159,11 @@ class WorkbenchBrowser:
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.origin = f"http://127.0.0.1:{self.server.server_port}"
-        self.profile = tempfile.TemporaryDirectory(prefix="rspice-workbench-")
+        # Chromium's children can write the profile back while it is being
+        # deleted, and close() turns a cleanup failure into a failed check.
+        self.profile = tempfile.TemporaryDirectory(
+            prefix="rspice-workbench-", ignore_cleanup_errors=True
+        )
         self.downloads = self.output / "downloads"
         self.downloads.mkdir(exist_ok=True)
         with socket.socket() as reserved:
