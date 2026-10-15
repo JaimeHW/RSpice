@@ -1231,12 +1231,13 @@ fn the_waves_details_panel_states_ranges_and_method_as_rows_and_meta() {
             .any(|(_, node)| node.label() == Some("LTE acceptances")),
         "a run that forced nothing has no convergence row"
     );
+    // Linear interpolation between retained samples is how every
+    // measurement in the product is taken, so the header does not say it.
     assert!(
         nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Heading
-                && node.label() == Some("Measurements, linear interpolation")
+            node.role() == egui::accesskit::Role::Heading && node.label() == Some("Measurements")
         }),
-        "the measurements header does not carry its method as metadata"
+        "the measurements header is gone"
     );
 }
 

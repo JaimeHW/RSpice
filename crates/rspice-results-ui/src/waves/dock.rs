@@ -203,7 +203,7 @@ pub fn readout_strip(
             (rect.top() + READOUT_HEADER_H).min(rect.bottom()),
         ),
     );
-    readout_header(ui, state, source, header);
+    readout_header(ui, state, header);
     if state.readout_collapsed || rect.bottom() <= header.bottom() {
         return actions;
     }
@@ -227,37 +227,14 @@ pub fn readout_strip(
     actions
 }
 
-fn readout_header(
-    ui: &mut Ui,
-    state: &mut ResultViewerState,
-    source: ReadoutInput<'_>,
-    rect: egui::Rect,
-) {
+fn readout_header(ui: &mut Ui, state: &mut ResultViewerState, rect: egui::Rect) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let cursor = state.cursor_readout_active();
-    let trace_count = if cursor {
-        readout_row_count(state, source)
-    } else {
-        0
-    };
-    let marker_count = visible_markers(state, source).len();
     let title = if cursor {
         "Cursors & markers"
     } else {
         "Markers"
-    };
-    let count = if cursor {
-        format!(
-            "{trace_count} row{} · {marker_count} marker{}",
-            if trace_count == 1 { "" } else { "s" },
-            if marker_count == 1 { "" } else { "s" }
-        )
-    } else {
-        format!(
-            "{marker_count} marker{}",
-            if marker_count == 1 { "" } else { "s" }
-        )
     };
     let mut header_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -272,12 +249,8 @@ fn readout_header(
             .font(theme::sans(tokens::FS_1, FontWeight::Medium))
             .color(c.text),
     );
-    header_ui.label(
-        egui::RichText::new(count)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(c.text_faint)
-            .background_color(c.bg_inset),
-    );
+    // The rows and markers are directly below; counting them is the band
+    // describing what the reader can see.
     header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         let collapsed = state.readout_collapsed;
         let label = if collapsed {
@@ -476,14 +449,9 @@ pub fn marker_section(
             retained: matches!(marker, MarkerView::Document(_)),
         })
         .collect();
+    // An empty marker list reserves no height to say it is empty; the +M
+    // control's own hover says how one is placed.
     if shown.is_empty() {
-        ui.painter().text(
-            egui::pos2(rect.left() + READOUT_PAD_X, rect.top() + 8.0),
-            egui::Align2::LEFT_TOP,
-            "No markers on this sheet. Drop one at cursor A with +M.",
-            theme::sans(tokens::FS_1, FontWeight::Regular),
-            c.text_faint,
-        );
         return;
     }
 
@@ -560,9 +528,9 @@ pub fn marker_section(
                     .color(color),
             )
             .on_hover_text(if entry.retained {
-                "Retained by this result document"
+                "Saved in this result document"
             } else {
-                "Saved with the project"
+                "Saved in the project"
             });
         // The kind is stated, not cycled: a click that silently reclassifies
         // what a marker asserts is a decision made by accident. The id
@@ -572,15 +540,8 @@ pub fn marker_section(
                 .font(theme::mono(tokens::FS_0, FontWeight::Regular))
                 .color(c.text_dim),
         );
-        // Which store owns the marker changes what removing it means, so the
-        // row states it rather than leaving the reader to infer it.
-        if entry.retained {
-            row_ui.label(
-                egui::RichText::new("retained")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(c.text_faint),
-            );
-        }
+        // Which store owns the marker is on the id's own hover above; the
+        // word "retained" on the row said it a second time.
         if row_ui
             .add(
                 egui::Button::new(
@@ -638,13 +599,8 @@ pub fn marker_section(
         // is edited in the marker dialog, so a stray keystroke over the strip
         // cannot rewrite what a marker says.
         let note = &entry.note;
-        if note.is_empty() {
-            row_ui.label(
-                egui::RichText::new("no label")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(c.text_faint),
-            );
-        } else {
+        // A marker without a note is the common case and says nothing.
+        if !note.is_empty() {
             row_ui
                 .label(
                     egui::RichText::new(note)

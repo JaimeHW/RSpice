@@ -7,7 +7,7 @@ use super::{
 use crate::derived::{DerivedSeries, WindowStats};
 use egui::Ui;
 use rspice_app_types::quantity::QuantityPresentationPolicy;
-use rspice_ui_kit::panels::section_header_explained;
+use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::plot::sample::{
     SweepClass, SweepShape, XOrientation, nearest_sample, sample_at_with_shape,
     sample_branches_into,
@@ -195,13 +195,6 @@ fn readout_accessibility_text(
     text
 }
 
-/// How the measurement section's values are computed, as its header states it.
-pub const MEASUREMENT_METHOD: &str = "linear interpolation";
-
-/// The header's hover text: what [`MEASUREMENT_METHOD`] means for the values.
-const MEASUREMENT_METHOD_EXPLAINED: &str = "Measurements use linear segments between retained \
-     samples. Plot smoothing and display decimation do not change these values.";
-
 /// Paint retained-sample measurements for the selected strip and cursor span.
 pub fn measurement_panel(
     ui: &mut Ui,
@@ -216,9 +209,10 @@ pub fn measurement_panel(
     } else {
         "Measurements"
     };
-    // How every value below was computed qualifies the section, so it is the
-    // section's own metadata rather than a line of its own under the header.
-    section_header_explained(ui, title, MEASUREMENT_METHOD, MEASUREMENT_METHOD_EXPLAINED);
+    // Linear interpolation between retained samples is how every measurement
+    // in the product is taken; stating it on the header of every strip is a
+    // constant, not a qualification.
+    section_header(ui, title, None);
     measurement_rows(
         ui,
         derived,
@@ -553,13 +547,8 @@ pub fn measurement_values(
             }
         }
     }
-    let visible = model.traces.iter().filter(|trace| trace.visible).count();
-    if visible > 4 {
-        rows.push((
-            "Traces".to_owned(),
-            format!("Showing 4 of {visible}; hide traces to measure others"),
-        ));
-    }
+    // An arbitrary cap the reader had to work around by hiding traces is not
+    // a measurement, so the row that announced it goes.
     rows
 }
 
