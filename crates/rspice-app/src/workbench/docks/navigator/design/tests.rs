@@ -510,7 +510,9 @@ fn a_built_in_device_master_is_inert_in_both_hierarchy_rails() {
     let device = CellViewRef::new("rspice", "d_pwm", "xspice");
 
     let mut tree = NavigatorTreeState::default();
-    tree.expand(NavigatorTreeNode::Occurrence(InstancePath::root().fold_key()));
+    tree.expand(NavigatorTreeNode::Occurrence(
+        InstancePath::root().fold_key(),
+    ));
     assert_eq!(
         occurrence_states(&occurrence_rows(&app, &tree)),
         vec![
