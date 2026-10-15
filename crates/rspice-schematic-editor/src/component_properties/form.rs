@@ -616,8 +616,10 @@ fn label_font(def: &PropertyDefinition) -> egui::FontId {
 const SECTION_BAND_HEIGHT: f32 = 26.0;
 /// Where a band's title starts, matching the inset of the content under it.
 const SECTION_BAND_INSET: f32 = 16.0;
-/// The most a band reaches past its content, which is the widest gutter a
-/// scroll area reserves for its bar.
+/// The most a band reaches past its own content, which is the widest gutter a
+/// scroll area reserves for its bar. A ceiling, not a target: the clip rect is
+/// what the band normally reaches, and this only bounds the damage when a pane
+/// has not confined one.
 const SECTION_BAND_GUTTER: f32 = 12.0;
 
 /// One section's head: the title, and nothing else.
@@ -640,9 +642,13 @@ pub fn section_band(ui: &mut Ui, title: &str) {
     // stopped at the content edge left a notch between every title's bar and
     // the bar beside it.
     //
-    // The gutter is taken as the clip rect, capped: a pane that is not
-    // scrolling is clipped by the dialog rather than by itself, and an
-    // uncapped reach painted the band out past the dialog's own edge.
+    // The pane is the clip rect, which its caller confines to the rectangle it
+    // allocated. The gutter is also bounded here, so a caller that forgets is
+    // out by a bar's width rather than by however wide its area happens to be:
+    // trusting the clip rect alone looked right in every offscreen render,
+    // because the rasterizer clips a dialog to the canvas, while the running
+    // editor draws in an area with no such edge and put the band out past the
+    // dialog's own border.
     let right = ui
         .clip_rect()
         .right()
@@ -699,4 +705,66 @@ fn property_group_heading(ui: &mut Ui, label: &str) {
         }
     }
     ui.add_space(5.0);
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    /// A band reaches its scrollbar gutter and stops, even where nothing
+    /// clips it.
+    ///
+    /// The pane is placed in a ui far wider than itself and its clip rect is
+    /// deliberately left alone, which is the case the running editor hits: a
+    /// dialog paints into an area with no edge of its own, so a band that took
+    /// the clip rect as its width ran out past the dialog's border. Every
+    /// offscreen render missed it, because the rasterizer clips a dialog to
+    /// the canvas and clamped the overshoot away — so this asserts the bound
+    /// rather than the picture.
+    #[test]
+    fn a_section_band_stops_at_its_own_gutter_when_nothing_clips_it() {
+        const PANE: f32 = 240.0;
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut surround = egui::Rect::NOTHING;
+        let mut pane = egui::Rect::NOTHING;
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                surround = ui.max_rect();
+                pane = egui::Rect::from_min_size(ui.max_rect().min, vec2(PANE, 400.0));
+                let mut pane_ui = ui.new_child(egui::UiBuilder::new().max_rect(pane));
+                section_band(&mut pane_ui, "Parameters");
+            });
+        });
+        assert!(
+            surround.right() > pane.right() + SECTION_BAND_GUTTER * 4.0,
+            "the surrounding ui must reach far past the pane and its gutter \
+             for this to prove anything: {surround:?} against {pane:?}"
+        );
+        let limit = pane.right() + SECTION_BAND_GUTTER;
+        // The band's own fill, not every shape the host panel drew: a
+        // `CentralPanel` paints its background over an effectively unbounded
+        // rect, which says nothing about this widget.
+        let fill = Tokens::get(&ctx).color.bg_panel_2;
+        let bands = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(bands.len(), 1, "one band was painted: {bands:?}");
+        let painted = bands[0];
+        assert!(
+            painted.right() <= limit + 1.0,
+            "the band reached {}, which is {} past the pane's gutter at {limit}",
+            painted.right(),
+            painted.right() - limit
+        );
+        assert!(
+            painted.right() > pane.right(),
+            "the band still reaches into the gutter it heads: {painted:?} in {pane:?}"
+        );
+    }
 }

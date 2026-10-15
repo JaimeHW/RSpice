@@ -124,6 +124,7 @@ pub fn render_component_property_dialog(
                     vec2(left_width, body_height),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        clip_to_pane(ui);
                         first_parameter = render_component_parameters(
                             ui,
                             draft,
@@ -140,6 +141,7 @@ pub fn render_component_property_dialog(
                     vec2(ui.available_width(), body_height),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        clip_to_pane(ui);
                         evidence_pane(
                             ui,
                             draft,
@@ -160,6 +162,7 @@ pub fn render_component_property_dialog(
                     vec2(ui.available_width(), parameters_height),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        clip_to_pane(ui);
                         first_parameter = render_component_parameters(
                             ui,
                             draft,
@@ -176,6 +179,7 @@ pub fn render_component_property_dialog(
                     vec2(ui.available_width(), ui.available_height()),
                     Layout::top_down(Align::Min),
                     |ui| {
+                        clip_to_pane(ui);
                         evidence_pane(
                             ui,
                             draft,
@@ -220,6 +224,18 @@ pub fn render_component_property_dialog(
     }
 
     result
+}
+
+/// Confine a pane's painting to the rectangle it was allocated.
+///
+/// A pane's own rect is the only honest answer to "how wide is this surface",
+/// and the section bands inside it need that answer: without it the band has
+/// to guess how much of the scroll area's reserved gutter to reach into, and a
+/// guess is either a notch beside every title or a bar painted out past the
+/// dialog's border. The rasterizer hides the second case, because it clips a
+/// dialog to the canvas; the running editor does not.
+fn clip_to_pane(ui: &mut Ui) {
+    ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
 }
 
 /// Whether this component has anything to show beside its parameters.
