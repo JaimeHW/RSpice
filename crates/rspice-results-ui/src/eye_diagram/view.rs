@@ -563,13 +563,19 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
         return;
     }
 
-    let summary = timebase_summary(eye);
     let m = &eye.measurements;
 
     section_header(ui, "Eye", None);
     let rows = [
-        ("Unit interval", fmt_si(m.unit_interval, "s", 3), true),
-        ("Data rate", fmt_si(m.data_rate, "b/s", 2), false),
+        (
+            "Unit interval",
+            format!(
+                "{} ({})",
+                fmt_si(m.unit_interval, "s", 3),
+                fmt_si(m.data_rate, "b/s", 2)
+            ),
+            true,
+        ),
         ("Eye height", fmt_si(m.eye_height, "V", 0), true),
         ("Eye width", format!("{:.2} UI", m.eye_width), true),
         ("Jitter rms", fmt_si(m.jitter_rms, "s", 1), false),
@@ -604,7 +610,6 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
         ),
     ];
     crate::presentation::stat_table(ui, &rows);
-    crate::presentation::panel_note(ui, &format!("Folded at {summary}."));
 
     if eye.mask.enabled {
         section_header(ui, "Mask", None);
@@ -620,11 +625,6 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
                 "Margin",
                 or_unmeasured(mask.margin, |value| format!("{:+.0} %", value * 100.0)),
                 true,
-            ),
-            (
-                "Pass rate",
-                or_unmeasured(mask.pass_rate(), |value| format!("{:.3} %", value * 100.0)),
-                false,
             ),
         ];
         crate::presentation::stat_table(ui, &rows);
@@ -643,10 +643,6 @@ pub fn right_panel(ui: &mut Ui, eye: &EyeDiagramState, source: &str) {
             );
         }
     }
-    crate::presentation::panel_note(
-        ui,
-        "Acquisitions folded at the configured bit period; thresholds 20/50/80 %.",
-    );
 }
 
 /// An em dash where the data could not support a figure.

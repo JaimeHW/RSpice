@@ -166,7 +166,8 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
     let text = panel_text(&mut state);
     assert!(text.contains("Drive strength"), "{text}");
     assert!(text.contains("resistive"), "{text}");
-    assert!(text.contains("RSpice prepared execution"), "{text}");
+    // A natively solved event is the normal case and names no source.
+    assert!(!text.contains("RSpice prepared execution"), "{text}");
     assert!(!text.contains("canonical strengths"), "{text}");
     state.simulation.retained.runs[0].analyses[0].import_source =
         Some(crate::state::ResultImportSource {

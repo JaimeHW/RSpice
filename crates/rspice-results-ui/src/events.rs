@@ -575,9 +575,7 @@ pub fn selection_absent(ui: &mut Ui, absence: SelectionAbsence) {
     panel_note(
         ui,
         match absence {
-            SelectionAbsence::Unselected => {
-                "Select an event row to inspect its retained value change."
-            }
+            SelectionAbsence::Unselected => "Select an event.",
             SelectionAbsence::NoDataset => EVENT_SELECTION_NO_DATASET,
             SelectionAbsence::UnretainedAnalysis => EVENT_SELECTION_UNRETAINED_ANALYSIS,
             SelectionAbsence::OtherAnalysis => EVENT_SELECTION_OTHER_ANALYSIS,
@@ -595,34 +593,31 @@ pub fn right_panel(
     radix: BusRadix,
     origin: EventOrigin<'_>,
 ) {
+    // An exact timestamp is the normal case; a reconstructed one qualifies
+    // the time printed under it, so only that one says so.
     section_header(
         ui,
         "Selected event",
-        Some(if event.exact() { "EXACT" } else { "PROJECTED" }),
+        (!event.exact()).then_some("from samples"),
     );
+    // The point index, the value's domain and the encoded form of the 0/1/X/Z
+    // shown above it are bookkeeping; a native source is the normal case.
     let mut stats = vec![
         ("Signal", event.signal_name().to_owned(), true),
-        ("Physical time", format!("{:.17e} s", event.time_s()), true),
         (
-            if event.exact() {
-                "Trace event"
-            } else {
-                "Source sample"
-            },
-            format!("#{}", selection.point_index + 1),
-            false,
+            "Physical time",
+            rspice_ui_kit::plot::fmt_si_readout(event.time_s(), "s", 6),
+            true,
         ),
         ("Value", event.value().display(), true),
-        ("Domain", event.value().domain().to_owned(), false),
     ];
-    stats.push(("Source", origin.label().to_owned(), false));
     if let EventOrigin::Imported(source) = origin {
+        stats.push(("Source", origin.label().to_owned(), false));
         stats.push(("Import file", source.source_name.clone(), false));
     }
     let mut bus_fallback = None;
     match event.value() {
-        EventValue::Digital { code, .. } => {
-            stats.push(("Retained code", code.to_string(), false));
+        EventValue::Digital { .. } => {
             stats.push((
                 if matches!(origin, EventOrigin::Native) {
                     "Drive strength"
@@ -634,9 +629,7 @@ pub fn right_panel(
             ));
         }
         EventValue::Bus(word) => {
-            stats.push(("Radix", radix.label().to_owned(), false));
             if let Some(bus) = buses.iter().find(|bus| bus.name() == selection.trace_name) {
-                stats.push(("Members", bus.members().len().to_string(), false));
                 stats.push(("Bit order", bus.members().join(" "), false));
             }
             bus_fallback = word.fallback();
@@ -650,20 +643,6 @@ pub fn right_panel(
     if let Some(reason) = bus_fallback {
         panel_note(ui, &format!("Not shown in {}: {reason}.", radix.label()));
     }
-    panel_note(
-        ui,
-        match event.source() {
-            EventSelectionSource::Bus => {
-                "This word is reassembled from the member histories beside it, at the exact time one of them changed. Every member keeps its own retained event code; the word holds no value they do not."
-            }
-            _ if event.exact() => {
-                "This is a retained sparse event timestamp. Same-time transitions are preserved in per-trace order; cross-node delta-cycle ordering is not retained by the result contract."
-            }
-            _ => {
-                "This row was reconstructed from sampled waveform values. Its original sparse event timestamp is unavailable."
-            }
-        },
-    );
 }
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support {
