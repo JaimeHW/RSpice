@@ -225,8 +225,13 @@ fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {
     }));
 }
 
+/// The header is a title and, when there is one, a runtime problem under it.
+///
+/// It used to carry an eyebrow and a sentence describing the page's own
+/// implementation; what the compact layout still has to get right is that the
+/// status stacks under the title rather than over it.
 #[test]
-fn phone_header_stacks_runtime_status_below_description_without_overlap() {
+fn phone_header_stacks_runtime_status_below_the_title_without_overlap() {
     let mut app = RSpiceApp::test_instance();
     app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
     let ctx = egui::Context::default();
@@ -249,34 +254,32 @@ fn phone_header_stacks_runtime_status_below_description_without_overlap() {
         .accesskit_update
         .expect("PDK phone accessibility tree")
         .nodes;
-    let description = nodes
+    let labels = nodes
         .iter()
-        .find(|(_, node)| {
-            node.label().is_some_and(|label| {
-                label.contains(
-                    "Validate signed technology packages, inspect exact physical resources",
-                )
-            })
-        })
+        .filter_map(|(_, node)| node.label())
+        .collect::<Vec<_>>();
+    assert!(
+        !labels
+            .iter()
+            .any(|label| label.contains("Validate signed technology packages")),
+        "the header still describes its own implementation: {labels:?}"
+    );
+    // A painted label's text is the node's *value*; its `label()` belongs to
+    // the window root, which carries the same words over the whole page.
+    let title = nodes
+        .iter()
+        .find(|(_, node)| node.value() == Some("PDK technology administration"))
         .and_then(|(_, node)| node.bounds())
-        .unwrap_or_else(|| {
-            panic!(
-                "PDK header description bounds; labels={:?}",
-                nodes
-                    .iter()
-                    .filter_map(|(_, node)| node.label())
-                    .collect::<Vec<_>>()
-            )
-        });
+        .unwrap_or_else(|| panic!("PDK header title bounds; labels={labels:?}"));
     let status = nodes
         .iter()
-        .find(|(_, node)| node.label() == Some("NO ACTIVE BINDING"))
+        .find(|(_, node)| node.label() == Some("No active binding"))
         .and_then(|(_, node)| node.bounds())
         .expect("PDK runtime status bounds");
 
     assert!(
-        status.y0 >= description.y1 - 1.0,
-        "compact runtime status overlaps the header description: description={description:?}, status={status:?}"
+        status.y0 >= title.y1 - 1.0,
+        "compact runtime status overlaps the header title: title={title:?}, status={status:?}"
     );
 }
 
@@ -605,11 +608,13 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
         label.contains("Run callback derive-device")
             && label.contains("exact attached project revision")
     }));
+    // A receipt that did not verify is never listed, so the row says what it
+    // is — sequence and callback — and nothing about its own validity.
     assert!(
-        labels
+        !labels
             .iter()
             .any(|label| label.contains("receipt verified")),
-        "callback receipt status is absent from accessibility labels: {labels:?}"
+        "the receipt row still reports its own validity: {labels:?}"
     );
     assert!(
         labels

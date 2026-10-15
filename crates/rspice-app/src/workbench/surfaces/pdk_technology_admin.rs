@@ -21,8 +21,9 @@ use crate::state::pdk_config::{
     PdkTechnologyRevisionDiff, PdkTrustAuditAction, PdkViaDefinition, ProjectPdkCallbackReceipt,
     TrustedPdkPublisherKey, ValidatedPdkTechnologyPackage,
 };
+use crate::ui::accessibility::plural_suffix;
 use crate::ui::tokens::Tokens;
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, Problem, problem_line};
 use crate::workbench::RSpiceApp;
 use rspice_simulation::pdk::import as pdk_import;
 
@@ -284,23 +285,23 @@ fn browser_pdk_storage_status(ui: &mut Ui, app: &mut RSpiceApp) {
     let retryable = app.browser_pdk_persistence_retryable();
     let degraded = app.browser_pdk_persistence_degraded();
     let tokens = Tokens::get(ui.ctx());
-    let color = if ready && !degraded {
-        tokens.color.ok
-    } else if retryable {
-        tokens.color.err
+    // Storage that is ready needs no banner: the page works, which is what a
+    // banner saying so would be telling the reader.
+    if ready && !degraded {
+        return;
+    }
+    let problem = if retryable {
+        Problem::Failure
     } else {
-        tokens.color.warn
+        Problem::Warning
     };
     let response = Frame::new()
         .fill(tokens.color.bg_inset)
-        .stroke(Stroke::new(1.0, color))
+        .stroke(Stroke::new(1.0, tokens.color.border))
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.colored_label(
-                    color,
-                    RichText::new(app.browser_pdk_persistence_status_message()).strong(),
-                );
+                problem_line(ui, problem, &app.browser_pdk_persistence_status_message());
                 if retryable
                     && Button::new("Retry storage recovery")
                         .accessible_label("Retry browser PDK storage recovery")
@@ -489,14 +490,16 @@ fn package_by_identity<'a>(
 fn header(ui: &mut Ui, snapshot: &RegistrySnapshot) {
     let tokens = Tokens::get(ui.ctx());
     let compact = ui.available_width() < COMPACT_BREAKPOINT;
-    let (status_label, status_color) = if snapshot.runtime_ready {
+    // An active, trusted binding is the state this page exists to reach, so
+    // it is stated by the list below rather than announced in the header.
+    let status = if snapshot.runtime_ready {
         if snapshot.active_trusted {
-            ("ACTIVE · TRUSTED", tokens.color.ok)
+            None
         } else {
-            ("NO ACTIVE BINDING", tokens.color.warn)
+            Some(("No active binding", None))
         }
     } else {
-        ("TRUST BLOCKED", tokens.color.err)
+        Some(("Trust blocked", Some(Problem::Failure)))
     };
     Frame::new()
         .fill(tokens.color.bg_panel)
@@ -504,37 +507,36 @@ fn header(ui: &mut Ui, snapshot: &RegistrySnapshot) {
         .inner_margin(egui::Margin::symmetric(16, 12))
         .show(ui, |ui| {
             if compact {
-                header_identity(ui, &tokens);
-                ui.add_space(4.0);
-                header_runtime_status(ui, status_label, status_color);
+                header_identity(ui);
+                if let Some((label, problem)) = status {
+                    ui.add_space(4.0);
+                    header_runtime_status(ui, label, problem);
+                }
             } else {
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| header_identity(ui, &tokens));
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        header_runtime_status(ui, status_label, status_color);
-                    });
+                    ui.vertical(|ui| header_identity(ui));
+                    if let Some((label, problem)) = status {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            header_runtime_status(ui, label, problem);
+                        });
+                    }
                 });
             }
         });
 }
 
-fn header_identity(ui: &mut Ui, tokens: &Tokens) {
-    ui.label(
-        RichText::new("PDK · TECHNOLOGY FILE · STREAM MAP · TRUST")
-            .small()
-            .color(tokens.color.text_faint),
-    );
+/// The page is named once, by its title. The eyebrow above it stacked four
+/// invented nouns, and the sentence under it described the page's own
+/// implementation.
+fn header_identity(ui: &mut Ui) {
     ui.heading("PDK technology administration");
-    const DESCRIPTION: &str = "Validate signed technology packages, inspect exact physical resources, and govern activation with durable audit receipts.";
-    let description = ui.label(DESCRIPTION);
-    ui.ctx().accesskit_node_builder(description.id, |node| {
-        node.set_role(egui::accesskit::Role::Label);
-        node.set_label(DESCRIPTION);
-    });
 }
 
-fn header_runtime_status(ui: &mut Ui, label: &str, color: Color32) {
-    let response = ui.colored_label(color, RichText::new(label).strong());
+fn header_runtime_status(ui: &mut Ui, label: &str, problem: Option<Problem>) {
+    let response = match problem {
+        Some(problem) => problem_line(ui, problem, label),
+        None => ui.label(RichText::new(label).color(Tokens::get(ui.ctx()).color.text_dim)),
+    };
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
         node.set_label(label);
@@ -596,10 +598,7 @@ fn metrics(ui: &mut Ui, snapshot: &RegistrySnapshot) {
 fn package_selector(ui: &mut Ui, snapshot: &RegistrySnapshot, view: &mut AdminViewState) {
     panel(ui, "Installed signed revisions", |ui| {
         if !snapshot.validation_errors.is_empty() {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                "Runtime trust is blocked. No installed package can execute.",
-            );
+            problem_line(ui, Problem::Failure, "Trust blocked. No package can run.");
             for error in &snapshot.validation_errors {
                 ui.label(RichText::new(error).small().monospace());
             }
@@ -628,7 +627,7 @@ fn package_selector(ui: &mut Ui, snapshot: &RegistrySnapshot, view: &mut AdminVi
                     && binding.manifest_digest == package.manifest_digest()
             });
             let label = if active {
-                format!("● {} {} · active", manifest.package_id, manifest.revision)
+                format!("{} {} · active", manifest.package_id, manifest.revision)
             } else {
                 format!("{} {}", manifest.package_id, manifest.revision)
             };
@@ -809,12 +808,12 @@ fn technology_draft_controls(
             .technology_draft
             .as_ref()
             .expect("draft presence checked above");
-        ui.colored_label(
-            Tokens::get(ui.ctx()).color.warn,
-            format!(
-                "Draft '{}' is based on {} {}. Select that exact source revision to edit it.",
+        ui.label(
+            RichText::new(format!(
+                "Draft '{}' is based on {} {}. Select that revision to edit it.",
                 draft.draft_id, draft.baseline.binding.package_id, draft.baseline.binding.revision
-            ),
+            ))
+            .color(Tokens::get(ui.ctx()).color.text_dim),
         );
         return;
     }
@@ -840,19 +839,10 @@ fn technology_draft_controls(
         }
     });
     let validation = draft.validate_candidate(package.metadata());
-    match &validation {
-        Ok(()) => {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.ok,
-                "Candidate manifest is valid.",
-            );
-        }
-        Err(error) => {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.warn,
-                format!("Draft validation: {error}"),
-            );
-        }
+    // A manifest that validates says nothing: the Save control is live, and
+    // that is the whole of what "valid" meant here.
+    if let Err(error) = &validation {
+        problem_line(ui, Problem::Failure, &format!("Draft validation: {error}"));
     }
     ui.horizontal_wrapped(|ui| {
         if Button::new("Save draft")
@@ -904,7 +894,7 @@ fn section_contents(
         return;
     };
     match view.section {
-        AdminSection::Package => package_section(ui, package, snapshot),
+        AdminSection::Package => package_section(ui, package),
         AdminSection::Compare => compare_section(ui, package, snapshot, view),
         AdminSection::Layers => layers_section(ui, package, view),
         AdminSection::Display => display_section(ui, package, snapshot, view, action),
@@ -933,12 +923,9 @@ fn compare_section(
             .filter(|package| package.binding() != candidate.binding())
             .collect::<Vec<_>>();
         if alternatives.is_empty() {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.warn,
-                "No second currently trusted revision is available for comparison.",
-            );
-            ui.small(
-                "Import and revalidate another signed revision. Quarantined or untrusted archives are never offered as a baseline.",
+            ui.label(
+                RichText::new("Install another revision to compare.")
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
             );
             return;
         }
@@ -969,10 +956,7 @@ fn compare_section(
             .and_then(|identity| package_by_identity(snapshot, identity))
             .filter(|package| package.binding() != candidate.binding())
         else {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                "The selected comparison baseline is no longer runtime trusted.",
-            );
+            problem_line(ui, Problem::Failure, "Baseline is no longer trusted.");
             return;
         };
         let diff_result: Result<PdkTechnologyRevisionDiff, PdkTechnologyDiffError> =
@@ -980,10 +964,7 @@ fn compare_section(
         let diff = match diff_result {
             Ok(diff) => diff,
             Err(error) => {
-                ui.colored_label(
-                    Tokens::get(ui.ctx()).color.err,
-                    format!("Comparison failed closed: {error}"),
-                );
+                problem_line(ui, Problem::Failure, &format!("Comparison failed: {error}"));
                 return;
             }
         };
@@ -1001,44 +982,46 @@ fn compare_section(
                 .strong()
                 .monospace(),
             );
+            let breaking = diff.count(PdkTechnologyDiffImpact::Breaking);
+            let review = diff.count(PdkTechnologyDiffImpact::ReviewRequired);
             diff_metric(
                 ui,
                 "Breaking",
-                diff.count(PdkTechnologyDiffImpact::Breaking),
-                Tokens::get(ui.ctx()).color.err,
+                breaking,
+                (breaking > 0).then_some(Problem::Failure),
             );
             diff_metric(
                 ui,
                 "Review",
-                diff.count(PdkTechnologyDiffImpact::ReviewRequired),
-                Tokens::get(ui.ctx()).color.warn,
+                review,
+                (review > 0).then_some(Problem::Warning),
             );
             diff_metric(
                 ui,
                 "Information",
                 diff.count(PdkTechnologyDiffImpact::Informational),
-                Tokens::get(ui.ctx()).color.info,
+                None,
             );
         });
+        // Identical packages need no sentence: the table below is empty, and
+        // the three counts above it all read zero.
         if !diff.same_package_lineage {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                "Package IDs differ. This is a cross-technology comparison, not a revision migration.",
+            problem_line(
+                ui,
+                Problem::Failure,
+                "Different package. Not a revision upgrade.",
             );
         } else if diff.has_breaking_changes() {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.err,
-                "Breaking contracts changed. Automatic migration is prohibited; every affected project object requires an explicit migration plan and validation.",
+            problem_line(
+                ui,
+                Problem::Failure,
+                "Breaking changes. Migrate each affected object manually.",
             );
         } else if diff.migration_requires_review() {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.warn,
-                "No structural breaking change was detected, but the signed revision still requires explicit review and project revalidation.",
-            );
-        } else {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.ok,
-                "The exact validated packages are identical.",
+            problem_line(
+                ui,
+                Problem::Warning,
+                "Review required before projects use this revision.",
             );
         }
         ui.small(
@@ -1066,10 +1049,7 @@ fn compare_section(
                 }
             }
             Err(error) => {
-                ui.colored_label(
-                    Tokens::get(ui.ctx()).color.err,
-                    format!("Comparison export failed closed: {error}"),
-                );
+                problem_line(ui, Problem::Failure, &format!("Export failed: {error}"));
             }
         }
 
@@ -1098,8 +1078,21 @@ fn compare_section(
     });
 }
 
-fn diff_metric(ui: &mut Ui, label: &str, count: usize, color: Color32) {
-    ui.colored_label(color, RichText::new(format!("{label} {count}")).strong());
+/// One of the three counts over a comparison.
+///
+/// A count is not a verdict cell, so the number is plain text; a count that
+/// stands above zero takes a mark, which is the one thing on the line that
+/// carries severity.
+fn diff_metric(ui: &mut Ui, label: &str, count: usize, problem: Option<Problem>) {
+    let text = format!("{label} {count}");
+    match problem {
+        Some(problem) => {
+            problem_line(ui, problem, &text);
+        }
+        None => {
+            ui.label(RichText::new(text).color(Tokens::get(ui.ctx()).color.text));
+        }
+    }
 }
 
 const DIFF_TABLE_WIDTH: f32 = 1_480.0;
@@ -1262,10 +1255,12 @@ const fn diff_impact_label(impact: PdkTechnologyDiffImpact) -> &'static str {
     }
 }
 
+/// The Impact column's verdict colour. An informational entry is not a
+/// verdict and takes the table's own text tone.
 fn diff_impact_color(ui: &Ui, impact: PdkTechnologyDiffImpact) -> Color32 {
     let tokens = Tokens::get(ui.ctx());
     match impact {
-        PdkTechnologyDiffImpact::Informational => tokens.color.info,
+        PdkTechnologyDiffImpact::Informational => tokens.color.text,
         PdkTechnologyDiffImpact::ReviewRequired => tokens.color.warn,
         PdkTechnologyDiffImpact::Breaking => tokens.color.err,
     }
@@ -1283,20 +1278,19 @@ fn display_section(
         ui,
         "Versioned display resources and visibility sets",
         |ui| {
-            ui.label(
-            "Presentation-only overrides are bound to this exact signed technology manifest. Layer identity, connectivity, stream mapping, recognition, extraction, and package bytes remain immutable.",
-        );
             if let Some(error) = &snapshot.display_validation_error {
-                ui.colored_label(
-                    Tokens::get(ui.ctx()).color.err,
-                    format!("Display-profile audit is corrupted and fails closed: {error}"),
+                problem_line(
+                    ui,
+                    Problem::Failure,
+                    &format!("Display profile unreadable: {error}"),
                 );
                 return;
             }
             if !snapshot.runtime_display_profile_valid {
-                ui.colored_label(
-                    Tokens::get(ui.ctx()).color.warn,
-                    "The stored active display profile is not consumable by the active trusted technology. Rendering falls back to signed package defaults.",
+                problem_line(
+                    ui,
+                    Problem::Warning,
+                    "Display profile does not match this technology. Using package defaults.",
                 );
             }
 
@@ -1311,18 +1305,20 @@ fn display_section(
                 .as_ref()
                 .filter(|binding| binding.technology_manifest_digest == package.manifest_digest());
             ui.horizontal_wrapped(|ui| {
-                ui.label(format!("{} immutable revision(s)", package_profiles.len()));
-                if let Some(active) = active {
-                    ui.colored_label(
-                        Tokens::get(ui.ctx()).color.ok,
-                        format!("active: {} r{}", active.profile_id, active.revision),
-                    );
-                } else {
-                    ui.colored_label(
-                        Tokens::get(ui.ctx()).color.warn,
-                        "No validated active profile for this technology",
-                    );
-                }
+                let tokens = Tokens::get(ui.ctx());
+                ui.label(
+                    RichText::new(format!(
+                        "{} revision{}",
+                        package_profiles.len(),
+                        plural_suffix(package_profiles.len())
+                    ))
+                    .color(tokens.color.text_dim),
+                );
+                let state = active.map_or_else(
+                    || "no active profile".to_owned(),
+                    |active| format!("active: {} r{}", active.profile_id, active.revision),
+                );
+                ui.label(RichText::new(state).color(tokens.color.text_dim));
             });
 
             if !package_profiles.is_empty() {
@@ -1719,11 +1715,7 @@ const fn display_scope_label(scope: PdkDisplayProfileScope) -> &'static str {
     }
 }
 
-fn package_section(
-    ui: &mut Ui,
-    package: &ValidatedPdkTechnologyPackage,
-    snapshot: &RegistrySnapshot,
-) {
+fn package_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage) {
     let manifest = package.manifest();
     panel(ui, "Technology package identity and compatibility", |ui| {
         property(ui, "Package", &manifest.package_id);
@@ -1768,19 +1760,9 @@ fn package_section(
                     .join(", ")
             ),
         );
-        let active = snapshot.active.as_ref() == Some(&package.binding());
-        ui.colored_label(
-            if active {
-                Tokens::get(ui.ctx()).color.ok
-            } else {
-                Tokens::get(ui.ctx()).color.text_faint
-            },
-            if active {
-                "This exact signed revision is the active environment binding."
-            } else {
-                "This revision is installed and trusted but does not mutate any pinned project."
-            },
-        );
+        // Which revision is active is read off the selector, where the active
+        // one carries "· active"; and a revision that is merely installed had
+        // a line here disclaiming what it does not do.
     });
 }
 
@@ -1831,7 +1813,7 @@ fn editable_layers_section(
             "Edits apply only to the unsigned working draft. Layer renames cascade through stream, via, recognition, extraction, and alias references.",
         );
         if let Some(error) = &view.technology_draft_error {
-            ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
+            problem_line(ui, Problem::Failure, error);
         }
         let mut changed = false;
         let mut remove_index = None;
@@ -2426,11 +2408,13 @@ fn stream_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage, view: &m
             .id_salt("pdk-stream-table")
             .max_height(540.0)
             .show(ui, |ui| {
+                // No Status column: it read "mapped" on every row, which is
+                // the sentence above the table said once per row.
                 Grid::new("pdk-stream-grid")
                     .striped(true)
-                    .num_columns(4)
+                    .num_columns(3)
                     .show(ui, |ui| {
-                        table_headers(ui, &["Layer", "Purpose", "Layer / datatype", "Status"]);
+                        table_headers(ui, &["Layer", "Purpose", "Layer / datatype"]);
                         for mapping in &package.manifest().stream_map {
                             ui.monospace(&mapping.layer);
                             ui.monospace(&mapping.purpose);
@@ -2438,7 +2422,6 @@ fn stream_section(ui: &mut Ui, package: &ValidatedPdkTechnologyPackage, view: &m
                                 "{} / {}",
                                 mapping.stream_layer, mapping.stream_datatype
                             ));
-                            ui.colored_label(Tokens::get(ui.ctx()).color.ok, "mapped");
                             ui.end_row();
                         }
                     });
@@ -2460,16 +2443,17 @@ fn connectivity_section(
             ui.label("This signed revision declares no conductive transitions.");
             return;
         }
+        // No Status column: a validated graph has no unresolved edge in it,
+        // so "resolved" was a constant on every row.
         Grid::new("pdk-connectivity-grid")
             .striped(true)
-            .num_columns(4)
+            .num_columns(3)
             .show(ui, |ui| {
-                table_headers(ui, &["From", "Through", "To", "Status"]);
+                table_headers(ui, &["From", "Through", "To"]);
                 for edge in &package.manifest().connectivity {
                     ui.monospace(&edge.from_layer);
                     ui.monospace(&edge.through_layer);
                     ui.monospace(&edge.to_layer);
-                    ui.colored_label(Tokens::get(ui.ctx()).color.ok, "resolved");
                     ui.end_row();
                 }
             });
@@ -2784,13 +2768,10 @@ fn recognition_section(
         return;
     }
     panel(ui, "Signed device-recognition contracts", |ui| {
-        ui.label(
-            "Every displayed rule, terminal layer-purpose, and qualification vector was validated against this package’s exact signed artifact closure.",
-        );
         if package.manifest().recognition.is_empty() {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.warn,
-                "This package declares no typed recognition contract. No device-recognition capability is claimed.",
+            ui.label(
+                RichText::new("No recognition rules in this package.")
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
             );
             return;
         }
@@ -2803,10 +2784,7 @@ fn recognition_section(
                         .fill(Tokens::get(ui.ctx()).color.bg_inset)
                         .inner_margin(egui::Margin::same(8))
                         .show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.monospace(&contract.contract_id);
-                                ui.colored_label(Tokens::get(ui.ctx()).color.ok, "source-bound");
-                            });
+                            ui.monospace(&contract.contract_id);
                             property(ui, "Device class", &contract.device_class);
                             property(ui, "Rule artifact", &contract.rule_artifact_path);
                             property(
@@ -3068,13 +3046,10 @@ fn extraction_section(
         return;
     }
     panel(ui, "Signed parasitic-extraction contracts", |ui| {
-        ui.label(
-            "Rule artifacts, covered layer-purposes, requested quantities, and independent reference vectors are exact members of the signed archive.",
-        );
         if package.manifest().extraction.is_empty() {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.warn,
-                "This package declares no typed extraction contract. No parasitic-extraction capability is claimed.",
+            ui.label(
+                RichText::new("No extraction rules in this package.")
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
             );
             return;
         }
@@ -3087,10 +3062,7 @@ fn extraction_section(
                         .fill(Tokens::get(ui.ctx()).color.bg_inset)
                         .inner_margin(egui::Margin::same(8))
                         .show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.monospace(&contract.contract_id);
-                                ui.colored_label(Tokens::get(ui.ctx()).color.ok, "source-bound");
-                            });
+                            ui.monospace(&contract.contract_id);
                             property(ui, "Rule artifact", &contract.rule_artifact_path);
                             property(
                                 ui,
@@ -3605,24 +3577,17 @@ fn resources_section(
                                 .fill(Tokens::get(ui.ctx()).color.bg_inset)
                                 .inner_margin(egui::Margin::same(8))
                                 .show(ui, |ui| {
-                                    ui.horizontal_wrapped(|ui| {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "#{} {}",
-                                                receipt.sequence, receipt.execution.callback_id
-                                            ))
-                                            .strong()
-                                            .monospace(),
-                                        );
-                                        let verified = ui.colored_label(
-                                            Tokens::get(ui.ctx()).color.ok,
-                                            "receipt verified",
-                                        );
-                                        ui.ctx().accesskit_node_builder(verified.id, |node| {
-                                            node.set_role(egui::accesskit::Role::Status);
-                                            node.set_label("receipt verified");
-                                        });
-                                    });
+                                    // No "receipt verified" beside the id: an
+                                    // unverified receipt is never listed, so
+                                    // the words were a constant on every row.
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "#{} {}",
+                                            receipt.sequence, receipt.execution.callback_id
+                                        ))
+                                        .strong()
+                                        .monospace(),
+                                    );
                                     property(
                                         ui,
                                         "Project revision",
@@ -3768,14 +3733,11 @@ fn trust_audit_section(
             let encoded = STANDARD.encode(key.verifying_key);
             ui.horizontal_wrapped(|ui| {
                 ui.monospace(format!("{}/{}", key.publisher_id, key.key_id));
-                ui.colored_label(
-                    if key.revoked {
-                        Tokens::get(ui.ctx()).color.err
-                    } else {
-                        Tokens::get(ui.ctx()).color.ok
-                    },
-                    if key.revoked { "revoked" } else { "trusted" },
-                );
+                // Only revocation is news: every other key in this list is
+                // trusted, which is what being in the list means.
+                if key.revoked {
+                    problem_line(ui, Problem::Failure, "revoked");
+                }
                 ui.monospace(format!("{}…", &encoded[..encoded.len().min(12)]));
                 let revoke = Button::new("Revoke")
                     .enabled(!key.revoked && administrative_fields_ready(view))
@@ -3796,9 +3758,8 @@ fn trust_audit_section(
             });
         }
         if snapshot.trust_keys.is_empty() {
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.warn,
-                "No publisher verification key is provisioned.",
+            ui.label(
+                RichText::new("No publisher keys.").color(Tokens::get(ui.ctx()).color.text_dim),
             );
         }
         if let Some(package) = package {
