@@ -25,7 +25,8 @@ use crate::state::workspace::{
     DesignProjection,
 };
 use crate::state::{
-    CellViewRef, ComponentType, DesignManagementCatalog, InstancePath, LibraryCellInstance, SheetId,
+    CellViewRef, ComponentType, DesignManagementCatalog, InstancePath, LibraryCellInstance,
+    LibraryManager, SheetId,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
@@ -50,6 +51,14 @@ const TREE_ROW_BUDGET: usize = 500;
 /// indented rows.
 const TREE_LEVEL_INDENT: f32 = 14.0;
 
+/// What a row says when its master is one the engine implements itself.
+///
+/// Both rails offer to open a master, and a reader has no way to tell by
+/// looking which ones can be opened — so the ones that cannot say so where the
+/// gesture would have been made.
+const DEVICE_MASTER_HINT: &str =
+    "Built-in device model: the engine implements it, so there is no view to open";
+
 // -----------------------------------------------------------------------------
 // Model
 // -----------------------------------------------------------------------------
@@ -59,6 +68,10 @@ const TREE_LEVEL_INDENT: f32 = 14.0;
 pub(super) struct TreeSource<'a> {
     pub projection: &'a DesignProjection,
     pub sheets: &'a DesignManagementCatalog,
+    /// The project's own libraries, asked only whether a master names a view
+    /// they hold — which is what decides whether descending into it lands
+    /// anywhere.
+    pub libraries: &'a LibraryManager,
     /// Folded filter text, empty when the navigator is unfiltered.
     pub query: &'a str,
 }
@@ -77,6 +90,11 @@ pub(super) enum OccurrenceState {
     Recursive,
     /// The design places the instance and the plan bound nothing there.
     Unbound,
+    /// Bound to a master the engine implements itself — a built-in XSPICE
+    /// code model or a generated Verilog-A device. These are staged under the
+    /// engine's own `rspice` namespace, which is a binding label and not a
+    /// library, so there is no cell view behind the row to descend into.
+    Device,
 }
 
 impl OccurrenceState {
@@ -87,11 +105,14 @@ impl OccurrenceState {
 
     /// What the row says about itself when that is a condition rather than
     /// the master it stands on.
+    ///
+    /// A device row is not one of them: the model it stands on is the useful
+    /// thing to read there, and it is not a condition to warn about.
     const fn note(self) -> Option<&'static str> {
         match self {
             Self::Recursive => Some("recursive"),
             Self::Unbound => Some("unbound"),
-            Self::Leaf | Self::Collapsed | Self::Expanded => None,
+            Self::Leaf | Self::Collapsed | Self::Expanded | Self::Device => None,
         }
     }
 }
@@ -181,8 +202,10 @@ impl Walk<'_> {
             .last()
             .cloned()
             .unwrap_or_else(|| master.cell.clone());
-        let expandable =
-            !binding.stop_boundary() && places_instances(self.source.projection, &master);
+        let authored = authored_view(self.source.libraries, &master);
+        let expandable = authored
+            && !binding.stop_boundary()
+            && places_instances(self.source.projection, &master);
         // A filter asks about the whole design, so it unfolds what it finds
         // instead of waiting to be unfolded.
         let unfold = expandable
@@ -201,7 +224,9 @@ impl Walk<'_> {
             return None;
         }
         *budget = budget.saturating_sub(1);
-        let state = if !expandable {
+        let state = if !authored {
+            OccurrenceState::Device
+        } else if !expandable {
             OccurrenceState::Leaf
         } else if unfold {
             OccurrenceState::Expanded
@@ -310,6 +335,23 @@ fn placed_instances(projection: &DesignProjection, master: &CellViewRef) -> Vec<
             })
             .collect()
     })
+}
+
+/// Whether a master names a view the project's libraries actually hold.
+///
+/// The plan binds two kinds of master. One is a cell view somebody authored,
+/// which both rails can open. The other is a device the engine implements —
+/// a built-in XSPICE code model, a generated Verilog-A device — staged under
+/// the `rspice` namespace, which no library carries and no document can be
+/// opened from. Offering to open the second kind hands the reader a blank
+/// schematic belonging to no cell, and re-roots every other rail onto it, so
+/// the rails ask this before they offer the gesture.
+pub(super) fn authored_view(libraries: &LibraryManager, reference: &CellViewRef) -> bool {
+    libraries
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .is_some()
 }
 
 /// Whether a master places anything at all. This is what decides a disclosure
@@ -708,6 +750,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
             for master in views {
                 let reference = CellViewRef::new(library, cell, &master.view);
                 let occurrences = master.occurrences.to_string();
+                let openable = authored_view(&state.library_manager, &reference);
                 let response = tree_row(
                     ui,
                     TreeRow {
@@ -722,6 +765,10 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                         selected: state.workspace.content.active_view == reference,
                     },
                 );
+                if !openable {
+                    response.row.on_hover_text(DEVICE_MASTER_HINT);
+                    continue;
+                }
                 if response
                     .row
                     .on_hover_text(format!(
@@ -756,6 +803,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         &TreeSource {
             projection: projection.as_ref(),
             sheets: &app.state.workspace.content.design_management,
+            libraries: &app.state.library_manager,
             query: query.as_str(),
         },
         &tree,
@@ -797,7 +845,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                     .state
                     .note()
                     .map_or_else(|| row.master.cell.clone(), str::to_owned);
-                let response = tree_row(
+                let mut response = tree_row(
                     ui,
                     TreeRow {
                         id: ui.id().with(("navigator-occurrence", row.path.fold_key())),
@@ -824,6 +872,9 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                         selected: tree.selection() == Some(&row.path) || row.path == active,
                     },
                 );
+                if row.state == OccurrenceState::Device {
+                    response.row = response.row.on_hover_text(DEVICE_MASTER_HINT);
+                }
                 if response.disclosure.is_some_and(|caret| caret.clicked()) {
                     tree.toggle(NavigatorTreeNode::Occurrence(row.path.fold_key()));
                 } else if response.row.clicked() && row.state.is_bound() {
@@ -984,9 +1035,12 @@ fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
 ///
 /// Every master is read from the plan before anything moves, so a path the
 /// projection cannot spell end to end navigates nowhere rather than part of
-/// the way. Ascending to the shared prefix and descending only the rest is
-/// what keeps a click on a sibling from re-entering every level it already
-/// stands on.
+/// the way. A path ending on a master the engine implements itself is one of
+/// those: there is no cell view behind a built-in XSPICE code model or a
+/// generated Verilog-A device, and landing on one would re-root the session
+/// onto a blank schematic belonging to no cell. Ascending to the shared prefix
+/// and descending only the rest is what keeps a click on a sibling from
+/// re-entering every level it already stands on.
 pub(super) fn open_occurrence(
     state: &mut crate::workbench::app_state::AppState,
     path: &InstancePath,
@@ -1018,6 +1072,11 @@ pub(super) fn open_occurrence(
         prefix = next;
     }
     drop(projection);
+    if let Some((_, terminal)) = steps.last()
+        && !authored_view(&state.library_manager, terminal)
+    {
+        return;
+    }
 
     let rooted_here = state
         .workspace

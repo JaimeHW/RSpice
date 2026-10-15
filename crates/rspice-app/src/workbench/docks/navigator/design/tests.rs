@@ -242,6 +242,7 @@ fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTree
         &hierarchy_tree::TreeSource {
             projection: projection.as_ref(),
             sheets: &app.state.workspace.content.design_management,
+            libraries: &app.state.library_manager,
             query: "",
         },
         tree,
@@ -324,6 +325,95 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
     assert_eq!(
         app.state.workspace.content.active_view,
         CellViewRef::new("work", "child", "schematic")
+    );
+}
+
+/// A design that places one built-in XSPICE code model: the PWM oscillator,
+/// bound into the engine's own `rspice` namespace rather than into a library.
+fn design_placing_a_builtin_xspice_device() -> (RSpiceApp, InstancePath) {
+    use crate::state::{builtin_xspice_library_binding, engine_only_xspice_devices};
+
+    let descriptor = engine_only_xspice_devices()
+        .iter()
+        .find(|descriptor| descriptor.model_type == "d_pwm")
+        .expect("the PWM oscillator is an authoritative catalog entry");
+    let binding =
+        builtin_xspice_library_binding(descriptor).expect("the PWM oscillator places a binding");
+
+    let mut app = RSpiceApp::test_instance();
+    let mut component = crate::state::Component::new(
+        401,
+        ComponentType::CellInstance,
+        crate::state::Point::new(40, 40),
+    )
+    .with_library_cell(binding);
+    component.name = "A1".to_owned();
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
+    app.state.sync_active_schematic_to_workspace();
+
+    let occurrence = InstancePath::root()
+        .child("A1")
+        .expect("the fixture instance is nameable");
+    (app, occurrence)
+}
+
+/// A master the engine implements is not a master either rail can open.
+///
+/// A built-in XSPICE code model is staged under `rspice`, which is a binding
+/// label and not a library, so there is no cell view behind it. Both rails
+/// used to offer the gesture anyway, and taking it re-rooted the session onto
+/// a blank schematic belonging to no cell — which read as the device having
+/// an empty schematic of its own.
+#[test]
+fn a_built_in_device_master_is_inert_in_both_hierarchy_rails() {
+    let (mut app, occurrence) = design_placing_a_builtin_xspice_device();
+    let root_view = app.state.workspace.content.active_view.clone();
+    let device = CellViewRef::new("rspice", "d_pwm", "xspice");
+
+    let mut tree = NavigatorTreeState::default();
+    tree.expand(NavigatorTreeNode::Occurrence(InstancePath::root().fold_key()));
+    assert_eq!(
+        occurrence_states(&occurrence_rows(&app, &tree)),
+        vec![
+            (InstancePath::root(), OccurrenceState::Expanded),
+            (occurrence.clone(), OccurrenceState::Device),
+        ],
+        "the device occurrence is bound, but not to anything that can be read"
+    );
+    assert!(
+        !OccurrenceState::Device.is_bound(),
+        "a device occurrence has nothing to descend into, so its row is inert"
+    );
+
+    // The predicate the Masters rail asks before it offers to open a row.
+    assert!(
+        !hierarchy_tree::authored_view(&app.state.library_manager, &device),
+        "no library holds the engine's own code model"
+    );
+    assert!(
+        hierarchy_tree::authored_view(&app.state.library_manager, &root_view),
+        "the project's own master is openable"
+    );
+
+    hierarchy_tree::open_occurrence(&mut app.state, &occurrence);
+    assert_eq!(
+        app.state.workspace.content.active_view, root_view,
+        "descending into a device leaves the session where it stood"
+    );
+    assert_eq!(
+        app.state.workspace.content.occurrence_path(),
+        InstancePath::root()
+    );
+    assert!(
+        app.state
+            .workspace
+            .clone_schematic_editor(&device.key())
+            .is_none(),
+        "no blank schematic is minted for a cell view the project does not have"
     );
 }
 
