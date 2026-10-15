@@ -246,7 +246,13 @@ const ALLOWED_VIOLATIONS: &[(&str, &str, usize)] = &[
 /// command helpers they dispatch through resolve availability against the
 /// whole application. A `stimulus_tools` that took less would have to
 /// duplicate that resolution to say why a button is unavailable.
-const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 867;
+///
+/// 867 -> 789 on 2026-10-15, when the Visualization Studio was deleted. Its
+/// stage, dock, sections and actions took the application everywhere, so the
+/// surface carried 78 of these on its own. None of the 78 is banked: the
+/// ceiling follows the measurement down, and the result viewer that absorbed
+/// the Studio's capabilities takes the session slices its forms read.
+const MAX_WHOLE_APP_MUTABLE_PARAMS: usize = 789;
 
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
