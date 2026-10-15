@@ -86,6 +86,13 @@ pub enum DialogSize {
     /// Drawing-sheet supporting workflows: 1160 pt wide, content-height
     /// capped at 760 pt, and edge-to-edge at the shared 820 pt breakpoint.
     DrawingSheetWorkflow,
+    /// The drawing-sheet preset catalog: 880 pt wide, otherwise
+    /// [`Self::DrawingSheetWorkflow`].
+    ///
+    /// Narrower because its table states six short columns and four row
+    /// verbs. Given the workflow width it spent a third of the surface on
+    /// nothing at all, however the columns were sized.
+    DrawingSheetLibrary,
     /// Account, license, and privacy console: one 600 pt reading column,
     /// content-height capped at 760 pt, and a full-viewport sheet at 560 pt
     /// and below.
@@ -333,6 +340,10 @@ impl DialogSize {
                 radius: 4.0,
                 top_anchored: false,
             },
+            Self::DrawingSheetLibrary => DialogSurfaceSpec {
+                width: 880.0,
+                ..Self::DrawingSheetWorkflow.spec()
+            },
             Self::SchematicPageSetup => DialogSurfaceSpec {
                 width: 1_280.0,
                 max_height: 760.0,
@@ -408,8 +419,22 @@ struct DialogLayout {
 }
 
 impl DialogLayout {
+    #[cfg(test)]
     fn resolve(size: DialogSize, screen: Rect, measured_height: Option<f32>) -> Self {
-        let spec = size.spec();
+        Self::resolve_with_width(size, screen, measured_height, None)
+    }
+
+    /// As [`Self::resolve`], with the width a content-width body stated.
+    fn resolve_with_width(
+        size: DialogSize,
+        screen: Rect,
+        measured_height: Option<f32>,
+        content_width: Option<f32>,
+    ) -> Self {
+        let mut spec = size.spec();
+        if let Some(width) = content_width {
+            spec.width = width.min(spec.width);
+        }
         let narrow = screen.width() <= spec.narrow_max_width;
         let surface_rect = if narrow && spec.edge_to_edge_narrow {
             screen
@@ -782,6 +807,7 @@ pub struct Dialog<'a> {
     initial_focus: DialogInitialFocus,
     initial_height: Option<f32>,
     fixed_height: Option<f32>,
+    content_width: Option<f32>,
 }
 
 impl<'a> Dialog<'a> {
@@ -814,6 +840,7 @@ impl<'a> Dialog<'a> {
             initial_focus: DialogInitialFocus::Container,
             initial_height: None,
             fixed_height: None,
+            content_width: None,
         }
     }
 
@@ -836,6 +863,19 @@ impl<'a> Dialog<'a> {
     /// available viewport height, and overflowing body content remains scrollable.
     pub fn fixed_height(mut self, height: f32) -> Self {
         self.fixed_height = height.is_finite().then(|| height.max(1.0));
+        self
+    }
+
+    /// Take the surface's width from the body instead of from the size.
+    ///
+    /// For a catalog whose columns are as wide as the widest thing in them: an
+    /// authored width is either wider than that table, which leaves a band of
+    /// surface no column reaches, or narrower, which scrolls it. The body is
+    /// the only honest source for the width, so it states it. Still capped by
+    /// the size's own width and by the viewport, and ignored by a narrow
+    /// edge-to-edge layout, which is the viewport's width by definition.
+    pub fn width_from_content(mut self, width: f32) -> Self {
+        self.content_width = width.is_finite().then(|| width.max(1.0));
         self
     }
 
@@ -1051,7 +1091,12 @@ impl<'a> Dialog<'a> {
             ctx.data(|data| data.get_temp::<f32>(measured_height_id))
                 .or(self.initial_height)
         });
-        let layout = DialogLayout::resolve(self.size, screen, measured_height);
+        let layout = DialogLayout::resolve_with_width(
+            self.size,
+            screen,
+            measured_height,
+            self.content_width,
+        );
         // `fixed_height` is a workflow-stability contract, not merely an
         // initial measurement hint. Its surface and body viewport must retain
         // the resolved height while body content scrolls beneath the fixed
