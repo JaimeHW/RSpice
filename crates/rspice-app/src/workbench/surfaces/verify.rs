@@ -28,10 +28,7 @@ use crate::workbench::RSpiceApp;
 
 use super::super::commands::vocabulary::Command;
 use super::super::state::{VerificationPage, VerificationSessionState};
-use tuning::{
-    revert_tuning_session, sync_tuning_session, tuning, tuning_commit_block_reason,
-    tuning_is_dirty, tuning_review_dialog,
-};
+use tuning::{sync_tuning_session, tuning, tuning_review_dialog};
 
 use corners::*;
 use optimization::*;
@@ -120,15 +117,50 @@ fn record_action(session: &mut VerificationSessionState, result: Result<(), Stri
     session.action_problem = result.err();
 }
 
-/// The refusal of the last action, under the toolbar it was taken on.
+/// What this page could not do, under the toolbar it was asked on: the
+/// refusal of the last action, and the reason the run it reads cannot be held
+/// against the plan's limits.
 fn action_problem_line(ui: &mut Ui, app: &RSpiceApp) {
     if let Some(problem) = &app.state.workbench.verification.action_problem {
         let _ = crate::ui::widgets::problem_line(ui, Problem::Failure, problem);
     }
+    // `NoDataset` is the empty state, which already says what produces data;
+    // repeating it under the same toolbar would be two lines for one fact.
+    if verification_run(app).is_some()
+        && let Some(refusal) = verification_evidence_domain(app).refusal()
+    {
+        let _ = crate::ui::widgets::problem_line(
+            ui,
+            Problem::Warning,
+            &format!("Values are unjudged: the {refusal}."),
+        );
+    }
 }
 
-/// The limits the active plan judges its outputs by.
+/// How the run Verify reads relates to the plan whose limits it would be
+/// judged against.
+///
+/// Classified through the one owner of that question, so this surface and the
+/// studio's requirements page cannot reach different conclusions about the
+/// same run.
+fn verification_evidence_domain(app: &RSpiceApp) -> crate::state::EvidenceDomain {
+    app.state
+        .simulation
+        .evidence_domain(verification_plan_id(app))
+}
+
+/// The limits the run this page reads may be judged against.
+///
+/// A dataset another plan owns, or a manual deck no plan owns, is not this
+/// plan's evidence: the studio's requirements page has always refused it, and
+/// Verify used to judge it anyway, so one surface reported a margin and the
+/// other reported nothing for the same run and the same limit. The run's own
+/// values stay on the page — they are what it measured — with no verdict
+/// column and the line under the toolbar naming why.
 fn verification_specs(app: &RSpiceApp) -> Vec<SpecEntry> {
+    if !verification_evidence_domain(app).answers_a_plan_limit() {
+        return Vec::new();
+    }
     verification_plan_id(app).map_or_else(
         || app.state.workspace.content.specs.clone(),
         |plan_id| app.state.workspace.content.active_specs(plan_id).to_vec(),

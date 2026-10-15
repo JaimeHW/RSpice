@@ -320,7 +320,7 @@ fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)])
         .with_measurements(
             measurements
                 .iter()
-                .map(|(name, value)| rspice_core::MeasureResult::success(*name, *value))
+                .map(|(name, value)| rspice_core::MeasureResult::success(name, *value))
                 .collect(),
         )
 }

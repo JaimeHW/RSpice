@@ -96,7 +96,7 @@ impl TuningInstanceBindingDraft {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VerificationSessionState {
     #[serde(default)]
     pub regression_baseline_run: Option<crate::product::RunId>,
@@ -151,30 +151,6 @@ pub struct VerificationSessionState {
     /// leaves nothing here: its result is the page itself.
     #[serde(skip)]
     pub action_problem: Option<String>,
-}
-
-impl Default for VerificationSessionState {
-    fn default() -> Self {
-        Self {
-            regression_baseline_run: None,
-            corner_compare_nominal: false,
-            yield_selected_spec: None,
-            regression_comparison: None,
-            regression_baseline_picker_open: false,
-            regression_baseline_picker_selection: None,
-            regression_selected_target: None,
-            regression_tolerance_drafts: Vec::new(),
-            tuning_plan_id: None,
-            tuning_plan_revision: None,
-            tuning_variables: Vec::new(),
-            tuning_instance_binding: None,
-            tuning_selected_variable: None,
-            tuning_focus_variable: None,
-            tuning_baseline_run: None,
-            tuning_review_open: false,
-            action_problem: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

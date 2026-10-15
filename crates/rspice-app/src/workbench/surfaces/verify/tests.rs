@@ -5,6 +5,7 @@
 //! whose tolerance digest does not match its contract is rejected.
 
 use super::raster::sealed_run;
+use super::tuning::{revert_tuning_session, tuning_commit_block_reason, tuning_is_dirty};
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
@@ -1613,6 +1614,10 @@ fn verify_and_the_studio_report_the_same_worst_value_for_one_limit() {
 }
 
 /// Verify must not judge a dataset the studio refuses.
+///
+/// The run's own measured values stay on the page — it did measure them — but
+/// a run another plan owns answers none of this plan's limits, so no limit
+/// reaches the table and nothing in it is judged.
 #[test]
 fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
     use crate::state::EvidenceDomain;
@@ -1633,6 +1638,56 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
             "{refused:?} must state why it cannot, or the surface goes silently blank"
         );
     }
+
+    let mut app = super::raster::corner_app();
+    assert_eq!(
+        verification_evidence_domain(&app),
+        EvidenceDomain::Legacy,
+        "the corner fixture's run predates receipts, which Verify reads"
+    );
+    assert!(
+        !verification_specs(&app).is_empty(),
+        "and its four limits are this plan's"
+    );
+
+    // The same run, now owned by a plan that is not the one being read.
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let other = crate::product::SimulationPlanId::new();
+    let analysis = app.state.simulation.retained.runs[0].analyses[0].clone();
+    let source = analysis
+        .provenance()
+        .expect("the fixture attributes its analysis")
+        .source_instance_id();
+    app.state.simulation.retained.runs =
+        vec![super::raster::sealed_run(3, other, source, 19, analysis)].into();
+    app.state.simulation.view.active_run_idx = Some(0);
+
+    assert_ne!(other, plan_id);
+    assert_eq!(
+        verification_evidence_domain(&app),
+        EvidenceDomain::AnotherPlan
+    );
+    assert!(
+        verification_specs(&app).is_empty(),
+        "another plan's dataset answers none of this plan's limits"
+    );
+    let run = verification_run(&app).expect("the run is still the one Verify reads");
+    let family =
+        latest_analysis(&app, AnalysisType::Corner).expect("and still holds its corner run");
+    let matrix = corner_matrix(run, family, None, &verification_specs(&app), None);
+    assert!(
+        !matrix.rows.is_empty(),
+        "the values the run did measure stay on the page"
+    );
+    assert!(
+        matrix.rows.iter().all(|row| row.verdict().is_none()),
+        "and nothing in it is judged"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2308,4 +2363,81 @@ fn the_yield_page_draws_the_selected_histogram_under_the_table() {
         (220.0..=340.0).contains(&histogram.height()),
         "{histogram:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// What the pages may not grow back
+// ---------------------------------------------------------------------------
+
+/// Every file the Verify pages are drawn from.
+fn verify_slice() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("verify.rs", include_str!("../verify.rs")),
+        ("verify/corners.rs", include_str!("corners.rs")),
+        ("verify/histogram.rs", include_str!("histogram.rs")),
+        ("verify/optimization.rs", include_str!("optimization.rs")),
+        (
+            "verify/regression_contract.rs",
+            include_str!("regression_contract.rs"),
+        ),
+        (
+            "verify/regression_panel.rs",
+            include_str!("regression_panel.rs"),
+        ),
+        ("verify/safety.rs", include_str!("safety.rs")),
+        ("verify/table.rs", include_str!("table.rs")),
+        ("verify/toolbar.rs", include_str!("toolbar.rs")),
+        ("verify/tuning.rs", include_str!("tuning.rs")),
+        ("verify/yield_page.rs", include_str!("yield_page.rs")),
+    ]
+}
+
+/// Colour on a Verify page is a problem, never a state.
+///
+/// A pass is the absence of one, so nothing here paints success: no status
+/// dot, no `Success`/`Neutral` mark, no `ok` or `info` tone. A page that wants
+/// to say a run is fine says it in the toolbar's words, in the text colour.
+/// What colour is left is the failure and near-limit ink in a verdict cell,
+/// the selected row's wash, and the one trace colour a candidate waveform is
+/// drawn in.
+#[test]
+fn no_verify_page_paints_a_state_it_could_state_in_words() {
+    for (path, source) in verify_slice() {
+        let shipped = crate::source_guard::without_test_items(source);
+        for banned in [
+            "colored_label",
+            "status_dot",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+            "color.ok",
+            "color.info",
+        ] {
+            assert!(
+                !shipped.contains(banned),
+                "{path} names `{banned}`: a Verify page colours a problem, not a state"
+            );
+        }
+    }
+}
+
+/// The pages James called a generic dashboard do not come back.
+///
+/// Each page is its toolbar, one dense table and the detail of a selected
+/// row. A tile of a big number with a subline under it, a lecturing subtitle
+/// and a receipt reporting that an action worked are the shapes that made it
+/// one, and the uppercase table head came with them.
+#[test]
+fn no_verify_page_grows_a_tile_strip_a_lecture_or_a_receipt_back() {
+    for (path, source) in verify_slice() {
+        let shipped = crate::source_guard::without_test_items(source);
+        for (banned, why) in [
+            ("KpiTile", "a tile of a big number is a dashboard, not a result"),
+            ("kpi_strip", "a tile of a big number is a dashboard, not a result"),
+            ("to_uppercase", "a table head is sentence case"),
+            ("action_receipt", "an action that worked says nothing"),
+            ("heading(ui", "a page's title is its toolbar's, and carries no subtitle"),
+        ] {
+            assert!(!shipped.contains(banned), "{path} names `{banned}`: {why}");
+        }
+    }
 }
