@@ -47,6 +47,11 @@ const TICK_LABEL_INSET: f32 = TICK_LABEL_GAP + 6.0;
 const TIME_GUTTER: f32 = 16.0;
 /// How close a pointer has to be to a PWL marker to select it.
 const MARKER_GRAB: f32 = 7.0;
+/// Stroke the results engine gives a primary trace, and the thinner one it
+/// gives an envelope's edges. Stated here so the two surfaces a reader
+/// compares a waveform across are drawn with the same pen.
+const TRACE_WIDTH: f32 = 1.8;
+const ENVELOPE_WIDTH: f32 = 1.4;
 /// Air between a readout's label and its value.
 const READOUT_GAP: f32 = 4.0;
 
@@ -273,12 +278,17 @@ fn plot_body(
 ) -> Option<TraceReading> {
     let tokens = Tokens::get(ui.ctx());
     let colors = tokens.color;
+    // The waveform is the first trace of a plot, and it is drawn in the colour
+    // every results pane gives its first trace. The accent is the interface's
+    // own colour — a control under the pointer, a selected row — and a curve
+    // painted in it is the one line on screen that cannot be told from chrome.
+    let trace = colors.traces[0];
     let response = ui.interact(
         rect,
         ui.id().with("workbench.stimulus.proof"),
         Sense::click(),
     );
-    ui.painter().rect_filled(rect, 0.0, colors.bg_app);
+    ui.painter().rect_filled(rect, 0.0, colors.canvas_bg);
     theme::paint_focus_ring(ui, &response, rect);
 
     let label = accessible_label(state, stage);
@@ -338,15 +348,34 @@ fn plot_body(
         maximum,
     };
 
-    paint_grid(ui, &projector, colors.border, &axis);
+    paint_grid(ui, &projector, colors.canvas_grid, &axis);
+    // Zero is a reference line, not a gridline, and the results engine draws
+    // every reference line dashed in `text_faint`. Drawn solid it was a hard
+    // grey bar across the middle of the window — the one thing on the plot
+    // that is not data reading as the strongest thing on it.
     if minimum < 0.0 && maximum > 0.0 {
-        ui.painter().hline(
-            plot.x_range(),
-            projector.y(0.0),
+        let y = projector.y(0.0);
+        ui.painter().extend(egui::Shape::dashed_line(
+            &[Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)],
             Stroke::new(1.0, colors.text_faint),
-        );
+            4.0,
+            3.0,
+        ));
     }
     paint_guides(ui, &projector, &stage.realization.guides, colors.warn);
+    // The two axes the results engine rules, in the same colour: a plot whose
+    // canvas is the document well needs its left and bottom stated, and a box
+    // around it would state two edges the data never reaches.
+    ui.painter().vline(
+        plot.left(),
+        plot.y_range(),
+        Stroke::new(1.0, colors.border_strong),
+    );
+    ui.painter().hline(
+        plot.x_range(),
+        plot.bottom(),
+        Stroke::new(1.0, colors.border_strong),
+    );
 
     match &stage.realization.trace {
         WaveformTrace::Curve(samples) => {
@@ -355,10 +384,10 @@ fn plot_body(
                 .map(|(time, value)| Pos2::new(projector.x(*time), projector.y(*value)))
                 .collect::<Vec<_>>();
             ui.painter()
-                .add(egui::Shape::line(points, Stroke::new(1.4, colors.accent)));
+                .add(egui::Shape::line(points, Stroke::new(TRACE_WIDTH, trace)));
         }
         WaveformTrace::Envelope { columns, .. } => {
-            paint_envelope(ui, &projector, columns, colors.accent);
+            paint_envelope(ui, &projector, columns, trace);
         }
     }
 
@@ -386,7 +415,7 @@ fn paint_envelope(ui: &Ui, projector: &Projector, columns: &[EnvelopeColumn], co
             )
         })
         .collect::<Vec<_>>();
-    crate::ui::plot::paint_min_max_band(ui.painter(), &projected, color, 1.2);
+    crate::ui::plot::paint_min_max_band(ui.painter(), &projected, color, ENVELOPE_WIDTH);
 }
 
 /// Where a `(time, value)` lands inside the plot.
@@ -552,6 +581,9 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, axis: &ValueAxis) 
     let plot = projector.plot;
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    // The register the results engine labels an axis in. Its ticks are chrome
+    // a reader reads against the curve, not annotations hung on it.
+    let ink = tokens.color.text_dim;
     let stroke = Stroke::new(0.5, color);
     let target = ((plot.width() / TIME_TICK_PITCH).floor() as usize).clamp(2, 8);
     let mut painted_to = f32::NEG_INFINITY;
@@ -563,9 +595,7 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, axis: &ValueAxis) 
         } else {
             crate::ui::plot::tick_with_unit(&label, "s")
         };
-        let galley = ui
-            .painter()
-            .layout_no_wrap(text, font.clone(), tokens.color.text_faint);
+        let galley = ui.painter().layout_no_wrap(text, font.clone(), ink);
         let left = (x - galley.size().x * 0.5).clamp(
             plot.left(),
             (plot.right() - galley.size().x).max(plot.left()),
@@ -574,11 +604,8 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, axis: &ValueAxis) 
             continue;
         }
         painted_to = left + galley.size().x;
-        ui.painter().galley(
-            Pos2::new(left, plot.bottom() + 2.0),
-            galley,
-            tokens.color.text_faint,
-        );
+        ui.painter()
+            .galley(Pos2::new(left, plot.bottom() + 2.0), galley, ink);
     }
     for (value, text, _) in &axis.ticks {
         let y = projector.y(*value);
@@ -588,7 +615,7 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, axis: &ValueAxis) 
             Align2::RIGHT_CENTER,
             text,
             font.clone(),
-            tokens.color.text_faint,
+            ink,
         );
     }
     if let Some(anchor) = &axis.anchor {
@@ -597,7 +624,7 @@ fn paint_grid(ui: &Ui, projector: &Projector, color: Color32, axis: &ValueAxis) 
             Align2::LEFT_TOP,
             anchor,
             font,
-            tokens.color.text_faint,
+            ink,
         );
     }
 }
@@ -668,6 +695,7 @@ fn paint_markers(
     actions: &mut Vec<StageAction>,
 ) -> bool {
     let colors = Tokens::get(ui.ctx()).color;
+    let trace = colors.traces[0];
     let mut over_marker = false;
     for marker in &stage.realization.markers {
         let center = Pos2::new(projector.x(marker.time), projector.y(marker.value));
@@ -675,12 +703,8 @@ fn paint_markers(
         ui.painter().circle(
             center,
             if selected { 4.5 } else { 3.0 },
-            if selected {
-                colors.accent
-            } else {
-                colors.bg_app
-            },
-            Stroke::new(1.2, colors.accent),
+            if selected { trace } else { colors.canvas_bg },
+            Stroke::new(1.2, trace),
         );
         let hit = Rect::from_center_size(center, Vec2::splat(MARKER_GRAB * 2.0));
         if response
