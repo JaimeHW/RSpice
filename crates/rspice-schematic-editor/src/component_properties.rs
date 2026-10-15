@@ -8,8 +8,8 @@ mod dialog;
 mod evidence;
 mod form;
 pub use context::{
-    ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentPropertyDialogResult, ComponentTerminalContext, StimulusEditorContext,
+    ComponentEditorContext, ComponentModelContext, ComponentPropertyDialogResult,
+    StimulusEditorContext,
 };
 pub use dialog::{
     ComponentPropertyDialogView, ComponentPropertyServices, render_component_property_dialog,

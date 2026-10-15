@@ -1,11 +1,16 @@
 //! Live display evidence and interaction results for the component editor.
 
-/// Live, non-editable evidence shown beside a component's typed parameters.
+/// Live, non-editable evidence shown under a component's typed parameters.
 ///
 /// The property draft remains owned by [`super::ComponentPropertyDraft`]. This
-/// projection is rebuilt from authoritative application state every frame so
-/// connectivity, model provenance, and retained operating-point evidence can
-/// never become a second source of truth.
+/// projection is rebuilt from authoritative application state every frame, so
+/// model provenance and stimulus provenance can never become a second source
+/// of truth.
+///
+/// It carries only what this editor is for, which is changing the instance.
+/// Where its pins land and what a retained run measured on it are readings of
+/// the instance in place, and the design inspector states both beside the
+/// schematic, where a reader can act on them without first dismissing a modal.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComponentEditorContext {
     pub glyph: String,
@@ -14,8 +19,6 @@ pub struct ComponentEditorContext {
     pub library_cell: String,
     pub family: String,
     pub model: Option<ComponentModelContext>,
-    pub operating_point: Option<ComponentOperatingPointContext>,
-    pub terminals: Vec<ComponentTerminalContext>,
     /// Where this instance stands with the project's stimulus library.
     /// `None` for anything that is not an independent source, which is every
     /// component with no waveform to adopt.
@@ -38,7 +41,7 @@ pub struct StimulusEditorContext {
     /// holds it. `None` is what makes "open it" an offer the editor withholds.
     pub library_revision: Option<u32>,
     /// Whether the project has authored any definition at all: with none,
-    /// there is nothing to adopt and the section says so instead.
+    /// there is nothing to adopt and the verb is not offered.
     pub library_is_empty: bool,
 }
 
@@ -53,21 +56,6 @@ pub struct ComponentModelContext {
     pub status: String,
     pub can_open: bool,
     pub can_qualify: bool,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct ComponentOperatingPointContext {
-    pub run_id: u64,
-    pub analysis: String,
-    pub current: bool,
-    pub rows: Vec<(String, String)>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ComponentTerminalContext {
-    pub pin: String,
-    pub direction: String,
-    pub net: Option<String>,
 }
 
 /// Result of the component editor interaction.
@@ -94,8 +82,6 @@ pub enum ComponentPropertyDialogResult {
     /// Copy the library's current revision onto this instance now, and reload
     /// the editor from what that leaves behind.
     ReadoptStimulus,
-    /// Close the editor and cross-probe the selected instance in Results.
-    CrossProbe,
     /// User clicked Cancel - changes discarded
     Cancelled,
 }

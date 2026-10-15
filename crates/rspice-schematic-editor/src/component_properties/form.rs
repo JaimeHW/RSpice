@@ -49,23 +49,23 @@ pub fn render_component_parameters(
     browse: &mut impl FnMut(PropertyBrowseRequest<'_>, &mut ComponentPropertyDraft),
 ) -> Option<Id> {
     let mut first_control = None;
-    egui::Frame::NONE
-        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+    // No fill of its own. The dialog body paints the editor's one surface, and
+    // a pane that painted a second coat of the same token came out a shade off
+    // the pane beside it, with the base colour showing between them — a seam
+    // down the middle of what is one editor.
+    egui::ScrollArea::vertical()
+        .id_salt("component-editor-parameters")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("component-editor-parameters")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    first_control = parameters_contents(
-                        ui,
-                        draft,
-                        sheet,
-                        advisories,
-                        quantity_policy,
-                        number_locale,
-                        browse,
-                    );
-                });
+            first_control = parameters_contents(
+                ui,
+                draft,
+                sheet,
+                advisories,
+                quantity_policy,
+                number_locale,
+                browse,
+            );
         });
     first_control
 }
@@ -81,7 +81,7 @@ fn parameters_contents(
 ) -> Option<Id> {
     let component_type = draft.component_type?;
     draft.present_numeric_drafts(sheet, quantity_policy, number_locale);
-    section_band(ui, "Parameters", "typed · unit-checked");
+    section_band(ui, "Parameters");
     let properties = sheet
         .iter()
         .filter(|definition| definition.name != "name")
@@ -154,41 +154,25 @@ fn parameters_contents(
                 );
             }
 
-            let t = Tokens::get(ui.ctx());
-            let message = draft
+            // The whole-sheet failure, and only that. What the engine will do
+            // with one field is stated on that field, by `field_hint`, which
+            // reads the field each rule names; a count of those along the
+            // bottom was a second rendering of facts already on screen, and it
+            // named no field a reader could go and look at.
+            if let Some(message) = draft
                 .commit_error
                 .as_deref()
-                .or(draft.global_error.as_deref());
-            ui.add_space(6.0);
-            let (rect, _) =
-                ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
-            // A failure owns the line when there is one. Otherwise the count of
-            // engine advisories takes it, in the muted colour: they are things
-            // to know before running, not things to fix before applying, and
-            // painting them in the error colour would say the opposite.
-            if let Some(message) = message {
+                .or(draft.global_error.as_deref())
+            {
+                ui.add_space(6.0);
+                let (rect, _) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
                 ui.painter().text(
                     pos2(rect.left(), rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     message,
                     theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.err,
-                );
-            } else if !advisories.is_empty() {
-                let count = advisories.len();
-                let summary = if count == 1 {
-                    "1 engine advisory — the run differs from what a field states".to_owned()
-                } else {
-                    format!(
-                        "{count} engine advisories — the run differs from what these fields state"
-                    )
-                };
-                ui.painter().text(
-                    pos2(rect.left(), rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    summary,
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.text_dim,
+                    Tokens::get(ui.ctx()).color.err,
                 );
             }
         });
@@ -624,35 +608,65 @@ fn label_font(def: &PropertyDefinition) -> egui::FontId {
 }
 
 /// Paint a section heading shared by the parameter and evidence panes.
-pub fn section_band(ui: &mut Ui, title: &str, status: &str) {
+/// The height of a section's head.
+///
+/// Sized to the one line it holds. The band used to be laid out by a frame
+/// around a row, which came to 38 points for a 12-point word because the row
+/// took the style's own interact height before its margins were added.
+const SECTION_BAND_HEIGHT: f32 = 26.0;
+/// Where a band's title starts, matching the inset of the content under it.
+const SECTION_BAND_INSET: f32 = 16.0;
+/// The most a band reaches past its content, which is the widest gutter a
+/// scroll area reserves for its bar.
+const SECTION_BAND_GUTTER: f32 = 12.0;
+
+/// One section's head: the title, and nothing else.
+///
+/// Sentence case, as written. It used to upper-case the title and carry a
+/// right-aligned caption beside it, and the caption was never worth its line:
+/// `typed · unit-checked` states a property of the editor rather than of this
+/// instance, and the model binding's word repeated the status its own card
+/// prints underneath. What one of them said and nothing else did — which
+/// definition a source copied — is a row in that section now, where an
+/// identifier is set in mono and not folded to `SENSOR_DRIVE · R2`.
+pub fn section_band(ui: &mut Ui, title: &str) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::NONE
-        .fill(t.color.bg_panel_2)
-        .inner_margin(Margin {
-            left: 16,
-            right: 16,
-            top: 8,
-            bottom: 4,
-        })
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(title.to_uppercase())
-                        .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                        .color(t.color.text_dim),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(status.to_uppercase())
-                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    );
-                });
-            });
-        });
-    let y = ui.cursor().top();
-    ui.painter()
-        .hline(ui.max_rect().x_range(), y, Stroke::new(1.0, t.color.border));
+    let (row, _) = ui.allocate_exact_size(
+        vec2(ui.available_width(), SECTION_BAND_HEIGHT),
+        Sense::hover(),
+    );
+    // Across the pane, not across the scroll area's content width: the
+    // scrollbar gutter is part of the surface the band heads, and a fill that
+    // stopped at the content edge left a notch between every title's bar and
+    // the bar beside it.
+    //
+    // The gutter is taken as the clip rect, capped: a pane that is not
+    // scrolling is clipped by the dialog rather than by itself, and an
+    // uncapped reach painted the band out past the dialog's own edge.
+    let right = ui
+        .clip_rect()
+        .right()
+        .min(ui.max_rect().right() + SECTION_BAND_GUTTER);
+    let band = egui::Rect::from_x_y_ranges(ui.max_rect().left()..=right, row.y_range());
+    ui.painter().rect_filled(band, 0.0, t.color.bg_panel_2);
+    let mut inner = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(egui::Rect::from_min_max(
+                pos2(band.left() + SECTION_BAND_INSET, band.top()),
+                band.max,
+            ))
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    inner.label(
+        egui::RichText::new(title)
+            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+            .color(t.color.text_dim),
+    );
+    ui.painter().hline(
+        band.x_range(),
+        band.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
 }
 
 /// A category rule: the group name followed by a hairline running to the

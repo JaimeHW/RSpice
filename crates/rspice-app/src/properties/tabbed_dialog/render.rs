@@ -6,12 +6,10 @@ use crate::properties::model_browser::ModelBrowserState;
 use crate::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 use crate::simulation::stimulus_realize::PreviewTiming;
 use crate::state::{Component, ComponentType, PropertyValue};
-use crate::ui::tokens::Tokens;
-use egui::{Margin, Stroke, Ui};
+use egui::Ui;
 use rspice_schematic_editor::component_properties::{
     ComponentPropertyDialogResult, ComponentPropertyDialogView, ComponentPropertyDraft,
     ComponentPropertyServices, PropertyBrowseRequest, render_component_property_dialog,
-    section_band,
 };
 
 pub fn render_tabbed_property_dialog(
@@ -128,6 +126,13 @@ impl ComponentPropertyServices for ComponentDialogServices<'_> {
 /// visible here exactly as it will be in the run, which is what the dialog's
 /// own sampler could not promise.
 ///
+/// The curve alone: it is drawn inside the editor's Stimulus section, which
+/// owns the band, the frame and the margin around it. It used to carry its own
+/// band, titled `Transient stimulus preview` with the status `engine
+/// evaluator`, above a plot whose caption already read `Engine-evaluated
+/// waveform` — three statements of one fact, and a second banded block for
+/// what is one subject with the library record under it.
+///
 /// The drawing itself belongs to [`crate::properties::source_preview`], which
 /// the stimulus link dialog paints through as well: that dialog shows the card
 /// a definition would leave on this instance, and a second painter is how two
@@ -138,7 +143,6 @@ fn source_preview_card(
     preview: &ComponentPreview<'_>,
 ) {
     let timing = preview.timing;
-    section_band(ui, "Transient stimulus preview", "engine evaluator");
     let component = preview_component(draft, preview);
     let unit = component
         .as_ref()
@@ -149,24 +153,7 @@ fn source_preview_card(
             let tables = preview_tables(preview, &component);
             crate::properties::source_preview::source_curve(&component, timing, tables)
         });
-    egui::Frame::NONE
-        .fill(Tokens::get(ui.ctx()).color.bg_panel)
-        .inner_margin(Margin {
-            left: 16,
-            right: 16,
-            top: 4,
-            bottom: 10,
-        })
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            crate::properties::source_preview::paint_preview_card(ui, &curve, timing, unit);
-        });
-    let y = ui.cursor().top();
-    ui.painter().hline(
-        ui.max_rect().x_range(),
-        y,
-        Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
-    );
+    crate::properties::source_preview::paint_preview_card(ui, &curve, timing, unit);
 }
 
 /// The instance as the draft currently describes it.
@@ -501,6 +488,142 @@ mod tests {
             trace_of(&typed, ComponentType::VoltageSourcePulse, &registry),
             trace_of(&numeric, ComponentType::VoltageSourcePulse, &registry)
         );
+    }
+
+    /// One render-review scene: the file stem it writes, the component the
+    /// editor opens for, and the context the host would hand it.
+    #[cfg(not(target_arch = "wasm32"))]
+    type EditorScene = (
+        &'static str,
+        ComponentType,
+        fn() -> ComponentPropertyContext,
+    );
+
+    /// A component that binds no model and adopts no waveform, so its editor
+    /// is a parameter form and nothing else.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn plain_context() -> ComponentPropertyContext {
+        ComponentPropertyContext {
+            editor: rspice_schematic_editor::component_properties::ComponentEditorContext {
+                glyph: "R".to_owned(),
+                subtitle: "Resistor".to_owned(),
+                instance_path: "/top/R4".to_owned(),
+                library_cell: "analogLib/res".to_owned(),
+                family: "Linear".to_owned(),
+                model: None,
+                stimulus: None,
+            },
+            retained_table: None,
+        }
+    }
+
+    /// One editor context for a source that has adopted a definition the
+    /// library has since moved past, so the Stimulus section offers every verb
+    /// it has at once.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn adopted_source_context() -> ComponentPropertyContext {
+        use rspice_design::stimulus_library::provenance::ProvenanceState;
+        use rspice_schematic_editor::component_properties::StimulusEditorContext;
+
+        ComponentPropertyContext {
+            editor: rspice_schematic_editor::component_properties::ComponentEditorContext {
+                glyph: "V".to_owned(),
+                subtitle: "Independent voltage source".to_owned(),
+                instance_path: "/top/V4".to_owned(),
+                library_cell: "analogLib/vpulse".to_owned(),
+                family: "PULSE".to_owned(),
+                model: None,
+                stimulus: Some(StimulusEditorContext {
+                    state: ProvenanceState::Behind {
+                        adopted: 1,
+                        library: 2,
+                    },
+                    definition: Some("sensor_drive".to_owned()),
+                    library_revision: Some(2),
+                    library_is_empty: false,
+                }),
+            },
+            retained_table: None,
+        }
+    }
+
+    /// A component that binds a model and adopts no waveform.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn bound_model_context() -> ComponentPropertyContext {
+        use rspice_schematic_editor::component_properties::ComponentModelContext;
+
+        ComponentPropertyContext {
+            editor: rspice_schematic_editor::component_properties::ComponentEditorContext {
+                glyph: "M".to_owned(),
+                subtitle: "N-channel MOSFET".to_owned(),
+                instance_path: "/top/M4".to_owned(),
+                library_cell: "analogLib/nmos4".to_owned(),
+                family: "BSIM4".to_owned(),
+                model: Some(ComponentModelContext {
+                    name: "nch_svt".to_owned(),
+                    library: Some("tsmc018".to_owned()),
+                    source: "tsmc018/models/nch.lib".to_owned(),
+                    section: "tt".to_owned(),
+                    status: "resolved from the configured corner".to_owned(),
+                    can_open: true,
+                    can_qualify: true,
+                }),
+                stimulus: None,
+            },
+            retained_table: None,
+        }
+    }
+
+    /// Write the editor's three shapes to PNGs: a form on its own, a form with
+    /// a model binding under it, and a form with the Stimulus section under
+    /// it.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn print_component_editor_renders_for_review() {
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let stderr = std::io::stderr();
+        let mut report = stderr.lock();
+        let scenes: [EditorScene; 3] = [
+            ("resistor", ComponentType::Resistor, plain_context),
+            ("mosfet", ComponentType::Nmos, bound_model_context),
+            (
+                "source-pulse",
+                ComponentType::VoltageSourcePulse,
+                adopted_source_context,
+            ),
+        ];
+        for (stem, kind, context) in scenes {
+            let (mut state, registry) = editor(kind);
+            let context = context();
+            let library = crate::state::ModelLibraryManager::default();
+            let canvas = crate::ui::raster::render_themed(
+                crate::ui::Theme::default(),
+                egui::vec2(1100.0, 760.0),
+                |ui, background| {
+                    let _ = background;
+                    render_tabbed_property_dialog(
+                        ui.ctx(),
+                        &mut state,
+                        &context,
+                        &registry,
+                        &library,
+                        QuantityPresentationPolicy::default(),
+                        UiNumberLocale::default(),
+                        crate::state::PropertyCommitPolicy::default(),
+                    );
+                },
+            );
+            let height = canvas.content_height().max(1);
+            let path = directory.join(format!("component-editor-{stem}.png"));
+            std::fs::write(&path, canvas.png(height)).expect("write dialog render");
+            writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
+                .expect("write raster qualification report");
+        }
     }
 
     /// The pin the hand-rolled sampler could not hold: a noise source is not a

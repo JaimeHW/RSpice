@@ -100,7 +100,22 @@ pub fn render_component_property_dialog(
         );
         let wide = ctx.content_rect().width() > 760.0;
         let mut first_parameter = None;
-        if wide {
+        // With nothing to show beside them, the parameters take the whole body
+        // rather than leaving a pane that holds a divider and no content.
+        if !has_evidence(draft, context, show_source_preview) {
+            first_parameter = render_component_parameters(
+                ui,
+                draft,
+                sheet,
+                advisories,
+                quantity_policy,
+                number_locale,
+                &mut |request, draft| services.browse(request, draft),
+            );
+        } else if wide {
+            // One surface, so no rule between the halves: the parameters and
+            // what is beside them are one editor over one instance, and the
+            // bands already say where each section starts.
             let gap = 1.0;
             let left_width = ((ui.available_width() - gap) * (1.1 / 2.1)).max(300.0);
             ui.horizontal(|ui| {
@@ -120,9 +135,7 @@ pub fn render_component_property_dialog(
                         );
                     },
                 );
-                let (divider, _) = ui.allocate_exact_size(vec2(gap, body_height), Sense::hover());
-                ui.painter()
-                    .rect_filled(divider, 0.0, Tokens::get(ui.ctx()).color.border);
+                ui.add_space(gap);
                 ui.allocate_ui_with_layout(
                     vec2(ui.available_width(), body_height),
                     Layout::top_down(Align::Min),
@@ -158,10 +171,7 @@ pub fn render_component_property_dialog(
                         );
                     },
                 );
-                let (divider, _) =
-                    ui.allocate_exact_size(vec2(ui.available_width(), gap), Sense::hover());
-                ui.painter()
-                    .rect_filled(divider, 0.0, Tokens::get(ui.ctx()).color.border);
+                ui.add_space(gap);
                 ui.allocate_ui_with_layout(
                     vec2(ui.available_width(), ui.available_height()),
                     Layout::top_down(Align::Min),
@@ -210,6 +220,27 @@ pub fn render_component_property_dialog(
     }
 
     result
+}
+
+/// Whether this component has anything to show beside its parameters.
+///
+/// A resistor binds no model and adopts no waveform, so its editor is a form
+/// and nothing else: the pane beside it would be empty, which is the editor
+/// claiming to hold something it does not.
+///
+/// `show_source_preview` is part of the question and not a duplicate of the
+/// stimulus context, even though the host derives both from the same kind: the
+/// evidence pane is what calls the preview service, so a source whose
+/// provenance failed to resolve would otherwise lose its waveform rather than
+/// its provenance line.
+fn has_evidence(
+    draft: &ComponentPropertyDraft,
+    context: &ComponentEditorContext,
+    show_source_preview: bool,
+) -> bool {
+    show_source_preview
+        || context.stimulus.is_some()
+        || super::evidence::binds_a_model(draft, context)
 }
 
 fn component_identity_header(

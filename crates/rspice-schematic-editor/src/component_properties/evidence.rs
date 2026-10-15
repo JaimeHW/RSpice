@@ -4,7 +4,7 @@ use super::{
     ComponentEditorContext, ComponentPropertyDialogResult, ComponentPropertyDraft,
     ComponentPropertyServices, section_band,
 };
-use egui::{Align, Layout, Margin, Stroke, Ui};
+use egui::{Align, Layout, Margin, Ui};
 use rspice_app_types::property::PropertyValue;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
@@ -17,15 +17,14 @@ pub(super) fn evidence_pane(
     services: &mut impl ComponentPropertyServices,
     action: &mut ComponentPropertyDialogResult,
 ) {
-    egui::Frame::NONE
-        .fill(Tokens::get(ui.ctx()).color.bg_panel)
+    // No fill of its own: the dialog body already painted one, and a second
+    // coat that stopped where this pane's content stopped is what put a seam
+    // down the middle of one surface.
+    egui::ScrollArea::vertical()
+        .id_salt("component-editor-evidence")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("component-editor-evidence")
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    evidence_contents(ui, draft, context, show_source_preview, services, action)
-                });
+            evidence_contents(ui, draft, context, show_source_preview, services, action)
         });
 }
 
@@ -37,13 +36,28 @@ fn evidence_contents(
     services: &mut impl ComponentPropertyServices,
     action: &mut ComponentPropertyDialogResult,
 ) {
-    model_binding_card(ui, draft, context, action);
-    operating_point_card(ui, context, action);
-    if show_source_preview {
-        services.preview_source(ui, draft);
-        stimulus_library_card(ui, draft, context, action);
+    if binds_a_model(draft, context) {
+        model_binding_card(ui, draft, context, action);
     }
-    terminals_card(ui, context);
+    if show_source_preview {
+        stimulus_section(ui, draft, context, services, action);
+    }
+}
+
+/// Whether this component binds a model at all.
+///
+/// A source, a resistor and a capacitor do not, and a banded card reading
+/// `Model binding · not bound · This component has no model binding` is three
+/// ways of saying that the section should not have been drawn.
+pub(super) fn binds_a_model(
+    draft: &ComponentPropertyDraft,
+    context: &ComponentEditorContext,
+) -> bool {
+    context.model.is_some()
+        || draft
+            .get_value("model")
+            .map(PropertyValue::display_string)
+            .is_some_and(|model| !model.trim().is_empty())
 }
 
 /// The colour a provenance chip takes.
@@ -72,14 +86,46 @@ pub fn provenance_colour(
     }
 }
 
-/// Where this source stands with the project's stimulus library, and the four
-/// verbs that move it.
+/// What waveform this source carries, where it came from, and the verbs that
+/// change that.
+///
+/// One section rather than two. The curve and the library record are one
+/// subject — the curve *is* what the adopted card evaluates to — and showing
+/// them as two banded blocks made one thing look like two, with the engine
+/// named three times between them: once in a band title, once in its status,
+/// and once in the plot's own caption.
+///
+/// The band's status is the definition this instance copied, which is the one
+/// fact the two rows under the old card spent four lines on. The lifecycle
+/// word is not repeated here: the dialog header already carries it, in the
+/// same colours, two inches up.
+fn stimulus_section(
+    ui: &mut Ui,
+    draft: &ComponentPropertyDraft,
+    context: &ComponentEditorContext,
+    services: &mut impl ComponentPropertyServices,
+    action: &mut ComponentPropertyDialogResult,
+) {
+    let Some(stimulus) = context.stimulus.as_ref() else {
+        return;
+    };
+    section_block(ui, "Stimulus", |ui| {
+        services.preview_source(ui, draft);
+        stimulus_body(ui, draft, stimulus, action);
+    });
+}
+
+/// The note this source's provenance needs, and the verbs that move it.
+///
+/// Split from the section so the gate below can read the verbs without a
+/// waveform evaluator behind it: what the verbs offer is decided by the draft
+/// and the library, and neither needs a curve to be drawn.
 ///
 /// Only two of the verbs are unconditional. Opening a definition and
 /// re-adopting one are offers about a record the library may not hold and a
 /// revision that may not exist, so they are absent rather than disabled: a
-/// control that is here works, and the status line above already states why
-/// there is nothing to open.
+/// control that is here works, and the band above already states what there is
+/// to open.
 ///
 /// Three of the four act on the card the *instance* carries, not on the draft
 /// in front of the reader, and all three leave this editor. While the draft
@@ -94,15 +140,12 @@ pub fn provenance_colour(
 /// Opening the definition is the one verb that reads nothing of the draft: it
 /// shows a library record the draft cannot change, exactly as `Open model
 /// detail…` stays available while the draft's model is the committed one.
-fn stimulus_library_card(
+fn stimulus_body(
     ui: &mut Ui,
     draft: &ComponentPropertyDraft,
-    context: &ComponentEditorContext,
+    stimulus: &super::StimulusEditorContext,
     action: &mut ComponentPropertyDialogResult,
 ) {
-    let Some(stimulus) = context.stimulus.as_ref() else {
-        return;
-    };
     let unapplied = draft
         .has_modifications()
         .then_some("Apply or cancel this editor's edits first");
@@ -110,124 +153,152 @@ fn stimulus_library_card(
         .definition
         .as_deref()
         .zip(stimulus.library_revision);
-    section_block(ui, "Stimulus library", &stimulus.state.label(), |ui| {
-        let t = Tokens::get(ui.ctx());
-        match held {
-            Some((definition, revision)) => {
-                evidence_row(ui, "Definition", definition);
-                evidence_row(ui, "Library holds", &format!("r{revision}"));
-            }
-            None if stimulus.definition.is_some() => {
-                evidence_row(
-                    ui,
-                    "Definition",
-                    stimulus.definition.as_deref().unwrap_or_default(),
-                );
-                ui.label(
-                    egui::RichText::new(
-                        "The library no longer holds it. This instance keeps the card it copied.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.warn),
-                );
-            }
-            None => {
-                ui.label(
-                    egui::RichText::new(if stimulus.library_is_empty {
-                        "This project has authored no stimulus definitions yet."
-                    } else {
-                        "This source was drawn on the sheet and adopted no definition."
-                    })
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                );
-            }
-        }
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            if !stimulus.library_is_empty
-                && stimulus_verb(
-                    ui,
-                    "Adopt definition…",
-                    unapplied,
-                    "Copy a library definition's card onto this instance and record which \
-                     revision it came from",
-                )
-            {
-                *action = ComponentPropertyDialogResult::AdoptStimulus;
-            }
-            if stimulus_verb(
-                ui,
-                "Save as library definition…",
-                unapplied,
-                "Publish this instance's card as a project stimulus definition",
-            ) {
-                *action = ComponentPropertyDialogResult::ExtractStimulus;
-            }
-            if held.is_some()
-                && stimulus_verb(
-                    ui,
-                    "Open in Stimulus Library",
-                    None,
-                    "Show this definition in the Stimulus Library workspace",
-                )
-            {
-                *action = ComponentPropertyDialogResult::OpenStimulusDefinition;
-            }
-            let readopt = held
-                .filter(|_| stimulus.state.offers_readoption())
-                .map(|(_, revision)| format!("Re-adopt r{revision}"));
-            if let Some(label) = readopt.as_deref()
-                && stimulus_verb(
-                    ui,
-                    label,
-                    unapplied,
-                    "Copy the library's revision onto this instance and reload this editor from \
-                     it",
-                )
-            {
-                *action = ComponentPropertyDialogResult::ReadoptStimulus;
-            }
+    // Which definition this card came from, in the row grammar the model
+    // binding beside it already uses. It was the band's caption until the
+    // band stopped carrying one; it is a fact about this instance either way,
+    // and the only statement of it in the editor.
+    evidence_row(
+        ui,
+        "Definition",
+        &match (held, stimulus.definition.as_deref()) {
+            (Some((definition, revision)), _) => format!("{definition} · r{revision}"),
+            (None, Some(definition)) => definition.to_owned(),
+            (None, None) => "none · this instance's own card".to_owned(),
+        },
+    );
+    if stimulus.definition.is_some() && held.is_none() {
+        ui.label(
+            egui::RichText::new(
+                "The library no longer holds it. This instance keeps the card it copied.",
+            )
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(Tokens::get(ui.ctx()).color.warn),
+        );
+    }
+    let readopt = held
+        .filter(|_| stimulus.state.offers_readoption())
+        .map(|(_, revision)| format!("Re-adopt r{revision}"));
+    let mut verbs = Vec::new();
+    if !stimulus.library_is_empty {
+        verbs.push(Verb {
+            label: "Adopt definition…",
+            unavailable: unapplied,
+            hover: "Copy a library definition's card onto this instance and record which revision \
+                    it came from",
+            result: ComponentPropertyDialogResult::AdoptStimulus,
         });
+    }
+    verbs.push(Verb {
+        label: "Save as library definition…",
+        unavailable: unapplied,
+        hover: "Publish this instance's card as a project stimulus definition",
+        result: ComponentPropertyDialogResult::ExtractStimulus,
     });
+    if held.is_some() {
+        verbs.push(Verb {
+            label: "Open in Stimulus Library",
+            unavailable: None,
+            hover: "Show this definition in the Stimulus Library workspace",
+            result: ComponentPropertyDialogResult::OpenStimulusDefinition,
+        });
+    }
+    if let Some(label) = readopt.as_deref() {
+        verbs.push(Verb {
+            label,
+            unavailable: unapplied,
+            hover: "Copy the library's revision onto this instance and reload this editor from it",
+            result: ComponentPropertyDialogResult::ReadoptStimulus,
+        });
+    }
+    ui.add_space(10.0);
+    verb_grid(ui, &verbs, action);
 }
 
-/// One verb in the Stimulus library block.
+/// One verb a section offers.
+struct Verb<'a> {
+    label: &'a str,
+    /// Why it cannot be taken right now, if it cannot.
+    unavailable: Option<&'a str>,
+    hover: &'a str,
+    result: ComponentPropertyDialogResult,
+}
+
+/// Columns a section's verbs are laid out in.
+const VERB_COLUMNS: usize = 2;
+const VERB_GAP: f32 = 8.0;
+/// The narrowest a verb cell is drawn before the grid gives up on columns.
+const VERB_MINIMUM: f32 = 150.0;
+
+/// A section's verbs, on a grid of equal cells.
+///
+/// Equal cells rather than a wrapped row of shrink-to-fit buttons. Wrapping
+/// sized every button to its own label and broke the line wherever the next
+/// one stopped fitting, so four verbs came out as a long one beside a short
+/// one over two more of different widths again — four sizes and two ragged
+/// right edges for one set of equally weighted choices.
 ///
 /// A verb that cannot be taken right now is drawn disabled and announces why,
 /// rather than vanishing: the reason is a state the reader clears in one act,
-/// and a control that disappeared would leave them looking for it.
-fn stimulus_verb(ui: &mut Ui, label: &str, unavailable: Option<&str>, hover: &str) -> bool {
-    let response = rspice_ui_kit::widgets::Button::new(label)
-        .enabled(unavailable.is_none())
-        .show(ui);
-    match unavailable {
-        Some(reason) => {
-            response.on_disabled_hover_text(reason);
-            false
-        }
-        None => response.on_hover_text(hover).clicked(),
+/// and a control that disappeared would leave them looking for it. A verb that
+/// is not on offer at all is absent, which is the caller's decision.
+fn verb_grid(ui: &mut Ui, verbs: &[Verb<'_>], action: &mut ComponentPropertyDialogResult) {
+    if verbs.is_empty() {
+        return;
+    }
+    let track = ui.available_width();
+    let columns = if track >= VERB_MINIMUM * VERB_COLUMNS as f32 + VERB_GAP {
+        VERB_COLUMNS
+    } else {
+        1
+    };
+    let cell =
+        ((track - VERB_GAP * (columns - 1) as f32) / columns as f32).max(VERB_MINIMUM.min(track));
+    for row in verbs.chunks(columns) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = VERB_GAP;
+            for verb in row {
+                let response = rspice_ui_kit::widgets::Button::new(verb.label)
+                    .enabled(verb.unavailable.is_none())
+                    .min_width(cell)
+                    .show(ui);
+                match verb.unavailable {
+                    Some(reason) => {
+                        response.on_disabled_hover_text(reason);
+                    }
+                    None => {
+                        if response.on_hover_text(verb.hover).clicked() {
+                            *action = verb.result.clone();
+                        }
+                    }
+                }
+            }
+        });
+        ui.add_space(VERB_GAP);
     }
 }
 
-fn section_block(ui: &mut Ui, title: &str, status: &str, body: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    section_band(ui, title, status);
+/// One banded section: its head, and its content inset under it.
+///
+/// The content carries no fill and no closing rule. It used to have both, and
+/// a section is not the last thing in the pane it sits in: the fill ended where
+/// the content did and the pane's own fill carried on past it, so the last
+/// section closed with a rule across the width and a panel of a slightly
+/// different grey beneath — a blank box the section appeared to have drawn on
+/// purpose. The band is what separates one section from the next, and it is
+/// enough on its own.
+fn section_block(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
+    section_band(ui, title);
     egui::Frame::NONE
-        .fill(t.color.bg_panel)
         .inner_margin(Margin {
             left: 16,
             right: 16,
-            top: 4,
-            bottom: 10,
+            top: 8,
+            bottom: 12,
         })
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             body(ui);
         });
-    let y = ui.cursor().top();
-    ui.painter()
-        .hline(ui.max_rect().x_range(), y, Stroke::new(1.0, t.color.border));
 }
 
 fn evidence_row(ui: &mut Ui, label: &str, value: &str) {
@@ -278,25 +349,7 @@ fn model_binding_card(
             });
         identity_changed.then(|| draft_model.as_deref().unwrap_or(&model.name))
     });
-    let status = if pending_model.is_some() {
-        "pending"
-    } else {
-        context
-            .model
-            .as_ref()
-            .map(|model| {
-                if model.status.contains("resolved") {
-                    "qualified"
-                } else if model.status.contains("inline") || model.status.contains("exact") {
-                    "exact"
-                } else {
-                    "unverified"
-                }
-            })
-            .unwrap_or("not bound")
-    };
-
-    section_block(ui, "Model binding", status, |ui| {
+    section_block(ui, "Model binding", |ui| {
         if let Some(model) = &context.model {
             let t = Tokens::get(ui.ctx());
             if let Some(pending_model) = pending_model {
@@ -323,194 +376,41 @@ fn model_binding_card(
                 );
             }
             if model.can_open || model.can_qualify {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if rspice_ui_kit::widgets::Button::new("Open model detail…")
-                        .enabled(model.can_open && pending_model.is_none())
-                        .show(ui)
-                        .clicked()
-                    {
-                        *action = ComponentPropertyDialogResult::OpenModel;
-                    }
-                    if rspice_ui_kit::widgets::Button::new("Qualification…")
-                        .enabled(model.can_qualify && pending_model.is_none())
-                        .show(ui)
-                        .clicked()
-                    {
-                        *action = ComponentPropertyDialogResult::OpenQualification;
-                    }
-                });
+                let pending = pending_model
+                    .is_some()
+                    .then_some("Apply the new model binding first");
+                let mut verbs = Vec::new();
+                if model.can_open {
+                    verbs.push(Verb {
+                        label: "Open model detail…",
+                        unavailable: pending,
+                        hover: "Show this model's catalog record",
+                        result: ComponentPropertyDialogResult::OpenModel,
+                    });
+                }
+                if model.can_qualify {
+                    verbs.push(Verb {
+                        label: "Qualification…",
+                        unavailable: pending,
+                        hover: "Show the qualification evidence behind this binding",
+                        result: ComponentPropertyDialogResult::OpenQualification,
+                    });
+                }
+                ui.add_space(10.0);
+                verb_grid(ui, &verbs, action);
             }
         } else if let Some(model) = draft_model.as_deref() {
             evidence_row(ui, "Model", model);
             evidence_row(ui, "Source", "No catalog source resolved");
             evidence_row(ui, "Section", "default");
-        } else {
-            let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new("This component has no model binding.")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
         }
     });
-}
-
-fn operating_point_card(
-    ui: &mut Ui,
-    context: &ComponentEditorContext,
-    action: &mut ComponentPropertyDialogResult,
-) {
-    let status = context
-        .operating_point
-        .as_ref()
-        .map(|operating_point| {
-            format!(
-                "Run {} · {}{}",
-                operating_point.run_id,
-                operating_point.analysis,
-                if operating_point.current {
-                    ""
-                } else {
-                    " · stale"
-                }
-            )
-        })
-        .unwrap_or_else(|| "no retained run".to_owned());
-    section_block(ui, "Evaluated at operating point", &status, |ui| {
-        if let Some(operating_point) = &context.operating_point {
-            for (label, value) in &operating_point.rows {
-                evidence_row(ui, label, value);
-            }
-            ui.add_space(8.0);
-            if rspice_ui_kit::widgets::Button::new("Cross-probe in results…")
-                .show(ui)
-                .clicked()
-            {
-                *action = ComponentPropertyDialogResult::CrossProbe;
-            }
-        } else {
-            let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new("No retained device operating point")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-            ui.label(
-                egui::RichText::new("Run a DC operating-point analysis to populate this card.")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
-        }
-    });
-}
-
-fn terminals_card(ui: &mut Ui, context: &ComponentEditorContext) {
-    let open_count = context
-        .terminals
-        .iter()
-        .filter(|terminal| terminal.net.is_none())
-        .count();
-    let status = if context.terminals.is_empty() {
-        "none declared".to_owned()
-    } else if open_count == 0 {
-        "all bound".to_owned()
-    } else {
-        format!("{open_count} open")
-    };
-    section_band(ui, "Terminals", &status);
-    if context.terminals.is_empty() {
-        let t = Tokens::get(ui.ctx());
-        egui::Frame::NONE
-            .fill(t.color.bg_panel)
-            .inner_margin(Margin::symmetric(16, 10))
-            .show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("This component has no declared terminals.")
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
-            });
-        return;
-    }
-
-    terminal_table_row(ui, "PIN", "DIRECTION", "NET", true, false);
-    for terminal in &context.terminals {
-        terminal_table_row(
-            ui,
-            &terminal.pin,
-            &terminal.direction,
-            terminal.net.as_deref().unwrap_or("open"),
-            false,
-            terminal.net.is_none(),
-        );
-    }
-}
-
-fn terminal_table_row(
-    ui: &mut Ui,
-    pin: &str,
-    direction: &str,
-    net: &str,
-    heading: bool,
-    open: bool,
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    // The row must span the whole evidence pane: a shrink-to-fit frame would
-    // stop its fill and its bottom rule at the widest cell, leaving the table
-    // narrower than the band above it.
-    let row_width = ui.available_width();
-    let frame = egui::Frame::NONE
-        .fill(if heading { c.bg_panel_2 } else { c.bg_panel })
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.set_width(row_width - 20.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                let font = if heading {
-                    theme::mono(tokens::FS_0, FontWeight::Medium)
-                } else {
-                    theme::mono(tokens::FS_0, FontWeight::Regular)
-                };
-                let color = if heading { c.text_faint } else { c.text };
-                ui.add_sized(
-                    [62.0, 16.0],
-                    egui::Label::new(egui::RichText::new(pin).font(font.clone()).color(color)),
-                );
-                ui.add_sized(
-                    [88.0, 16.0],
-                    egui::Label::new(
-                        egui::RichText::new(direction)
-                            .font(if heading {
-                                font.clone()
-                            } else {
-                                theme::sans(tokens::FS_0, FontWeight::Regular)
-                            })
-                            .color(if heading { c.text_faint } else { c.text_dim }),
-                    ),
-                );
-                ui.add(
-                    egui::Label::new(egui::RichText::new(net).font(font).color(if open {
-                        c.warn
-                    } else {
-                        color
-                    }))
-                    .truncate(),
-                );
-            });
-        });
-    ui.painter().hline(
-        frame.response.rect.x_range(),
-        frame.response.rect.bottom(),
-        Stroke::new(1.0, c.border),
-    );
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    /// The stimulus library block, as a screen reader receives it.
+    /// The Stimulus section's verbs, as a screen reader receives them.
     fn stimulus_verbs(
         draft: &ComponentPropertyDraft,
         context: &ComponentEditorContext,
@@ -519,9 +419,10 @@ mod tests {
         rspice_ui_kit::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut action = ComponentPropertyDialogResult::None;
+        let stimulus = context.stimulus.clone().expect("a source context");
         ctx.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                stimulus_library_card(ui, draft, context, &mut action);
+                stimulus_body(ui, draft, &stimulus, &mut action);
             });
         })
         .platform_output

@@ -14,11 +14,9 @@ use crate::workbench::app::dialogs::stimulus_link::{
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::{ModelsPage, Workspace};
-use rspice_design::connectivity::summary::projection_nets;
-use rspice_design::hierarchy::HierarchySource;
 use rspice_schematic_editor::component_properties::{
-    ComponentEditorContext, ComponentModelContext, ComponentOperatingPointContext,
-    ComponentPropertyDialogResult, ComponentTerminalContext, StimulusEditorContext,
+    ComponentEditorContext, ComponentModelContext, ComponentPropertyDialogResult,
+    StimulusEditorContext,
 };
 
 /// Render the floating schematic component editor.
@@ -210,10 +208,6 @@ pub fn render_property_dialog(
             if let Some(library) = library {
                 state.select_model_library(&library);
             }
-        }
-        ComponentPropertyDialogResult::CrossProbe => {
-            state.tabbed_property_dialog.close();
-            state.workbench.activate(Workspace::Results);
         }
         ComponentPropertyDialogResult::AdoptStimulus
         | ComponentPropertyDialogResult::ExtractStimulus => {
@@ -538,8 +532,6 @@ fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
             }
         ),
         model: component_model_context(state, component),
-        operating_point: component_operating_point_context(state, component),
-        terminals: component_terminal_context(state, component),
         stimulus: None,
     };
     let (stimulus, retained_table) = component_stimulus_context(state, component);
@@ -833,172 +825,6 @@ fn generated_inline_model_name(component: &Component) -> Option<String> {
         _ => return None,
     };
     Some(format!("{prefix}_{}", component.name))
-}
-
-fn component_operating_point_context(
-    state: &AppState,
-    component: &Component,
-) -> Option<ComponentOperatingPointContext> {
-    let run = state.simulation.active_run()?;
-    let current = run.prepared_receipt().is_some_and(|receipt| {
-        receipt.project_revision() == state.workspace.content.project.revision()
-    }) && state.simulation.source.cross_probe.is_current_for(
-        &state.workspace.content.active_view,
-        state.schematic.topology_version(),
-    );
-    run.analyses.iter().find_map(|analysis| {
-        analysis.device_op.as_ref().and_then(|report| {
-            report
-                .entries
-                .iter()
-                .find(|entry| entry.name.eq_ignore_ascii_case(&component.name))
-                .map(|entry| {
-                    let mut rows = Vec::new();
-                    if let Some(region) = entry.region {
-                        rows.push(("Region".to_owned(), region.to_owned()));
-                    }
-                    rows.extend(
-                        entry
-                            .params
-                            .iter()
-                            .take(5_usize.saturating_sub(rows.len()))
-                            .map(|(name, value)| ((*name).to_owned(), format!("{value:.6e}"))),
-                    );
-                    rows.push((
-                        "Temperature".to_owned(),
-                        format!(
-                            "{:.1} °C",
-                            state.sim_setup.reference_pvt.temperature_celsius
-                        ),
-                    ));
-                    ComponentOperatingPointContext {
-                        run_id: run.id,
-                        analysis: analysis.label.clone(),
-                        current,
-                        rows,
-                    }
-                })
-        })
-    })
-}
-
-/// The instance's pins with the net each one binds, read from the configured
-/// design.
-///
-/// When that design does not resolve, every pin's net cell states the reason
-/// instead. An empty cell would read as an open pin, which is a different and
-/// much worse claim than "the configuration does not resolve".
-fn component_terminal_context(
-    state: &AppState,
-    component: &Component,
-) -> Vec<ComponentTerminalContext> {
-    let projection = match state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
-    ) {
-        Ok(projection) => projection,
-        Err(error) => {
-            let reason = error.to_string();
-            return component
-                .terminal_positions_resolved(None)
-                .into_iter()
-                .enumerate()
-                .map(|(index, (pin, _))| ComponentTerminalContext {
-                    direction: component_terminal_direction(component, index, &pin),
-                    net: Some(reason.clone()),
-                    pin,
-                })
-                .collect();
-        }
-    };
-    let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
-    let nets = projection_nets(
-        state.library_manager.catalog(),
-        &projection,
-        &state.workspace.content.active_view.key(),
-    );
-    let mut bound = HashMap::<(u64, String), String>::new();
-    for net in nets.iter() {
-        let isolated = net.terminals.len() == 1
-            && net.wire_ids.is_empty()
-            && net.port.is_none()
-            && !net.authored_name;
-        if isolated {
-            continue;
-        }
-        for terminal in &net.terminals {
-            bound.insert(
-                (terminal.component_id, terminal.pin.to_ascii_lowercase()),
-                net.name.clone(),
-            );
-        }
-    }
-    let resolved = component
-        .library_cell
-        .as_ref()
-        .and_then(|binding| hierarchy.resolved_symbol_for(binding));
-    component
-        .terminal_positions_resolved(resolved.as_ref())
-        .into_iter()
-        .enumerate()
-        .map(|(index, (pin, _))| ComponentTerminalContext {
-            direction: component_terminal_direction(component, index, &pin),
-            net: bound
-                .get(&(component.id, pin.to_ascii_lowercase()))
-                .cloned(),
-            pin,
-        })
-        .collect()
-}
-
-fn component_terminal_direction(component: &Component, index: usize, pin: &str) -> String {
-    if let Some(direction) = component
-        .library_cell
-        .as_ref()
-        .and_then(|binding| binding.terminal_dirs.get(index))
-    {
-        return direction.keyword().to_owned();
-    }
-    if component.kind == ComponentType::Port {
-        return component
-            .port_contract()
-            .map(|contract| contract.direction.keyword().to_owned())
-            .unwrap_or_else(|| "inout".to_owned());
-    }
-    if component.kind.is_xspice() {
-        return if matches!(pin.to_ascii_lowercase().as_str(), "out" | "q" | "qbar") {
-            "output"
-        } else {
-            "input"
-        }
-        .to_owned();
-    }
-    match component.kind {
-        ComponentType::OpAmp => {
-            if index == 2 {
-                "output"
-            } else {
-                "input"
-            }
-        }
-        ComponentType::Vcvs | ComponentType::Vccs | ComponentType::Ccvs | ComponentType::Cccs => {
-            if index < 2 {
-                "output"
-            } else {
-                "input"
-            }
-        }
-        ComponentType::VSwitch | ComponentType::ISwitch | ComponentType::GenericSwitch => {
-            if index < 2 { "passive" } else { "input" }
-        }
-        ComponentType::Ground => "ground",
-        kind if kind.is_source() => "output",
-        kind if kind.is_semiconductor() => "inout",
-        _ => "passive",
-    }
-    .to_owned()
 }
 
 fn component_property_session_error(state: &AppState) -> Option<String> {
