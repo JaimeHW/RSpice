@@ -12,5 +12,5 @@ pub use rspice_app_types::product::{
     AnalysisInstanceId, CaptureGroupId, ContentDigest, DatasetBinding, DatasetId, DesignVariableId,
     ModelSourceId, ObjectRef, ObjectRevision, ProcessCorner, ProductObjectKind, ProjectId,
     ResultDocumentId, RunId, SavedOutputId, SimulationCampaignId, SimulationPlanId, TransactionId,
-    VerificationEvidenceId, short_identity,
+    VerificationEvidenceId,
 };
