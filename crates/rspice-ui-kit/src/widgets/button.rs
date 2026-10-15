@@ -194,6 +194,13 @@ impl<'a> Button<'a> {
         } else {
             c.text
         };
+        // A disabled control is dimmed, its words included. `Painter::galley`
+        // applies its colour argument only to the sections that set none, and
+        // `measure` bakes one into every section, so dimming at the call site
+        // left a disabled button's label exactly as bright as a live one's —
+        // the frame faded and the words did not.
+        let opacity = if self.enabled { 1.0 } else { 0.4 };
+        let fg = fg.gamma_multiply(opacity);
         let (galley, width) = self.measure(ui, fg);
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
         let content_width = galley.size().x + icon_w;
@@ -258,7 +265,6 @@ impl<'a> Button<'a> {
             (fill, mix(c.border, c.border_strong, hover))
         };
 
-        let opacity = if self.enabled { 1.0 } else { 0.4 };
         let painter = ui.painter();
         painter.rect(
             rect,
@@ -276,15 +282,11 @@ impl<'a> Button<'a> {
         if let Some(icon) = self.icon {
             let icon_rect =
                 Rect::from_center_size(egui::pos2(x + 6.5, rect.center().y), vec2(13.0, 13.0));
-            icon.paint(painter, icon_rect, fg.gamma_multiply(opacity));
+            icon.paint(painter, icon_rect, fg);
             x += 13.0 + 6.0;
         }
         let text_y = rect.center().y - galley.size().y * 0.5;
-        painter.galley(
-            egui::pos2(x, text_y),
-            galley.clone(),
-            fg.gamma_multiply(opacity),
-        );
+        painter.galley(egui::pos2(x, text_y), galley.clone(), fg);
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         }
