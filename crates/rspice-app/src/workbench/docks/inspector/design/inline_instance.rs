@@ -1092,18 +1092,10 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                 ),
             );
         }
-        let digits = usize::from(
-            app.state
-                .ui
-                .preferences
-                .result_presentation_policy()
-                .displayed_significant_digits()
-                .get(),
-        );
         property_row(
             ui,
             "Node voltage",
-            &super::super::engineering_readout(annotation.voltage, &annotation.unit, digits),
+            &super::super::compact_readout(annotation.voltage, &annotation.unit),
         );
     }
 

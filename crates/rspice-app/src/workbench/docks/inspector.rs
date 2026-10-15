@@ -1208,23 +1208,15 @@ fn selected_result_trace(
     let sample_count = waveform.x.len().min(waveform.y.len());
     let statistics = finite_trace_statistics(&waveform.y);
     let available_sample_count = waveform.y.iter().filter(|value| value.is_finite()).count();
-    // The statistics are measurements of the trace, so they read the way the
-    // Measurements section reads them: in the trace's own unit, to the number
-    // of significant digits the reader chose for result readouts.
+    // The statistics are measurements of the trace, read in the trace's own
+    // unit at the precision this panel's rows hold.
     let unit = crate::workbench::documents::result_document::browser_signal_unit(
         &waveform.name,
         waveform.unit.as_deref(),
         crate::workbench::documents::result_document::analysis_default_unit(analysis.analysis_type),
     )
     .to_owned();
-    let digits = usize::from(
-        app.state
-            .ui
-            .result_presentation_policy()
-            .displayed_significant_digits()
-            .get(),
-    );
-    let measured = |value: f64| engineering_readout(value, &unit, digits);
+    let measured = |value: f64| compact_readout(value, &unit);
 
     section_header(ui, "Selected trace", None);
     property_row(ui, "Name", &waveform_name);
@@ -1469,6 +1461,18 @@ fn finite_trace_statistics(values: &[f64]) -> Option<TraceStatistics> {
         maximum,
         mean: sum / count as f64,
     })
+}
+
+/// The significant digits a compact panel readout holds: an operating-point
+/// row, a node voltage, a trace's statistics. Four, as an annotated operating
+/// point reads in Spectre — the reader's own precision belongs to the result
+/// tables, which have the width to spend it.
+const COMPACT_SIGNIFICANT_DIGITS: usize = 4;
+
+/// `value` in engineering notation with its unit, at the precision a compact
+/// panel row reads at: `96.86 µA`, not `96.86112 µA`.
+fn compact_readout(value: f64, unit: &str) -> String {
+    engineering_readout(value, unit, COMPACT_SIGNIFICANT_DIGITS)
 }
 
 /// `value` in engineering notation with its unit, to the reader's chosen

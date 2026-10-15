@@ -289,6 +289,75 @@ pub(super) fn catalog_model_location(
     Some((library.name.clone(), model.name.clone()))
 }
 
+/// The instance parameters a classic SPICE MOSFET reads: the geometry, the
+/// diffusion parasitics it sizes the junctions from, the instance
+/// temperature and the `UIC` initial conditions.
+///
+/// LEVELs 1 to 6 — Shichman-Hodges through the legacy BSIM1/BSIM2 cards —
+/// all reach the same builder and read the same instance set.
+const CLASSIC_MOS_INSTANCE_PARAMETERS: &[&str] = &[
+    "w", "l", "m", "ad", "as", "pd", "ps", "nrd", "nrs", "temp", "dtemp", "ic_vds", "ic_vgs",
+    "ic_vbs",
+];
+
+/// The SPICE `LEVEL` of the model this instance runs.
+///
+/// The card it binds, or — for a bare placement, which the netlister resolves
+/// onto its family's foundation card — that card's level.
+fn bound_model_spice_level(state: &AppState, component: &Component) -> Option<u32> {
+    let (library, model) = catalog_model_location(state, component)
+        .or_else(|| foundation_default_model_location(state, component))?;
+    let model = state
+        .model_library_manager
+        .get_library(&library)?
+        .models
+        .values()
+        .find(|candidate| candidate.name == model)?;
+    model.spice_level.or(match model.level {
+        crate::state::model_library::ModelLevel::SpiceLevel1 => Some(1),
+        crate::state::model_library::ModelLevel::SpiceLevel3 => Some(3),
+        _ => None,
+    })
+}
+
+/// Where the foundation card a bare bulk-MOS placement runs on lives.
+fn foundation_default_model_location(
+    state: &AppState,
+    component: &Component,
+) -> Option<(String, String)> {
+    let family = match component.kind {
+        ComponentType::Nmos => rspice_core::library::FoundationDeviceFamily::Nmos,
+        ComponentType::Pmos => rspice_core::library::FoundationDeviceFamily::Pmos,
+        _ => return None,
+    };
+    let provider = state
+        .model_library_manager
+        .effective_definition_provider(
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            family.default_model_name(),
+        )
+        .ok()
+        .flatten()?;
+    Some((provider.library, provider.definition))
+}
+
+/// The instance parameters the bound model's level reads, or `None` when the
+/// level is unknown or reads the sheet whole.
+///
+/// The MOSFET property sheet is the union of every MOS level's instance set,
+/// so without this a LEVEL=1 inverter offers BSIM4 geometry modes, stress
+/// distances, mismatch terms and body squares that nothing in its deck reads.
+fn level_supported_instance_parameters(
+    state: &AppState,
+    component: &Component,
+) -> Option<&'static [&'static str]> {
+    if !matches!(component.kind, ComponentType::Nmos | ComponentType::Pmos) {
+        return None;
+    }
+    matches!(bound_model_spice_level(state, component)?, 1..=6)
+        .then_some(CLASSIC_MOS_INSTANCE_PARAMETERS)
+}
+
 pub(super) fn bound_model_choices(
     state: &AppState,
     component: &Component,
@@ -751,6 +820,17 @@ pub(super) fn inline_parameter_contract(
     let temperature_row = supports_instance_temperature(state, component);
     let is_temperature = |key: &str| temperature_row && key.eq_ignore_ascii_case(TEMPERATURE_PARAM);
     let compiled = crate::workbench::app::has_compiled_parameter_sheet(state, component);
+    // A parameter the bound model's level does not read has no row, unless
+    // the instance sets it anyway: then it is the instance's own value and
+    // belongs on the panel whatever the card would do with it.
+    let supported = level_supported_instance_parameters(state, component);
+    let read_by_the_model = |name: &str| {
+        supported.is_none_or(|set| {
+            set.iter()
+                .any(|supported| supported.eq_ignore_ascii_case(name))
+                || declared.contains_key(&name.to_ascii_lowercase())
+        })
+    };
     let mut rows = Vec::new();
     let mut seen = HashSet::new();
     if let Ok(Some(sheet)) =
@@ -762,6 +842,7 @@ pub(super) fn inline_parameter_contract(
                 && definition.name != "symbol"
                 && !definition.name.eq_ignore_ascii_case(primary)
                 && !is_temperature(&definition.name)
+                && read_by_the_model(&definition.name)
         }) {
             let hint = definition.default_hint.clone().unwrap_or_else(|| {
                 match &definition.default_value {
@@ -1015,9 +1096,8 @@ fn op_quantity_set(device_kind: &str) -> Option<OpQuantitySet> {
 /// solved it at. A quantity the report does not carry has no row.
 pub(super) fn operating_point_rows(
     entry: &rspice_core::circuit::DeviceOpEntry,
-    significant_digits: usize,
 ) -> Vec<(String, String)> {
-    use super::super::engineering_readout;
+    use super::super::compact_readout;
 
     let value = |key: &str| {
         entry
@@ -1034,10 +1114,7 @@ pub(super) fn operating_point_rows(
         Some(set) => {
             for (key, label, unit) in set {
                 if let Some(value) = value(key) {
-                    rows.push((
-                        (*label).to_owned(),
-                        engineering_readout(value, unit, significant_digits),
-                    ));
+                    rows.push(((*label).to_owned(), compact_readout(value, unit)));
                 }
             }
         }
@@ -1056,7 +1133,7 @@ pub(super) fn operating_point_rows(
                 if let Some(first) = label.get_mut(..1) {
                     first.make_ascii_uppercase();
                 }
-                rows.push((label, engineering_readout(*value, unit, significant_digits)));
+                rows.push((label, compact_readout(*value, unit)));
             }
         }
     }
@@ -1125,15 +1202,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
             ),
         );
     }
-    let digits = usize::from(
-        app.state
-            .ui
-            .preferences
-            .result_presentation_policy()
-            .displayed_significant_digits()
-            .get(),
-    );
-    for (label, value) in operating_point_rows(entry, digits) {
+    for (label, value) in operating_point_rows(entry) {
         property_row(ui, &label, &value);
     }
 }

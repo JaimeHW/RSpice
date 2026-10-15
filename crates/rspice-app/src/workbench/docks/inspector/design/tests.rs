@@ -1357,7 +1357,7 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
             (OpLabel::TEMP, 85.0),
         ],
     );
-    let rows = operating_point_rows(&entry, 4);
+    let rows = operating_point_rows(&entry);
     let rows = rows
         .iter()
         .map(|(label, value)| (label.as_str(), value.as_str()))
@@ -1376,6 +1376,58 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
             ("Temperature", "85 °C"),
         ]
     );
+}
+
+/// The MOSFET property sheet is the union of every MOS level's instance set,
+/// so a LEVEL=1 transistor used to be offered BSIM4 geometry modes, stress
+/// distances, mismatch terms and body squares that nothing in its deck reads.
+/// It is offered what its card reads; a value the instance sets anyway is
+/// still the instance's own and keeps its row.
+#[test]
+fn a_level_1_mosfet_is_offered_only_the_parameters_its_card_reads() {
+    let mut state = AppState::default();
+    crate::workbench::examples::load_example("CMOS Inverter", &mut state.schematic);
+    let mut component = state
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.name == "MN")
+        .expect("the inverter has an MN")
+        .clone();
+
+    let declared = crate::state::parse_params_string(&component.params);
+    let rows = inline_parameter_contract(&state, &component, &declared);
+    let keys = |rows: &[InlineParameterContract]| {
+        rows.iter()
+            .map(|row| row.key.to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    };
+    let offered = keys(&rows);
+    for unread in [
+        "geomod", "rgeomod", "min", "nf", "sa", "sb", "sc", "sd", "sca", "scb", "scc", "delvto",
+        "mulu0", "nrb",
+    ] {
+        assert!(
+            !offered.iter().any(|key| key == unread),
+            "LEVEL=1 does not read {unread}: {offered:?}"
+        );
+    }
+    for read in [
+        "w", "l", "m", "ad", "as", "pd", "ps", "nrd", "nrs", "ic_vds",
+    ] {
+        assert!(
+            offered.iter().any(|key| key == read),
+            "LEVEL=1 reads {read}: {offered:?}"
+        );
+    }
+
+    // Set one of the dropped parameters and it comes back: it is a value on
+    // the instance, not a field the card invited.
+    component.params = format!("{} sa=1u", component.params);
+    let declared = crate::state::parse_params_string(&component.params);
+    let offered = keys(&inline_parameter_contract(&state, &component, &declared));
+    assert!(offered.iter().any(|key| key == "sa"), "{offered:?}");
 }
 
 /// A device below the design root is reported under its instance path. The

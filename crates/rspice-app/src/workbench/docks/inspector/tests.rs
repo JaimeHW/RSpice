@@ -1390,17 +1390,29 @@ fn design_multi_app() -> RSpiceApp {
 /// solved the inverter's operating point with its input held at mid-rail —
 /// the device report and node voltages are the engine's own.
 fn design_mos_op_app() -> RSpiceApp {
-    let deck = "\
+    // The shipped example's own transistors, cards and rail: the panel
+    // states an operating point the design in front of the reader would
+    // actually solve, so the cards are the foundation library's own text.
+    let card = |name: &str| {
+        rspice_core::library::foundation_card_source(name)
+            .unwrap_or_else(|| panic!("{name} is a foundation card"))
+    };
+    let deck = format!(
+        "\
 * CMOS inverter at its switching point
-vdd vdd 0 dc 1.8
-vin in 0 dc 0.9
-MP out in vdd vdd pch W=2u L=0.18u
-MN out in 0 0 nch W=1u L=0.18u
-.model nch NMOS LEVEL=1 VTO=0.45 KP=200u LAMBDA=0.05
-.model pch PMOS LEVEL=1 VTO=-0.45 KP=80u LAMBDA=0.05
+vdd vdd 0 dc 3.3
+vin in 0 dc 1.65
+MP out in vdd vdd RSPICE_PMOS W=2u L=0.18u
+MN out in 0 0 RSPICE_NMOS W=1u L=0.18u
+{}
+{}
 .op
 .end
-";
+",
+        card("RSPICE_NMOS"),
+        card("RSPICE_PMOS")
+    );
+    let deck = deck.as_str();
     let netlist = rspice_core::netlist::Netlist::parse(deck).expect("the op deck parses");
     let (solution, report) =
         rspice_core::engine::Engine::new(rspice_core::engine::SimulationConfig::default())
@@ -1495,6 +1507,19 @@ MN out in 0 0 nch W=1u L=0.18u
         .selection
         .select_only_component(mn);
     app
+}
+
+/// A compact panel row — an operating point, a node voltage, a trace's
+/// statistics — holds four significant digits whatever precision the reader
+/// set for the result tables, and still drops the zeros that only pad a
+/// value out.
+#[test]
+fn a_compact_panel_readout_holds_four_significant_digits() {
+    assert_eq!(compact_readout(96.86112e-6, "A"), "96.86 µA");
+    assert_eq!(compact_readout(275.30774e-3, "V"), "275.3 mV");
+    assert_eq!(compact_readout(310.10824e-6, "S"), "310.1 µS");
+    assert_eq!(compact_readout(4.1, "V"), "4.1 V");
+    assert_eq!(compact_readout(0.9, "V"), "900 mV");
 }
 
 /// One review panel: its file name and the app state it renders.
