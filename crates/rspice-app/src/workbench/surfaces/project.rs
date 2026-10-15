@@ -628,7 +628,10 @@ fn project_page_actions(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
+/// A ledger panel's own header: its name on the left and one fact about the
+/// list on the right. The fact is never painted as a verdict; a panel the
+/// reader has to look at carries the kit's mark in front of it instead.
+fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (rect, _) =
@@ -669,13 +672,27 @@ fn workspace_table_panel_header(ui: &mut Ui, title: &str, meta: &str, meta_color
         title_font,
         tokens.color.text,
     );
-    ui.painter().with_clip_rect(meta_rect).text(
-        meta_rect.right_center(),
-        Align2::RIGHT_CENTER,
-        meta,
-        meta_font,
-        meta_color,
-    );
+    let meta_left = ui
+        .painter()
+        .with_clip_rect(meta_rect)
+        .text(
+            meta_rect.right_center(),
+            Align2::RIGHT_CENTER,
+            meta,
+            meta_font,
+            tokens.color.text_faint,
+        )
+        .left();
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(meta_left - 6.0 - CHIP_MARK_SIDE * 0.5, meta_rect.center().y),
+                vec2(CHIP_MARK_SIDE, CHIP_MARK_SIDE),
+            ),
+            problem,
+        );
+    }
 }
 
 /// How one ledger row is painted.
@@ -700,6 +717,13 @@ impl WorkspaceRowKind {
     }
 }
 
+/// One ledger row.
+///
+/// `faint_columns` are the cells holding a placeholder rather than a value,
+/// which take the faint tone so an absent value never competes with a real
+/// one. `problem` marks one cell — a resource the reader has to look at —
+/// with the kit's mark in front of its words; no cell's text is ever
+/// coloured.
 fn workspace_table_row<const N: usize>(
     ui: &mut Ui,
     width: f32,
@@ -707,7 +731,8 @@ fn workspace_table_row<const N: usize>(
     fractions: [f32; N],
     kind: WorkspaceRowKind,
     mono_columns: &[usize],
-    colored_cells: &[(usize, Color32)],
+    faint_columns: &[usize],
+    problem: Option<(usize, Problem)>,
 ) -> (egui::Response, Vec<Rect>) {
     let tokens = Tokens::get(ui.ctx());
     let header = kind.is_header();
@@ -758,14 +783,11 @@ fn workspace_table_row<const N: usize>(
         if index > 0 {
             painter.vline(left, rect.y_range(), Stroke::new(1.0, tokens.color.border));
         }
-        let text_color = colored_cells
-            .iter()
-            .find_map(|(column, color)| (*column == index).then_some(*color))
-            .unwrap_or(if header {
-                tokens.color.text_faint
-            } else {
-                tokens.color.text_dim
-            });
+        let text_color = if header || faint_columns.contains(&index) {
+            tokens.color.text_faint
+        } else {
+            tokens.color.text_dim
+        };
         let font = if header {
             theme::sans(tokens::FS_0, FontWeight::Medium)
         } else if mono_columns.contains(&index) {
@@ -773,10 +795,27 @@ fn workspace_table_row<const N: usize>(
         } else {
             theme::sans(tokens::FS_0, FontWeight::Regular)
         };
-        let text_rect = cell.shrink2(vec2(8.0, 0.0));
+        let mark = problem.and_then(|(column, problem)| (column == index).then_some(problem));
+        if let Some(problem) = mark {
+            paint_problem_mark(
+                &painter,
+                Rect::from_center_size(
+                    pos2(cell.left() + 8.0 + CHIP_MARK_SIDE * 0.5, cell.center().y),
+                    vec2(CHIP_MARK_SIDE, CHIP_MARK_SIDE),
+                ),
+                problem,
+            );
+        }
+        let text_left = 8.0
+            + if mark.is_some() {
+                CHIP_MARK_ADVANCE
+            } else {
+                0.0
+            };
+        let text_rect = cell.shrink2(vec2(text_left, 0.0));
         let text = elide_text(ui, text, &font, text_rect.width());
         painter.with_clip_rect(text_rect).text(
-            cell.left_center() + vec2(8.0, 0.0),
+            cell.left_center() + vec2(text_left, 0.0),
             Align2::LEFT_CENTER,
             text,
             font,
@@ -785,15 +824,19 @@ fn workspace_table_row<const N: usize>(
         cell_rects.push(cell);
         left = right;
     }
+    let announcement = {
+        let joined = cells.join(", ");
+        problem.map_or(joined.clone(), |(_, problem)| problem.announce(&joined))
+    };
     response.widget_info(|| {
         if header {
-            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), cells.join(", "))
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
         } else {
             egui::WidgetInfo::selected(
                 egui::WidgetType::SelectableLabel,
                 ui.is_enabled(),
                 kind == WorkspaceRowKind::Selected,
-                cells.join(", "),
+                &announcement,
             )
         }
     });

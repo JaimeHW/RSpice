@@ -27,18 +27,18 @@ const DEPENDENCY_ACTION_BAR_PAD: i8 = 6;
 const DEPENDENCY_UNSET: &str = "\u{2014}";
 
 const LEDGER_COLUMNS: [&str; 6] = [
-    "DEPENDENCY",
-    "TYPE",
-    "VERSION",
-    "SOURCE",
-    "DIGEST",
-    "STATUS",
+    "Dependency",
+    "Type",
+    "Version",
+    "Source",
+    "Digest",
+    "Status",
 ];
 const LEDGER_FRACTIONS: [f32; 6] = [0.24, 0.14, 0.09, 0.26, 0.11, 0.16];
 /// Version and digest are identities rather than prose, so both take the mono
 /// face and stay comparable down the column.
 const LEDGER_MONO_COLUMNS: [usize; 2] = [2, 4];
-const LEDGER_COMPACT_COLUMNS: [&str; 5] = ["DEPENDENCY", "TYPE", "VERSION", "SOURCE", "STATUS"];
+const LEDGER_COMPACT_COLUMNS: [&str; 5] = ["Dependency", "Type", "Version", "Source", "Status"];
 const LEDGER_COMPACT_FRACTIONS: [f32; 5] = [0.26, 0.15, 0.14, 0.24, 0.21];
 const LEDGER_COMPACT_MONO_COLUMNS: [usize; 1] = [2];
 
@@ -173,32 +173,21 @@ fn dependency_context_facts(
     total: usize,
     filter: &str,
 ) {
-    let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.x = 10.0;
     context_fact(
         ui,
         "Closure",
         &format!("{resolved} resolved \u{00b7} {review} review"),
-        if review == 0 {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
     );
     // The ledger names its own count in its header; the ratio is only worth a
     // fact while a filter is hiding something.
     if !filter.is_empty() {
         ui.separator();
-        context_fact(
-            ui,
-            "Filter",
-            &format!("{visible} of {total} match"),
-            t.color.text_dim,
-        );
+        context_fact(ui, "Filter", &format!("{visible} of {total} match"));
     }
 }
 
-fn context_fact(ui: &mut Ui, label: &str, value: &str, color: Color32) {
+fn context_fact(ui: &mut Ui, label: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
         egui::RichText::new(label)
@@ -208,7 +197,7 @@ fn context_fact(ui: &mut Ui, label: &str, value: &str, color: Color32) {
     ui.label(
         egui::RichText::new(value)
             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(color),
+            .color(t.color.text_dim),
     );
 }
 
@@ -260,15 +249,13 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         .cloned();
     let contract = app.state.validate_project_technology_contract();
     let contract_ok = binding.is_some() && contract.is_ok();
+    // A pinned binding is the ordinary binding, so the header names only the
+    // one that has to be looked at.
     workspace_table_panel_header(
         ui,
         "Technology & simulator binding",
-        if contract_ok { "PINNED" } else { "REVIEW" },
-        if contract_ok {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
+        if contract_ok { "" } else { "review" },
+        (!contract_ok).then_some(Problem::Warning),
     );
     if let Some(binding) = binding.as_ref() {
         property_row(ui, "Technology", &binding.display_label());
@@ -361,14 +348,11 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         "Execution",
         crate::state::ExecutionTarget::current().label(),
     );
-    technology_contract_note(
-        ui,
-        &contract.err().unwrap_or_else(|| {
-            "Model sources, signed package bytes, publisher signature, and runtime compatibility validate exactly."
-                .to_owned()
-        }),
-        contract_ok,
-    );
+    // A contract that validates says nothing: the sentence it used to paint
+    // described the checks RSpice ran, not anything the reader can act on.
+    if let Some(error) = contract.err() {
+        technology_contract_note(ui, &error);
+    }
     dependency_action_bar(ui, |ui| {
         if Button::new(TECHNOLOGY_SURFACE_ACTION)
             .accent()
@@ -392,42 +376,22 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 }
 
-/// The verdict on the project's technology contract, carried by a rule in the
-/// verdict's own colour rather than by a tinted box that reads as a tooltip
-/// stranded between the property list and the buttons.
-fn technology_contract_note(ui: &mut Ui, message: &str, contract_ok: bool) {
+/// What stops the project's technology contract from validating, under a rule
+/// that separates it from the property list above and the buttons below.
+fn technology_contract_note(ui: &mut Ui, message: &str) {
     let t = Tokens::get(ui.ctx());
-    let tone = if contract_ok {
-        t.color.ok
-    } else {
-        t.color.warn
-    };
+    // `problem_line` carries the panel body's own 10 px inset, which is where
+    // the property labels above it start, so the frame adds none of its own.
     let shown = egui::Frame::new()
-        .fill(theme::mix(t.color.bg_panel, tone, 0.05))
-        .inner_margin(Margin {
-            left: 12,
-            right: 10,
-            top: 7,
-            bottom: 7,
-        })
+        .inner_margin(Margin::symmetric(0, 7))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
+            problem_line(ui, Problem::Warning, message);
         });
-    let rect = shown.response.rect;
-    ui.painter()
-        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
-    ui.painter().rect_filled(
-        Rect::from_min_size(rect.left_top(), vec2(2.0, rect.height())),
-        0.0,
-        tone,
+    ui.painter().hline(
+        shown.response.rect.x_range(),
+        shown.response.rect.top(),
+        Stroke::new(1.0, t.color.border),
     );
 }
 
@@ -438,7 +402,6 @@ fn dependency_inventory(
     pane_width: f32,
     pane_height: f32,
 ) {
-    let t = Tokens::get(ui.ctx());
     let top = ui.cursor().top();
     ui.spacing_mut().item_spacing.y = 0.0;
     let filter = dependency_filter(state);
@@ -449,12 +412,8 @@ fn dependency_inventory(
     workspace_table_panel_header(
         ui,
         "Resolved dependency ledger",
-        &format!("{} SHOWN", visible.len()),
-        if visible.is_empty() {
-            t.color.text_faint
-        } else {
-            t.color.ok
-        },
+        &format!("{} shown", visible.len()),
+        None,
     );
     // The pane owns the column grid, not the unconstrained central panel: a
     // ledger bound to the wrong width paints its status column underneath the
@@ -471,6 +430,7 @@ fn dependency_inventory(
             WorkspaceRowKind::Header,
             &[],
             &[],
+            None,
         );
     } else {
         workspace_table_row(
@@ -481,6 +441,7 @@ fn dependency_inventory(
             WorkspaceRowKind::Header,
             &[],
             &[],
+            None,
         );
     }
     if rows.is_empty() {
@@ -498,7 +459,7 @@ fn dependency_inventory(
             state.workbench.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
         );
         let status = status_label(&row.status);
-        let tone = status_tone(&t, &row.status);
+        let problem = status_problem(&row.status);
         let response = if compact {
             let cells = [
                 row.identity.as_str(),
@@ -514,7 +475,8 @@ fn dependency_inventory(
                 LEDGER_COMPACT_FRACTIONS,
                 kind,
                 &LEDGER_COMPACT_MONO_COLUMNS,
-                &cell_tones(&cells, 4, tone, t.color.text_faint),
+                &unset_columns(&cells),
+                problem.map(|problem| (4, problem)),
             )
             .0
         } else {
@@ -533,7 +495,8 @@ fn dependency_inventory(
                 LEDGER_FRACTIONS,
                 kind,
                 &LEDGER_MONO_COLUMNS,
-                &cell_tones(&cells, 5, tone, t.color.text_faint),
+                &unset_columns(&cells),
+                problem.map(|problem| (5, problem)),
             )
             .0
         };
@@ -603,11 +566,15 @@ fn row_is_resolved(row: &DependencyRow) -> bool {
     matches!(row.status.as_str(), "accepted" | "available" | "embedded")
 }
 
-fn status_tone(t: &Tokens, status: &str) -> Color32 {
+/// The mark a resource's status earns, or none.
+///
+/// A resource that resolved is the ordinary resource and reads as one. A
+/// resource the project holds only by catalog entry, or in any other state,
+/// is one the reader has to look at before a run depends on it.
+fn status_problem(status: &str) -> Option<Problem> {
     match status {
-        "accepted" | "available" | "embedded" => t.color.ok,
-        "catalog only" => t.color.text_dim,
-        _ => t.color.warn,
+        "accepted" | "available" | "embedded" | "catalog only" => None,
+        _ => Some(Problem::Warning),
     }
 }
 
@@ -620,22 +587,15 @@ fn status_label(status: &str) -> String {
     })
 }
 
-/// Per-cell colours for one ledger row: the status verdict, and the faint tone
-/// every placeholder takes so an absent value never competes with a real one.
-fn cell_tones<const N: usize>(
-    cells: &[&str; N],
-    status_column: usize,
-    status: Color32,
-    unset: Color32,
-) -> Vec<(usize, Color32)> {
-    let mut tones = Vec::with_capacity(3);
-    tones.push((status_column, status));
-    for (index, cell) in cells.iter().enumerate() {
-        if *cell == DEPENDENCY_UNSET {
-            tones.push((index, unset));
-        }
-    }
-    tones
+/// The columns of one ledger row holding a placeholder rather than a value.
+/// They take the faint tone, so an absent value never competes with a real
+/// one down the column.
+fn unset_columns<const N: usize>(cells: &[&str; N]) -> Vec<usize> {
+    cells
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cell)| (*cell == DEPENDENCY_UNSET).then_some(index))
+        .collect()
 }
 
 fn dependency_rows(state: &AppState) -> Vec<DependencyRow> {
