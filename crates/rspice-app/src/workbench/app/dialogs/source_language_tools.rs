@@ -17,11 +17,12 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, Problem,
+    problem_line,
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
+use crate::workbench::design_system::inspector::muted_inspector_copy;
 use crate::workbench::design_system::{
     code_inspector_section, panel_body, property_row, property_row_input, section_block_gap,
 };
@@ -692,7 +693,7 @@ fn code_actions(
             // The formatter refuses documents it cannot prove it would not
             // corrupt. That refusal is the finding, so it is shown as one.
             Err(refusal) => {
-                toned_inspector_copy(ui, refusal, t.color.warn);
+                problem_line(ui, Problem::Warning, refusal);
             }
             Ok(actions) if actions.is_empty() => {
                 muted_inspector_copy(ui, &messages.text(MessageId::CodeToolsNoCodeActions));

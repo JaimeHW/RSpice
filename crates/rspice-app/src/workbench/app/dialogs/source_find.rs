@@ -19,7 +19,7 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
+use crate::workbench::design_system::inspector::muted_inspector_copy;
 use crate::workbench::design_system::{
     code_inspector_section, panel_body, property_row, property_row_combo, section_block_gap,
 };
@@ -303,7 +303,7 @@ fn find_body(
                         action = FindAction::Replace;
                     }
                     if found.read_only_matches > 0 {
-                        toned_inspector_copy(
+                        muted_inspector_copy(
                             ui,
                             &messages.format(
                                 if found.read_only_matches == 1 {
@@ -313,7 +313,6 @@ fn find_body(
                                 },
                                 &[("count", &found.read_only_matches.to_string())],
                             ),
-                            t.color.warn,
                         );
                     }
                 }
@@ -408,7 +407,7 @@ fn results_table(
             // Silence about a cap reads as "this is everything". Say what was
             // dropped and why the number on screen is not the total.
             if found.display_truncated {
-                toned_inspector_copy(
+                muted_inspector_copy(
                     ui,
                     &messages.format(
                         if found.truncated {
@@ -421,7 +420,6 @@ fn results_table(
                             ("count", &found.total_matches.to_string()),
                         ],
                     ),
-                    t.color.warn,
                 );
             }
         },

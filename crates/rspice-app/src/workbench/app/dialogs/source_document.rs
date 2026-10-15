@@ -18,18 +18,24 @@ use crate::state::{ProjectSourceBundle, ProjectSourceLanguage};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, Problem,
+    paint_problem_mark,
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    StatusMark, code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
-    property_row_height, property_row_input, property_row_status, section_block_gap,
+    code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
+    property_row_height, property_row_input, property_row_problem, section_block_gap,
     subsection_header,
 };
 use crate::workbench::documents::code_workspace::{self, CodeSourceFileAction};
 use crate::workbench::{MessageCatalog, MessageId};
+
+/// Side of a leading problem mark on an include row, and the advance from its
+/// left edge to the text behind it. Both match the kit's own problem line.
+const INCLUDE_MARK_SIDE: f32 = 11.0;
+const INCLUDE_MARK_ADVANCE: f32 = 17.0;
 
 /// Bring the lifecycle dialog up for the page that is showing.
 ///
@@ -922,7 +928,6 @@ fn lifecycle_body(
     facts: &DocumentFacts,
     messages: MessageCatalog,
 ) -> LifecycleAction {
-    let t = Tokens::get(ui.ctx());
     let mut action = LifecycleAction::None;
     // One body around every section, so they stack on the section gap rather
     // than on the scroll area's item spacing.
@@ -931,9 +936,7 @@ fn lifecycle_body(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             panel_body(ui, |ui| {
-                if let Some(chosen) =
-                    current_document(ui, facts, t.color.ok, t.color.accent, messages)
-                {
+                if let Some(chosen) = current_document(ui, facts, messages) {
                     action = chosen;
                 }
                 operations(ui, facts, &mut action, messages);
@@ -964,7 +967,7 @@ fn netlist_lifecycle_body(
                 code_inspector_section(
                     ui,
                     &messages.text(MessageId::CodeSourceCurrentDocument),
-                    Some(&messages.text(MessageId::CodeSourceOwnedEditable)),
+                    None,
                     None,
                     |ui| {
                         if facts.include_identity.is_some() {
@@ -1214,24 +1217,19 @@ fn include_search_paths(
                         ui.painter()
                             .rect_filled(panel_bleed(ui, rect), 0.0, t.color.accent_dim);
                     }
-                    let state_text = if rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence() {
-                        messages.text(if entry.exists() {
-                            MessageId::NetlistIncludeSearchPathFound
-                        } else {
-                            MessageId::NetlistIncludeSearchPathMissing
-                        })
+                    // A path that resolves is every path's normal state, so
+                    // only one that does not is marked and named.
+                    let missing = rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence()
+                        && !entry.exists();
+                    let state_text = if missing {
+                        messages.text(MessageId::NetlistIncludeSearchPathMissing)
                     } else {
                         String::new()
                     };
                     let state_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-                    let state_tone = if entry.exists() {
-                        t.color.text_faint
-                    } else {
-                        t.color.warn
-                    };
-                    let state_width = ui
+                    let mut state_width = ui
                         .painter()
-                        .layout_no_wrap(state_text.clone(), state_font.clone(), state_tone)
+                        .layout_no_wrap(state_text.clone(), state_font.clone(), t.color.text_dim)
                         .size()
                         .x;
                     ui.painter().text(
@@ -1239,8 +1237,23 @@ fn include_search_paths(
                         egui::Align2::RIGHT_CENTER,
                         &state_text,
                         state_font,
-                        state_tone,
+                        t.color.text_dim,
                     );
+                    if missing {
+                        paint_problem_mark(
+                            ui.painter(),
+                            egui::Rect::from_center_size(
+                                egui::pos2(
+                                    rect.right() - inset - state_width - INCLUDE_MARK_ADVANCE
+                                        + INCLUDE_MARK_SIDE * 0.5,
+                                    rect.center().y,
+                                ),
+                                egui::Vec2::splat(INCLUDE_MARK_SIDE),
+                            ),
+                            Problem::Warning,
+                        );
+                        state_width += INCLUDE_MARK_ADVANCE;
+                    }
                     ui.painter()
                         .with_clip_rect(egui::Rect::from_x_y_ranges(
                             (rect.left() + inset)..=(rect.right() - inset - 8.0 - state_width),
@@ -1261,10 +1274,9 @@ fn include_search_paths(
                 }
             }
             if unsaved && !authored.is_empty() {
-                toned_inspector_copy(
+                muted_inspector_copy(
                     ui,
                     &messages.text(MessageId::NetlistIncludeSearchPathUnsaved),
-                    t.color.warn,
                 );
             }
             section_block_gap(ui);
@@ -1383,7 +1395,7 @@ fn netlist_operation_review(
     code_inspector_section(
         ui,
         &messages.text(title),
-        Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
+        None,
         None,
         |ui| {
             if deleting {
@@ -1470,7 +1482,7 @@ fn netlist_include_operation_review(
     code_inspector_section(
         ui,
         &messages.text(title),
-        Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
+        None,
         None,
         |ui| {
             property_row(
@@ -1519,20 +1531,15 @@ fn netlist_include_operation_review(
 fn current_document(
     ui: &mut Ui,
     facts: &DocumentFacts,
-    ok: egui::Color32,
-    accent: egui::Color32,
     messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
-    let ownership = messages.text(if facts.editable {
-        MessageId::CodeSourceOwnedEditable
-    } else {
-        MessageId::CodeSourceOwnedReadOnly
-    });
+    // Every project document is editable; only one that is not is news.
+    let ownership = (!facts.editable).then(|| messages.text(MessageId::CodeSourceOwnedReadOnly));
     let mut action = None;
     code_inspector_section(
         ui,
         &messages.text(MessageId::CodeSourceCurrentDocument),
-        Some(&ownership),
+        ownership.as_deref(),
         None,
         |ui| {
             property_row(
@@ -1563,21 +1570,16 @@ fn current_document(
                 &messages.text(MessageId::CodeSourceBundle),
                 &facts.bundle,
             );
-            property_row_status(
-                ui,
-                &messages.text(MessageId::CodeSourceValidation),
-                &messages.text(if facts.validation_current {
-                    MessageId::CodeSourceValidationCurrent
-                } else {
-                    MessageId::CodeSourceValidationStale
-                }),
-                if facts.validation_current { ok } else { accent },
-                if facts.validation_current {
-                    StatusMark::Success
-                } else {
-                    StatusMark::Warning
-                },
-            );
+            // A current validation is the state this row is in nearly always,
+            // and saying so is the absence of a problem.
+            if !facts.validation_current {
+                property_row_problem(
+                    ui,
+                    &messages.text(MessageId::CodeSourceValidation),
+                    &messages.text(MessageId::CodeSourceValidationStale),
+                    Some(Problem::Warning),
+                );
+            }
         },
     );
     action
@@ -1780,7 +1782,7 @@ fn operation_review(
     code_inspector_section(
         ui,
         &messages.text(title),
-        Some(&messages.text(MessageId::CodeSourceOpenTransaction)),
+        None,
         None,
         |ui| {
             if deleting {
@@ -1958,7 +1960,7 @@ fn revision_history(
                                 String::new()
                             })
                             .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                            .color(t.color.ok),
+                            .color(t.color.text_dim),
                         );
                         ui.end_row();
                     }
