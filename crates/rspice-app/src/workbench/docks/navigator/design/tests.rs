@@ -1665,10 +1665,7 @@ fn an_open_row_menu_takes_the_arrows_back_from_the_rail() {
     }]);
     panel.pass(Vec::new());
     assert!(
-        panel
-            .painted()
-            .lines()
-            .any(|line| line == "NAVIGATOR OBJECT"),
+        panel.painted().lines().any(|line| line == "Properties…"),
         "Shift+F10 raised the focused row's menu: {}",
         panel.painted()
     );
@@ -2073,16 +2070,16 @@ fn the_rf_port_rail_indexes_its_rows_the_way_an_s_parameter_run_does() {
         [
             (
                 "PIN",
-                "#1 \u{00b7} Z0 50 \u{00b7} drive \u{00b7} no S-parameter run".to_owned()
+                "#1 \u{00b7} Z0 50 \u{00b7} drive \u{00b7} unused".to_owned()
             ),
             // `5e1` and `50` are one impedance, and the rail prints them as one.
             (
                 "POUT",
-                "#2 \u{00b7} Z0 50 \u{00b7} term \u{00b7} no S-parameter run".to_owned()
+                "#2 \u{00b7} Z0 50 \u{00b7} term \u{00b7} unused".to_owned()
             ),
             (
                 "PLOAD",
-                "#3 \u{00b7} Z0 75 \u{00b7} term \u{00b7} no S-parameter run".to_owned()
+                "#3 \u{00b7} Z0 75 \u{00b7} term \u{00b7} unused".to_owned()
             ),
         ]
     );
@@ -2101,8 +2098,8 @@ fn an_rf_port_row_names_the_s_parameter_run_that_reads_it() {
 
     let unread = rf_port_meta(&listed_rf_ports(&app)[0]);
     assert!(
-        unread.ends_with("no S-parameter run"),
-        "a plan with no `.sp` run states what is missing: {unread}"
+        unread.ends_with("unused"),
+        "a plan with no `.sp` run leaves the port unused: {unread}"
     );
 
     // A transient reaches the port as the two-terminal element the netlist
@@ -2112,7 +2109,7 @@ fn an_rf_port_row_names_the_s_parameter_run_that_reads_it() {
         Some(plan_with(crate::simulation::plan::AnalysisKind::Transient));
     let loaded = rf_port_meta(&listed_rf_ports(&app)[0]);
     assert!(
-        loaded.ends_with("no S-parameter run"),
+        loaded.ends_with("unused"),
         "only an `.sp` run indexes a port: {loaded}"
     );
 
@@ -2495,7 +2492,7 @@ fn the_object_menu_opens_from_the_keyboard_on_the_focused_row() {
     // anchor only lives on the opening frame is gone by now.
     let output = navigator_output(Vec::new());
     let runs = painted_runs(&output);
-    let find = run_rect(&runs, "Find references and consumers…").unwrap_or_else(|| {
+    let find = run_rect(&runs, "Filter by ALPHA").unwrap_or_else(|| {
         panic!(
             "Shift+F10 keeps the focused row's object menu open: {}",
             painted_text(&output)

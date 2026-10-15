@@ -140,8 +140,9 @@ fn a_part_the_project_retained_arms_from_the_component_shelf() {
 
     let macromodel = row("PROVING_DIV");
     // The catalog's word for a subcircuit, not a second one: the same column
-    // carries pack rows, and the class chip that narrows it spells it this way.
-    assert_eq!(macromodel.meta, "subckt · in project");
+    // carries pack rows, and the class chip that narrows it spells it this
+    // way. Where it came from is normal and is the Models workspace's.
+    assert_eq!(macromodel.meta, "subckt");
     let LibraryPartAction::Arm(placement) = &macromodel.action else {
         panic!(
             "a retained macromodel arms directly: {:?}",
@@ -203,7 +204,9 @@ fn a_foundation_part_arms_from_its_built_in_library() {
         .iter()
         .find(|row| row.part_id == "RSPICE_PROBE_NPN")
         .expect("the foundation card is on the shelf");
-    assert!(row.meta.ends_with("built in"), "{}", row.meta);
+    // A placeable foundation card is the normal case, so the row states what
+    // the part is and leaves where it came from to the Models workspace.
+    assert_eq!(row.meta, "bjt-npn", "{}", row.meta);
     assert!(
         matches!(&row.action, LibraryPartAction::Arm(placement)
         if matches!(placement.as_ref(), PartPlacement::NativeDevice {
@@ -504,27 +507,27 @@ fn a_fresh_shelf_opens_passives_and_folds_the_rest_until_the_reader_moves_one() 
     );
 }
 
-/// The shelf's meta column states the designator prefix and the default the
-/// placed instance will carry, spelled through the crate's engineering
-/// formatter — and only what a part actually has: a modelled device keeps its
-/// prefix alone, a structural row says nothing.
+/// The shelf's meta column states the default the placed instance will
+/// carry, spelled through the crate's engineering formatter, and nothing
+/// else: the designator prefix it used to lead with is what the glyph column
+/// beside it paints, from the same `spice_prefix`.
 #[test]
-fn shelf_meta_states_the_prefix_and_the_placed_default() {
+fn shelf_meta_states_the_placed_default() {
     for (kind, meta) in [
-        (ComponentType::Resistor, Some("R \u{00b7} 1k")),
-        (ComponentType::Capacitor, Some("C \u{00b7} 1u")),
-        (ComponentType::Inductor, Some("L \u{00b7} 1m")),
-        (ComponentType::VoltageSource, Some("V \u{00b7} 5")),
-        (ComponentType::OpAmp, Some("E \u{00b7} 100k")),
+        (ComponentType::Resistor, Some("1k")),
+        (ComponentType::Capacitor, Some("1u")),
+        (ComponentType::Inductor, Some("1m")),
+        (ComponentType::VoltageSource, Some("5")),
+        (ComponentType::OpAmp, Some("100k")),
         // The one default not authored in the formatter's spelling: the
         // formatter's decade wins, as it does in the property editor.
-        (ComponentType::CoupledInductor, Some("K \u{00b7} 990m")),
+        (ComponentType::CoupledInductor, Some("990m")),
         // A default no engineering parser reads is stated as authored.
-        (ComponentType::BehavioralSource, Some("B \u{00b7} V=0")),
+        (ComponentType::BehavioralSource, Some("V=0")),
         // Modelled devices have no meaningful default value.
-        (ComponentType::Diode, Some("D")),
-        (ComponentType::Nmos, Some("M")),
-        (ComponentType::Memristor, Some("MR")),
+        (ComponentType::Diode, None),
+        (ComponentType::Nmos, None),
+        (ComponentType::Memristor, None),
         // Structural objects own neither a designator nor a value.
         (ComponentType::Ground, None),
         (ComponentType::Port, None),

@@ -639,15 +639,11 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
     if !navigator_section_header(ui, DesignNavigatorSection::Masters, &total.to_string()) {
         return;
     }
+    // An empty rail says so with the "0" on its band.
     if masters.is_empty() {
-        empty_navigator_row(
-            ui,
-            if query.is_empty() {
-                "This design binds no cell view"
-            } else {
-                "No master matches this filter"
-            },
-        );
+        if !query.is_empty() {
+            empty_navigator_row(ui, "No master matches this filter");
+        }
         return;
     }
 
@@ -782,7 +778,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         empty_navigator_row(
             ui,
             if query.is_empty() {
-                "The design root binds no executable view"
+                "The top cell has no schematic."
             } else {
                 "No occurrence matches this filter"
             },
@@ -854,7 +850,9 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
                         icon: WorkbenchIcon::File,
                         label: name.as_str(),
                         mono: false,
-                        meta: Some("sheet"),
+                        // The row's own file icon already says it is a
+                        // sheet, on every sheet row there is.
+                        meta: None,
                         alert: false,
                         selected: false,
                     },

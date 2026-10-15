@@ -420,47 +420,52 @@ fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::multi_sheet_catalog(&app.state)
         .map(|_| sheet_visibility::sheet_scope(ui.ctx()));
     let mut chosen_scope = None;
-    let path_frame = egui::Frame::new()
-        .fill(t.color.bg_inset)
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 3.0;
-                let occurrence_text = egui::RichText::new(&occurrence)
-                    .font(theme::mono(tokens::FS_1, FontWeight::Medium))
-                    .color(t.color.text);
+    // At the design root the line reads "/ · lib/cell", which is the document
+    // tab above it; the click it carries ascends to nothing. Below the root
+    // the path is where the reader is and the click is how they leave.
+    if can_ascend || scope.is_some() {
+        let path_frame = egui::Frame::new()
+            .fill(t.color.bg_inset)
+            .inner_margin(egui::Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width().max(1.0));
                 if can_ascend {
-                    let response = ui
-                        .add(egui::Button::new(occurrence_text).frame(false))
-                        .on_hover_text("Ascend to the parent sheet");
-                    if response.clicked() {
-                        ascend = true;
-                    }
-                } else {
-                    ui.label(occurrence_text);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        let occurrence_text = egui::RichText::new(&occurrence)
+                            .font(theme::mono(tokens::FS_1, FontWeight::Medium))
+                            .color(t.color.text);
+                        let response = ui
+                            .add(egui::Button::new(occurrence_text).frame(false))
+                            .on_hover_text("Ascend to the parent sheet");
+                        if response.clicked() {
+                            ascend = true;
+                        }
+                        ui.label(
+                            egui::RichText::new("\u{00b7}")
+                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                                .color(t.color.text_faint),
+                        );
+                        ui.label(
+                            egui::RichText::new(&master)
+                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        );
+                    });
                 }
-                ui.label(
-                    egui::RichText::new("\u{00b7}")
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-                ui.label(
-                    egui::RichText::new(&master)
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                );
+                if let Some(scope) = scope {
+                    if can_ascend {
+                        ui.add_space(SCOPE_CONTROL_GAP);
+                    }
+                    chosen_scope = sheet_scope_control(ui, scope);
+                }
             });
-            if let Some(scope) = scope {
-                ui.add_space(SCOPE_CONTROL_GAP);
-                chosen_scope = sheet_scope_control(ui, scope);
-            }
-        });
-    ui.painter().hline(
-        path_frame.response.rect.x_range(),
-        path_frame.response.rect.bottom(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
+        ui.painter().hline(
+            path_frame.response.rect.x_range(),
+            path_frame.response.rect.bottom(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+    }
     if let Some(chosen) = chosen_scope {
         sheet_visibility::set_sheet_scope(ui.ctx(), chosen);
     }
@@ -624,15 +629,12 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     if !navigator_section_header(ui, DesignNavigatorSection::Nets, &nets.len().to_string()) {
         return;
     }
+    // An empty rail says so with the "0" on its band; only a filter that
+    // emptied a rail that holds something needs a row to say which it is.
     if nets.is_empty() {
-        empty_navigator_row(
-            ui,
-            if query.is_empty() {
-                "No nets in this sheet"
-            } else {
-                "No nets match this filter"
-            },
-        );
+        if !query.is_empty() {
+            empty_navigator_row(ui, "No nets match this filter");
+        }
         return;
     }
     for net in nets {
@@ -859,14 +861,9 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     if ports.is_empty() {
-        empty_navigator_row(
-            ui,
-            if query.is_empty() {
-                "No ports declared in this sheet"
-            } else {
-                "No ports match this filter"
-            },
-        );
+        if !query.is_empty() {
+            empty_navigator_row(ui, "No ports match this filter");
+        }
         return;
     }
     for port in ports {
@@ -1250,7 +1247,7 @@ fn rf_port_meta(port: &crate::simulation::placed_sources::PlacedRfPort) -> Strin
         // not the case the excitation rail's `no reader` was written for —
         // calling every termination in a time-domain testbench a finding is how
         // a rail stops being read.
-        0 => "no S-parameter run".to_owned(),
+        0 => "unused".to_owned(),
         1 => reading[0].role.to_owned(),
         count => format!("{count} analyses"),
     };
@@ -1365,14 +1362,9 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     if sources.is_empty() {
-        empty_navigator_row(
-            ui,
-            if query.is_empty() {
-                "No sources placed"
-            } else {
-                "No excitations match this filter"
-            },
-        );
+        if !query.is_empty() {
+            empty_navigator_row(ui, "No excitations match this filter");
+        }
         return;
     }
     let mut descend = None;
@@ -1557,25 +1549,16 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     if probes.is_empty() {
-        empty_navigator_row(
-            ui,
-            if query.is_empty() {
-                "No saved probes"
-            } else {
-                "No probe matches this filter"
-            },
-        );
+        if !query.is_empty() {
+            empty_navigator_row(ui, "No probe matches this filter");
+        }
         return;
     }
     for (name, expression) in probes {
-        let response = nav_row_indented_mono_response(
-            ui,
-            WorkbenchIcon::ArrowLeft,
-            &name,
-            false,
-            Some("probe"),
-            1,
-        );
+        // No meta: the rail lists probes and nothing else, so the word on
+        // every row of it says nothing the band has not.
+        let response =
+            nav_row_indented_mono_response(ui, WorkbenchIcon::ArrowLeft, &name, false, None, 1);
         if response.clicked() {
             reveal_probe_expression(&mut app.state, &expression);
         }
@@ -1691,28 +1674,12 @@ enum NavigatorObject {
 }
 
 impl NavigatorObject {
-    fn summary(&self) -> String {
+    /// What the row calls the object, for a menu item that names it.
+    fn name(&self) -> &str {
         match self {
-            Self::Component { label, .. } | Self::Net { name: label, .. } => label.clone(),
-            Self::SavedOutput {
-                name, expression, ..
-            } => format!("{name} · {expression}"),
-        }
-    }
-
-    fn stable_path(&self, state: &AppState) -> String {
-        let owner = state.workspace.content.active_display_path();
-        match self {
-            Self::Component { label, id, .. } => format!("{owner}/{label}#component-{id}"),
-            Self::Net { name, .. } => format!("{owner}::net/{name}"),
-            Self::SavedOutput { name, .. } => format!(
-                "{}::saved-output/{name}",
-                state
-                    .sim_setup
-                    .analysis_plan
-                    .as_ref()
-                    .map_or_else(|| "unbound-plan".to_owned(), |plan| plan.id().to_string())
-            ),
+            Self::Component { label, .. }
+            | Self::Net { name: label, .. }
+            | Self::SavedOutput { name: label, .. } => label,
         }
     }
 }
@@ -1861,15 +1828,9 @@ fn navigator_object_context_menu(
         select_navigator_object(&mut app.state, &object);
     }
     popup.show(|ui| {
-        ui.label(
-            egui::RichText::new("NAVIGATOR OBJECT")
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(Tokens::get(ui.ctx()).color.text_faint),
-        );
-        ui.label(object.summary());
-        ui.separator();
-
-        if ui.button("Open selected object").clicked() {
+        // No caption and no summary: the reader right-clicked the row the
+        // menu is about, and it is still under the pointer.
+        if ui.button("Open").clicked() {
             select_navigator_object(&mut app.state, &object);
             match &object {
                 NavigatorObject::Component { id, .. }
@@ -1915,11 +1876,7 @@ fn navigator_object_context_menu(
             }
         }
         ui.separator();
-        if ui.button("Copy stable path").clicked() {
-            ui.ctx().copy_text(object.stable_path(&app.state));
-            ui.close();
-        }
-        if ui.button("Find references and consumers…").clicked() {
+        if ui.button(format!("Filter by {}", object.name())).clicked() {
             find_navigator_object_references(&mut app.state, &object);
             ui.close();
         }

@@ -175,34 +175,30 @@ impl ShelfGlyph {
     }
 }
 
-/// The shelf's meta column for one placeable primitive: `prefix · default`,
-/// e.g. `R · 1k` — what the designator will start with and the value the
-/// placed instance opens carrying.
+/// The shelf's meta column for one placeable primitive: the value the placed
+/// instance opens carrying, e.g. `1k`.
 ///
-/// Both halves come from the type's own metadata — [`ComponentType::
-/// spice_prefix`] and [`ComponentType::default_value`], the same single
-/// source [`crate::state`]'s placement writes into a fresh component — and
-/// the value is re-presented through the crate's engineering formatter the
-/// way the property editor re-presents an untouched draft, so the shelf and
-/// the editor spell one decade the same way. A default the formatter cannot
-/// read (`V=0`) is stated as authored; a part with no meaningful default
-/// keeps the prefix alone, and a structural row with neither says nothing.
+/// It comes from [`ComponentType::default_value`], the same single source
+/// [`crate::state`]'s placement writes into a fresh component, and is
+/// re-presented through the crate's engineering formatter the way the
+/// property editor re-presents an untouched draft, so the shelf and the
+/// editor spell one decade the same way. A default the formatter cannot read
+/// (`V=0`) is stated as authored; a structural row with no meaningful default
+/// says nothing.
+///
+/// The line used to open with the card letter, which is exactly what the
+/// glyph column beside it paints from the same [`ComponentType::
+/// spice_prefix`].
 pub(super) fn primitive_shelf_meta(kind: ComponentType) -> Option<String> {
-    let prefix = kind.spice_prefix();
     let default = kind.default_value();
-    let value = if default.is_empty() {
-        String::new()
-    } else {
+    if default.is_empty() {
+        return None;
+    }
+    Some(
         crate::quantity::parse_engineering_value(default)
             .map(crate::quantity::format_engineering_value)
-            .unwrap_or_else(|_| default.to_owned())
-    };
-    match (prefix.is_empty(), value.is_empty()) {
-        (true, true) => None,
-        (true, false) => Some(value),
-        (false, true) => Some(prefix.to_owned()),
-        (false, false) => Some(format!("{prefix} \u{00b7} {value}")),
-    }
+            .unwrap_or_else(|_| default.to_owned()),
+    )
 }
 
 /// The glyph for one placeable primitive.
@@ -423,18 +419,15 @@ fn library_part_row(libraries: &[&ModelLibrary], row: &ModelHubPartRow) -> Optio
                 Ok(placement) => LibraryPartAction::Arm(Box::new(placement)),
                 Err(reason) => LibraryPartAction::Refused(refusal_sentence(reason)),
             };
-            let standing = if matches!(row.provenance, PartProvenance::Foundation) {
-                "built in"
-            } else {
-                "in project"
-            };
-            (format!("{} · {standing}", row.device), action)
+            // A part that is here and placeable is the normal case; where
+            // it came from is the Models workspace's business.
+            (row.device.clone(), action)
         }
         PartProvenance::InstalledPack { pack_id, version }
         | PartProvenance::RemoteRelease { pack_id, version } => {
             let pack_name = row.pack_name.clone().unwrap_or_else(|| pack_id.clone());
             let meta = match &row.state {
-                PartState::Installed => format!("{} · installed", row.device),
+                PartState::Installed => row.device.clone(),
                 PartState::Available => format!("{} · available", row.device),
                 PartState::UpdateAvailable { latest, .. } => {
                     format!("{} · update {latest}", row.device)
@@ -570,14 +563,14 @@ fn library_parts_section(
 ///
 /// The same completion the Models workspace shelf performs when it arms a
 /// held part, minus that workspace's operation receipt: this click happened
-/// on the canvas side, so the toast and the canvas focus are the whole story.
+/// on the canvas side, so the armed cursor is the whole story.
 fn arm_library_part(
     state: &mut crate::workbench::app_state::AppState,
     placement: PartPlacement,
     ctx: &egui::Context,
 ) {
-    let armed = crate::workbench::app::arm_pack_part(state, placement);
-    finish_shelf_placement(state, ctx, &armed);
+    let _ = crate::workbench::app::arm_pack_part(state, placement);
+    finish_shelf_placement(state, ctx);
 }
 
 /// Raises the pack confirmation for one shelf part.
@@ -1537,10 +1530,11 @@ fn stimulus_library_rows(state: &AppState, query: &str) -> Vec<StimulusShelfRow>
         .collect()
 }
 
-/// Arm one definition from the shelf, and say so where the reader is looking.
+/// Arm one definition from the shelf; a refusal is reported where the reader
+/// is looking.
 fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context) {
     match crate::workbench::app::arm_placement_from_definition(state, name) {
-        Ok(()) => finish_shelf_placement(state, ctx, name),
+        Ok(()) => finish_shelf_placement(state, ctx),
         Err(refusal) => {
             state.push_user_message(crate::diagnostics::ConsoleMessage::warning(refusal.clone()));
             state
@@ -1964,7 +1958,7 @@ pub(super) fn arm_primitive(app: &mut RSpiceApp, kind: ComponentType, ctx: &egui
     let state = &mut app.state;
     state.schematic.session.editor.pending_library_cell = None;
     state.schematic.arm_tool(Tool::Place(kind));
-    finish_shelf_placement(state, ctx, kind.display_name());
+    finish_shelf_placement(state, ctx);
 }
 
 /// Capture the current placement context and return focus to the canvas.
@@ -1973,18 +1967,17 @@ fn arm_cell(
     binding: LibraryCellInstance,
     ctx: &egui::Context,
 ) {
-    let label = crate::workbench::app::arm_library_cell_placement(state, binding);
-    finish_shelf_placement(state, ctx, &label);
+    let _ = crate::workbench::app::arm_library_cell_placement(state, binding);
+    finish_shelf_placement(state, ctx);
 }
 
-fn finish_shelf_placement(state: &mut AppState, ctx: &egui::Context, label: &str) {
+/// Hand the canvas back after a shelf click.
+///
+/// No toast: the armed cursor is the canvas's own answer, and one toast per
+/// shelf click is one per placement.
+fn finish_shelf_placement(state: &mut AppState, ctx: &egui::Context) {
     // Selecting a part releases the compact shelf's modal input ownership.
     state.workbench.close_drawer();
-    state.ui.toasts.success(
-        ctx,
-        "Component placement armed",
-        format!("{label} will snap to the schematic grid."),
-    );
     rspice_schematic_editor::view::canvas::request_focus(ctx);
 }
 
