@@ -19,8 +19,7 @@
 use egui::{Sense, Ui};
 
 use crate::simulation::placed_sources::SourceConsumer;
-use crate::state::ContractStrength;
-use crate::state::stimulus_library::definition::{StimulusDefinition, StimulusFamily};
+use crate::state::stimulus_library::definition::StimulusDefinition;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app::actions::stimulus::{self as stimulus_actions, StimulusAdopter};
@@ -28,8 +27,7 @@ use crate::workbench::state::{PURPOSE_FIELD, SimulationPage, Workspace};
 use crate::workbench::{AppState, MessageId};
 
 use super::super::super::design_system::{
-    card_well, panel_inset, property_row, property_row_input_with_hint, property_row_wrapped,
-    section_block_gap,
+    card_well, property_row, property_row_input_with_hint, property_row_wrapped,
 };
 use super::{muted_inspector_copy, section_header};
 
@@ -60,7 +58,6 @@ enum Verb {
 }
 
 pub(in crate::workbench::docks) fn show(ui: &mut Ui, state: &mut AppState) {
-    let messages = state.ui.messages();
     let library = &state.workspace.content.stimulus_library;
     let Some(definition) = state
         .workbench
@@ -69,17 +66,9 @@ pub(in crate::workbench::docks) fn show(ui: &mut Ui, state: &mut AppState) {
         .and_then(|name| library.get(name))
         .cloned()
     else {
-        section_header(ui, &messages.text(MessageId::StimulusLibrarySection), None);
-        property_row(
-            ui,
-            &messages.text(MessageId::StimulusFieldDefinitions),
-            &library.len().to_string(),
-        );
-        property_row(
-            ui,
-            &messages.text(MessageId::StimulusFieldSelection),
-            &messages.text(MessageId::StimulusNone),
-        );
+        // Nothing selected is not a subject. A section headed to say so,
+        // over a count the browser's own band prints, is a panel of two rows
+        // about the absence of one.
         return;
     };
 
@@ -89,8 +78,6 @@ pub(in crate::workbench::docks) fn show(ui: &mut Ui, state: &mut AppState) {
     if consumers_section(ui, state, &adopters) {
         verbs.push(Verb::OpenPlanReaders);
     }
-    impact_section(ui, state, &adopters, &definition);
-    contract_section(ui, state, &definition);
     definition_section(ui, state, &definition, &mut verbs);
     for verb in verbs {
         apply(state, &adopters, verb);
@@ -141,26 +128,25 @@ fn adopter_card(
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 4.0;
-            let chip_tone = if adopter.behind || adopter.modified {
-                palette.warn
-            } else {
-                palette.text_faint
-            };
+            // The chip is the decision to re-adopt: an instance in step with
+            // the library states nothing, and a drift is a fact rather than a
+            // tone — the Re-adopt button under it is what acts on it.
+            let chip = (adopter.behind || adopter.modified).then_some(adopter.chip.as_str());
+            // The occurrence is where the run reaches this instance; at the
+            // design root "/" is not a place the reader has to be told about.
+            let occurrence = (adopter.occurrence != "/").then_some(adopter.occurrence.as_str());
             // The instance, where the run reaches it and where it stands share
             // one line: three registers of one fact, and a reader comparing two
             // cards reads down one column for each of them.
             let (rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
-            response.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Label,
-                    true,
-                    format!(
-                        "{} \u{b7} {} \u{b7} {}",
-                        adopter.source.reference, adopter.occurrence, adopter.chip
-                    ),
-                )
-            });
+            let spoken = std::iter::once(adopter.source.reference.as_str())
+                .chain(occurrence)
+                .chain(chip)
+                .collect::<Vec<_>>()
+                .join(" \u{b7} ");
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &spoken));
             let reference = ui.painter().layout_no_wrap(
                 adopter.source.reference.clone(),
                 theme::mono(tokens::FS_1, FontWeight::Medium),
@@ -172,20 +158,24 @@ fn adopter_card(
                 reference,
                 palette.text,
             );
-            ui.painter().text(
-                egui::pos2(rect.left() + reference_width + 8.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                &adopter.occurrence,
-                theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-                palette.text_faint,
-            );
-            ui.painter().text(
-                rect.right_center(),
-                egui::Align2::RIGHT_CENTER,
-                &adopter.chip,
-                theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-                chip_tone,
-            );
+            if let Some(occurrence) = occurrence {
+                ui.painter().text(
+                    egui::pos2(rect.left() + reference_width + 8.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    occurrence,
+                    theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+                    palette.text_faint,
+                );
+            }
+            if let Some(chip) = chip {
+                ui.painter().text(
+                    rect.right_center(),
+                    egui::Align2::RIGHT_CENTER,
+                    chip,
+                    theme::mono(tokens::FS_MICRO, FontWeight::Regular),
+                    palette.text_dim,
+                );
+            }
             card_well(
                 ui,
                 adopter.source.card.as_deref().map_err(String::as_str),
@@ -292,152 +282,6 @@ fn consumers_section(ui: &mut Ui, state: &AppState, adopters: &[StimulusAdopter]
     opened
 }
 
-/// What publishing a revision would and would not change.
-///
-/// Every line is a fact the product already backs: the count is the walk's, the
-/// revision is the record's, and the two sentences about adopters restate the
-/// rule `StimulusLibrary::apply` is written to — adopters own their cards, so
-/// publishing moves the library and nothing else.
-fn impact_section(
-    ui: &mut Ui,
-    state: &AppState,
-    adopters: &[StimulusAdopter],
-    definition: &StimulusDefinition,
-) {
-    let messages = state.ui.messages();
-    section_header(ui, &messages.text(MessageId::StimulusImpactSection), None);
-    property_row(
-        ui,
-        &messages.text(MessageId::StimulusImpactReadBy),
-        &messages.format(
-            if adopters.len() == 1 {
-                MessageId::StimulusImpactReadBySingular
-            } else {
-                MessageId::StimulusImpactReadByPlural
-            },
-            &[("count", &adopters.len().to_string())],
-        ),
-    );
-    let next = definition.revision().saturating_add(1).to_string();
-    property_row_wrapped(
-        ui,
-        &messages.text(MessageId::StimulusImpactOnApply),
-        &messages.format(
-            if adopters.is_empty() {
-                MessageId::StimulusImpactOnApplyAlone
-            } else {
-                MessageId::StimulusImpactOnApplyAdopted
-            },
-            &[("revision", &next)],
-        ),
-    );
-    if !adopters.is_empty() {
-        property_row_wrapped(
-            ui,
-            &messages.text(MessageId::StimulusImpactReadopt),
-            &messages.text(MessageId::StimulusImpactReadoptDetail),
-        );
-    }
-    property_row_wrapped(
-        ui,
-        &messages.text(MessageId::StimulusImpactFrozen),
-        &messages.text(MessageId::StimulusImpactFrozenDetail),
-    );
-}
-
-/// What the engine will do with a card of this family that authors nothing.
-///
-/// Asked of `source_contract` rather than written out here: these are the
-/// substitutions and clamps the evaluator performs, one owner states them, and
-/// a second table in a dock is a table that goes stale the first time a rule
-/// changes. An empty card is the subject because that is the family's contract
-/// rather than this definition's — what this definition's own fields provoke is
-/// the instrument's audit strip, one pane away.
-fn contract_section(ui: &mut Ui, state: &AppState, definition: &StimulusDefinition) {
-    let messages = state.ui.messages();
-    let palette = Tokens::get(ui.ctx()).color;
-    let family = definition.family();
-    section_header(
-        ui,
-        &messages.format(
-            MessageId::StimulusContractSection,
-            &[("family", family.label())],
-        ),
-        None,
-    );
-    let empty = empty_card(family, definition);
-    // The card the netlister writes for a definition of this family that
-    // authors nothing: the positional field order the engine reads, and what
-    // it is handed where a field was left out. It is the netlister's own text
-    // rather than a template restated here, so it cannot describe a card the
-    // deck would not carry.
-    if let Some(record) = empty.as_ref() {
-        let card = crate::simulation::stimulus_realize::definition_card_text(
-            record,
-            crate::simulation::stimulus_realize::DETACHED_NETS,
-        )
-        .map_err(|errors| errors.join("; "));
-        caption(ui, &messages.text(MessageId::StimulusContractCard));
-        let trailing = panel_inset(ui);
-        card_well(ui, card.as_deref().map_err(String::as_str), trailing);
-        section_block_gap(ui);
-    }
-    let findings = empty
-        .map(|record| stimulus_actions::contract_findings(state, &record))
-        .unwrap_or_default();
-    if findings.is_empty() {
-        muted_inspector_copy(
-            ui,
-            &messages.format(
-                MessageId::StimulusContractClean,
-                &[("family", family.label())],
-            ),
-        );
-        return;
-    }
-    for finding in findings {
-        let response = property_row_wrapped(ui, finding.field, &finding.message);
-        if finding.strength == ContractStrength::Refusal {
-            ui.painter().rect_filled(
-                egui::Rect::from_min_size(
-                    response.rect.left_top(),
-                    egui::vec2(2.0, response.rect.height()),
-                ),
-                0.0,
-                palette.err,
-            );
-        }
-    }
-}
-
-/// A definition of this family and quantity that authors no field at all.
-///
-/// Under this definition's own name, so the card reads as a line this project
-/// could carry rather than as a specimen from somewhere else. What separates it
-/// from the definition's real card is the caption above it, not a second
-/// instance name the library does not hold.
-fn empty_card(
-    family: StimulusFamily,
-    definition: &StimulusDefinition,
-) -> Option<StimulusDefinition> {
-    StimulusDefinition::new(
-        definition.name(),
-        family.component_type(definition.kind()),
-        crate::state::stimulus_library::now_unix_ms,
-    )
-    .ok()
-}
-
-/// A quiet line naming what the block under it is.
-fn caption(ui: &mut Ui, text: &str) {
-    let palette = Tokens::get(ui.ctx()).color;
-    ui.label(
-        egui::RichText::new(text)
-            .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
-            .color(palette.text_faint),
-    );
-}
-
 /// The record's own bookkeeping, and the one field of it a reader edits here.
 fn definition_section(
     ui: &mut Ui,
@@ -448,15 +292,12 @@ fn definition_section(
     let messages = state.ui.messages();
     let editor = &state.workbench.stimulus_editor;
     let dirty = editor.is_dirty(definition.name());
+    // No name in the header's metadata: the browser's selected row and the
+    // stage's own title both name the definition this panel is about.
     section_header(
         ui,
         &messages.text(MessageId::StimulusDefinitionSection),
-        Some(definition.name()),
-    );
-    property_row(
-        ui,
-        &messages.text(MessageId::StimulusFieldOwner),
-        &messages.text(MessageId::StimulusOwnerProject),
+        None,
     );
     property_row(
         ui,
@@ -494,11 +335,8 @@ fn definition_section(
     } else if response.changed() || response.gained_focus() {
         verbs.push(Verb::TypePurpose(purpose));
     }
-    property_row_wrapped(
-        ui,
-        &messages.text(MessageId::StimulusFieldStored),
-        &messages.text(MessageId::StimulusStoredInProject),
-    );
+    // Owner and Stored were two rows that never varied: every definition is
+    // the project's, and every one of them is in the project document.
 }
 
 /// One verb on an adopter card, at the width its row divided between them.

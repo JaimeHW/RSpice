@@ -48,12 +48,12 @@ pub use rspice_results::sensitivity::{
 pub use rspice_results::simulation_values::ComplexResultValue;
 
 pub use rspice_results::floquet::{
-    FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
-    PstbStabilityClassificationEvidence,
+    FloquetOrbitKindEvidence, FloquetStabilityVerdictEvidence, PstbStabilityClassificationEvidence,
 };
 #[cfg(test)]
 pub use rspice_results::floquet::{
-    FloquetSpectrumCertificateEvidence, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
+    FloquetSpectrumCertificateEvidence, FloquetSpectrumEvidence, PssFloquetMultiplierEvidence,
+    PstbFloquetModeEvidence,
 };
 #[cfg(test)]
 pub use rspice_results::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};

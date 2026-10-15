@@ -7,7 +7,6 @@
 
 use super::*;
 
-use crate::state::stimulus_library::definition::StimulusDefinition;
 use crate::state::stimulus_library::draft::DefinitionDraft;
 use crate::state::stimulus_library::fixtures;
 use crate::state::{Component, ComponentType, Point};
@@ -468,19 +467,20 @@ fn the_inspector_cards_every_adopter_in_the_design() {
         published.contains(&"Adopters, 2".to_owned()),
         "{published:?}"
     );
+    // At the design root a card is its instance and nothing else: "/" is not
+    // a place to be told about, and an adopter in step with the library has
+    // no decision on it to chip.
     for reference in ["V1", "V2"] {
         assert!(
-            published
-                .iter()
-                .any(|run| run.starts_with(&format!("{reference} \u{b7} / \u{b7} adopted"))),
+            published.iter().any(|run| run == reference),
             "{reference} has no card: {published:?}"
         );
     }
     assert!(published.contains(&"Show in schematic".to_owned()));
     assert!(published.contains(&"Properties\u{2026}".to_owned()));
     assert!(
-        published.iter().any(|run| run.contains("2 placed sources")),
-        "the edit impact did not count the adopters: {published:?}"
+        !published.iter().any(|run| run.contains("adopted \u{b7} r")),
+        "an in-step adopter chipped its normal state: {published:?}"
     );
 }
 
@@ -497,9 +497,7 @@ fn the_inspector_says_how_to_adopt_when_nothing_has() {
         "{published:?}"
     );
     assert!(
-        published
-            .iter()
-            .any(|run| run.starts_with("Nothing in this design has adopted")),
+        published.contains(&"Not used in this design.".to_owned()),
         "{published:?}"
     );
     // With no adopter there is no reader, so the consumers section is absent
@@ -512,55 +510,50 @@ fn the_inspector_says_how_to_adopt_when_nothing_has() {
     );
 }
 
-/// The engine contract states the card this family carries when nothing is
-/// authored, and whatever `source_contract` says about it — never a second
-/// table of field names written out in the dock.
+/// The inspector is the definition's world, not a reference card.
+///
+/// It used to carry an "Engine contract · PULSE" section describing an empty
+/// specimen of the family — a card this project does not hold — over "Edit
+/// impact", whose four rows restated the Adopters count, the two button
+/// tooltips and a constant about frozen manifests.
 #[test]
-fn the_engine_contract_is_the_card_the_netlister_writes_for_the_family() {
+fn the_inspector_drops_the_family_reference_and_the_edit_impact_block() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     app.state.workbench.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
     let published = inspector(&mut app.state);
 
-    assert!(
-        published.contains(&"Engine contract \u{b7} PULSE".to_owned()),
-        "{published:?}"
-    );
-    let empty = StimulusDefinition::new(
-        "bridge_cal_step",
-        ComponentType::VoltageSourcePulse,
-        crate::state::stimulus_library::now_unix_ms,
-    )
-    .expect("a pulse source is placeable");
-    let card = crate::simulation::stimulus_realize::definition_card_text(
-        &empty,
-        crate::simulation::stimulus_realize::DETACHED_NETS,
-    )
-    .expect("the netlister writes a card for an unauthored pulse");
-    assert!(
-        published.iter().any(|run| run == &card),
-        "the family's own card is missing: {published:?}"
-    );
-    // Every finding the module does produce is stated; the rules fire on
-    // authored values, so an unauthored card provokes none and the section
-    // says exactly that rather than leaving the reader with a heading.
-    let findings = stimulus_verbs::contract_findings(&app.state, &empty);
-    for finding in &findings {
+    for absent in [
+        "Engine contract",
+        "Edit impact",
+        "Read by",
+        "On apply",
+        "Frozen manifests",
+        "Owner",
+        "Stored",
+    ] {
         assert!(
-            published
-                .iter()
-                .any(|run| run.contains(finding.message.as_str())),
-            "the contract row for {} is missing: {published:?}",
-            finding.field
+            !published.iter().any(|run| run.starts_with(absent)),
+            "{absent:?} is still on the panel: {published:?}"
         );
     }
-    if findings.is_empty() {
+    // What is left is the definition's own bookkeeping.
+    for present in ["Adopters, 0", "Definition"] {
         assert!(
-            published.iter().any(|run| run
-                == "An empty PULSE card carries no substitution the engine makes silently"),
-            "{published:?}"
+            published.iter().any(|run| run.starts_with(present)),
+            "{present:?} left with it: {published:?}"
         );
     }
+}
+
+/// Nothing selected is not a subject: the dock used to head a section to say
+/// so, over a count the browser's own band prints.
+#[test]
+fn the_inspector_paints_nothing_with_no_definition_selected() {
+    let mut app = RSpiceApp::test_instance();
+    library(&mut app.state);
+    app.state.workbench.selected_stimulus_definition = None;
+    assert!(inspector(&mut app.state).is_empty());
 }
 
 /// The purpose writes through the draft, so it is undoable and dirties the
