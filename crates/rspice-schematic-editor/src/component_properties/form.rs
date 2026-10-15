@@ -49,6 +49,10 @@ pub fn render_component_parameters(
     browse: &mut impl FnMut(PropertyBrowseRequest<'_>, &mut ComponentPropertyDraft),
 ) -> Option<Id> {
     let mut first_control = None;
+    // Read before the scroll area, which is the last place the pane's own
+    // width is legible: inside it every rect has the scrollbar gutter taken
+    // off, and the section bands head the pane rather than the content.
+    let pane = ui.max_rect();
     // No fill of its own. The dialog body paints the editor's one surface, and
     // a pane that painted a second coat of the same token came out a shade off
     // the pane beside it, with the base colour showing between them — a seam
@@ -57,6 +61,12 @@ pub fn render_component_parameters(
         .id_salt("component-editor-parameters")
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // Here rather than inside the contents, which is where the pane's
+            // width would have to be an eighth argument: the band belongs to
+            // the scroll area, so that it scrolls, and to nothing narrower.
+            if draft.component_type.is_some() {
+                section_band(ui, "Parameters", pane);
+            }
             first_control = parameters_contents(
                 ui,
                 draft,
@@ -81,7 +91,6 @@ fn parameters_contents(
 ) -> Option<Id> {
     let component_type = draft.component_type?;
     draft.present_numeric_drafts(sheet, quantity_policy, number_locale);
-    section_band(ui, "Parameters");
     let properties = sheet
         .iter()
         .filter(|definition| definition.name != "name")
@@ -616,11 +625,6 @@ fn label_font(def: &PropertyDefinition) -> egui::FontId {
 const SECTION_BAND_HEIGHT: f32 = 26.0;
 /// Where a band's title starts, matching the inset of the content under it.
 const SECTION_BAND_INSET: f32 = 16.0;
-/// The most a band reaches past its own content, which is the widest gutter a
-/// scroll area reserves for its bar. A ceiling, not a target: the clip rect is
-/// what the band normally reaches, and this only bounds the damage when a pane
-/// has not confined one.
-const SECTION_BAND_GUTTER: f32 = 12.0;
 
 /// One section's head: the title, and nothing else.
 ///
@@ -631,30 +635,32 @@ const SECTION_BAND_GUTTER: f32 = 12.0;
 /// prints underneath. What one of them said and nothing else did — which
 /// definition a source copied — is a row in that section now, where an
 /// identifier is set in mono and not folded to `SENSOR_DRIVE · R2`.
-pub fn section_band(ui: &mut Ui, title: &str) {
+pub fn section_band(ui: &mut Ui, title: &str, pane: egui::Rect) {
     let t = Tokens::get(ui.ctx());
     let (row, _) = ui.allocate_exact_size(
         vec2(ui.available_width(), SECTION_BAND_HEIGHT),
         Sense::hover(),
     );
-    // Across the pane, not across the scroll area's content width: the
-    // scrollbar gutter is part of the surface the band heads, and a fill that
-    // stopped at the content edge left a notch between every title's bar and
-    // the bar beside it.
+    // The band spans the pane, which is handed in because nothing inside a
+    // scroll area can work it out. A vertical `ScrollArea` sets its content's
+    // clip rect to `clip_rect().max.x - current_bar_use.x`, deliberately, so
+    // every rect in reach here — `max_rect`, `clip_rect`, `available_width` —
+    // already has the bar's gutter taken off it.
     //
-    // The pane is the clip rect, which its caller confines to the rectangle it
-    // allocated. The gutter is also bounded here, so a caller that forgets is
-    // out by a bar's width rather than by however wide its area happens to be:
-    // trusting the clip rect alone looked right in every offscreen render,
-    // because the rasterizer clips a dialog to the canvas, while the running
-    // editor draws in an area with no such edge and put the band out past the
-    // dialog's own border.
-    let right = ui
-        .clip_rect()
-        .right()
-        .min(ui.max_rect().right() + SECTION_BAND_GUTTER);
-    let band = egui::Rect::from_x_y_ranges(ui.max_rect().left()..=right, row.y_range());
-    ui.painter().rect_filled(band, 0.0, t.color.bg_panel_2);
+    // Two expressions written from inside were tried and both left the gutter
+    // bare: the content width, and the content width plus a constant standing
+    // in for the gutter, which the narrowed clip rect then cut back anyway.
+    // The notch they left is small on one band and obvious between two panes,
+    // where the two of them read as a gap chopped out of the header bar.
+    let band = egui::Rect::from_x_y_ranges(pane.left()..=pane.right(), row.y_range());
+    // The pane's own clip, not the content's: the fill has to cross the gutter
+    // that the content's clip rect stops at. `with_clip_rect` cannot do this —
+    // it *intersects* with the clip already in force, so asking it for the
+    // pane gave back the content's rect and painted exactly the notch this is
+    // here to remove.
+    let mut painter = ui.painter().clone();
+    painter.set_clip_rect(pane);
+    painter.rect_filled(band, 0.0, t.color.bg_panel_2);
     let mut inner = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(egui::Rect::from_min_max(
@@ -668,7 +674,7 @@ pub fn section_band(ui: &mut Ui, title: &str) {
             .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
             .color(t.color.text_dim),
     );
-    ui.painter().hline(
+    painter.hline(
         band.x_range(),
         band.bottom(),
         Stroke::new(1.0, t.color.border),
@@ -711,37 +717,60 @@ fn property_group_heading(ui: &mut Ui, label: &str) {
 mod tests {
     use super::*;
 
-    /// A band reaches its scrollbar gutter and stops, even where nothing
-    /// clips it.
+    /// A band spans the pane it heads, gutter included, through a real scroll
+    /// area rather than a stand-in for one.
     ///
-    /// The pane is placed in a ui far wider than itself and its clip rect is
-    /// deliberately left alone, which is the case the running editor hits: a
-    /// dialog paints into an area with no edge of its own, so a band that took
-    /// the clip rect as its width ran out past the dialog's border. Every
-    /// offscreen render missed it, because the rasterizer clips a dialog to
-    /// the canvas and clamped the overshoot away — so this asserts the bound
-    /// rather than the picture.
+    /// The pane is laid out exactly as the editor's is — a fixed rect holding
+    /// a vertical `ScrollArea` with content long enough to need its bar — so
+    /// the gutter the band has to cross is the one egui actually reserves, not
+    /// a number written here. Three expressions failed this before it was
+    /// handed the pane: the content width, which leaves the gutter bare; the
+    /// content width plus a constant for the gutter, which the scroll area's
+    /// own clip rect cut back to the same place; and the clip rect itself,
+    /// which egui narrows by `current_bar_use` on purpose.
     #[test]
-    fn a_section_band_stops_at_its_own_gutter_when_nothing_clips_it() {
+    fn a_section_band_spans_the_pane_it_heads() {
         const PANE: f32 = 240.0;
         let ctx = egui::Context::default();
         rspice_ui_kit::Theme::default().apply(&ctx);
-        let mut surround = egui::Rect::NOTHING;
+        // A bar that takes its own column, so there is a gutter to cross. A
+        // floating bar is drawn over the content and reserves nothing, which
+        // makes this pass without proving anything.
+        ctx.all_styles_mut(|style| style.spacing.scroll = egui::style::ScrollStyle::solid());
         let mut pane = egui::Rect::NOTHING;
-        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                surround = ui.max_rect();
-                pane = egui::Rect::from_min_size(ui.max_rect().min, vec2(PANE, 400.0));
-                let mut pane_ui = ui.new_child(egui::UiBuilder::new().max_rect(pane));
-                section_band(&mut pane_ui, "Parameters");
-            });
-        });
+        let mut content_right = f32::NAN;
+        let mut frame = || {
+            ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    pane = egui::Rect::from_min_size(ui.max_rect().min, vec2(PANE, 120.0));
+                    let mut pane_ui = ui.new_child(egui::UiBuilder::new().max_rect(pane));
+                    pane_ui.set_clip_rect(pane);
+                    let rect = pane_ui.max_rect();
+                    egui::ScrollArea::vertical()
+                        .id_salt("band-test")
+                        .auto_shrink([false, false])
+                        .show(&mut pane_ui, |ui| {
+                            section_band(ui, "Parameters", rect);
+                            // Long enough to put the bar on screen, so the
+                            // gutter this is about is actually reserved.
+                            for row in 0..40 {
+                                ui.label(format!("row {row}"));
+                            }
+                            content_right = ui.clip_rect().right();
+                        });
+                });
+            })
+        };
+        // The first frame does not know the content overflows, so no bar is
+        // shown and no gutter is reserved. The second one has the state.
+        drop(frame());
+        let output = frame();
         assert!(
-            surround.right() > pane.right() + SECTION_BAND_GUTTER * 4.0,
-            "the surrounding ui must reach far past the pane and its gutter \
-             for this to prove anything: {surround:?} against {pane:?}"
+            content_right < pane.right(),
+            "the scroll area must reserve a gutter for this to prove \
+             anything: content clipped at {content_right}, pane at {}",
+            pane.right()
         );
-        let limit = pane.right() + SECTION_BAND_GUTTER;
         // The band's own fill, not every shape the host panel drew: a
         // `CentralPanel` paints its background over an effectively unbounded
         // rect, which says nothing about this widget.
@@ -750,21 +779,27 @@ mod tests {
             .shapes
             .iter()
             .filter_map(|shape| match &shape.shape {
-                egui::Shape::Rect(rect) if rect.fill == fill => Some(rect.rect),
+                egui::Shape::Rect(rect) if rect.fill == fill => Some((rect.rect, shape.clip_rect)),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(bands.len(), 1, "one band was painted: {bands:?}");
-        let painted = bands[0];
+        let (painted, clip) = bands[0];
         assert!(
-            painted.right() <= limit + 1.0,
-            "the band reached {}, which is {} past the pane's gutter at {limit}",
-            painted.right(),
-            painted.right() - limit
+            (painted.left() - pane.left()).abs() <= 0.5
+                && (painted.right() - pane.right()).abs() <= 0.5,
+            "the band spans its pane: {painted:?} against {pane:?}, \
+             with the content clipped at {content_right}"
         );
+        // The shape carries the rect it asked for; what reaches the screen is
+        // that rect intersected with the clip it was issued under. Asserting
+        // only the first would pass against the very bug this is here for,
+        // where the band was the right size and the scroll area's clip rect
+        // took the gutter back off it.
         assert!(
-            painted.right() > pane.right(),
-            "the band still reaches into the gutter it heads: {painted:?} in {pane:?}"
+            clip.right() >= pane.right() - 0.5 && clip.left() <= pane.left() + 0.5,
+            "the band is painted under a clip that admits all of it: \
+             {clip:?} against {pane:?}"
         );
     }
 }
