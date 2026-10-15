@@ -5,7 +5,7 @@ use crate::diagnostics::LogSource;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use crate::workbench::AppState;
 use crate::workbench::state::WorkbenchState;
-use rspice_design::drc::{DrcResult, DrcSeverity};
+use rspice_design::drc::DrcResult;
 
 #[test]
 fn console_empty_hints_match_mockup_spacing_and_type_scale() {
@@ -93,11 +93,6 @@ fn only_warnings_and_errors_earn_a_problem_mark() {
     for quiet in [LogSeverity::Info, LogSeverity::Debug, LogSeverity::Trace] {
         assert_eq!(log_problem(quiet), None);
     }
-
-    assert_eq!(drc_problem(DrcSeverity::Critical), Some(Problem::Failure));
-    assert_eq!(drc_problem(DrcSeverity::Error), Some(Problem::Failure));
-    assert_eq!(drc_problem(DrcSeverity::Warning), Some(Problem::Warning));
-    assert_eq!(drc_problem(DrcSeverity::Info), None);
 
     let palette = Tokens::default().color;
     let neutral = [palette.text, palette.text_dim, palette.text_faint];
@@ -200,7 +195,7 @@ fn netlist_problem_badge_is_owned_only_by_the_canonical_collection() {
         .unwrap(),
     );
 
-    assert_eq!(active_problem_count(&app.state), 1);
+    assert_eq!(active_problem_count(&app.state).total(), 1);
 }
 
 #[test]
@@ -234,7 +229,7 @@ fn netlist_first_results_keep_the_canonical_problem_badge() {
     assert!(!app.state.is_netlist_first_without_schematic());
     assert!(app.state.active_result_uses_manual_deck());
     assert!(netlist_diagnostics_own_problems(&app.state));
-    assert_eq!(active_problem_count(&app.state), 0);
+    assert_eq!(active_problem_count(&app.state).total(), 0);
 }
 
 #[test]

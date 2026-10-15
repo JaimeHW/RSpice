@@ -3,8 +3,10 @@
 mod log_anchor;
 #[cfg(test)]
 mod measurement_rows_tests;
+mod problems;
 
 use log_anchor::log_row;
+use problems::{ProblemCount, active_problem_count, problems};
 
 use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
 
@@ -215,7 +217,7 @@ fn console_trailing_actions_width(
     actions as f32 * (control_size + CONSOLE_ACTION_MARGIN_RIGHT)
 }
 
-fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) {
+fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height: f32) {
     let mut requested = None;
     let mut focus = None;
     let mut ids = Vec::with_capacity(ConsolePage::ALL.len());
@@ -223,16 +225,23 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) 
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
             let count = match page {
-                ConsolePage::Problems => problems,
+                ConsolePage::Problems => problems.total(),
                 ConsolePage::Measurements => active_measurement_count(&app.state.simulation),
                 ConsolePage::TaskLog => app.state.simulation.retained.runs.len(),
                 ConsolePage::Console => 0,
             };
+            // The badge has room for one number. Which severities that number
+            // is made of is said in the tab's name and under the pointer, so
+            // the strip can never imply that twelve advisories are twelve
+            // errors.
+            let breakdown = (page == ConsolePage::Problems && count > 0)
+                .then(|| problems.announcement());
             let response = console_tab(
                 ui,
                 page,
                 app.state.workbench.console_page == page,
                 count,
+                breakdown,
                 height,
             );
             ids.push(response.id);
@@ -285,6 +294,7 @@ fn console_tab(
     page: ConsolePage,
     selected: bool,
     count: usize,
+    breakdown: Option<String>,
     height: f32,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -315,8 +325,10 @@ fn console_tab(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Tab);
         node.set_selected(selected);
-        if count > 0 {
-            node.set_label(format!("{}, {count}", page.label()));
+        match breakdown.as_deref() {
+            Some(breakdown) => node.set_label(format!("{}, {breakdown}", page.label())),
+            None if count > 0 => node.set_label(format!("{}, {count}", page.label())),
+            None => {}
         }
     });
     if response.hovered() {
@@ -360,7 +372,10 @@ fn console_tab(
         );
     }
     theme::paint_focus_ring(ui, &response, rect);
-    response
+    match breakdown {
+        Some(breakdown) => response.on_hover_text(breakdown),
+        None => response,
+    }
 }
 
 enum ConsoleActionIcon {
@@ -594,210 +609,6 @@ fn netlist_diagnostics_own_problems(state: &AppState) -> bool {
                 == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist)
 }
 
-fn active_problem_count(state: &AppState) -> usize {
-    if netlist_diagnostics_own_problems(state) {
-        return state.ui.netlist.diagnostics.summary().total();
-    }
-    state
-        .dialogs
-        .drc_results
-        .as_ref()
-        .map_or(0, |result| result.total_count())
-        + state.log_buffer.count_by_severity(LogSeverity::Error)
-        + state.log_buffer.count_by_severity(LogSeverity::Warning)
-}
-
-fn problems(ui: &mut Ui, state: &mut AppState) {
-    if netlist_diagnostics_own_problems(state) {
-        netlist_problems(ui, state);
-        return;
-    }
-    ScrollArea::vertical()
-        .id_salt("workbench.problems")
-        .show(ui, |ui| {
-            let mut any = false;
-            if let Some(result) = &state.dialogs.drc_results {
-                for violation in result.violations() {
-                    any = true;
-                    issue_row(
-                        ui,
-                        drc_problem(violation.severity),
-                        violation.severity.display_name(),
-                        &violation.location.display(),
-                        &violation.message,
-                    );
-                }
-            }
-            for entry in state
-                .log_buffer
-                .entries()
-                .filter(|entry| matches!(entry.severity, LogSeverity::Error | LogSeverity::Warning))
-            {
-                any = true;
-                issue_row(
-                    ui,
-                    log_problem(entry.severity),
-                    entry.severity.name(),
-                    entry.context.as_deref().unwrap_or(entry.source.name()),
-                    &entry.message,
-                );
-            }
-            if !any {
-                muted(ui, "No current errors or advisories.");
-            }
-        });
-}
-
-fn netlist_problems(ui: &mut Ui, state: &mut AppState) {
-    let diagnostics = std::sync::Arc::clone(&state.ui.netlist.diagnostics);
-    if diagnostics.is_empty() {
-        muted(ui, "No current netlist diagnostics.");
-        return;
-    }
-    let mut requested = None;
-    ScrollArea::vertical()
-        .id_salt("workbench.problems.netlist")
-        .show_rows(ui, CONSOLE_ROW_MIN_HEIGHT, diagnostics.len(), |ui, rows| {
-            for index in rows {
-                let Some(diagnostic) = diagnostics.get(index) else {
-                    continue;
-                };
-                let current = diagnostic.is_current();
-                let status = if current {
-                    netlist_diagnostic_severity_name(diagnostic.severity).to_owned()
-                } else {
-                    format!(
-                        "STALE {}",
-                        netlist_diagnostic_severity_name(diagnostic.severity)
-                    )
-                };
-                let source = netlist_diagnostic_location(diagnostic);
-                // A stale diagnostic describes text that has since changed:
-                // it keeps its words, faint, and gives up its mark.
-                let problem = current
-                    .then(|| netlist_diagnostic_problem(diagnostic.severity))
-                    .flatten();
-                let response = netlist_problem_row(
-                    ui,
-                    problem,
-                    &status,
-                    &source,
-                    &diagnostic.message,
-                    current,
-                );
-                if response.clicked() {
-                    requested = Some(diagnostic.canonical.diagnostic_id);
-                }
-                if !diagnostic.details.is_empty() {
-                    response.on_hover_text(&diagnostic.details);
-                }
-            }
-        });
-    if let Some(diagnostic_id) = requested
-        && let Err(error) = crate::workbench::documents::netlist_document::open_diagnostic_location(
-            state,
-            diagnostic_id,
-        )
-    {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
-    }
-}
-
-/// One canonical netlist diagnostic. Only a current diagnostic is a target,
-/// and only a current warning or error carries a mark; every column is
-/// neutral, and a stale row is faint throughout.
-fn netlist_problem_row(
-    ui: &mut Ui,
-    problem: Option<Problem>,
-    status: &str,
-    source: &str,
-    message: &str,
-    interactive: bool,
-) -> egui::Response {
-    let tokens = Tokens::get(ui.ctx());
-    let (status_color, source_color, message_color) = if interactive {
-        (
-            tokens.color.text_dim,
-            tokens.color.text_dim,
-            tokens.color.text,
-        )
-    } else {
-        (
-            tokens.color.text_faint,
-            tokens.color.text_faint,
-            tokens.color.text_faint,
-        )
-    };
-    let sense = if interactive {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), CONSOLE_ROW_MIN_HEIGHT),
-        sense,
-    );
-    // The row is painted, not built from widgets, so nothing else declares
-    // what it is: an interactive row is a keyboard target that opens the
-    // diagnostic, and a stale one is still text a screen reader should read.
-    let label = announced_row(problem, &[status, source, message]);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            if interactive {
-                egui::WidgetType::Button
-            } else {
-                egui::WidgetType::Label
-            },
-            ui.is_enabled(),
-            label.clone(),
-        )
-    });
-    if response.hovered() && interactive {
-        ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
-    }
-    paint_row_mark(ui, rect.left(), rect.top(), problem);
-    let status_x = rect.left() + CONSOLE_MARK_GUTTER;
-    let source_x = status_x + CONSOLE_TIME_WIDTH + CONSOLE_COLUMN_GAP;
-    let message_x = source_x + CONSOLE_SOURCE_WIDTH + CONSOLE_COLUMN_GAP;
-    for (text, x, width, font, text_color) in [
-        (
-            status,
-            status_x,
-            CONSOLE_TIME_WIDTH,
-            theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
-            status_color,
-        ),
-        (
-            source,
-            source_x,
-            CONSOLE_SOURCE_WIDTH,
-            theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
-            source_color,
-        ),
-        (
-            message,
-            message_x,
-            (rect.right() - message_x).max(1.0),
-            theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular),
-            message_color,
-        ),
-    ] {
-        let clip = egui::Rect::from_min_max(
-            egui::pos2(x, rect.top()),
-            egui::pos2((x + width).min(rect.right()), rect.bottom()),
-        );
-        ui.painter().with_clip_rect(clip).text(
-            egui::pos2(x, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            text,
-            font,
-            text_color,
-        );
-    }
-    theme::paint_focus_ring(ui, &response, rect);
-    response.on_hover_text(format!("{status} · {source}\n{message}"))
-}
-
 /// Join the columns a painted console row shows into the one string a screen
 /// reader announces, skipping the columns a continuation row leaves blank.
 fn row_announcement(columns: &[&str]) -> String {
@@ -853,29 +664,6 @@ fn netlist_diagnostic_location(
         .map_or(location.clone(), |path| {
             format!("{} · {location}", path.display())
         })
-}
-
-fn netlist_diagnostic_severity_name(
-    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
-) -> &'static str {
-    use crate::workbench::documents::netlist_document::DiagnosticSeverity;
-    match severity {
-        DiagnosticSeverity::Error => "ERROR",
-        DiagnosticSeverity::Warning => "WARNING",
-        DiagnosticSeverity::Info => "INFO",
-        DiagnosticSeverity::Hint => "HINT",
-    }
-}
-
-fn netlist_diagnostic_problem(
-    severity: crate::workbench::documents::netlist_document::DiagnosticSeverity,
-) -> Option<Problem> {
-    use crate::workbench::documents::netlist_document::DiagnosticSeverity;
-    match severity {
-        DiagnosticSeverity::Error => Some(Problem::Failure),
-        DiagnosticSeverity::Warning => Some(Problem::Warning),
-        DiagnosticSeverity::Info | DiagnosticSeverity::Hint => None,
-    }
 }
 
 fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -1451,6 +1239,8 @@ fn run_lifecycle_presentation(
 
 /// A problem, log or task row: a leading mark for a warning or a failure,
 /// then neutral columns.
+/// One task-history row: the same three columns a log line uses, with the
+/// run's lifecycle in the time column instead of a timestamp.
 fn issue_row(
     ui: &mut Ui,
     problem: Option<Problem>,
@@ -1488,16 +1278,6 @@ fn log_message_color(tokens: &Tokens, severity: LogSeverity) -> egui::Color32 {
     }
 }
 
-fn drc_problem(severity: rspice_design::drc::DrcSeverity) -> Option<Problem> {
-    match severity {
-        rspice_design::drc::DrcSeverity::Critical | rspice_design::drc::DrcSeverity::Error => {
-            Some(Problem::Failure)
-        }
-        rspice_design::drc::DrcSeverity::Warning => Some(Problem::Warning),
-        rspice_design::drc::DrcSeverity::Info => None,
-    }
-}
-
 fn format_measure_value(value: f64) -> String {
     fmt_si(value, "", 6).trim().to_owned()
 }
@@ -1529,7 +1309,10 @@ fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleC
         },
         ConsolePage::Problems => ConsoleClearAction {
             enabled: false,
-            label: "Problems reflect current diagnostics and cannot be cleared",
+            // Says what this control does, which is nothing, rather than
+            // claiming the page is beyond clearing: part of it is still
+            // projected from the log, and the log clears from the Console.
+            label: "Problems lists current findings and is not cleared from here",
         },
         ConsolePage::Measurements => ConsoleClearAction {
             enabled: false,

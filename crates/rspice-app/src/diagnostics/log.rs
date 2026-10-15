@@ -304,7 +304,12 @@ impl LogBuffer {
         self.severity_counts = [0; 5];
     }
 
-    /// Count entries by severity (O(1) — maintained on log/evict/clear)
+    /// Count entries by severity (O(1) — maintained on log/evict/clear).
+    ///
+    /// No shipping surface counts the log by severity any more: the Problems
+    /// page is the only one that ever did, and it now counts exactly the rows
+    /// it lists rather than asking the whole buffer.
+    #[cfg(test)]
     pub fn count_by_severity(&self, severity: LogSeverity) -> usize {
         self.severity_counts[severity_index(severity)]
     }

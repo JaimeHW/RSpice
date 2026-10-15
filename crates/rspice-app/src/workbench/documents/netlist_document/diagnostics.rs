@@ -211,13 +211,25 @@ pub struct NetlistDiagnosticSummary {
 
 impl NetlistDiagnosticSummary {
     #[must_use]
+    #[cfg(test)]
     pub const fn current_total(self) -> usize {
         self.current_errors + self.current_warnings + self.current_information + self.current_hints
     }
 
+    /// Every record in the collection, current or not.
+    ///
+    /// Kept for the tests that assert the projection, and deliberately out of
+    /// reach of the chrome: counting stale records among the problems is what
+    /// made the tab strip claim findings about a design that no longer
+    /// existed.
     #[must_use]
+    #[cfg(test)]
     pub const fn total(self) -> usize {
-        self.current_total() + self.stale
+        self.current_errors
+            + self.current_warnings
+            + self.current_information
+            + self.current_hints
+            + self.stale
     }
 
     #[must_use]
