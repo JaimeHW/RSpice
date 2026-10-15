@@ -1722,3 +1722,30 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
     assert_eq!(models[0].traces[0].unit.as_deref(), Some("dBc"));
     assert_eq!(models[0].traces[0].y.as_slice(), &[-80.0, -60.0]);
 }
+
+/// The waveform sheet as a PNG with its measured geometry beside it, so the
+/// pane card's insets can be read off a render rather than guessed at.
+/// `RSPICE_RASTER_DIR` names the directory; the system temp directory
+/// otherwise.
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_the_waveform_sheet_for_review() {
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    for width in [900.0_f32, 560.0] {
+        let mut state = deep_readout_fixture(3);
+        crate::ui::raster::write_panel_review(
+            &directory,
+            &format!("waves-sheet-{width}"),
+            crate::ui::Theme::default(),
+            egui::vec2(width, 620.0),
+            0.0,
+            |ui, _| {
+                let canvas = Tokens::get(ui.ctx()).color.canvas_bg;
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(canvas))
+                    .show(ui, |ui| super::show(ui, &mut state));
+            },
+        );
+    }
+}
