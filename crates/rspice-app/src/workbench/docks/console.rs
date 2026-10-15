@@ -39,8 +39,6 @@ const CONSOLE_MARK_SIDE: f32 = 11.0;
 /// up with an unmarked row's.
 const CONSOLE_MARK_GUTTER: f32 = CONSOLE_MARK_SIDE + 6.0;
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
-const EMPTY_HINT_PADDING_X: i8 = 12;
-const EMPTY_HINT_PADDING_Y: i8 = 20;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     ui.spacing_mut().item_spacing.y = 0.0;
@@ -1662,27 +1660,22 @@ fn simulation_progress_percent(progress: f64) -> u8 {
     (progress.clamp(0.0, 1.0) * 100.0).round() as u8
 }
 
+/// The line a page paints instead of rows.
+///
+/// It stands exactly where the page's first row would: same left edge, same
+/// leading, same ink as a quiet row. An inset, centred notice floated in the
+/// middle of an otherwise tight panel and read as a different surface from
+/// the one the reader switched to; this reads as a list with nothing in it.
 fn muted(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .inner_margin(egui::Margin {
-            left: EMPTY_HINT_PADDING_X,
-            right: EMPTY_HINT_PADDING_X,
-            top: EMPTY_HINT_PADDING_Y,
-            bottom: EMPTY_HINT_PADDING_Y,
-        })
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                )
-                .wrap()
-                .halign(Align::Center),
-            );
-        });
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(text)
+                .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular))
+                .color(t.color.text_faint),
+        )
+        .wrap(),
+    );
 }
 #[cfg(test)]
 mod tests;

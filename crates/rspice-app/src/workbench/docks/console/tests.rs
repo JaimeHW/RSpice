@@ -9,10 +9,79 @@ use rspice_design::drc::{DrcResult, DrcSeverity};
 
 #[test]
 fn console_empty_hints_match_mockup_spacing_and_type_scale() {
-    assert_eq!(EMPTY_HINT_PADDING_X, 12);
-    assert_eq!(EMPTY_HINT_PADDING_Y, 20);
     assert_eq!(CONSOLE_FONT_SIZE, 12.0);
     assert_eq!(CONSOLE_FONT_SIZE, tokens::FS_1);
+}
+
+/// A page with nothing to list is inset by the body padding and nothing
+/// else: its line stands at the panel's own left edge, on the row the first
+/// row would have taken. The hint used to carry a 12 × 20 inset of its own,
+/// which floated it inside a panel every other page kept tight.
+#[test]
+fn an_empty_page_starts_where_its_first_row_would() {
+    fn scan(shape: &egui::epaint::Shape, found: &mut Option<egui::Pos2>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                if found.is_none_or(|best: egui::Pos2| text.pos.y < best.y) {
+                    *found = Some(text.pos);
+                }
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    scan(shape, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for page in ConsolePage::ALL {
+        let mut app = RSpiceApp::test_instance();
+        app.state.workbench.console_visible = true;
+        app.state.workbench.console_page = page;
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let size = egui::Vec2::new(900.0, 240.0);
+        let mut run = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    ..Default::default()
+                },
+                |ui| {
+                    let layout = crate::workbench::layout::LayoutSpec::resolve(
+                        1280.0,
+                        760.0,
+                        &app.state.workbench,
+                    );
+                    super::show(ui, &mut app, layout);
+                },
+            )
+        };
+        // Sizing settles on the second pass; the third is the one measured.
+        let _ = run();
+        let _ = run();
+        let output = run();
+        let mut found = None;
+        for clipped in &output.shapes {
+            // The tab strip paints above the body; only body ink is in scope.
+            if clipped.shape.visual_bounding_rect().top() < CONSOLE_HEADER_HEIGHT {
+                continue;
+            }
+            scan(&clipped.shape, &mut found);
+        }
+        let hint = found.unwrap_or_else(|| panic!("{page:?} painted no empty line"));
+        assert_eq!(
+            hint.x, CONSOLE_BODY_PADDING_X,
+            "{page:?} insets its empty line past the body padding"
+        );
+        let body_top = CONSOLE_HEADER_HEIGHT + CONSOLE_BODY_PADDING_TOP;
+        assert!(
+            (body_top..body_top + CONSOLE_ROW_MIN_HEIGHT).contains(&hint.y),
+            "{page:?} drops its empty line to {} instead of the first row at {body_top}",
+            hint.y
+        );
+    }
 }
 
 /// Only a warning or an error earns a mark, and the mark is the line's only
