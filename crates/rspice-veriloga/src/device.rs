@@ -4747,29 +4747,40 @@ impl VerilogADevice {
         let previous = self.context.clone();
         let result = (|| {
             self.context.begin_initialization();
+            // Declaration initializers are not assignment occurrences. An
+            // analysis-type switch re-runs them on live storage, where an
+            // occurrence counter's initializer would rewind the count the
+            // digital side retains; keep the journal out of the declarations
+            // and put each counter back at its origin before `analog initial`.
+            let occurrences = self.context.analog_occurrences.take();
             let mut vm = Vm::new(&mut self.context);
-            for step in &self.model.assignment_steps {
-                if let crate::codegen::AssignmentStep::Assign(assignment) = step
-                    && self
-                        .model
-                        .initialization_prologue_variables
-                        .contains(&assignment.var_index)
-                {
-                    Self::execute_assignment_steps(&mut vm, std::slice::from_ref(step))?;
-                }
-            }
-            for selected in [
-                rspice_veriloga_runtime::AnalogEvaluationPhase::Declarations,
-                rspice_veriloga_runtime::AnalogEvaluationPhase::Initialization,
-            ] {
+            let declarations = (|| {
                 for step in &self.model.assignment_steps {
-                    if let crate::codegen::AssignmentStep::Initialization { phase, body } = step
-                        && *phase == selected
+                    if let crate::codegen::AssignmentStep::Assign(assignment) = step
+                        && self
+                            .model
+                            .initialization_prologue_variables
+                            .contains(&assignment.var_index)
                     {
-                        Self::execute_assignment_steps(&mut vm, body)?;
+                        Self::execute_assignment_steps(&mut vm, std::slice::from_ref(step))?;
                     }
                 }
+                Self::execute_initialization_phase(
+                    &mut vm,
+                    &self.model,
+                    rspice_veriloga_runtime::AnalogEvaluationPhase::Declarations,
+                )
+            })();
+            if let Some(journal) = &occurrences {
+                journal.restore_origins(&mut vm.context.variables);
             }
+            vm.context.analog_occurrences = occurrences;
+            declarations?;
+            Self::execute_initialization_phase(
+                &mut vm,
+                &self.model,
+                rspice_veriloga_runtime::AnalogEvaluationPhase::Initialization,
+            )?;
             vm.context.commit_initialization()?;
             vm.context.time = previous.time;
             self.try_refresh_static_conditions()
@@ -4777,6 +4788,21 @@ impl VerilogADevice {
         if let Err(error) = result {
             self.context = previous;
             return Err(error);
+        }
+        Ok(())
+    }
+
+    fn execute_initialization_phase(
+        vm: &mut Vm<'_>,
+        model: &crate::codegen::CompiledModel,
+        selected: rspice_veriloga_runtime::AnalogEvaluationPhase,
+    ) -> Result<(), VmError> {
+        for step in &model.assignment_steps {
+            if let crate::codegen::AssignmentStep::Initialization { phase, body } = step
+                && *phase == selected
+            {
+                Self::execute_assignment_steps(vm, body)?;
+            }
         }
         Ok(())
     }

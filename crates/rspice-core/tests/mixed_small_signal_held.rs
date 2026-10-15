@@ -517,9 +517,12 @@ fn an_unknown_output_is_the_midpoint_behind_its_resistance_and_z_is_open() {
 }
 
 /// S5(a) and S5(b): the analog block reads a discrete variable as a
-/// constant of the linearization, and the process that samples `V(a)` every
-/// 10 ns does not run during it, so the AC transfer is the twin's with the
-/// held code — whichever code the operating point sampled.
+/// constant of the linearization, and the process that samples `V(a)` on a
+/// 10 ns `timer` does not run during it, so every small-signal answer is the
+/// twin's with the held code — whichever code the operating point sampled.
+/// The timer is an analog event the digital process subscribes to through a
+/// retained occurrence counter, which each analysis's switch of analysis
+/// type must leave where the operating point put it.
 #[test]
 fn a_digital_read_of_an_analog_value_is_frozen_at_the_held_sample() {
     let module = SourceFile::new(
@@ -531,7 +534,7 @@ fn a_digital_read_of_an_analog_value_is_frozen_at_the_held_sample() {
            inout p; electrical p;\n\
            integer code;\n\
            initial code = 5;\n\
-           always begin code = (V(a) > 0.5) ? 9 : 3; #10; end\n\
+           always @(timer(0, 10n)) code = (V(a) > 0.5) ? 9 : 3;\n\
            analog I(p) <+ V(p) / 1k - code * 1.0e-4 * V(a);\n\
          endmodule\n",
     );
@@ -541,17 +544,21 @@ fn a_digital_read_of_an_analog_value_is_frozen_at_the_held_sample() {
             "* digital read of an analog value\n\
              va a 0 dc {bias} ac 1\n\
              xr a p xread\n\
-             rp p 0 1k\n\
+             vprobe p q 0\n\
+             rp q 0 1k\n\
              .va \"{}\" xread\n\
              .end\n",
             module.path()
         ));
+        // The module's `V(p)/1k` is a noiseless conductance, so the twin
+        // spells it as a VCCS rather than a resistor.
         let twin = parse(&format!(
             "* held-code twin\n\
              va a 0 dc {bias} ac 1\n\
-             rx p 0 1k\n\
+             gr p 0 p 0 1m\n\
              gx 0 p a 0 {}\n\
-             rp p 0 1k\n\
+             vprobe p q 0\n\
+             rp q 0 1k\n\
              .end\n",
             code * 1.0e-4
         ));
@@ -566,5 +573,61 @@ fn a_digital_read_of_an_analog_value_is_frozen_at_the_held_sample() {
         }
         let gain = ac_voltage(&ac[0], "p").re;
         assert_close("held-code transfer", gain, code * 0.05, 1.0e-12, 1.0e-9);
+
+        let tf = engine
+            .run_transfer_function(&deck, "p", None, false, "va")
+            .expect(".tf runs");
+        let twin_tf = engine
+            .run_transfer_function(&twin, "p", None, false, "va")
+            .expect("twin .tf");
+        assert_close(".tf gain", tf.gain, code * 0.05, 1.0e-12, 1.0e-9);
+        assert_close(".tf gain", tf.gain, twin_tf.gain, 1.0e-12, 1.0e-9);
+        assert_close(
+            ".tf output impedance",
+            tf.output_impedance,
+            twin_tf.output_impedance,
+            1.0e-9,
+            1.0e-9,
+        );
+
+        let stb_config = || {
+            StbConfig::new()
+                .with_sweep(1.0e3, 1.0e7, 5)
+                .with_probe("vprobe")
+        };
+        let stb = engine.run_stb(&deck, stb_config()).expect(".stb runs");
+        let twin_stb = engine.run_stb(&twin, stb_config()).expect("twin .stb");
+        assert_eq!(stb.loop_gains.len(), twin_stb.loop_gains.len());
+        for ((frequency, gain), reference) in stb
+            .frequencies
+            .iter()
+            .zip(&stb.loop_gains)
+            .zip(&twin_stb.loop_gains)
+        {
+            assert_phasor_close(
+                &format!(".stb loop gain at {frequency} Hz"),
+                *gain,
+                *reference,
+            );
+        }
+
+        let out = node_index(&engine, &deck, "p");
+        let twin_out = node_index(&engine, &twin, "p");
+        let noise = engine
+            .run_noise(&deck, out, &FREQUENCIES, 300.15)
+            .expect(".noise runs");
+        let twin_noise = engine
+            .run_noise(&twin, twin_out, &FREQUENCIES, 300.15)
+            .expect("twin .noise");
+        assert_eq!(noise.len(), twin_noise.len());
+        for (point, reference) in noise.iter().zip(&twin_noise) {
+            assert_close(
+                &format!(".noise output density at {} Hz", point.frequency),
+                point.output_noise_density,
+                reference.output_noise_density,
+                0.0,
+                1.0e-9,
+            );
+        }
     }
 }

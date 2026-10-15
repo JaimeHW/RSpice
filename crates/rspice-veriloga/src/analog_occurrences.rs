@@ -142,6 +142,18 @@ impl AnalogOccurrenceJournal {
         }
     }
 
+    /// Write each counter's origin back into its storage slot. A counter is
+    /// a synthesized signal whose count the digital side retains for the
+    /// instance's lifetime, so re-running declaration initializers (an
+    /// analysis-type switch) must not rewind it.
+    pub(crate) fn restore_origins(&self, variables: &mut [f64]) {
+        for (&slot, &origin) in &self.counters {
+            if let Some(value) = variables.get_mut(slot) {
+                *value = f64::from(origin);
+            }
+        }
+    }
+
     pub(crate) fn record(
         &mut self,
         slot: usize,
