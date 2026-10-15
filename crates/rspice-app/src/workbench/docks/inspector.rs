@@ -672,8 +672,7 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
         property_row(ui, "Version", &library.version);
         // A library whose model files resolve is the normal case and says
         // nothing; one whose do not cannot simulate, which is the fact.
-        if !(library.source_authority.has_execution_source() && !library.source_closure.is_empty())
-        {
+        if !library.source_authority.has_execution_source() || library.source_closure.is_empty() {
             property_row_problem(
                 ui,
                 "Model files",

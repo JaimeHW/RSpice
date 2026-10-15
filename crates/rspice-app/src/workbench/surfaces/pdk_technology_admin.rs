@@ -514,7 +514,7 @@ fn header(ui: &mut Ui, snapshot: &RegistrySnapshot) {
                 }
             } else {
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| header_identity(ui));
+                    ui.vertical(header_identity);
                     if let Some((label, problem)) = status {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             header_runtime_status(ui, label, problem);

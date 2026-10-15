@@ -270,7 +270,6 @@ fn an_instance_settled_by_declaration_order_is_not_resolving_to_one_card() {
     };
     let audit = BinAudit::derive(&families, &inspection);
     assert_eq!(audit.instances, 3);
-    assert_eq!(audit.shared, 1);
     assert_eq!(audit.one_card, 2);
     assert_eq!(audit.tally("foundry · nch").one_card(), 2);
     // Every instance is indexed back to its family, in receipt order, so the

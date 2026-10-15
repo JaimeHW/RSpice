@@ -411,7 +411,6 @@ struct BinAudit {
     boundaries: usize,
     instances: usize,
     one_card: usize,
-    shared: usize,
     by_family: BTreeMap<String, FamilyTally>,
     /// Indices into the receipt's own instance list, per family key, in
     /// receipt order. Indices rather than clones: the receipt outlives every
@@ -488,7 +487,6 @@ impl BinAudit {
             boundaries,
             instances,
             one_card: instances.saturating_sub(shared),
-            shared,
             by_family,
             instances_by_family,
         }

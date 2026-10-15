@@ -818,3 +818,87 @@ fn the_model_detail_panes_are_one_row_of_equal_columns_filling_the_document() {
         "a pane is drawn shorter than the mockup's 170 px minimum: {first:?}"
     );
 }
+
+/// Nothing in the Project, Models or PDK surfaces paints status with colour.
+///
+/// The slice's own guard. A warning or a failure the reader has to notice is
+/// a `Problem` mark in front of neutral text, so none of these files may
+/// reach for `colored_label`, for a status dot, for the two `StatusMark`
+/// variants that are not problems, or for the success and information tones.
+/// The data and verdict exceptions are listed by name with their reason.
+#[test]
+fn no_slice_file_paints_a_status_in_colour() {
+    const BANNED: [&str; 6] = [
+        "colored_label",
+        "status_dot(",
+        "StatusMark::Success",
+        "StatusMark::Neutral",
+        ".color(t.color.ok",
+        ".color(t.color.info",
+    ];
+    // Each entry is one shipped file of this slice, read back as it ships.
+    const SLICE: [(&str, &str); 14] = [
+        ("models/manager.rs", include_str!("../models/manager.rs")),
+        (
+            "models/manager/bindings.rs",
+            include_str!("../models/manager/bindings.rs"),
+        ),
+        (
+            "models/manager/bins.rs",
+            include_str!("../models/manager/bins.rs"),
+        ),
+        (
+            "models/manager/corners.rs",
+            include_str!("../models/manager/corners.rs"),
+        ),
+        (
+            "models/manager/corpus.rs",
+            include_str!("../models/manager/corpus.rs"),
+        ),
+        (
+            "models/manager/detail.rs",
+            include_str!("../models/manager/detail.rs"),
+        ),
+        (
+            "models/manager/drift.rs",
+            include_str!("../models/manager/drift.rs"),
+        ),
+        (
+            "models/manager/held_catalog.rs",
+            include_str!("../models/manager/held_catalog.rs"),
+        ),
+        (
+            "models/manager/include.rs",
+            include_str!("../models/manager/include.rs"),
+        ),
+        (
+            "models/manager/paint.rs",
+            include_str!("../models/manager/paint.rs"),
+        ),
+        (
+            "models/manager/qualification_page.rs",
+            include_str!("../models/manager/qualification_page.rs"),
+        ),
+        (
+            "models/manager/shelf.rs",
+            include_str!("../models/manager/shelf.rs"),
+        ),
+        (
+            "models/manager/symbols.rs",
+            include_str!("../models/manager/symbols.rs"),
+        ),
+        (
+            "../pdk_technology_admin.rs",
+            include_str!("../pdk_technology_admin.rs"),
+        ),
+    ];
+    for (name, source) in SLICE {
+        let production = crate::source_guard::production_source(source);
+        for banned in BANNED {
+            assert!(
+                !production.contains(banned),
+                "{name} still paints a status with {banned:?}"
+            );
+        }
+    }
+}

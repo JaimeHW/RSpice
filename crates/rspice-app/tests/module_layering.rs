@@ -1570,7 +1570,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     // rather than the field being refused a home.
     ("workbench/app/dialogs/drawing_sheet_setup/render.rs", 2_845),
     ("workbench/app/dialogs/hardcopy/render.rs", 3_112),
-    ("workbench/docks/inspector.rs", 3_221),
     ("workbench/docks/navigator.rs", 6_668),
     // 2026-09-06, +100 (6_418 -> 6_518): three viewer sheets joined the
     // workspace. Every line is a single-owner table this file exists to own —

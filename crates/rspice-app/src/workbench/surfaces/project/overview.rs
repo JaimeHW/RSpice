@@ -1703,10 +1703,10 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
                 name: document.reference.display_path(),
                 kind: document.view_type.display_name().to_owned(),
                 detail: document_state(document).to_owned(),
+                // An unsaved document is the one state a reader acts on; an
+                // active one is simply the document they are in.
                 tone: if document.dirty {
                     Tone::Warn
-                } else if document.active {
-                    Tone::Neutral
                 } else {
                     Tone::Neutral
                 },
