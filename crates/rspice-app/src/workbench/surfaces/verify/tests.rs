@@ -2123,6 +2123,40 @@ fn fixture_yield_results(app: &RSpiceApp) -> Vec<rspice_results::yield_analysis:
     verification_yield_results(app).to_vec()
 }
 
+/// A Spec cell and an axis tick state a quantity the way the measured values
+/// beside them do: the SI prefix on the unit, one space in front of it.
+///
+/// The Spec column used to read `≥ 10M Hz` and `≤ 1.200m A` — the prefix split
+/// off the unit it scales, and three zeros nobody authored — while the value
+/// in the next cell read `11.90 MHz`.
+#[test]
+fn a_limit_and_a_tick_are_spelled_like_the_values_beside_them() {
+    let bound = |min: Option<f64>, max: Option<f64>, unit: &str| {
+        super::limit_cell(&SpecEntry {
+            measurement: "m".to_owned(),
+            expression: String::new(),
+            min,
+            max,
+            unit: unit.to_owned(),
+            scope: crate::state::SpecPointScope::AllPoints,
+        })
+        .text
+    };
+
+    assert_eq!(bound(Some(10.0e6), None, "Hz"), "\u{2265} 10 MHz");
+    assert_eq!(bound(None, Some(1.2e-3), "A"), "\u{2264} 1.2 mA");
+    assert_eq!(bound(Some(40.0), None, "dB"), "\u{2265} 40 dB");
+    assert_eq!(bound(Some(45.0), None, "deg"), "\u{2265} 45 deg");
+    assert_eq!(bound(None, Some(2.0e-6), "s"), "\u{2264} 2 \u{b5}s");
+    assert_eq!(bound(Some(1.62), Some(1.98), "V"), "1.62 V \u{2026} 1.98 V");
+    assert_eq!(bound(None, None, "V"), "", "a bound of nothing says nothing");
+
+    // One space before the unit, the same one the values carry.
+    assert_eq!(super::histogram::tick_text(38.0, 0.5, "dB"), "38 dB");
+    assert_eq!(super::histogram::tick_text(10.0e6, 2.0e6, "Hz"), "10 MHz");
+    assert_eq!(super::format_value(38.9, "dB"), "38.90 dB");
+}
+
 /// The statistics come from the exact retained samples. The fixture's
 /// summary block is all zeros, which is what the old histogram header printed
 /// as "mean 0.000 dB" over data spanning 38.9 to 43.2.

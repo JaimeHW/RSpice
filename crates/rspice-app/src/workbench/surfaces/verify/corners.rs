@@ -634,7 +634,7 @@ fn corner_table(ui: &mut Ui, matrix: &CornerMatrix, compare: bool) {
                 cells.push(
                     row.spec
                         .as_ref()
-                        .map_or_else(Cell::empty, |spec| Cell::number(spec.limit_text())),
+                        .map_or_else(Cell::empty, limit_cell),
                 );
             }
             if matrix.nominal.is_some() {

@@ -1070,7 +1070,7 @@ mod tests {
         );
         assert_eq!(
             by_name("Y requirement"),
-            "\u{2265} 39.500 dB \u{b7} 38 beyond"
+            "\u{2265} 39.5 dB \u{b7} 38 beyond"
         );
         assert!(
             by_name("X requirement").starts_with("sampled variable \u{b7} std dev"),

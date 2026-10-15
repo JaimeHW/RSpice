@@ -1254,7 +1254,7 @@ mod tests {
         assert_eq!(columns[0].name, "vos");
         assert_eq!(columns[0].unit, "V");
         assert_eq!(columns[0].bounds(), [(-50.0, true), (50.0, false)]);
-        assert_eq!(columns[0].limit_text(), "-50 \u{2026} 50 V");
+        assert_eq!(columns[0].limit_text(), "-50 V \u{2026} 50 V");
     }
     #[test]
     fn a_sampled_variable_is_drawable_and_reports_no_requirement() {
@@ -1306,7 +1306,7 @@ mod tests {
             "{}",
             by_name("Worst trial")
         );
-        assert_eq!(by_name("Requirement"), "\u{2265} 39.500 dB");
+        assert_eq!(by_name("Requirement"), "\u{2265} 39.5 dB");
         assert_eq!(by_name("Trials"), "101 measured of 101");
     }
     #[test]

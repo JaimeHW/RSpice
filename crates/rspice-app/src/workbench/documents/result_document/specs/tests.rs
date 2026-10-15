@@ -437,7 +437,12 @@ fn a_limit_is_spelled_the_same_here_as_on_the_page_that_authored_it() {
         unit: "Hz".to_owned(),
         scope: crate::state::SpecPointScope::AllPoints,
     };
-    assert_eq!(spec.limit_text(), "\u{2265} 1M Hz");
+    assert_eq!(
+        spec.limit_text(),
+        "\u{2265} 1 MHz",
+        "the prefix scales the unit, and the bound carries no digits its \
+         author did not type"
+    );
     assert!(
         !spec.limit_text().contains("Meg"),
         "`Meg` is the deck's prefix and belongs in a deck, not beside a unit"

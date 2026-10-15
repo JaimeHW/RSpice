@@ -41,9 +41,8 @@ impl PopulationLimit {
             let mut text = entry.limit_text();
             if spec.guard_band() > 0.0 {
                 text.push_str(&format!(
-                    " · guard band {} {}",
-                    rspice_app_types::quantity::format_engineering_display(spec.guard_band()),
-                    entry.unit
+                    " \u{b7} guard band {}",
+                    crate::number_format::fmt_si_bound(spec.guard_band(), &entry.unit)
                 ));
             }
             PopulationLimit {

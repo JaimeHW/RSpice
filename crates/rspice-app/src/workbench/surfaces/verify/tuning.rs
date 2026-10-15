@@ -1073,7 +1073,7 @@ fn tuning_specification_table(
             };
             vec![
                 Cell::text(&spec.measurement),
-                Cell::number(spec.limit_text()),
+                limit_cell(spec),
                 value(baseline),
                 value(candidate),
                 candidate

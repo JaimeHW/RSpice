@@ -11,7 +11,6 @@ use crate::provenance::AnalysisResultPvtPoint;
 use rspice_app_types::product::{
     AnalysisInstanceId, ContentDigest, SimulationPlanId, SpecificationId,
 };
-use rspice_app_types::quantity::format_engineering_display;
 use serde::{Deserialize, Serialize};
 
 use rspice_app_types::text_validation::{
@@ -699,21 +698,21 @@ impl SpecEntry {
     /// limit a reader has to translate before holding it against a datasheet is
     /// stated badly; two spellings of one number is worse.
     ///
-    /// [`rspice_app_types::quantity::format_engineering_display`] is the spelling: `Meg` is
-    /// the deck's unambiguous megohm/megahertz prefix and belongs in a deck,
-    /// not beside a unit on a surface.
+    /// [`crate::number_format::fmt_si_bound`] is the spelling, the one the
+    /// measured values beside the limit are already in: the SI prefix sits on
+    /// the unit. A limit spelled `≥ 10M Hz` splits the prefix off the quantity
+    /// it scales, and a reader has to reassemble `MHz` before holding the bound
+    /// against a datasheet. (`Meg`, the deck's unambiguous megohm/megahertz
+    /// prefix, belongs in a deck and never reaches a surface either way.)
     #[must_use]
     pub fn limit_text(&self) -> String {
-        let quantity = format_engineering_display;
+        let quantity = |value: f64| crate::number_format::fmt_si_bound(value, &self.unit);
         match (self.min, self.max) {
-            (Some(minimum), Some(maximum)) => format!(
-                "{} \u{2026} {} {}",
-                quantity(minimum),
-                quantity(maximum),
-                self.unit
-            ),
-            (Some(minimum), None) => format!("\u{2265} {} {}", quantity(minimum), self.unit),
-            (None, Some(maximum)) => format!("\u{2264} {} {}", quantity(maximum), self.unit),
+            (Some(minimum), Some(maximum)) => {
+                format!("{} \u{2026} {}", quantity(minimum), quantity(maximum))
+            }
+            (Some(minimum), None) => format!("\u{2265} {}", quantity(minimum)),
+            (None, Some(maximum)) => format!("\u{2264} {}", quantity(maximum)),
             (None, None) => "waveform \u{b7} no scalar bound".to_owned(),
         }
     }

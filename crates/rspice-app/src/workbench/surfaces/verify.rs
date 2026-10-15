@@ -410,6 +410,16 @@ fn normalized_margin(spec: &SpecEntry, value: f64) -> Option<f64> {
     }
 }
 
+/// A Spec column's cell: the bound, in the notation of the measured values
+/// beside it, and nothing at all for a limit that bounds nothing.
+fn limit_cell(spec: &SpecEntry) -> table::Cell {
+    if spec.min.is_none() && spec.max.is_none() {
+        table::Cell::empty()
+    } else {
+        table::Cell::number(spec.limit_text())
+    }
+}
+
 /// A measured value in engineering notation with its unit: four significant
 /// digits, an SI prefix, never a bare exponent.
 fn format_value(value: f64, unit: &str) -> String {

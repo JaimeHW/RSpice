@@ -491,7 +491,7 @@ fn population_contract_applies_guard_bands_to_every_bound_shape_and_capability()
             assert_eq!(limit.signed_margin(value as f64), Some(margin));
         }
         assert_eq!(cpk(&[0.0, 1.0, 2.0], limit), Some(expected[1] / 3.0));
-        assert!(limit.text.contains("guard band 250m dB"));
+        assert!(limit.text.contains("guard band 250 mdB"), "{}", limit.text);
         assert_eq!(limit.normalized().signed_margin(0.0), Some(0.0));
         if expected[1] > 0.0 {
             assert_eq!(limit.margin_percent(1.0), Some(100.0));

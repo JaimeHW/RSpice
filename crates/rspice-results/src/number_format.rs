@@ -163,6 +163,32 @@ pub fn fmt_si_significant(value: f64, unit: &str, significant_digits: usize) -> 
     .to_owned()
 }
 
+/// Format one bound of a limit: the notation of the measured values it is
+/// held against, without the zeros nobody wrote it with.
+///
+/// A limit is authored, not measured, so the digits past the ones its author
+/// typed are noise: `10 MHz` is the bound, `10.00 MHz` is four significant
+/// digits of a number that only ever had two. The prefix sits on the unit, as
+/// it does on every value beside it — `≥ 10 MHz`, never `≥ 10M Hz` — because a
+/// reader holds these against a datasheet.
+#[must_use]
+pub fn fmt_si_bound(value: f64, unit: &str) -> String {
+    let text = fmt_si_significant(value, unit, 4);
+    let (number, suffix) = text.split_once(' ').unwrap_or((text.as_str(), ""));
+    // Scientific notation past the ladder's end carries its own exponent, and
+    // trimming its mantissa would change the number.
+    let number = if number.contains('.') && !number.contains(['e', 'E']) {
+        number.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        number
+    };
+    if suffix.is_empty() {
+        number.to_owned()
+    } else {
+        format!("{number} {suffix}")
+    }
+}
+
 /// Format a unitless or fixed-unit value with an exact number of significant
 /// digits. `suffix` should include its own leading space when desired.
 pub fn fmt_significant(value: f64, significant_digits: usize, suffix: &str) -> String {

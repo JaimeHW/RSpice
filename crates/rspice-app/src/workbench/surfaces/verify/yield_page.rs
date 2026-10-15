@@ -254,7 +254,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
             };
             vec![
                 Cell::text(&row.output),
-                Cell::number(row.limit.limit_text()),
+                limit_cell(&row.limit),
                 stat(row.stats.map(|stats| stats.mean)),
                 stat(row.stats.map(|stats| stats.std_dev)),
                 stat(row.stats.map(|stats| stats.min)),
