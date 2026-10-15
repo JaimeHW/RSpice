@@ -10,7 +10,8 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, Problem,
+    paint_problem_mark,
 };
 use crate::workbench::workflows::project_workflow::{
     SaveRequestOutcome, save_active_for_continuation,
@@ -35,10 +36,15 @@ const TITLE: &str = "Check and save schematic";
 const PRIMARY: &str = "Save validated revision";
 const DESCRIPTION: &str =
     "Run connectivity, parameter, hierarchy, model, pin, and naming checks before explicit save.";
-const SAVING_TITLE: &str = "Validated revision save in progress";
-const SAVING_DETAIL: &str = "The browser owns the canonical save request. Keep this dialog open until publication completes.";
+const SAVING_TITLE: &str = "Saving";
+const SAVING_DETAIL: &str = "Keep this dialog open until the save completes.";
 const NEWER_CHANGES_HINT: &str = "Edits made after validation are still unsaved.";
 const CHECK_AND_SAVE_BODY_HEIGHT: f32 = 291.0;
+/// Side of a leading problem mark, and the advance from its left edge to the
+/// text behind it. Both match the kit's own problem line, so a marked line
+/// here sits where a marked line sits anywhere else.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
 const CHECK_AND_SAVE_SURFACE_HEIGHT: f32 = SURFACE_HEIGHT + 61.0;
 
 #[derive(Clone, Copy)]
@@ -47,8 +53,6 @@ struct CheckAndSavePreconditions<'a> {
     revision: &'a str,
     source_current: bool,
     saved_snapshot: bool,
-    authority_resolved: bool,
-    dependencies_enumerated: bool,
 }
 
 pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
@@ -153,15 +157,11 @@ impl RSpiceApp {
         let primary_label = if saved { "Close" } else { PRIMARY };
         let primary_enabled = saved || (!pending && report.can_save() && note_error.is_none());
         let source_current = report.source_is_current(&self.state);
-        let authority_resolved = report.authority_is_resolved();
-        let dependencies_enumerated = report.dependencies_are_enumerated();
         let preconditions = CheckAndSavePreconditions {
             project: &project,
             revision: &revision,
             source_current,
             saved_snapshot: saved,
-            authority_resolved,
-            dependencies_enumerated,
         };
         let mut dialog = Dialog::new(TITLE, primary_label)
             .description(DESCRIPTION)
@@ -733,7 +733,7 @@ fn check_and_save_body(
             form.response.rect.bottom(),
             Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
         );
-        preconditions_panel(ui, report, CHECK_AND_SAVE_BODY_HEIGHT, preconditions);
+        preconditions_panel(ui, CHECK_AND_SAVE_BODY_HEIGHT, preconditions);
         return form.inner;
     }
     let body = ui.allocate_ui_with_layout(
@@ -756,7 +756,7 @@ fn check_and_save_body(
                 Layout::top_down(Align::Min),
                 |ui| {
                     ui.set_min_size(vec2(context_width, CHECK_AND_SAVE_BODY_HEIGHT));
-                    preconditions_panel(ui, report, CHECK_AND_SAVE_BODY_HEIGHT, preconditions);
+                    preconditions_panel(ui, CHECK_AND_SAVE_BODY_HEIGHT, preconditions);
                 },
             );
             response
@@ -831,7 +831,7 @@ fn check_and_save_form(
                 );
             });
         });
-    section_heading(ui, "Exact change preview", None);
+    section_heading(ui, "Exact change preview");
     preview_table(ui, report);
     note_response.unwrap_or_else(|| ui.allocate_response(egui::Vec2::ZERO, Sense::hover()))
 }
@@ -860,122 +860,99 @@ fn stale_interface_repair_row(ui: &mut Ui, instance: &str) -> bool {
                     .clicked();
                 let font = theme::sans(tokens::FS_0, FontWeight::Regular);
                 let galley = ui.painter().layout_no_wrap(
-                    format!("{instance} does not present its master's interface"),
+                    format!("{instance}: pins differ from master"),
                     font,
-                    t.color.err,
+                    t.color.text,
                 );
-                let (rect, _) = ui.allocate_exact_size(galley.size(), Sense::hover());
-                ui.painter().galley(rect.left_top(), galley, t.color.err);
+                let (rect, _) = ui.allocate_exact_size(
+                    vec2(galley.size().x + MARK_ADVANCE, galley.size().y),
+                    Sense::hover(),
+                );
+                paint_problem_mark(
+                    ui.painter(),
+                    egui::Rect::from_center_size(
+                        egui::pos2(rect.left() + MARK_SIDE * 0.5, rect.center().y),
+                        egui::Vec2::splat(MARK_SIDE),
+                    ),
+                    Problem::Failure,
+                );
+                ui.painter().galley(
+                    rect.left_top() + vec2(MARK_ADVANCE, 0.0),
+                    galley,
+                    t.color.text,
+                );
             });
         });
     requested
 }
 
-fn preconditions_panel(
-    ui: &mut Ui,
-    report: &CheckAndSaveValidationReport,
-    height: f32,
-    preconditions: CheckAndSavePreconditions<'_>,
-) {
+fn preconditions_panel(ui: &mut Ui, height: f32, preconditions: CheckAndSavePreconditions<'_>) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE.fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.set_min_height(height);
         ui.spacing_mut().item_spacing.y = 0.0;
-        // A successful publication changes the accepted generation itself.
-        // Its completed receipt describes the validated snapshot, including
-        // when newer working edits remain outside that saved snapshot.
-        let source_valid = preconditions.saved_snapshot || preconditions.source_current;
-        let passed = [
-            source_valid,
-            preconditions.authority_resolved,
-            preconditions.dependencies_enumerated,
-        ]
-        .into_iter()
-        .filter(|passed| *passed)
-        .count();
-        let status = format!("{passed} / 3");
         section_heading(
             ui,
             if preconditions.saved_snapshot {
                 "Saved snapshot"
             } else {
-                "Preconditions"
+                "Validated snapshot"
             },
-            Some((&status, passed == 3)),
         );
         fact_row(ui, "Project", preconditions.project);
         fact_row(ui, "Revision", preconditions.revision);
-        fact_row(ui, "Change boundary", "owned source + dependency graph");
-        checklist_row(
-            ui,
-            if preconditions.saved_snapshot {
-                "Saved source validated"
-            } else {
-                "Source revision current"
-            },
-            source_valid,
-        );
-        checklist_row(ui, "Permissions resolved", preconditions.authority_resolved);
-        checklist_row(
-            ui,
-            "Dependencies enumerated",
-            preconditions.dependencies_enumerated,
-        );
-        checklist_row(
-            ui,
-            if preconditions.saved_snapshot {
-                "Validated revision recorded"
-            } else {
-                "Commit produces an auditable result"
-            },
-            source_valid
-                && preconditions.authority_resolved
-                && preconditions.dependencies_enumerated
-                && report.can_save(),
-        );
+        // The gates a blocker already states are not repeated here: the Checks
+        // field counts them and the strip names the first one. Only an edit
+        // made after the checks ran is invisible everywhere else, and it is
+        // what makes the save refuse.
+        if !preconditions.saved_snapshot && !preconditions.source_current {
+            unmet_line(ui, "The design changed after these checks ran.");
+        }
     });
 }
 
-fn section_heading(ui: &mut Ui, label: &str, status: Option<(&str, bool)>) {
+/// The one precondition the rest of the dialog cannot state.
+fn unmet_line(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+    paint_problem_mark(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 10.0 + MARK_SIDE * 0.5, rect.center().y),
+            egui::Vec2::splat(MARK_SIDE),
+        ),
+        Problem::Warning,
+    );
+    ui.painter().text(
+        rect.left_center() + vec2(10.0 + MARK_ADVANCE, 0.0),
+        Align2::LEFT_CENTER,
+        text,
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let announcement = Problem::Warning.announce(text);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+    });
+}
+
+fn section_heading(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_elevated);
     ui.painter().text(
         rect.left_center() + vec2(10.0, 0.0),
         Align2::LEFT_CENTER,
-        label.to_ascii_uppercase(),
+        label,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
-    if let Some((status, passed)) = status {
-        let font = theme::mono(tokens::FS_0, FontWeight::Medium);
-        let text_width = ui
-            .painter()
-            .layout_no_wrap(status.to_owned(), font.clone(), t.color.ok)
-            .size()
-            .x;
-        ui.painter().circle_filled(
-            rect.right_center() - vec2(10.0 + text_width + 7.5, 0.0),
-            2.5,
-            if passed { t.color.ok } else { t.color.err },
-        );
-        ui.painter().text(
-            rect.right_center() - vec2(10.0, 0.0),
-            Align2::RIGHT_CENTER,
-            status,
-            font,
-            if passed { t.color.ok } else { t.color.err },
-        );
-    }
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
         node.set_label(label);
-        if let Some((status, _)) = status {
-            node.set_value(status);
-        }
     });
 }
 
@@ -1040,13 +1017,8 @@ fn table_row(ui: &mut Ui, values: &[&str], header: bool) {
                 FontWeight::Regular
             },
         );
-        let display_source = if header {
-            value.to_ascii_uppercase()
-        } else {
-            (*value).to_owned()
-        };
         let (display_value, was_truncated) =
-            ellipsized_text(ui, &display_source, clip.width(), &font, t.color.text_dim);
+            ellipsized_text(ui, value, clip.width(), &font, t.color.text_dim);
         truncated |= was_truncated;
         ui.painter().with_clip_rect(clip).text(
             clip.left_center(),
@@ -1126,38 +1098,6 @@ fn fact_row(ui: &mut Ui, label: &str, value: &str) {
     if truncated {
         response.on_hover_text(value);
     }
-}
-
-fn checklist_row(ui: &mut Ui, label: &str, passed: bool) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 23.0), Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    ui.painter().circle_filled(
-        rect.left_center() + vec2(11.0, 0.0),
-        2.0,
-        if passed { t.color.ok } else { t.color.err },
-    );
-    ui.painter().text(
-        rect.left_center() + vec2(20.0, 0.0),
-        Align2::LEFT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        if passed {
-            t.color.text_dim
-        } else {
-            t.color.err
-        },
-    );
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(label);
-        node.set_value(if passed { "pass" } else { "blocked" });
-    });
 }
 
 #[cfg(test)]

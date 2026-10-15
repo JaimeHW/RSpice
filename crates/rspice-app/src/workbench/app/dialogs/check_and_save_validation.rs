@@ -661,19 +661,6 @@ impl CheckAndSaveValidationReport {
             && self.active_view == state.workspace.content.active_schematic_reference()
     }
 
-    pub(crate) fn authority_is_resolved(&self) -> bool {
-        self.blockers
-            .iter()
-            .all(|finding| finding.source != "authority")
-    }
-
-    pub(crate) fn dependencies_are_enumerated(&self) -> bool {
-        !self.dependencies.is_empty()
-            && self.blockers.iter().all(|finding| {
-                !matches!(finding.source.as_str(), "hierarchy" | "models" | "project")
-            })
-    }
-
     pub(crate) fn blockers(&self) -> &[CheckAndSaveFinding] {
         &self.blockers
     }
