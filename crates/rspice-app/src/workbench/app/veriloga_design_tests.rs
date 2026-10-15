@@ -117,6 +117,10 @@ pub(super) fn frame_with(
 
 pub(super) fn themed_context() -> egui::Context {
     let ctx = egui::Context::default();
+    // egui names a shortcut's modifier after the host's operating system, so
+    // a context that inherits it asserts "Ctrl+F" on one machine and "Cmd+F"
+    // on another. These tests read menus, so the context states its platform.
+    ctx.set_os(egui::os::OperatingSystem::Nix);
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     ctx
