@@ -12,14 +12,18 @@ use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::{Drawer, Workspace};
 
-const MOBILE_NAV_HEADER_HEIGHT: f32 = 57.0;
+/// The sheet's title and its close target, which is 44 px square: the band
+/// held a branding eyebrow over the title and was 57.
+const MOBILE_NAV_HEADER_HEIGHT: f32 = 44.0;
 const MOBILE_NAV_MAX_WIDTH: f32 = 700.0;
 const MOBILE_NAV_GUTTER: f32 = 9.0;
 const MOBILE_NAV_BREAKPOINT: f32 = 560.0;
 const MOBILE_NAV_GRID_PADDING: f32 = 12.0;
 const MOBILE_NAV_GRID_GAP: f32 = 8.0;
 const MOBILE_NAV_GROUP_HEIGHT: f32 = 23.0;
-const MOBILE_NAV_CARD_HEIGHT: f32 = 72.0;
+/// One line of words beside a 24 px icon, with a comfortable touch target
+/// around them. The card carried a tagline under its label and was 72.
+const MOBILE_NAV_CARD_HEIGHT: f32 = 44.0;
 
 pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
     let Some(drawer) = app.state.workbench.drawer else {
@@ -233,111 +237,97 @@ struct MobileNavigationAction {
     command: Command,
     icon: WorkbenchIcon,
     label: &'static str,
-    detail: &'static str,
 }
 
+/// A workspace is called what the shell calls it everywhere else: the phone
+/// sheet used to coin a second name for four of the eight.
 const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Project),
         icon: WorkbenchIcon::Project,
-        label: "Current project",
-        detail: "Libraries, recovery and configuration",
+        label: Workspace::Project.label(),
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Design),
         icon: WorkbenchIcon::Design,
-        label: "Design",
-        detail: "Schematic and hierarchy",
+        label: Workspace::Design.label(),
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Simulate),
         icon: WorkbenchIcon::Simulate,
-        label: "Simulation",
-        detail: "Setup, runs and resources",
+        label: Workspace::Simulate.label(),
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Stimulus),
         icon: WorkbenchIcon::Source,
-        label: "Stimulus Library",
-        detail: "Source waveform definitions this project owns",
+        label: Workspace::Stimulus.label(),
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Results),
         icon: WorkbenchIcon::Results,
-        label: "Results",
-        detail: "Plots, calculator and measurements",
+        label: Workspace::Results.label(),
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Verify),
         icon: WorkbenchIcon::Verify,
-        label: "Verify",
-        detail: "PVT, yield, SOA and regression",
+        label: Workspace::Verify.label(),
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Models),
         icon: WorkbenchIcon::Models,
-        label: "Model & libraries",
-        detail: "Sources, sections, symbols and metadata audit",
+        label: Workspace::Models.label(),
     },
     MobileNavigationAction {
         command: Command::OpenWorkspace(Workspace::Netlist),
         icon: WorkbenchIcon::Netlist,
-        label: "Code & automation",
-        detail: "Netlists and scripts",
+        label: Workspace::Netlist.label(),
     },
 ];
 
-const SPECIALIST_ACTIONS: [MobileNavigationAction; 1] = [MobileNavigationAction {
-    command: Command::SpecialistToolBrowser,
-    icon: WorkbenchIcon::More,
-    label: "Specialist tool browser",
-    detail: "AMS, RF, physical, SI/PI, models, automation and emerging domains",
-}];
-
-const UTILITY_ACTIONS: [MobileNavigationAction; 2] = [
+/// Everything that is not a workspace, under one head: three groups holding
+/// one, two and two entries were three rules and three captions over five
+/// rows.
+const TOOL_ACTIONS: [MobileNavigationAction; 5] = [
+    MobileNavigationAction {
+        command: Command::SpecialistToolBrowser,
+        icon: WorkbenchIcon::More,
+        label: "Specialist tool browser",
+    },
     MobileNavigationAction {
         command: Command::OpenConsole,
         icon: WorkbenchIcon::Console,
         label: "Console",
-        detail: "Diagnostics, measurements and task log",
     },
     MobileNavigationAction {
         command: Command::ProjectLauncher,
         icon: WorkbenchIcon::Project,
         label: "Project launcher",
-        detail: "Recent, shared, recovered and template projects",
     },
-];
-
-const SETTINGS_ACTIONS: [MobileNavigationAction; 2] = [
     MobileNavigationAction {
         command: Command::Preferences,
         icon: WorkbenchIcon::Settings,
         label: "Preferences",
-        detail: "Personal appearance, files and shortcuts",
     },
     MobileNavigationAction {
         command: Command::AccountOrganization,
         icon: WorkbenchIcon::Verify,
         label: "Organization & licensing",
-        detail: "Identity, roles, managed policy and entitlements",
     },
 ];
 
+/// The two groups the sheet holds, in the order it paints them.
+const MOBILE_NAV_GROUPS: [(&str, &[MobileNavigationAction]); 2] =
+    [("Workspaces", &WORKSPACE_ACTIONS), ("Tools", &TOOL_ACTIONS)];
+
 fn mobile_navigation_natural_height(columns: usize) -> f32 {
-    let card_rows = [
-        WORKSPACE_ACTIONS.len(),
-        SPECIALIST_ACTIONS.len(),
-        UTILITY_ACTIONS.len(),
-        SETTINGS_ACTIONS.len(),
-    ]
-    .into_iter()
-    .map(|count| count.div_ceil(columns))
-    .sum::<usize>();
-    let rows = card_rows + 4;
+    let card_rows = MOBILE_NAV_GROUPS
+        .iter()
+        .map(|(_, actions)| actions.len().div_ceil(columns))
+        .sum::<usize>();
+    let rows = card_rows + MOBILE_NAV_GROUPS.len();
     MOBILE_NAV_HEADER_HEIGHT
         + MOBILE_NAV_GRID_PADDING * 2.0
-        + MOBILE_NAV_GROUP_HEIGHT * 4.0
+        + MOBILE_NAV_GROUP_HEIGHT * MOBILE_NAV_GROUPS.len() as f32
         + MOBILE_NAV_CARD_HEIGHT * card_rows as f32
         + MOBILE_NAV_GRID_GAP * rows.saturating_sub(1) as f32
 }
@@ -388,14 +378,7 @@ fn mobile_navigation_dialog(
                         egui::Stroke::new(1.0, tokens.color.border),
                     );
                     ui.painter().text(
-                        egui::pos2(header.left() + 15.0, header.top() + 17.0),
-                        egui::Align2::LEFT_CENTER,
-                        "RSPICE",
-                        theme::mono(tokens::FS_0, FontWeight::Medium),
-                        tokens.color.text_faint,
-                    );
-                    ui.painter().text(
-                        egui::pos2(header.left() + 15.0, header.bottom() - 16.0),
+                        egui::pos2(header.left() + 15.0, header.center().y),
                         egui::Align2::LEFT_CENTER,
                         "Workspaces & tools",
                         theme::sans(tokens::FS_3, FontWeight::SemiBold),
@@ -420,38 +403,16 @@ fn mobile_navigation_dialog(
                                         focus_ids: &mut focus_ids,
                                         first_card_id: &mut first_card_id,
                                     };
-                                    mobile_navigation_group(
-                                        ui,
-                                        app,
-                                        "Workspaces",
-                                        &WORKSPACE_ACTIONS,
-                                        columns,
-                                        &mut group_state,
-                                    );
-                                    mobile_navigation_group(
-                                        ui,
-                                        app,
-                                        "Specialist engineering",
-                                        &SPECIALIST_ACTIONS,
-                                        columns,
-                                        &mut group_state,
-                                    );
-                                    mobile_navigation_group(
-                                        ui,
-                                        app,
-                                        "Utilities",
-                                        &UTILITY_ACTIONS,
-                                        columns,
-                                        &mut group_state,
-                                    );
-                                    mobile_navigation_group(
-                                        ui,
-                                        app,
-                                        "Settings",
-                                        &SETTINGS_ACTIONS,
-                                        columns,
-                                        &mut group_state,
-                                    );
+                                    for (label, actions) in MOBILE_NAV_GROUPS {
+                                        mobile_navigation_group(
+                                            ui,
+                                            app,
+                                            label,
+                                            actions,
+                                            columns,
+                                            &mut group_state,
+                                        );
+                                    }
                                     ui.add_space(MOBILE_NAV_GRID_PADDING);
                                 });
                         },
@@ -535,9 +496,9 @@ fn mobile_navigation_group(
     ui.painter().text(
         egui::pos2(label_rect.left() + 2.0, label_rect.bottom() - 8.0),
         egui::Align2::LEFT_CENTER,
-        label.to_uppercase(),
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.text_faint,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
     );
 
     for row in actions.chunks(columns) {
@@ -648,9 +609,6 @@ fn mobile_navigation_card(
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), action.label)
     });
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_description(action.detail);
-    });
     ui.painter().rect(
         rect,
         t.radius,
@@ -675,28 +633,16 @@ fn mobile_navigation_card(
         },
     );
     let text_clip = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 53.0, rect.top() + 8.0),
-        egui::pos2(rect.right() - 10.0, rect.bottom() - 8.0),
+        egui::pos2(rect.left() + 53.0, rect.top() + 4.0),
+        egui::pos2(rect.right() - 10.0, rect.bottom() - 4.0),
     );
-    let text_painter = ui.painter().with_clip_rect(text_clip);
-    text_painter.text(
-        egui::pos2(rect.left() + 53.0, rect.top() + 25.0),
+    ui.painter().with_clip_rect(text_clip).text(
+        egui::pos2(rect.left() + 53.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         action.label,
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
         if enabled {
             t.color.text
-        } else {
-            t.color.text_faint
-        },
-    );
-    text_painter.text(
-        egui::pos2(rect.left() + 53.0, rect.bottom() - 22.0),
-        egui::Align2::LEFT_CENTER,
-        action.detail,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        if enabled {
-            t.color.text_dim
         } else {
             t.color.text_faint
         },
@@ -903,23 +849,44 @@ mod tests {
         );
     }
 
+    /// Thirteen one-line rows under two heads, not thirteen taglined cards
+    /// under four: the one-column sheet was 1,237 px of scrolling.
     #[test]
     fn mobile_navigation_grid_height_tracks_its_real_rows() {
-        assert_eq!(mobile_navigation_natural_height(2), 757.0);
-        assert_eq!(mobile_navigation_natural_height(1), 1_237.0);
+        assert_eq!(mobile_navigation_natural_height(2), 486.0);
+        assert_eq!(mobile_navigation_natural_height(1), 798.0);
         assert_eq!(MOBILE_NAV_MAX_WIDTH, 700.0);
         assert_eq!(MOBILE_NAV_GUTTER, 9.0);
-        assert_eq!(MOBILE_NAV_CARD_HEIGHT, 72.0);
+        assert_eq!(MOBILE_NAV_CARD_HEIGHT, 44.0);
         assert_eq!(MOBILE_NAV_GRID_PADDING, 12.0);
         assert_eq!(MOBILE_NAV_GRID_GAP, 8.0);
     }
 
+    /// A workspace is called what the rest of the shell calls it, and the
+    /// sheet has two heads: the destinations, and everything else.
+    #[test]
+    fn the_phone_sheet_names_a_workspace_once_and_groups_the_rest_as_tools() {
+        for workspace in Workspace::ALL {
+            assert!(
+                WORKSPACE_ACTIONS.iter().any(|action| {
+                    action.command == Command::OpenWorkspace(workspace)
+                        && action.label == workspace.label()
+                }),
+                "{workspace:?} is offered under the name the shell gives it"
+            );
+        }
+        assert_eq!(
+            MOBILE_NAV_GROUPS.map(|(label, _)| label),
+            ["Workspaces", "Tools"]
+        );
+    }
+
     #[test]
     fn mobile_organization_entry_opens_the_canonical_account_manager() {
-        let action = SETTINGS_ACTIONS
+        let action = TOOL_ACTIONS
             .iter()
             .find(|action| action.label == "Organization & licensing")
-            .expect("mockup account entry");
+            .expect("the account entry");
         assert_eq!(action.command, Command::AccountOrganization);
     }
 
