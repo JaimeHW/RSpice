@@ -146,6 +146,49 @@ fn xyce_level10_soimod3_auto_selection_is_instance_length_aware() {
     assert_eq!(device_kind("mlong"), "B3SOIDD");
 }
 
+/// ngspice defaults NRD, NRS and NRB to one square in every BSIMSOI
+/// flavour — `b3soiddset.c:889,917,909`, `b3soifdset.c:890,918,910`,
+/// `b3soipdset.c:1063,1093,1083`, `b4soiset.c:2115,2145,2135`, each
+/// `if (!<x>Given) <x> = 1.0;` — so an instance that states none of them
+/// still gets a square of sheet resistance on each terminal. B3SOIDD and
+/// B3SOIFD defaulted all three to zero, which did not merely scale a
+/// resistance to nothing: it removed the drain and source series resistors
+/// from the circuit, and left `rbodyext = body_squares * rbsh` at an ideal
+/// body contact. Only B3SOIPD agreed with the reference.
+#[test]
+fn every_soi_family_defaults_its_square_counts_to_one_square() {
+    for (case, selector_params) in [
+        ("pd", ""),
+        ("dd", "vbs0pd=-1 vbs0fd=0.5"),
+        ("fd", "vbs0fd=-1"),
+    ] {
+        let deck = format!(
+            "\
+        * A sheet resistance with no NRD/NRS still builds the terminal resistors\n\
+        m1 d g s 0 nmos w=4u l=1u\n\
+        vd d 0 5\n\
+        vg g 0 1.2\n\
+        vs s 0 0\n\
+        .model nmos nmos level=10 soimod=3 capmod=2 rsh=10 {selector_params}\n\
+        .op\n\
+        .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let circuit = engine()
+            .build_circuit(&netlist)
+            .unwrap_or_else(|err| panic!("{case} circuit must build: {err}"));
+
+        assert!(
+            circuit.get_node_by_name("m1.__dint").is_some(),
+            "{case}: a sheet resistance with no NRD must still give the drain its series resistor"
+        );
+        assert!(
+            circuit.get_node_by_name("m1.__sint").is_some(),
+            "{case}: a sheet resistance with no NRS must still give the source its series resistor"
+        );
+    }
+}
+
 #[test]
 fn xyce_level10_bsimsoi_rejects_unresolved_native_model_params() {
     let deck = xyce_level10_default_gain_stage().replace("level=10", "level=10 u0={missing_u0}");
