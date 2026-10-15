@@ -1,14 +1,39 @@
-//! The regression review pane: verdicts, the baseline contract, and the diff.
+//! The regression review: one table of every compared target, and the detail
+//! of the one the reader selects.
 //!
 //! This is presentation over [`super::regression_contract`] — it renders the
 //! verdicts and coverage gaps that module computes, and never re-derives one.
-//! The contract pane deliberately shows the digest a verdict was anchored to,
-//! so a reviewer can see which baseline a pass actually refers to.
+//! The toolbar names the candidate and the baseline and how many targets pass.
+//! A row click selects a target; its tolerance form, and for a waveform its
+//! comparison plot, open in the pane under the table. A target nobody selected
+//! shows no detail.
 
+use super::table::{Cell, Column, DataTable, TABLE_EDGE_INSET, TABLE_HEAD_H, TABLE_ROW_H, Verdict};
+use super::toolbar::{PageToolbar, Summary, ToolbarAction, empty_line};
 use super::*;
 
-pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32) {
-    let surface_top = ui.cursor().top();
+/// Least and greatest height of the detail pane under the table.
+const DETAIL_MIN_H: f32 = 220.0;
+const DETAIL_MAX_H: f32 = 320.0;
+/// Width of the tolerance form beside a waveform plot.
+const TOLERANCE_FORM_W: f32 = 360.0;
+
+/// What the regression toolbar can do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RegressionAction {
+    SelectBaseline,
+    Run,
+    Export,
+    RemoveOrphans,
+}
+
+/// One table row: the target it compares, when it names one, and its cells.
+struct RegressionRow {
+    target: Option<crate::state::RegressionTargetSelector>,
+    cells: Vec<Cell>,
+}
+
+pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     let regression_policy = active_regression_specification_policy(app);
     let targets = regression_run_pair(app)
         .map(|(baseline, current)| {
@@ -22,7 +47,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         })
         .unwrap_or_default();
     synchronize_regression_drafts(app, &targets);
-    let mut regression_session = app.state.workbench.verification.clone();
+    let mut session = app.state.workbench.verification.clone();
     let pair = regression_run_pair(app);
     let checks = pair
         .map(|(baseline, current)| derive_regression_checks(baseline, current))
@@ -53,21 +78,8 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
             regression_tolerance_digest(&rules),
         )
     });
-    let baseline_contract = pair.map(|(baseline, current)| RegressionBaselineContractSnapshot {
-        baseline_id: baseline.id,
-        candidate_id: current.id,
-        baseline_dataset: baseline.dataset_id.to_string(),
-        baseline_revision: baseline
-            .prepared_receipt()
-            .expect("run pair requires prepared baseline")
-            .project_revision(),
-        baseline_recorded_at: baseline.timestamp,
-        baseline_provenance: if baseline.prepared_receipt().is_some() {
-            "prepared snapshot retained"
-        } else {
-            "legacy / unclassified"
-        },
-        receipt: regression_session
+    let receipt = pair.and_then(|(baseline, current)| {
+        session
             .regression_comparison
             .as_ref()
             .filter(|receipt| {
@@ -77,7 +89,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
                     )
                 })
             })
-            .cloned(),
+            .cloned()
     });
     let check_verdicts = checks
         .iter()
@@ -87,23 +99,10 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         .iter()
         .map(|pair| evaluate_regression_waveform(pair, regression_rule(&rules, &pair.target)))
         .collect::<Vec<_>>();
-    let t = Tokens::get(ui.ctx());
-    let passed_checks = check_verdicts
-        .iter()
-        .filter(|verdict| verdict.passed())
-        .count();
-    let passed_waveforms = waveform_verdicts
-        .iter()
-        .filter(|verdict| verdict.passed())
-        .count();
-    let failures = check_verdicts
-        .iter()
-        .chain(&waveform_verdicts)
-        .filter(|verdict| verdict.failed())
-        .count();
-    let unresolved = check_verdicts
-        .iter()
-        .chain(&waveform_verdicts)
+    let verdicts = check_verdicts.iter().chain(&waveform_verdicts);
+    let passed = verdicts.clone().filter(|verdict| verdict.passed()).count();
+    let failures = verdicts.clone().filter(|verdict| verdict.failed()).count();
+    let unresolved = verdicts
         .filter(|verdict| {
             matches!(
                 verdict,
@@ -112,600 +111,457 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp, viewport_height: f32)
         })
         .count()
         + coverage_issues.len();
-    let worst_normalized = check_verdicts
-        .iter()
-        .chain(&waveform_verdicts)
-        .filter_map(|verdict| match verdict {
-            RegressionVerdict::Pass {
-                worst_delta,
-                allowed_delta,
-            }
-            | RegressionVerdict::Fail {
-                worst_delta,
-                allowed_delta,
-                ..
-            } => Some(if *allowed_delta > 0.0 {
-                *worst_delta / *allowed_delta
-            } else if *worst_delta == 0.0 {
-                0.0
-            } else {
-                f64::INFINITY
-            }),
-            RegressionVerdict::NotConfigured | RegressionVerdict::NotEvaluated(_) => None,
-        })
-        .max_by(f64::total_cmp);
-    let configured = targets
-        .iter()
-        .filter(|target| regression_rule(&rules, &target.target).is_some())
-        .count();
-    let comparison_available = pair.is_some();
-    let overall_pass = failures == 0 && unresolved == 0 && !targets.is_empty();
-    let items = [
-        KpiTile::new(
-            "Checks passing",
-            format!("{passed_checks} / {}", checks.len()),
-            if comparison_available {
-                format!("{failures} failing")
-            } else {
-                "Select a baseline".to_owned()
-            },
-        )
-        .with_problem((failures > 0).then_some(Problem::Failure)),
-        KpiTile::new(
-            "Waveform matches",
-            format!("{passed_waveforms} / {}", waveforms.len()),
-            if !regression_requires_waveforms(regression_policy) {
-                "Limits only: waveforms are not compared".to_owned()
-            } else if comparison_available {
-                String::new()
-            } else {
-                "No waveform pair".to_owned()
-            },
-        ),
-        KpiTile::new(
-            "Worst normalized delta",
-            worst_normalized.map_or_else(
-                || "—".to_owned(),
-                |value| {
-                    if value.is_finite() {
-                        format!("{value:.3} × limit")
-                    } else {
-                        "∞ × limit".to_owned()
-                    }
-                },
-            ),
-            if !comparison_available || overall_pass {
-                String::new()
-            } else {
-                format!("{unresolved} targets unresolved")
-            },
-        ),
-        KpiTile::new(
-            "Tolerances",
-            format!("{configured} / {}", targets.len()),
-            if targets.is_empty() {
-                "No comparison targets".to_owned()
-            } else if regression_session
-                .regression_tolerance_drafts
-                .iter()
-                .any(|draft| draft.dirty)
-            {
-                "Unsaved. Applied on the next regression run.".to_owned()
-            } else {
-                String::new()
-            },
-        ),
-    ];
-    verification_kpi_strip(ui, &items);
-
-    let width = ui.available_width();
-    let viewport_width = ui.ctx().content_rect().width();
-    let header_height = if t.metrics.ctl_h >= 44.0 { 44.0 } else { 37.0 };
-    let visible_remaining =
-        remaining_viewport_height(viewport_height, ui.cursor().top() - surface_top);
-    let comparison_rows = checks.len() + waveforms.len() + coverage_issues.len();
-    let layout = VerifyLayout::resolve(
-        viewport_width,
-        width,
-        visible_remaining,
-        comparison_rows,
-        header_height,
-        verification_table_row_height(viewport_width),
-    );
-    if layout.split {
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 1.0;
-            ui.allocate_ui_with_layout(
-                egui::vec2(layout.left_width, layout.first_row_height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    regression_waveform_chart(
-                        ui,
-                        &waveforms,
-                        &rules,
-                        regression_session.regression_selected_target.as_ref(),
-                    )
-                },
-            );
-            ui.allocate_ui_with_layout(
-                egui::vec2(layout.right_width, layout.first_row_height),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    regression_baseline_contract_pane(
-                        ui,
-                        &mut regression_session,
-                        baseline_contract.as_ref(),
-                        &targets,
-                    )
-                },
-            );
-        });
-    } else {
-        let chart_height = verification_stacked_chart_height(viewport_width);
-        ui.allocate_ui(egui::vec2(width, chart_height), |ui| {
-            regression_waveform_chart(
-                ui,
-                &waveforms,
-                &rules,
-                regression_session.regression_selected_target.as_ref(),
-            )
-        });
-        ui.add_space(1.0);
-        regression_baseline_contract(
-            ui,
-            &mut regression_session,
-            baseline_contract.as_ref(),
-            &targets,
-        );
-    }
-    ui.add_space(1.0);
-    let headers = vec![
-        ("Check".to_owned(), 0.17),
-        ("Comparison".to_owned(), 0.14),
-        ("Baseline".to_owned(), 0.14),
-        ("Current".to_owned(), 0.14),
-        ("Delta".to_owned(), 0.14),
-        ("Tolerance".to_owned(), 0.13),
-        ("Status".to_owned(), 0.14),
-    ];
-    let mut rows = checks
-        .iter()
-        .zip(&check_verdicts)
-        .map(|(check, verdict)| {
-            let rule = regression_rule(&rules, &check.target);
-            vec![
-                TableCell::text(&check.name),
-                TableCell::text(format!(
-                    "{} · {}",
-                    rule.map_or("unconfigured", |rule| rule.method.label()),
-                    check.source_identity
-                )),
-                TableCell::mono(format_scalar(check.baseline)),
-                TableCell::mono(format_scalar(check.current)),
-                TableCell::mono(signed_scalar(check.delta())),
-                TableCell::mono(
-                    rule.map_or_else(|| "not configured".to_owned(), format_tolerance_rule),
-                ),
-                regression_status_cell(verdict),
-            ]
-        })
-        .collect::<Vec<_>>();
-    rows.extend(
-        waveforms
-            .iter()
-            .zip(&waveform_verdicts)
-            .map(|(pair, verdict)| {
-                let rule = regression_rule(&rules, &pair.target);
-                let (delta, allowed) = match verdict {
-                    RegressionVerdict::Pass {
-                        worst_delta,
-                        allowed_delta,
-                    }
-                    | RegressionVerdict::Fail {
-                        worst_delta,
-                        allowed_delta,
-                        ..
-                    } => (*worst_delta, *allowed_delta),
-                    RegressionVerdict::NotConfigured | RegressionVerdict::NotEvaluated(_) => {
-                        (f64::NAN, f64::NAN)
-                    }
-                };
-                vec![
-                    TableCell::text(format!("Waveform · {}", pair.current.name)),
-                    TableCell::text(rule.map_or("unconfigured", |rule| rule.method.label())),
-                    TableCell::mono(format!("{} samples", pair.baseline.y.len())),
-                    TableCell::mono(format!("{} samples", pair.current.y.len())),
-                    TableCell::mono(if delta.is_finite() {
-                        format!("max {}", format_scalar(delta))
-                    } else {
-                        "—".to_owned()
-                    }),
-                    TableCell::mono(rule.map_or_else(
-                        || {
-                            if allowed.is_finite() {
-                                format_scalar(allowed)
-                            } else {
-                                "not configured".to_owned()
-                            }
-                        },
-                        format_tolerance_rule,
-                    )),
-                    regression_status_cell(verdict),
-                ]
-            }),
-    );
-    rows.extend(coverage_issues.iter().map(|issue| {
-        vec![
-            TableCell::text(&issue.label),
-            TableCell::text("evidence coverage"),
-            TableCell::mono("—"),
-            TableCell::mono("—"),
-            TableCell::mono("—"),
-            TableCell::mono("—"),
-            TableCell::problem(format!("Blocked · {}", issue.detail), Problem::Warning),
-        ]
-    }));
+    let total = checks.len() + waveforms.len() + coverage_issues.len();
     let orphan_targets = orphaned_regression_targets(&coverage_issues);
-    let mut remove_orphans_requested = false;
+    let export_documents = receipt.as_ref().map(|receipt| {
+        let cases = regression_export_cases(
+            &checks,
+            &check_verdicts,
+            &waveforms,
+            &waveform_verdicts,
+            &coverage_issues,
+        );
+        regression_ci_documents(receipt, &cases)
+    });
+
+    let runs = run_choice(app, |run| validate_regression_run(run).is_ok());
+    let candidate_name = verification_run(app).map(|run| format!("Run {}", run.id));
+    let summary = pair.map(|(baseline, current)| {
+        let text = format!(
+            "Run {} vs baseline Run {} \u{00b7} {passed} / {total} pass",
+            current.id, baseline.id
+        );
+        if failures > 0 {
+            Summary::failing(text)
+        } else if unresolved > 0 {
+            Summary::warning(format!("{text} \u{00b7} {unresolved} unresolved"))
+        } else {
+            Summary::plain(text)
+        }
+    });
+    let mut actions = vec![RegressionAction::SelectBaseline, RegressionAction::Run];
+    let mut toolbar_actions = vec![
+        ToolbarAction::new("Select baseline"),
+        ToolbarAction::new("Run regression")
+            .enabled(pair.is_some())
+            .disabled_reason("Select a baseline run first."),
+        ToolbarAction::new("Export JUnit / TAP")
+            .enabled(export_documents.is_some())
+            .disabled_reason("Run regression first."),
+    ];
+    actions.push(RegressionAction::Export);
+    if !orphan_targets.is_empty() {
+        actions.push(RegressionAction::RemoveOrphans);
+        toolbar_actions.push(ToolbarAction::new("Remove orphaned rules"));
+    }
+    let output = PageToolbar {
+        title: "Regression",
+        runs: &runs,
+        summary,
+        actions: &toolbar_actions,
+    }
+    .show(ui);
+    action_problem_line(ui, app);
     if !orphan_targets.is_empty() {
         let names = coverage_issues
             .iter()
             .filter(|issue| {
-                issue.detail == "persisted tolerance target is absent from both datasets"
+                issue
+                    .target
+                    .as_ref()
+                    .is_some_and(|target| orphan_targets.contains(target))
             })
             .map(|issue| issue.label.as_str())
             .collect::<Vec<_>>()
             .join(", ");
-        card(ui, "Orphaned tolerance recovery", |ui| {
-            ui.label(format!(
-                "{} persisted tolerance target(s) are absent from both retained datasets: {names}",
-                orphan_targets.len()
-            ));
-            ui.label(
-                "Remove these obsolete rules, then select a current target to configure its replacement contract.",
-            );
-            remove_orphans_requested = Button::new("Remove orphaned tolerances").show(ui).clicked();
-        });
+        let _ = crate::ui::widgets::problem_line(
+            ui,
+            Problem::Warning,
+            &format!(
+                "{} tolerance rule{} name{} targets neither run holds: {names}",
+                orphan_targets.len(),
+                if orphan_targets.len() == 1 { "" } else { "s" },
+                if orphan_targets.len() == 1 { "s" } else { "" },
+            ),
+        );
     }
-    let export_documents = baseline_contract
-        .as_ref()
-        .and_then(|contract| contract.receipt.as_ref())
-        .map(|receipt| {
-            let cases = regression_export_cases(
-                &checks,
-                &check_verdicts,
-                &waveforms,
-                &waveform_verdicts,
-                &coverage_issues,
-            );
-            regression_ci_documents(receipt, &cases)
+
+    let mut clicked = None;
+    if pair.is_none() {
+        let text = candidate_name.map_or_else(
+            || "No run selected. Regression compares a run of this plan against a baseline run.".to_owned(),
+            |run| format!("No baseline selected. Select the run {run} is compared against."),
+        );
+        let _ = empty_line(ui, &text, None);
+    } else {
+        let rows = regression_rows(
+            &checks,
+            &check_verdicts,
+            &waveforms,
+            &waveform_verdicts,
+            &coverage_issues,
+            &rules,
+        );
+        let selected = session.regression_selected_target.as_ref().and_then(|selected| {
+            rows.iter()
+                .position(|row| row.target.as_ref() == Some(selected))
         });
-    let export_requested = table_section_header(
-        ui,
-        "Regression checks",
-        Some("persisted per-check tolerance and deterministic verdict"),
-        export_documents.as_ref().map(|_| "Export JUnit / TAP"),
-    );
-    render_data_table(ui, "verify-regression-checks", &headers, &rows, None);
+        let body = ui.available_height();
+        let detail = selected.map_or(0.0, |_| (body * 0.45).clamp(DETAIL_MIN_H, DETAIL_MAX_H));
+        let columns = [
+            Column::name("Check", 160.0),
+            Column::words("Method", 120.0),
+            Column::number("Baseline", 100.0),
+            Column::number("Current", 100.0),
+            Column::number("Delta", 100.0),
+            Column::words("Tolerance", 150.0),
+            Column::words("Result", 180.0),
+        ];
+        clicked = DataTable::new("verify.regression.checks", &columns, rows.len())
+            .clickable()
+            .selected(selected)
+            .max_height((body - detail - 1.0).max(TABLE_HEAD_H + TABLE_ROW_H))
+            .show(ui, |index| rows[index].cells.clone())
+            .clicked
+            .map(|index| rows[index].target.clone());
+        if let Some(target) = selected.and_then(|index| rows[index].target.clone()) {
+            regression_detail(ui, &mut session, &target, &waveforms, &rules, &checks);
+        }
+    }
     drop(waveforms);
-    if remove_orphans_requested {
-        let result = remove_orphaned_regression_rules(app, &orphan_targets).map(|_| ());
-        record_action(&mut app.state.workbench.verification, result);
+
+    if let Some(target) = clicked {
+        session.regression_selected_target = if target == session.regression_selected_target {
+            None
+        } else {
+            target
+        };
     }
-    if export_requested && let Some(documents) = export_documents {
-        match documents {
-            Ok((junit, tap)) => export_regression_ci(app, &junit, &tap),
-            Err(error) => {
+    let mut removed_orphans = false;
+    match output.action.and_then(|index| actions.get(index)) {
+        Some(RegressionAction::SelectBaseline) => {
+            app.state
+                .workbench
+                .verification
+                .regression_baseline_picker_selection = active_regression_baseline(app);
+            app.state
+                .workbench
+                .verification
+                .regression_baseline_picker_open = true;
+        }
+        Some(RegressionAction::Run) => run_regression_comparison(app),
+        Some(RegressionAction::Export) => match export_documents {
+            Some(Ok((junit, tap))) => export_regression_ci(app, &junit, &tap),
+            Some(Err(error)) => {
                 app.state.workbench.verification.action_problem =
                     Some(format!("JUnit / TAP export failed: {error}."));
             }
+            None => {}
+        },
+        Some(RegressionAction::RemoveOrphans) => {
+            removed_orphans = true;
+            let result = remove_orphaned_regression_rules(app, &orphan_targets).map(|_| ());
+            record_action(&mut app.state.workbench.verification, result);
         }
+        None => {}
     }
-    if !remove_orphans_requested {
+    if let Some(index) = output.run {
+        select_verification_run(&mut app.state.simulation, index);
+    }
+    if !removed_orphans {
         app.state.workbench.verification.regression_selected_target =
-            regression_session.regression_selected_target;
+            session.regression_selected_target;
         app.state.workbench.verification.regression_tolerance_drafts =
-            regression_session.regression_tolerance_drafts;
+            session.regression_tolerance_drafts;
     }
 }
 
-/// A regression check's verdict cell: a failure in the error colour, a pass
-/// neutral, an unconfigured tolerance plain, and a check that could not be
-/// evaluated behind a warning mark — blocked is not a failure.
-fn regression_status_cell(verdict: &RegressionVerdict) -> TableCell {
-    match verdict {
-        RegressionVerdict::Pass { .. } => TableCell::verdict("PASS", Verdict::Pass),
-        RegressionVerdict::Fail { detail, .. } => {
-            TableCell::verdict(format!("FAIL · {detail}"), Verdict::Fail)
-        }
-        RegressionVerdict::NotConfigured => TableCell::mono("not configured"),
-        RegressionVerdict::NotEvaluated(detail) => {
-            TableCell::problem(format!("Blocked · {detail}"), Problem::Warning)
-        }
-    }
-}
-
-pub(super) fn regression_baseline_contract_pane(
-    ui: &mut Ui,
-    session: &mut super::super::super::state::VerificationSessionState,
-    contract: Option<&RegressionBaselineContractSnapshot>,
-    targets: &[RegressionTargetDescriptor],
-) {
-    let t = Tokens::get(ui.ctx());
-    let size = ui.available_size().max(egui::Vec2::splat(1.0));
-    let (viewport, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    ui.painter().rect_filled(viewport, 0.0, t.color.bg_app);
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(viewport)
-            .layout(egui::Layout::top_down(egui::Align::Min)),
-    );
-    child.spacing_mut().item_spacing.y = 0.0;
-    ScrollArea::vertical()
-        .id_salt("verify.regression.baseline-contract")
-        .auto_shrink([false, false])
-        .show(&mut child, |ui| {
-            ui.set_min_width(viewport.width());
-            regression_baseline_contract(ui, session, contract, targets);
-        });
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct RegressionBaselineContractSnapshot {
-    pub(super) baseline_id: u64,
-    pub(super) candidate_id: u64,
-    pub(super) baseline_dataset: String,
-    pub(super) baseline_revision: crate::product::ObjectRevision,
-    pub(super) baseline_recorded_at: f64,
-    pub(super) baseline_provenance: &'static str,
-    pub(super) receipt: Option<super::super::super::state::RegressionComparisonReceipt>,
-}
-
-pub(super) fn regression_baseline_contract(
-    ui: &mut Ui,
-    session: &mut super::super::super::state::VerificationSessionState,
-    contract: Option<&RegressionBaselineContractSnapshot>,
-    targets: &[RegressionTargetDescriptor],
-) {
-    table_section_header(ui, "Baseline contract", Some("immutable reference"), None);
-    if let Some(contract) = contract {
-        property_row(ui, "Baseline run", &format!("Run {}", contract.baseline_id));
-        property_row(
-            ui,
-            "Candidate run",
-            &format!("Run {}", contract.candidate_id),
-        );
-        property_row(ui, "Baseline dataset", &contract.baseline_dataset);
-        property_row(
-            ui,
-            "Revision",
-            &contract.baseline_revision.get().to_string(),
-        );
-        property_row(ui, "Producer engine", "not retained by this dataset schema");
-        property_row(
-            ui,
-            "Comparison engine",
-            concat!("RSpice ", env!("CARGO_PKG_VERSION")),
-        );
-        property_row(
-            ui,
-            "Recorded authority",
-            &format!(
-                "Local prepared-run authority · {:.3} Unix s",
-                contract.baseline_recorded_at
-            ),
-        );
-        property_row(
-            ui,
-            "Replacement policy",
-            "Explicit selection · simulation-plan revision required",
-        );
-        property_row(ui, "Baseline provenance", contract.baseline_provenance);
-        property_row(
-            ui,
-            "Comparison receipt",
-            &contract.receipt.as_ref().map_or_else(
-                || "not run / stale".to_owned(),
-                |receipt| {
-                    format!(
-                        "{} checks · {} waveforms · {} pass · {} fail · {} blocked",
-                        receipt.aligned_checks,
-                        receipt.aligned_waveforms,
-                        receipt.passed_checks + receipt.passed_waveforms,
-                        receipt.failed_checks + receipt.failed_waveforms,
-                        receipt.unconfigured_targets + receipt.unevaluated_targets,
-                    )
-                },
-            ),
-        );
-        ui.add_space(5.0);
-        table_section_header(
-            ui,
-            "Tolerance & decision",
-            Some("per selected immutable result target"),
-            None,
-        );
-        let mut selected = session.regression_selected_target.clone();
-        let selected_label = selected
-            .as_ref()
-            .and_then(|selected| targets.iter().find(|target| target.target == *selected))
-            .map_or("No aligned target", |target| target.label.as_str());
-        egui::ComboBox::from_id_salt("verify.regression.tolerance.target")
-            .selected_text(selected_label)
-            .width(ui.available_width().max(120.0))
-            .show_ui(ui, |ui| {
-                for target in targets {
-                    ui.selectable_value(&mut selected, Some(target.target.clone()), &target.label);
-                }
-            });
-        session.regression_selected_target = selected.clone();
-        if let Some(index) = selected.as_ref().and_then(|selected| {
-            session
-                .regression_tolerance_drafts
-                .iter()
-                .position(|draft| draft.target == *selected)
-        }) {
-            let draft = &mut session.regression_tolerance_drafts[index];
-            let previous_method = draft.method;
-            egui::ComboBox::from_label("Comparison method")
-                .selected_text(draft.method.label())
-                .width(ui.available_width().max(120.0))
-                .show_ui(ui, |ui| {
-                    for method in crate::state::RegressionComparisonMethod::ALL {
-                        ui.selectable_value(&mut draft.method, method, method.label());
-                    }
-                });
-            draft.dirty |= draft.method != previous_method;
-            egui::Grid::new("verify.regression.tolerance.fields")
-                .num_columns(2)
-                .spacing(egui::vec2(8.0, 4.0))
-                .show(ui, |ui| {
-                    ui.label("Absolute tolerance");
-                    draft.dirty |= ui
-                        .add(
-                            egui::TextEdit::singleline(&mut draft.absolute_tolerance)
-                                .hint_text("10m"),
-                        )
-                        .changed();
-                    ui.end_row();
-                    ui.label("Relative tolerance (%)");
-                    draft.dirty |= ui
-                        .add(
-                            egui::TextEdit::singleline(&mut draft.relative_tolerance_percent)
-                                .hint_text("0.5"),
-                        )
-                        .changed();
-                    ui.end_row();
-                    if draft.target.kind == crate::state::RegressionTargetKind::Waveform {
-                        ui.label("Time-skew allowance");
-                        draft.dirty |= ui
-                            .add(
-                                egui::TextEdit::singleline(&mut draft.time_skew_allowance)
-                                    .hint_text("20u"),
-                            )
-                            .changed();
-                        ui.end_row();
-                        ui.label("Comparison window");
-                        draft.dirty |= ui
-                            .add(
-                                egui::TextEdit::singleline(&mut draft.comparison_window)
-                                    .hint_text("0 … 20m"),
-                            )
-                            .changed();
-                        ui.end_row();
-                    }
-                });
-            let t = Tokens::get(ui.ctx());
-            // The error sits under the form it rejects. Saved is the normal
-            // state, and says nothing.
-            if let Some(error) = &draft.validation_error {
-                ui.label(egui::RichText::new(error).color(t.color.err));
-            } else if draft.dirty {
-                ui.label(
-                    egui::RichText::new("Unsaved. Applied on the next regression run.")
-                        .color(t.color.text_dim),
-                );
+/// Every compared target as a table row: the measurements, then the
+/// waveforms, then the targets that could not be compared.
+fn regression_rows(
+    checks: &[RegressionCheck],
+    check_verdicts: &[RegressionVerdict],
+    waveforms: &[RegressionWaveformPair<'_>],
+    waveform_verdicts: &[RegressionVerdict],
+    coverage_issues: &[RegressionCoverageIssue],
+    rules: &[crate::state::RegressionToleranceRule],
+) -> Vec<RegressionRow> {
+    let method = |rule: Option<&crate::state::RegressionToleranceRule>| {
+        rule.map_or_else(Cell::absent, |rule| Cell::text(rule.method.label()))
+    };
+    let tolerance = |rule: Option<&crate::state::RegressionToleranceRule>| {
+        rule.map_or_else(Cell::absent, |rule| Cell::number(format_tolerance_rule(rule)))
+    };
+    let mut rows = checks
+        .iter()
+        .zip(check_verdicts)
+        .map(|(check, verdict)| {
+            let rule = regression_rule(rules, &check.target);
+            RegressionRow {
+                target: Some(check.target.clone()),
+                cells: vec![
+                    Cell::text(&check.name),
+                    method(rule),
+                    Cell::number(format_scalar(check.baseline)),
+                    Cell::number(format_scalar(check.current)),
+                    Cell::number(signed_scalar(check.delta())),
+                    tolerance(rule),
+                    regression_status_cell(verdict),
+                ],
             }
+        })
+        .collect::<Vec<_>>();
+    rows.extend(waveforms.iter().zip(waveform_verdicts).map(|(pair, verdict)| {
+        let rule = regression_rule(rules, &pair.target);
+        let worst = match verdict {
+            RegressionVerdict::Pass { worst_delta, .. }
+            | RegressionVerdict::Fail { worst_delta, .. } => Some(*worst_delta),
+            RegressionVerdict::NotConfigured | RegressionVerdict::NotEvaluated(_) => None,
+        };
+        RegressionRow {
+            target: Some(pair.target.clone()),
+            cells: vec![
+                Cell::text(format!("Waveform {}", pair.current.name)),
+                method(rule),
+                Cell::number(format!("{} pts", pair.baseline.y.len())),
+                Cell::number(format!("{} pts", pair.current.y.len())),
+                worst.map_or_else(Cell::absent, |delta| {
+                    Cell::number(format!("max {}", format_scalar(delta)))
+                }),
+                tolerance(rule),
+                regression_status_cell(verdict),
+            ],
         }
-    } else {
-        let t = Tokens::get(ui.ctx());
-        let available_width = ui.available_width();
-        egui::Frame::new()
-            .fill(t.color.bg_panel)
-            .inner_margin(egui::Margin::same(10))
-            .show(ui, |ui| {
-                ui.set_min_width((available_width - 20.0).max(1.0));
-                ui.label(egui::RichText::new("No baseline selected.").color(t.color.text));
-                ui.label(egui::RichText::new("Select a baseline run.").color(t.color.text_dim));
-            });
+    }));
+    rows.extend(coverage_issues.iter().map(|issue| RegressionRow {
+        target: issue.target.clone(),
+        cells: vec![
+            Cell::text(&issue.label),
+            Cell::absent(),
+            Cell::absent(),
+            Cell::absent(),
+            Cell::absent(),
+            Cell::absent(),
+            Cell::problem(format!("Blocked \u{00b7} {}", issue.detail), Problem::Warning),
+        ],
+    }));
+    rows
+}
+
+/// A regression target's verdict cell: a failure in the error colour, a pass
+/// neutral, an unconfigured tolerance plain, and a target that could not be
+/// evaluated behind a warning mark — blocked is not a failure.
+fn regression_status_cell(verdict: &RegressionVerdict) -> Cell {
+    match verdict {
+        RegressionVerdict::Pass { .. } => Cell::verdict(Verdict::Pass),
+        RegressionVerdict::Fail { detail, .. } => {
+            Cell::text(format!("Fail \u{00b7} {detail}")).judged(Verdict::Fail)
+        }
+        RegressionVerdict::NotConfigured => Cell::text("No tolerance"),
+        RegressionVerdict::NotEvaluated(detail) => {
+            Cell::problem(format!("Blocked \u{00b7} {detail}"), Problem::Warning)
+        }
     }
 }
 
-pub(super) fn regression_waveform_chart(
+/// The selected target's detail: its waveform comparison, when it is a
+/// waveform, beside the form that sets its tolerance.
+fn regression_detail(
     ui: &mut Ui,
+    session: &mut VerificationSessionState,
+    target: &crate::state::RegressionTargetSelector,
     waveforms: &[RegressionWaveformPair<'_>],
     rules: &[crate::state::RegressionToleranceRule],
-    selected: Option<&crate::state::RegressionTargetSelector>,
+    checks: &[RegressionCheck],
+) {
+    let t = Tokens::get(ui.ctx());
+    let top = ui.cursor().top();
+    let left = ui.max_rect().left();
+    let width = ui.available_width();
+    ui.painter().hline(
+        left..=left + width,
+        top + 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    ui.add_space(1.0);
+    let height = ui.available_height().clamp(DETAIL_MIN_H, DETAIL_MAX_H);
+    let pane = egui::Rect::from_min_size(egui::pos2(left, top + 1.0), egui::vec2(width, height));
+    let _ = ui.allocate_exact_size(pane.size(), egui::Sense::hover());
+    #[cfg(test)]
+    super::raster::probe(ui, "split", pane);
+    ui.painter().rect_filled(pane, 0.0, t.color.bg_panel);
+    let waveform = waveforms.iter().find(|pair| pair.target == *target);
+    let form_width = if waveform.is_some() {
+        TOLERANCE_FORM_W.min(width * 0.5)
+    } else {
+        width
+    };
+    let form_rect = egui::Rect::from_min_max(
+        egui::pos2(pane.right() - form_width, pane.top()),
+        pane.max,
+    );
+    if let Some(pair) = waveform {
+        let plot_rect =
+            egui::Rect::from_min_max(pane.min, egui::pos2(form_rect.left() - 1.0, pane.bottom()));
+        ui.painter().vline(
+            form_rect.left() - 0.5,
+            pane.y_range(),
+            egui::Stroke::new(1.0, t.color.border),
+        );
+        let mut plot_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(plot_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        plot_ui.set_clip_rect(plot_rect.intersect(ui.clip_rect()));
+        regression_waveform_chart(&mut plot_ui, pair, regression_rule(rules, &pair.target));
+    }
+    let title = checks
+        .iter()
+        .find(|check| check.target == *target)
+        .map(|check| check.name.clone())
+        .or_else(|| waveform.map(|pair| pair.current.name.clone()))
+        .unwrap_or_else(|| target.name.clone());
+    let mut form_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(form_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    form_ui.set_clip_rect(form_rect.intersect(ui.clip_rect()));
+    tolerance_form(&mut form_ui, session, target, &title);
+}
+
+/// The tolerance a target is judged by, edited in place; saved with the next
+/// regression run.
+fn tolerance_form(
+    ui: &mut Ui,
+    session: &mut VerificationSessionState,
+    target: &crate::state::RegressionTargetSelector,
+    title: &str,
+) {
+    crate::workbench::design_system::section_header(ui, &format!("{title} tolerance"), None);
+    let Some(draft) = session
+        .regression_tolerance_drafts
+        .iter_mut()
+        .find(|draft| draft.target == *target)
+    else {
+        return;
+    };
+    crate::workbench::design_system::panel_body(ui, |ui| {
+        let previous_method = draft.method;
+        egui::ComboBox::from_id_salt("verify.regression.tolerance.method")
+            .selected_text(draft.method.label())
+            .width(ui.available_width().max(120.0))
+            .show_ui(ui, |ui| {
+                for method in crate::state::RegressionComparisonMethod::ALL {
+                    ui.selectable_value(&mut draft.method, method, method.label());
+                }
+            });
+        draft.dirty |= draft.method != previous_method;
+        ui.add_space(4.0);
+        egui::Grid::new("verify.regression.tolerance.fields")
+            .num_columns(2)
+            .spacing(egui::vec2(8.0, 4.0))
+            .show(ui, |ui| {
+                let field = |ui: &mut Ui, label: &str, value: &mut String, hint: &str| {
+                    ui.label(label);
+                    let changed = ui
+                        .add(egui::TextEdit::singleline(value).hint_text(hint))
+                        .changed();
+                    ui.end_row();
+                    changed
+                };
+                draft.dirty |= field(ui, "Absolute", &mut draft.absolute_tolerance, "10m");
+                draft.dirty |= field(
+                    ui,
+                    "Relative (%)",
+                    &mut draft.relative_tolerance_percent,
+                    "0.5",
+                );
+                if draft.target.kind == crate::state::RegressionTargetKind::Waveform {
+                    draft.dirty |= field(ui, "Time skew", &mut draft.time_skew_allowance, "20u");
+                    draft.dirty |= field(ui, "Window", &mut draft.comparison_window, "0 … 20m");
+                }
+            });
+        let t = Tokens::get(ui.ctx());
+        // The error sits under the form it rejects. Saved is the normal
+        // state, and says nothing.
+        if let Some(error) = &draft.validation_error {
+            let _ = crate::ui::widgets::problem_line(ui, Problem::Failure, error);
+        } else if draft.dirty {
+            ui.label(
+                egui::RichText::new("Unsaved: applied on the next regression run.")
+                    .color(t.color.text_dim),
+            );
+        }
+    });
+}
+
+/// Baseline, candidate and the tolerance envelope of one waveform target.
+fn regression_waveform_chart(
+    ui: &mut Ui,
+    pair: &RegressionWaveformPair<'_>,
+    rule: Option<&crate::state::RegressionToleranceRule>,
 ) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let height = ui.available_height().max(210.0);
+    let height = ui.available_height().max(1.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
-    let header = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + 36.0));
-    ui.painter().rect_filled(header, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        header.x_range(),
-        header.bottom(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    let header_left = egui::Rect::from_min_max(
-        header.min,
-        egui::pos2(header.left() + header.width() * 0.45, header.bottom()),
-    );
-    let header_right =
-        egui::Rect::from_min_max(egui::pos2(header_left.right(), header.top()), header.max);
-    let title_font = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let title = elide_table_text(
-        ui,
-        "Waveform comparison",
-        &title_font,
-        (header_left.width() - 20.0).max(0.0),
-    );
-    ui.painter().with_clip_rect(header_left).text(
-        header_left.left_center() + egui::vec2(10.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        title,
-        title_font,
-        t.color.text,
-    );
-    let pair = selected
-        .and_then(|selected| waveforms.iter().find(|pair| pair.target == *selected))
-        .or_else(|| waveforms.first());
-    let Some(pair) = pair else {
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Other,
-                ui.is_enabled(),
-                "Waveform comparison: no source-aligned retained waveform pair",
-            )
-        });
-        ui.painter().text(
-            rect.center() + egui::vec2(0.0, 12.0),
-            egui::Align2::CENTER_CENTER,
-            "No source-aligned waveform pair",
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-        );
-        return;
-    };
     let baseline = pair.baseline;
     let current = pair.current;
-    let rule = regression_rule(rules, &pair.target);
-    let verdict = evaluate_regression_waveform(pair, rule);
-    let detail_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let detail = elide_table_text(
-        ui,
-        &format!(
-            "{} · {}",
-            current.name,
-            match &verdict {
-                RegressionVerdict::Pass { .. } => "pass",
-                RegressionVerdict::Fail { .. } => "fail",
-                RegressionVerdict::NotConfigured => "tolerance not configured",
-                RegressionVerdict::NotEvaluated(_) => "evaluation blocked",
-            }
-        ),
-        &detail_font,
-        (header_right.width() - 20.0).max(0.0),
+    let candidate_color = t.color.traces[0];
+    let header = egui::Rect::from_min_size(rect.min, egui::vec2(width, PANEL_HEADER_H_CHART));
+    ui.painter().text(
+        egui::pos2(header.left() + TABLE_EDGE_INSET, header.center().y),
+        egui::Align2::LEFT_CENTER,
+        &current.name,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text,
     );
-    ui.painter().with_clip_rect(header_right).text(
-        header_right.right_center() - egui::vec2(10.0, 0.0),
-        egui::Align2::RIGHT_CENTER,
-        detail,
-        detail_font,
-        t.color.text_faint,
-    );
+    let legend_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let mut x = header.right() - TABLE_EDGE_INSET;
+    for (label, stroke, dashed) in [
+        ("tolerance", egui::Stroke::new(1.0, t.color.text_faint), true),
+        ("candidate", egui::Stroke::new(1.5, candidate_color), false),
+        ("baseline", egui::Stroke::new(1.5, t.color.text_dim), false),
+    ] {
+        if rule.is_none() && dashed {
+            continue;
+        }
+        let galley =
+            ui.painter()
+                .layout_no_wrap(label.to_owned(), legend_font.clone(), t.color.text_dim);
+        x -= galley.size().x;
+        ui.painter().galley(
+            egui::pos2(x, header.center().y - galley.size().y * 0.5),
+            galley,
+            t.color.text_dim,
+        );
+        let line = [
+            egui::pos2(x - 20.0, header.center().y),
+            egui::pos2(x - 6.0, header.center().y),
+        ];
+        if dashed {
+            ui.painter()
+                .extend(egui::Shape::dashed_line(&line, stroke, 3.0, 2.0));
+        } else {
+            ui.painter().line_segment(line, stroke);
+        }
+        x -= 34.0;
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Other,
+            ui.is_enabled(),
+            format!(
+                "Waveform {}: baseline {} samples, candidate {} samples",
+                current.name,
+                baseline.y.len(),
+                current.y.len()
+            ),
+        )
+    });
+
     let mut finite_values = baseline
         .y
         .iter()
@@ -726,12 +582,6 @@ pub(super) fn regression_waveform_chart(
                 }),
         );
     }
-    let Some(y_min) = finite_values.iter().copied().min_by(f64::total_cmp) else {
-        return;
-    };
-    let Some(y_max) = finite_values.iter().copied().max_by(f64::total_cmp) else {
-        return;
-    };
     let finite_x = baseline
         .x
         .iter()
@@ -739,32 +589,36 @@ pub(super) fn regression_waveform_chart(
         .copied()
         .filter(|value| value.is_finite())
         .collect::<Vec<_>>();
-    let Some(x_min) = finite_x.iter().copied().min_by(f64::total_cmp) else {
-        return;
-    };
-    let Some(x_max) = finite_x.iter().copied().max_by(f64::total_cmp) else {
+    let (Some(y_min), Some(y_max), Some(x_min), Some(x_max)) = (
+        finite_values.iter().copied().min_by(f64::total_cmp),
+        finite_values.iter().copied().max_by(f64::total_cmp),
+        finite_x.iter().copied().min_by(f64::total_cmp),
+        finite_x.iter().copied().max_by(f64::total_cmp),
+    ) else {
         return;
     };
     let plot = egui::Rect::from_min_max(
-        header.left_bottom() + egui::vec2(10.0, 10.0),
-        rect.right_bottom() - egui::vec2(10.0, 18.0),
+        header.left_bottom() + egui::vec2(TABLE_EDGE_INSET, 6.0),
+        rect.right_bottom() - egui::vec2(TABLE_EDGE_INSET, TABLE_EDGE_INSET),
     );
-    for step in 0..=4 {
+    if plot.width() <= 4.0 || plot.height() <= 4.0 {
+        return;
+    }
+    ui.painter().rect_filled(plot, 0.0, t.color.canvas_bg);
+    for step in 1..4 {
         let y = egui::lerp(plot.bottom()..=plot.top(), step as f32 / 4.0);
         ui.painter().hline(
             plot.x_range(),
             y,
-            egui::Stroke::new(1.0, t.color.canvas_grid.gamma_multiply(0.55)),
+            egui::Stroke::new(1.0, t.color.canvas_grid),
         );
     }
     let points = |x_values: &[f64], y_values: &[f64]| {
         x_values
             .iter()
             .zip(y_values)
-            .filter_map(|(x_value, y_value)| {
-                if !x_value.is_finite() || !y_value.is_finite() {
-                    return None;
-                }
+            .filter(|(x_value, y_value)| x_value.is_finite() && y_value.is_finite())
+            .map(|(x_value, y_value)| {
                 let x_fraction = if (x_max - x_min).abs() <= f64::EPSILON {
                     0.5
                 } else {
@@ -775,52 +629,37 @@ pub(super) fn regression_waveform_chart(
                 } else {
                     ((*y_value - y_min) / (y_max - y_min)) as f32
                 };
-                Some(egui::pos2(
+                egui::pos2(
                     egui::lerp(plot.left()..=plot.right(), x_fraction),
                     egui::lerp(plot.bottom()..=plot.top(), y_fraction),
-                ))
+                )
             })
             .collect::<Vec<_>>()
     };
     ui.painter().add(egui::Shape::line(
         points(baseline.x.as_slice(), baseline.y.as_slice()),
-        egui::Stroke::new(1.5, t.color.text_faint),
+        egui::Stroke::new(1.5, t.color.text_dim),
     ));
     if let Some(rule) = rule {
-        let lower = baseline
-            .y
-            .iter()
-            .map(|value| *value - permitted_delta(*value, rule))
-            .collect::<Vec<_>>();
-        let upper = baseline
-            .y
-            .iter()
-            .map(|value| *value + permitted_delta(*value, rule))
-            .collect::<Vec<_>>();
-        let envelope_stroke = egui::Stroke::new(1.0, t.color.ok.gamma_multiply(0.65));
-        ui.painter().add(egui::Shape::line(
-            points(baseline.x.as_slice(), &lower),
-            envelope_stroke,
-        ));
-        ui.painter().add(egui::Shape::line(
-            points(baseline.x.as_slice(), &upper),
-            envelope_stroke,
-        ));
+        for side in [-1.0, 1.0] {
+            let envelope = baseline
+                .y
+                .iter()
+                .map(|value| *value + side * permitted_delta(*value, rule))
+                .collect::<Vec<_>>();
+            ui.painter().extend(egui::Shape::dashed_line(
+                &points(baseline.x.as_slice(), &envelope),
+                egui::Stroke::new(1.0, t.color.text_faint),
+                4.0,
+                3.0,
+            ));
+        }
     }
     ui.painter().add(egui::Shape::line(
         points(current.x.as_slice(), current.y.as_slice()),
-        egui::Stroke::new(1.8, t.color.accent),
+        egui::Stroke::new(1.5, candidate_color),
     ));
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Other,
-            ui.is_enabled(),
-            format!(
-                "Regression waveform {} with {} candidate samples; baseline, candidate, and configured tolerance envelope shown with verdict {:?}",
-                current.name,
-                current.y.len(),
-                verdict
-            ),
-        )
-    });
 }
+
+/// Height of the waveform plot's header row.
+const PANEL_HEADER_H_CHART: f32 = 24.0;

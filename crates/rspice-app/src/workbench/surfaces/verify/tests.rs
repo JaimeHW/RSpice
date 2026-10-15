@@ -4,21 +4,10 @@
 //! XML control characters are refused rather than escaped away, and a receipt
 //! whose tolerance digest does not match its contract is rejected.
 
+use super::raster::sealed_run;
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
-use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SimulationState};
-
-#[test]
-fn verification_split_panes_share_one_top_aligned_row() {
-    let row = egui::Rect::from_min_size(egui::pos2(7.0, 11.0), egui::vec2(1_420.0, 336.0));
-    let (left, right) = verification_split_rects(row, 645.0);
-    assert_eq!(left.top(), row.top());
-    assert_eq!(right.top(), row.top());
-    assert_eq!(left.bottom(), row.bottom());
-    assert_eq!(right.bottom(), row.bottom());
-    assert_eq!(right.left() - left.right(), 1.0);
-    assert_eq!(right.right(), row.right());
-}
+use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     attributed_with_id(analysis, AnalysisInstanceId::new())
@@ -37,42 +26,6 @@ fn attributed_with_id(
         )
         .expect("test provenance is internally valid"),
     )
-}
-
-fn sealed_run(
-    run_number: u64,
-    plan_id: crate::product::SimulationPlanId,
-    source_instance_id: AnalysisInstanceId,
-    analysis_kind_tag: u8,
-    analysis: AnalysisResult,
-) -> SimulationRun {
-    let snapshot = ContentDigest::from_bytes([0x5a; 32]);
-    let task = crate::state::PreparedRunTaskReceipt::new(
-        source_instance_id,
-        ObjectRevision::INITIAL,
-        Vec::new(),
-        analysis_kind_tag,
-        ContentDigest::from_bytes([analysis_kind_tag; 32]),
-    )
-    .unwrap();
-    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
-        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
-        simulation_plan_id: Some(plan_id),
-        project_revision: ObjectRevision::INITIAL,
-        prepared_snapshot_digest: snapshot,
-        source_content_digest: ContentDigest::from_bytes([0x41; 32]),
-        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
-            ContentDigest::from_bytes([0x42; 32]),
-        ),
-        project_model_sources: Vec::new(),
-        specifications: Vec::new(),
-        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
-        tasks: vec![task],
-    })
-    .unwrap();
-    let mut run = SimulationRun::new_prepared(run_number, receipt);
-    run.add_analysis(attributed_with_id(analysis, source_instance_id));
-    run
 }
 
 #[test]
@@ -706,76 +659,6 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
 }
 
 #[test]
-fn verify_layout_matches_desktop_tablet_and_phone_compositions() {
-    let desktop = VerifyLayout::resolve(1_440.0, 820.0, 620.0, 5, 37.0, 28.0);
-    assert!(desktop.split);
-    assert!((desktop.left_width + 1.0 + desktop.right_width - 820.0).abs() < f32::EPSILON);
-    assert_eq!(desktop.first_row_height, VERIFY_FIRST_ROW_MAX_HEIGHT);
-
-    let compact_desktop = VerifyLayout::resolve(1_024.0, 744.0, 600.0, 5, 37.0, 28.0);
-    assert!(!compact_desktop.split);
-
-    let tablet = VerifyLayout::resolve(820.0, 768.0, 600.0, 5, 44.0, 31.0);
-    assert!(!tablet.split);
-    assert_eq!(tablet.left_width, 768.0);
-
-    let phone = VerifyLayout::resolve(390.0, 390.0, 540.0, 5, 44.0, 36.0);
-    assert!(!phone.split);
-    assert_eq!(phone.right_width, 390.0);
-}
-
-#[test]
-fn verification_first_row_height_is_finite_and_capped() {
-    assert_eq!(
-        bounded_verification_first_row_height(10_000.0, 100.0),
-        VERIFY_FIRST_ROW_MAX_HEIGHT
-    );
-    assert_eq!(
-        bounded_verification_first_row_height(100.0, 200.0),
-        VERIFY_FIRST_ROW_MIN_HEIGHT
-    );
-    assert_eq!(
-        bounded_verification_first_row_height(f32::INFINITY, 100.0),
-        VERIFY_FIRST_ROW_MIN_HEIGHT
-    );
-    assert_eq!(
-        bounded_verification_first_row_height(f32::NAN, 100.0),
-        VERIFY_FIRST_ROW_MIN_HEIGHT
-    );
-}
-
-#[test]
-fn visible_height_depends_only_on_consumed_content_not_scroll_offset() {
-    assert_eq!(remaining_viewport_height(600.0, -40.0), 600.0);
-    assert_eq!(remaining_viewport_height(600.0, 0.0), 600.0);
-    assert_eq!(remaining_viewport_height(600.0, 160.0), 440.0);
-    assert_eq!(remaining_viewport_height(600.0, 640.0), 0.0);
-}
-
-#[test]
-fn responsive_verify_geometry_matches_mockup_breakpoints() {
-    assert_eq!(verification_status_columns(1_261.0), 4);
-    assert_eq!(verification_status_columns(1_260.0), 2);
-    assert_eq!(verification_status_columns(821.0), 2);
-    assert_eq!(verification_status_columns(820.0), 2);
-    assert_eq!(verification_status_columns(390.0), 2);
-
-    assert_eq!(verification_stacked_chart_height(561.0), 250.0);
-    assert_eq!(verification_stacked_chart_height(560.0), 230.0);
-
-    assert_eq!(verification_table_row_height(1_440.0), 28.0);
-    assert_eq!(verification_table_row_height(820.0), 31.0);
-    assert_eq!(verification_table_row_height(560.0), 36.0);
-
-    assert_eq!(verification_table_width(1_280.0, 718.0, None), 718.0);
-    assert_eq!(verification_table_width(560.0, 390.0, None), 540.0);
-    assert_eq!(
-        verification_table_width(1_280.0, 718.0, Some(1_450.0)),
-        1_450.0
-    );
-}
-
-#[test]
 fn soa_cross_probe_selects_the_exact_schematic_device() {
     let mut app = RSpiceApp::test_instance();
     app.state.schematic.document_mut_for_test().components.push(
@@ -806,16 +689,7 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
 }
 
 #[test]
-fn histogram_bins_preserve_every_exact_sample() {
-    let samples = [0.0, 0.2, 0.4, 0.8, 1.0];
-    let bins = histogram_bins(&samples, 4, 0.0, 1.0);
-
-    assert_eq!(bins.iter().sum::<usize>(), samples.len());
-    assert_eq!(bins, vec![2, 1, 0, 2]);
-}
-
-#[test]
-fn signed_margin_is_positive_inside_and_negative_outside_bounds() {
+fn normalized_margin_is_positive_inside_and_negative_outside_bounds() {
     let spec = SpecEntry {
         measurement: "gain".to_owned(),
         expression: String::new(),
@@ -825,9 +699,9 @@ fn signed_margin_is_positive_inside_and_negative_outside_bounds() {
         scope: crate::state::SpecPointScope::AllPoints,
     };
 
-    assert_eq!(signed_margin(&spec, 15.0), 5.0);
-    assert_eq!(signed_margin(&spec, 8.0), -2.0);
-    assert_eq!(signed_margin(&spec, 23.0), -3.0);
+    assert_eq!(verification_margin(&spec, 15.0), 5.0);
+    assert_eq!(verification_margin(&spec, 8.0), -2.0);
+    assert_eq!(verification_margin(&spec, 23.0), -3.0);
     assert_eq!(normalized_margin(&spec, 15.0), Some(0.5));
     assert_eq!(normalized_margin(&spec, 8.0), Some(-0.2));
 }
@@ -856,13 +730,6 @@ fn joint_sample_summary_requires_aligned_trails_and_ands_every_spec() {
     assert_eq!(joint.total, 3);
     assert_eq!(joint.specification_count, 2);
     assert!((joint.yield_percent() - 100.0 / 3.0).abs() < 1.0e-12);
-    assert_eq!(
-        worst_individual_yield_result(&aligned)
-            .expect("worst individual detail")
-            .spec
-            .target,
-        "gain"
-    );
 
     let misaligned = [
         make_result("gain", vec![true, true]),
@@ -902,46 +769,6 @@ fn joint_headline_can_be_lower_than_every_individual_spec_yield() {
 }
 
 #[test]
-fn specification_editor_never_falls_through_to_an_inactive_dataset() {
-    let mut inactive = SimulationRun::new(1);
-    inactive.add_analysis(attributed(
-        AnalysisResult::new(1, AnalysisType::Ac, "inactive")
-            .with_measurements(vec![rspice_core::MeasureResult::success("gain", 99.0)]),
-    ));
-    let mut active = SimulationRun::new(2);
-    active.add_analysis(attributed(
-        AnalysisResult::new(1, AnalysisType::Ac, "active")
-            .with_measurements(vec![rspice_core::MeasureResult::success("bandwidth", 42.0)]),
-    ));
-    let active_dataset = active.dataset_id;
-    let mut simulation = SimulationState {
-        retained: crate::state::RetainedSimulationState {
-            runs: vec![inactive, active].into(),
-            ..Default::default()
-        },
-        view: crate::state::SimulationViewState {
-            active_run_idx: Some(1),
-            ..Default::default()
-        },
-        ..SimulationState::default()
-    };
-
-    assert_eq!(
-        simulation.active_run().map(|run| run.dataset_id),
-        Some(active_dataset)
-    );
-    assert_eq!(
-        active_dataset_measurement(&simulation, "bandwidth"),
-        Some(42.0)
-    );
-    assert_eq!(active_dataset_measurement(&simulation, "gain"), None);
-
-    simulation.view.active_run_idx = None;
-    assert_eq!(active_dataset_measurement(&simulation, "bandwidth"), None);
-    assert_eq!(active_dataset_measurement(&simulation, "gain"), None);
-}
-
-#[test]
 fn verification_requires_an_explicit_active_run_selection() {
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -976,13 +803,25 @@ fn measurement_evidence_requires_success_finite_value_and_provenance() {
             .with_measurements(vec![rspice_core::MeasureResult::success("valid", 4.0)]),
     ));
 
-    assert_eq!(measurement_in_run_with_unit(&run, "legacy", ""), None);
-    assert_eq!(measurement_in_run_with_unit(&run, "failed", ""), None);
+    let tracked = |name: &str| SpecEntry {
+        measurement: name.to_owned(),
+        expression: String::new(),
+        min: None,
+        max: None,
+        unit: String::new(),
+        scope: crate::state::SpecPointScope::AllPoints,
+    };
+
+    assert_eq!(worst_measurement_in_run(&run, &tracked("legacy")), None);
+    assert_eq!(worst_measurement_in_run(&run, &tracked("failed")), None);
     assert_eq!(
-        measurement_in_run_with_unit(&run, "measure_failed", ""),
+        worst_measurement_in_run(&run, &tracked("measure_failed")),
         None
     );
-    assert_eq!(measurement_in_run_with_unit(&run, "valid", ""), Some(4.0));
+    assert_eq!(
+        worst_measurement_in_run(&run, &tracked("valid")),
+        Some(4.0)
+    );
 }
 
 #[test]
@@ -1983,7 +1822,7 @@ fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
 // The page grammar: corners, SOA, optimization
 // ---------------------------------------------------------------------------
 
-use super::table::Verdict as CellVerdict;
+use super::table::Verdict;
 
 #[test]
 fn corner_labels_read_back_into_their_point() {
@@ -2057,11 +1896,11 @@ fn the_corner_matrix_reads_every_output_at_every_corner_from_the_run() {
     );
     let gain = &matrix.rows[0];
     assert_eq!(gain.values[1], Some(39.4));
-    assert_eq!(gain.verdict_of(39.4), Some(CellVerdict::Fail));
-    assert_eq!(gain.verdict(), Some(CellVerdict::Fail));
-    assert_eq!(matrix.rows[2].verdict_of(47.0), Some(CellVerdict::Near));
-    assert_eq!(matrix.rows[3].verdict(), Some(CellVerdict::Near));
-    assert_eq!(matrix.rows[1].verdict(), Some(CellVerdict::Pass));
+    assert_eq!(gain.verdict_of(39.4), Some(Verdict::Fail));
+    assert_eq!(gain.verdict(), Some(Verdict::Fail));
+    assert_eq!(matrix.rows[2].verdict_of(47.0), Some(Verdict::Near));
+    assert_eq!(matrix.rows[3].verdict(), Some(Verdict::Near));
+    assert_eq!(matrix.rows[1].verdict(), Some(Verdict::Pass));
     assert_eq!(
         matrix.rows[4].verdict(),
         None,
@@ -2111,11 +1950,11 @@ fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
             .map(|row| (row.device.as_str(), row.verdict))
             .collect::<Vec<_>>(),
         [
-            ("M3", CellVerdict::Fail),
-            ("M1", CellVerdict::Fail),
-            ("M2", CellVerdict::Near),
-            ("M1", CellVerdict::Pass),
-            ("M4", CellVerdict::Pass),
+            ("M3", Verdict::Fail),
+            ("M1", Verdict::Fail),
+            ("M2", Verdict::Near),
+            ("M1", Verdict::Pass),
+            ("M4", Verdict::Pass),
         ]
     );
     assert_eq!(
@@ -2205,12 +2044,7 @@ fn seeded_verify_pages_follow_the_table_grammar() {
 /// produces data: no table, no tiles.
 #[test]
 fn empty_verify_pages_are_one_line_under_the_toolbar() {
-    for page in [
-        VerificationPage::Yield,
-        VerificationPage::Corners,
-        VerificationPage::DeviceSafety,
-        VerificationPage::Optimization,
-    ] {
+    for page in VerificationPage::NAVIGATION {
         let geometry = super::raster::page_geometry(RSpiceApp::test_instance(), page);
         let toolbar = geometry.one("toolbar").expect("toolbar");
         let empty = geometry.one("empty").expect("empty line");
@@ -2219,6 +2053,66 @@ fn empty_verify_pages_are_one_line_under_the_toolbar() {
         assert!(geometry.one("table.head").is_none(), "{page:?}");
         assert!(geometry.one("toolbar.summary").is_none(), "{page:?}");
     }
+}
+
+/// Tuning is its toolbar, the variable editors beside the response they
+/// produce, and under both the limits judged against the baseline and the
+/// candidate run.
+#[test]
+fn the_tuning_page_is_two_panes_over_the_limits_table() {
+    use super::raster::{PAGE_WIDTH, page_geometry, tuning_app};
+
+    let geometry = page_geometry(tuning_app(), VerificationPage::Tuning);
+    let toolbar = geometry.one("toolbar").expect("toolbar");
+    assert_eq!(toolbar.height(), super::toolbar::TOOLBAR_H);
+    assert!(
+        geometry.one("toolbar.summary").is_some(),
+        "the toolbar names the candidate and the baseline"
+    );
+    let variables = geometry.one("tuning.variables").expect("variables pane");
+    let response = geometry.one("tuning.response").expect("response pane");
+    assert_eq!(variables.left(), 0.0);
+    assert_eq!(variables.top(), toolbar.bottom());
+    assert_eq!(response.top(), variables.top());
+    assert_eq!(response.bottom(), variables.bottom());
+    assert_eq!(response.left(), variables.right() + 1.0);
+    assert_eq!(response.right(), PAGE_WIDTH);
+    let head = geometry.one("table.head").expect("limits table");
+    assert_eq!(head.top(), variables.bottom() + 1.0, "one hairline between");
+    let rows = geometry.all("table.row");
+    assert_eq!(rows.len(), 2, "one row per limit");
+    assert!(rows.iter().all(|row| row.height() == 24.0));
+    assert_eq!(rows[0].top(), head.bottom());
+    for (column, edges) in geometry.right_edges() {
+        assert_eq!(edges.len(), 1, "{column}: numbers end on one edge");
+    }
+    assert_eq!(geometry.outside_insets(PAGE_WIDTH), Vec::<String>::new());
+}
+
+/// Regression is one table of every compared target, and the selected
+/// target's detail in a pane directly under it.
+#[test]
+fn the_regression_page_is_one_table_and_the_selected_targets_detail() {
+    use super::raster::{PAGE_WIDTH, page_geometry, regression_app};
+
+    let geometry = page_geometry(regression_app(), VerificationPage::Regression);
+    let toolbar = geometry.one("toolbar").expect("toolbar");
+    assert!(geometry.one("toolbar.summary").is_some());
+    let head = geometry.one("table.head").expect("checks table");
+    assert_eq!(head.top(), toolbar.bottom(), "nothing between toolbar and table");
+    let rows = geometry.all("table.row");
+    assert_eq!(rows.len(), 5, "four measurements and one waveform");
+    assert!(rows.iter().all(|row| row.height() == 24.0));
+    assert_eq!(rows[0].top(), head.bottom());
+    let detail = geometry.one("split").expect("the selected waveform's detail");
+    let last = rows.last().expect("rows");
+    assert_eq!(detail.top(), last.bottom() + 1.0, "the detail sits under the table");
+    assert_eq!(detail.left(), 0.0);
+    assert_eq!(detail.right(), PAGE_WIDTH);
+    for (column, edges) in geometry.right_edges() {
+        assert_eq!(edges.len(), 1, "{column}: numbers end on one edge");
+    }
+    assert_eq!(geometry.outside_insets(PAGE_WIDTH), Vec::<String>::new());
 }
 
 // ---------------------------------------------------------------------------
@@ -2256,7 +2150,7 @@ fn yield_rows_compute_their_statistics_from_the_samples() {
     assert!((cpk - (stats.mean - 40.0) / (3.0 * stats.std_dev)).abs() < 1.0e-9);
     assert_eq!((row.passing, row.total), (37, 40));
     assert_eq!(row.yield_percent(), Some(92.5));
-    assert_eq!(row.verdict(), CellVerdict::Fail);
+    assert_eq!(row.verdict(), Verdict::Fail);
     assert_eq!(row.limit.limit_text(), "≥ 40 dB");
     assert_eq!(
         yield_summary(&results),

@@ -2,9 +2,18 @@
 //!
 //! Live parameter adjustment against the last run, with the dirty tracking
 //! that decides when the displayed result no longer matches the tuned
-//! values.
+//! values. The page is the shared Verify grammar around its two working
+//! parts: the variable editors on the left and the response they produce on
+//! the right, with the limits judged against the baseline and the candidate
+//! run under them.
 
+use super::table::{Cell, Column, DataTable, TABLE_EDGE_INSET};
+use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, empty_line};
 use super::*;
+
+/// Least and greatest height of the variables and response panes.
+const TUNING_PANE_MIN_H: f32 = 240.0;
+const TUNING_PANE_MAX_H: f32 = 380.0;
 
 pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
     let active_plan_run = verification_run(app).and_then(|run| {
@@ -428,11 +437,11 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
                     },
                 );
             Some(vec![
-                TableCell::mono(&variable.name),
-                TableCell::mono(committed),
-                TableCell::mono(&draft.candidate_expression),
-                TableCell::mono(delta),
-                TableCell::text(destination),
+                Cell::number(&variable.name),
+                Cell::number(committed),
+                Cell::number(&draft.candidate_expression),
+                Cell::number(delta),
+                Cell::text(destination),
             ])
         })
         .collect::<Vec<_>>();
@@ -441,11 +450,11 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
         .filter(|binding| binding.requires_schematic_edit())
     {
         rows.push(vec![
-            TableCell::mono(format!("{}.Value", binding.component_name)),
-            TableCell::mono(&binding.source_value),
-            TableCell::mono(&binding.binding_expression),
-            TableCell::mono("instance binding"),
-            TableCell::text(binding.source_view.display_path()),
+            Cell::number(format!("{}.Value", binding.component_name)),
+            Cell::number(&binding.source_value),
+            Cell::number(&binding.binding_expression),
+            Cell::number("instance binding"),
+            Cell::text(binding.source_view.display_path()),
         ]);
     }
     if rows.is_empty() {
@@ -486,22 +495,15 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
                     );
                 });
             ui.add_space(8.0);
-            let headers = vec![
-                ("Parameter".to_owned(), 0.16),
-                ("Committed".to_owned(), 0.22),
-                ("Proposed".to_owned(), 0.22),
-                ("Delta".to_owned(), 0.18),
-                ("Destination".to_owned(), 0.22),
+            let columns = [
+                Column::words("Parameter", 120.0),
+                Column::words("Committed", 150.0),
+                Column::words("Proposed", 150.0),
+                Column::number("Delta", 110.0),
+                Column::name("Destination", 120.0),
             ];
-            render_data_table(ui, "verify-tuning-review", &headers, &rows, None);
-            ui.add_space(8.0);
-            property_row(
-                ui,
-                "New simulation",
-                "required · queued through active plan",
-            );
-            property_row(ui, "Release evidence", "never copied from sandbox");
-            property_row(ui, "Change set", "one transactional working revision");
+            let _ = DataTable::new("verify.tuning.review", &columns, rows.len())
+                .show(ui, |index| rows[index].clone());
             ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let primary = Button::new("Commit to working revision").enabled(runnable);
@@ -594,9 +596,20 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
                 })
         })
     else {
-        card(ui, "Exploration variables", |ui| {
-            ui.label("No active simulation plan.");
-        });
+        let _ = PageToolbar {
+            title: "Tuning",
+            runs: &RunChoice::default(),
+            summary: None,
+            actions: &[],
+        }
+        .show(ui);
+        if empty_line(
+            ui,
+            "No active simulation plan. Add an analysis in the Simulation setup.",
+            Some("Open analyses"),
+        ) {
+            Command::SimulationPage(crate::workbench::state::SimulationPage::Analyses).execute(app);
+        }
         return;
     };
     let variables = tuning_session_variables(app);
@@ -626,83 +639,140 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         .iter()
         .filter(|draft| draft.validation_error.is_some())
         .count();
-    let baseline_run = tuning_baseline_run(app);
-    let candidate_run = tuning_candidate_run(app);
-    let mut tiles = vec![
-        KpiTile::new("Design variables", variables.len().to_string(), ""),
-        KpiTile::new("Uncommitted changes", dirty_count.to_string(), ""),
-    ];
-    // Valid candidates are the normal state; only a blocked set earns a tile.
-    if invalid_count > 0 {
-        tiles.push(
-            KpiTile::new(
-                "Validation",
-                "Blocked",
-                format!(
-                    "{invalid_count} invalid value{}",
-                    if invalid_count == 1 { "" } else { "s" }
-                ),
-            )
-            .with_problem(Some(Problem::Failure)),
-        );
-    }
-    tiles.push(KpiTile::new(
-        "Baseline",
-        baseline_run.map_or_else(|| "—".to_owned(), |run| format!("Run {}", run.id)),
-        match (candidate_run, baseline_run) {
-            (Some(candidate), _) => format!("Candidate Run {}", candidate.id),
-            (None, Some(_)) => String::new(),
-            (None, None) => "Run the plan first".to_owned(),
-        },
-    ));
-    verification_kpi_strip(ui, &tiles);
-
-    let width = ui.available_width();
-    if width > VERIFY_KPI_BREAKPOINT {
-        let left_width = ((width - 1.0) * 0.44).max(360.0);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 1.0;
-            ui.allocate_ui_with_layout(
-                egui::vec2(left_width, 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| tuning_variable_card(ui, app, &variables),
-            );
-            ui.allocate_ui_with_layout(
-                egui::vec2((width - left_width - 1.0).max(1.0), 0.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| tuning_baseline_card(ui, app),
-            );
-        });
+    let baseline = tuning_baseline_run(app).map(|run| run.id);
+    let candidate = tuning_candidate_run(app).map(|run| run.id);
+    let plural = |count: usize| if count == 1 { "" } else { "s" };
+    let runs_text = match (candidate, baseline) {
+        (Some(candidate), Some(baseline)) => Some(format!(
+            "candidate Run {candidate} vs baseline Run {baseline}"
+        )),
+        (None, Some(baseline)) => Some(format!("baseline Run {baseline}")),
+        _ => None,
+    };
+    let summary = if invalid_count > 0 {
+        Some(Summary::failing(format!(
+            "{invalid_count} invalid value{}",
+            plural(invalid_count)
+        )))
+    } else if dirty_count > 0 {
+        Some(Summary::plain(
+            [
+                Some(format!(
+                    "{dirty_count} uncommitted change{}",
+                    plural(dirty_count)
+                )),
+                runs_text,
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" \u{00b7} "),
+        ))
     } else {
-        tuning_variable_card(ui, app, &variables);
-        ui.add_space(1.0);
-        tuning_baseline_card(ui, app);
+        runs_text.map(Summary::plain)
+    };
+    let dirty = tuning_is_dirty(app);
+    let valid = tuning_is_valid(app);
+    let block_reason = tuning_commit_block_reason(app);
+    let actions = [
+        ToolbarAction::new("Revert").enabled(dirty),
+        ToolbarAction::new("Review & commit\u{2026}")
+            .enabled(dirty && valid)
+            .disabled_reason(&block_reason),
+    ];
+    let output = PageToolbar {
+        title: "Tuning",
+        runs: &RunChoice::default(),
+        summary,
+        actions: &actions,
     }
-    tuning_specification_contract(ui, app, &specs, dirty_count > 0);
+    .show(ui);
+    match output.action {
+        Some(0) => revert_tuning_session(app),
+        Some(1) => app.state.workbench.verification.tuning_review_open = true,
+        _ => {}
+    }
+    action_problem_line(ui, app);
+
+    if variables.is_empty() {
+        if empty_line(
+            ui,
+            "No design variables are configured. Add variables in the Simulation setup.",
+            Some("Open variables"),
+        ) {
+            Command::SimulationPage(crate::workbench::state::SimulationPage::Variables)
+                .execute(app);
+        }
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    // Whole points: the table under the panes starts on the pixel grid, so
+    // the hairline between them is one line rather than two faint ones.
+    let height = (ui.available_height() * 0.55)
+        .clamp(TUNING_PANE_MIN_H, TUNING_PANE_MAX_H)
+        .round();
+    let left_width = (width * 0.4).clamp(280.0, 420.0).min(width).round();
+    let top = ui.cursor().top();
+    let left = ui.max_rect().left();
+    let variables_rect =
+        egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(left_width, height));
+    let plot_rect = egui::Rect::from_min_max(
+        egui::pos2(left + left_width + 1.0, top),
+        egui::pos2(left + width, top + height),
+    );
+    let _ = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    #[cfg(test)]
+    {
+        super::raster::probe(ui, "tuning.variables", variables_rect);
+        super::raster::probe(ui, "tuning.response", plot_rect);
+    }
+    ui.painter().vline(
+        variables_rect.right() + 0.5,
+        variables_rect.y_range(),
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    let mut variables_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(variables_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    variables_ui.set_clip_rect(variables_rect.intersect(ui.clip_rect()));
+    tuning_variables_pane(&mut variables_ui, app, &variables);
+    let mut plot_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(plot_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    plot_ui.set_clip_rect(plot_rect.intersect(ui.clip_rect()));
+    tuning_response_pane(&mut plot_ui, app);
+    ui.painter().hline(
+        left..=left + width,
+        top + height + 0.5,
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    ui.add_space(1.0);
+    tuning_specification_table(ui, app, &specs, dirty_count > 0);
 }
 
-fn tuning_variable_card(
+/// The variable editors, each a name, its value, a slider over its allowed
+/// range and the committed value it started from.
+fn tuning_variables_pane(
     ui: &mut Ui,
     app: &mut RSpiceApp,
     variables: &[crate::state::DesignVariable],
 ) {
-    let dirty = tuning_is_dirty(app);
-    card(ui, "Exploration variables", |ui| {
-        if dirty {
-            ui.label(
-                egui::RichText::new("Uncommitted changes")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(Tokens::get(ui.ctx()).color.text_dim),
-            );
-        }
-        if variables.is_empty() {
-            ui.label("No design variables are configured. Add typed variables in Simulation Studio before tuning.");
-            return;
-        }
-        for variable in variables {
-            tuning_variable_editor(ui, app, variable);
-        }
-    });
+    crate::workbench::design_system::section_header(ui, "Variables", None);
+    ScrollArea::vertical()
+        .id_salt("workbench.verify.tuning.variables")
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            crate::workbench::design_system::panel_body(ui, |ui| {
+                for variable in variables {
+                    tuning_variable_editor(ui, app, variable);
+                }
+            });
+        });
 }
 
 fn tuning_variable_editor(
@@ -722,17 +792,12 @@ fn tuning_variable_editor(
     };
     let t = Tokens::get(ui.ctx());
     let proposed = app.state.workbench.verification.tuning_variables[index].proposed;
-    let selected = app.state.workbench.verification.tuning_selected_variable == Some(variable.id);
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(
             egui::RichText::new(&variable.name)
                 .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                .color(if selected {
-                    t.color.accent
-                } else {
-                    t.color.text
-                }),
+                .color(t.color.text),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
@@ -795,11 +860,7 @@ fn tuning_variable_editor(
     }
     let draft = &app.state.workbench.verification.tuning_variables[index];
     if let Some(error) = &draft.validation_error {
-        ui.label(
-            egui::RichText::new(error)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.err),
-        );
+        let _ = crate::ui::widgets::problem_line(ui, Problem::Failure, error);
     } else {
         let range = variable.allowed_range.as_ref().map_or_else(
             || "No explicit tuning bounds".to_owned(),
@@ -830,30 +891,24 @@ fn tuning_range_si(variable: &crate::state::DesignVariable) -> Option<(f64, f64)
     (minimum.is_finite() && maximum.is_finite() && minimum < maximum).then_some((minimum, maximum))
 }
 
-fn tuning_baseline_card(ui: &mut Ui, app: &RSpiceApp) {
-    card(ui, "Retained nominal response", |ui| {
-        let run = tuning_baseline_run(app);
-        let baseline = run
-            .and_then(|run| run.analyses.iter().find(|analysis| analysis.success))
-            .and_then(|analysis| analysis.waveforms.first());
-        let candidate = tuning_candidate_run(app)
-            .and_then(|run| run.analyses.iter().find(|analysis| analysis.success))
-            .and_then(|analysis| {
-                baseline.and_then(|baseline| {
-                    analysis
-                        .waveforms
-                        .iter()
-                        .find(|waveform| waveform.name.eq_ignore_ascii_case(&baseline.name))
-                })
-            });
-        tuning_waveform_preview(ui, baseline, candidate);
-        if let Some(run) = run {
-            property_row(ui, "Dataset", &run.dataset_id.to_string());
-            property_row(ui, "Run", &format!("Run {} · immutable", run.id));
-        } else {
-            ui.label("No source-aligned retained waveform is available. Committing a valid candidate dispatches the active production plan and retains its result as a new immutable run.");
-        }
-    });
+/// The baseline run's first waveform, dashed, under the candidate run's same
+/// waveform once a committed candidate has run.
+fn tuning_response_pane(ui: &mut Ui, app: &RSpiceApp) {
+    crate::workbench::design_system::section_header(ui, "Response", None);
+    let baseline = tuning_baseline_run(app)
+        .and_then(|run| run.analyses.iter().find(|analysis| analysis.success))
+        .and_then(|analysis| analysis.waveforms.first());
+    let candidate = tuning_candidate_run(app)
+        .and_then(|run| run.analyses.iter().find(|analysis| analysis.success))
+        .and_then(|analysis| {
+            baseline.and_then(|baseline| {
+                analysis
+                    .waveforms
+                    .iter()
+                    .find(|waveform| waveform.name.eq_ignore_ascii_case(&baseline.name))
+            })
+        });
+    tuning_waveform_preview(ui, baseline, candidate);
 }
 
 fn tuning_waveform_preview(
@@ -862,11 +917,11 @@ fn tuning_waveform_preview(
     candidate: Option<&crate::state::WaveformData>,
 ) {
     let t = Tokens::get(ui.ctx());
-    let height = 210.0;
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
+    let (pane, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+    let rect = pane.shrink(TABLE_EDGE_INSET);
+    if rect.width() <= 1.0 || rect.height() <= 1.0 {
+        return;
+    }
     ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
     for index in 1..4 {
         let x = egui::lerp(rect.x_range(), index as f32 / 4.0);
@@ -900,7 +955,7 @@ fn tuning_waveform_preview(
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "No retained nominal waveform",
+            "Run the plan to see its response",
             theme::sans(tokens::FS_0, FontWeight::Regular),
             t.color.text_dim,
         );
@@ -948,7 +1003,7 @@ fn tuning_waveform_preview(
     if let Some(candidate) = candidate.filter(valid_waveform) {
         ui.painter().add(egui::Shape::line(
             points_for(candidate),
-            egui::Stroke::new(1.7, t.color.accent),
+            egui::Stroke::new(1.5, t.color.traces[0]),
         ));
     }
     ui.painter().text(
@@ -966,64 +1021,64 @@ fn tuning_waveform_preview(
         if candidate.is_some() {
             "solid candidate · dashed baseline"
         } else {
-            "dashed immutable baseline"
+            "dashed baseline"
         },
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
 }
 
-fn tuning_specification_contract(
+/// The plan's limits against the baseline run and the committed candidate.
+///
+/// A candidate value exists only once a committed candidate has run; while
+/// the sandbox holds uncommitted changes, no run has measured them, so the
+/// candidate column is empty and the verdict is the baseline's.
+fn tuning_specification_table(
     ui: &mut Ui,
     app: &RSpiceApp,
     specs: &[SpecEntry],
     provisional: bool,
 ) {
-    table_section_header(
-        ui,
-        "Specifications",
-        provisional.then_some("uncommitted"),
-        None,
-    );
+    if specs.is_empty() {
+        return;
+    }
     let baseline_run = tuning_baseline_run(app);
-    let candidate_run = tuning_candidate_run(app);
-    let headers = vec![
-        ("Executable check".to_owned(), 0.25),
-        ("Committed baseline".to_owned(), 0.22),
-        ("Provisional".to_owned(), 0.22),
-        ("Limit".to_owned(), 0.16),
-        ("Gate".to_owned(), 0.15),
-    ];
+    let candidate_run = tuning_candidate_run(app).filter(|_| !provisional);
     let rows = specs
         .iter()
         .map(|spec| {
-            let baseline_value = baseline_run
-                .and_then(|run| measurement_in_run_with_unit(run, &spec.measurement, &spec.unit));
-            let candidate_value = candidate_run
-                .and_then(|run| measurement_in_run_with_unit(run, &spec.measurement, &spec.unit));
-            let baseline = baseline_value
-                .map_or_else(|| "—".to_owned(), |value| format_value(value, &spec.unit));
-            let passed = candidate_value.is_some_and(|value| spec.passes(value));
-            vec![
-                TableCell::text(&spec.measurement),
-                TableCell::mono(&baseline),
-                TableCell::mono(if provisional {
-                    "awaiting commit + run".to_owned()
-                } else if let Some(value) = candidate_value {
-                    format_value(value, &spec.unit)
-                } else {
-                    "awaiting retained candidate".to_owned()
-                }),
-                TableCell::mono(limit_text(spec)),
-                if provisional || candidate_value.is_none() {
-                    TableCell::absent("not evaluated")
-                } else if passed {
-                    TableCell::verdict("PASS", Verdict::Pass)
-                } else {
-                    TableCell::verdict("FAIL", Verdict::Fail)
-                },
-            ]
+            (
+                spec,
+                baseline_run.and_then(|run| worst_measurement_in_run(run, spec)),
+                candidate_run.and_then(|run| worst_measurement_in_run(run, spec)),
+            )
         })
         .collect::<Vec<_>>();
-    render_data_table(ui, "verify-tuning-contract", &headers, &rows, None);
+    let columns = [
+        Column::name("Output", 140.0),
+        Column::words("Spec", 104.0),
+        Column::number("Baseline", 104.0),
+        Column::number("Candidate", 104.0),
+        Column::words("Pass/fail", 70.0),
+    ];
+    let height = ui.available_height();
+    let _ = DataTable::new("verify.tuning.specs", &columns, rows.len())
+        .max_height(height)
+        .show(ui, |index| {
+            let (spec, baseline, candidate) = rows[index];
+            let value = |value: Option<f64>| {
+                value.map_or_else(Cell::absent, |value| {
+                    Cell::number(format_value(value, &spec.unit))
+                })
+            };
+            vec![
+                Cell::text(&spec.measurement),
+                Cell::number(spec.limit_text()),
+                value(baseline),
+                value(candidate),
+                candidate
+                    .or(baseline)
+                    .map_or_else(Cell::empty, |value| Cell::verdict(judge(spec, value))),
+            ]
+        });
 }

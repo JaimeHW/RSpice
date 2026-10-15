@@ -231,15 +231,238 @@ pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageG
 }
 
 fn attributed(analysis: AnalysisResult) -> AnalysisResult {
+    attributed_to(analysis, AnalysisInstanceId::new())
+}
+
+fn attributed_to(analysis: AnalysisResult, source_instance_id: AnalysisInstanceId) -> AnalysisResult {
     analysis.with_provenance(
         crate::state::AnalysisResultProvenance::new(
-            AnalysisInstanceId::new(),
+            source_instance_id,
             ObjectRevision::INITIAL,
             ContentDigest::from_bytes([0x5a; 32]),
             Vec::new(),
         )
         .expect("fixture provenance is internally valid"),
     )
+}
+
+/// A run of `plan_id`, sealed by a prepared receipt whose one task produced
+/// `analysis`.
+pub(super) fn sealed_run(
+    run_number: u64,
+    plan_id: crate::product::SimulationPlanId,
+    source_instance_id: AnalysisInstanceId,
+    analysis_kind_tag: u8,
+    analysis: AnalysisResult,
+) -> SimulationRun {
+    let task = crate::state::PreparedRunTaskReceipt::new(
+        source_instance_id,
+        ObjectRevision::INITIAL,
+        Vec::new(),
+        analysis_kind_tag,
+        ContentDigest::from_bytes([analysis_kind_tag; 32]),
+    )
+    .expect("fixture task receipt is internally valid");
+    let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
+        source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
+        simulation_plan_id: Some(plan_id),
+        project_revision: ObjectRevision::INITIAL,
+        prepared_snapshot_digest: ContentDigest::from_bytes([0x5a; 32]),
+        source_content_digest: ContentDigest::from_bytes([0x41; 32]),
+        source_check_receipt: crate::state::PreparedSourceCheckReceipt::SchematicDrc(
+            ContentDigest::from_bytes([0x42; 32]),
+        ),
+        project_model_sources: Vec::new(),
+        specifications: Vec::new(),
+        specification_policy: rspice_results::specification::PreparedSpecificationPolicy::default(),
+        tasks: vec![task],
+    })
+    .expect("fixture run receipt is internally valid");
+    let mut run = SimulationRun::new_prepared(run_number, receipt);
+    run.add_analysis(attributed_to(analysis, source_instance_id));
+    run
+}
+
+/// The canonical execution tag a transient task carries, which the receipt
+/// checks its result against.
+const TRANSIENT_TASK_TAG: u8 = 5;
+
+/// A second-order step response settling to 1 V.
+fn step_response(damping: f64, natural_rad_s: f64, time: &[f64]) -> Vec<f64> {
+    let root = (1.0 - damping * damping).sqrt();
+    let damped = natural_rad_s * root;
+    time.iter()
+        .map(|t| {
+            1.0 - (-damping * natural_rad_s * t).exp()
+                * ((damped * t).cos() + damping / root * (damped * t).sin())
+        })
+        .collect()
+}
+
+/// Three microseconds of a step, at 12.5 ns.
+fn step_time() -> Vec<f64> {
+    (0..=240).map(|index| f64::from(index) * 12.5e-9).collect()
+}
+
+/// A transient step of the active plan's one analysis, with its measurements.
+fn step_analysis(damping: f64, natural_rad_s: f64, measurements: &[(&str, f64)]) -> AnalysisResult {
+    let time = step_time();
+    AnalysisResult::new(1, AnalysisType::Transient, "Step")
+        .with_waveforms(vec![
+            WaveformData::new(
+                "V(out)",
+                time.clone(),
+                step_response(damping, natural_rad_s, &time),
+                "#4c9be8",
+            )
+            .with_unit("V"),
+        ])
+        .with_measurements(
+            measurements
+                .iter()
+                .map(|(name, value)| rspice_core::MeasureResult::success(*name, *value))
+                .collect(),
+        )
+}
+
+/// A plan with one tuned resistor and two limits, and two runs of it: Run 3,
+/// the baseline the tuning session opened on, whose overshoot fails, and
+/// Run 4, the committed candidate, whose settling time is near its limit.
+pub(super) fn tuning_app() -> RSpiceApp {
+    use crate::state::{
+        DesignVariable, DesignVariableOverridePolicy, DesignVariableQuantity, DesignVariableRange,
+        DesignVariableScope, DesignVariableSweepEligibility,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let variable = DesignVariable::new(
+        "RGAIN",
+        "499 ohm",
+        DesignVariableQuantity::Resistance,
+        DesignVariableScope::Project,
+        "Closed-loop gain-setting resistor",
+        Some(DesignVariableRange {
+            minimum: "350 ohm".to_owned(),
+            maximum: "750 ohm".to_owned(),
+        }),
+        DesignVariableSweepEligibility::NestedSweepAndOptimization,
+        DesignVariableOverridePolicy::ExplicitTestLocalOverride,
+    )
+    .expect("valid tuning variable");
+    app.state
+        .workspace
+        .content
+        .add_design_variable(plan_id, variable)
+        .expect("the variable enters the active plan");
+    set_limits(
+        &mut app,
+        vec![
+            limit("tsettle", None, Some(2.0e-6), "s"),
+            limit("overshoot", None, Some(10.0), "%"),
+        ],
+    );
+    let source = AnalysisInstanceId::new();
+    let baseline = sealed_run(
+        3,
+        plan_id,
+        source,
+        TRANSIENT_TASK_TAG,
+        step_analysis(0.55, 4.49e6, &[("tsettle", 1.62e-6), ("overshoot", 12.6)]),
+    );
+    let candidate = sealed_run(
+        4,
+        plan_id,
+        source,
+        TRANSIENT_TASK_TAG,
+        step_analysis(0.65, 3.22e6, &[("tsettle", 1.91e-6), ("overshoot", 6.8)]),
+    );
+    app.state.simulation.retained.runs = vec![baseline, candidate].into();
+    app.state.simulation.view.active_run_idx = Some(0);
+    super::tuning::sync_tuning_session(&mut app);
+    app.state.simulation.view.active_run_idx = Some(1);
+    app
+}
+
+/// Run 4 of the active plan against its baseline, Run 3: four measurements and
+/// the output waveform. Bandwidth breaks its 2 % rule, overshoot has no rule,
+/// and the waveform is selected, so its comparison opens under the table.
+pub(super) fn regression_app() -> RSpiceApp {
+    use crate::state::{
+        RegressionComparisonMethod, RegressionComparisonWindow, RegressionSpecificationPolicy,
+        RegressionTargetSelector, RegressionToleranceRule,
+    };
+
+    let mut app = RSpiceApp::test_instance();
+    let plan_id = app
+        .state
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("default plan")
+        .id();
+    let source = AnalysisInstanceId::new();
+    let run = |number: u64, damping: f64, natural: f64, values: [f64; 4]| {
+        sealed_run(
+            number,
+            plan_id,
+            source,
+            TRANSIENT_TASK_TAG,
+            step_analysis(
+                damping,
+                natural,
+                &[
+                    ("gain", values[0]),
+                    ("bw", values[1]),
+                    ("tsettle", values[2]),
+                    ("overshoot", values[3]),
+                ],
+            ),
+        )
+    };
+    let baseline = run(3, 0.55, 4.49e6, [42.30, 18.2e6, 1.62e-6, 12.6]);
+    let candidate = run(4, 0.56, 4.45e6, [42.28, 17.1e6, 1.64e-6, 12.1]);
+    let baseline_id = baseline.run_id;
+    let rule = |target: RegressionTargetSelector, absolute: f64, relative: f64| {
+        let waveform = target.kind == crate::state::RegressionTargetKind::Waveform;
+        RegressionToleranceRule {
+            target,
+            method: RegressionComparisonMethod::AbsoluteRelativeEnvelope,
+            absolute_tolerance: absolute,
+            relative_tolerance: relative,
+            time_skew_allowance: if waveform { 20.0e-9 } else { 0.0 },
+            comparison_window: waveform.then_some(RegressionComparisonWindow {
+                start: 0.0,
+                end: 3.0e-6,
+            }),
+        }
+    };
+    let mut rules = super::derive_regression_checks(&baseline, &candidate)
+        .into_iter()
+        .filter_map(|check| match check.name.as_str() {
+            "gain" => Some(rule(check.target, 0.1, 0.005)),
+            "bw" => Some(rule(check.target, 0.0, 0.02)),
+            "tsettle" => Some(rule(check.target, 0.0, 0.05)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let waveform = super::regression_waveform_pairs(&baseline, &candidate)
+        .first()
+        .map(|pair| pair.target.clone())
+        .expect("both runs hold V(out)");
+    rules.push(rule(waveform.clone(), 0.02, 0.02));
+    let payload = app.state.workspace.content.ensure_active_plan_data(plan_id);
+    payload.regression_tolerances = rules;
+    payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
+    app.state.simulation.retained.runs = vec![baseline, candidate].into();
+    assert!(app.state.simulation.select_run(1));
+    super::commit_regression_baseline(&mut app, baseline_id).expect("the baseline commits");
+    app.state.workbench.verification.regression_selected_target = Some(waveform);
+    app
 }
 
 fn limit(measurement: &str, min: Option<f64>, max: Option<f64>, unit: &str) -> SpecEntry {
@@ -587,9 +810,9 @@ fn seeded(page: VerificationPage) -> RSpiceApp {
         VerificationPage::Corners => corner_app(),
         VerificationPage::DeviceSafety => soa_app(),
         VerificationPage::Optimization => optimization_app(),
-        VerificationPage::Yield | VerificationPage::Tuning | VerificationPage::Regression => {
-            monte_carlo_app()
-        }
+        VerificationPage::Yield => monte_carlo_app(),
+        VerificationPage::Tuning => tuning_app(),
+        VerificationPage::Regression => regression_app(),
     }
 }
 

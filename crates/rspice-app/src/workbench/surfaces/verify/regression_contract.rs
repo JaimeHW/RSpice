@@ -738,10 +738,11 @@ pub(super) fn format_regression_window(
 }
 
 pub(super) fn format_tolerance_rule(rule: &crate::state::RegressionToleranceRule) -> String {
+    let relative = format!("{:.6}", rule.relative_tolerance * 100.0);
+    let relative = relative.trim_end_matches('0').trim_end_matches('.');
     let mut text = format!(
-        "abs {} + rel {:.6}%",
+        "abs {} + rel {relative} %",
         crate::simulation::dialog::options::format_si_value(rule.absolute_tolerance),
-        rule.relative_tolerance * 100.0
     );
     if rule.target.kind == crate::state::RegressionTargetKind::Waveform {
         text.push_str(&format!(

@@ -127,9 +127,7 @@ pub use rspice_results::run_receipt::{
     HierarchyMapRow, PreparedModelSourceIdentity, PreparedRunReceiptInput, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt,
 };
-pub use rspice_results::run_receipt::{
-    PreparedRunReceipt, SignOffStanding, SimulationRunProvenance,
-};
+pub use rspice_results::run_receipt::{PreparedRunReceipt, SimulationRunProvenance};
 pub use rspice_results::saved_output::SavedOutputMaterializationStatus;
 #[cfg(test)]
 pub use rspice_results::saved_output::SavedOutputReceipt;
