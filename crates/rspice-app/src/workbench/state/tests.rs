@@ -860,7 +860,7 @@ fn independent_workspace_layouts_round_trip_with_the_session() {
 }
 
 #[test]
-fn console_pages_include_the_mockup_interactive_surface() {
+fn console_pages_are_the_four_evidence_surfaces() {
     assert_eq!(
         ConsolePage::ALL,
         [
@@ -868,8 +868,16 @@ fn console_pages_include_the_mockup_interactive_surface() {
             ConsolePage::Problems,
             ConsolePage::Measurements,
             ConsolePage::TaskLog,
-            ConsolePage::Interactive,
         ]
     );
-    assert_eq!(ConsolePage::Interactive.label(), "Interactive");
+}
+
+/// A session saved while the retired Interactive page was open must still
+/// restore. Its page name resolves to the engine log rather than failing the
+/// whole workbench snapshot on a variant this build no longer carries.
+#[test]
+fn a_session_left_on_the_retired_interactive_page_restores_onto_the_console() {
+    let page: ConsolePage =
+        serde_json::from_str("\"Interactive\"").expect("a retired page name still deserializes");
+    assert_eq!(page, ConsolePage::Console);
 }

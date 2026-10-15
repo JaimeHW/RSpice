@@ -1055,7 +1055,6 @@ impl Command {
             Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => !state.log_buffer.is_empty(),
-                ConsolePage::Interactive => !state.script_console.history.is_empty(),
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => false,
             },
             _ => true,
@@ -1493,7 +1492,6 @@ impl Command {
             // see, so the command owns the same page scope the control shows.
             Self::ClearConsole => match app.state.workbench.console_page {
                 ConsolePage::Console => app.state.clear_primary_log(),
-                ConsolePage::Interactive => app.state.script_console.history.clear(),
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => {}
             },
             Self::ToggleFocusMode => {

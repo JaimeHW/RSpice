@@ -9,20 +9,17 @@ use log_anchor::log_row;
 use egui::{Align, Grid, Layout, ScrollArea, Sense, Ui, Vec2};
 
 use crate::diagnostics::LogSeverity;
-use crate::simulation::automation::CommandOutput;
 use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Problem, paint_problem_mark};
-use crate::workbench::app_state::session::script_console::ConsoleHistoryItem;
 use crate::workbench::{AppState, RSpiceApp};
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
 use super::super::state::ConsolePage;
-use crate::workbench::commands::CommandAvailability;
-use crate::workbench::commands::vocabulary::{Command, command_catalog};
+use crate::workbench::commands::vocabulary::Command;
 
 const CONSOLE_HEADER_HEIGHT: f32 = 31.0;
 const CONSOLE_TAB_HEIGHT: f32 = 26.0;
@@ -44,7 +41,6 @@ const CONSOLE_MARK_GUTTER: f32 = CONSOLE_MARK_SIDE + 6.0;
 const CONSOLE_FONT_SIZE: f32 = tokens::FS_1;
 const EMPTY_HINT_PADDING_X: i8 = 12;
 const EMPTY_HINT_PADDING_Y: i8 = 20;
-const INTERACTIVE_INPUT_GAP: f32 = 6.0;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     ui.spacing_mut().item_spacing.y = 0.0;
@@ -72,7 +68,6 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             .layout(Layout::top_down(Align::Min)),
         |ui| match page {
             ConsolePage::Console => console(ui, &mut app.state),
-            ConsolePage::Interactive => interactive(ui, app),
             ConsolePage::Problems => problems(ui, &mut app.state),
             ConsolePage::Measurements => measurements(ui, app),
             ConsolePage::TaskLog => task_log(ui, app),
@@ -230,7 +225,6 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: usize, height: f32) 
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
             let count = match page {
-                ConsolePage::Interactive => app.state.script_console.history.len(),
                 ConsolePage::Problems => problems,
                 ConsolePage::Measurements => active_measurement_count(&app.state.simulation),
                 ConsolePage::TaskLog => app.state.simulation.retained.runs.len(),
@@ -582,375 +576,6 @@ fn producer_filter_strip(
     });
     ui.add_space(4.0);
     cleared
-}
-
-fn interactive(ui: &mut Ui, app: &mut RSpiceApp) {
-    let mut submit = false;
-    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = INTERACTIVE_INPUT_GAP;
-            let command_ready = !app.state.script_console.input_buffer.trim().is_empty();
-            let run = ui
-                .add_enabled(command_ready, egui::Button::new("Run"))
-                .on_hover_text("Execute command");
-            run.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::Button,
-                    ui.is_enabled(),
-                    "Execute interactive command",
-                )
-            });
-            submit |= run.clicked();
-
-            let input = ui.add_sized(
-                [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
-                egui::TextEdit::singleline(&mut app.state.script_console.input_buffer)
-                    .hint_text("Typed project expression or command…"),
-            );
-            input.widget_info(|| {
-                egui::WidgetInfo::labeled(
-                    egui::WidgetType::TextEdit,
-                    ui.is_enabled(),
-                    "Interactive command",
-                )
-            });
-            submit |= input.has_focus()
-                && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-        });
-        ui.add_space(INTERACTIVE_INPUT_GAP);
-        ScrollArea::vertical()
-            .id_salt("workbench.interactive.history")
-            .stick_to_bottom(true)
-            .show(ui, |ui| {
-                if app.state.script_console.history.is_empty() {
-                    muted(
-                        ui,
-                        "Queries: project.runs · plan.analyses.enabled · project.results[\"Run 1\"].measure(\"gain\") · help",
-                    );
-                }
-                for item in &app.state.script_console.history {
-                    automation_row(ui, item);
-                }
-            });
-    });
-    if submit {
-        submit_interactive_command(app);
-    }
-}
-
-fn submit_interactive_command(app: &mut RSpiceApp) -> bool {
-    let command = app.state.script_console.input_buffer.trim().to_owned();
-    if command.is_empty() {
-        return false;
-    }
-    app.state.script_console.input_buffer.clear();
-    let output = execute_interactive_command(&command, app);
-    app.state
-        .script_console
-        .history
-        .push(ConsoleHistoryItem { command, output });
-    true
-}
-
-fn execute_interactive_command(input: &str, app: &mut RSpiceApp) -> CommandOutput {
-    let input = input.trim();
-    if input.eq_ignore_ascii_case("help") {
-        return CommandOutput {
-            success: true,
-            message: "Read project and retained-result state with typed expressions, or dispatch a governed command by stable ID.".to_owned(),
-            data: Some(
-                "Queries: project.runs · project.revision · project.specifications · plan.analyses.enabled · project.results[\"Run 1\"].measure(\"gain\")\nCommands: commands [filter] · command <stable-id>".to_owned(),
-            ),
-        };
-    }
-    if let Some(output) = execute_project_query(input, app) {
-        return output;
-    }
-
-    if let Some(filter) = input
-        .strip_prefix("commands")
-        .filter(|suffix| suffix.is_empty() || suffix.starts_with(char::is_whitespace))
-    {
-        let filter = filter.trim().to_ascii_lowercase();
-        let rows = command_catalog()
-            .filter(|command| {
-                filter.is_empty()
-                    || command.stable_id().to_ascii_lowercase().contains(&filter)
-                    || command.spec().label.to_ascii_lowercase().contains(&filter)
-            })
-            .map(|command| {
-                let availability = match command.availability(app) {
-                    CommandAvailability::Available => "available",
-                    CommandAvailability::Disabled(_) => "disabled",
-                    CommandAvailability::Hidden => "hidden",
-                };
-                format!(
-                    "{} · {} · {availability}",
-                    command.stable_id(),
-                    command.spec().label.trim_end_matches('…')
-                )
-            })
-            .collect::<Vec<_>>();
-        return if rows.is_empty() {
-            CommandOutput {
-                success: false,
-                message: if filter.is_empty() {
-                    "The canonical command catalog is empty.".to_owned()
-                } else {
-                    format!("No command matches `{filter}`.")
-                },
-                data: None,
-            }
-        } else {
-            CommandOutput {
-                success: true,
-                message: format!(
-                    "{} governed command{}",
-                    rows.len(),
-                    if rows.len() == 1 { "" } else { "s" }
-                ),
-                data: Some(rows.join("\n")),
-            }
-        };
-    }
-
-    let Some(stable_id) = input.strip_prefix("command ").map(str::trim) else {
-        return CommandOutput {
-            success: false,
-            message:
-                "Unknown expression. Use `help` for project queries and governed command syntax."
-                    .to_owned(),
-            data: None,
-        };
-    };
-    if stable_id.is_empty() || stable_id.chars().any(char::is_whitespace) {
-        return CommandOutput {
-            success: false,
-            message: "A command invocation requires exactly one canonical stable ID.".to_owned(),
-            data: None,
-        };
-    }
-    let Some(command) = Command::from_stable_id(stable_id) else {
-        return CommandOutput {
-            success: false,
-            message: format!("Unknown command ID `{stable_id}`. Use `commands` to inspect IDs."),
-            data: None,
-        };
-    };
-    if !command.palette_visible() {
-        return CommandOutput {
-            success: false,
-            message: format!("Command `{stable_id}` is private to application chrome."),
-            data: None,
-        };
-    }
-    if let Some(output) = unavailable_command_output(stable_id, command.availability(app)) {
-        return output;
-    }
-    let label = command.spec().label.trim_end_matches('…').to_owned();
-    command.execute(app);
-    CommandOutput {
-        success: true,
-        message: format!("Dispatched `{stable_id}` · {label}"),
-        data: Some(
-            "The governed dispatcher accepted this command. Its owning workflow reports asynchronous completion separately.".to_owned(),
-        ),
-    }
-}
-
-fn execute_project_query(input: &str, app: &RSpiceApp) -> Option<CommandOutput> {
-    match input {
-        "project.revision" => Some(CommandOutput {
-            success: true,
-            message: "Current mutable project revision".to_owned(),
-            data: Some(
-                app.state
-                    .workspace
-                    .content
-                    .project
-                    .revision()
-                    .get()
-                    .to_string(),
-            ),
-        }),
-        "project.runs" | "help(project.runs)" => {
-            let runs = app
-                .state
-                .simulation
-                .retained
-                .runs
-                .iter()
-                .map(|run| {
-                    format!(
-                        "Run {} · {} · {} · {} analyses · {:.3} s",
-                        run.id,
-                        run.label,
-                        run_lifecycle_label(run.lifecycle),
-                        run.analyses.len(),
-                        run.elapsed_time
-                    )
-                })
-                .collect::<Vec<_>>();
-            Some(CommandOutput {
-                success: true,
-                message: format!(
-                    "{} retained immutable run{}",
-                    runs.len(),
-                    if runs.len() == 1 { "" } else { "s" }
-                ),
-                data: Some(if runs.is_empty() {
-                    "No retained runs.".to_owned()
-                } else {
-                    runs.join("\n")
-                }),
-            })
-        }
-        "project.specifications" => {
-            let rows = active_specifications(app)
-                .into_iter()
-                .map(|spec| {
-                    format!(
-                        "{} · {}{}",
-                        spec.measurement,
-                        specification_text(&spec),
-                        if spec.unit.trim().is_empty() {
-                            String::new()
-                        } else {
-                            format!(" {}", spec.unit.trim())
-                        }
-                    )
-                })
-                .collect::<Vec<_>>();
-            Some(CommandOutput {
-                success: true,
-                message: format!(
-                    "{} active specification{}",
-                    rows.len(),
-                    if rows.len() == 1 { "" } else { "s" }
-                ),
-                data: Some(if rows.is_empty() {
-                    "No active specifications.".to_owned()
-                } else {
-                    rows.join("\n")
-                }),
-            })
-        }
-        "plan.analyses.enabled" => {
-            let Some(plan) = app.state.sim_setup.analysis_plan.as_ref() else {
-                return Some(CommandOutput {
-                    success: false,
-                    message: "The active simulation plan has no stable analysis graph.".to_owned(),
-                    data: None,
-                });
-            };
-            let enabled = plan
-                .instances()
-                .iter()
-                .filter(|instance| instance.enabled())
-                .map(|instance| instance.kind().stable_id())
-                .collect::<Vec<_>>();
-            Some(CommandOutput {
-                success: true,
-                message: format!(
-                    "{} enabled analysis instance{} · plan revision {}",
-                    enabled.len(),
-                    if enabled.len() == 1 { "" } else { "s" },
-                    plan.revision().get()
-                ),
-                data: Some(format!("[{}]", enabled.join(", "))),
-            })
-        }
-        _ => parse_measurement_query(input)
-            .map(|(run_selector, measurement)| measurement_query(app, run_selector, measurement)),
-    }
-}
-
-fn parse_measurement_query(input: &str) -> Option<(&str, &str)> {
-    let rest = input.strip_prefix("project.results[\"")?;
-    let (run, rest) = rest.split_once("\"].measure(\"")?;
-    let measurement = rest.strip_suffix("\")")?;
-    (!run.trim().is_empty() && !measurement.trim().is_empty()).then_some((run, measurement))
-}
-
-fn measurement_query(app: &RSpiceApp, run_selector: &str, measurement: &str) -> CommandOutput {
-    let run_number = run_selector
-        .strip_prefix("Run ")
-        .and_then(|value| value.parse::<u64>().ok());
-    let run = app.state.simulation.retained.runs.iter().find(|run| {
-        run.label.eq_ignore_ascii_case(run_selector)
-            || run_number.is_some_and(|number| run.id == number)
-    });
-    let Some(run) = run else {
-        return CommandOutput {
-            success: false,
-            message: format!("No retained run matches `{run_selector}`."),
-            data: None,
-        };
-    };
-    let matches = run
-        .analyses
-        .iter()
-        .flat_map(|analysis| {
-            analysis
-                .measurements
-                .iter()
-                .filter(|candidate| candidate.name.eq_ignore_ascii_case(measurement))
-                .map(move |candidate| (analysis.label.as_str(), candidate))
-        })
-        .collect::<Vec<_>>();
-    if matches.is_empty() {
-        return CommandOutput {
-            success: false,
-            message: format!("Run {} has no measurement named `{measurement}`.", run.id),
-            data: None,
-        };
-    }
-    let rows = matches
-        .iter()
-        .map(|(analysis, measurement)| {
-            let value = measurement
-                .value
-                .map(format_measure_value)
-                .unwrap_or_else(|| "unavailable".to_owned());
-            format!(
-                "{} · {} · {}",
-                analysis,
-                value,
-                if measurement.passed { "pass" } else { "fail" }
-            )
-        })
-        .collect::<Vec<_>>();
-    CommandOutput {
-        success: matches
-            .iter()
-            .all(|(_, measurement)| measurement.value.is_some()),
-        message: format!(
-            "{} exact f64 result{} from immutable Run {}",
-            rows.len(),
-            if rows.len() == 1 { "" } else { "s" },
-            run.id
-        ),
-        data: Some(rows.join("\n")),
-    }
-}
-
-fn unavailable_command_output(
-    stable_id: &str,
-    availability: CommandAvailability,
-) -> Option<CommandOutput> {
-    match availability {
-        CommandAvailability::Available => None,
-        CommandAvailability::Disabled(reason) => Some(CommandOutput {
-            success: false,
-            message: format!("Command `{stable_id}` is unavailable: {reason}."),
-            data: None,
-        }),
-        CommandAvailability::Hidden => Some(CommandOutput {
-            success: false,
-            message: format!("Command `{stable_id}` is hidden in the current context."),
-            data: None,
-        }),
-    }
 }
 
 fn active_measurement_count(simulation: &SimulationState) -> usize {
@@ -1826,45 +1451,6 @@ fn run_lifecycle_presentation(
     }
 }
 
-fn automation_row(ui: &mut Ui, item: &ConsoleHistoryItem) {
-    let t = Tokens::get(ui.ctx());
-    row(
-        ui,
-        None,
-        ">",
-        "AUTO",
-        &item.command,
-        t.color.text_dim,
-        t.color.text_dim,
-    );
-    // A failed command marks its first output line; the words stay neutral.
-    let failure = (!item.output.success).then_some(Problem::Failure);
-    for (index, line) in item.output.message.lines().enumerate() {
-        row(
-            ui,
-            failure.filter(|_| index == 0),
-            "",
-            "",
-            line,
-            t.color.text_dim,
-            t.color.text,
-        );
-    }
-    if let Some(data) = item.output.data.as_deref() {
-        for line in data.lines() {
-            row(
-                ui,
-                None,
-                "",
-                "DATA",
-                line,
-                t.color.text_dim,
-                t.color.text_dim,
-            );
-        }
-    }
-}
-
 /// A problem, log or task row: a leading mark for a warning or a failure,
 /// then neutral columns.
 fn issue_row(
@@ -1941,14 +1527,6 @@ fn console_clear_action(page: ConsolePage, console_has_output: bool) -> ConsoleC
                 "Clear console output"
             } else {
                 "Console output is already empty"
-            },
-        },
-        ConsolePage::Interactive => ConsoleClearAction {
-            enabled: console_has_output,
-            label: if console_has_output {
-                "Clear interactive command history"
-            } else {
-                "Interactive command history is already empty"
             },
         },
         ConsolePage::Problems => ConsoleClearAction {

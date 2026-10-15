@@ -202,8 +202,6 @@ pub struct AppState {
     pub(crate) sim_setup: SimSetupState,
     /// Structured log history buffer (ring-buffer, filterable).
     pub(crate) log_buffer: crate::diagnostics::LogBuffer,
-    /// Scripting/Automation console state
-    pub(crate) script_console: session::script_console::ScriptConsoleState,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Runtime collaboration-lock authority for governed project library

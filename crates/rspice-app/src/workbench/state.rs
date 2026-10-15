@@ -451,9 +451,12 @@ pub enum Drawer {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ConsolePage {
+    /// The alias restores a session last left on the retired Interactive page
+    /// onto the engine log, rather than failing the whole workbench restore
+    /// on a page name this build no longer has.
     #[default]
+    #[serde(alias = "Interactive")]
     Console,
-    Interactive,
     Problems,
     Measurements,
     TaskLog,
@@ -619,18 +622,16 @@ impl LocalSafeModeState {
 }
 
 impl ConsolePage {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 4] = [
         Self::Console,
         Self::Problems,
         Self::Measurements,
         Self::TaskLog,
-        Self::Interactive,
     ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Console => "Console",
-            Self::Interactive => "Interactive",
             Self::Problems => "Problems",
             Self::Measurements => "Measurements",
             Self::TaskLog => "Task log",

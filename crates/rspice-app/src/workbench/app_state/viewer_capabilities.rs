@@ -68,12 +68,11 @@ impl AppState {
         self.dialogs.drc_checked_version = 0;
         self.dialogs.drc_cycle = None;
         self.clear_all_design_checks();
-        // Console, Problems, Automation output, and debugger evidence are
-        // project-scoped under the source-workspace contract. Clear them in
-        // the same transaction as documents and results so a replacement can
-        // never render one frame containing two projects' evidence.
+        // Console, Problems, and debugger evidence are project-scoped under
+        // the source-workspace contract. Clear them in the same transaction
+        // as documents and results so a replacement can never render one
+        // frame containing two projects' evidence.
         self.log_buffer.clear();
-        self.script_console = Default::default();
         self.clear_specialized_viewer_data();
     }
 
@@ -759,14 +758,6 @@ mod tests {
         state
             .log_buffer
             .warning(LogSource::Simulation, "old project warning");
-        state.script_console.input_buffer = "old project command".to_owned();
-        state.script_console.history.push(
-            crate::workbench::app_state::session::script_console::ConsoleHistoryItem {
-                command: "old".to_owned(),
-                output: Default::default(),
-            },
-        );
-
         state.clear_design_execution_context();
 
         assert_eq!(
@@ -776,8 +767,6 @@ mod tests {
         assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
         assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
         assert!(state.log_buffer.is_empty());
-        assert!(state.script_console.input_buffer.is_empty());
-        assert!(state.script_console.history.is_empty());
     }
 
     #[test]

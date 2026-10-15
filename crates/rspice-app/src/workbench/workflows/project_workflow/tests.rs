@@ -1025,14 +1025,6 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         crate::diagnostics::LogSource::Simulation,
         "old project warning",
     );
-    state.script_console.input_buffer = "old project command".to_owned();
-    state.script_console.history.push(
-        crate::workbench::app_state::session::script_console::ConsoleHistoryItem {
-            command: "old".to_owned(),
-            output: Default::default(),
-        },
-    );
-
     let project = project_named_with_results("browser-import.rspiceproj");
 
     assert!(apply_loaded_project(
@@ -1056,8 +1048,6 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     );
     assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
     assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
-    assert!(state.script_console.input_buffer.is_empty());
-    assert!(state.script_console.history.is_empty());
     assert!(
         !state
             .log_buffer

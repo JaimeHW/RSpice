@@ -175,11 +175,6 @@ fn clear_affordance_is_truthful_for_every_console_page() {
     assert_eq!(console.label, "Clear console output");
     assert!(!console_clear_action(ConsolePage::Console, false).enabled);
 
-    let interactive = console_clear_action(ConsolePage::Interactive, true);
-    assert!(interactive.enabled);
-    assert_eq!(interactive.label, "Clear interactive command history");
-    assert!(!console_clear_action(ConsolePage::Interactive, false).enabled);
-
     for page in [
         ConsolePage::Problems,
         ConsolePage::Measurements,
@@ -197,26 +192,6 @@ fn the_clear_control_clears_the_visible_page_through_its_command() {
     app.state
         .log_buffer
         .warning(LogSource::Simulation, "visible console warning");
-    app.state.script_console.history.push(ConsoleHistoryItem {
-        command: "help".to_owned(),
-        output: Default::default(),
-    });
-
-    app.state.workbench.console_page = ConsolePage::Interactive;
-    assert!(
-        console_clear_action(
-            ConsolePage::Interactive,
-            Command::ClearConsole.is_enabled(&app)
-        )
-        .enabled,
-        "the painted control and the command must agree on what is clearable"
-    );
-    Command::ClearConsole.execute(&mut app);
-    assert!(app.state.script_console.history.is_empty());
-    assert!(
-        !app.state.log_buffer.is_empty(),
-        "clearing the interactive page must not reach output the user cannot see"
-    );
 
     app.state.workbench.console_page = ConsolePage::Problems;
     assert!(!Command::ClearConsole.is_enabled(&app));
@@ -236,11 +211,6 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
     state
         .log_buffer
         .warning(LogSource::Simulation, "visible console warning");
-    state.script_console.input_buffer = "pending command".to_owned();
-    state.script_console.history.push(ConsoleHistoryItem {
-        command: "help".to_owned(),
-        output: Default::default(),
-    });
     state.dialogs.drc_results = Some(DrcResult::new());
 
     let measurement = rspice_core::MeasureResult::success("gain", 42.0);
@@ -251,11 +221,8 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
     state.simulation.retained.runs.push(run);
 
     state.clear_primary_log();
-    state.script_console.history.clear();
 
     assert!(state.log_buffer.is_empty());
-    assert!(state.script_console.history.is_empty());
-    assert_eq!(state.script_console.input_buffer, "pending command");
     assert!(state.dialogs.drc_results.is_some());
     assert_eq!(state.simulation.retained.runs.len(), 1);
     assert_eq!(
@@ -263,98 +230,6 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
             .measurements
             .len(),
         1
-    );
-}
-
-#[test]
-fn interactive_console_uses_the_governed_command_dispatcher() {
-    let mut app = RSpiceApp::test_instance();
-    let navigator_was_visible = app.state.workbench.navigator_visible;
-    app.state.script_console.input_buffer = "command toggle-navigator".to_owned();
-
-    assert!(submit_interactive_command(&mut app));
-    assert!(app.state.script_console.input_buffer.is_empty());
-    assert_eq!(app.state.script_console.history.len(), 1);
-    assert_eq!(
-        app.state.script_console.history[0].command,
-        "command toggle-navigator"
-    );
-    assert!(app.state.script_console.history[0].output.success);
-    assert_ne!(
-        app.state.workbench.navigator_visible, navigator_was_visible,
-        "the typed command must execute through the real workbench dispatcher"
-    );
-
-    app.state.script_console.input_buffer = "   ".to_owned();
-    assert!(!submit_interactive_command(&mut app));
-    assert_eq!(app.state.script_console.history.len(), 1);
-}
-
-#[test]
-fn interactive_console_rejects_unknown_private_and_unavailable_commands() {
-    let mut app = RSpiceApp::test_instance();
-
-    let unknown = execute_interactive_command("command no-such-command", &mut app);
-    assert!(!unknown.success);
-    assert!(unknown.message.contains("Unknown command ID"));
-
-    let fuzzy = execute_interactive_command("command Toggle Navigator", &mut app);
-    assert!(!fuzzy.success);
-    assert!(
-        fuzzy
-            .message
-            .contains("requires exactly one canonical stable ID")
-    );
-
-    let private = execute_interactive_command("command console-clear", &mut app);
-    assert!(!private.success);
-    assert!(private.message.contains("private to application chrome"));
-
-    let unavailable = execute_interactive_command("command stop-run", &mut app);
-    assert!(!unavailable.success);
-    assert!(unavailable.message.contains("unavailable"));
-
-    let catalog = execute_interactive_command("commands navigator", &mut app);
-    assert!(catalog.success);
-    assert!(
-        catalog
-            .data
-            .as_deref()
-            .is_some_and(|data| data.contains("toggle-navigator"))
-    );
-
-    let hidden = unavailable_command_output("future-context-command", CommandAvailability::Hidden)
-        .expect("hidden commands are rejected");
-    assert!(!hidden.success);
-    assert!(hidden.message.contains("hidden in the current context"));
-}
-
-#[test]
-fn interactive_console_reads_exact_retained_measurement_and_plan_state() {
-    let mut app = RSpiceApp::test_instance();
-    let analysis = AnalysisResult::new(1, AnalysisType::Ac, "AC")
-        .with_measurements(vec![rspice_core::MeasureResult::success("gain_dc", 42.0)]);
-    let mut run = SimulationRun::new(7);
-    run.add_analysis(analysis);
-    app.state.simulation.retained.runs.push(run);
-
-    let measurement =
-        execute_interactive_command("project.results[\"Run 7\"].measure(\"gain_dc\")", &mut app);
-    assert!(measurement.success);
-    assert!(measurement.message.contains("immutable Run 7"));
-    assert!(
-        measurement
-            .data
-            .as_deref()
-            .is_some_and(|data| data.contains("42.000000"))
-    );
-
-    let plan = execute_interactive_command("plan.analyses.enabled", &mut app);
-    assert!(plan.success);
-    assert!(
-        plan.data
-            .as_deref()
-            .is_some_and(|data| data.contains("tran"))
     );
 }
 

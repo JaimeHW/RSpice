@@ -40,10 +40,6 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
         ("design_checks", size_of::<a::DesignCheckRuntime>()),
         ("sim_setup", size_of::<a::SimSetupState>()),
         ("log_buffer", size_of::<crate::diagnostics::LogBuffer>()),
-        (
-            "script_console",
-            size_of::<a::session::script_console::ScriptConsoleState>(),
-        ),
         ("library_manager", size_of::<crate::state::LibraryManager>()),
         (
             "library_edit_locks",

@@ -4,7 +4,6 @@
 //! Manages the complete simulation workflow from netlist generation to result display.
 
 pub(crate) use rspice_simulation_contract::accuracy;
-pub(crate) mod automation;
 pub(crate) use rspice_simulation_contract::config;
 pub(crate) mod controller;
 #[cfg(test)]
