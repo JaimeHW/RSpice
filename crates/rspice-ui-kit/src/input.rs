@@ -10,7 +10,7 @@ pub struct InputTransition {
 
 impl InputTransition {
     pub fn after_keys(input: &InputState, keys: &[(Key, Modifiers)]) -> Option<Self> {
-        Self::after_keys_with_order(input, keys, TextEventOrder::current())
+        Self::after_keys_with_order(input, keys, TextEventOrder::infer(&input.events))
     }
 
     fn after_keys_with_order(
@@ -56,7 +56,7 @@ impl InputTransition {
 
     /// The continuation of an accepted pointer or keyboard button activation.
     pub fn after_activation(input: &InputState) -> Self {
-        Self::after_activation_with_order(input, TextEventOrder::current())
+        Self::after_activation_with_order(input, TextEventOrder::infer(&input.events))
     }
 
     fn after_activation_with_order(input: &InputState, order: TextEventOrder) -> Self {
@@ -148,34 +148,107 @@ pub fn consume_keys(
     keys: &[(Key, Modifiers)],
     command_key_count: usize,
 ) -> bool {
-    let Some(indices) = command_event_indices(
-        &input.events,
-        keys,
-        command_key_count,
-        TextEventOrder::current(),
-    ) else {
+    let order = TextEventOrder::infer(&input.events);
+    let Some(indices) = command_event_indices(&input.events, keys, command_key_count, order) else {
         return false;
     };
     remove_events_at_indices(&mut input.events, indices);
     true
 }
 
-#[derive(Clone, Copy)]
+/// Which side of its [`Event::Key`] a keystroke's generated text sits on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TextEventOrder {
     BeforeKey,
     AfterKey,
 }
 
 impl TextEventOrder {
-    fn current() -> Self {
-        // eframe's web keydown callback emits Text before Key; egui-winit's
-        // keyboard callback emits Key before Text. Both are one input batch.
+    /// Read the order off the batch itself, because the host does not answer
+    /// it once and for all.
+    ///
+    /// egui-winit always emits the key before its text. eframe's web keydown
+    /// callback emits the text first, but only while the canvas holds DOM
+    /// focus: with the hidden text agent focused — which is exactly while a
+    /// text field is being edited — keydown pushes the key alone and the
+    /// character arrives afterwards from the agent's own `input` event. So on
+    /// the web both orders occur, and the build target cannot decide.
+    ///
+    /// The first printable key whose own character sits on exactly one side
+    /// settles the whole batch. A key whose character sits on neither side
+    /// (`ab`: the text before `Key(b)` is the previous key's) and one whose
+    /// character sits on both (`aa` typed in one frame) are skipped, so an
+    /// ambiguous key never decides the order and a later unambiguous one
+    /// still can.
+    fn infer(events: &[Event]) -> Self {
+        for (index, event) in events.iter().enumerate() {
+            let Event::Key {
+                key,
+                modifiers,
+                pressed: true,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            if !owns_generated_text(*key, *modifiers) {
+                continue;
+            }
+            let generated_at = |index: Option<usize>| {
+                index.and_then(|index| events.get(index)).is_some_and(
+                    |event| matches!(event, Event::Text(text) if is_generated_text(text, *key)),
+                )
+            };
+            match (
+                generated_at(index.checked_sub(1)),
+                generated_at(index.checked_add(1)),
+            ) {
+                (true, false) => return Self::BeforeKey,
+                (false, true) => return Self::AfterKey,
+                _ => {}
+            }
+        }
+        Self::host_default()
+    }
+
+    /// A batch with no key-generated text to claim makes both answers
+    /// equivalent, so keep the host's usual order rather than invent a third
+    /// state.
+    fn host_default() -> Self {
         if cfg!(target_arch = "wasm32") {
             Self::BeforeKey
         } else {
             Self::AfterKey
         }
     }
+}
+
+/// Whether this keystroke generates text of its own: a command chord does
+/// not, and neither does a key that is not a single character or Space.
+fn owns_generated_text(key: Key, modifiers: Modifiers) -> bool {
+    !modifiers.command
+        && !modifiers.ctrl
+        && !modifiers.mac_cmd
+        && (key.name().chars().count() == 1 || key == Key::Space)
+}
+
+/// Whether `text` is the character this key generates. [`Key::name`] is the
+/// character itself for the letters and digits, in upper case, and shift
+/// decides the case of what the host sends.
+fn is_generated_text(text: &str, key: Key) -> bool {
+    let mut characters = text.chars();
+    let Some(character) = characters.next() else {
+        return false;
+    };
+    if characters.next().is_some() {
+        return false;
+    }
+    if key == Key::Space {
+        return character == ' ';
+    }
+    let mut name = key.name().chars();
+    name.next()
+        .is_some_and(|named| name.next().is_none() && named.eq_ignore_ascii_case(&character))
 }
 
 fn command_event_indices(
@@ -187,11 +260,7 @@ fn command_event_indices(
     let command_keys = keys.get(..command_key_count)?;
     let mut indices = matching_key_indices(events, keys)?;
     for (position, (key, modifiers)) in command_keys.iter().enumerate() {
-        if modifiers.command
-            || modifiers.ctrl
-            || modifiers.mac_cmd
-            || (key.name().chars().count() != 1 && *key != Key::Space)
-        {
+        if !owns_generated_text(*key, *modifiers) {
             continue;
         }
         let text_index = match order {
@@ -256,6 +325,103 @@ mod tests {
             TextEventOrder::BeforeKey => vec![text, key],
             TextEventOrder::AfterKey => vec![key, text],
         }
+    }
+
+    #[test]
+    fn the_inferred_order_is_the_order_the_batch_was_built_in() {
+        for order in [TextEventOrder::BeforeKey, TextEventOrder::AfterKey] {
+            for (key, text, modifiers) in [
+                (Key::R, "r", Modifiers::NONE),
+                (Key::I, "I", Modifiers::SHIFT),
+                (Key::Space, " ", Modifiers::NONE),
+            ] {
+                assert_eq!(
+                    TextEventOrder::infer(&typed(key, text, modifiers, order)),
+                    order
+                );
+            }
+        }
+    }
+
+    /// The web emits both orders: the text first while the canvas has DOM
+    /// focus, the key first while the hidden text agent is focused for a text
+    /// field. Neither is the build target's business.
+    #[test]
+    fn both_web_orders_are_recognised_whatever_the_build_target() {
+        let text_agent_focused = vec![press(Key::X, Modifiers::NONE), Event::Text("x".to_owned())];
+        assert_eq!(
+            TextEventOrder::infer(&text_agent_focused),
+            TextEventOrder::AfterKey
+        );
+        let canvas_focused = vec![Event::Text("x".to_owned()), press(Key::X, Modifiers::NONE)];
+        assert_eq!(
+            TextEventOrder::infer(&canvas_focused),
+            TextEventOrder::BeforeKey
+        );
+    }
+
+    /// `ab`: the text beside the command key on one side is its own and on the
+    /// other side the previous keystroke's. Taking either neighbour would
+    /// swallow the earlier character.
+    #[test]
+    fn a_command_key_takes_its_own_text_and_leaves_the_previous_keystrokes() {
+        for order in [TextEventOrder::BeforeKey, TextEventOrder::AfterKey] {
+            let preceding = typed(Key::A, "a", Modifiers::NONE, order);
+            let mut input = InputState::default();
+            input.events = preceding.clone();
+            input
+                .events
+                .extend(typed(Key::B, "b", Modifiers::NONE, order));
+            assert!(consume_keys(&mut input, &[(Key::B, Modifiers::NONE)], 1));
+            assert_eq!(input.events, preceding);
+        }
+    }
+
+    /// `aa`: both neighbours of the second key hold the same character, so
+    /// only the batch as a whole says which one it generated.
+    #[test]
+    fn a_repeated_character_consumes_its_own_text_in_both_orders() {
+        for order in [TextEventOrder::BeforeKey, TextEventOrder::AfterKey] {
+            let mut input = InputState::default();
+            input.events = typed(Key::A, "a", Modifiers::NONE, order);
+            input
+                .events
+                .extend(typed(Key::A, "a", Modifiers::NONE, order));
+            assert!(consume_keys(
+                &mut input,
+                &[(Key::A, Modifiers::NONE), (Key::A, Modifiers::NONE)],
+                2,
+            ));
+            assert!(input.events.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_batch_that_generates_no_text_keeps_the_hosts_order_and_its_events() {
+        let escape = vec![press(Key::Escape, Modifiers::NONE)];
+        assert_eq!(
+            TextEventOrder::infer(&escape),
+            TextEventOrder::host_default()
+        );
+        for order in [TextEventOrder::BeforeKey, TextEventOrder::AfterKey] {
+            let chord = typed(Key::K, "k", Modifiers::CTRL, order);
+            assert_eq!(
+                TextEventOrder::infer(&chord),
+                TextEventOrder::host_default()
+            );
+            let mut input = InputState::default();
+            input.events = chord.clone();
+            assert!(consume_keys(&mut input, &[(Key::K, Modifiers::CTRL)], 1));
+            assert_eq!(input.events, vec![Event::Text("k".to_owned())]);
+        }
+        let mut input = InputState::default();
+        input.events = escape;
+        assert!(consume_keys(
+            &mut input,
+            &[(Key::Escape, Modifiers::NONE)],
+            1
+        ));
+        assert!(input.events.is_empty());
     }
 
     #[test]
