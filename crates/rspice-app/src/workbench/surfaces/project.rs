@@ -24,7 +24,9 @@ use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager}
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, Problem, problem_line, select};
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark, problem_line, select,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 
@@ -360,9 +362,8 @@ fn project_revision_label(ui: &mut Ui, app: &RSpiceApp, tokens: &Tokens) {
 }
 
 fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
-    let tokens = Tokens::get(ui.ctx());
     if app.state.is_netlist_first_without_schematic() {
-        let (label, description, tone) = app
+        let (label, description, problem) = app
             .state
             .workspace
             .content.netlist_document
@@ -372,19 +373,19 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
                     (
                         "source unavailable".to_owned(),
                         "The project has no canonical SPICE source document".to_owned(),
-                        tokens.color.err,
+                        Some(Problem::Failure),
                     )
                 },
                 |document| match document.validation() {
                     None => (
                         "source not validated".to_owned(),
                         "Open and validate the retained SPICE source deck".to_owned(),
-                        tokens.color.warn,
+                        None,
                     ),
                     Some(report) if report.content_digest() != document.content_digest() => (
                         "source stale".to_owned(),
                         "The source changed after the retained validation".to_owned(),
-                        tokens.color.warn,
+                        None,
                     ),
                     Some(report) => {
                         let errors = report.error_count();
@@ -394,18 +395,13 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
                             format!(
                                 "Retained SPICE source validation: {errors} errors and {warnings} advisories"
                             ),
-                            if errors > 0 {
-                                tokens.color.err
-                            } else if warnings > 0 {
-                                tokens.color.warn
-                            } else {
-                                tokens.color.ok
-                            },
+                            (errors > 0).then_some(Problem::Failure),
                         )
                     }
                 },
             );
-        if project_status_chip(ui, "project-source", &label, &description, tone, true).clicked() {
+        if project_status_chip(ui, "project-source", &label, &description, problem, true).clicked()
+        {
             Command::OpenWorkspace(Workspace::Netlist).execute(app);
         }
     } else {
@@ -414,7 +410,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             &app.state.workspace.content.project.top_cell,
             crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
         );
-        let (checks_label, checks_description, checks_tone) = match app
+        let (checks_label, checks_description, checks_problem) = match app
             .state
             .project_root_design_check_status()
         {
@@ -427,33 +423,31 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
                     format!(
                         "Project-root schematic checks: {errors} blocking errors and {advisories} advisories"
                     ),
-                    if errors == 0 {
-                        tokens.color.ok
-                    } else {
-                        tokens.color.err
-                    },
+                    (errors > 0).then_some(Problem::Failure),
                 )
             }
             DesignCheckStatus::NotRun => (
                 "checks not run".to_owned(),
                 "Run schematic checks for the project root".to_owned(),
-                tokens.color.warn,
+                None,
             ),
             DesignCheckStatus::Stale(_) => (
                 "checks stale".to_owned(),
                 "Project-root inputs changed after the retained check".to_owned(),
-                tokens.color.warn,
+                None,
             ),
-            DesignCheckStatus::Unavailable { reason, .. } => {
-                ("checks unavailable".to_owned(), reason, tokens.color.err)
-            }
+            DesignCheckStatus::Unavailable { reason, .. } => (
+                "checks unavailable".to_owned(),
+                reason,
+                Some(Problem::Failure),
+            ),
         };
         if project_status_chip(
             ui,
             "project-checks",
             &checks_label,
             &checks_description,
-            checks_tone,
+            checks_problem,
             true,
         )
         .clicked()
@@ -468,16 +462,14 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let active_configuration = app.state.workspace.content.configuration_sets.active();
     let configuration = active_configuration.map_or("none", |configuration| configuration.name());
+    // A configuration's name is a name, not a state, and "none" is a project
+    // that has not pinned one rather than a fault.
     if project_status_chip(
         ui,
         "project-configuration",
         &format!("config {configuration}"),
         &format!("Active project configuration: {configuration}"),
-        if active_configuration.is_none() {
-            tokens.color.warn
-        } else {
-            tokens.color.ok
-        },
+        None,
         true,
     )
     .clicked()
@@ -487,17 +479,15 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
 
     if let Some((index, run)) = app.state.simulation.retained.runs.iter().enumerate().next() {
         let has_dataset = !run.analyses.is_empty();
-        let run_label = format!(
-            "run {} · {}",
-            run.id,
-            if run.success && has_dataset {
-                "complete"
-            } else if has_dataset {
-                "review"
-            } else {
-                "no data"
-            }
-        );
+        // A run that completed with data is the ordinary run, so the chip
+        // names only the two cases that are not.
+        let run_label = if run.success && has_dataset {
+            format!("run {}", run.id)
+        } else if has_dataset {
+            format!("run {} · review", run.id)
+        } else {
+            format!("run {} · no data", run.id)
+        };
         let description = format!(
             "Latest retained simulation run {}: {}",
             run.id,
@@ -512,11 +502,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             "project-latest-run",
             &run_label,
             &description,
-            if run.success && has_dataset {
-                tokens.color.ok
-            } else {
-                tokens.color.warn
-            },
+            None,
             true,
         )
         .clicked()
@@ -538,29 +524,42 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             "project-latest-run",
             "run none",
             "No retained simulation run",
-            tokens.color.text_faint,
+            None,
             false,
         );
     }
 }
 
+/// Side of a problem mark painted inside a chip, and the advance from the
+/// mark's left edge to the text after it: the kit's own values, so a marked
+/// chip and an unmarked one beside it keep the same text rhythm.
+const CHIP_MARK_SIDE: f32 = 11.0;
+const CHIP_MARK_ADVANCE: f32 = 17.0;
+
+/// One of the title row's health chips: a link to the page that owns the
+/// fact, so its words stay neutral. A failure the reader has to act on puts
+/// the kit's cross in front of them; nothing else is coloured.
 fn project_status_chip(
     ui: &mut Ui,
     id_salt: &'static str,
     label: &str,
     accessible_label: &str,
-    color: Color32,
+    problem: Option<Problem>,
     enabled: bool,
 ) -> Response {
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let width = ui
+    let text_width = ui
         .painter()
-        .layout_no_wrap(label.to_owned(), font.clone(), color)
+        .layout_no_wrap(label.to_owned(), font.clone(), tokens.color.text_dim)
         .size()
-        .x
-        + 14.0;
-    let (_, rect) = ui.allocate_space(vec2(width, 22.0));
+        .x;
+    let mark_advance = if problem.is_some() {
+        CHIP_MARK_ADVANCE
+    } else {
+        0.0
+    };
+    let (_, rect) = ui.allocate_space(vec2(text_width + mark_advance + 14.0, 22.0));
     let response = ui.interact(
         rect,
         ui.id().with(("project-status-chip", id_salt)),
@@ -573,20 +572,36 @@ fn project_status_chip(
     if enabled && (response.hovered() || response.has_focus()) {
         ui.painter().rect_filled(rect, 3.0, tokens.color.bg_hover);
     }
+    let text_left = rect.left() + 7.0 + mark_advance;
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(
+                    rect.left() + 7.0 + CHIP_MARK_SIDE * 0.5,
+                    rect.center().y + 0.5,
+                ),
+                vec2(CHIP_MARK_SIDE, CHIP_MARK_SIDE),
+            ),
+            problem,
+        );
+    }
     ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
+        pos2(text_left, rect.center().y),
+        Align2::LEFT_CENTER,
         label,
         font,
         if enabled {
-            color
+            tokens.color.text_dim
         } else {
             tokens.color.text_faint
         },
     );
-    response.widget_info(|| {
-        WidgetInfo::labeled(WidgetType::Button, enabled, accessible_label.to_owned())
-    });
+    let announcement = problem.map_or_else(
+        || accessible_label.to_owned(),
+        |problem| problem.announce(accessible_label),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, enabled, announcement.clone()));
     if enabled {
         theme::paint_focus_ring(ui, &response, rect);
     }
