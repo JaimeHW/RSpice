@@ -98,11 +98,12 @@ pub fn property_row_input_captioned(
             right: trailing as i8,
             ..margin
         })
-        .desired_width(value_rect.width());
+        .desired_width(value_rect.width())
+        .text_color(t.color.text);
     if invalid {
         edit = edit.text_color(t.color.err);
     }
-    let response = ui.put(value_rect, edit);
+    let response = super::show_property_field(ui, value_rect, edit);
     slot.close(ui);
     if let Some(galley) = unit {
         // On the value's baseline. The field sets its text at its top inset,

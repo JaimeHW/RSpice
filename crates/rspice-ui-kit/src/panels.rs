@@ -1258,6 +1258,29 @@ pub(crate) fn hinted_edit<'t>(value: &'t mut String, hint: &str) -> egui::TextEd
     }
 }
 
+/// Show a property-row field with the palette's own tones on both the value
+/// and the hint standing in for it.
+///
+/// egui decides neither for us the way we want them. The value it paints in
+/// `widgets.inactive`, the tone a resting button gets, so an authored value
+/// came out two steps below the same fact on the read-only row above it. The
+/// hint it paints in `Visuals::weak_text_color`, which it derives by fading
+/// the body tone rather than reading the palette, and which it overwrites on
+/// the atoms afterwards, so `RichText::color` on a hint does not survive:
+/// stating the tone on the style for the length of the put is the only way to
+/// reach it. Unstated, the hint landed about a tenth below the value — a
+/// column of inherited defaults every one of which read as declared.
+///
+/// Both ends of that gap move here, and nothing about the field's geometry
+/// does: a row whose value is inherited is still an empty field.
+fn show_property_field(ui: &mut Ui, rect: Rect, edit: egui::TextEdit<'_>) -> Response {
+    let faint = Tokens::get(ui.ctx()).color.text_faint;
+    let restored = std::mem::replace(&mut ui.visuals_mut().weak_text_color, Some(faint));
+    let response = ui.put(rect, edit);
+    ui.visuals_mut().weak_text_color = restored;
+    response
+}
+
 /// Editable property row with caller-owned identity and single-line editor options.
 pub fn property_row_text_edit(
     ui: &mut Ui,
@@ -1283,11 +1306,12 @@ fn property_row_text_edit_in(
     let mut edit = edit
         .font(egui::TextStyle::Monospace)
         .margin(hinted_field_margin(ui, value_rect, 8, hint_shown))
-        .desired_width(value_rect.width());
+        .desired_width(value_rect.width())
+        .text_color(t.color.text);
     if invalid {
         edit = edit.text_color(t.color.err);
     }
-    let response = ui.put(value_rect, edit);
+    let response = show_property_field(ui, value_rect, edit);
     slot.close(ui);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label);
@@ -1362,9 +1386,7 @@ pub fn property_row_input_action(
     let text_color = if invalid {
         t.color.err
     } else {
-        ui.visuals()
-            .override_text_color
-            .unwrap_or_else(|| ui.visuals().widgets.inactive.text_color())
+        ui.visuals().override_text_color.unwrap_or(t.color.text)
     };
     let edit = egui::TextEdit::singleline(value)
         .font(egui::TextStyle::Monospace)
