@@ -7,7 +7,7 @@
 
 mod symbol_document;
 
-use crate::diagnostics::{ConsoleMessage, LogAnchor, LogSeverity};
+use crate::diagnostics::{ConsoleMessage, LogAnchor};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     CellViewRef, ComponentType, OpenCellView, Point, SchematicState, SymbolDocument, View, ViewType,
@@ -15,13 +15,10 @@ use crate::state::{
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
 use crate::workbench::state::WorkspaceDocumentId;
-use rspice_design::drc::DrcSeverity;
 use rspice_design::symbol::generated::{
     GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
 use std::collections::BTreeMap;
-
-pub(super) const MAX_FINDING_ROWS: usize = 50;
 
 fn view_type_for_reference(state: &AppState, reference: &CellViewRef) -> ViewType {
     state
@@ -203,14 +200,6 @@ impl AppState {
             .set_routing_mode(routing_mode);
         schematic.session.editor.bus_drawing.routing_mode = routing_mode;
         schematic
-    }
-}
-
-pub(super) fn log_severity_from_drc(severity: DrcSeverity) -> LogSeverity {
-    match severity {
-        DrcSeverity::Critical | DrcSeverity::Error => LogSeverity::Error,
-        DrcSeverity::Warning => LogSeverity::Warning,
-        DrcSeverity::Info => LogSeverity::Info,
     }
 }
 

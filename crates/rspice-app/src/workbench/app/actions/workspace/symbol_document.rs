@@ -14,7 +14,7 @@ mod tests;
 use rspice_schematic_editor::symbol_editor::interaction::SymbolRequestSource;
 use std::collections::BTreeMap;
 
-use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
+use crate::diagnostics::ConsoleMessage;
 use crate::state::{
     CellViewRef, ModelBoundSymbolDefinition, PinFindingKind, PortSpec,
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
@@ -30,8 +30,6 @@ use rspice_design::symbol::edit::{
     symbol_metadata_snapshot_from_view, symbol_pin_position_remaps, symbol_snapshot_from_view,
 };
 use rspice_design::symbol::generated::{GENERATED_PORTS_KEY, decode_ports};
-
-use super::{MAX_FINDING_ROWS, log_severity_from_drc};
 
 impl AppState {
     pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
@@ -596,29 +594,15 @@ impl AppState {
                     return;
                 }
 
-                for violation in result.violations().iter().take(MAX_FINDING_ROWS) {
-                    let anchor =
-                        crate::schematic::view::violations::finding_anchor(self, violation);
-                    self.log_buffer.log_anchored(
-                        log_severity_from_drc(violation.severity),
-                        LogSource::Drc,
-                        violation.message.clone(),
-                        None,
-                        anchor,
-                    );
-                }
-                let hidden = result.violations().len().saturating_sub(MAX_FINDING_ROWS);
-                if hidden > 0 {
-                    self.log_buffer.log(
-                        LogSeverity::Info,
-                        LogSource::Drc,
-                        format!("+{hidden} more findings - use the finding navigation commands"),
-                        None,
-                    );
-                }
-                self.push_user_message(ConsoleMessage::error(format!(
-                    "Symbol check found {} issue(s)",
-                    result.total_count()
+                // The findings stay in the receipt, which is what the Problems
+                // page and the canvas read. One Console line records that the
+                // check ran, at the severity of an event rather than of a
+                // finding: an error line here would stand on the Problems page
+                // as a problem of its own, beside the findings it counts.
+                let found = result.total_count();
+                self.push_user_message(ConsoleMessage::info(format!(
+                    "Symbol pin checks · {found} finding{}",
+                    if found == 1 { "" } else { "s" },
                 )));
                 self.dialogs.drc_results = Some(result);
                 self.dialogs.drc_checked_version = self.schematic.topology_version();

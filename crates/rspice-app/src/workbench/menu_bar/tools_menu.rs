@@ -1,18 +1,17 @@
 //! Design-check actions (Check menu). Rendering lives in
 //! `crate::workbench::chrome::title_bar`.
 
-use crate::diagnostics::{ConsoleMessage, LogSeverity, LogSource};
+use crate::diagnostics::ConsoleMessage;
 use crate::workbench::app_state::AppState;
-use rspice_design::drc::DrcSeverity;
-
-/// Per-run cap on per-finding console rows; the rest stay reachable via
-/// the canvas badges and typed finding-navigation commands.
-const MAX_FINDING_ROWS: usize = 50;
 
 /// Run the design-rule / electrical-rule checks on the active schematic.
-/// Results surface as the ERC pill in the schematic docbar, canvas badges,
-/// and console rows — one summary line plus a clickable row per finding
-/// that jumps to its anchor.
+///
+/// The findings themselves live in the check receipt, which is what the
+/// Problems page, the canvas badges and the docbar pill all read. This writes
+/// one Console line, because a check having run is a session event; it does
+/// not copy the findings into the Console as well. Copying them produced two
+/// rows per finding on the Problems page — one from the receipt and one from
+/// the log — and a count that said twice the truth.
 pub(crate) fn run_design_rule_check(state: &mut AppState) {
     let result = match state.run_active_design_checks() {
         Ok(result) => result,
@@ -24,41 +23,11 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
         }
     };
     let summary = result.summary();
-    let msg = if result.passed() {
-        format!(
-            "DRC passed: {} info, {} warnings",
-            summary.info, summary.warnings
-        )
-    } else {
-        format!(
-            "DRC found {} violations ({} errors, {} critical)",
-            summary.total, summary.errors, summary.critical
-        )
-    };
-    state.push_user_message(ConsoleMessage::info(msg));
-
-    for violation in result.violations().iter().take(MAX_FINDING_ROWS) {
-        let severity = match violation.severity {
-            DrcSeverity::Critical | DrcSeverity::Error => LogSeverity::Error,
-            DrcSeverity::Warning => LogSeverity::Warning,
-            DrcSeverity::Info => LogSeverity::Info,
-        };
-        let anchor = crate::schematic::view::violations::finding_anchor(state, violation);
-        state.log_buffer.log_anchored(
-            severity,
-            LogSource::Drc,
-            violation.message.clone(),
-            None,
-            anchor,
-        );
-    }
-    let hidden = result.violations().len().saturating_sub(MAX_FINDING_ROWS);
-    if hidden > 0 {
-        state.log_buffer.log(
-            LogSeverity::Info,
-            LogSource::Drc,
-            format!("+{hidden} more findings — use the finding navigation commands"),
-            None,
-        );
-    }
+    let errors = summary.critical + summary.errors;
+    let advisories = summary.warnings + summary.info;
+    state.push_user_message(ConsoleMessage::info(format!(
+        "Schematic checks · {errors} error{} · {advisories} advisor{}",
+        if errors == 1 { "" } else { "s" },
+        if advisories == 1 { "y" } else { "ies" },
+    )));
 }
