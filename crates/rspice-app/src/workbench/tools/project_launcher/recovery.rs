@@ -384,44 +384,18 @@ pub(super) fn recovery_contract(
                 &candidate.original.display().to_string(),
                 layout,
             );
-            recovery_contract_row(
-                ui,
-                "Recovery point",
-                &candidate.checkpoint.display().to_string(),
-                layout,
-            );
+            // The checkpoint's own path was a UUID-named file inside RSpice's
+            // bookkeeping; the list above picks a candidate by its age.
             match &candidate.integrity {
-                RecoveryIntegrity::Verified {
-                    baseline_available,
-                    baseline_note,
-                    ..
-                } => {
-                    // The page heading already says recovery never overwrites
-                    // the saved project; a row repeating it is not kept.
-                    recovery_contract_row(
-                        ui,
-                        "Recommended action",
-                        if *baseline_available {
-                            "Compare the editable recovery candidate with the read-only saved baseline."
-                        } else {
-                            baseline_note.as_deref().unwrap_or(
-                                "Review the verified checkpoint without a saved baseline.",
-                            )
-                        },
-                        layout,
-                    );
+                RecoveryIntegrity::Verified { baseline_note, .. } => {
+                    // "Recommended action" said what the two buttons under it
+                    // already do. Only an unexpected baseline has a row.
                     if let Some(note) = baseline_note {
-                        recovery_contract_row(ui, "Baseline status", note, layout);
+                        recovery_contract_row(ui, "Saved baseline", note, layout);
                     }
                 }
                 RecoveryIntegrity::Invalid(error) => {
                     recovery_contract_row(ui, "Integrity", error, layout);
-                    recovery_contract_row(
-                        ui,
-                        "Required action",
-                        "Retain or discard the checkpoint; invalid content is never opened.",
-                        layout,
-                    );
                 }
             }
         });

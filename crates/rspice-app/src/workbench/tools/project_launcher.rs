@@ -131,8 +131,9 @@ const LAUNCHER_EDGE_TO_EDGE_MAX_WIDTH: f32 = 760.0;
 const LAUNCHER_HEADER_HEIGHT: f32 = 48.0;
 /// The 44 pt touch close control with 4 pt above and below it.
 const LAUNCHER_COMPACT_HEADER_HEIGHT: f32 = 52.0;
-const LAUNCHER_VERSION_LABEL: &str =
-    concat!(env!("CARGO_PKG_VERSION"), " · ", env!("RSPICE_BUILD_HASH"));
+/// The launcher names the release. The build hash behind it is Help ▸ About's
+/// to give, where a reader goes to quote it in a report.
+const LAUNCHER_VERSION_LABEL: &str = env!("CARGO_PKG_VERSION");
 const LAUNCHER_NAV_WIDTH: f32 = 184.0;
 const LAUNCHER_COMPACT_NAV_HEIGHT: f32 = 42.0;
 const LAUNCHER_PAGE_FOOTER_MIN_HEIGHT: f32 = 51.0;
