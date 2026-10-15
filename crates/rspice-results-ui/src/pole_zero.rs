@@ -12,7 +12,7 @@ use rspice_results::pole_zero::{
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::{self, Axis, PlotSpec, XScale, fmt_si},
+    plot::{self, Axis, PlotSpec, XScale, fmt_si, fmt_si_readout},
     tokens::Tokens,
 };
 
@@ -20,22 +20,6 @@ use rspice_ui_kit::{
 pub struct PoleZeroResponse {
     pub plot: plot::PlotResponse,
     pub fit_clicked: bool,
-}
-
-fn format_root_evidence(evidence: &rspice_results::pole_zero::PoleZeroRootSetEvidence) -> String {
-    evidence.certificate().map_or_else(
-        || evidence.label().to_owned(),
-        |certificate| {
-            format!(
-                "{} · order {} · infinite {} · residual {:.3e} / {:.3e}",
-                evidence.label(),
-                certificate.problem_order,
-                certificate.infinite_count,
-                certificate.max_backward_error,
-                certificate.qualification_tolerance
-            )
-        },
-    )
 }
 
 fn accessible_root_inventory(data: &PoleZeroData) -> String {
@@ -281,7 +265,7 @@ pub fn right_panel(
     data: Option<&PoleZeroData>,
     quantity_policy: &QuantityPresentationPolicy,
 ) {
-    section_header(ui, "Roots", None);
+    section_header(ui, "Stability", None);
     let Some(data) = data else {
         crate::presentation::panel_note(ui, "Roots appear once a pole-zero analysis runs.");
         return;
@@ -289,71 +273,51 @@ pub fn right_panel(
 
     let verdict = pole_stability(data);
     let summary = summarize_roots(data);
-    let dominant = summary.dominant_pole.map_or_else(
-        || "Unavailable — no retained poles".to_owned(),
-        |root| format_dominant_pole(root, quantity_policy),
-    );
-    let worst_q = summary.worst_q.map_or_else(
-        || "Unavailable — no retained pole Q".to_owned(),
-        |q| {
+    // The verdict and what makes it are one statement: "Unstable" with the
+    // RHP count beside it, rather than a verdict row and two rows of "none".
+    let mut verdict_text = verdict.label().to_owned();
+    if summary.right_half_plane_poles > 0 {
+        verdict_text.push_str(&format!(
+            " · {} RHP pole{}",
+            summary.right_half_plane_poles,
+            if summary.right_half_plane_poles == 1 {
+                ""
+            } else {
+                "s"
+            }
+        ));
+    }
+    if summary.imaginary_axis_poles > 0 {
+        verdict_text.push_str(&format!(
+            " · {} on the imaginary axis",
+            summary.imaginary_axis_poles
+        ));
+    }
+    let mut summary_rows: Vec<(&str, String, bool)> = vec![("Verdict", verdict_text, true)];
+    if let Some(root) = summary.dominant_pole {
+        summary_rows.push((
+            "Dominant pole",
+            format_dominant_pole(root, quantity_policy),
+            false,
+        ));
+    }
+    if let Some(q) = summary.worst_q {
+        summary_rows.push((
+            "Worst Q",
             if q.is_infinite() {
                 "∞ · imaginary-axis pole".to_owned()
             } else {
                 format!("{q:.4}")
-            }
-        },
-    );
-    let rhp = if summary.right_half_plane_poles == 0 {
-        "none".to_owned()
-    } else {
-        format!("{} poles", summary.right_half_plane_poles)
-    };
-    let axis = if summary.imaginary_axis_poles == 0 {
-        "none".to_owned()
-    } else {
-        format!("{} poles", summary.imaginary_axis_poles)
-    };
-    let summary_rows = [
-        ("Verdict".to_owned(), verdict.label().to_owned(), true),
-        (
-            "Poles / zeros".to_owned(),
-            format!("{} / {} · retained", summary.pole_count, summary.zero_count),
+            },
             false,
-        ),
-        (
-            "Pole evidence".to_owned(),
-            format_root_evidence(&data.pole_evidence),
-            false,
-        ),
-        (
-            "Zero evidence".to_owned(),
-            format_root_evidence(&data.zero_evidence),
-            false,
-        ),
-        ("Dominant pole".to_owned(), dominant, false),
-        ("Worst Q".to_owned(), worst_q, false),
-        ("RHP content".to_owned(), rhp, false),
-        ("Imaginary axis".to_owned(), axis, false),
-        (
-            "Gain".to_owned(),
-            data.gain
-                .map(|gain| format!("{gain:.4}"))
-                .unwrap_or_else(|| "Unavailable — no finite DC gain".to_owned()),
-            false,
-        ),
-        (
-            "Reduction".to_owned(),
-            "Unavailable — matrix reduction not retained".to_owned(),
-            false,
-        ),
-    ];
-    let summary_refs: Vec<(&str, String, bool)> = summary_rows
-        .iter()
-        .map(|(key, value, highlight)| (key.as_str(), value.clone(), *highlight))
-        .collect();
-    crate::presentation::stat_table(ui, &summary_refs);
+        ));
+    }
+    if let Some(gain) = data.gain {
+        summary_rows.push(("Gain", fmt_si_readout(gain, "", 4), false));
+    }
+    crate::presentation::stat_table(ui, &summary_rows);
 
-    section_header(ui, "Retained roots", None);
+    section_header(ui, "Roots", None);
     let mut rows: Vec<(String, String, bool)> = Vec::new();
     let mut pole_index = 0usize;
     let mut zero_index = 0usize;
@@ -367,7 +331,8 @@ pub fn right_panel(
             format!("z{zero_index}")
         };
         let value = if root.is_real() {
-            fmt_si(root.real, "", 3)
+            // A real root is a frequency like every other root on the map.
+            quantity_policy.format_frequency(root.real.abs() / std::f64::consts::TAU, 3)
         } else {
             format!(
                 "ζ {:.2} · fₙ {}",
@@ -384,17 +349,8 @@ pub fn right_panel(
         .collect();
     crate::presentation::stat_table(ui, &row_refs);
     if omitted > 0 {
-        crate::presentation::panel_note(
-            ui,
-            &format!(
-                "{omitted} additional retained root representatives are omitted from this compact table."
-            ),
-        );
+        crate::presentation::panel_note(ui, &format!("+{omitted} more"));
     }
-    crate::presentation::panel_note(
-        ui,
-        "Conjugate pairs are listed once using the +jω member. Crosses are poles and circles are zeros. The shaded left half-plane is asymptotically stable; poles on the imaginary axis are marginal.",
-    );
 }
 
 #[cfg(test)]
