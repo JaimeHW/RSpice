@@ -27,29 +27,12 @@ pub struct PhaseNoiseTrace<'a> {
 pub struct PhaseNoiseInspector<'a> {
     pub trace: PhaseNoiseTrace<'a>,
     pub analysis: &'a AnalysisResult<WaveformData>,
-    pub offset_range: Option<(f64, f64)>,
 }
 
 /// Requests applied by the host to the same viewport that produced this frame.
 pub struct PhaseNoiseResponse {
     pub fit: bool,
     pub plot: Option<plot::PlotResponse>,
-}
-
-fn format_offset_range(
-    range: Option<(f64, f64)>,
-    quantities: &rspice_app_types::quantity::QuantityPresentationPolicy,
-) -> String {
-    range.map_or_else(
-        || "Unavailable — no retained offsets".to_owned(),
-        |(start, stop)| {
-            format!(
-                "{} – {}",
-                quantities.format_frequency(start, 2),
-                quantities.format_frequency(stop, 2)
-            )
-        },
-    )
 }
 
 /// Explain the host's reason for having no phase-noise source.
@@ -160,72 +143,59 @@ pub fn right_panel(
 ) {
     section_header(ui, "Phase noise", None);
     let Some(input) = input else {
-        crate::presentation::panel_note(
-            ui,
-            "A PNOISE/QPNOISE result needs an explicitly labelled phase-noise trace before L(f) can be shown.",
-        );
+        crate::presentation::panel_note(ui, "No phase-noise trace in this run.");
         return;
     };
 
     let PhaseNoiseInspector {
         trace: model,
         analysis,
-        offset_range,
     } = input;
-    let offset_range = format_offset_range(offset_range, quantities);
-    let phase = retained_measurement(analysis, "phase_error_rms_rad")
-        .map(|value| format!("{value:.6e} rad RMS"))
-        .unwrap_or_else(|| "Not retained".into());
-    let jitter = retained_measurement(analysis, "timing_jitter_rms_s")
-        .map(|value| rspice_ui_kit::plot::fmt_si(value, "s RMS", 6))
-        .unwrap_or_else(|| "Not retained".into());
-    let spot = exact_retained_value_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6).map_or_else(
-        || "Unavailable — 1 MHz sample not retained".to_owned(),
-        |level| format!("{level:.3} dBc/Hz · retained sample"),
-    );
-    let rows = [
-        ("Trace", model.source.to_owned(), false),
-        (
-            "Carrier",
-            quantities.format_frequency(model.carrier_frequency_hz, 3),
-            false,
-        ),
-        ("Offset range", offset_range, true),
-        ("Integrated phase error", phase, true),
-        ("Integrated timing jitter", jitter, true),
-        ("Spot L(f) at 1 MHz", spot, true),
-        (
-            "Spurs",
-            "Unavailable — spur evidence not retained".to_owned(),
-            false,
-        ),
-    ];
+    // The carrier names which oscillation L(f) is referred to; the offset
+    // extent is the plot's own X axis, and the trace is in its legend.
+    let mut rows = vec![(
+        "Carrier",
+        quantities.format_frequency(model.carrier_frequency_hz, 3),
+        false,
+    )];
+    if let Some(radians) = retained_measurement(analysis, "phase_error_rms_rad") {
+        rows.push((
+            "Integrated phase error",
+            format!("{:.3}° rms", radians.to_degrees()),
+            true,
+        ));
+    }
+    if let Some(seconds) = retained_measurement(analysis, "timing_jitter_rms_s") {
+        rows.push((
+            "Integrated timing jitter",
+            rspice_ui_kit::plot::fmt_si_readout(seconds, "s rms", 4),
+            true,
+        ));
+    }
+    if let Some(level) = exact_retained_value_at(model.offset_hz, model.level_dbc_per_hz, 1.0e6) {
+        rows.push(("Spot L(f) at 1 MHz", format!("{level:.3} dBc/Hz"), true));
+    }
     crate::presentation::stat_table(ui, &rows);
+    let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
+    if shares.is_empty() {
+        return;
+    }
     // The fold sits on the rows' inset rather than on the panel edge.
     rspice_ui_kit::panels::panel_body(ui, |ui| {
         ui.collapsing("Device noise shares", |ui| {
-            let shares: Vec<_> = retained_device_noise_shares(&analysis.measurements).collect();
-            if shares.is_empty() {
-                crate::presentation::panel_note(ui, "No per-device noise shares were retained.");
-            } else {
-                egui::ScrollArea::vertical().max_height(240.0).show_rows(
-                    ui,
-                    30.0,
-                    shares.len(),
-                    |ui, range| {
-                        for index in range {
-                            crate::presentation::stat_table(
-                                ui,
-                                &[(shares[index].0, format!("{:.6} %", shares[index].1), false)],
-                            );
-                        }
-                    },
-                );
-            }
+            egui::ScrollArea::vertical().max_height(240.0).show_rows(
+                ui,
+                30.0,
+                shares.len(),
+                |ui, range| {
+                    for index in range {
+                        crate::presentation::stat_table(
+                            ui,
+                            &[(shares[index].0, format!("{:.1} %", shares[index].1), false)],
+                        );
+                    }
+                },
+            );
         })
     });
-    crate::presentation::panel_note(
-        ui,
-        "Only an explicitly labelled retained phase-noise trace is rendered; ordinary periodic-noise traces are not reinterpreted as L(f).",
-    );
 }

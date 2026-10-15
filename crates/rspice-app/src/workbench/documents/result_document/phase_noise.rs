@@ -177,7 +177,6 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let input = model.as_ref().map(|model| view::PhaseNoiseInspector {
         trace: model.trace(),
         analysis: &state.simulation.active_run().unwrap().analyses[model.analysis_index].data,
-        offset_range: finite_range(&model.offset_hz),
     });
     view::right_panel(ui, input, &quantities);
 }
