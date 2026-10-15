@@ -49,7 +49,11 @@ fn ticks(span: (f64, f64), room: f32) -> (Vec<f64>, f64) {
     let mut ticks = Vec::new();
     let mut tick = (low / step).ceil() * step;
     while tick <= high + step * 1.0e-9 {
-        ticks.push(if tick.abs() < step * 1.0e-9 { 0.0 } else { tick });
+        ticks.push(if tick.abs() < step * 1.0e-9 {
+            0.0
+        } else {
+            tick
+        });
         tick += step;
     }
     (ticks, step)
@@ -115,11 +119,7 @@ pub(super) fn paint(ui: &Ui, rect: Rect, axes: &Axes<'_>) -> Rect {
             continue;
         }
         last_right = left + galley.size().x;
-        painter.galley(
-            pos2(left, plot.bottom() + 2.0),
-            galley,
-            t.color.text_faint,
-        );
+        painter.galley(pos2(left, plot.bottom() + 2.0), galley, t.color.text_faint);
     }
     painter.hline(
         plot.x_range(),

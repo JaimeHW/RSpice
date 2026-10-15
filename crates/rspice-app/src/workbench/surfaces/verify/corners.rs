@@ -631,11 +631,7 @@ fn corner_table(ui: &mut Ui, matrix: &CornerMatrix, compare: bool) {
             };
             let mut cells = vec![Cell::text(&row.output)];
             if limited {
-                cells.push(
-                    row.spec
-                        .as_ref()
-                        .map_or_else(Cell::empty, limit_cell),
-                );
+                cells.push(row.spec.as_ref().map_or_else(Cell::empty, limit_cell));
             }
             if matrix.nominal.is_some() {
                 cells.push(value_cell(nominal, false));

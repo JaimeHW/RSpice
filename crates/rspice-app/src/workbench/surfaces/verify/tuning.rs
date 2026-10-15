@@ -972,7 +972,9 @@ fn tuning_waveform_preview(
         x: (x_min, x_max),
         y: (y_min, y_max),
         x_unit: sweep_unit,
-        y_unit: named.and_then(|waveform| waveform.unit.as_deref()).unwrap_or(""),
+        y_unit: named
+            .and_then(|waveform| waveform.unit.as_deref())
+            .unwrap_or(""),
     };
 
     // The header row carries the waveform's name and what each line is; the
@@ -985,11 +987,7 @@ fn tuning_waveform_preview(
         theme::mono(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
-    let mut legend = vec![(
-        "baseline",
-        egui::Stroke::new(1.3, t.color.text_dim),
-        true,
-    )];
+    let mut legend = vec![("baseline", egui::Stroke::new(1.3, t.color.text_dim), true)];
     if candidate.is_some() {
         legend.insert(
             0,

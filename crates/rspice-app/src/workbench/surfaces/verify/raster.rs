@@ -234,7 +234,10 @@ fn attributed(analysis: AnalysisResult) -> AnalysisResult {
     attributed_to(analysis, AnalysisInstanceId::new())
 }
 
-fn attributed_to(analysis: AnalysisResult, source_instance_id: AnalysisInstanceId) -> AnalysisResult {
+fn attributed_to(
+    analysis: AnalysisResult,
+    source_instance_id: AnalysisInstanceId,
+) -> AnalysisResult {
     analysis.with_provenance(
         crate::state::AnalysisResultProvenance::new(
             source_instance_id,

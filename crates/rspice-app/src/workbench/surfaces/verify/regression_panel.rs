@@ -189,7 +189,10 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut clicked = None;
     if pair.is_none() {
         let text = candidate_name.map_or_else(
-            || "No run selected. Regression compares a run of this plan against a baseline run.".to_owned(),
+            || {
+                "No run selected. Regression compares a run of this plan against a baseline run."
+                    .to_owned()
+            },
             |run| format!("No baseline selected. Select the run {run} is compared against."),
         );
         let _ = empty_line(ui, &text, None);
@@ -202,10 +205,13 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
             &coverage_issues,
             &rules,
         );
-        let selected = session.regression_selected_target.as_ref().and_then(|selected| {
-            rows.iter()
-                .position(|row| row.target.as_ref() == Some(selected))
-        });
+        let selected = session
+            .regression_selected_target
+            .as_ref()
+            .and_then(|selected| {
+                rows.iter()
+                    .position(|row| row.target.as_ref() == Some(selected))
+            });
         let body = ui.available_height();
         let detail = selected.map_or(0.0, |_| (body * 0.45).clamp(DETAIL_MIN_H, DETAIL_MAX_H));
         // Method and Tolerance hold whole phrases — "Absolute + relative
@@ -294,7 +300,9 @@ fn regression_rows(
         rule.map_or_else(Cell::absent, |rule| Cell::text(rule.method.label()))
     };
     let tolerance = |rule: Option<&crate::state::RegressionToleranceRule>| {
-        rule.map_or_else(Cell::absent, |rule| Cell::number(format_tolerance_rule(rule)))
+        rule.map_or_else(Cell::absent, |rule| {
+            Cell::number(format_tolerance_rule(rule))
+        })
     };
     let mut rows = checks
         .iter()
@@ -315,28 +323,33 @@ fn regression_rows(
             }
         })
         .collect::<Vec<_>>();
-    rows.extend(waveforms.iter().zip(waveform_verdicts).map(|(pair, verdict)| {
-        let rule = regression_rule(rules, &pair.target);
-        let worst = match verdict {
-            RegressionVerdict::Pass { worst_delta, .. }
-            | RegressionVerdict::Fail { worst_delta, .. } => Some(*worst_delta),
-            RegressionVerdict::NotConfigured | RegressionVerdict::NotEvaluated(_) => None,
-        };
-        RegressionRow {
-            target: Some(pair.target.clone()),
-            cells: vec![
-                Cell::text(format!("Waveform {}", pair.current.name)),
-                method(rule),
-                Cell::number(format!("{} pts", pair.baseline.y.len())),
-                Cell::number(format!("{} pts", pair.current.y.len())),
-                worst.map_or_else(Cell::absent, |delta| {
-                    Cell::number(format!("max {}", format_scalar(delta)))
-                }),
-                tolerance(rule),
-                regression_status_cell(verdict),
-            ],
-        }
-    }));
+    rows.extend(
+        waveforms
+            .iter()
+            .zip(waveform_verdicts)
+            .map(|(pair, verdict)| {
+                let rule = regression_rule(rules, &pair.target);
+                let worst = match verdict {
+                    RegressionVerdict::Pass { worst_delta, .. }
+                    | RegressionVerdict::Fail { worst_delta, .. } => Some(*worst_delta),
+                    RegressionVerdict::NotConfigured | RegressionVerdict::NotEvaluated(_) => None,
+                };
+                RegressionRow {
+                    target: Some(pair.target.clone()),
+                    cells: vec![
+                        Cell::text(format!("Waveform {}", pair.current.name)),
+                        method(rule),
+                        Cell::number(format!("{} pts", pair.baseline.y.len())),
+                        Cell::number(format!("{} pts", pair.current.y.len())),
+                        worst.map_or_else(Cell::absent, |delta| {
+                            Cell::number(format!("max {}", format_scalar(delta)))
+                        }),
+                        tolerance(rule),
+                        regression_status_cell(verdict),
+                    ],
+                }
+            }),
+    );
     rows.extend(coverage_issues.iter().map(|issue| RegressionRow {
         target: issue.target.clone(),
         cells: vec![
@@ -346,7 +359,10 @@ fn regression_rows(
             Cell::absent(),
             Cell::absent(),
             Cell::absent(),
-            Cell::problem(format!("Blocked \u{00b7} {}", issue.detail), Problem::Warning),
+            Cell::problem(
+                format!("Blocked \u{00b7} {}", issue.detail),
+                Problem::Warning,
+            ),
         ],
     }));
     rows
@@ -403,10 +419,8 @@ fn regression_detail(
     } else {
         width
     };
-    let form_rect = egui::Rect::from_min_max(
-        egui::pos2(pane.right() - form_width, pane.top()),
-        pane.max,
-    );
+    let form_rect =
+        egui::Rect::from_min_max(egui::pos2(pane.right() - form_width, pane.top()), pane.max);
     if let Some(pair) = waveform {
         let plot_rect =
             egui::Rect::from_min_max(pane.min, egui::pos2(form_rect.left() - 1.0, pane.bottom()));

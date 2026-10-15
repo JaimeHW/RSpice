@@ -819,10 +819,7 @@ fn measurement_evidence_requires_success_finite_value_and_provenance() {
         worst_measurement_in_run(&run, &tracked("measure_failed")),
         None
     );
-    assert_eq!(
-        worst_measurement_in_run(&run, &tracked("valid")),
-        Some(4.0)
-    );
+    assert_eq!(worst_measurement_in_run(&run, &tracked("valid")), Some(4.0));
 }
 
 #[test]
@@ -2158,14 +2155,24 @@ fn the_regression_page_is_one_table_and_the_selected_targets_detail() {
     let toolbar = geometry.one("toolbar").expect("toolbar");
     assert!(geometry.one("toolbar.summary").is_some());
     let head = geometry.one("table.head").expect("checks table");
-    assert_eq!(head.top(), toolbar.bottom(), "nothing between toolbar and table");
+    assert_eq!(
+        head.top(),
+        toolbar.bottom(),
+        "nothing between toolbar and table"
+    );
     let rows = geometry.all("table.row");
     assert_eq!(rows.len(), 5, "four measurements and one waveform");
     assert!(rows.iter().all(|row| row.height() == 24.0));
     assert_eq!(rows[0].top(), head.bottom());
-    let detail = geometry.one("split").expect("the selected waveform's detail");
+    let detail = geometry
+        .one("split")
+        .expect("the selected waveform's detail");
     let last = rows.last().expect("rows");
-    assert_eq!(detail.top(), last.bottom() + 1.0, "the detail sits under the table");
+    assert_eq!(
+        detail.top(),
+        last.bottom() + 1.0,
+        "the detail sits under the table"
+    );
     assert_eq!(detail.left(), 0.0);
     assert_eq!(detail.right(), PAGE_WIDTH);
     for (column, edges) in geometry.right_edges() {
@@ -2208,7 +2215,11 @@ fn a_limit_and_a_tick_are_spelled_like_the_values_beside_them() {
     assert_eq!(bound(Some(45.0), None, "deg"), "\u{2265} 45 deg");
     assert_eq!(bound(None, Some(2.0e-6), "s"), "\u{2264} 2 \u{b5}s");
     assert_eq!(bound(Some(1.62), Some(1.98), "V"), "1.62 V \u{2026} 1.98 V");
-    assert_eq!(bound(None, None, "V"), "", "a bound of nothing says nothing");
+    assert_eq!(
+        bound(None, None, "V"),
+        "",
+        "a bound of nothing says nothing"
+    );
 
     // One space before the unit, the same one the values carry.
     assert_eq!(super::histogram::tick_text(38.0, 0.5, "dB"), "38 dB");
@@ -2435,11 +2446,20 @@ fn no_verify_page_grows_a_tile_strip_a_lecture_or_a_receipt_back() {
     for (path, source) in verify_slice() {
         let shipped = crate::source_guard::without_test_items(source);
         for (banned, why) in [
-            ("KpiTile", "a tile of a big number is a dashboard, not a result"),
-            ("kpi_strip", "a tile of a big number is a dashboard, not a result"),
+            (
+                "KpiTile",
+                "a tile of a big number is a dashboard, not a result",
+            ),
+            (
+                "kpi_strip",
+                "a tile of a big number is a dashboard, not a result",
+            ),
             ("to_uppercase", "a table head is sentence case"),
             ("action_receipt", "an action that worked says nothing"),
-            ("heading(ui", "a page's title is its toolbar's, and carries no subtitle"),
+            (
+                "heading(ui",
+                "a page's title is its toolbar's, and carries no subtitle",
+            ),
         ] {
             assert!(!shipped.contains(banned), "{path} names `{banned}`: {why}");
         }
