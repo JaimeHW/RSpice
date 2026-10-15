@@ -259,16 +259,10 @@ fn form_review_body(
         ui,
         "Unsaved library changes",
         "The form designer never overwrites another draft.",
+        // Nothing unsaved is this row's normal state and says nothing.
         |ui| {
             let t = Tokens::get(ui.ctx());
-            ui.colored_label(
-                if unsaved { t.color.warn } else { t.color.ok },
-                if unsaved {
-                    "present \u{00b7} save or review before publication"
-                } else {
-                    "none \u{00b7} safe to open"
-                },
-            )
+            ui.colored_label(t.color.text_dim, if unsaved { "Unsaved" } else { "" })
         },
     );
     response.id
@@ -284,9 +278,9 @@ fn form_summary_table(ui: &mut Ui, form: Option<&SymbolParameterForm>) {
                 .striped(true)
                 .min_col_width(150.0)
                 .show(ui, |ui| {
-                    table_header(ui, "SECTION");
-                    table_header(ui, "FIELDS");
-                    table_header(ui, "VALIDATION");
+                    table_header(ui, "Section");
+                    table_header(ui, "Fields");
+                    table_header(ui, "Validation");
                     ui.end_row();
                     if let Some(form) = form {
                         for section in &form.sections {
@@ -297,8 +291,8 @@ fn form_summary_table(ui: &mut Ui, form: Option<&SymbolParameterForm>) {
                             ui.label(&section.label);
                             ui.monospace(section.fields.len().to_string());
                             ui.colored_label(
-                                if valid { t.color.ok } else { t.color.warn },
-                                if valid { "complete" } else { "review" },
+                                t.color.text_dim,
+                                if valid { "" } else { "review" },
                             );
                             ui.end_row();
                         }

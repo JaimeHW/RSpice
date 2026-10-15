@@ -50,7 +50,6 @@ const DEFAULT_CELL: &str = "sensor_frontend";
 const SETTING_ROW_HORIZONTAL_PADDING: i8 = 12;
 const SETTING_ROW_VERTICAL_PADDING: i8 = 10;
 const SETTING_ROW_MIN_HEIGHT: f32 = 54.0;
-const STATUS_DOT_DIAMETER: f32 = 5.0;
 const SURFACE_WITHOUT_TABLE_ROWS: f32 = 267.0;
 const TABLE_ROW_HEIGHT: f32 = 28.0;
 
@@ -386,16 +385,11 @@ const fn direction_label(direction: PortDirection) -> &'static str {
     }
 }
 
+/// The dot that stood in front of this line was green whatever the line said.
 fn status_text(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 5.0;
-        let (dot, _) = ui.allocate_exact_size(
-            vec2(STATUS_DOT_DIAMETER, STATUS_DOT_DIAMETER),
-            Sense::hover(),
-        );
-        ui.painter()
-            .circle_filled(dot.center(), STATUS_DOT_DIAMETER * 0.5, t.color.ok);
         ui.add_sized(
             vec2(ui.available_width().max(1.0), t.metrics.ctl_h),
             Label::new(
@@ -962,7 +956,6 @@ mod tests {
         assert_eq!(SETTING_ROW_HORIZONTAL_PADDING, 12);
         assert_eq!(SETTING_ROW_VERTICAL_PADDING, 10);
         assert_eq!(SETTING_ROW_MIN_HEIGHT, 54.0);
-        assert_eq!(STATUS_DOT_DIAMETER, 5.0);
         assert_eq!(SURFACE_WITHOUT_TABLE_ROWS, 267.0);
     }
 

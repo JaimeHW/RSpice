@@ -406,16 +406,17 @@ fn target_value(ui: &mut Ui, occurrence_path: &str, target: &str) -> egui::Id {
     .inner
 }
 
+/// What happens to the parent's unsaved work. With nothing unsaved there is
+/// nothing to say, and "safe to descend" was saying it anyway.
 fn checkpoint_value(ui: &mut Ui, parent_dirty: bool) {
+    if !parent_dirty {
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     ui.label(
-        egui::RichText::new(if parent_dirty {
-            "working checkpoint preserved"
-        } else {
-            "safe to descend"
-        })
-        .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-        .color(t.color.ok),
+        egui::RichText::new("working checkpoint preserved")
+            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
+            .color(t.color.text_dim),
     );
 }
 

@@ -164,7 +164,6 @@ pub(crate) struct ProjectRevisionHistoryDialogState {
     pub(crate) expected_journal: ValidatedRevisionJournal,
     pub(crate) restore_confirmation: bool,
     pub(crate) error: Option<String>,
-    pub(crate) receipt: Option<String>,
     pub(crate) body_scroll_offset: f32,
 }
 
@@ -180,7 +179,6 @@ impl Default for ProjectRevisionHistoryDialogState {
             expected_journal: ValidatedRevisionJournal::default(),
             restore_confirmation: false,
             error: None,
-            receipt: None,
             body_scroll_offset: 0.0,
         }
     }
@@ -314,7 +312,6 @@ impl RSpiceApp {
                 let dialog = &mut self.state.dialogs.project_revision_history;
                 dialog.restore_confirmation = false;
                 dialog.comparison = None;
-                dialog.receipt = None;
                 if let Some(index) = dialog.selected.iter().position(|selected| *selected == key) {
                     if additive {
                         dialog.selected.remove(index);
@@ -394,7 +391,6 @@ impl RSpiceApp {
         let dialog = &mut self.state.dialogs.project_revision_history;
         dialog.comparison = Some(comparison);
         dialog.error = None;
-        dialog.receipt = None;
     }
 
     fn restore_selected_revision(&mut self, rows: &[ProjectAuditRow]) {
@@ -444,11 +440,8 @@ impl RSpiceApp {
                 dialog.expected_journal =
                     self.state.schematic.document().validated_revisions.clone();
                 dialog.restore_confirmation = false;
+                // The restored design is on the canvas behind the dialog.
                 dialog.error = None;
-                dialog.receipt = Some(
-                    "Restored the exact validated schematic snapshot. One Undo returns to the prior working design; retained result manifests remain immutable."
-                        .to_owned(),
-                );
             }
             Err(error) => {
                 let dialog = &mut self.state.dialogs.project_revision_history;
@@ -591,17 +584,13 @@ fn revision_history_body(
                                     ui.label(&row.actor);
                                     ui.label(&row.change);
                                     ui.label(&row.affected_evidence);
-                                    let status_color = match row.status.as_str() {
-                                        "accepted" | "passed" | "attached" | "authenticated" => {
-                                            t.color.ok
-                                        }
-                                        "working" | "unpinned" | "findings" => t.color.warn,
-                                        _ => t.color.text,
-                                    };
+                                    // The column said the same word twice: in
+                                    // text, and in a tone picked by matching
+                                    // that text against a list of words.
                                     ui.label(
                                         RichText::new(&row.status)
                                             .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                                            .color(status_color),
+                                            .color(t.color.text_dim),
                                     );
                                     ui.end_row();
                                 }
@@ -637,24 +626,7 @@ fn revision_history_body(
                 dialog.restore_confirmation = true;
             }
         }
-        if dialog.restore_confirmation {
-            ui.label(
-                RichText::new(
-                    "Restores only the exact validated schematic snapshot; result manifests are not rewritten.",
-                )
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.warn),
-            );
-        }
     });
-
-    if let Some(receipt) = dialog.receipt.as_deref() {
-        ui.label(
-            RichText::new(receipt)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.ok),
-        );
-    }
 
     ui.columns(2, |columns| {
         revision_note_card(
@@ -1024,14 +996,9 @@ fn revision_graph(ui: &mut Ui, rows: &[&ProjectAuditRow], selected: &[String]) {
                 Stroke::new(1.0, t.color.border_strong),
             );
         }
+        // A node is accent only while it is the selected one.
         let is_selected = selected.contains(&row.key);
-        let approved = matches!(
-            row.status.as_str(),
-            "accepted" | "passed" | "attached" | "authenticated"
-        );
-        let color = if approved {
-            t.color.ok
-        } else if is_selected {
+        let color = if is_selected {
             t.color.accent
         } else {
             t.color.text_dim

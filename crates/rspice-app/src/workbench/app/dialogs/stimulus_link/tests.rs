@@ -646,7 +646,8 @@ fn both_modes_fit_and_state_their_subject_at_every_gated_viewport() {
                 "Name",
                 "Purpose",
                 "Published card",
-                "Unique SPICE identifier",
+                // An accepted name says nothing: the validation line renders
+                // only the refusal that stops the save.
                 "Stored in",
                 "Save definition",
             ] {

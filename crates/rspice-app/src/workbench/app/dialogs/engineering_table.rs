@@ -1501,7 +1501,7 @@ fn saved_views_body(
             ui.label(saved.scope.label());
             ui.monospace(&saved.definition.grid_id);
             if saved.is_default {
-                ui.colored_label(Tokens::get(ui.ctx()).color.ok, "default");
+                ui.colored_label(Tokens::get(ui.ctx()).color.text_dim, "default");
             }
             ui.label(format!("revision {}", saved.revision));
             if ui.button("Use").clicked() {

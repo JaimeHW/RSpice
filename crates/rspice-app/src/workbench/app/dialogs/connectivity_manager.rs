@@ -1066,10 +1066,10 @@ impl RSpiceApp {
                 dialog.selected_repairs.clear();
                 match refreshed {
                     Ok(report) => {
+                        // The refreshed table is the report of its refresh.
                         dialog.report = report;
                         dialog.error = None;
-                        dialog.receipt =
-                            Some("Connectivity report refreshed from the active design.".into());
+                        dialog.receipt = None;
                     }
                     Err(error) => {
                         dialog.report = ConnectivityReport::default();
@@ -1266,13 +1266,15 @@ impl RSpiceApp {
         dialog.policy = policy;
         dialog.selected_repairs.clear();
         dialog.error = None;
+        // How many repairs went in, and whether the policy went with them.
+        // That the apply was one transaction is not the reader's problem.
         dialog.receipt = Some(format!(
-            "Applied {count} reviewed repair{}{}.",
+            "Applied {count} repair{}{}",
             if count == 1 { "" } else { "s" },
             if policy_changed {
-                " and saved the project connectivity policy"
+                " \u{00b7} policy saved"
             } else {
-                " atomically; one Undo restores the prior schematic"
+                ""
             }
         ));
         Ok(())
@@ -1572,7 +1574,7 @@ fn connectivity_manager_body(
     if let Some(receipt) = dialog.receipt.as_deref() {
         ui.label(
             RichText::new(receipt)
-                .color(Tokens::get(ui.ctx()).color.ok)
+                .color(Tokens::get(ui.ctx()).color.text_dim)
                 .monospace(),
         );
     }

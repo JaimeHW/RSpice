@@ -11,7 +11,7 @@
 //! parameter string, which is how a readout and the curve above it come to
 //! disagree about a source the engine has already substituted a field into.
 
-use egui::{Rect, Sense, Stroke, Ui, vec2};
+use egui::{Sense, Ui, vec2};
 
 use crate::properties::source_preview;
 use crate::simulation::placed_sources;
@@ -232,61 +232,25 @@ fn select_whole_name(ui: &Ui, id: egui::Id, name: &str) {
 
 /// One line under the name field: what the netlist reader makes of it.
 ///
-/// The refusal is the model's sentence unrewritten. The accepting case is a
-/// mark and four words, because a field that says nothing while it is valid
-/// leaves a reader unsure whether it was checked at all.
+/// The refusal is the model's sentence unrewritten. An accepted name says
+/// nothing: the field takes it, and that is the report.
 fn validation_line(ui: &mut Ui, refusal: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 18.0), Sense::hover());
-    let (ink, message) = match refusal {
-        Some(refusal) => (t.color.err, refusal),
-        None => (t.color.ok, "Unique SPICE identifier"),
+    let Some(message) = refusal else {
+        return;
     };
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, message));
-    let mut text_left = rect.left();
-    if refusal.is_none() {
-        check_mark(
-            ui,
-            Rect::from_center_size(
-                egui::pos2(rect.left() + 5.0, rect.center().y),
-                vec2(10.0, 10.0),
-            ),
-            ink,
-        );
-        text_left += 16.0;
-    }
-    let track = Rect::from_min_max(egui::pos2(text_left, rect.top()), rect.max);
     if shell::painted_run(
         ui,
-        track,
+        rect,
         false,
         message,
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        ink,
+        t.color.err,
     ) {
         response.on_hover_text(message);
     }
-}
-
-/// The accepting mark, painted rather than typeset: the bundled Plex faces
-/// carry no check, so a character here would rasterize as a tofu box.
-fn check_mark(ui: &Ui, rect: Rect, ink: egui::Color32) {
-    let stroke = Stroke::new(1.4, ink);
-    let center = rect.center();
-    ui.painter().line_segment(
-        [
-            egui::pos2(center.x - 4.0, center.y),
-            egui::pos2(center.x - 1.0, center.y + 3.2),
-        ],
-        stroke,
-    );
-    ui.painter().line_segment(
-        [
-            egui::pos2(center.x - 1.0, center.y + 3.2),
-            egui::pos2(center.x + 4.2, center.y - 3.4),
-        ],
-        stroke,
-    );
 }
 
 /// The right pane: the published shape, the card, and what the samples say

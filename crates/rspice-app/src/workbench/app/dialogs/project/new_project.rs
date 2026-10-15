@@ -176,36 +176,19 @@ fn render_identity(ui: &mut egui::Ui, dialog: &mut NewProjectDialogState) {
 }
 
 fn render_contract(ui: &mut egui::Ui, dialog: &NewProjectDialogState) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
     let params = dialog.params();
-    let identity_valid = params.validate().is_ok();
 
-    property_card(
-        ui,
-        "Safety contract",
-        None,
-        &[
-            ("Existing files", "untouched until Save"),
-            ("Unsaved work", "reviewed first"),
-            ("Active run", "blocks creation"),
-            ("PDK model catalog", "restored from settings"),
-        ],
-    );
-    ui.add_space(tokens::SP_4);
-
+    // The "Safety contract" card above this said the same four things for
+    // every project anyone ever created, so it was not about this one.
     let top_view = format!(
         "{}/{}/{DEFAULT_SCHEMATIC_VIEW}",
         params.root_library, params.top_cell
     );
+    // The enabled Create button says the inputs are complete, and the field
+    // errors say which one is not.
     property_card(
         ui,
-        "Validation preview",
-        Some(if identity_valid {
-            ("ready", c.ok)
-        } else {
-            ("incomplete", c.err)
-        }),
+        "Creates",
         &[
             ("Design library", params.root_library.as_str()),
             ("Top cell view", top_view.as_str()),
@@ -217,12 +200,7 @@ fn render_contract(ui: &mut egui::Ui, dialog: &NewProjectDialogState) {
 
 /// The mockup's property card: a titled panel with an optional right-aligned
 /// status and a key/value list.
-fn property_card(
-    ui: &mut egui::Ui,
-    title: &str,
-    status: Option<(&str, egui::Color32)>,
-    rows: &[(&str, &str)],
-) {
+fn property_card(ui: &mut egui::Ui, title: &str, rows: &[(&str, &str)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     egui::Frame::new()
@@ -230,22 +208,11 @@ fn property_card(
         .stroke(egui::Stroke::new(1.0, c.border))
         .inner_margin(egui::Margin::same(10))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(title)
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(c.text),
-                );
-                if let Some((label, color)) = status {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            egui::RichText::new(label)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(color),
-                        );
-                    });
-                }
-            });
+            ui.label(
+                egui::RichText::new(title)
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                    .color(c.text),
+            );
             ui.add_space(tokens::SP_2);
             for &(key, value) in rows {
                 kv_row(ui, key, value);

@@ -219,7 +219,6 @@ pub(crate) struct SelectionBulkEditDialogState {
     pub(crate) unset_behavior: SelectionBulkUnsetBehavior,
     authority: Option<SelectionBulkEditAuthority>,
     pub(crate) error: Option<String>,
-    pub(crate) receipt: Option<String>,
     pub(crate) body_scroll_offset: f32,
     save_filter_open: bool,
     save_filter_name: String,
@@ -237,7 +236,6 @@ impl Default for SelectionBulkEditDialogState {
             unset_behavior: SelectionBulkUnsetBehavior::SetExplicitValue,
             authority: None,
             error: None,
-            receipt: None,
             body_scroll_offset: 0.0,
             save_filter_open: false,
             save_filter_name: String::new(),
@@ -280,7 +278,6 @@ pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
         unset_behavior: SelectionBulkUnsetBehavior::SetExplicitValue,
         authority: Some(authority),
         error: None,
-        receipt: None,
         body_scroll_offset: 0.0,
         save_filter_open: false,
         save_filter_name: String::new(),
@@ -410,7 +407,6 @@ impl RSpiceApp {
                         .map(|row| row.key)
                         .collect();
                 self.state.dialogs.selection_bulk_edit.error = None;
-                self.state.dialogs.selection_bulk_edit.receipt = None;
                 self.state.dialogs.selection_bulk_edit.authority =
                     Some(SelectionBulkEditAuthority::capture(&self.state));
             }
@@ -433,8 +429,6 @@ impl RSpiceApp {
                             .save_filter_name
                             .clear();
                         self.state.dialogs.selection_bulk_edit.save_filter_open = false;
-                        self.state.dialogs.selection_bulk_edit.receipt =
-                            Some("Selection filter saved to this UI session.".to_owned());
                         self.state.dialogs.selection_bulk_edit.error = None;
                     }
                     Err(error) => self.state.dialogs.selection_bulk_edit.error = Some(error),
@@ -462,8 +456,6 @@ impl RSpiceApp {
                     self.state.dialogs.selection_bulk_edit.authority =
                         Some(SelectionBulkEditAuthority::capture(&self.state));
                     self.state.dialogs.selection_bulk_edit.error = None;
-                    self.state.dialogs.selection_bulk_edit.receipt =
-                        Some(format!("Loaded saved selection filter '{name}'."));
                 }
             }
             SelectionBulkBodyAction::DeleteFilter => {
@@ -477,8 +469,6 @@ impl RSpiceApp {
                     && self.state.ui.schematic_bulk_edit_filters.remove(&name)
                 {
                     self.state.dialogs.selection_bulk_edit.selected_saved_filter = None;
-                    self.state.dialogs.selection_bulk_edit.receipt =
-                        Some(format!("Deleted saved selection filter '{name}'."));
                     self.state.dialogs.selection_bulk_edit.error = None;
                 }
             }
@@ -682,14 +672,6 @@ fn selection_bulk_body(
         split_rect.bottom(),
         egui::Stroke::new(1.0, tokens.color.border),
     );
-    if let Some(receipt) = dialog.receipt.as_deref() {
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(receipt)
-                .font(theme::sans(11.0, FontWeight::Medium))
-                .color(tokens.color.ok),
-        );
-    }
     action
 }
 
@@ -1045,7 +1027,7 @@ fn selection_filter_header(ui: &mut Ui, matched: usize) {
     ui.painter().text(
         rect.left_center() + egui::vec2(10.0, 0.0),
         egui::Align2::LEFT_CENTER,
-        "SELECTION FILTER",
+        "Selection filter",
         theme::sans(crate::ui::tokens::FS_0, FontWeight::SemiBold),
         tokens.color.text_dim,
     );
@@ -1054,7 +1036,7 @@ fn selection_filter_header(ui: &mut Ui, matched: usize) {
         egui::Align2::RIGHT_CENTER,
         format!("{matched} matched"),
         theme::mono(crate::ui::tokens::FS_0, FontWeight::Regular),
-        tokens.color.ok,
+        tokens.color.text_dim,
     );
 }
 

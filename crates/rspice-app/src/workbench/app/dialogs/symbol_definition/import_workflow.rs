@@ -297,25 +297,23 @@ fn check_table(ui: &mut Ui, preview: Option<&SymbolDefinitionImport>) {
         .stroke(Stroke::new(1.0, t.color.border))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
+            // A Status column stood beside Observed and was derived from it:
+            // "12 primitives" was "valid", "0 explicit" was "review-only",
+            // "unbound" was "review". What was observed is the status.
             Grid::new("symbol-import-checks")
-                .num_columns(3)
+                .num_columns(2)
                 .striped(true)
                 .min_col_width(130.0)
                 .show(ui, |ui| {
-                    table_header(ui, "CHECK");
-                    table_header(ui, "OBSERVED");
-                    table_header(ui, "STATUS");
+                    table_header(ui, "Check");
+                    table_header(ui, "Observed");
                     ui.end_row();
                     let rows = preview.map_or_else(
                         || {
                             vec![
-                                (
-                                    "Vector geometry",
-                                    "not inspected".to_owned(),
-                                    "choose source",
-                                ),
-                                ("Pin anchors", "not inspected".to_owned(), "choose contract"),
-                                ("Pin order", "not inspected".to_owned(), "review"),
+                                ("Vector geometry", "not inspected".to_owned()),
+                                ("Pin anchors", "not inspected".to_owned()),
+                                ("Pin order", "not inspected".to_owned()),
                             ]
                         },
                         |import| {
@@ -323,16 +321,10 @@ fn check_table(ui: &mut Ui, preview: Option<&SymbolDefinitionImport>) {
                                 (
                                     "Vector geometry",
                                     format!("{} primitives", import.report.primitive_count),
-                                    "valid",
                                 ),
                                 (
                                     "Pin anchors",
                                     format!("{} explicit", import.report.explicit_pin_anchor_count),
-                                    if import.report.explicit_pin_anchor_count == 0 {
-                                        "review-only"
-                                    } else {
-                                        "valid"
-                                    },
                                 ),
                                 (
                                     "Pin order",
@@ -341,26 +333,13 @@ fn check_table(ui: &mut Ui, preview: Option<&SymbolDefinitionImport>) {
                                     } else {
                                         "unbound".to_owned()
                                     },
-                                    if import.report.pin_order_valid {
-                                        "valid"
-                                    } else {
-                                        "review"
-                                    },
                                 ),
                             ]
                         },
                     );
-                    for (check, observed, status) in rows {
+                    for (check, observed) in rows {
                         ui.label(check);
                         ui.monospace(observed);
-                        ui.colored_label(
-                            if status == "valid" {
-                                t.color.ok
-                            } else {
-                                t.color.warn
-                            },
-                            status,
-                        );
                         ui.end_row();
                     }
                 });

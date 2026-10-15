@@ -75,7 +75,6 @@ pub(crate) struct DesignReviewCommentsDialogState {
     pub(crate) evidence_picker_open: bool,
     pub(crate) selected_evidence: Option<usize>,
     pub(crate) error: Option<String>,
-    pub(crate) receipt: Option<String>,
     pub(crate) body_scroll_offset: f32,
 }
 
@@ -94,7 +93,6 @@ impl Default for DesignReviewCommentsDialogState {
             evidence_picker_open: false,
             selected_evidence: None,
             error: None,
-            receipt: None,
             body_scroll_offset: 0.0,
         }
     }
@@ -112,7 +110,6 @@ impl DesignReviewCommentsDialogState {
         self.evidence_picker_open = false;
         self.selected_evidence = None;
         self.error = None;
-        self.receipt = None;
     }
 }
 
@@ -374,11 +371,8 @@ impl RSpiceApp {
                 dialog.assignment.clear();
                 dialog.evidence_picker_open = false;
                 dialog.selected_evidence = None;
+                // The thread above now holds the update that was published.
                 dialog.error = None;
-                dialog.receipt = Some(
-                    "Review update published to the active schematic. Undo restores the prior review record."
-                        .to_owned(),
-                );
             }
             Err(error) => self.state.dialogs.design_review_comments.error = Some(error),
         }
@@ -707,11 +701,7 @@ fn review_thread_row(ui: &mut Ui, note: &DesignNote, selected: bool) -> egui::Re
         egui::Align2::RIGHT_CENTER,
         status,
         theme::mono(tokens::FS_0, FontWeight::SemiBold),
-        if review.state == DesignReviewState::Resolved {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
+        t.color.text_dim,
     );
     // Every column is painted, so the announced label is assembled here.
     let row_label = format!("{author}: {}", ellipsize(&note.text, 46));
@@ -787,19 +777,12 @@ fn review_thread_detail(
                     Some(&review.evidence.len().to_string()),
                 );
                 for item in &review.evidence {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("\u{25cf}")
-                                .color(t.color.accent)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular)),
-                        );
-                        ui.label(
-                            RichText::new(&item.label)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text),
-                        )
-                        .on_hover_text(&item.source_identity);
-                    });
+                    ui.label(
+                        RichText::new(&item.label)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text),
+                    )
+                    .on_hover_text(&item.source_identity);
                 }
             }
         });
@@ -945,13 +928,6 @@ fn review_thread_detail(
         }
     });
 
-    if let Some(receipt) = dialog.receipt.as_deref() {
-        ui.label(
-            RichText::new(receipt)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.ok),
-        );
-    }
     action
 }
 
