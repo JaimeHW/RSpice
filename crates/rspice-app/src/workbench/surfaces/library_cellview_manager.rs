@@ -8,8 +8,8 @@
 //! here.
 
 use egui::{
-    Align, Color32, Frame, Grid, Key, Layout, Margin, Modifiers, Rect, RichText, ScrollArea, Sense,
-    Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2,
+    Align, Frame, Grid, Key, Layout, Margin, Modifiers, Rect, RichText, ScrollArea, Sense, Stroke,
+    Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2,
 };
 
 use crate::state::{
@@ -26,6 +26,7 @@ use crate::workbench::app::{
     open_symbol_parameter_form_dialog_for,
 };
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::design_system::{Problem, paint_problem_mark, problem_line};
 use crate::workbench::state::{LibraryCellviewPage, Workspace};
 
 use super::project;
@@ -33,6 +34,8 @@ use super::project;
 const COMPACT_BREAKPOINT: f32 = 820.0;
 const SPLIT_BREAKPOINT: f32 = 960.0;
 const HEADER_MIN_HEIGHT: f32 = 68.0;
+/// Side of a header chip's problem mark, sized to the chip's own text.
+const HEADER_CHIP_MARK_SIDE: f32 = 11.0;
 const TAB_HEIGHT: f32 = 34.0;
 const PIN_TABLE_MIN_WIDTH: f32 = 690.0;
 const FORM_TABLE_MIN_WIDTH: f32 = 900.0;
@@ -154,14 +157,14 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
         ui,
         "Project",
         &format!("r{}", app.state.workspace.content.project.revision().get()),
-        tokens.color.text,
+        None,
         tokens,
     );
     header_chip(
         ui,
         "Catalog",
         &format!("r{}", app.state.library_manager.revision()),
-        tokens.color.text,
+        None,
         tokens,
     );
     header_chip(
@@ -171,20 +174,24 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
             "{} libraries · {} cells · {} views",
             snapshot.libraries, snapshot.cells, snapshot.views
         ),
-        tokens.color.text_dim,
+        None,
         tokens,
     );
+    // An open, writable project is the ordinary case and the chip has nothing
+    // to add to it. The other two say what the reader cannot do here.
     let access = if !app.state.project_lifecycle.is_open() {
-        ("closed", tokens.color.err)
+        Some(("closed", None))
     } else if app.state.workbench.safe_mode.project_read_only() {
-        ("safe-mode read only", tokens.color.warn)
+        Some(("safe-mode read only", Some(Problem::Warning)))
     } else {
-        ("project governed", tokens.color.ok)
+        None
     };
-    header_chip(ui, "Access", access.0, access.1, tokens);
+    if let Some((value, problem)) = access {
+        header_chip(ui, "Access", value, problem, tokens);
+    }
 }
 
-fn header_chip(ui: &mut Ui, label: &str, value: &str, color: Color32, tokens: &Tokens) {
+fn header_chip(ui: &mut Ui, label: &str, value: &str, problem: Option<Problem>, tokens: &Tokens) {
     Frame::new()
         .fill(tokens.color.bg_inset)
         .stroke(Stroke::new(1.0, tokens.color.border))
@@ -197,10 +204,17 @@ fn header_chip(ui: &mut Ui, label: &str, value: &str, color: Color32, tokens: &T
                         .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                         .color(tokens.color.text_faint),
                 );
+                if let Some(problem) = problem {
+                    let (mark, _) = ui.allocate_exact_size(
+                        Vec2::splat(HEADER_CHIP_MARK_SIDE),
+                        egui::Sense::hover(),
+                    );
+                    paint_problem_mark(ui.painter(), mark, problem);
+                }
                 ui.label(
                     RichText::new(value)
                         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(color),
+                        .color(tokens.color.text_dim),
                 );
             });
         });
@@ -395,15 +409,14 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
     let selection = projection
         .map(|projection| projection.reference.display_path())
         .unwrap_or_else(|| "No symbol view available".to_owned());
-    let state = projection.map_or(("empty", tokens.color.warn), |projection| match &projection
-        .definition
-    {
-        Ok(Some(definition)) if definition.validate().is_ok() => {
-            ("typed contract valid", tokens.color.ok)
-        }
-        Ok(Some(_)) => ("typed contract invalid", tokens.color.err),
-        Ok(None) => ("legacy symbol · no typed contract", tokens.color.warn),
-        Err(_) => ("typed metadata unreadable", tokens.color.err),
+    // With no view selected the Selection value already says so, and a valid
+    // contract is the case that needs no words. The rest are what is wrong
+    // with the contract this view does carry.
+    let contract = projection.and_then(|projection| match &projection.definition {
+        Ok(Some(definition)) if definition.validate().is_ok() => None,
+        Ok(Some(_)) => Some(("typed contract invalid", Problem::Failure)),
+        Ok(None) => Some(("No typed contract", Problem::Warning)),
+        Err(_) => Some(("typed metadata unreadable", Problem::Failure)),
     });
     Frame::new()
         .fill(tokens.color.bg_inset)
@@ -414,15 +427,17 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        context_value(ui, "Selection", &selection, tokens.color.text, &tokens);
-                        ui.separator();
-                        context_value(ui, "Contract", state.0, state.1, &tokens);
+                        context_value(ui, "Selection", &selection, None, &tokens);
+                        if let Some((value, problem)) = contract {
+                            ui.separator();
+                            context_value(ui, "Contract", value, Some(problem), &tokens);
+                        }
                         ui.separator();
                         context_value(
                             ui,
                             "Project",
                             &format!("r{}", app.state.workspace.content.project.revision().get()),
-                            tokens.color.text_dim,
+                            None,
                             &tokens,
                         );
                         ui.separator();
@@ -430,7 +445,7 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
                             ui,
                             "Catalog",
                             &format!("r{}", app.state.library_manager.revision()),
-                            tokens.color.text_dim,
+                            None,
                             &tokens,
                         );
                     });
@@ -438,16 +453,21 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
         });
 }
 
-fn context_value(ui: &mut Ui, label: &str, value: &str, color: Color32, tokens: &Tokens) {
+fn context_value(ui: &mut Ui, label: &str, value: &str, problem: Option<Problem>, tokens: &Tokens) {
     ui.label(
         RichText::new(label)
             .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
             .color(tokens.color.text_faint),
     );
+    if let Some(problem) = problem {
+        let (mark, _) =
+            ui.allocate_exact_size(Vec2::splat(HEADER_CHIP_MARK_SIDE), egui::Sense::hover());
+        paint_problem_mark(ui.painter(), mark, problem);
+    }
     ui.label(
         RichText::new(value)
             .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(color),
+            .color(tokens.color.text_dim),
     );
 }
 
@@ -762,13 +782,7 @@ fn contract_identity_card(
                     );
                 });
             if let Err(error) = validation {
-                validation_message(ui, &error.to_string(), true);
-            } else {
-                validation_message(
-                    ui,
-                    "Typed source, terminal order, component form, and netlist contract agree.",
-                    false,
-                );
+                validation_message(ui, &error.to_string());
             }
         },
     );
@@ -811,37 +825,16 @@ fn property(ui: &mut Ui, label: &str, value: &str) {
     ui.end_row();
 }
 
-fn validation_message(ui: &mut Ui, message: &str, error: bool) {
-    let tokens = Tokens::get(ui.ctx());
+/// One refusal under a card: its mark, then the words in the ordinary tone.
+///
+/// There is no success variant. A card whose contract agrees with its sources
+/// used to carry a green frame saying so; the Validation row above already
+/// reads "Valid", and nothing here is in doubt.
+fn validation_message(ui: &mut Ui, message: &str) {
     Frame::new()
-        .fill(if error {
-            tokens.color.err.gamma_multiply(0.12)
-        } else {
-            tokens.color.ok.gamma_multiply(0.10)
-        })
-        .stroke(Stroke::new(
-            1.0,
-            if error {
-                tokens.color.err
-            } else {
-                tokens.color.ok
-            },
-        ))
-        .corner_radius(tokens.radius)
         .inner_margin(Margin::symmetric(8, 6))
         .show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    RichText::new(message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(if error {
-                            tokens.color.err
-                        } else {
-                            tokens.color.text
-                        }),
-                )
-                .wrap(),
-            );
+            problem_line(ui, Problem::Failure, message);
         });
 }
 
@@ -955,21 +948,14 @@ fn parameter_form_table(ui: &mut Ui, definition: &ModelBoundSymbolDefinition) {
                         });
                 });
             let diagnostics = definition.parameter_form.validate_diagnostics();
-            if diagnostics.is_empty() {
-                validation_message(
-                    ui,
-                    "Form keys, typed defaults, constraints, inheritance, and emitted parameter order are valid.",
-                    false,
-                );
-            } else {
+            if !diagnostics.is_empty() {
                 validation_message(
                     ui,
                     &format!(
-                        "{} form diagnostic{} must be resolved before publication.",
+                        "{} form error{}",
                         diagnostics.len(),
                         plural_suffix(diagnostics.len())
                     ),
-                    true,
                 );
             }
         },
@@ -1055,10 +1041,13 @@ fn legacy_symbol_surface(ui: &mut Ui, projection: &SymbolProjection) {
         "Typed contract required",
         "The selected legacy symbol may be opened for graphical editing, but it has no versioned source, terminal-order, component-form, or netlist contract.",
         |ui| {
-            validation_message(
-                ui,
-                "Create or import a model-bound symbol before form editing or governed publication. RSpice will not infer electrical semantics from drawing geometry.",
-                true,
+            // Not a refusal of anything the reader did: it is the route out
+            // of the state the card above already described.
+            let tokens = Tokens::get(ui.ctx());
+            ui.label(
+                RichText::new("Create or import a model-bound symbol to edit its form.")
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(tokens.color.text_dim),
             );
         },
     );
@@ -1073,13 +1062,7 @@ fn invalid_symbol_surface(ui: &mut Ui, projection: &SymbolProjection, error: &st
             projection.reference.display_path()
         ),
         |ui| {
-            validation_message(
-                ui,
-                &format!(
-                    "{error} The definition is not used as an executable placement or component-form contract."
-                ),
-                true,
-            );
+            validation_message(ui, error);
         },
     );
 }
