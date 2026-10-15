@@ -48,7 +48,7 @@ use crate::ui::tokens::{self, Tokens};
 // chip, a select and a modal across all six of them.
 use crate::ui::widgets::{
     self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, SegmentedWidth,
-    paint_problem_mark,
+    paint_problem_mark, problem_line,
 };
 use crate::workbench::app::open_create_subcircuit_bound_symbol_dialog;
 use crate::workbench::app_state::design_history::{
@@ -832,14 +832,12 @@ impl CatalogStatus {
         }
     }
 
-    /// A pin is a settled state and reads as one; only the finding is toned
-    /// like a finding. A table that painted both in the warning colour would
-    /// be a table where the colour means nothing.
-    fn tone(self, t: &Tokens) -> Color32 {
+    /// A pin is a settled state and reads as one; only the finding takes a
+    /// mark, and the mark is the one thing in the cell that is coloured.
+    const fn problem(self) -> Option<Problem> {
         match self {
-            Self::Review => t.color.warn,
-            Self::Pinned => t.color.text_dim,
-            Self::Unstated => t.color.text_faint,
+            Self::Review => Some(Problem::Warning),
+            Self::Pinned | Self::Unstated => None,
         }
     }
 }
@@ -884,12 +882,12 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
             ui,
             "models-project-catalog-sort",
             &[
-                sort_column("MODEL", 0.20, ModelsCatalogSortKey::Model),
-                sort_column("FAMILY", 0.17, ModelsCatalogSortKey::Family),
-                sort_column("SOURCE", 0.22, ModelsCatalogSortKey::Source),
-                sort_column("USED BY", 0.16, ModelsCatalogSortKey::UsedBy),
-                sort_column("VECTORS", 0.10, ModelsCatalogSortKey::Vectors),
-                sort_column("STATUS", 0.15, ModelsCatalogSortKey::Status),
+                sort_column("Model", 0.20, ModelsCatalogSortKey::Model),
+                sort_column("Family", 0.17, ModelsCatalogSortKey::Family),
+                sort_column("Source", 0.22, ModelsCatalogSortKey::Source),
+                sort_column("Used by", 0.16, ModelsCatalogSortKey::UsedBy),
+                sort_column("Vectors", 0.10, ModelsCatalogSortKey::Vectors),
+                sort_column("Status", 0.15, ModelsCatalogSortKey::Status),
             ],
             sort.key,
             sort.descending,
@@ -1039,19 +1037,31 @@ fn paint_status_cell(ui: &Ui, rect: egui::Rect, status: CatalogStatus) {
     }
     let t = Tokens::get(ui.ctx());
     let left = rect.left() + rect.width() * STATUS_COLUMN_START + 5.0;
+    let mut advance = 0.0;
+    if let Some(problem) = status.problem() {
+        paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(left + MARK_SIDE * 0.5, rect.center().y),
+                Vec2::splat(MARK_SIDE),
+            ),
+            problem,
+        );
+        advance = MARK_ADVANCE;
+    }
     let font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let label = crate::workbench::design_system::elide_text(
         ui,
         status.label(),
         &font,
-        (rect.right() - left - 5.0).max(1.0),
+        (rect.right() - left - advance - 5.0).max(1.0),
     );
     ui.painter().text(
-        egui::pos2(left, rect.center().y),
+        egui::pos2(left + advance, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         font,
-        status.tone(&t),
+        t.color.text_dim,
     );
 }
 
@@ -1092,34 +1102,26 @@ fn catalog_footer_capped(
             format!("{shown} shown · {total} {noun}")
         },
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        if capped {
-            t.color.warn
-        } else {
-            t.color.text_faint
-        },
+        // A cap is not a warning: the sentence says what to do about it.
+        t.color.text_faint,
     );
-    let state = if review == 0 {
-        "No open review"
-    } else if review == 1 {
-        "1 item needs review"
+    // Nothing when nothing is open: the STATUS column marks each row that
+    // needs looking at, so a footer reporting that none of them do is the
+    // table saying "no" once more.
+    if review == 0 {
+        return;
+    }
+    let state = if review == 1 {
+        "1 item needs review".to_owned()
     } else {
-        ""
-    };
-    let state = if state.is_empty() {
         format!("{review} items need review")
-    } else {
-        state.to_owned()
     };
     ui.painter().text(
         egui::pos2(rect.right() - 12.0, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         state,
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        if review == 0 {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
+        t.color.text_faint,
     );
 }
 
@@ -1167,20 +1169,17 @@ fn compare_models(
             format!("{differences} of {} parameters differ.", rows.len())
         })
         .small()
-        .color(if differences == 0 {
-            Tokens::get(ui.ctx()).color.ok
-        } else {
-            Tokens::get(ui.ctx()).color.warn
-        }),
+        // A count of differences is a count, not a verdict.
+        .color(Tokens::get(ui.ctx()).color.text_dim),
     );
     table_header(
         ui,
         &[
-            ("PARAMETER", 0.26),
-            ("LEFT", 0.25),
-            ("RIGHT", 0.25),
-            ("KIND", 0.10),
-            ("STATE", 0.14),
+            ("Parameter", 0.26),
+            ("Left", 0.25),
+            ("Right", 0.25),
+            ("Kind", 0.10),
+            ("State", 0.14),
         ],
     );
     ScrollArea::vertical().max_height(360.0).show(ui, |ui| {

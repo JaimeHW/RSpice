@@ -288,11 +288,8 @@ pub(super) fn page_empty_state(ui: &mut Ui, title: &str, detail: &str) {
         Stroke::new(1.0, t.color.border),
         egui::StrokeKind::Inside,
     );
-    let accent = egui::Rect::from_center_size(
-        egui::pos2(panel.center().x, panel.center().y - 34.0),
-        egui::vec2(34.0, 3.0),
-    );
-    ui.painter().rect_filled(accent, 2.0, t.color.accent);
+    // No accent bar over the title: it was an ornament on a page that has
+    // nothing on it, and accent in this product means the active item.
     ui.painter().text(
         egui::pos2(panel.center().x, panel.center().y - 12.0),
         egui::Align2::CENTER_CENTER,
@@ -656,8 +653,8 @@ mod tests {
                         ui,
                         "paint-test-header",
                         &[
-                            sort_column("MODEL", 0.5, ModelsCatalogSortKey::Model),
-                            sort_column("STATUS", 0.5, ModelsCatalogSortKey::Status),
+                            sort_column("Model", 0.5, ModelsCatalogSortKey::Model),
+                            sort_column("Status", 0.5, ModelsCatalogSortKey::Status),
                         ],
                         active,
                         descending,
@@ -676,7 +673,7 @@ mod tests {
             .accesskit_update
             .expect("the header publishes an access tree")
             .nodes;
-        for name in ["sort by MODEL", "sort by STATUS"] {
+        for name in ["sort by Model", "sort by Status"] {
             assert!(
                 nodes.iter().any(|(_, node)| {
                     node.role() == egui::accesskit::Role::Button && node.label() == Some(name)
@@ -736,6 +733,6 @@ mod tests {
                 painted.push(text.galley.text().to_owned());
             }
         }
-        assert_eq!(painted, ["MODEL", "STATUS"]);
+        assert_eq!(painted, ["Model", "Status"]);
     }
 }

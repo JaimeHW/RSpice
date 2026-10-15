@@ -318,20 +318,17 @@ fn the_status_column_orders_by_exactly_what_the_cell_says() {
     );
 }
 
-/// The status word and the tone it is painted in are one value.
+/// The status word and the mark in front of it are one value.
 ///
-/// A cell that says "review" in the tone of a settled state is worse than one
-/// that says nothing, and the two used to be chosen in different places.
+/// A cell that says "review" without the mark is worse than one that says
+/// nothing, and the two used to be chosen in different places. A retained pin
+/// is a settled state and takes no mark: marking it is how a warning comes to
+/// mean nothing.
 #[test]
-fn every_status_the_column_states_carries_its_own_tone() {
-    let t = Tokens::default();
-    assert_eq!(CatalogStatus::Review.tone(&t), t.color.warn);
-    assert_ne!(
-        CatalogStatus::Pinned.tone(&t),
-        t.color.warn,
-        "a retained pin is a settled state; toning it like a finding is how a \
-         warning colour comes to mean nothing"
-    );
+fn only_a_finding_in_the_status_column_carries_a_mark() {
+    assert_eq!(CatalogStatus::Review.problem(), Some(Problem::Warning));
+    assert_eq!(CatalogStatus::Pinned.problem(), None);
+    assert_eq!(CatalogStatus::Unstated.problem(), None);
 }
 
 /// The USED BY cell names one instance and counts the rest.
@@ -456,34 +453,38 @@ fn catalog_row(review: bool, pinned: bool) -> ProjectModelRow {
     }
 }
 
-/// The status column paints its word in the tone of the state, and the USED BY
-/// column names one consumer and counts the others.
+/// Status words are neutral, and the Used by column names one consumer and
+/// counts the others.
 ///
 /// Both cells are painted, so nothing that reads state covers either: the
 /// column showed the same lone designator for a model bound once and a model
-/// bound eleven times, and a row carrying a finding was the same grey as one
-/// carrying none.
+/// bound eleven times. Severity is the mark in front of the word, which is
+/// pinned by `only_a_finding_in_the_status_column_carries_a_mark`; the words
+/// themselves are never toned.
 #[test]
-fn the_catalog_row_paints_its_status_in_tone_and_counts_its_consumers() {
-    let warn = Tokens::default().color.warn;
+fn the_catalog_row_states_its_status_neutrally_and_counts_its_consumers() {
+    let t = Tokens::default();
 
     let review = catalog_row_paint(&catalog_row(true, false));
     assert!(
-        review.contains(&("review".to_owned(), warn)),
-        "a row with a finding paints its status in the warning tone; it painted {review:?}"
+        review.contains(&("review".to_owned(), t.color.text_dim)),
+        "a status word is painted in the neutral ramp; it painted {review:?}"
     );
     assert!(
         review.iter().any(|(text, _)| text == "M1 · +3"),
         "the consumer cell names one instance and counts the rest; it painted {review:?}"
     );
+    assert!(
+        !review.iter().any(|(_, color)| *color == t.color.warn),
+        "a catalog row tones one of its words; it painted {review:?}"
+    );
 
-    // A pin is a settled state, and reads as one.
     let pinned = catalog_row_paint(&catalog_row(false, true));
     let cell = pinned
         .iter()
         .find(|(text, _)| text == "pinned")
         .expect("a pinned row states that its bytes are retained");
-    assert_ne!(cell.1, warn);
+    assert_eq!(cell.1, t.color.text_dim);
 }
 
 /// The Models page, rendered until its layout settles, holding both what it

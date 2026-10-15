@@ -1104,12 +1104,12 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
 /// given equal, generous width, because a truncated exception is a worse
 /// answer than none.
 const LEDGER_COLUMNS: [(&str, f32); 6] = [
-    ("PACK", 0.16),
-    ("CONTENTS", 0.30),
-    ("PARTS", 0.07),
-    ("INSTALLED", 0.11),
-    ("PROJECT", 0.18),
-    ("ATTENTION", 0.18),
+    ("Pack", 0.16),
+    ("Contents", 0.30),
+    ("Parts", 0.07),
+    ("Installed", 0.11),
+    ("Project", 0.18),
+    ("Attention", 0.18),
 ];
 
 /// Paints a toned cell the shared row painter cannot tone.
@@ -1546,7 +1546,7 @@ fn releases_pane(
     let published = format!("{} published", row.releases.len());
     inspector_pane(
         ui,
-        "RELEASES",
+        "Releases",
         Some(&published),
         height,
         "models-hub-releases-pane",
@@ -1617,7 +1617,7 @@ fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>, he
         .unwrap_or_default();
     inspector_pane(
         ui,
-        "CATALOG",
+        "Catalog",
         Some(&licence),
         height,
         "models-hub-catalog-pane",
@@ -1735,7 +1735,7 @@ pub(super) fn release_confirmation(ui: &mut Ui, pack_id: &str, release: &PackRel
             .strong(),
     );
     card(ui, |ui| {
-        card_title(ui, "WHAT WILL BE INSTALLED", Some(pack_id));
+        card_title(ui, "What will be installed", Some(pack_id));
         property(ui, "License", &release.spdx, "signed manifest");
         property(
             ui,

@@ -192,7 +192,9 @@ fn card_title_row(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
         Stroke::new(1.0, tokens.color.border),
     );
     let meta_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let meta = elide_text(ui, &meta.to_uppercase(), &meta_font, (width * 0.5).max(1.0));
+    // Written as authored, both of them: a card's title and its metadata are
+    // sentence case, like every other header in the workbench.
+    let meta = elide_text(ui, meta, &meta_font, (width * 0.5).max(1.0));
     let meta_width = ui
         .painter()
         .layout_no_wrap(meta.clone(), meta_font.clone(), Color32::WHITE)
@@ -208,7 +210,7 @@ fn card_title_row(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
     paint_elided(
         ui,
         pos2(rect.left() + 10.0, rect.center().y - tokens::FS_0 * 0.5),
-        &title.to_uppercase(),
+        title,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         tokens.color.text_dim,
         (width - meta_width - 28.0).max(1.0),

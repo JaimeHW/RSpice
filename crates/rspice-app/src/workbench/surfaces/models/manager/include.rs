@@ -179,7 +179,7 @@ fn include_closure_graph(
     let direct_only = app.state.workbench.models_view.include_direct_only;
     detail_pane(
         ui,
-        "RESOLVED CLOSURE",
+        "Resolved closure",
         Some(if direct_only {
             "root plus direct dependencies"
         } else {
@@ -336,7 +336,7 @@ fn include_closure_graph(
                             GRAPH_NODE_LIMIT
                         ))
                         .small()
-                        .color(t.color.warn),
+                        .color(t.color.text_faint),
                     );
                 }
                 ui.label(
@@ -350,11 +350,7 @@ fn include_closure_graph(
                         diagnostics.unpinned_roots, diagnostics.cyclic_nodes
                     ))
                     .small()
-                    .color(if diagnostics.diagnostics() == 0 {
-                        t.color.ok
-                    } else {
-                        t.color.err
-                    }),
+                    .color(t.color.text_dim),
                 );
             });
         },
@@ -600,7 +596,7 @@ fn include_definition_table(
     card(ui, |ui| {
         card_title(
             ui,
-            "DEFINITION RESOLUTION",
+            "Definition resolution",
             Some(&format!(
                 "{} unique names · {contested_count} contested",
                 definitions.len()
@@ -609,12 +605,12 @@ fn include_definition_table(
         table_header(
             ui,
             &[
-                ("DEFINITION", 0.22),
-                ("KIND", 0.11),
-                ("PROVIDER", 0.20),
-                ("SECTION", 0.11),
-                ("OTHER CANDIDATES", 0.20),
-                ("RESOLUTION", 0.16),
+                ("Definition", 0.22),
+                ("Kind", 0.11),
+                ("Provider", 0.20),
+                ("Section", 0.11),
+                ("Other candidates", 0.20),
+                ("Resolution", 0.16),
             ],
         );
         if matching.is_empty() {
@@ -750,10 +746,10 @@ const RESOLUTION_RULES: [(&str, &str, &str); 5] = [
 /// rule states the absence instead.
 fn resolution_rules_card(ui: &mut Ui) {
     card(ui, |ui| {
-        card_title(ui, "RESOLUTION RULES IN FORCE", Some("fail closed"));
+        card_title(ui, "Resolution rules in force", None);
         table_header(
             ui,
-            &[("RULE", 0.30), ("RESOLVED VALUE", 0.44), ("OWNER", 0.26)],
+            &[("Rule", 0.30), ("Resolved value", 0.44), ("Owner", 0.26)],
         );
         for (rule, value, owner) in RESOLUTION_RULES {
             let (rect, response) =
@@ -865,7 +861,7 @@ fn instance_binding_card(
     card(ui, |ui| {
         card_title(
             ui,
-            "INSTANCE BINDINGS",
+            "Instance bindings",
             Some(&if unbound.is_empty() {
                 "every reference resolves".to_owned()
             } else {
@@ -876,21 +872,16 @@ fn instance_binding_card(
                 )
             }),
         );
+        // Nothing when every instance resolves: the sentence that stood here
+        // reported the absence of a problem.
         if unbound.is_empty() {
-            ui.label(
-                RichText::new(
-                    "Every model an instance on this sheet names is declared by a file in the \
-                     authenticated closure above.",
-                )
-                .small()
-                .color(t.color.ok),
-            );
             return;
         }
         for instance in unbound.iter().take(UNBOUND_ROWS) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                ui.label(RichText::new("unresolved").small().color(t.color.err));
+                let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
+                paint_problem_mark(ui.painter(), mark, Problem::Failure);
                 ui.label(
                     RichText::new(&instance.instance)
                         .monospace()

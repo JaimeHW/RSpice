@@ -60,7 +60,7 @@ pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub:
 /// What this client holds, and what makes it believable.
 fn identity(ui: &mut Ui, hub: &hub::HubCatalog) {
     card(ui, |ui| {
-        card_title(ui, "IDENTITY", Some("signed snapshot"));
+        card_title(ui, "Identity", Some("signed snapshot"));
         let Some(identity) = hub.identity.as_ref() else {
             empty_state(
                 ui,
@@ -188,7 +188,7 @@ fn contract(ui: &mut Ui, hub: &hub::HubCatalog) {
     card(ui, |ui| {
         card_title(
             ui,
-            "ACCEPTANCE",
+            "Acceptance",
             Some(if hub.cache_discarded {
                 "cache discarded"
             } else if hub.identity.is_some() {
@@ -244,7 +244,7 @@ fn last_attempt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let attempted = app.state.workbench.models_view.attempted_operation.clone();
     let state = app.state.workbench.models_view.operational_state;
     card(ui, |ui| {
-        card_title(ui, "LAST ATTEMPT", Some("this session only"));
+        card_title(ui, "Last attempt", Some("this session only"));
         let Some(ModelsAttemptedOperation { label, .. }) = attempted else {
             empty_state(
                 ui,

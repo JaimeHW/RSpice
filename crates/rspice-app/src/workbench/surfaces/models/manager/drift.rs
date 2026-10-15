@@ -345,7 +345,7 @@ pub(super) fn resolve_dialog(ui: &mut Ui, app: &ManagerRenderContext<'_>, librar
     ));
     ui.label(RichText::new(DRIFT_EFFECT).small().color(t.color.text_dim));
     card(ui, |ui| {
-        card_title(ui, "FINDINGS", Some("pinned → present"));
+        card_title(ui, "Findings", Some("pinned → present"));
         if findings.is_empty() {
             empty_state(
                 ui,

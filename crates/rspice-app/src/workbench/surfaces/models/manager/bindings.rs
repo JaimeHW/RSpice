@@ -201,7 +201,7 @@ pub(super) fn unresolved_card(
     card(ui, |ui| {
         card_title(
             ui,
-            "UNRESOLVED INSTANCE BINDINGS",
+            "Unresolved instance bindings",
             Some(&format!(
                 "{} instance{}",
                 diagnostics.len(),

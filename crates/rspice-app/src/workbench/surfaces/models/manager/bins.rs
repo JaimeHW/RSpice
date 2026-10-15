@@ -607,21 +607,19 @@ fn bin_audit_strip(ui: &mut Ui, audit: &BinAudit) {
         Stroke::new(1.0, t.color.border),
     );
 
-    let clean = audit.findings.is_empty();
+    // A summary strip is not a verdict table: the family table below marks
+    // each family that has a finding, so these are counts and read as counts.
+    // "BIN AUDIT clean" was a fifth cell saying the other three read zero.
     let cells: [(&str, String, egui::Color32); 4] = [
         (
-            "BIN AUDIT",
-            if clean {
-                "clean".to_owned()
-            } else {
-                "faults".to_owned()
-            },
-            if clean { t.color.ok } else { t.color.err },
+            "binned families",
+            audit.by_family.len().to_string(),
+            t.color.text,
         ),
         (
             "overlapping envelopes",
             audit.findings.len().to_string(),
-            if clean { t.color.ok } else { t.color.err },
+            t.color.text,
         ),
         (
             "shared boundaries",
@@ -631,23 +629,13 @@ fn bin_audit_strip(ui: &mut Ui, audit: &BinAudit) {
         (
             "instances resolving to one card",
             format!("{} / {}", audit.one_card, audit.instances),
-            if audit.shared == 0 {
-                t.color.ok
-            } else {
-                t.color.warn
-            },
+            t.color.text,
         ),
     ];
     // The rule those numbers are measured under, hard against the right, read
-    // out of the engine rather than restated: `bin_range_contains` is
-    // inclusive at both ends and `resolve_binned_model_def` takes
-    // `matches.first()`. The cell is one line wide, so the strip carries the
-    // short form and the announcement below carries the whole sentence.
-    const RULE: &str = "inclusive edges · first match";
-    const RULE_SENTENCE: &str =
-        "bin ranges are inclusive at both edges, and the first declared matching card wins";
-    let rule_width = 212.0f32.min(rect.width() * 0.32);
-    let cell_width = ((rect.width() - rule_width) / cells.len() as f32).max(1.0);
+    // No "bin rule" cell: it explained the engine's resolution rule, which is
+    // the same on every project and in every row of the table below.
+    let cell_width = (rect.width() / cells.len() as f32).max(1.0);
     for (index, (caption, value, color)) in cells.iter().enumerate() {
         let cell = egui::Rect::from_min_max(
             egui::pos2(rect.left() + cell_width * index as f32, rect.top()),
@@ -678,27 +666,12 @@ fn bin_audit_strip(ui: &mut Ui, audit: &BinAudit) {
             *color,
         );
     }
-    ui.painter().text(
-        egui::pos2(rect.right() - 10.0, rect.top() + 13.0),
-        egui::Align2::RIGHT_CENTER,
-        "bin rule",
-        theme::sans(tokens::FS_0, FontWeight::SemiBold),
-        t.color.text_faint,
-    );
-    ui.painter().text(
-        egui::pos2(rect.right() - 10.0, rect.bottom() - 13.0),
-        egui::Align2::RIGHT_CENTER,
-        elide(ui, RULE, rule_width - 20.0, true),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-
-    // Every glyph above is painter text, which publishes nothing. This strip is
-    // the page's headline verdict, so it is announced whole.
+    // Every glyph above is painter text, which publishes nothing, so the
+    // strip is announced whole.
     let announcement = format!(
-        "Bin audit: {}. {} overlapping envelopes, {} shared boundaries, {} of {} instances \
-         resolving to one card. Bin rule: {RULE_SENTENCE}.",
-        if clean { "clean" } else { "faults" },
+        "{} binned families, {} overlapping envelopes, {} shared boundaries, {} of {} instances \
+         resolving to one card.",
+        audit.by_family.len(),
         audit.findings.len(),
         audit.boundaries,
         audit.one_card,
@@ -728,7 +701,7 @@ fn geometry_map(
     card(ui, |ui| {
         card_title(
             ui,
-            "LOG L/W MAP",
+            "Log L/W map",
             Some(&format!(
                 "{} · {} cards · {}",
                 family.family,
@@ -1038,18 +1011,18 @@ fn family_table(
     card(ui, |ui| {
         card_title(
             ui,
-            "BINNED FAMILIES",
+            "Binned families",
             Some(&format!("{} · library · family", families.len())),
         );
         table_header(
             ui,
             &[
-                ("FAMILY", 0.24),
-                ("LIBRARY", 0.20),
-                ("DEVICE", 0.14),
-                ("CARDS", 0.10),
-                ("PLACED", 0.11),
-                ("AUDIT", FAMILY_AUDIT_WIDTH),
+                ("Family", 0.24),
+                ("Library", 0.20),
+                ("Device", 0.14),
+                ("Cards", 0.10),
+                ("Placed", 0.11),
+                ("Audit", FAMILY_AUDIT_WIDTH),
             ],
         );
         ScrollArea::vertical()
@@ -1074,7 +1047,9 @@ fn family_table(
                     } else if tally.shared > 0 {
                         (format!("{} on a boundary", tally.shared), t.color.warn)
                     } else {
-                        ("clean".to_owned(), t.color.ok)
+                        // Green "clean" on every family that is fine is
+                        // wallpaper behind the two that are not.
+                        ("clean".to_owned(), t.color.text_faint)
                     };
                     let cards = family.cards.len().to_string();
                     let placed = if tally.instances == 0 {
@@ -1136,7 +1111,7 @@ fn findings_card(ui: &mut Ui, family: &BinFamily, audit: &BinAudit) {
     card(ui, |ui| {
         card_title(
             ui,
-            "GEOMETRY FINDINGS",
+            "Geometry findings",
             Some(&format!(
                 "{} · {} shared boundar{}",
                 family.family,
@@ -1145,21 +1120,14 @@ fn findings_card(ui: &mut Ui, family: &BinFamily, audit: &BinAudit) {
             )),
         );
         let t = Tokens::get(ui.ctx());
+        // A family with no finding has nothing to report: the paragraph that
+        // stood here restated the engine's resolution rule and said the
+        // family was fine.
         if findings.is_empty() {
-            ui.label(
-                RichText::new(format!(
-                    "Every declared envelope in {} is free of enclosed overlap. Its {} shared \
-                     boundaries are adjacent cards whose inclusive edges touch without enclosing \
-                     area; the first declared card wins there, deterministically.",
-                    family.family, tally.boundaries
-                ))
-                .small()
-                .color(t.color.text_dim),
-            );
             return;
         }
         for finding in findings.iter().take(FINDING_ROWS) {
-            ui.label(RichText::new(finding.sentence()).small().color(t.color.err));
+            problem_line(ui, Problem::Failure, &finding.sentence());
         }
         if findings.len() > FINDING_ROWS {
             ui.label(
@@ -1218,7 +1186,7 @@ fn geometry_instance_table(
         ui.horizontal(|ui| {
             let t = Tokens::get(ui.ctx());
             ui.label(
-                RichText::new("INSTANCE RESOLUTION")
+                RichText::new("Instance resolution")
                     .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                     .color(t.color.text_dim),
             );
@@ -1243,11 +1211,9 @@ fn geometry_instance_table(
                     ))
                     .small()
                     .monospace()
-                    .color(if tally.shared == 0 {
-                        t.color.text_faint
-                    } else {
-                        t.color.warn
-                    }),
+                    // A ratio, not a verdict: the Outcome column marks each
+                    // instance that landed on a shared boundary.
+                    .color(t.color.text_faint),
                 );
             });
         });
@@ -1263,14 +1229,14 @@ fn geometry_instance_table(
         table_header(
             ui,
             &[
-                ("INSTANCE", 0.15),
-                ("REQUESTED", 0.16),
-                ("LENGTH", 0.11),
-                ("WIDTH", 0.11),
+                ("Instance", 0.15),
+                ("Requested", 0.16),
+                ("Length", 0.11),
+                ("Width", 0.11),
                 ("NFIN", 0.08),
                 ("M", 0.07),
-                ("RESOLVES TO", 0.17),
-                ("OUTCOME", INSTANCE_OUTCOME_WIDTH),
+                ("Resolves to", 0.17),
+                ("Outcome", INSTANCE_OUTCOME_WIDTH),
             ],
         );
         ScrollArea::vertical()
@@ -1285,7 +1251,7 @@ fn geometry_instance_table(
                             ("exact card", t.color.text_dim)
                         }
                         rspice_core::engine::ModelBinSelectionKind::FamilyMatch => {
-                            ("family match", t.color.ok)
+                            ("family match", t.color.text_dim)
                         }
                         rspice_core::engine::ModelBinSelectionKind::SharedBoundary => {
                             ("boundary · first card", t.color.warn)

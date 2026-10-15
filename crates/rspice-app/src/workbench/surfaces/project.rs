@@ -1137,14 +1137,14 @@ mod tests {
             let text = painted_project_page(size, |ui| show(ui, &mut app));
             for expected in [
                 "lna-frontend-28g",
-                "PROJECT STATUS",
-                "EXECUTION CONTEXT",
-                "DESIGN",
-                "RECENT OPERATIONS",
+                "Project status",
+                "Execution context",
+                "Design",
+                "Recent operations",
                 "Library published · analog-core-1.2.0",
                 "Open top schematic",
                 "CHK-007",
-                "4 RETAINED",
+                "4 retained",
             ] {
                 assert!(
                     text.contains(expected),
@@ -1246,14 +1246,14 @@ mod tests {
                 "3 verified",
                 "Create checkpoint",
                 "Revision history\u{2026}",
-                "CHECKPOINTS",
-                "3 OF 8 KEPT",
+                "Checkpoints",
+                "3 of 8 kept",
                 "Manual checkpoint",
                 "Before technology attachment",
                 "6 min ago \u{b7} revision 3",
                 "Compare",
                 "Restore\u{2026}",
-                "STORAGE",
+                "Storage",
                 "The newest 8 checkpoints",
                 "All checkpoints verified",
             ] {
@@ -1272,7 +1272,6 @@ mod tests {
                 "governed mutations",
                 "never overwritten",
                 "Working state",
-                "SET ASIDE",
             ] {
                 assert!(
                     !text.contains(retired),
@@ -1368,7 +1367,7 @@ mod tests {
         let text = painted_project_page(size, |ui| show(ui, &mut damaged));
         for expected in [
             "1 set aside",
-            "SET ASIDE",
+            "Set aside",
             "7f0c2a9e-5b41-4d0e-9a55-2c1f6e8b3d10",
             "Project checkpoint bytes do not match their integrity manifest",
             "1 damaged, set aside",

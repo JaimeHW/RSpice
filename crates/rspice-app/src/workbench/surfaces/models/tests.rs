@@ -24,31 +24,31 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00-models-project",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "bfa6b472798e2624efa2ee465c63dcc9560c0c473d7b698bf6ce676dfb218a25",
+        fingerprint: "1c1bf5938c7b83c2acecef6bcf36c75ecdf1a6bacb69047d82b27411a328fc26",
     },
     ModelsBaseline {
         name: "models-01-symbols-cdf",
         page: ModelsPage::Symbols,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "e0248c56bfc6e07bbd9b1a2d6dfdb2224f17fabf47274d6e7e758dc4b6e22414",
+        fingerprint: "725c45d251498f20766d0ff1ab3b926ae610f71f0bd6caa2ee058a522e001f5d",
     },
     ModelsBaseline {
         name: "models-02-corners-sections",
         page: ModelsPage::Corners,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "640ee0c89978947c287636b1d3dd8b6d706812cc7c5515f9f5b5d6e7530169a0",
+        fingerprint: "d3e29dccca5479c091be1dfe3f4014cc694b5c1a5c3aa80102c79dcfa3c62b15",
     },
     ModelsBaseline {
         name: "models-03-bins-geometry",
         page: ModelsPage::Bins,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "d99eb73e77a1ed19a3065e4e8af0806dd6ab943d684ec48054282ca2415666ec",
+        fingerprint: "c06749101f7a806f8252d3c96c81e87e81267d3aa1c246133fbe3dc5b2fc9a57",
     },
     ModelsBaseline {
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "2b5c346588550c7b9a8ca874ed9bdf462eb35edf0d96f122d3031a4e7dcef01a",
+        fingerprint: "2c48296a467ad3f9ea22373dd158d8dd9d2a12890076aa50918d04bba24046c1",
     },
     ModelsBaseline {
         name: "models-05-qualification",
@@ -60,13 +60,13 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00b-rspice-library",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::RSpiceLibrary,
-        fingerprint: "4001b3097a7862e56f6b760efb76c3826edcd524890a50079b85338f77a0e2c9",
+        fingerprint: "727696e5bdfab27769a63c5a4dd6b4cebcebe2344eb984b4f3bd4950ae7038f9",
     },
     ModelsBaseline {
         name: "models-00c-installed-packs",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::InstalledPacks,
-        fingerprint: "fe3bdad35009aef7e328388880c5bc27ea9c9f8ad9eb3b68d178335502deb9c5",
+        fingerprint: "a4d8d6b267a9b87c6e3f71980fd1b8b2edc83e1b5ba50ae9e8548ba57cc1b572",
     },
 ];
 

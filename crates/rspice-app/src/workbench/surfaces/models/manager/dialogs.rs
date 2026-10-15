@@ -630,7 +630,7 @@ pub(super) fn render_dialog(
                         ui.end_row();
                     });
                 ui.separator();
-                ui.label(RichText::new("REQUIRED FUNCTIONAL DOMAINS").small().strong());
+                ui.label(RichText::new("Required functional domains").small().strong());
                 ui.horizontal_wrapped(|ui| {
                     for domain in CornerSectionDomain::ALL {
                         let mut required = required_domains.contains(&domain);

@@ -278,22 +278,26 @@ pub(super) fn selected_model_detail(
                 // verdict the release gate has not published — that page owns
                 // "qualified", and repeating it from weaker evidence is how two
                 // surfaces come to disagree about one model.
-                for (word, tone) in [
-                    ("review", detail.review.then_some(t.color.warn)),
-                    ("drift", detail.drifted.then_some(t.color.warn)),
-                    ("pinned", detail.pinned.then_some(t.color.ok)),
-                    (
-                        "engine-owned",
-                        detail.engine_owned.then_some(t.color.text_faint),
-                    ),
+                // "engine-owned" is gone: the SOURCE cell beside it reads
+                // "RSpice built-in" on exactly the same rows.
+                for (word, shown, problem) in [
+                    ("review", detail.review, Some(Problem::Warning)),
+                    ("drift", detail.drifted, Some(Problem::Warning)),
+                    ("pinned", detail.pinned, None),
                 ] {
-                    if let Some(tone) = tone {
-                        ui.label(
-                            RichText::new(word)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                .color(tone),
-                        );
+                    if !shown {
+                        continue;
                     }
+                    if let Some(problem) = problem {
+                        let (mark, _) =
+                            ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
+                        paint_problem_mark(ui.painter(), mark, problem);
+                    }
+                    ui.label(
+                        RichText::new(word)
+                            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                            .color(t.color.text_dim),
+                    );
                 }
             });
             // Right to left, so the Models page's one accent primary — the
@@ -626,13 +630,14 @@ fn routed_count(ui: &mut Ui, name: &str, value: &str, note: &str) -> egui::Respo
         theme::sans(tokens::FS_0, FontWeight::Regular),
         t.color.text_dim,
     );
-    // The number is the control, so it is the number that carries the accent.
+    // The row's hover fill carries the affordance; accent in this product
+    // means the active item, not "this is clickable".
     ui.painter().text(
         egui::pos2(rect.left() + name_width + INSET, rect.center().y),
         egui::Align2::LEFT_CENTER,
         elide(ui, value, (value_width - INSET * 2.0).max(1.0), true),
         theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.accent,
+        t.color.text,
     );
     ui.painter().text(
         egui::pos2(rect.right() - INSET, rect.center().y),
@@ -647,7 +652,7 @@ fn routed_count(ui: &mut Ui, name: &str, value: &str, note: &str) -> egui::Respo
 fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
     filled_detail_pane(
         ui,
-        "RESOLVED PARAMETERS",
+        "Resolved parameters",
         Some(&format!("{} values", detail.parameter_total)),
         height,
         "models-detail-parameters",
@@ -707,7 +712,7 @@ fn parameter_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
 fn characteristic_card(ui: &mut Ui, detail: &SelectedModelDetail<'_>, height: f32) {
     filled_detail_pane(
         ui,
-        "DECLARED ENVELOPE",
+        "Declared envelope",
         Some("from the card"),
         height,
         "models-detail-envelope",
@@ -790,7 +795,7 @@ fn qualification_card(
 ) {
     filled_detail_pane(
         ui,
-        "QUALIFICATION",
+        "Qualification",
         Some("source-owned evidence"),
         height,
         "models-detail-qualification",
@@ -840,7 +845,7 @@ fn usage_card(
     let usages = detail.usages;
     filled_detail_pane(
         ui,
-        "WHERE USED",
+        "Where used",
         Some(&format!("{} consumers", usages.len())),
         height,
         "models-detail-usage",

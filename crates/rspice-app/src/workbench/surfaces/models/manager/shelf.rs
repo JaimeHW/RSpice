@@ -172,13 +172,13 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
         + specs.len() as f32 * 0.10;
     let mut columns = vec![
         ShelfColumn {
-            heading: "PART",
+            heading: "Part",
             width: 0.14,
             mono: true,
             read: |row| row.hit.name.clone(),
         },
         ShelfColumn {
-            heading: "DESCRIPTION",
+            heading: "Description",
             width: 0.58 - optional,
             mono: false,
             // The part's own signed line where the publisher wrote one, and
@@ -196,7 +196,7 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
     ];
     if class_varies {
         columns.push(ShelfColumn {
-            heading: "CLASS",
+            heading: "Class",
             width: 0.10,
             mono: true,
             read: |row| row.hit.device.clone(),
@@ -204,7 +204,7 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
     }
     if kind_varies {
         columns.push(ShelfColumn {
-            heading: "KIND",
+            heading: "Kind",
             width: 0.08,
             mono: true,
             read: |row| row.hit.kind.clone(),
@@ -221,13 +221,13 @@ fn shelf_columns(rows: &[ShelfRow], facet: RSpicePartFacet) -> ShelfColumns {
         read: |_| String::new(),
     }));
     columns.push(ShelfColumn {
-        heading: "PACK",
+        heading: "Pack",
         width: 0.16,
         mono: true,
         read: |row| row.hit.pack.clone(),
     });
     columns.push(ShelfColumn {
-        heading: "STATE",
+        heading: "State",
         width: 0.12,
         mono: true,
         read: |_| String::new(),
@@ -484,19 +484,30 @@ fn shelf_row(
             .take(layout.columns.len() - 1)
             .map(|column| column.width)
             .sum();
+        // The mark carries the severity; the word is a word.
+        let left = response.rect.left() + response.rect.width() * start + 5.0;
+        let advance = match tone {
+            StateTone::Severe => Some(Problem::Failure),
+            StateTone::Warn => Some(Problem::Warning),
+            StateTone::Quiet => None,
+        }
+        .map_or(0.0, |problem| {
+            paint_problem_mark(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    egui::pos2(left + MARK_SIDE * 0.5, response.rect.center().y),
+                    Vec2::splat(MARK_SIDE),
+                ),
+                problem,
+            );
+            MARK_ADVANCE
+        });
         ui.painter().text(
-            egui::pos2(
-                response.rect.left() + response.rect.width() * start + 5.0,
-                response.rect.center().y,
-            ),
+            egui::pos2(left + advance, response.rect.center().y),
             egui::Align2::LEFT_CENTER,
             phrase,
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            match tone {
-                StateTone::Severe => t.color.err,
-                StateTone::Warn => t.color.warn,
-                StateTone::Quiet => t.color.text_faint,
-            },
+            t.color.text_dim,
         );
     }
     // Painter text publishes no node, so the row's own node carries the part
@@ -715,7 +726,7 @@ fn identity_pane(ui: &mut Ui, row: &ShelfRow, height: f32) {
     let hit = &row.hit;
     filled_detail_pane(
         ui,
-        "IDENTITY & SPECS",
+        "Identity and specs",
         // The statement the part is declared with, spelled the way the page's
         // own footer spells it when a whole page shares one.
         Some(&format!(".{}", hit.kind)),
@@ -799,7 +810,7 @@ fn source_pane(ui: &mut Ui, row: &ShelfRow, height: f32) {
     let (standing, note) = source_standing(row);
     filled_detail_pane(
         ui,
-        "MODEL SOURCE",
+        "Model source",
         Some(standing),
         height,
         "models-shelf-source",
@@ -1224,7 +1235,7 @@ mod tests {
         };
         assert_eq!(
             headings(&layout),
-            ["PART", "DESCRIPTION", "CLASS", "KIND", "PACK", "STATE"]
+            ["Part", "Description", "Class", "Kind", "Pack", "State"]
         );
         assert!(layout.shared.is_empty(), "nothing here is shared");
 
@@ -1235,7 +1246,7 @@ mod tests {
         let layout = shelf_columns(&one_class, RSpicePartFacet::Diode);
         assert_eq!(
             headings(&layout),
-            ["PART", "DESCRIPTION", "PACK", "STATE"],
+            ["Part", "Description", "Pack", "State"],
             "a class every row shares is not a column"
         );
         assert_eq!(layout.shared, ["all diode", "all .model"]);
@@ -1319,7 +1330,7 @@ mod tests {
         let description = layout
             .columns
             .iter()
-            .find(|column| column.heading == "DESCRIPTION")
+            .find(|column| column.heading == "Description")
             .expect("the description column is always present");
         assert_eq!(
             (description.read)(&rows[0]),

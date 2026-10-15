@@ -134,15 +134,15 @@ fn matrix_subtitle(rows: &[CornerRow], unresolved: usize) -> String {
 /// PDK that publishes macromodels as their own section lets a corner bind it
 /// independently of the device sections beside it.
 const MATRIX_COLUMNS: [(&str, f32); 9] = [
-    ("CORNER", 0.11),
+    ("Corner", 0.11),
     ("MOS", 0.11),
     ("BJT", 0.10),
-    ("PASSIVES", 0.11),
-    ("MACRO", 0.10),
-    ("STATISTICAL", 0.12),
-    ("AGING", 0.09),
-    ("TEMP °C", 0.10),
-    ("STATUS", 0.16),
+    ("Passives", 0.11),
+    ("Macro", 0.10),
+    ("Statistical", 0.12),
+    ("Aging", 0.09),
+    ("Temp °C", 0.10),
+    ("Status", 0.16),
 ];
 
 fn corner_matrix(
@@ -311,14 +311,13 @@ fn row_bind_action(ui: &mut Ui, row: egui::Rect, corner: &CornerRow) -> bool {
 /// unresolved corner is.
 fn fail_closed_note(ui: &mut Ui, unresolved: usize) {
     let t = Tokens::get(ui.ctx());
-    let mut prose = "A corner with any unbound section can never expand into tasks — there is \
-                     no implicit typical fallback and no silent alias resolution."
-        .to_owned();
-    if unresolved > 0 {
-        prose.push_str(
-            " The unresolved corners above are held out of every run until they bind one.",
-        );
-    }
+    // "fail closed" is the engine's own vocabulary, not a reader's. What the
+    // reader needs is what happens to an unbound corner, in one sentence.
+    let prose = if unresolved > 0 {
+        "Unresolved corners are skipped until bound. There is no typical fallback."
+    } else {
+        "A corner with an unbound section does not run. There is no typical fallback."
+    };
     egui::Frame::NONE
         .fill(t.color.bg_panel)
         .stroke(Stroke::new(1.0, t.color.border))
@@ -326,17 +325,14 @@ fn fail_closed_note(ui: &mut Ui, unresolved: usize) {
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.label(
-                    RichText::new("fail closed")
-                        .small()
-                        .strong()
-                        .color(t.color.err),
-                );
+                if unresolved > 0 {
+                    let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
+                    paint_problem_mark(ui.painter(), mark, Problem::Warning);
+                }
                 super::hub::announced(
                     ui,
-                    RichText::new(&prose).small().color(t.color.text_dim),
-                    &prose,
+                    RichText::new(prose).small().color(t.color.text_dim),
+                    prose,
                 );
             });
         });
@@ -608,7 +604,15 @@ fn section_source_pane(
         match excerpt.as_ref() {
             Ok(excerpt) => paint_section_lines(ui, excerpt, height),
             Err(error) => {
-                super::hub::announced(ui, RichText::new(error).small().color(t.color.warn), error);
+                ui.horizontal_wrapped(|ui| {
+                    let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
+                    paint_problem_mark(ui.painter(), mark, Problem::Warning);
+                    super::hub::announced(
+                        ui,
+                        RichText::new(error).small().color(t.color.text_dim),
+                        error,
+                    );
+                });
             }
         }
     });
@@ -718,7 +722,7 @@ fn statistical_and_aging_card(ui: &mut Ui, app: &ManagerRenderContext<'_>, row: 
     let library = app.state.model_library_manager.get_library(&row.library);
     detail_pane(
         ui,
-        "STATISTICAL & AGING SECTIONS",
+        "Statistical and aging sections",
         Some(if bound { "bound" } else { "none bound" }),
         |ui| {
             if !bound {
@@ -894,7 +898,7 @@ fn temperature_validity_findings(ui: &mut Ui, rows: &[CornerRow]) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.warn))
+        .stroke(Stroke::new(1.0, t.color.border))
         .inner_margin(egui::Margin::symmetric(12, 6))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
@@ -906,7 +910,15 @@ fn temperature_validity_findings(ui: &mut Ui, rows: &[CornerRow]) {
                     row.corner.qualified_range_label(),
                     crate::state::model_library::stated_temperatures(&row.unqualified_temperatures)
                 );
-                super::hub::announced(ui, RichText::new(&line).small().color(t.color.warn), &line);
+                ui.horizontal_wrapped(|ui| {
+                    let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
+                    paint_problem_mark(ui.painter(), mark, Problem::Warning);
+                    super::hub::announced(
+                        ui,
+                        RichText::new(&line).small().color(t.color.text_dim),
+                        &line,
+                    );
+                });
             }
             if findings.len() > TEMPERATURE_FINDING_ROWS {
                 let more = format!(
@@ -1186,18 +1198,15 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
             .strong(),
         );
         if let Some(blocker) = row.blocker.as_deref() {
-            ui.label(
-                RichText::new(format!("run expansion blocked · {blocker}"))
-                    .small()
-                    .color(Tokens::get(ui.ctx()).color.err),
-            );
+            problem_line(ui, Problem::Failure, &format!("Blocked · {blocker}"));
         }
         if row.active {
+            // The active corner is a domain state, not the reader's
+            // selection, so it is a word and not an accent.
             ui.label(
-                RichText::new("ACTIVE FOR EXECUTION")
+                RichText::new("Active")
                     .small()
-                    .strong()
-                    .color(Tokens::get(ui.ctx()).color.accent),
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
             );
         }
         // Accent only while activating is both possible and the thing left to
@@ -1284,7 +1293,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
     // bottom instead of ending in bare canvas.
     filled_detail_pane(
         ui,
-        "CORNER BINDING DETAILS",
+        "Corner binding details",
         Some("section, environment, statistics, and aging"),
         ui.available_height(),
         "models-corner-detail",
@@ -1467,12 +1476,14 @@ fn inline_unbind(ui: &mut Ui, domain: CornerSectionDomain, section: &str, width:
     });
     let hovered = response.hovered();
     let inner = rect.shrink2(egui::vec2(2.0, 3.0));
+    // Unbinding a section is a routine edit the reader can redo in a click,
+    // so it is not painted in the tone of a failure.
     if hovered {
         ui.painter().rect(
             inner,
             t.radius,
             t.color.bg_hover,
-            Stroke::new(1.0, t.color.err),
+            Stroke::new(1.0, t.color.border_strong),
             egui::StrokeKind::Inside,
         );
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -1483,9 +1494,9 @@ fn inline_unbind(ui: &mut Ui, domain: CornerSectionDomain, section: &str, width:
         "Unbind",
         theme::sans(tokens::FS_MICRO, FontWeight::Regular),
         if hovered {
-            t.color.err
+            t.color.text
         } else {
-            t.color.err.gamma_multiply(0.7)
+            t.color.text_dim
         },
     );
     theme::paint_focus_ring(ui, &response, inner);

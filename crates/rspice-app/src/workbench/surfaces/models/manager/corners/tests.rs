@@ -965,9 +965,9 @@ fn the_fail_closed_contract_is_stated_under_the_matrix() {
         .map(|(_, label)| label)
         .collect::<Vec<_>>();
     assert!(
-        labels.iter().any(|label| label
-            .contains("no implicit typical fallback and no silent alias resolution")
-            && label.contains("held out of every run")),
+        labels
+            .iter()
+            .any(|label| label.contains("Unresolved corners are skipped until bound")),
         "the contract, and that this project is currently held by it: {labels:?}"
     );
 }

@@ -298,27 +298,27 @@ const CONTROL_EFFECTS: &[(&str, &str)] = &[
     // The project catalog's sortable header cells. Each one reorders the rows
     // the page already derived; the order itself is durable session state.
     (
-        "MODEL",
+        "Model",
         "models_view.catalog_sort = Model, read by sort_catalog_rows",
     ),
     (
-        "FAMILY",
+        "Family",
         "models_view.catalog_sort = Family, read by sort_catalog_rows",
     ),
     (
-        "SOURCE",
+        "Source",
         "models_view.catalog_sort = Source, read by sort_catalog_rows",
     ),
     (
-        "USED BY",
+        "Used by",
         "models_view.catalog_sort = UsedBy, read by sort_catalog_rows",
     ),
     (
-        "VECTORS",
+        "Vectors",
         "models_view.catalog_sort = Vectors, read by sort_catalog_rows",
     ),
     (
-        "STATUS",
+        "Status",
         "models_view.catalog_sort = Status, read by sort_catalog_rows",
     ),
     // Selected model detail

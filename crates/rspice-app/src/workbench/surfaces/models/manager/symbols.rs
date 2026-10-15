@@ -87,11 +87,11 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 table_header(
                     ui,
                     &[
-                        ("SYMBOL", 0.30),
-                        ("BOUND FAMILY", 0.25),
-                        ("PINS", 0.20),
-                        ("FORM", 0.13),
-                        ("STATUS", 0.12),
+                        ("Symbol", 0.30),
+                        ("Bound family", 0.25),
+                        ("Pins", 0.20),
+                        ("Form", 0.13),
+                        ("Status", 0.12),
                     ],
                 );
                 let layout = RegistryLayout {
@@ -311,12 +311,12 @@ fn symbol_group_band(ui: &mut Ui, label: &str) {
     });
 }
 
-/// The colour a status reads in.
-fn status_color(t: &Tokens, status: SymbolStatus) -> Color32 {
+/// The mark a status carries, if any. The word itself is always neutral.
+const fn status_problem(status: SymbolStatus) -> Option<Problem> {
     match status {
-        SymbolStatus::PinMismatch => t.color.err,
-        SymbolStatus::Review => t.color.warn,
-        SymbolStatus::Bound | SymbolStatus::ReadOnly => t.color.text_dim,
+        SymbolStatus::PinMismatch => Some(Problem::Failure),
+        SymbolStatus::Review => Some(Problem::Warning),
+        SymbolStatus::Bound | SymbolStatus::ReadOnly => None,
     }
 }
 
@@ -336,13 +336,9 @@ fn symbol_registry_row(ui: &mut Ui, selected: bool, row: &SymbolRow) -> egui::Re
         );
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
-    } else if row.status == SymbolStatus::PinMismatch {
-        // A blocking row is tinted whole, not only in its last column: the
-        // mismatch is a property of the symbol, and the status cell is the
-        // narrowest column on the table.
-        ui.painter()
-            .rect_filled(rect, 0.0, t.color.err.linear_multiply(0.08));
     }
+    // No error wash down a blocking row: the failure mark in its status cell
+    // is the one place severity is said.
 
     let glyph = egui::Rect::from_min_size(
         egui::pos2(rect.left() + 5.0, rect.center().y - 13.0),
@@ -355,7 +351,7 @@ fn symbol_registry_row(ui: &mut Ui, selected: bool, row: &SymbolRow) -> egui::Re
         Stroke::new(1.0, t.color.border),
         egui::StrokeKind::Inside,
     );
-    paint_symbol_glyph(ui, glyph.shrink(5.0), &row.family, row.pins.len());
+    paint_symbol_glyph(ui, glyph.shrink(5.0), &row.family);
 
     let fractions = [0.30, 0.25, 0.20, 0.13, 0.12];
     let values = [
@@ -369,7 +365,22 @@ fn symbol_registry_row(ui: &mut Ui, selected: bool, row: &SymbolRow) -> egui::Re
     for (index, (value, fraction)) in values.iter().zip(fractions).enumerate() {
         let width = rect.width() * fraction;
         let text_x = if index == 0 { x + 44.0 } else { x + 5.0 };
-        let available = (width - if index == 0 { 48.0 } else { 9.0 }).max(8.0);
+        let mut available = (width - if index == 0 { 48.0 } else { 9.0 }).max(8.0);
+        let mut text_x = text_x;
+        if index == 4
+            && let Some(problem) = status_problem(row.status)
+        {
+            paint_problem_mark(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    egui::pos2(text_x + MARK_SIDE * 0.5, rect.center().y),
+                    Vec2::splat(MARK_SIDE),
+                ),
+                problem,
+            );
+            text_x += MARK_ADVANCE;
+            available = (available - MARK_ADVANCE).max(8.0);
+        }
         ui.painter().text(
             egui::pos2(text_x, rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -379,11 +390,7 @@ fn symbol_registry_row(ui: &mut Ui, selected: bool, row: &SymbolRow) -> egui::Re
             } else {
                 theme::sans(tokens::FS_0, FontWeight::Regular)
             },
-            if index == 4 {
-                status_color(&t, row.status)
-            } else {
-                t.color.text_dim
-            },
+            t.color.text_dim,
         );
         x += width;
     }
@@ -409,7 +416,7 @@ fn symbol_registry_row(ui: &mut Ui, selected: bool, row: &SymbolRow) -> egui::Re
     response
 }
 
-fn paint_symbol_glyph(ui: &Ui, rect: egui::Rect, family: &str, pins: usize) {
+fn paint_symbol_glyph(ui: &Ui, rect: egui::Rect, family: &str) {
     let t = Tokens::get(ui.ctx());
     let stroke = Stroke::new(1.1, t.color.text_dim);
     let center = rect.center();
@@ -458,9 +465,8 @@ fn paint_symbol_glyph(ui: &Ui, rect: egui::Rect, family: &str, pins: usize) {
             stroke,
         );
     }
-    if pins > 3 {
-        ui.painter().circle_filled(center, 1.4, t.color.accent);
-    }
+    // No centre dot for a symbol with more than three pins: a dot that says
+    // nothing a reader can decode is decoration.
 }
 
 fn symbol_detail(
@@ -511,7 +517,7 @@ fn symbol_detail(
                                     "{technology_name} {revision} · signed · read-only"
                                 ))
                                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.info),
+                                .color(t.color.text_faint),
                             );
                         } else if row.read_only() {
                             ui.label(
@@ -561,12 +567,12 @@ fn symbol_detail(
                 });
             if !row.diagnostics.is_empty() {
                 card(ui, |ui| {
-                    card_title(ui, "BLOCKING CONTRACT FINDINGS", Some(row.status.label()));
+                    card_title(ui, "Blocking contract findings", Some(row.status.label()));
                     for diagnostic in &row.diagnostics {
-                        ui.label(
-                            RichText::new(format!("Warning: {diagnostic}"))
-                                .small()
-                                .color(status_color(&t, row.status)),
+                        problem_line(
+                            ui,
+                            status_problem(row.status).unwrap_or(Problem::Warning),
+                            diagnostic,
                         );
                     }
                 });
@@ -579,7 +585,7 @@ fn symbol_detail(
             } = &row.authority
             {
                 card(ui, |ui| {
-                    card_title(ui, "SIGNED TECHNOLOGY AUTHORITY", Some(technology_name));
+                    card_title(ui, "Signed technology authority", Some(technology_name));
                     property(ui, "Revision", revision, "exact project pin");
                     property(
                         ui,
@@ -611,17 +617,17 @@ fn pin_contract_card(ui: &mut Ui, row: &SymbolRow) {
             let aligned = pins.iter().filter(|pin| pin.check.is_aligned()).count();
             card_title(
                 ui,
-                "PIN CONTRACT VS PROVIDER PORTS",
+                "Pin contract vs provider ports",
                 Some(&format!("{aligned}/{} aligned", pins.len())),
             );
             detail_table_header(
                 ui,
                 &[
                     ("PIN", 0.20),
-                    ("ELECTRICAL", 0.26),
-                    ("ORDER", 0.10),
-                    ("PROVIDER PORT", 0.24),
-                    ("CHECK", 0.20),
+                    ("Electrical", 0.26),
+                    ("Order", 0.10),
+                    ("Provider port", 0.24),
+                    ("Check", 0.20),
                 ],
             );
             for pin in pins {
@@ -637,13 +643,13 @@ fn pin_contract_card(ui: &mut Ui, row: &SymbolRow) {
             );
         }
         PinContract::NoProviderPorts(reason) => {
-            card_title(ui, "PIN CONTRACT VS PROVIDER PORTS", Some("no provider"));
+            card_title(ui, "Pin contract vs provider ports", Some("no provider"));
             empty_state(ui, "There are no provider ports to check against.", reason);
         }
         PinContract::Legacy(pins) => {
             card_title(
                 ui,
-                "PIN CONTRACT VS PROVIDER PORTS",
+                "Pin contract vs provider ports",
                 Some(&format!("{} drawn pins", pins.len())),
             );
             for (index, pin) in pins.iter().enumerate() {
@@ -661,11 +667,6 @@ fn pin_contract_card(ui: &mut Ui, row: &SymbolRow) {
 
 fn pin_contract_row(ui: &mut Ui, pin: &PinContractRow) {
     let t = Tokens::get(ui.ctx());
-    let check_color = if pin.check.is_aligned() {
-        t.color.ok
-    } else {
-        t.color.err
-    };
     let order = pin.order.to_string();
     let columns = [
         (pin.pin.as_deref().unwrap_or("—"), 0.20, true),
@@ -682,22 +683,31 @@ fn pin_contract_row(ui: &mut Ui, pin: &PinContractRow) {
         pin.check.label()
     );
     let rect = detail_table_row(ui, &columns, announced);
-    ui.painter().text(
-        egui::pos2(rect.left() + rect.width() * 0.80 + 5.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        elide(
-            ui,
-            if pin.check.is_aligned() {
-                "aligned"
-            } else {
-                pin.check.label()
-            },
-            (rect.width() * 0.20 - 9.0).max(8.0),
-            false,
-        ),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        check_color,
-    );
+    // A pin that lines up leaves the cell blank: "aligned" on every good row
+    // is a constant, and the mismatch is what the column is for.
+    if !pin.check.is_aligned() {
+        let left = rect.left() + rect.width() * 0.80 + 5.0;
+        paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(left + MARK_SIDE * 0.5, rect.center().y),
+                Vec2::splat(MARK_SIDE),
+            ),
+            Problem::Failure,
+        );
+        ui.painter().text(
+            egui::pos2(left + MARK_ADVANCE, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            elide(
+                ui,
+                pin.check.label(),
+                (rect.width() * 0.20 - 9.0 - MARK_ADVANCE).max(8.0),
+                false,
+            ),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+    }
 }
 
 /// The instance line this symbol emits, token by token.
@@ -706,7 +716,7 @@ fn netlist_template_card(ui: &mut Ui, row: &SymbolRow) {
         // A legacy symbol has no validated template to break into tokens, so
         // it keeps the one line it does carry.
         card(ui, |ui| {
-            card_title(ui, "NETLIST TEMPLATE", Some(&row.family));
+            card_title(ui, "Netlist template", Some(&row.family));
             property(ui, "Template", &row.template, "not a typed contract");
             empty_state(
                 ui,
@@ -724,7 +734,7 @@ fn netlist_template_card(ui: &mut Ui, row: &SymbolRow) {
                 let unresolved = tokens.iter().filter(|token| !token.resolves).count();
                 card_title(
                     ui,
-                    "NETLIST TEMPLATE",
+                    "Netlist template",
                     Some(&if unresolved == 0 {
                         format!("{} tokens · all resolve", tokens.len())
                     } else {
@@ -735,10 +745,10 @@ fn netlist_template_card(ui: &mut Ui, row: &SymbolRow) {
                 detail_table_header(
                     ui,
                     &[
-                        ("TOKEN", 0.22),
-                        ("SOURCE", 0.22),
-                        ("VALUE", 0.32),
-                        ("OWNER", 0.24),
+                        ("Token", 0.22),
+                        ("Source", 0.22),
+                        ("Value", 0.32),
+                        ("Owner", 0.24),
                     ],
                 );
                 for token in tokens {
@@ -762,32 +772,24 @@ fn netlist_template_card(ui: &mut Ui, row: &SymbolRow) {
                     );
                     let rect = detail_table_row(ui, &columns, announced);
                     if !token.resolves {
-                        ui.painter().vline(
-                            rect.left(),
-                            rect.y_range(),
-                            Stroke::new(2.0, t.color.err),
+                        paint_problem_mark(
+                            ui.painter(),
+                            egui::Rect::from_center_size(
+                                egui::pos2(rect.left() + MARK_SIDE * 0.5, rect.center().y),
+                                Vec2::splat(MARK_SIDE),
+                            ),
+                            Problem::Failure,
                         );
                     }
                 }
-                ui.label(
-                    RichText::new(
-                        "A token that resolves from nothing blocks netlisting rather than \
-                         emitting an empty field.",
-                    )
-                    .small()
-                    .color(t.color.text_faint),
-                );
             }
             NetlistTemplate::Invalid(reason) => {
-                card_title(ui, "NETLIST TEMPLATE", Some("refused"));
-                template_line(ui, &definition.netlist.template, t.color.err);
-                ui.label(
-                    RichText::new(format!(
-                        "The netlist writer refuses this template: {reason}. No instance line \
-                         is emitted for it, so there are no tokens to account for.",
-                    ))
-                    .small()
-                    .color(t.color.err),
+                card_title(ui, "Netlist template", Some("refused"));
+                template_line(ui, &definition.netlist.template, t.color.text);
+                problem_line(
+                    ui,
+                    Problem::Failure,
+                    &format!("Template rejected: {reason}"),
                 );
             }
         }
@@ -821,7 +823,7 @@ fn placed_instances_card(ui: &mut Ui, app: &ManagerRenderContext<'_>, row: &Symb
     card(ui, |ui| {
         card_title(
             ui,
-            "PLACED INSTANCES",
+            "Placed instances",
             Some(&format!("{total} on this sheet")),
         );
         if total == 0 {
@@ -876,7 +878,7 @@ fn placed_instances_card(ui: &mut Ui, app: &ManagerRenderContext<'_>, row: &Symb
 /// edited from here.
 fn provenance_card(ui: &mut Ui, row: &SymbolRow, project_count: usize, technology_count: usize) {
     card(ui, |ui| {
-        card_title(ui, "PROVENANCE", Some(row.status.label()));
+        card_title(ui, "Provenance", Some(row.status.label()));
         match (&row.authority, &row.definition) {
             (SymbolRowAuthority::SignedTechnology { revision, .. }, _) => {
                 property(ui, "Saved revision", revision, "signed manifest");
@@ -949,7 +951,7 @@ fn parameter_form_card(ui: &mut Ui, row: &SymbolRow) {
             .map_or(0, |definition| definition.parameter_form.fields().count());
         card_title(
             ui,
-            "PARAMETER FORM · CDF",
+            "Parameter form · CDF",
             Some(&format!("{field_count} typed fields")),
         );
         if let Some(definition) = &row.definition {

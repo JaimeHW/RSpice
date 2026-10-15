@@ -72,12 +72,12 @@ pub(super) fn pack_catalog(
         table_header(
             ui,
             &[
-                ("PACK", 0.25),
-                ("CONTENTS", 0.18),
-                ("ORIGIN", 0.12),
-                ("PARTS", 0.11),
-                ("LICENSE", 0.17),
-                ("STATE", 0.17),
+                ("Pack", 0.25),
+                ("Contents", 0.18),
+                ("Origin", 0.12),
+                ("Parts", 0.11),
+                ("License", 0.17),
+                ("State", 0.17),
             ],
         );
         ScrollArea::vertical()
@@ -297,7 +297,7 @@ fn pack_detail(
     let region_h = ui.available_height().max(1.0);
     filled_detail_pane(
         ui,
-        "PACK CONTRACT",
+        "Pack contract",
         Some(&pack.category),
         region_h,
         "models-corpus-contract",

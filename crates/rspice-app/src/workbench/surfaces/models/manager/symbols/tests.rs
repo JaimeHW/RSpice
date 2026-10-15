@@ -120,39 +120,19 @@ fn a_layout_with_only_one_corpus_has_no_band_and_uniform_offsets() {
     }
 }
 
-/// The three tones the STATUS column reads in.
+/// The marks the Status column carries, and the two states that carry none.
 #[test]
-fn a_review_is_coloured_as_a_finding_rather_than_as_a_settled_state() {
-    // The defect this replaced: the painter chose the colour by string-matching
-    // `pin mismatch`, so `review` — a contract that would not parse — was
-    // painted in the same dim grey as `bound`.
-    let tokens = crate::ui::tokens::Tokens::new(
-        crate::ui::tokens::Direction::Instrument,
-        crate::ui::tokens::Mode::Dark,
-        crate::ui::tokens::Density::Compact,
-    );
+fn a_review_is_marked_as_a_finding_rather_than_as_a_settled_state() {
+    // The defect this replaced: the painter chose severity by string-matching
+    // `pin mismatch`, so `review` — a contract that would not parse — read
+    // exactly like `bound`.
     assert_eq!(
-        status_color(&tokens, SymbolStatus::PinMismatch),
-        tokens.color.err
+        status_problem(SymbolStatus::PinMismatch),
+        Some(Problem::Failure)
     );
-    assert_eq!(
-        status_color(&tokens, SymbolStatus::Review),
-        tokens.color.warn
-    );
-    assert_eq!(
-        status_color(&tokens, SymbolStatus::Bound),
-        tokens.color.text_dim
-    );
-    assert_eq!(
-        status_color(&tokens, SymbolStatus::ReadOnly),
-        tokens.color.text_dim
-    );
-    assert_ne!(
-        status_color(&tokens, SymbolStatus::Review),
-        status_color(&tokens, SymbolStatus::Bound),
-        "a review is work and a bound symbol is not; the column cannot say \
-         both in the same colour"
-    );
+    assert_eq!(status_problem(SymbolStatus::Review), Some(Problem::Warning));
+    assert_eq!(status_problem(SymbolStatus::Bound), None);
+    assert_eq!(status_problem(SymbolStatus::ReadOnly), None);
 }
 
 /// RENDER EVIDENCE — writes PNGs of the page with symbols on it.
