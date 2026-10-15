@@ -80,7 +80,6 @@ struct TaskRow {
 #[derive(Debug, Clone)]
 struct RunRow {
     run_id: RunId,
-    job_id: Option<String>,
     sequence: u64,
     label: String,
     scope: String,
@@ -91,9 +90,7 @@ struct RunRow {
     tone: RunTone,
     analysis_count: usize,
     task_count: usize,
-    evidence: String,
     source_revision: String,
-    run_set_id: String,
     tasks: Vec<TaskRow>,
     plan_id: Option<crate::product::SimulationPlanId>,
     campaign: Option<crate::state::SimulationCampaignMembership>,
@@ -148,7 +145,7 @@ impl RunRow {
                 .ok()
                 .filter(|plan| plan.id() == plan_id)
         });
-        let (scope, evidence, source_revision, run_set_id, tasks) =
+        let (scope, source_revision, tasks) =
             run_authority_rows(run, executor_owned, current_analysis_progress, run_plan);
         let mut scope = plan_id.map_or(scope, |plan_id| {
             let name = state
@@ -190,7 +187,6 @@ impl RunRow {
             .map_or(0, |deck| deck.points.len());
         Self {
             run_id: run.run_id,
-            job_id: run.job_id.map(|id| id.to_string()),
             sequence: run.id,
             executed_deck_points,
             label: run.label.clone(),
@@ -208,9 +204,7 @@ impl RunRow {
             tone,
             analysis_count: run.analyses.len(),
             task_count,
-            evidence,
             source_revision,
-            run_set_id,
             tasks,
             plan_id,
             campaign,
@@ -371,8 +365,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         dialog
     };
     let choice = dialog.show(ctx, |ui| {
-        render_plan_scope(ui, scope, &mut requested_scope);
-        render_status_strip(ui, &snapshot);
+        render_plan_scope(ui, scope, &mut requested_scope, &snapshot);
         let output = ScrollArea::vertical()
             .id_salt("workbench.jobs-manager.body")
             .vertical_scroll_offset(body_scroll_offset)
@@ -466,7 +459,18 @@ fn open_task_deck(state: &mut AppState, sequence: u64) {
     }
 }
 
-fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPlanScope) {
+/// The page's one toolbar row: the history scope, and one line saying what
+/// the scope holds and where it ran.
+///
+/// Four 68 pt tiles stood under this row -- selected run, execution, target,
+/// evidence -- and every one of them restated the selected row of the table
+/// below, or the manifest card beside it.
+fn render_plan_scope(
+    ui: &mut Ui,
+    current: JobsPlanScope,
+    requested: &mut JobsPlanScope,
+    snapshot: &JobsSnapshot,
+) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE
         .fill(t.color.bg_panel)
@@ -486,8 +490,28 @@ fn render_plan_scope(ui: &mut Ui, current: JobsPlanScope, requested: &mut JobsPl
                         *requested = scope;
                     }
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(jobs_summary_line(snapshot))
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    );
+                });
             });
         });
+}
+
+/// What this scope holds, and the runtime it runs on.
+fn jobs_summary_line(snapshot: &JobsSnapshot) -> String {
+    if snapshot.rows.is_empty() {
+        return "No runs \u{00b7} run the active plan to create one".to_owned();
+    }
+    format!(
+        "{} run{} \u{00b7} {}",
+        snapshot.rows.len(),
+        if snapshot.rows.len() == 1 { "" } else { "s" },
+        snapshot.current_target.label()
+    )
 }
 
 fn close_to_source(state: &mut AppState) {
@@ -506,123 +530,6 @@ fn close_to_source(state: &mut AppState) {
         state.push_user_message(ConsoleMessage::warning(format!(
             "Could not close Jobs, targets & run history: {error}"
         )));
-    }
-}
-
-fn render_status_strip(ui: &mut Ui, snapshot: &JobsSnapshot) {
-    let t = Tokens::get(ui.ctx());
-    let selected = snapshot.selected();
-    let entries = [
-        (
-            "Selected run",
-            selected
-                .map(|row| format!("Run {}", row.sequence))
-                .unwrap_or_else(|| "No retained run".to_owned()),
-            selected
-                .map(|row| format!("{} tasks", row.task_count))
-                .unwrap_or_else(|| "Run the active plan to create one".to_owned()),
-            None,
-        ),
-        (
-            "Execution",
-            selected
-                .map(|row| row.status.clone())
-                .unwrap_or_else(|| "Idle".to_owned()),
-            selected
-                .map(|row| row.elapsed.clone())
-                .unwrap_or_else(|| "No active engine job".to_owned()),
-            // The one tile that may carry a mark: the run failed or stopped
-            // short. Every value is neutral text.
-            selected.and_then(|row| row.tone.problem()),
-        ),
-        (
-            "Target",
-            selected
-                .map(|row| row.target.clone())
-                .unwrap_or_else(|| snapshot.current_target.label().to_owned()),
-            selected
-                .map(|_| "Retained with selected run".to_owned())
-                .unwrap_or_else(|| format!("{} runtime", snapshot.current_target.runtime())),
-            None,
-        ),
-        (
-            "Evidence",
-            selected
-                .map(|row| row.evidence.clone())
-                .unwrap_or_else(|| "No run evidence".to_owned()),
-            selected
-                .map(|row| format!("source {}", row.source_revision))
-                .unwrap_or_else(|| "Nothing selected".to_owned()),
-            None,
-        ),
-    ];
-    let width = ui.available_width().max(1.0);
-    let columns = jobs_status_columns(width);
-    let cell_width = width / columns as f32;
-    for row in entries.chunks(columns) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
-            for (index, (label, value, detail, problem)) in row.iter().enumerate() {
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(cell_width, 68.0), Sense::hover());
-                let announced = format!("{label}: {value}. {detail}");
-                response.widget_info(|| {
-                    WidgetInfo::labeled(
-                        WidgetType::Label,
-                        true,
-                        problem.map_or_else(
-                            || announced.clone(),
-                            |problem| problem.announce(&announced),
-                        ),
-                    )
-                });
-                ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
-                let content = rect.shrink2(vec2(12.0, 0.0));
-                let painter = ui.painter().with_clip_rect(content);
-                painter.text(
-                    pos2(content.left(), rect.top() + 9.0),
-                    Align2::LEFT_TOP,
-                    *label,
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.text_dim,
-                );
-                let mut value_left = content.left();
-                if let Some(problem) = problem {
-                    paint_problem_mark(
-                        &painter,
-                        Rect::from_min_size(pos2(value_left, rect.top() + 32.0), vec2(11.0, 11.0)),
-                        *problem,
-                    );
-                    value_left += 17.0;
-                }
-                painter.text(
-                    pos2(value_left, rect.top() + 28.0),
-                    Align2::LEFT_TOP,
-                    value,
-                    theme::mono(17.0, FontWeight::Medium),
-                    t.color.text,
-                );
-                painter.text(
-                    pos2(content.left(), rect.top() + 50.0),
-                    Align2::LEFT_TOP,
-                    detail,
-                    theme::sans(tokens::FS_0, FontWeight::Regular),
-                    t.color.text_faint,
-                );
-                if index + 1 < row.len() {
-                    ui.painter().vline(
-                        rect.right(),
-                        rect.y_range(),
-                        Stroke::new(1.0, t.color.border),
-                    );
-                }
-            }
-        });
-        ui.painter().hline(
-            egui::Rangef::new(ui.min_rect().left(), ui.min_rect().left() + width),
-            ui.cursor().top(),
-            Stroke::new(1.0, t.color.border_strong),
-        );
     }
 }
 
@@ -645,10 +552,6 @@ fn campaign_summary(campaign: &CampaignRollup) -> (String, bool) {
         summary.push_str(&format!(" · {missing} not in history"));
     }
     (summary, campaign.failed_members > 0)
-}
-
-fn jobs_status_columns(width: f32) -> usize {
-    if width <= 820.0 { 2 } else { 4 }
 }
 
 fn batch_progress(tasks: &[TaskRow]) -> f32 {
@@ -843,16 +746,9 @@ fn render_inspector(
             });
             crate::workbench::design_system::property_card(ui, "Selected run manifest", |ui| {
                 if let Some(row) = snapshot.selected() {
-                    crate::workbench::design_system::property_row(
-                        ui,
-                        "Job ID",
-                        row.job_id.as_deref().unwrap_or("Not retained (legacy run)"),
-                    );
-                    crate::workbench::design_system::property_row(
-                        ui,
-                        "Stable run ID",
-                        &row.run_id.to_string(),
-                    );
+                    // The job, run and run-set identifiers were three UUIDs
+                    // in a row, and the campaign's was a fourth. A reader
+                    // addresses a run by its sequence, which the table does.
                     crate::workbench::design_system::property_row(
                         ui,
                         "Input revision",
@@ -863,11 +759,6 @@ fn render_inspector(
                         "Analyses",
                         &row.analysis_count.to_string(),
                     );
-                    crate::workbench::design_system::property_row(
-                        ui,
-                        "Run-set ID",
-                        &row.run_set_id,
-                    );
                     if let Some(campaign) = &row.campaign {
                         crate::workbench::design_system::property_row(
                             ui,
@@ -877,12 +768,7 @@ fn render_inspector(
                         crate::workbench::design_system::property_row(
                             ui,
                             "Campaign member",
-                            &format!(
-                                "{} / {} · {}",
-                                campaign.member_index(),
-                                campaign.member_count(),
-                                campaign.campaign_id()
-                            ),
+                            &format!("{} / {}", campaign.member_index(), campaign.member_count()),
                         );
                     }
                     crate::workbench::design_system::property_row(
@@ -928,7 +814,7 @@ fn render_inspector(
                         if deck
                             .on_hover_text(format!(
                                 "Opens the exact source Run {} handed its first task, as a \
-                                 read-only document sealed with the run. This run holds {} of \
+                                 read-only document kept with the run. This run holds {} of \
                                  them.",
                                 row.sequence, row.executed_deck_points
                             ))
@@ -1314,7 +1200,7 @@ fn run_authority_rows(
     executor_owned: bool,
     run_progress: f32,
     run_plan: Option<&crate::simulation::plan::SimulationPlan>,
-) -> (String, String, String, String, Vec<TaskRow>) {
+) -> (String, String, Vec<TaskRow>) {
     match run.provenance() {
         Some(SimulationRunProvenance::Prepared(receipt)) => {
             let completed = run.analyses.len();
@@ -1372,34 +1258,23 @@ fn run_authority_rows(
             .to_owned();
             (
                 scope,
-                "Prepared receipt valid".to_owned(),
                 receipt.project_revision().get().to_string(),
-                receipt
-                    .simulation_plan_id()
-                    .map(|id| id.to_string())
-                    .unwrap_or_else(|| "manual-deck".to_owned()),
                 tasks,
             )
         }
         Some(SimulationRunProvenance::LegacyUnattributed) => (
             "Legacy retained run".to_owned(),
-            "Legacy · no prepared receipt".to_owned(),
             "not retained".to_owned(),
-            "legacy".to_owned(),
             legacy_task_rows(run),
         ),
         Some(SimulationRunProvenance::LegacyPreparedUnclassified) => (
             "Legacy prepared run".to_owned(),
-            "Legacy · source domain unknown".to_owned(),
             "not retained".to_owned(),
-            "legacy-prepared".to_owned(),
             legacy_task_rows(run),
         ),
         None => (
             "Transient run preparation".to_owned(),
-            "Unsealed runtime state".to_owned(),
-            "not sealed".to_owned(),
-            "unsealed".to_owned(),
+            "not recorded".to_owned(),
             legacy_task_rows(run),
         ),
     }
@@ -1909,11 +1784,36 @@ mod tests {
         assert_eq!(value["manifest"]["lifecycle"], "running");
     }
 
+    /// The toolbar row says what the scope holds, and nothing the table
+    /// below it says again.
     #[test]
-    fn status_strip_uses_the_mockup_four_to_two_column_breakpoint() {
-        assert_eq!(jobs_status_columns(1_120.0), 4);
-        assert_eq!(jobs_status_columns(820.0), 2);
-        assert_eq!(jobs_status_columns(390.0), 2);
+    fn the_toolbar_line_counts_the_runs_in_scope() {
+        let mut snapshot = JobsSnapshot {
+            rows: Vec::new(),
+            campaigns: Vec::new(),
+            selected_run_id: None,
+            running: false,
+            cancelling: false,
+            current_target: ExecutionTarget::LocalDesktop,
+        };
+        assert_eq!(
+            jobs_summary_line(&snapshot),
+            format!("No runs \u{00b7} run the active plan to create one")
+        );
+
+        let state = AppState::default();
+        snapshot = JobsSnapshot::capture(&state, None, JobsPlanScope::AllPlans);
+        let expected = format!(
+            "{} run{} \u{00b7} {}",
+            snapshot.rows.len(),
+            if snapshot.rows.len() == 1 { "" } else { "s" },
+            snapshot.current_target.label()
+        );
+        if snapshot.rows.is_empty() {
+            assert!(jobs_summary_line(&snapshot).starts_with("No runs"));
+        } else {
+            assert_eq!(jobs_summary_line(&snapshot), expected);
+        }
     }
 
     #[test]
