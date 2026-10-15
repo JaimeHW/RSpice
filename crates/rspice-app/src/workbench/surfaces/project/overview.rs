@@ -859,15 +859,16 @@ fn overview_body(
     }
 }
 
-/// A bordered dashboard card: title bar, toned meta, content-sized body.
+/// A bordered dashboard card: title bar, one fact about its contents,
+/// content-sized body. The rows inside carry the marks on this page, so no
+/// card head takes one.
 fn overview_card(
     ui: &mut Ui,
     title: &str,
     meta: &str,
-    meta_color: Color32,
     body: impl FnOnce(&mut Ui) -> Option<OverviewIntent>,
 ) -> Option<OverviewIntent> {
-    page::card(ui, title, meta, meta_color, body)
+    page::card(ui, title, meta, None, body)
 }
 
 /// Summarise the status register beside the project name.
@@ -1117,8 +1118,7 @@ fn import_deck_intent() -> OverviewIntent {
 
 /// The bindings the next run executes against, stated as a property ledger.
 fn context_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
-    let tokens = Tokens::get(ui.ctx());
-    overview_card(ui, "Execution context", "", tokens.color.text_faint, |ui| {
+    overview_card(ui, "Execution context", "", |ui| {
         if snapshot.netlist_first {
             let deck = snapshot.source_deck.as_ref();
             property_row(
@@ -1225,7 +1225,6 @@ fn status_card(
     statuses: &[StatusSnapshot],
     problem: Option<&ProblemSnapshot>,
 ) -> Option<OverviewIntent> {
-    let tokens = Tokens::get(ui.ctx());
     let status_tone = if statuses.iter().any(|status| status.tone == Tone::Error) {
         Tone::Error
     } else if statuses.iter().any(|status| status.tone == Tone::Warn) {
@@ -1243,7 +1242,6 @@ fn status_card(
             Tone::Warn => "review required",
             Tone::Neutral => "",
         },
-        tokens.color.text_faint,
         |ui| status_rows(ui, statuses, problem),
     )
 }
@@ -1402,7 +1400,6 @@ fn design_card(
     app: &RSpiceApp,
     snapshot: &OverviewSnapshot,
 ) -> Option<OverviewIntent> {
-    let tokens = Tokens::get(ui.ctx());
     let objects = design_objects(snapshot);
     let meta = if snapshot.netlist_first {
         format!(
@@ -1419,9 +1416,7 @@ fn design_card(
             singular_or_plural(snapshot.cell_count, "cell", "cells")
         )
     };
-    overview_card(ui, "Design", &meta, tokens.color.text_faint, |ui| {
-        design_register(ui, app, &objects)
-    })
+    overview_card(ui, "Design", &meta, |ui| design_register(ui, app, &objects))
 }
 
 fn design_register(
@@ -1816,12 +1811,10 @@ fn operations_meta(shown: usize, total: usize) -> String {
 }
 
 fn operations_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewIntent> {
-    let tokens = Tokens::get(ui.ctx());
     overview_card(
         ui,
         "Recent operations",
         &operations_meta(snapshot.operations.len(), snapshot.operation_total),
-        tokens.color.text_faint,
         |ui| operations_register(ui, snapshot),
     )
 }

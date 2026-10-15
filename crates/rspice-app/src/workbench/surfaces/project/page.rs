@@ -11,6 +11,7 @@ use egui::{
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Problem, paint_problem_mark};
 use crate::workbench::design_system::centered_content_rect;
 
 use super::visible_workspace_width;
@@ -138,12 +139,17 @@ pub(super) fn columns(
     );
 }
 
-/// A bordered card: title bar, toned meta, content-sized body.
+/// A bordered card: title bar, one fact about its contents, content-sized
+/// body.
+///
+/// The fact is never a verdict in a verdict's colour. A card the reader has
+/// to look at carries the kit's mark in front of it, which owns the only
+/// colour on the row.
 pub(super) fn card<R>(
     ui: &mut Ui,
     title: &str,
     meta: &str,
-    meta_color: Color32,
+    problem: Option<Problem>,
     body: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let tokens = Tokens::get(ui.ctx());
@@ -160,7 +166,7 @@ pub(super) fn card<R>(
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.set_width(width);
-            card_title_row(ui, title, meta, meta_color);
+            card_title_row(ui, title, meta, problem);
             output = Some(body(ui));
             ui.add_space(9.0);
         });
@@ -171,7 +177,7 @@ pub(super) fn card<R>(
     output.expect("the card body runs exactly once")
 }
 
-fn card_title_row(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
+fn card_title_row(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {
     let tokens = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let (rect, response) = ui.allocate_exact_size(vec2(width, CARD_HEADER_HEIGHT), Sense::hover());
@@ -200,20 +206,34 @@ fn card_title_row(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
         .layout_no_wrap(meta.clone(), meta_font.clone(), Color32::WHITE)
         .size()
         .x;
-    ui.painter().text(
-        pos2(rect.right() - 10.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        &meta,
-        meta_font,
-        meta_color,
-    );
+    let meta_left = ui
+        .painter()
+        .text(
+            pos2(rect.right() - 10.0, rect.center().y),
+            Align2::RIGHT_CENTER,
+            &meta,
+            meta_font,
+            tokens.color.text_faint,
+        )
+        .left();
+    let mark_advance = if problem.is_some() { MARK_ADVANCE } else { 0.0 };
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(meta_left - 6.0 - MARK_SIDE * 0.5, rect.center().y),
+                vec2(MARK_SIDE, MARK_SIDE),
+            ),
+            problem,
+        );
+    }
     paint_elided(
         ui,
         pos2(rect.left() + 10.0, rect.center().y - tokens::FS_0 * 0.5),
         title,
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         tokens.color.text_dim,
-        (width - meta_width - 28.0).max(1.0),
+        (width - meta_width - mark_advance - 28.0).max(1.0),
     );
     response.widget_info(|| {
         let label = if meta.is_empty() {
@@ -221,9 +241,15 @@ fn card_title_row(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
         } else {
             format!("{title}: {meta}")
         };
+        let label = problem.map_or(label.clone(), |problem| problem.announce(&label));
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label)
     });
 }
+
+/// Side of a problem mark set in front of a card's meta, and the advance from
+/// its left edge to the text after it: the kit's own values.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
 
 pub(super) fn paint_elided(
     ui: &Ui,

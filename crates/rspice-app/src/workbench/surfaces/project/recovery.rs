@@ -8,7 +8,7 @@
 use super::page::{self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, paint_elided};
 use super::*;
 use crate::workbench::app_state::AppState;
-use crate::workbench::design_system::{property_row_path, property_row_toned};
+use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
     MAX_RETAINED_CHECKPOINTS, ProjectCheckpointSummary,
 };
@@ -22,6 +22,10 @@ pub(super) const CHECKPOINT_ROW_HEIGHT: f32 = 52.0;
 /// Below this card width a row's actions move under its text.
 const CHECKPOINT_ROW_STACK_WIDTH: f32 = 460.0;
 const ROW_INSET: f32 = 12.0;
+/// Side of a problem mark set in front of a line on this page, and the
+/// advance from its left edge to the text after it: the kit's own values.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
 
 #[cfg(target_arch = "wasm32")]
 struct BrowserManualCheckpointCompletion {
@@ -81,24 +85,24 @@ impl RecoverySnapshot {
         }
     }
 
-    /// The page's one-word state beside its title, and its tone.
-    fn status(&self, tokens: &Tokens) -> (String, Color32) {
+    /// The page's one-word state beside its title, and the mark it earns.
+    ///
+    /// Counting the checkpoints is the fact; calling them verified was the
+    /// page reporting that nothing had gone wrong, in green.
+    fn status(&self) -> (String, Option<Problem>) {
         if self.error.is_some() {
-            ("unreadable".to_owned(), tokens.color.err)
+            ("unreadable".to_owned(), Some(Problem::Failure))
         } else if self.loading {
-            ("loading".to_owned(), tokens.color.text_faint)
+            ("loading".to_owned(), None)
         } else if !self.set_aside.is_empty() {
             (
                 format!("{} set aside", self.set_aside.len()),
-                tokens.color.warn,
+                Some(Problem::Warning),
             )
         } else if self.checkpoints.is_empty() {
-            ("no checkpoints".to_owned(), tokens.color.text_faint)
+            ("no checkpoints".to_owned(), None)
         } else {
-            (
-                format!("{} verified", self.checkpoints.len()),
-                tokens.color.ok,
-            )
+            (format!("{} checkpoints", self.checkpoints.len()), None)
         }
     }
 }
@@ -204,7 +208,7 @@ fn recovery_header(
     let tokens = Tokens::get(ui.ctx());
     ui.add_space(HEADER_TOP);
     let intent = page::inset_column(ui, inset, content_width, |ui| {
-        let (status, status_color) = snapshot.status(&tokens);
+        let (status, problem) = snapshot.status();
         let (title_rect, title_response) =
             ui.allocate_exact_size(vec2(content_width, 27.0), Sense::hover());
         let title = ui.painter().text(
@@ -214,20 +218,33 @@ fn recovery_header(
             theme::sans(20.0, FontWeight::SemiBold),
             tokens.color.text,
         );
+        let status_left = title.right() + 12.0;
+        let text_left = if let Some(problem) = problem {
+            paint_problem_mark(
+                ui.painter(),
+                Rect::from_center_size(
+                    pos2(status_left + MARK_SIDE * 0.5, title_rect.center().y + 2.0),
+                    vec2(MARK_SIDE, MARK_SIDE),
+                ),
+                problem,
+            );
+            status_left + MARK_ADVANCE
+        } else {
+            status_left
+        };
         ui.painter().text(
-            pos2(title.right() + 12.0, title_rect.center().y + 2.0),
+            pos2(text_left, title_rect.center().y + 2.0),
             Align2::LEFT_CENTER,
             &status,
             theme::mono(tokens::FS_0, FontWeight::Medium),
-            status_color,
+            tokens.color.text_dim,
         );
-        title_response.widget_info(|| {
-            WidgetInfo::labeled(
-                WidgetType::Label,
-                ui.is_enabled(),
-                format!("Recovery · {status}"),
-            )
-        });
+        let announcement = problem.map_or_else(
+            || format!("Recovery · {status}"),
+            |problem| problem.announce(&format!("Recovery · {status}")),
+        );
+        title_response
+            .widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), &announcement));
 
         ui.add_space(3.0);
         text_block(ui, RECOVERY_NOTE, body_font(), tokens.color.text_dim);
@@ -258,7 +275,6 @@ fn recovery_header(
 }
 
 fn checkpoints_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<RecoveryIntent> {
-    let tokens = Tokens::get(ui.ctx());
     let meta = if snapshot.checkpoints.is_empty() {
         String::new()
     } else {
@@ -267,7 +283,7 @@ fn checkpoints_card(ui: &mut Ui, snapshot: &RecoverySnapshot) -> Option<Recovery
             snapshot.checkpoints.len()
         )
     };
-    page::card(ui, "Checkpoints", &meta, tokens.color.text_faint, |ui| {
+    page::card(ui, "Checkpoints", &meta, None, |ui| {
         if let Some(error) = &snapshot.error {
             return catalog_error(ui, error);
         }
@@ -330,6 +346,39 @@ fn body_font() -> egui::FontId {
     theme::sans(tokens::FS_1, FontWeight::Regular)
 }
 
+/// A card's title with the kit's mark in front of it, for the one card whose
+/// whole body is the problem. The mark carries the severity; the words stay
+/// in the page's ordinary title tone.
+fn marked_title(ui: &mut Ui, problem: Problem, text: &str) {
+    let tokens = Tokens::get(ui.ctx());
+    let font = title_font();
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text.to_owned(), font, tokens.color.text);
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            (galley.size().x + MARK_ADVANCE).min(ui.available_width().max(1.0)),
+            galley.size().y.max(MARK_SIDE),
+        ),
+        Sense::hover(),
+    );
+    let announcement = problem.announce(text);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), &announcement));
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            pos2(rect.left() + MARK_SIDE * 0.5, rect.center().y),
+            vec2(MARK_SIDE, MARK_SIDE),
+        ),
+        problem,
+    );
+    ui.painter().galley(
+        pos2(rect.left() + MARK_ADVANCE, rect.top()),
+        galley,
+        tokens.color.text,
+    );
+}
+
 /// Wrapped copy, painted as text rather than laid out as a selectable label.
 fn text_block(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) {
     let galley = ui
@@ -345,12 +394,7 @@ fn catalog_error(ui: &mut Ui, error: &str) -> Option<RecoveryIntent> {
     ui.add_space(14.0);
     let width = ui.available_width() - 2.0 * (ROW_INSET + 2.0);
     let reload = page::inset_column(ui, ROW_INSET + 2.0, width, |ui| {
-        text_block(
-            ui,
-            "Checkpoints could not be read",
-            title_font(),
-            tokens.color.err,
-        );
+        marked_title(ui, Problem::Failure, "Checkpoints could not be read");
         ui.add_space(4.0);
         text_block(
             ui,
@@ -524,8 +568,7 @@ fn checkpoint_row(
 
 /// Where checkpoints live and the rules they are kept under.
 fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
-    let tokens = Tokens::get(ui.ctx());
-    page::card(ui, "Storage", "", tokens.color.text_faint, |ui| {
+    page::card(ui, "Storage", "", None, |ui| {
         ui.add_space(3.0);
         property_row_path(ui, "Location", &snapshot.location);
         property_row(
@@ -537,19 +580,19 @@ fn storage_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
         // `ProjectCheckpointReason::TechnologyAttachment` is the one
         // checkpoint RSpice takes on its own.
         property_row(ui, "Taken automatically", "Before technology changes");
-        let (integrity, tone) = if snapshot.error.is_some() {
-            ("Not checked".to_owned(), tokens.color.err)
+        // Integrity is a row only when it is not in order. "All checkpoints
+        // verified" and "Nothing to check" were the card reporting that
+        // nothing had gone wrong, which is what the absence of the row says.
+        if snapshot.error.is_some() {
+            property_row_problem(ui, "Integrity", "Not checked", Some(Problem::Failure));
         } else if !snapshot.set_aside.is_empty() {
-            (
-                format!("{} damaged, set aside", snapshot.set_aside.len()),
-                tokens.color.warn,
-            )
-        } else if snapshot.checkpoints.is_empty() {
-            ("Nothing to check".to_owned(), tokens.color.text_dim)
-        } else {
-            ("All checkpoints verified".to_owned(), tokens.color.ok)
-        };
-        property_row_toned(ui, "Integrity", &integrity, tone);
+            property_row_problem(
+                ui,
+                "Integrity",
+                &format!("{} damaged, set aside", snapshot.set_aside.len()),
+                Some(Problem::Warning),
+            );
+        }
     });
 }
 
@@ -565,7 +608,7 @@ fn set_aside_card(ui: &mut Ui, snapshot: &RecoverySnapshot) {
         ui,
         "Set aside",
         &snapshot.set_aside.len().to_string(),
-        tokens.color.warn,
+        Some(Problem::Warning),
         |ui| {
             ui.add_space(10.0);
             let width = ui.available_width() - 2.0 * ROW_INSET;

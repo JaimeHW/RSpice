@@ -1301,7 +1301,7 @@ mod tests {
             let text = painted_project_page(size, |ui| show(ui, &mut app));
             for expected in [
                 "Recovery",
-                "3 verified",
+                "3 checkpoints",
                 "Create checkpoint",
                 "Revision history\u{2026}",
                 "Checkpoints",
@@ -1313,7 +1313,6 @@ mod tests {
                 "Restore\u{2026}",
                 "Storage",
                 "The newest 8 checkpoints",
-                "All checkpoints verified",
             ] {
                 assert!(
                     text.contains(expected),
@@ -1330,6 +1329,11 @@ mod tests {
                 "governed mutations",
                 "never overwritten",
                 "Working state",
+                // A catalog that reads back whole says nothing: neither the
+                // page's state beside its title nor the Storage card reports
+                // that nothing has gone wrong.
+                "3 verified",
+                "Integrity",
             ] {
                 assert!(
                     !text.contains(retired),
@@ -1413,13 +1417,16 @@ mod tests {
         let size = egui::vec2(1440.0, 900.0);
         let mut empty = recovery_project_app(0, false, false);
         let text = painted_project_page(size, |ui| show(ui, &mut empty));
-        for expected in ["no checkpoints", "No checkpoints yet", "Nothing to check"] {
+        for expected in ["no checkpoints", "No checkpoints yet"] {
             assert!(text.contains(expected), "{expected:?} missing:\n{text}");
         }
         assert!(
             !text.contains("KEPT"),
             "an empty catalog counts nothing:\n{text}"
         );
+        // An empty store has nothing to verify, which it says by having no
+        // Integrity row rather than by printing "Nothing to check".
+        assert!(!text.contains("Integrity"), "{text}");
 
         let mut damaged = recovery_project_app(2, true, false);
         let text = painted_project_page(size, |ui| show(ui, &mut damaged));
