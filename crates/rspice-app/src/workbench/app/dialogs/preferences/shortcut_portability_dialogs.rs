@@ -26,7 +26,7 @@ use crate::workbench::shortcuts::artifacts::{
     prepare_shortcut_artifact, shortcut_library_digest,
 };
 
-use super::preferences_shell::{preference_switch, right_aligned};
+use super::preferences_shell::{control_width, preference_switch, value_column};
 
 pub(crate) const IMPORT_TITLE: &str = "Import keyboard shortcut map";
 pub(crate) const IMPORT_PRIMARY: &str = "Import compatible bindings";
@@ -679,7 +679,7 @@ fn render_import_body(
         "Source",
         "RSpice shortcut profile or supported editor preset.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 source_well(
                     ui,
                     state
@@ -698,7 +698,7 @@ fn render_import_body(
         "Merge policy",
         "Protected accessibility and operating-system bindings remain explicit.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let labels = MERGE_POLICIES
                     .iter()
                     .map(|policy| policy.label().to_owned())
@@ -711,7 +711,7 @@ fn render_import_body(
                             "Merge policy",
                             state.options.merge_policy.label(),
                             &labels,
-                            ui.available_width().min(360.0),
+                            control_width(ui),
                         )
                     })
                     .inner;
@@ -729,8 +729,8 @@ fn render_import_body(
             "Preset name",
             "Create a named profile without changing the active shortcut map.",
             |ui| {
-                right_aligned(ui, |ui| {
-                    let width = ui.available_width().min(360.0);
+                value_column(ui, |ui| {
+                    let width = control_width(ui);
                     let height = Tokens::get(ui.ctx()).metrics.ctl_h;
                     let response = if controls_enabled {
                         ui.add_enabled_ui(true, |ui| {
@@ -796,7 +796,7 @@ fn render_import_body(
     render_import_summary(ui, state.plan.as_ref(), state.options.conflict_policy);
 
     workflow_row(ui, "Conflict handling", "", |ui| {
-        right_aligned(ui, |ui| {
+        value_column(ui, |ui| {
             let labels = CONFLICT_POLICIES
                 .iter()
                 .map(|policy| policy.label().to_owned())
@@ -809,7 +809,7 @@ fn render_import_body(
                         "Conflict handling",
                         state.options.conflict_policy.label(),
                         &labels,
-                        ui.available_width().min(360.0),
+                        control_width(ui),
                     )
                 })
                 .inner;
@@ -1149,7 +1149,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
         "Format",
         "Versioned schema with stable command identifiers.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let labels = ShortcutArtifactFormat::ALL
                     .iter()
                     .map(|format| export_format_label(*format).to_owned())
@@ -1162,7 +1162,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
                             "Format",
                             export_format_label(state.format),
                             &labels,
-                            ui.available_width().min(360.0),
+                            control_width(ui),
                         )
                     })
                     .inner;
@@ -1179,7 +1179,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
         "Scope",
         "Defaults can be omitted for a smaller personal override.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let labels = EXPORT_SCOPES
                     .iter()
                     .map(|scope| export_scope_label(*scope).to_owned())
@@ -1192,7 +1192,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
                             "Scope",
                             export_scope_label(state.scope),
                             &labels,
-                            ui.available_width().min(360.0),
+                            control_width(ui),
                         )
                     })
                     .inner;
@@ -1209,7 +1209,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
         "Platform mappings",
         "Preserve explicit desktop and browser alternatives.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let changed = ui
                     .add_enabled_ui(controls_enabled, |ui| {
                         preference_switch(
@@ -1232,7 +1232,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
         "Privacy",
         "Projects, paths, recent commands, macros, credentials, and automation source are excluded.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let t = Tokens::get(ui.ctx());
                 ui.label(
                     egui::RichText::new("portable profile only")
@@ -1333,7 +1333,7 @@ fn workflow_row_copy(ui: &mut Ui, title: &str, help: &str) {
 
 fn source_well(ui: &mut Ui, value: Option<&str>, enabled: bool) -> bool {
     let t = Tokens::get(ui.ctx());
-    let width = ui.available_width().min(360.0);
+    let width = control_width(ui);
     let mut display = value.unwrap_or_default().to_owned();
     let field = ui
         .add_enabled_ui(enabled, |ui| {

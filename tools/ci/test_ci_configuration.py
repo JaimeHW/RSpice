@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import json
 import re
@@ -684,6 +685,52 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertLess(job.index("Generate production browser UI bindings"), job.index("Report browser UI image size"))
         self.assertLess(job.index("Generate production browser worker bindings"), job.index("Report browser worker image size"))
         self.assertLess(job.index("Report browser UI image size"), job.index("Build instrumented browser workbench"))
+
+    def test_headless_chrome_profiles_survive_a_cleanup_race(self) -> None:
+        """Deleting a scratch profile does not get to decide a browser check.
+
+        Chromium's children outlive the process the harness terminates, and a
+        late write into the profile makes its removal fail with ENOTEMPTY. That
+        failed the Monte Carlo checkpoint on a run whose worker had already
+        returned a passing verdict, and took the whole browser job with it.
+        """
+        scanned, offenders = [], []
+        for path in sorted((ROOT / "tools" / "ci").glob("*.py")):
+            # Suites name the flag to talk about it; only harnesses pass it.
+            if path.name.startswith("test_"):
+                continue
+            source = path.read_text(encoding="utf-8")
+            if "--user-data-dir" not in source:
+                continue
+            scanned.append(path.name)
+            for node in ast.walk(ast.parse(source)):
+                if not isinstance(node, ast.Call):
+                    continue
+                if ast.unparse(node.func) != "tempfile.TemporaryDirectory":
+                    continue
+                if not any(
+                    keyword.arg == "ignore_cleanup_errors"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in node.keywords
+                ):
+                    offenders.append(f"{path.name}:{node.lineno}")
+
+        self.assertLessEqual(
+            {
+                "browser_workbench.py",
+                "check_browser_monte_carlo_checkpoint.py",
+                "check_wasm_jit_browser.py",
+            },
+            set(scanned),
+            "a headless-Chrome harness was renamed; this guard no longer reads it",
+        )
+        self.assertEqual(
+            [],
+            offenders,
+            "a temporary directory handed to Chromium as --user-data-dir must be "
+            "built with ignore_cleanup_errors=True",
+        )
 
     def test_format_gate_covers_every_hand_written_workspace_member(self) -> None:
         """rustfmt runs over the workspace as the manifest defines it.

@@ -75,7 +75,13 @@ def main():
     query = urllib.parse.urlencode({"worker": "/" + worker.as_posix()})
     url = f"http://127.0.0.1:{server.server_port}/mc-checkpoint.html?{query}"
     try:
-        with tempfile.TemporaryDirectory(prefix="rspice-mc-browser-") as profile:
+        # Chromium's children outlive the process we terminate, and one of them
+        # can write the profile back while it is being deleted. The verdict comes
+        # from the worker, never from this scratch directory, so a cleanup that
+        # loses that race must not decide the check.
+        with tempfile.TemporaryDirectory(
+            prefix="rspice-mc-browser-", ignore_cleanup_errors=True
+        ) as profile:
             browser = subprocess.Popen(
                 [find_chromium(), "--headless=new", "--disable-gpu",
                  "--disable-background-networking", "--disable-extensions",

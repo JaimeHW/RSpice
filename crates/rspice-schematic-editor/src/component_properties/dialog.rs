@@ -92,17 +92,17 @@ pub fn render_component_property_dialog(
     let mut side_action = ComponentPropertyDialogResult::None;
     let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
         component_identity_header(ui, draft, component_name, context);
-        let body_height = ui.available_height().max(1.0);
         ui.painter().rect_filled(
             ui.available_rect_before_wrap(),
             0.0,
             Tokens::get(ui.ctx()).color.bg_panel,
         );
         let wide = ctx.content_rect().width() > 760.0;
-        let mut first_parameter = None;
+        let first_parameter;
         // With nothing to show beside them, the parameters take the whole body
         // rather than leaving a pane that holds a divider and no content.
         if !has_evidence(draft, context, show_source_preview) {
+            clip_to_pane(ui);
             first_parameter = render_component_parameters(
                 ui,
                 draft,
@@ -113,80 +113,57 @@ pub fn render_component_property_dialog(
                 &mut |request, draft| services.browse(request, draft),
             );
         } else if wide {
-            // One surface, so no rule between the halves: the parameters and
-            // what is beside them are one editor over one instance, and the
-            // bands already say where each section starts.
-            let gap = 1.0;
-            let left_width = ((ui.available_width() - gap) * (1.1 / 2.1)).max(300.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.allocate_ui_with_layout(
-                    vec2(left_width, body_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        first_parameter = render_component_parameters(
-                            ui,
-                            draft,
-                            sheet,
-                            advisories,
-                            quantity_policy,
-                            number_locale,
-                            &mut |request, draft| services.browse(request, draft),
-                        );
-                    },
-                );
-                ui.add_space(gap);
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), body_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        evidence_pane(
-                            ui,
-                            draft,
-                            context,
-                            show_source_preview,
-                            services,
-                            &mut side_action,
-                        )
-                    },
-                );
-            });
+            let (left, divider, right) = split_across(ui.available_rect_before_wrap());
+            let mut pane = ui.new_child(pane_builder(left));
+            clip_to_pane(&mut pane);
+            first_parameter = render_component_parameters(
+                &mut pane,
+                draft,
+                sheet,
+                advisories,
+                quantity_policy,
+                number_locale,
+                &mut |request, draft| services.browse(request, draft),
+            );
+            ui.painter()
+                .rect_filled(divider, 0.0, Tokens::get(ui.ctx()).color.border);
+            let mut pane = ui.new_child(pane_builder(right));
+            clip_to_pane(&mut pane);
+            evidence_pane(
+                &mut pane,
+                draft,
+                context,
+                show_source_preview,
+                services,
+                &mut side_action,
+            );
+            ui.advance_cursor_after_rect(ui.available_rect_before_wrap());
         } else {
-            let gap = 1.0;
-            let parameters_height = ((body_height - gap) * 0.56).max(1.0);
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), parameters_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        first_parameter = render_component_parameters(
-                            ui,
-                            draft,
-                            sheet,
-                            advisories,
-                            quantity_policy,
-                            number_locale,
-                            &mut |request, draft| services.browse(request, draft),
-                        );
-                    },
-                );
-                ui.add_space(gap);
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), ui.available_height()),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        evidence_pane(
-                            ui,
-                            draft,
-                            context,
-                            show_source_preview,
-                            services,
-                            &mut side_action,
-                        )
-                    },
-                );
-            });
+            let (top, divider, bottom) = split_down(ui.available_rect_before_wrap());
+            let mut pane = ui.new_child(pane_builder(top));
+            clip_to_pane(&mut pane);
+            first_parameter = render_component_parameters(
+                &mut pane,
+                draft,
+                sheet,
+                advisories,
+                quantity_policy,
+                number_locale,
+                &mut |request, draft| services.browse(request, draft),
+            );
+            ui.painter()
+                .rect_filled(divider, 0.0, Tokens::get(ui.ctx()).color.border);
+            let mut pane = ui.new_child(pane_builder(bottom));
+            clip_to_pane(&mut pane);
+            evidence_pane(
+                &mut pane,
+                draft,
+                context,
+                show_source_preview,
+                services,
+                &mut side_action,
+            );
+            ui.advance_cursor_after_rect(ui.available_rect_before_wrap());
         }
         first_parameter
     });
@@ -220,6 +197,68 @@ pub fn render_component_property_dialog(
     }
 
     result
+}
+
+/// The rule between two panes, and the only space between them.
+const PANE_RULE: f32 = 1.0;
+
+/// How much of a side-by-side body the parameters take.
+const PARAMETERS_SHARE: f32 = 1.1 / 2.1;
+
+/// The narrowest the parameters pane is allowed to get beside the evidence.
+const PARAMETERS_MINIMUM: f32 = 300.0;
+
+/// How much of a stacked body the parameters take.
+const STACKED_PARAMETERS_SHARE: f32 = 0.56;
+
+/// A body split into two panes and the rule between them.
+///
+/// Worked out from the body rather than laid out one pane after the other,
+/// because a pane is a scroll area and a scroll area does not occupy the rect
+/// it is given: with its bar visible it reports an outer rect of the content
+/// *plus* the bar, so the pane after it starts that much further along. The
+/// amount converges over the first frames as the bar settles, so the rule and
+/// the second pane moved on every one of them, and the first pane's section
+/// band — which spans the rect the pane was given — stopped 17 points short of
+/// a rule that had been pushed away from it.
+fn split_across(body: egui::Rect) -> (egui::Rect, egui::Rect, egui::Rect) {
+    let width = ((body.width() - PANE_RULE) * PARAMETERS_SHARE).max(PARAMETERS_MINIMUM);
+    let split = (body.left() + width).round();
+    (
+        egui::Rect::from_x_y_ranges(body.left()..=split, body.y_range()),
+        egui::Rect::from_x_y_ranges(split..=split + PANE_RULE, body.y_range()),
+        egui::Rect::from_x_y_ranges(split + PANE_RULE..=body.right(), body.y_range()),
+    )
+}
+
+/// [`split_across`] for a body too narrow to hold the panes side by side.
+fn split_down(body: egui::Rect) -> (egui::Rect, egui::Rect, egui::Rect) {
+    let height = ((body.height() - PANE_RULE) * STACKED_PARAMETERS_SHARE).max(1.0);
+    let split = (body.top() + height).round();
+    (
+        egui::Rect::from_x_y_ranges(body.x_range(), body.top()..=split),
+        egui::Rect::from_x_y_ranges(body.x_range(), split..=split + PANE_RULE),
+        egui::Rect::from_x_y_ranges(body.x_range(), split + PANE_RULE..=body.bottom()),
+    )
+}
+
+/// A pane laid out at the rect the split gave it.
+fn pane_builder(rect: egui::Rect) -> egui::UiBuilder {
+    egui::UiBuilder::new()
+        .max_rect(rect)
+        .layout(Layout::top_down(Align::Min))
+}
+
+/// Confine a pane's painting to the rectangle it was allocated.
+///
+/// A pane's own rect is the only honest answer to "how wide is this surface",
+/// and the section bands inside it need that answer: without it the band has
+/// to guess how much of the scroll area's reserved gutter to reach into, and a
+/// guess is either a notch beside every title or a bar painted out past the
+/// dialog's border. The rasterizer hides the second case, because it clips a
+/// dialog to the canvas; the running editor does not.
+fn clip_to_pane(ui: &mut Ui) {
+    ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
 }
 
 /// Whether this component has anything to show beside its parameters.

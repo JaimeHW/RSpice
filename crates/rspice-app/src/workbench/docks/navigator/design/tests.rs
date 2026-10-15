@@ -242,10 +242,23 @@ fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTree
         &hierarchy_tree::TreeSource {
             projection: projection.as_ref(),
             sheets: &app.state.workspace.content.design_management,
+            libraries: &app.state.library_manager,
             query: "",
         },
         tree,
     )
+}
+
+/// One app's design projection, which every hierarchy rail reads.
+fn projection_of(app: &RSpiceApp) -> std::sync::Arc<crate::state::workspace::DesignProjection> {
+    app.state
+        .workspace
+        .design_projection(
+            &app.state.library_manager,
+            &app.state.workspace.content.active_view,
+            &app.state.schematic,
+        )
+        .expect("the fixture design projects")
 }
 
 /// Every occurrence the rows carry, with how far it can be read.
@@ -324,6 +337,218 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
     assert_eq!(
         app.state.workspace.content.active_view,
         CellViewRef::new("work", "child", "schematic")
+    );
+}
+
+/// A design whose root places one master that resolves and two occurrences of
+/// one that does not: `work/missing` is never given a cell, so the resolver
+/// records it unresolved rather than binding it.
+fn design_with_a_broken_master() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let components = &mut app.state.schematic.document_mut_for_test().components;
+    components.push(placed(101, "XA", "work", "child"));
+    components.push(placed(102, "XGONE", "work", "missing"));
+    components.push(placed(103, "XGONE2", "work", "missing"));
+    app.state.sync_active_schematic_to_workspace();
+    add_master(&mut app.state, "work", "child", SchematicState::default());
+    app
+}
+
+/// A master the design cannot find still belongs to the rail named after it.
+///
+/// Masters used to read the execution plan, which carries only what resolved,
+/// so a deleted cell vanished from the rail and from its count while the
+/// Occurrences rail went on showing its instances as `unbound`. The broken
+/// master is the one worth finding here.
+#[test]
+fn the_masters_rail_lists_a_master_that_did_not_resolve() {
+    let app = design_with_a_broken_master();
+    let projection = projection_of(&app);
+    let masters = hierarchy_tree::declared_masters(projection.as_ref(), "");
+
+    let cells = masters.get("work").expect("the fixture library is named");
+    let views = |cell: &str| {
+        cells
+            .get(cell)
+            .unwrap_or_else(|| panic!("{cell} is a master this design names"))
+    };
+    let child = &views("child")[0];
+    assert_eq!(child.occurrences, 1);
+    assert!(
+        child.condition.is_none(),
+        "a master that resolved states its count, not a condition"
+    );
+
+    let missing = &views("missing")[0];
+    assert_eq!(
+        missing.occurrences, 2,
+        "an unresolved master is counted the way a resolved one is: how many \
+         places in the design reach for it"
+    );
+    let condition = missing
+        .condition
+        .as_ref()
+        .expect("the row carries the resolver's own outcome");
+    assert_eq!(condition.label, "unresolved");
+    assert!(
+        condition
+            .diagnostic
+            .as_deref()
+            .is_some_and(|diagnostic| diagnostic.contains("missing")),
+        "the row can say why: {:?}",
+        condition.diagnostic
+    );
+
+    // The band counts master views, and the broken one is one of them.
+    let total = masters
+        .values()
+        .flat_map(|cells| cells.values())
+        .map(Vec::len)
+        .sum::<usize>();
+    assert_eq!(total, 3, "root, child, and the master that did not resolve");
+}
+
+/// The Occurrences band states the design, not the disclosure.
+#[test]
+fn the_occurrences_band_counts_the_design_and_not_the_rows_on_screen() {
+    let app = recursive_design();
+    let projection = projection_of(&app);
+    let root = InstancePath::root();
+    let instance = root.child("XA").expect("the fixture instance is nameable");
+
+    let mut tree = NavigatorTreeState::default();
+    let folded = occurrence_rows(&app, &tree);
+    assert_eq!(
+        folded
+            .iter()
+            .filter(|row| matches!(row, DesignTreeRow::Occurrence(_)))
+            .count(),
+        1,
+        "a folded root paints one row"
+    );
+    let folded_count = hierarchy_tree::occurrence_band_count(projection.as_ref(), "", &folded);
+
+    tree.expand(NavigatorTreeNode::Occurrence(root.fold_key()));
+    tree.expand(NavigatorTreeNode::Occurrence(instance.fold_key()));
+    let unfolded = occurrence_rows(&app, &tree);
+    assert_eq!(
+        unfolded
+            .iter()
+            .filter(|row| matches!(row, DesignTreeRow::Occurrence(_)))
+            .count(),
+        4,
+        "the fixture's whole hierarchy is root, XA, XLEAF and the cycle"
+    );
+    let unfolded_count = hierarchy_tree::occurrence_band_count(projection.as_ref(), "", &unfolded);
+
+    assert_eq!(
+        folded_count, unfolded_count,
+        "folding a node changes what is on screen, not how big the design is"
+    );
+    assert_eq!(
+        folded_count,
+        projection.hierarchy_resolution().total_instances,
+        "the band states the figure preflight and the configuration surface state"
+    );
+    assert_eq!(folded_count, 4);
+
+    // A filter asks about the whole design, so under one the band answers the
+    // filter rather than restating the design's size.
+    assert_eq!(
+        hierarchy_tree::occurrence_band_count(projection.as_ref(), "xleaf", &unfolded),
+        unfolded
+            .iter()
+            .filter(|row| matches!(row, DesignTreeRow::Occurrence(_)))
+            .count()
+    );
+}
+
+/// A design that places one built-in XSPICE code model: the PWM oscillator,
+/// bound into the engine's own `rspice` namespace rather than into a library.
+fn design_placing_a_builtin_xspice_device() -> (RSpiceApp, InstancePath) {
+    use crate::state::{builtin_xspice_library_binding, engine_only_xspice_devices};
+
+    let descriptor = engine_only_xspice_devices()
+        .iter()
+        .find(|descriptor| descriptor.model_type == "d_pwm")
+        .expect("the PWM oscillator is an authoritative catalog entry");
+    let binding =
+        builtin_xspice_library_binding(descriptor).expect("the PWM oscillator places a binding");
+
+    let mut app = RSpiceApp::test_instance();
+    let mut component = crate::state::Component::new(
+        401,
+        ComponentType::CellInstance,
+        crate::state::Point::new(40, 40),
+    )
+    .with_library_cell(binding);
+    component.name = "A1".to_owned();
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(component);
+    app.state.sync_active_schematic_to_workspace();
+
+    let occurrence = InstancePath::root()
+        .child("A1")
+        .expect("the fixture instance is nameable");
+    (app, occurrence)
+}
+
+/// A master the engine implements is not a master either rail can open.
+///
+/// A built-in XSPICE code model is staged under `rspice`, which is a binding
+/// label and not a library, so there is no cell view behind it. Both rails
+/// used to offer the gesture anyway, and taking it re-rooted the session onto
+/// a blank schematic belonging to no cell — which read as the device having
+/// an empty schematic of its own.
+#[test]
+fn a_built_in_device_master_is_inert_in_both_hierarchy_rails() {
+    let (mut app, occurrence) = design_placing_a_builtin_xspice_device();
+    let root_view = app.state.workspace.content.active_view.clone();
+    let device = CellViewRef::new("rspice", "d_pwm", "xspice");
+
+    let mut tree = NavigatorTreeState::default();
+    tree.expand(NavigatorTreeNode::Occurrence(InstancePath::root().fold_key()));
+    assert_eq!(
+        occurrence_states(&occurrence_rows(&app, &tree)),
+        vec![
+            (InstancePath::root(), OccurrenceState::Expanded),
+            (occurrence.clone(), OccurrenceState::Device),
+        ],
+        "the device occurrence is bound, but not to anything that can be read"
+    );
+    assert!(
+        !OccurrenceState::Device.is_bound(),
+        "a device occurrence has nothing to descend into, so its row is inert"
+    );
+
+    // The predicate the Masters rail asks before it offers to open a row.
+    assert!(
+        !hierarchy_tree::authored_view(&app.state.library_manager, &device),
+        "no library holds the engine's own code model"
+    );
+    assert!(
+        hierarchy_tree::authored_view(&app.state.library_manager, &root_view),
+        "the project's own master is openable"
+    );
+
+    hierarchy_tree::open_occurrence(&mut app.state, &occurrence);
+    assert_eq!(
+        app.state.workspace.content.active_view, root_view,
+        "descending into a device leaves the session where it stood"
+    );
+    assert_eq!(
+        app.state.workspace.content.occurrence_path(),
+        InstancePath::root()
+    );
+    assert!(
+        app.state
+            .workspace
+            .clone_schematic_editor(&device.key())
+            .is_none(),
+        "no blank schematic is minted for a cell view the project does not have"
     );
 }
 

@@ -17,6 +17,10 @@ pub(super) fn evidence_pane(
     services: &mut impl ComponentPropertyServices,
     action: &mut ComponentPropertyDialogResult,
 ) {
+    // Read before the scroll area, which is the last place the pane's own
+    // width is legible: inside it every rect has the scrollbar gutter taken
+    // off, and the section bands head the pane rather than the content.
+    let pane = ui.max_rect();
     // No fill of its own: the dialog body already painted one, and a second
     // coat that stopped where this pane's content stopped is what put a seam
     // down the middle of one surface.
@@ -24,7 +28,15 @@ pub(super) fn evidence_pane(
         .id_salt("component-editor-evidence")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            evidence_contents(ui, draft, context, show_source_preview, services, action)
+            evidence_contents(
+                ui,
+                draft,
+                context,
+                show_source_preview,
+                services,
+                action,
+                pane,
+            )
         });
 }
 
@@ -35,12 +47,13 @@ fn evidence_contents(
     show_source_preview: bool,
     services: &mut impl ComponentPropertyServices,
     action: &mut ComponentPropertyDialogResult,
+    pane: egui::Rect,
 ) {
     if binds_a_model(draft, context) {
-        model_binding_card(ui, draft, context, action);
+        model_binding_card(ui, draft, context, action, pane);
     }
     if show_source_preview {
-        stimulus_section(ui, draft, context, services, action);
+        stimulus_section(ui, draft, context, services, action, pane);
     }
 }
 
@@ -105,11 +118,12 @@ fn stimulus_section(
     context: &ComponentEditorContext,
     services: &mut impl ComponentPropertyServices,
     action: &mut ComponentPropertyDialogResult,
+    pane: egui::Rect,
 ) {
     let Some(stimulus) = context.stimulus.as_ref() else {
         return;
     };
-    section_block(ui, "Stimulus", |ui| {
+    section_block(ui, "Stimulus", pane, |ui| {
         services.preview_source(ui, draft);
         stimulus_body(ui, draft, stimulus, action);
     });
@@ -286,8 +300,8 @@ fn verb_grid(ui: &mut Ui, verbs: &[Verb<'_>], action: &mut ComponentPropertyDial
 /// different grey beneath — a blank box the section appeared to have drawn on
 /// purpose. The band is what separates one section from the next, and it is
 /// enough on its own.
-fn section_block(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
-    section_band(ui, title);
+fn section_block(ui: &mut Ui, title: &str, pane: egui::Rect, body: impl FnOnce(&mut Ui)) {
+    section_band(ui, title, pane);
     egui::Frame::NONE
         .inner_margin(Margin {
             left: 16,
@@ -328,6 +342,7 @@ fn model_binding_card(
     draft: &ComponentPropertyDraft,
     context: &ComponentEditorContext,
     action: &mut ComponentPropertyDialogResult,
+    pane: egui::Rect,
 ) {
     let draft_model = draft
         .get_value("model")
@@ -349,7 +364,7 @@ fn model_binding_card(
             });
         identity_changed.then(|| draft_model.as_deref().unwrap_or(&model.name))
     });
-    section_block(ui, "Model binding", |ui| {
+    section_block(ui, "Model binding", pane, |ui| {
         if let Some(model) = &context.model {
             let t = Tokens::get(ui.ctx());
             if let Some(pending_model) = pending_model {

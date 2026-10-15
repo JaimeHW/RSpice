@@ -1,9 +1,17 @@
-//! Dedicated Preferences shell from the workbench mockup.
+//! The Preferences shell: a modal with a category rail and a settings grid.
 //!
-//! Preferences are not a generic form dialog: the reference surface has a
-//! fixed header/footer, a persistent category rail, and a compact category
-//! selector on touch/narrow layouts.  Keeping that composition here prevents
-//! application preference pages from rebuilding shell geometry ad hoc.
+//! Preferences are not a generic form dialog, so the composition lives here
+//! rather than being rebuilt per page: a fixed header and footer, a grouped
+//! category rail that becomes a selector on narrow and touch layouts, and one
+//! setting-row grid every page writes into.
+//!
+//! The grid is the whole design. A setting is a label, an optional line of
+//! help under it, and a control — and the control starts at the same x on
+//! every row of every page, so a page reads as one column of labels against
+//! one column of controls instead of a list of individually centred widgets.
+//! Values are left-aligned at that x for the same reason a schematic property
+//! editor aligns them: a reader comparing two rows compares their first
+//! character, not the gap in front of it.
 
 use egui::{
     Context, Id, Order, Popup, Rect, Sense, Stroke, Ui, UiKind, WidgetInfo, WidgetType, vec2,
@@ -12,7 +20,7 @@ use egui::{
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, IconButton, select};
+use crate::ui::widgets::{Button, IconButton, SWITCH_WIDTH, paint_switch, select};
 
 const DESKTOP_WIDTH: f32 = 1000.0;
 const DESKTOP_HEIGHT: f32 = 680.0;
@@ -21,88 +29,132 @@ const DESKTOP_VERTICAL_INSET: f32 = 34.0;
 const PHONE_INSET: f32 = 8.0;
 const PHONE_MAX_WIDTH: f32 = 560.0;
 const NARROW_MAX_WIDTH: f32 = 820.0;
-const SCOPE_NARROW_MAX_WIDTH: f32 = 760.0;
-const SECTION_LABEL_NARROW_MAX_WIDTH: f32 = 620.0;
-const HEADER_HEIGHT: f32 = 48.0;
+const HEADER_HEIGHT: f32 = 44.0;
 const FOOTER_HEIGHT: f32 = 48.0;
-const CATEGORY_RAIL_WIDTH: f32 = 208.0;
-const CATEGORY_ROW_HEIGHT: f32 = 36.0;
+const CATEGORY_RAIL_WIDTH: f32 = 196.0;
+const CATEGORY_ROW_HEIGHT: f32 = 30.0;
+const CATEGORY_GROUP_HEIGHT: f32 = 28.0;
 const TOUCH_TARGET: f32 = 44.0;
-const FOOTER_ITEM_GAP: f32 = 6.0;
-const SWITCH_TRACK_WIDTH: f32 = 30.0;
-const SWITCH_TRACK_HEIGHT: f32 = 17.0;
-const SWITCH_KNOB_DIAMETER: f32 = 11.0;
-const SWITCH_KNOB_TRANSLATION: f32 = 13.0;
-const SETTING_ROW_DESKTOP_CONTENT_HEIGHT: f32 = 52.0;
-const SETTING_ROW_COLUMN_GAP: f32 = 24.0;
-const SETTING_ROW_PHONE_VALUE_GAP: f32 = 10.0;
+const FOOTER_ITEM_GAP: f32 = 8.0;
+
+/// One inset for the header, every page row and the footer, so a title, a
+/// label and a button all start on the same vertical line.
+const CONTENT_INSET: f32 = 18.0;
+/// The same inset where a phone has given up a quarter of its width to it.
+const PHONE_CONTENT_INSET: f32 = 14.0;
+/// Width of the label column a page's controls line up against.
+///
+/// Wide enough that most of a row's help is one line: a column that wraps
+/// every other row's help to two lines makes the list's rhythm depend on
+/// sentence length rather than on what is on the row.
+const LABEL_COLUMN_WIDTH: f32 = 400.0;
+/// Gap between the label column and the control that answers it.
+const SETTING_ROW_COLUMN_GAP: f32 = 20.0;
+/// Widest a select or numeric field grows to, so neighbouring rows agree.
+const CONTROL_MAX_WIDTH: f32 = 300.0;
+/// Padding above and below a row's tallest element.
+///
+/// The density's own bar padding rather than a number of this dialog's own:
+/// a 28 px control inside nine pixels either side is a row that is half air,
+/// and the design system already states how much space a control of this
+/// density sits in.
+fn setting_row_padding(ui: &Ui) -> f32 {
+    Tokens::get(ui.ctx()).metrics.bar_pad
+}
+/// Gap between a row's label and the help under it.
+const SETTING_COPY_HELP_GAP: f32 = 2.0;
+/// Gap between a stacked label and its control on a phone.
+const SETTING_ROW_PHONE_VALUE_GAP: f32 = 8.0;
 const SHELL_ID: &str = "rspice.preferences.shell";
 
-/// Canonical category order from the approved Preferences mockup.
+/// The two things a reader is looking for when they open Preferences: how the
+/// application behaves, or how engineering quantities are read and written.
+///
+/// A rail of eight entries does not need groups to be navigable, but it does
+/// need them to be *predictable*: a reader after the grid size looks under
+/// engineering, and one after the colour mode does not read past Interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CategoryGroup {
+    Interface,
+    Engineering,
+}
+
+impl CategoryGroup {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Interface => "Interface",
+            Self::Engineering => "Engineering",
+        }
+    }
+}
+
+/// The preference pages this build can actually configure.
+///
+/// Three categories were removed rather than shipped empty: Security and
+/// privacy and Plug-ins and integrations each rendered a heading and a
+/// sentence saying nothing on the page was configurable, and Remote compute
+/// held one read-only count of the host's logical processors. A rail entry
+/// that leads to an absence advertises the absence; these come back when a
+/// credential store, an extension loader or an execution service does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum PreferenceCategory {
     #[default]
     Appearance,
+    Accessibility,
     Workspace,
+    Shortcuts,
     Units,
     Schematic,
-    Simulation,
+    Projects,
     Results,
-    Files,
-    Compute,
-    Security,
-    Accessibility,
-    Shortcuts,
-    Integrations,
 }
 
 impl PreferenceCategory {
-    pub(super) const ALL: [Self; 12] = [
+    pub(super) const ALL: [Self; 8] = [
         Self::Appearance,
+        Self::Accessibility,
         Self::Workspace,
+        Self::Shortcuts,
         Self::Units,
         Self::Schematic,
-        Self::Simulation,
+        Self::Projects,
         Self::Results,
-        Self::Files,
-        Self::Compute,
-        Self::Security,
-        Self::Accessibility,
-        Self::Shortcuts,
-        Self::Integrations,
     ];
 
     pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Appearance => "Appearance",
-            Self::Workspace => "Workspace",
-            Self::Units => "Units & notation",
-            Self::Schematic => "Schematic",
-            Self::Simulation => "Simulation",
-            Self::Results => "Results",
-            Self::Files => "Files & storage",
-            Self::Compute => "Remote compute",
-            Self::Security => "Security & privacy",
             Self::Accessibility => "Accessibility",
+            Self::Workspace => "Workspace",
             Self::Shortcuts => "Shortcuts",
-            Self::Integrations => "Integrations",
+            Self::Units => "Units and notation",
+            Self::Schematic => "Schematic editor",
+            Self::Projects => "Projects and files",
+            Self::Results => "Results and precision",
         }
     }
 
-    const fn stable_id(self) -> &'static str {
+    pub(super) const fn group(self) -> CategoryGroup {
+        match self {
+            Self::Appearance | Self::Accessibility | Self::Workspace | Self::Shortcuts => {
+                CategoryGroup::Interface
+            }
+            Self::Units | Self::Schematic | Self::Projects | Self::Results => {
+                CategoryGroup::Engineering
+            }
+        }
+    }
+
+    pub(super) const fn stable_id(self) -> &'static str {
         match self {
             Self::Appearance => "appearance",
+            Self::Accessibility => "accessibility",
             Self::Workspace => "workspace",
+            Self::Shortcuts => "shortcuts",
             Self::Units => "units",
             Self::Schematic => "schematic",
-            Self::Simulation => "simulation",
+            Self::Projects => "projects",
             Self::Results => "results",
-            Self::Files => "files",
-            Self::Compute => "compute",
-            Self::Security => "security",
-            Self::Accessibility => "accessibility",
-            Self::Shortcuts => "shortcuts",
-            Self::Integrations => "integrations",
         }
     }
 }
@@ -110,9 +162,9 @@ impl PreferenceCategory {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(super) struct PreferencesShellResponse {
     pub(super) close_requested: bool,
-    /// The mockup's organization/licensing owner entry routes to the truthful
-    /// local account and organization authority surface.
-    pub(super) account_organization_requested: bool,
+    /// The footer's page-scoped reset. The shell owns the control because the
+    /// footer is shell geometry; the page owns which settings it covers.
+    pub(super) restore_defaults_requested: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -271,9 +323,9 @@ pub(super) fn show(
             response.close_requested = true;
         }
         initial_focus_control_id = render_body(&mut surface, body, layout, category, render_page);
-        if render_footer(&mut surface, footer) {
-            response.account_organization_requested = true;
-        }
+        let footer_response = render_footer(&mut surface, footer);
+        response.close_requested |= footer_response.close;
+        response.restore_defaults_requested = footer_response.restore_defaults;
         let dialog_response = dialog_ui.response();
         dialog_response
             .widget_info(|| WidgetInfo::labeled(WidgetType::Window, true, "Preferences"));
@@ -368,7 +420,7 @@ fn render_header(surface: &mut Ui, rect: Rect, large_targets: bool) -> egui::Res
         .painter()
         .layout_no_wrap("Preferences".to_owned(), heading_font.clone(), t.color.text)
         .size();
-    let copy_rect = centered_header_copy_rect(rect, heading_size + vec2(1.0, 0.0), 15.0);
+    let copy_rect = centered_header_copy_rect(rect, heading_size + vec2(1.0, 0.0), CONTENT_INSET);
     let mut copy_ui = surface.new_child(
         egui::UiBuilder::new()
             .max_rect(copy_rect)
@@ -388,7 +440,11 @@ fn render_header(surface: &mut Ui, rect: Rect, large_targets: bool) -> egui::Res
         });
     let mut close_ui = surface.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(15.0, 0.0)))
+            // The button frame is wider than the glyph inside it, so insetting
+            // the frame by the content inset would push the glyph in past the
+            // title. Inset by the difference and the glyph's own right edge
+            // lands on `CONTENT_INSET`, where the title's left edge is.
+            .max_rect(rect.shrink2(vec2(CONTENT_INSET - 6.0, 0.0)))
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     close_ui
@@ -523,7 +579,12 @@ fn render_category_rail(
     );
     rail.spacing_mut().item_spacing.y = 0.0;
     let mut active_category_id = None;
+    let mut rendered_group = None;
     for candidate in PreferenceCategory::ALL {
+        if rendered_group != Some(candidate.group()) {
+            rendered_group = Some(candidate.group());
+            category_group_label(&mut rail, candidate.group().label());
+        }
         rail.push_id(("preferences.category", candidate.stable_id()), |ui| {
             let active = *category == candidate;
             let response = category_button(ui, candidate.label(), active);
@@ -543,6 +604,30 @@ fn render_category_rail(
             node.set_label("Preference categories");
         });
     active_category_id
+}
+
+/// A rail group name: the one piece of text in the dialog that is not a
+/// setting, a value or a control, so it is the faintest thing on the rail and
+/// carries no rule, no eyebrow and no tracking.
+fn category_group_label(ui: &mut Ui, label: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(ui.available_width(), CATEGORY_GROUP_HEIGHT),
+        Sense::hover(),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, label));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(label);
+        node.set_level(3);
+    });
+    ui.painter().text(
+        egui::pos2(rect.left() + CONTENT_INSET, rect.center().y + 3.0),
+        egui::Align2::LEFT_CENTER,
+        label,
+        theme::sans(tokens::FS_0, FontWeight::Medium),
+        t.color.text_faint,
+    );
 }
 
 fn category_button(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
@@ -573,10 +658,17 @@ fn category_button(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
         );
     }
     ui.painter().text(
-        egui::pos2(rect.left() + 18.0, rect.center().y),
+        egui::pos2(rect.left() + CONTENT_INSET, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
+        theme::sans(
+            tokens::FS_1,
+            if active {
+                FontWeight::Medium
+            } else {
+                FontWeight::Regular
+            },
+        ),
         if active {
             t.color.text
         } else {
@@ -597,13 +689,13 @@ fn render_mobile_category(surface: &mut Ui, rect: Rect, category: &mut Preferenc
     );
     let mut ui = surface.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(10.0, 8.0)))
+            .max_rect(rect.shrink2(vec2(PHONE_CONTENT_INSET, 8.0)))
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     ui.spacing_mut().item_spacing.x = 10.0;
     ui.label(
         egui::RichText::new("Preference category")
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
             .color(t.color.text_dim),
     );
     let options = PreferenceCategory::ALL
@@ -653,236 +745,115 @@ fn render_scrolling_page(
         });
 }
 
-fn render_footer(surface: &mut Ui, rect: Rect) -> bool {
+/// The footer: the page's reset on the left, the close on the right.
+///
+/// It used to carry a sentence explaining that preferences apply immediately
+/// and that project settings are versioned, plus a second route to the account
+/// surface the title bar, the drawers and the command palette already reach.
+/// Neither is a decision a reader makes here.
+fn render_footer(surface: &mut Ui, rect: Rect) -> FooterResponse {
     let t = Tokens::get(surface.ctx());
     surface.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     surface
         .painter()
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, t.color.border));
+    let mut response = FooterResponse::default();
     let mut ui = surface.new_child(
         egui::UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(12.0, 0.0)))
+            .max_rect(rect.shrink2(vec2(CONTENT_INSET, 0.0)))
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     ui.spacing_mut().item_spacing.x = FOOTER_ITEM_GAP;
-    let clicked = ui
-        .push_id("account-organization", |ui| {
-            Button::new("Organization & licensing…").show(ui).clicked()
+    response.close = ui
+        .push_id("preferences.done", |ui| {
+            Button::new("Done").accent().show(ui).clicked()
         })
         .inner;
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(
-                    "Personal and device preferences apply immediately. Project settings remain versioned.",
-                )
-                .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                .color(t.color.text_dim),
-            )
-            .wrap(),
-        );
+        response.restore_defaults = ui
+            .push_id("preferences.restore-defaults", |ui| {
+                Button::new("Restore defaults").ghost().show(ui).clicked()
+            })
+            .inner;
     });
-    clicked
+    response
 }
 
-pub(super) fn page_heading(ui: &mut Ui, title: &str, description: &str) {
-    let t = Tokens::get(ui.ctx());
-    let phone = ui.ctx().content_rect().width() <= PHONE_MAX_WIDTH;
-    let horizontal = if phone { 16.0 } else { 24.0 };
-    ui.add_space(if phone { 16.0 } else { 18.0 });
-    egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(horizontal as i8, 0))
-        .show(ui, |ui| {
-            let heading_response = ui.label(
-                egui::RichText::new(title)
-                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                    .color(t.color.text),
-            );
-            ui.ctx()
-                .accesskit_node_builder(heading_response.id, |node| {
-                    node.set_role(egui::accesskit::Role::Heading);
-                    node.set_label(title);
-                    node.set_level(3);
-                });
-            ui.add_space(4.0);
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(description)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
-    ui.add_space(if phone { 8.0 } else { 12.0 });
+#[derive(Debug, Clone, Copy, Default)]
+struct FooterResponse {
+    close: bool,
+    restore_defaults: bool,
 }
 
-/// Mockup scope strip variant with the trailing resolved-policy executor.
-/// Pages use this only once their policy review workflow is wired end to end.
-pub(super) fn actionable_scope_strip(
-    ui: &mut Ui,
-    scope: &str,
-    detail: &str,
-    action_label: &str,
-) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let narrow = ui.ctx().content_rect().width() <= SCOPE_NARROW_MAX_WIDTH;
-    let large_target = ui.ctx().content_rect().width() <= NARROW_MAX_WIDTH
-        || ui.ctx().input(|input| input.has_touch_screen());
-    let horizontal = if narrow { 12 } else { 24 };
-    let mut clicked = false;
-    let response = egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(horizontal, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_min_height(28.0);
-            ui.horizontal(|ui| {
-                let gap = 10.0;
-                ui.spacing_mut().item_spacing.x = gap;
-                let available = ui.available_width();
-                let action_width = ui
-                    .fonts_mut(|fonts| {
-                        fonts
-                            .layout_no_wrap(
-                                action_label.to_owned(),
-                                theme::sans(tokens::FS_0, FontWeight::Regular),
-                                t.color.text,
-                            )
-                            .size()
-                            .x
-                            + 20.0
-                    })
-                    .max(if large_target { TOUCH_TARGET } else { 0.0 })
-                    .min((available - gap).max(1.0));
-                let action_height = if large_target { TOUCH_TARGET } else { 28.0 };
-                let copy_width = (available - action_width - gap).max(0.0);
-                ui.allocate_ui_with_layout(
-                    vec2(copy_width, 28.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_width(copy_width);
-                        scope_copy(ui, scope, detail);
-                    },
-                );
-                ui.allocate_ui_with_layout(
-                    vec2(action_width, action_height),
-                    egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| {
-                        ui.set_clip_rect(ui.max_rect());
-                        clicked = Button::new(action_label)
-                            .ghost()
-                            .max_width(action_width)
-                            .min_height(if large_target { TOUCH_TARGET } else { 0.0 })
-                            .show(ui)
-                            .clicked();
-                    },
-                );
-            });
-        })
-        .response;
-    ui.painter().hline(
-        response.rect.x_range(),
-        response.rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    clicked
+/// The page inset at this width: a phone gives up less of it to the gutter.
+fn content_inset(ui: &Ui) -> f32 {
+    if ui.ctx().content_rect().width() <= PHONE_MAX_WIDTH {
+        PHONE_CONTENT_INSET
+    } else {
+        CONTENT_INSET
+    }
 }
 
-/// Scope/capability evidence for pages that intentionally have no executable
-/// policy owner. Unlike `actionable_scope_strip`, this never advertises an
-/// empty resolved-policy workflow.
-pub(super) fn informational_scope_strip(ui: &mut Ui, scope: &str, detail: &str) {
+/// A heading over a run of related settings, in the case it is written in.
+///
+/// It was an upper-cased, letter-spaced eyebrow over a full-width rule. Two
+/// typographic devices and a case change to separate one group of rows from
+/// the next is more emphasis than the distinction carries, and the product
+/// settled on sentence-case headers with no tracking.
+///
+/// It is a row of the same grid, not a label floating in whitespace. Its
+/// inset, its padding and the rule it closes with are a setting row's, and
+/// the tint is the one the design system keeps for table heads and section
+/// labels — so it separates two runs of settings without any spacing that
+/// belongs to it alone. Every number here is read off the row beside it.
+pub(super) fn section_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get(ui.ctx());
-    let narrow = ui.ctx().content_rect().width() <= SCOPE_NARROW_MAX_WIDTH;
-    let horizontal = if narrow { 12 } else { 24 };
-    let response = egui::Frame::NONE
-        .fill(t.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(horizontal, 7))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.set_min_height(28.0);
-            scope_copy(ui, scope, detail);
-        })
-        .response;
-    ui.painter().hline(
-        response.rect.x_range(),
-        response.rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-}
-
-fn scope_copy(ui: &mut Ui, scope: &str, detail: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.spacing_mut().item_spacing.y = 0.0;
-    let scope_response = ui.label(
-        egui::RichText::new(scope)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    scope_response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, scope));
-    ui.ctx().accesskit_node_builder(scope_response.id, |node| {
-        node.set_role(egui::accesskit::Role::Label);
-        node.set_label(scope);
+    let horizontal = content_inset(ui);
+    let font = theme::sans(tokens::FS_1, FontWeight::SemiBold);
+    let text_height = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(title.to_owned(), font.clone(), t.color.text)
+            .size()
+            .y
     });
-    ui.add_space(2.0);
-    let detail_response = ui.add(
-        egui::Label::new(
-            egui::RichText::new(detail)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_faint),
-        )
-        .wrap(),
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            ui.available_width(),
+            text_height + setting_row_padding(ui) * 2.0,
+        ),
+        Sense::hover(),
     );
-    detail_response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, detail));
-    ui.ctx().accesskit_node_builder(detail_response.id, |node| {
-        node.set_role(egui::accesskit::Role::Label);
-        node.set_label(detail);
-    });
-}
-
-pub(super) fn section_label(ui: &mut Ui, title: &str) {
-    let t = Tokens::get(ui.ctx());
-    let narrow = ui.ctx().content_rect().width() <= SECTION_LABEL_NARROW_MAX_WIDTH;
-    let horizontal = if narrow { 16.0 } else { 24.0 };
-    ui.add_space(14.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 31.0), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), title));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
         node.set_label(title);
         node.set_level(4);
     });
-    let line = Rect::from_min_max(
-        egui::pos2(rect.left() + horizontal, rect.bottom()),
-        egui::pos2(rect.right() - horizontal, rect.bottom()),
-    );
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &title.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            color: t.color.text_dim,
-            extra_letter_spacing: 0.06 * tokens::FS_0,
-            ..Default::default()
-        },
-    );
-    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-    ui.painter().galley(
-        egui::pos2(line.left(), rect.center().y - galley.size().y * 0.5),
-        galley,
-        t.color.text_dim,
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    ui.painter().text(
+        egui::pos2(rect.left() + horizontal, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        title,
+        font,
+        t.color.text,
     );
     ui.painter().hline(
-        line.x_range(),
-        line.top(),
-        Stroke::new(1.0, t.color.border_strong),
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
     );
 }
 
-/// Mockup setting row: two weighted columns on desktop, one stacked column
-/// with 16 px gutters on phones.
+/// One setting: a label, optional help under it, and the control that sets it.
+///
+/// The label column is a fixed width rather than a fraction of the page, so
+/// the control column begins at the same x whatever the dialog is sized to and
+/// whichever page is open — the property-editor convention, and the reason a
+/// reader can run an eye down the values. A row is as tall as its tallest
+/// element plus one padding, so a plain select row is a control high and only
+/// a row carrying wrapped help or a stack of controls grows.
+///
+/// A phone stacks the two: the label, then the control at full width.
 pub(super) fn setting_row<R>(
     ui: &mut Ui,
     title: &str,
@@ -890,18 +861,21 @@ pub(super) fn setting_row<R>(
     add_value: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let phone = ui.ctx().content_rect().width() <= PHONE_MAX_WIDTH;
-    let horizontal = if phone { 16 } else { 24 };
-    let vertical = if phone { 13 } else { 9 };
+    let horizontal = content_inset(ui) as i8;
     let response = egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(horizontal, vertical))
+        .inner_margin(egui::Margin::symmetric(
+            horizontal,
+            setting_row_padding(ui) as i8,
+        ))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
+            let control_height = Tokens::get(ui.ctx()).metrics.ctl_h;
             if phone {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = SETTING_ROW_PHONE_VALUE_GAP;
                     ui.scope(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
-                        setting_copy(ui, title, help);
+                        setting_copy(ui, title, help, ui.available_width());
                     });
                     ui.scope(|ui| {
                         ui.spacing_mut().item_spacing.y = 0.0;
@@ -914,22 +888,39 @@ pub(super) fn setting_row<R>(
             } else {
                 let gap = SETTING_ROW_COLUMN_GAP;
                 let available = (ui.available_width() - gap).max(0.0);
-                let left = (available * 0.45).max(220.0);
-                let right = (available - left).max(240.0);
+                // The label column holds its width until the page is too
+                // narrow for a usable control beside it, and only then gives
+                // ground — never the other way round, which is what let a
+                // 30 px switch sit in half a page of empty row.
+                let label_width = LABEL_COLUMN_WIDTH.min(available * 0.6);
+                let control_width = (available - label_width).max(1.0);
+                // Both columns are centred on the row rather than hung from
+                // its top. A control pinned to the top of a row whose label
+                // carries two lines of help sits above the row's middle by
+                // half the help, and by a different amount on the next row,
+                // so a column of controls drifts against its own rows.
+                let copy_height = setting_copy_height(ui, title, help, label_width);
+                // Every row reserves the height of a label with one line of
+                // help, which is what most of them carry, and grows past it
+                // only for content that needs more. Without the floor a row
+                // whose setting needs no explaining is four pixels shorter
+                // than its neighbours, and a page of them reads as a list
+                // measured by hand.
+                let row_height = copy_height
+                    .max(control_height)
+                    .max(standard_copy_height(ui, label_width));
                 ui.horizontal(|ui| {
-                    // The mockup specifies a 70 px minimum row, not a fixed
-                    // track. Let either column grow for wrapped help text,
-                    // stacked controls, validation, or managed-policy detail.
-                    ui.set_min_height(SETTING_ROW_DESKTOP_CONTENT_HEIGHT);
                     ui.spacing_mut().item_spacing.x = gap;
+                    ui.set_min_height(row_height);
                     ui.vertical(|ui| {
-                        ui.set_width(left);
-                        ui.set_min_height(SETTING_ROW_DESKTOP_CONTENT_HEIGHT);
-                        setting_copy(ui, title, help);
+                        ui.set_width(label_width);
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.add_space((row_height - copy_height) * 0.5);
+                        setting_copy(ui, title, help, label_width);
                     });
                     ui.vertical(|ui| {
-                        ui.set_width(right);
-                        ui.set_min_height(SETTING_ROW_DESKTOP_CONTENT_HEIGHT);
+                        ui.set_width(control_width);
+                        ui.add_space((row_height - control_height) * 0.5);
                         add_value(ui)
                     })
                     .inner
@@ -945,29 +936,62 @@ pub(super) fn setting_row<R>(
     response.inner
 }
 
-fn setting_copy(ui: &mut Ui, title: &str, help: &str) {
+/// A row's label, and its help where the setting needs one.
+///
+/// Help wraps to the label column rather than to a character count, so the
+/// text block has the same right edge as the label above it instead of ending
+/// wherever 38 zeroes happened to reach.
+/// The height of the page's standard row content: a one-line label over one
+/// line of help.
+fn standard_copy_height(ui: &mut Ui, width: f32) -> f32 {
+    setting_copy_height(ui, "A", "A", width)
+}
+
+/// How tall the label and its help will be at `width`, before either is laid
+/// out, so the row can centre both columns against each other.
+fn setting_copy_height(ui: &mut Ui, title: &str, help: &str, width: f32) -> f32 {
+    let measure = |ui: &mut Ui, text: &str, size: f32, weight: FontWeight| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout(
+                    text.to_owned(),
+                    theme::sans(size, weight),
+                    egui::Color32::WHITE,
+                    width,
+                )
+                .size()
+                .y
+        })
+    };
+    let mut height = measure(ui, title, tokens::FS_1, FontWeight::Regular);
+    if !help.is_empty() {
+        height += SETTING_COPY_HELP_GAP + measure(ui, help, tokens::FS_0, FontWeight::Regular);
+    }
+    height
+}
+
+fn setting_copy(ui: &mut Ui, title: &str, help: &str, width: f32) {
     let t = Tokens::get(ui.ctx());
-    let title_response = ui.label(
-        egui::RichText::new(title)
-            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text),
+    let title_response = ui.add(
+        egui::Label::new(
+            egui::RichText::new(title)
+                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .color(t.color.text),
+        )
+        .wrap(),
     );
     ui.ctx().accesskit_node_builder(title_response.id, |node| {
         node.set_role(egui::accesskit::Role::Label);
         node.set_label(title);
     });
     if !help.is_empty() {
-        ui.add_space(3.0);
-        let help_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-        let help_width = ui
-            .fonts_mut(|fonts| fonts.glyph_width(&help_font, '0') * 38.0)
-            .min(ui.available_width());
+        ui.add_space(SETTING_COPY_HELP_GAP);
         ui.scope(|ui| {
-            ui.set_max_width(help_width);
+            ui.set_max_width(width);
             ui.add(
                 egui::Label::new(
                     egui::RichText::new(help)
-                        .font(help_font)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(t.color.text_faint),
                 )
                 .wrap(),
@@ -976,17 +1000,21 @@ fn setting_copy(ui: &mut Ui, title: &str, help: &str) {
     }
 }
 
-pub(super) fn right_aligned<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let phone = ui.ctx().content_rect().width() <= PHONE_MAX_WIDTH;
-    ui.with_layout(
-        egui::Layout::top_down(if phone {
-            egui::Align::Min
-        } else {
-            egui::Align::Max
-        }),
-        add,
-    )
-    .inner
+/// A row's control column: left-aligned, so every value on the page starts at
+/// one x. Selects and numeric fields take [`control_width`]; a switch or a
+/// segmented control takes its own.
+pub(super) fn value_column<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), add)
+        .inner
+}
+
+/// How wide a select or numeric field is on this row.
+///
+/// Capped so a wide dialog does not stretch one page's selects to twice the
+/// width of the next page's, which is what makes a rail of pages read as one
+/// dialog rather than eight.
+pub(super) fn control_width(ui: &Ui) -> f32 {
+    ui.available_width().min(CONTROL_MAX_WIDTH)
 }
 
 /// The `.segmented` control moved to `ui::widgets` when the results data
@@ -1008,7 +1036,12 @@ pub(super) fn segmented(
     )
 }
 
-/// Compact switch with a 44 px touch hit target and checkbox semantics.
+/// A boolean setting's control: the design system's switch, on a hit target a
+/// coarse pointer can reach.
+///
+/// The shape is painted by [`paint_switch`] rather than here. This dialog used
+/// to carry its own copy of the track, the knob and their colours, which is a
+/// second switch in the product the moment either changes.
 pub(super) fn preference_switch(
     ui: &mut Ui,
     id_salt: &'static str,
@@ -1021,45 +1054,13 @@ pub(super) fn preference_switch(
         let target = TOUCH_TARGET.max(ui.spacing().interact_size.y);
         vec2(target, target)
     } else {
-        vec2(SWITCH_TRACK_WIDTH, SWITCH_TRACK_HEIGHT)
+        vec2(SWITCH_WIDTH, Tokens::get(ui.ctx()).metrics.ctl_h)
     };
     let (rect, _) = ui.allocate_exact_size(hit, Sense::hover());
     let response = ui.interact(rect, ui.make_persistent_id(id_salt), Sense::click());
     response
         .widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, *value, accessible_label));
-    let t = Tokens::get(ui.ctx());
-    let track =
-        Rect::from_center_size(rect.center(), vec2(SWITCH_TRACK_WIDTH, SWITCH_TRACK_HEIGHT));
-    ui.painter().rect(
-        track,
-        8.5,
-        if *value {
-            t.color.accent
-        } else {
-            t.color.bg_inset
-        },
-        Stroke::new(
-            1.0,
-            if *value {
-                t.color.accent
-            } else {
-                t.color.border_strong
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let knob_radius = SWITCH_KNOB_DIAMETER * 0.5;
-    let knob_x =
-        track.left() + 2.0 + knob_radius + if *value { SWITCH_KNOB_TRANSLATION } else { 0.0 };
-    ui.painter().circle_filled(
-        egui::pos2(knob_x, track.center().y),
-        knob_radius,
-        if *value {
-            t.color.accent_ink
-        } else {
-            t.color.text_dim
-        },
-    );
+    paint_switch(ui, rect.center(), *value, response.hovered(), rect);
     theme::paint_focus_ring(ui, &response, rect);
     if response.clicked() {
         *value = !*value;
@@ -1171,45 +1172,81 @@ mod tests {
     }
 
     #[test]
-    fn desktop_geometry_matches_preferences_mockup() {
+    fn a_desktop_window_gets_the_full_fixed_surface() {
         let layout =
             PreferencesLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0)));
-        assert_eq!(layout.surface.size(), vec2(1000.0, 680.0));
+        assert_eq!(layout.surface.size(), vec2(DESKTOP_WIDTH, DESKTOP_HEIGHT));
         assert!(!layout.narrow);
         assert!(!layout.phone);
     }
 
+    /// One inset runs through the header, the rail, every row and the footer.
+    ///
+    /// The header used to be inset 15 px over a body inset 24 and a footer
+    /// inset 12, so the dialog's title, its first label and its buttons each
+    /// started on a different vertical line.
     #[test]
-    fn shell_structure_matches_preferences_mockup_tokens() {
-        assert_eq!(HEADER_HEIGHT, 48.0);
-        assert_eq!(FOOTER_HEIGHT, 48.0);
-        assert_eq!(CATEGORY_RAIL_WIDTH, 208.0);
-        assert_eq!(CATEGORY_ROW_HEIGHT, 36.0);
-        assert_eq!(NARROW_MAX_WIDTH, 820.0);
-        assert_eq!(SCOPE_NARROW_MAX_WIDTH, 760.0);
-        assert_eq!(SECTION_LABEL_NARROW_MAX_WIDTH, 620.0);
-        assert_eq!(PHONE_MAX_WIDTH, 560.0);
-        assert_eq!(TOUCH_TARGET, 44.0);
-        assert_eq!(FOOTER_ITEM_GAP, 6.0);
-        assert_eq!(SWITCH_TRACK_WIDTH, 30.0);
-        assert_eq!(SWITCH_TRACK_HEIGHT, 17.0);
-        assert_eq!(SWITCH_KNOB_DIAMETER, 11.0);
-        assert_eq!(SWITCH_KNOB_TRANSLATION, 13.0);
-        assert_eq!(SETTING_ROW_DESKTOP_CONTENT_HEIGHT, 52.0);
-        assert_eq!(SETTING_ROW_COLUMN_GAP, 24.0);
-        assert_eq!(SETTING_ROW_PHONE_VALUE_GAP, 10.0);
-        assert_eq!(SETTING_ROW_DESKTOP_CONTENT_HEIGHT + 9.0 * 2.0, 70.0);
-    }
-
-    #[test]
-    fn header_copy_is_vertically_centered_and_clear_of_the_perimeter() {
+    fn one_inset_governs_the_header_the_rail_the_rows_and_the_footer() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    assert_eq!(content_inset(ui), CONTENT_INSET);
+                });
+            },
+        );
         let header = Rect::from_min_size(egui::pos2(11.0, 11.0), vec2(998.0, HEADER_HEIGHT));
-        let copy = centered_header_copy_rect(header, vec2(112.0, 31.0), 15.0);
-
-        assert_eq!(copy.left() - header.left(), 15.0);
+        let copy = centered_header_copy_rect(header, vec2(112.0, 31.0), CONTENT_INSET);
+        assert_eq!(copy.left() - header.left(), CONTENT_INSET);
         assert_eq!(copy.center().y, header.center().y);
         assert!(copy.top() > header.top());
         assert!(copy.bottom() < header.bottom());
+    }
+
+    /// A row is as tall as the control on it plus one padding either side.
+    ///
+    /// The old row reserved a 52 px content track for a 28 px control, so
+    /// every row was 70 px tall whatever was on it: an 11 px label and a
+    /// 17 px switch inside two and a half control heights of air.
+    #[test]
+    fn a_plain_row_is_one_control_tall() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let standard = standard_row_height(&ctx);
+        assert!(
+            standard >= Tokens::get(&ctx).metrics.ctl_h + Tokens::get(&ctx).metrics.bar_pad * 2.0,
+            "the page's row height clears a control and its padding"
+        );
+        assert!(
+            standard < 70.0,
+            "a row is shorter than the fixed 70 px track it replaces: {standard}"
+        );
+    }
+
+    /// The height every row on the page holds to: a label with one line of
+    /// help, padded. A row that carries no help is the same height as its
+    /// neighbours rather than four pixels shorter.
+    fn standard_row_height(ctx: &Context) -> f32 {
+        let mut height = 0.0;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    height = standard_copy_height(ui, LABEL_COLUMN_WIDTH)
+                        .max(Tokens::get(ui.ctx()).metrics.ctl_h)
+                        + setting_row_padding(ui) * 2.0;
+                });
+            },
+        );
+        height
     }
 
     #[test]
@@ -1223,67 +1260,20 @@ mod tests {
     }
 
     #[test]
-    fn phone_scope_action_remains_horizontal_and_contained() {
-        let ctx = Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(390.0, 844.0))),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| {
-                        let _ = actionable_scope_strip(
-                            ui,
-                            "User profile",
-                            "portable bindings with platform and organization exceptions",
-                            "View resolved policy…",
-                        );
-                    });
-            },
-        );
-        let nodes = output
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit tree update")
-            .nodes;
-        let scope = node_bounds(&nodes, egui::accesskit::Role::Label, "User profile");
-        let detail = node_bounds(
-            &nodes,
-            egui::accesskit::Role::Label,
-            "portable bindings with platform and organization exceptions",
-        );
-        let action = node_bounds(
-            &nodes,
-            egui::accesskit::Role::Button,
-            "View resolved policy…",
-        );
-
-        assert!(scope.x0 >= 12.0);
-        assert!(action.x1 <= 378.0);
-        assert!(action.x0 >= detail.x1);
-        assert!(action.y0 < detail.y1);
-        assert!(action.y1 > scope.y0);
-    }
-
-    #[test]
     fn tablet_uses_category_selector_without_phone_full_height_override() {
         let layout =
             PreferencesLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, vec2(768.0, 1024.0)));
-        assert_eq!(layout.surface.size(), vec2(740.0, 680.0));
+        assert_eq!(layout.surface.size(), vec2(740.0, DESKTOP_HEIGHT));
         assert!(layout.narrow);
         assert!(!layout.phone);
         assert_eq!(FOOTER_HEIGHT, 48.0);
     }
 
     #[test]
-    fn narrow_or_coarse_inputs_raise_targets_at_the_exact_mockup_boundary() {
+    fn narrow_or_coarse_inputs_raise_every_target_to_the_touch_minimum() {
         assert_eq!(category_control_height(false), 44.0);
         assert_eq!(category_control_height(true), 44.0);
-        assert_eq!(switch_control_height(821.0, false), 17.0);
+        assert_eq!(switch_control_height(821.0, false), 28.0);
         assert_eq!(switch_control_height(820.0, false), 44.0);
         assert_eq!(switch_control_height(1440.0, true), 44.0);
     }
@@ -1301,29 +1291,62 @@ mod tests {
         Popup::close_id(&ctx, popup_id);
     }
 
+    /// The rail, in order, and grouped so that each group is contiguous —
+    /// otherwise the rail paints a group name twice and a reader reads past
+    /// the heading they were looking under.
     #[test]
-    fn category_navigation_matches_the_complete_mockup_order() {
+    fn the_rail_lists_its_categories_in_contiguous_groups() {
         assert_eq!(
             PreferenceCategory::ALL.map(PreferenceCategory::label),
             [
                 "Appearance",
-                "Workspace",
-                "Units & notation",
-                "Schematic",
-                "Simulation",
-                "Results",
-                "Files & storage",
-                "Remote compute",
-                "Security & privacy",
                 "Accessibility",
+                "Workspace",
                 "Shortcuts",
-                "Integrations",
+                "Units and notation",
+                "Schematic editor",
+                "Projects and files",
+                "Results and precision",
             ]
         );
+        let mut seen: Vec<CategoryGroup> = Vec::new();
+        for category in PreferenceCategory::ALL {
+            if seen.last() != Some(&category.group()) {
+                assert!(
+                    !seen.contains(&category.group()),
+                    "{} reopens a group the rail already closed",
+                    category.label()
+                );
+                seen.push(category.group());
+            }
+        }
+        assert_eq!(seen.len(), 2);
     }
 
+    /// The three categories that were a heading over an absence, and the one
+    /// row of fiction each of two of them carried.
     #[test]
-    fn desktop_setting_rows_are_contiguous_seventy_pixel_tracks() {
+    fn the_rail_offers_no_category_without_a_setting_on_it() {
+        for absent in [
+            "Security & privacy",
+            "Security and privacy",
+            "Integrations",
+            "Remote compute",
+        ] {
+            assert!(
+                !PreferenceCategory::ALL
+                    .iter()
+                    .any(|category| category.label() == absent),
+                "{absent} leads to a page with nothing to configure"
+            );
+        }
+    }
+
+    /// Rows are contiguous and one control tall, and every control on the
+    /// page starts at the same x — which is the whole reason the label column
+    /// is a fixed width rather than a fraction of the row.
+    #[test]
+    fn rows_are_one_control_tall_and_share_one_control_column() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -1332,28 +1355,60 @@ mod tests {
             ..Default::default()
         };
         let mut category = PreferenceCategory::Appearance;
+        let mut switch = false;
         let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |ui, _| {
-                setting_row(ui, "First fidelity row", "", |_| {});
-                setting_row(ui, "Second fidelity row", "", |_| {});
+                setting_row(ui, "First row", "", |ui| {
+                    value_column(ui, |ui| {
+                        preference_switch(ui, "first", "First switch", &mut switch);
+                    });
+                });
+                setting_row(ui, "Second row", "", |ui| {
+                    value_column(ui, |ui| {
+                        let width = control_width(ui);
+                        ui.add_sized(
+                            [width, Tokens::get(ui.ctx()).metrics.ctl_h],
+                            egui::Slider::new(&mut 0, 0..=100).show_value(false),
+                        )
+                        .widget_info(|| {
+                            WidgetInfo::labeled(WidgetType::Slider, true, "Second control")
+                        });
+                    });
+                });
             });
         });
         let update = output
             .platform_output
             .accesskit_update
             .expect("AccessKit tree update");
-        let first = node_bounds(
+        let first = node_bounds(&update.nodes, egui::accesskit::Role::Label, "First row");
+        let second = node_bounds(&update.nodes, egui::accesskit::Role::Label, "Second row");
+        let switch_bounds = node_bounds(
             &update.nodes,
-            egui::accesskit::Role::Label,
-            "First fidelity row",
+            egui::accesskit::Role::CheckBox,
+            "First switch",
         );
-        let second = node_bounds(
+        let slider = node_bounds(
             &update.nodes,
-            egui::accesskit::Role::Label,
-            "Second fidelity row",
+            egui::accesskit::Role::Slider,
+            "Second control",
         );
 
-        assert_eq!(second.y0 - first.y0, 70.0);
+        assert_eq!(
+            second.y0 - first.y0,
+            f64::from(standard_row_height(&ctx)),
+            "two rows carrying no help are the page's one row height apart"
+        );
+        assert_eq!(first.x0, second.x0, "the two labels share one left edge");
+        assert_eq!(
+            switch_bounds.x0, slider.x0,
+            "a switch and a slider on two rows start at one control column"
+        );
+        assert_eq!(
+            switch_bounds.x0 - first.x0,
+            f64::from(LABEL_COLUMN_WIDTH + SETTING_ROW_COLUMN_GAP),
+            "the control column begins one label column and one gap in"
+        );
     }
 
     #[test]
@@ -1373,9 +1428,9 @@ mod tests {
                     "Expandable fidelity row",
                     "This deliberately long preference explanation wraps across several lines so the row must measure content instead of clipping it into a fixed-height track.",
                     |ui| {
-                        ui.label("Resolved value");
-                        ui.label("Managed source");
-                        ui.label("Validation and restart impact");
+                        ui.label("Stacked value");
+                        ui.label("Second stacked value");
+                        ui.label("Third stacked value");
                     },
                 );
                 setting_row(ui, "Following fidelity row", "", |_| {});
@@ -1396,7 +1451,7 @@ mod tests {
             "Following fidelity row",
         );
 
-        assert!(second.y0 - first.y0 > 70.0);
+        assert!(second.y0 - first.y0 > 46.0);
     }
 
     #[test]
@@ -1412,8 +1467,7 @@ mod tests {
 
         let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |ui, _| {
-                page_heading(ui, "Appearance", "Appearance preferences");
-                section_label(ui, "Visual system");
+                section_heading(ui, "Visual system");
             });
         });
         let update = output
@@ -1424,7 +1478,10 @@ mod tests {
 
         let dialog_bounds = node_bounds(nodes, egui::accesskit::Role::Dialog, "Preferences");
         assert_eq!(dialog_bounds.x1 - dialog_bounds.x0, 1000.0);
-        assert_eq!(dialog_bounds.y1 - dialog_bounds.y0, 680.0);
+        assert_eq!(
+            dialog_bounds.y1 - dialog_bounds.y0,
+            f64::from(DESKTOP_HEIGHT)
+        );
 
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Dialog
@@ -1443,7 +1500,12 @@ mod tests {
                 && node.label() == Some("Appearance")
                 && node.aria_current() == Some(egui::accesskit::AriaCurrent::Page)
         }));
-        for (label, level) in [("Preferences", 2), ("Appearance", 3), ("Visual system", 4)] {
+        for (label, level) in [
+            ("Preferences", 2),
+            ("Interface", 3),
+            ("Engineering", 3),
+            ("Visual system", 4),
+        ] {
             assert!(
                 nodes.iter().any(|(_, node)| {
                     node.role() == egui::accesskit::Role::Heading
@@ -1479,7 +1541,7 @@ mod tests {
         let mut category = PreferenceCategory::Appearance;
         let output = ctx.run_ui(input, |ctx| {
             let _ = show(ctx, &mut category, true, |ui, _| {
-                page_heading(ui, "Appearance", "Appearance preferences");
+                setting_row(ui, "Contained row", "", |_| {});
             });
         });
         let nodes = output
@@ -1489,7 +1551,7 @@ mod tests {
             .nodes;
         let dialog = node_bounds(&nodes, egui::accesskit::Role::Dialog, "Preferences");
         let current_category = node_bounds(&nodes, egui::accesskit::Role::Button, "Appearance");
-        let page_heading = node_bounds(&nodes, egui::accesskit::Role::Heading, "Appearance");
+        let row = node_bounds(&nodes, egui::accesskit::Role::Label, "Contained row");
 
         assert_eq!(dialog.x1 - dialog.x0, DESKTOP_WIDTH as f64);
         assert_eq!(
@@ -1499,7 +1561,7 @@ mod tests {
         assert!(current_category.x0 >= dialog.x0);
         assert!(current_category.x1 <= dialog.x1);
         assert!(current_category.y0 >= dialog.y0 + HEADER_HEIGHT as f64);
-        assert!(page_heading.x0 >= current_category.x1);
-        assert!(page_heading.x1 <= dialog.x1);
+        assert!(row.x0 >= current_category.x1);
+        assert!(row.x1 <= dialog.x1);
     }
 }

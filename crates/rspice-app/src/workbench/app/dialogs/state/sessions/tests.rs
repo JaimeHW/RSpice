@@ -40,7 +40,6 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_setup.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_support.manager.open = true);
     assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_support.title_fields.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.managed_preference_policy_open = true);
     assert_blocks_shortcuts(|dialogs| {
         dialogs
             .workspace_layout_manager

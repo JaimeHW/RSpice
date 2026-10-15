@@ -345,9 +345,6 @@ pub struct DialogState {
     /// Document-wide authored-sheet reconciliation and title-field editing.
     pub(crate) drawing_sheet_support: crate::workbench::app::DrawingSheetSupportState,
 
-    /// Read-only resolved policy review owned by Preferences.
-    pub(crate) managed_preference_policy_open: bool,
-
     /// Device-local workspace layout manager owned by Preferences.
     pub(crate) workspace_layout_manager:
         crate::workbench::app::dialogs::preferences::workspace_layout_manager::WorkspaceLayoutManagerState,
@@ -540,7 +537,6 @@ impl DialogState {
             || self.drawing_sheet_defaults.open
             || self.drawing_sheet_presets.any_open()
             || self.drawing_sheet_support.any_open()
-            || self.managed_preference_policy_open
             || self.workspace_layout_manager.open
             || self.shortcut_portability.application_modal_open()
             || self.shortcut_editor.open
