@@ -16,7 +16,7 @@ use rspice_results::{
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale},
+    plot::{self, Axis, LimitLine, Marker, PlotSpec, Trace, XScale, fmt_si_readout},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
 };
@@ -209,9 +209,7 @@ pub fn selection_note(ui: &mut Ui, reason: SoaSelectionAbsence) {
     panel_note(
         ui,
         match reason {
-            SoaSelectionAbsence::Unselected => {
-                "Select a rule row to inspect its exact worst point, limit, and coverage."
-            }
+            SoaSelectionAbsence::Unselected => "Select a rule.",
             SoaSelectionAbsence::Unavailable => {
                 "Select the rule's analysis with valid, successful SOA evidence to inspect it."
             }
@@ -492,7 +490,24 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
     } = source;
     let margin = evaluation.limit_value - evaluation.worst_actual_value;
 
-    section_header(ui, "Selected SOA rule", Some(evaluation.verdict.label()));
+    // The limit's own warning and critical fractions are rule settings and
+    // live on the verdict's hover; the sample count and the clipped and
+    // unqualified excursion counts are bookkeeping.
+    let margin_percent = if evaluation.limit_value.abs() > 0.0 {
+        format!(" ({:+.1} %)", 100.0 * margin / evaluation.limit_value.abs())
+    } else {
+        String::new()
+    };
+    rspice_ui_kit::panels::section_header_explained(
+        ui,
+        "Selected SOA rule",
+        evaluation.verdict.label(),
+        &format!(
+            "Warning above {}; critical above {}.",
+            threshold_text(evaluation.thresholds.warning_fraction),
+            threshold_text(evaluation.thresholds.critical_fraction)
+        ),
+    );
     stat_table(
         ui,
         &[
@@ -504,48 +519,35 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
             ),
             (
                 "Observed",
-                format!("{:.17e} {}", evaluation.worst_actual_value, evaluation.unit),
+                fmt_si_readout(evaluation.worst_actual_value, &evaluation.unit, 4),
                 true,
             ),
             (
                 "Limit",
-                format!("{:.17e} {}", evaluation.limit_value, evaluation.unit),
+                fmt_si_readout(evaluation.limit_value, &evaluation.unit, 4),
                 false,
             ),
             (
                 "Signed margin",
-                format!("{margin:.17e} {}", evaluation.unit),
+                format!(
+                    "{}{margin_percent}",
+                    fmt_si_readout(margin, &evaluation.unit, 4)
+                ),
                 true,
             ),
             (
-                "Worst time",
-                format!("{:.17e} s", evaluation.worst_time_s),
-                false,
-            ),
-            (
-                "Worst interval",
-                facts.map_or_else(
-                    || worst_interval_text(None, None, evaluation, false),
-                    |facts| facts.interval_full.clone(),
+                "Worst at",
+                format!(
+                    "{} ({})",
+                    fmt_si_readout(evaluation.worst_time_s, "s", 4),
+                    facts.map_or_else(
+                        || worst_interval_text(None, None, evaluation, false),
+                        |facts| facts.interval_full.clone(),
+                    )
                 ),
                 false,
             ),
-            (
-                "Samples evaluated",
-                evaluation.sample_count.to_string(),
-                false,
-            ),
             ("Violation events", event_count.to_string(), false),
-            (
-                "Warning above",
-                threshold_text(evaluation.thresholds.warning_fraction),
-                false,
-            ),
-            (
-                "Critical above",
-                threshold_text(evaluation.thresholds.critical_fraction),
-                false,
-            ),
         ],
     );
     if let Some(duration) = evaluation.duration {
@@ -553,18 +555,13 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
             ui,
             &[
                 (
-                    "Duration threshold",
-                    format!("{:.17e} s", duration.minimum_duration_s),
-                    false,
-                ),
-                (
                     "Longest excursion",
-                    format!("{:.17e} s", duration.longest_excursion_s),
+                    fmt_si_readout(duration.longest_excursion_s, "s", 4),
                     true,
                 ),
                 (
                     "Total time above limit",
-                    format!("{:.17e} s", duration.total_exceedance_s),
+                    fmt_si_readout(duration.total_exceedance_s, "s", 4),
                     false,
                 ),
                 (
@@ -572,52 +569,18 @@ pub fn right_panel(ui: &mut Ui, source: SoaInspector<'_>) -> SoaInspectorRespons
                     duration.qualified_excursions.to_string(),
                     true,
                 ),
-                (
-                    "Unqualified excursions",
-                    duration.rejected_excursions.to_string(),
-                    false,
-                ),
-                (
-                    "Window-clipped excursions",
-                    duration.clipped_excursions.to_string(),
-                    false,
-                ),
             ],
         );
         if let Some(cumulative) = duration.cumulative {
             stat_table(
                 ui,
-                &[
-                    ("Duration policy", "Cumulative exposure".into(), false),
-                    (
-                        "Recovery time constant",
-                        cumulative
-                            .recovery_time_s
-                            .map(|value| format!("{value:.17e} s"))
-                            .unwrap_or_else(|| "No recovery".into()),
-                        false,
-                    ),
-                    (
-                        "Peak exposure",
-                        format!("{:.17e} s", cumulative.peak_exposure_s),
-                        true,
-                    ),
-                    (
-                        "Exposure at window end",
-                        format!("{:.17e} s", cumulative.final_exposure_s),
-                        false,
-                    ),
-                ],
-            );
-            panel_note(
-                ui,
-                "Exposure starts at zero, accumulates above the limit, and optionally decays between excursions. Each excursion's ending exposure determines its verdict; earlier excursions keep their own verdicts.",
+                &[(
+                    "Peak exposure",
+                    fmt_si_readout(cumulative.peak_exposure_s, "s", 4),
+                    true,
+                )],
             );
         }
-        panel_note(
-            ui,
-            "The worst point is selected by reported severity, then utilization. Excursion widths use linear threshold crossings inside the checked window; the full stress history includes unqualified excursions.",
-        );
     }
     panel_note(ui, &evaluation.description);
 

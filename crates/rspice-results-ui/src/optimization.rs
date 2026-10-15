@@ -1,13 +1,13 @@
 //! Optimization convergence plots and exact retained candidate presentation.
 
-use crate::presentation::{PlotView, panel_note, stat_table};
+use crate::presentation::{PlotView, stat_table};
 use crate::strip::StripHeader;
 use crate::waveform::WaveformData;
 use egui::{RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 use rspice_results::{analysis_result::AnalysisResult, optimization::history::OptimizationView};
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si_readout};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use std::collections::BTreeMap;
@@ -36,7 +36,6 @@ pub struct CandidateView<'a> {
     pub iterations: &'a [f64],
     pub best_cost: &'a f64,
     pub best_variables: &'a BTreeMap<String, f64>,
-    pub converged: &'a bool,
 }
 
 fn nearest_candidate_index(iterations: &[f64], requested: f64) -> Option<usize> {
@@ -331,7 +330,6 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         iterations,
         best_cost,
         best_variables,
-        converged,
     } = input;
     let cost = analysis
         .waveforms
@@ -341,18 +339,23 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         .copied();
 
     section_header(ui, "Selected optimization candidate", None);
+    // The iteration is an index, not a measurement: it printed as
+    // "3.00000000000000000e0".
     let mut rows = vec![
-        ("Iteration", format!("{:.17e}", iterations[index]), true),
+        ("Iteration", format!("{}", iterations[index] as i64), true),
         (
             "Cost",
-            cost.map_or_else(|| "unavailable".to_owned(), |value| format!("{value:.17e}")),
+            cost.map_or_else(
+                || "unavailable".to_owned(),
+                |value| fmt_si_readout(value, "", 6),
+            ),
             true,
         ),
         (
             "Cost from best",
             cost.map_or_else(
                 || "unavailable".to_owned(),
-                |value| format!("{:+.17e}", value - *best_cost),
+                |value| signed_readout(value - *best_cost),
             ),
             true,
         ),
@@ -371,18 +374,21 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
             || "unavailable".to_owned(),
             |value| {
                 best_variables.get(name).map_or_else(
-                    || format!("{value:.17e}"),
-                    |best| format!("{value:.17e} · Δ {:+.17e}", value - *best),
+                    || fmt_si_readout(value, "", 6),
+                    |best| {
+                        format!(
+                            "{} · Δ {}",
+                            fmt_si_readout(value, "", 6),
+                            signed_readout(value - *best)
+                        )
+                    },
                 )
             },
         );
         (name, value, false)
     }));
-    rows.push((
-        "Run outcome",
-        if *converged { "converged" } else { "stopped" }.to_owned(),
-        false,
-    ));
+    // The run converged or stopped once, not once per candidate; the sheet's
+    // own header states it.
     rows.push((
         "Best candidate",
         if candidate_matches_best(analysis, index, *best_cost, best_variables) {
@@ -394,10 +400,13 @@ pub fn right_panel(ui: &mut Ui, input: CandidateView<'_>) {
         false,
     ));
     stat_table(ui, &rows);
-    panel_note(
-        ui,
-        "Variable deltas compare this candidate with the exact retained optimum. Feasibility and specification pass/fail are not inferred unless the result explicitly retains those contracts.",
-    );
+}
+
+/// A difference from the best candidate, signed so the direction reads at a
+/// glance and in the notation every other value on the panel uses.
+fn signed_readout(delta: f64) -> String {
+    let sign = if delta < 0.0 { "−" } else { "+" };
+    format!("{sign}{}", fmt_si_readout(delta.abs(), "", 6))
 }
 
 fn candidate_matches_best(

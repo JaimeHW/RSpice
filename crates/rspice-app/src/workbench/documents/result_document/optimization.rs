@@ -167,37 +167,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(selection) = state.ui.results.session.selected_optimization else {
-        section_header(ui, "Candidate selection", None);
-        panel_note(
-            ui,
-            "Select an iteration row to inspect its exact retained cost and variables.",
-        );
+    // Every way of losing the selection ends the same way: the selection is
+    // cleared and the reader picks another row. Five sentences for one state
+    // were five ways of saying "Select an iteration."
+    if paint_selected_candidate(ui, state) {
         return;
+    }
+    state.ui.results.session.selected_optimization = None;
+    section_header(ui, "Candidate selection", None);
+    panel_note(ui, "Select an iteration.");
+}
+
+/// Paint the selected candidate, or report that there is none to paint.
+fn paint_selected_candidate(ui: &mut Ui, state: &AppState) -> bool {
+    let Some(selection) = state.ui.results.session.selected_optimization else {
+        return false;
     };
     let Some(run) = state.simulation.active_run() else {
-        state.ui.results.session.selected_optimization = None;
-        section_header(ui, "Candidate selection", None);
-        panel_note(ui, "Select a retained optimization analysis and candidate.");
-        return;
+        return false;
     };
     let Some((analysis_index, analysis)) = selection.analysis.resolve(run) else {
-        state.ui.results.session.selected_optimization = None;
-        section_header(ui, "Candidate selection", None);
-        panel_note(
-            ui,
-            "The selected candidate no longer belongs to the active retained dataset.",
-        );
-        return;
+        return false;
     };
     if state.simulation.view.active_analysis_idx != Some(analysis_index) {
-        state.ui.results.session.selected_optimization = None;
-        section_header(ui, "Candidate selection", None);
-        panel_note(
-            ui,
-            "Select an optimization candidate in the active analysis.",
-        );
-        return;
+        return false;
     }
     let Some(AnalysisResultFamilyMetadata::Optimization {
         iterations,
@@ -205,26 +198,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         best_variables,
         best_objectives: _,
         best_constraints: _,
-        converged,
+        converged: _,
     }) = analysis.family_metadata.as_ref()
     else {
-        state.ui.results.session.selected_optimization = None;
-        section_header(ui, "Candidate selection", None);
-        panel_note(
-            ui,
-            "The active analysis no longer contains retained optimization history.",
-        );
-        return;
+        return false;
     };
     let index = selection.iteration_index;
     if index >= iterations.len() {
-        state.ui.results.session.selected_optimization = None;
-        section_header(ui, "Candidate selection", None);
-        panel_note(
-            ui,
-            "The selected candidate no longer exists in the retained optimization history.",
-        );
-        return;
+        return false;
     }
     presentation::right_panel(
         ui,
@@ -234,9 +215,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             iterations,
             best_cost,
             best_variables,
-            converged,
         },
     );
+    true
 }
 
 #[cfg(test)]
