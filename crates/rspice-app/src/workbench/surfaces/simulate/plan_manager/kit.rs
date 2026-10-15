@@ -308,6 +308,18 @@ fn table(
     } else {
         (0.0, HEAD_HEIGHT, ROW_HEIGHT)
     };
+    // How far the selected row's fill and rail reach past the cells.
+    //
+    // A flush table's own `pad` already holds the rail clear of the first
+    // column. A boxed one has no cell pad — it insets everything through its
+    // frame — so the rail was painted over the first cell, and the Order digit
+    // in the campaign table was drawn with its stem under it. Painting the fill
+    // and the rail back out across the frame's inset puts the rail in the
+    // padding where the flush table keeps it. Insetting the cells instead would
+    // take the inset out of the solved track, moving `table_minimum_width`, the
+    // split breakpoint and every route's fit gate; this moves two painted
+    // shapes and nothing else.
+    let bleed = if flush { 0.0 } else { f32::from(TABLE_PADDING) };
     frame.show(ui, |ui| {
         let track = ui.available_width();
         let widths = column_widths(columns, track - 2.0 * pad);
@@ -357,9 +369,10 @@ fn table(
                     Sense::hover()
                 },
             );
+            let selection = rect.expand2(vec2(bleed, 0.0));
             if row.selected {
                 ui.painter().rect_filled(
-                    rect,
+                    selection,
                     0.0,
                     if flush {
                         t.color.accent_dim
@@ -368,12 +381,12 @@ fn table(
                     },
                 );
                 ui.painter().vline(
-                    rect.left() + 1.0,
-                    rect.y_range(),
+                    selection.left() + 1.0,
+                    selection.y_range(),
                     Stroke::new(2.0, t.color.accent),
                 );
             } else if selects && response.hovered() {
-                ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
+                ui.painter().rect_filled(selection, 0.0, t.color.bg_hover);
             }
             if flush {
                 ui.painter().hline(
@@ -1074,6 +1087,68 @@ mod tests {
     /// two-column — is a property of the shipped widths or of nothing.
     fn plan_columns() -> &'static [TableColumn] {
         &super::super::PLAN_COLUMNS
+    }
+
+    /// The selected row's accent rail is painted clear of the first cell.
+    ///
+    /// A boxed table has no cell inset of its own — it insets its content
+    /// through its frame — so a rail at the row's own left edge lands on top of
+    /// the first column, and the campaign table's Order digit was drawn with
+    /// its stem under the accent at every viewport.
+    #[test]
+    fn the_selection_rail_is_painted_clear_of_the_first_cell() {
+        let rows = [
+            TableRow {
+                selected: true,
+                announced: "the selected plan".to_owned(),
+            },
+            TableRow {
+                selected: false,
+                announced: "the other plan".to_owned(),
+            },
+        ];
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 400.0))),
+                ..Default::default()
+            },
+            |root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| {
+                        records_table(ui, "rail", plan_columns(), &rows, |ui, row, column| {
+                            if row == 0 && column == 0 {
+                                ui.label("1");
+                            }
+                        });
+                    });
+            },
+        );
+
+        let mut rail_right = None;
+        let mut digit_left = None;
+        for clipped in &output.shapes {
+            match &clipped.shape {
+                egui::epaint::Shape::LineSegment { points, stroke }
+                    if (points[0].x - points[1].x).abs() < f32::EPSILON =>
+                {
+                    rail_right = Some(points[0].x + stroke.width / 2.0);
+                }
+                egui::epaint::Shape::Text(text) if text.galley.job.text == "1" => {
+                    digit_left = Some(text.pos.x);
+                }
+                _ => {}
+            }
+        }
+        let rail_right = rail_right.expect("the selected row paints an accent rail");
+        let digit_left = digit_left.expect("the first cell paints its order digit");
+        assert!(
+            rail_right <= digit_left,
+            "the rail ends at {rail_right} and the order digit starts at \
+             {digit_left}, so the accent is painted over the digit"
+        );
     }
 
     /// The solved widths fill the track exactly. A sum under the track leaves a
