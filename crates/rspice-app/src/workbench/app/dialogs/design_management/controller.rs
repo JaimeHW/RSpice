@@ -287,10 +287,6 @@ impl RSpiceApp {
             selection_summary,
             default_sheet_name,
         )?;
-        self.state.dialogs.design_management.receipt = Some(format!(
-            "Published design-management revision {} \u{00b7} one project transaction",
-            candidate.revision()
-        ));
         Ok(())
     }
 }

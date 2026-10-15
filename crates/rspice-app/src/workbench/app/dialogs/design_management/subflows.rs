@@ -27,28 +27,15 @@ pub(super) fn design_management_subflow_body(
             )),
         );
         semantic_change_map(left, &before, &subject, &after, page.title());
-        let preview_tokens = Tokens::get(left.ctx());
         left.columns(2, |columns| {
             let (preview, properties) = columns.split_at_mut(1);
             schematic_preview(&mut preview[0], page.code());
-            property_row_toned(
-                &mut properties[0],
-                "Invariant",
-                page.invariant(),
-                preview_tokens.color.ok,
-            );
             property_row(
                 &mut properties[0],
                 "Validation",
                 "connectivity \u{00b7} hierarchy \u{00b7} configuration",
             );
             property_row(&mut properties[0], "Recovery", "one explicit predecessor");
-            property_row_toned(
-                &mut properties[0],
-                "Stale results",
-                "enumerated after preview",
-                preview_tokens.color.warn,
-            );
         });
 
         section_header(right, "Transaction inputs", Some("source resolved"));
@@ -61,9 +48,6 @@ pub(super) fn design_management_subflow_body(
             drawing_sheet_personal,
             write_allowed,
         ));
-        if let Some(receipt) = dialog.receipt.as_deref() {
-            receipt_banner(right, receipt);
-        }
     });
     first_response.unwrap_or_else(|| {
         let (_, response) = ui.allocate_exact_size(Vec2::ZERO, Sense::hover());

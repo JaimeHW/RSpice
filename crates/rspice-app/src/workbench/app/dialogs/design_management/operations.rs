@@ -54,7 +54,10 @@ impl RSpiceApp {
             .clone();
         let all_objects = self.state.dialogs.design_management.all_object_ids.clone();
 
-        let (tab, receipt) = match page {
+        // An operation reports only what it produced that the manager's own
+        // tabs do not show — a created-object count, a difference count, a
+        // finding count. That it completed is reported by its page closing.
+        let (tab, outcome) = match page {
             DesignManagementPage::Manager => {
                 return Err("The manager publishes through its reviewed primary action.".to_owned());
             }
@@ -138,14 +141,7 @@ impl RSpiceApp {
                         .assign_objects(catalog.revision(), id, all_objects)
                         .map_err(|error| error.to_string())?;
                 }
-                (
-                    DesignManagementTab::Sheets,
-                    format!(
-                        "Created stable sheet `{}` · {}",
-                        inputs.sheet_name.trim(),
-                        id
-                    ),
-                )
+                (DesignManagementTab::Sheets, None)
             }
             DesignManagementPage::MoveSelection => {
                 let destination = inputs
@@ -208,14 +204,20 @@ impl RSpiceApp {
                         boundary_resolution,
                     })
                     .map_err(|error| error.to_string())?;
+                // The boundary ports are the part the author did not ask for.
                 (
                     DesignManagementTab::Sheets,
-                    format!(
-                        "Moved {} objects · {} explicit boundary ports · catalog revision {}",
-                        moved.object_ids.len(),
-                        moved.created_port_ids.len(),
-                        moved.catalog_revision
-                    ),
+                    (!moved.created_port_ids.is_empty()).then(|| {
+                        format!(
+                            "{} boundary port{} created for the move",
+                            moved.created_port_ids.len(),
+                            if moved.created_port_ids.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            }
+                        )
+                    }),
                 )
             }
             DesignManagementPage::NewVariant => {
@@ -226,7 +228,7 @@ impl RSpiceApp {
                     .draft
                     .as_mut()
                     .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let id = draft
+                draft
                     .variants_mut()
                     .create(AssemblyVariantDraft {
                         name: inputs.variant_name.trim().to_owned(),
@@ -236,13 +238,7 @@ impl RSpiceApp {
                         overrides: BTreeMap::new(),
                     })
                     .map_err(|error| error.to_string())?;
-                (
-                    DesignManagementTab::Variants,
-                    format!(
-                        "Created governed assembly variant `{}` · {id}",
-                        inputs.variant_name.trim()
-                    ),
-                )
+                (DesignManagementTab::Variants, None)
             }
             DesignManagementPage::CompareVariants => {
                 let reference = inputs
@@ -270,12 +266,13 @@ impl RSpiceApp {
                         "connectivity",
                     ),
                 };
+                // The comparison has nowhere else to land: no tab lists it.
                 (
                     DesignManagementTab::Variants,
-                    format!(
-                        "Compared immutable variants · {difference_count} {class_label} differences · {}",
-                        result.semantic_digest
-                    ),
+                    Some(format!(
+                        "{difference_count} {class_label} difference{}",
+                        if difference_count == 1 { "" } else { "s" }
+                    )),
                 )
             }
             DesignManagementPage::VariantMatrix => {
@@ -341,18 +338,7 @@ impl RSpiceApp {
                     );
                 }
                 *draft.variants_mut() = variants;
-                (
-                    DesignManagementTab::Variants,
-                    format!(
-                        "Validated {} governed override cells and applied substitution policies",
-                        draft
-                            .variants()
-                            .variants()
-                            .iter()
-                            .map(|variant| variant.definition().overrides.len())
-                            .sum::<usize>()
-                    ),
-                )
+                (DesignManagementTab::Variants, None)
             }
             DesignManagementPage::RenumberPreview => {
                 let design_management = self
@@ -381,13 +367,16 @@ impl RSpiceApp {
                     .preview_renumbering(&request)
                     .map_err(|error| error.to_string())?;
                 let mapping_count = preview.mappings.len();
-                let id = draft
+                draft
                     .annotation_mut()
                     .commit_renumbering(&preview, &request)
                     .map_err(|error| error.to_string())?;
                 (
                     DesignManagementTab::Annotation,
-                    format!("Created reviewed mapping {id} · {mapping_count} reference changes"),
+                    Some(format!(
+                        "{mapping_count} reference change{}",
+                        if mapping_count == 1 { "" } else { "s" }
+                    )),
                 )
             }
             DesignManagementPage::AnnotationPolicy => {
@@ -407,14 +396,11 @@ impl RSpiceApp {
                 definition.prefix_allocation = inputs.prefix_allocation;
                 definition.reserved_ranges = ranges;
                 definition.imported_ids = inputs.imported_ids;
-                let revision = draft
+                draft
                     .annotation_mut()
                     .update_policy(policy.revision(), definition)
                     .map_err(|error| error.to_string())?;
-                (
-                    DesignManagementTab::Annotation,
-                    format!("Saved annotation policy revision {revision}"),
-                )
+                (DesignManagementTab::Annotation, None)
             }
             DesignManagementPage::HierarchyAudit => {
                 let resolution = self.state.workspace.resolve_hierarchy_with_active(
@@ -474,20 +460,23 @@ impl RSpiceApp {
                     .draft
                     .as_mut()
                     .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let id = draft
+                draft
                     .run_and_record_hierarchy_audit(&request)
                     .map_err(|error| error.to_string())?;
                 let audit = draft
                     .hierarchy_audits()
                     .last()
-                    .ok_or_else(|| "The hierarchy audit receipt was not retained.".to_owned())?;
+                    .ok_or_else(|| "The hierarchy audit was not recorded.".to_owned())?;
+                // The tab says "qualified" or "findings"; the counts are here.
                 (
                     DesignManagementTab::Hierarchy,
-                    format!(
-                        "Recorded hierarchy audit {id} · {} resolved subjects · {} findings",
+                    Some(format!(
+                        "{} subject{} audited · {} finding{}",
                         audit.resolved_subjects(),
-                        audit.findings().len()
-                    ),
+                        if audit.resolved_subjects() == 1 { "" } else { "s" },
+                        audit.findings().len(),
+                        if audit.findings().len() == 1 { "" } else { "s" }
+                    )),
                 )
             }
         };
@@ -497,7 +486,7 @@ impl RSpiceApp {
         dialog.active_tab = tab;
         dialog.input_baseline = None;
         dialog.error = None;
-        dialog.receipt = Some(receipt);
+        dialog.outcome = outcome;
         dialog.discard_confirmation = false;
         dialog.body_scroll_offset = 0.0;
         Ok(())

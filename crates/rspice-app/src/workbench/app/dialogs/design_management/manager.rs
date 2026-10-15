@@ -21,13 +21,9 @@ pub(super) fn design_management_manager_body(
             hierarchy_manager_body(ui, dialog, workspace, libraries, schematic, write_allowed)
         }
     };
-    concept_banner(
-        ui,
-        "Every change is one reversible working-revision transaction. Existing results retain their original hierarchy, variant, and annotation manifests.",
-        true,
-    );
-    if let Some(receipt) = dialog.receipt.as_deref() {
-        receipt_banner(ui, receipt);
+    // Only what the operation did that the tabs do not already show.
+    if let Some(outcome) = dialog.outcome.as_deref() {
+        muted_note(ui, outcome);
     }
     let _ = first_focus;
     action
@@ -259,11 +255,6 @@ pub(super) fn sheets_manager_body(
         } else {
             muted_note(right, "Create a sheet to establish the sheet contract.");
         }
-        concept_banner(
-            right,
-            "Sheet identity is stable across reordering, printing, and annotation. Moving objects creates explicit ports and preserves source-object history.",
-            false,
-        );
     });
     action
 }
@@ -475,27 +466,13 @@ pub(super) fn variants_manager_body(
                 replacement.qualification != crate::state::VariantQualificationState::Current
             })
             .count();
-        property_row_toned(
+        // Both rows are counts, and a count reads as a count.
+        property_row(
             right,
             "Port equivalence",
             &format!("{equivalent} / {}", substitutions.len()),
-            if equivalent == substitutions.len() {
-                Tokens::get(right.ctx()).color.ok
-            } else {
-                Tokens::get(right.ctx()).color.warn
-            },
         );
-        property_row_toned(
-            right,
-            "Model sections",
-            &format!("{model_reviews} reviews"),
-            if model_reviews == 0 {
-                Tokens::get(right.ctx()).color.ok
-            } else {
-                Tokens::get(right.ctx()).color.warn
-            },
-        );
-        property_row(right, "Release evidence", "variant-bound");
+        property_row(right, "Model sections", &format!("{model_reviews} reviews"));
     });
     action
 }
@@ -643,11 +620,6 @@ pub(super) fn annotation_manager_body(
                 "Annotation contract updated.",
             );
         }
-        concept_banner(
-            right,
-            "A renumber operation never rewrites historical netlists, results, reports, or review anchors. It creates a stable old-to-new mapping.",
-            true,
-        );
     });
     action
 }
@@ -808,16 +780,11 @@ pub(super) fn hierarchy_manager_body(
                 "Hierarchy contract updated.",
             );
         }
-        let t = Tokens::get(right.ctx());
-        property_row_toned(
+        property_row_problem(
             right,
             "Unresolved views",
             &resolution.unresolved_instances().to_string(),
-            if resolution.is_valid() {
-                t.color.ok
-            } else {
-                t.color.err
-            },
+            (!resolution.is_valid()).then_some(Problem::Failure),
         );
         let protected =
             draft

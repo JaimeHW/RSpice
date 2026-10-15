@@ -109,21 +109,6 @@ pub(in crate::workbench) fn concept_banner(ui: &mut Ui, text: &str, warning: boo
         });
 }
 
-pub(super) fn receipt_banner(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.ok))
-        .inner_margin(Margin::same(10))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(format!("Committed · {text}"))
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.ok),
-            );
-        });
-}
-
 pub(super) fn toolbar(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     Frame::NONE

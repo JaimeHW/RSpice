@@ -23,9 +23,9 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, Problem,
 };
-use crate::workbench::design_system::{property_row, property_row_toned, section_header};
+use crate::workbench::design_system::{property_row, property_row_problem, section_header};
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
@@ -126,19 +126,6 @@ impl DesignManagementPage {
         }
     }
 
-    const fn invariant(self) -> &'static str {
-        match self {
-            Self::Manager => "one reversible working-revision transaction",
-            Self::NewSheet => "stable cross-sheet port identities",
-            Self::MoveSelection => "typed boundary nets preserved",
-            Self::NewVariant => "parent remains immutable",
-            Self::CompareVariants => "no source mutation",
-            Self::VariantMatrix => "qualified replacement policy",
-            Self::RenumberPreview => "external and locked references retained",
-            Self::AnnotationPolicy => "import source map retained",
-            Self::HierarchyAudit => "protected boundaries verified",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -272,7 +259,9 @@ pub(crate) struct DesignManagementDialogState {
     selection_summary: String,
     default_sheet_name: String,
     error: Option<String>,
-    receipt: Option<String>,
+    /// What the last operation did that the manager's own tabs do not show —
+    /// a count it produced, not a report that it finished.
+    outcome: Option<String>,
     discard_confirmation: bool,
     body_scroll_offset: f32,
 }
@@ -293,7 +282,7 @@ impl Default for DesignManagementDialogState {
             selection_summary: "No complete schematic objects selected".to_owned(),
             default_sheet_name: "Sheet 1".to_owned(),
             error: None,
-            receipt: None,
+            outcome: None,
             discard_confirmation: false,
             body_scroll_offset: 0.0,
         }
