@@ -92,7 +92,8 @@ fn default_title_field_value(
             .document_control
             .revision
             .clone(),
-        DrawingSheetTitleFieldId::Format => sheet.format_label(),
+        // Retired: never present in a normalized field set, so never resolved.
+        DrawingSheetTitleFieldId::Format => String::new(),
         DrawingSheetTitleFieldId::Scale => match sheet.format.title_block.scale {
             DrawingSheetScale::NotToScale => "NTS".to_owned(),
             DrawingSheetScale::Ratio {

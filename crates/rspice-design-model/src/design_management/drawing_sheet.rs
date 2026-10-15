@@ -609,6 +609,12 @@ pub enum DrawingSheetTitleFieldId {
     SheetTitle,
     Page,
     Revision,
+    /// Retired. The sheet format restated the paper the reader is holding,
+    /// in prose, in a cell narrow enough that it rarely fitted; Page Setup
+    /// owns that fact and the border itself shows it. The variant remains
+    /// only so sheets authored before it was withdrawn still load — it is
+    /// absent from [`Self::ALL`], so nothing offers, resolves, or renders
+    /// it, and deserialization drops it from the field set.
     Format,
     Scale,
     DrawnBy,
@@ -621,13 +627,12 @@ pub enum DrawingSheetTitleFieldId {
 }
 
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 13] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
         Self::Page,
         Self::Revision,
-        Self::Format,
         Self::Scale,
         Self::DrawnBy,
         Self::CheckedBy,
@@ -637,6 +642,13 @@ impl DrawingSheetTitleFieldId {
         Self::DocumentId,
         Self::Classification,
     ];
+
+    /// Fields withdrawn from the product that older sheets may still carry.
+    ///
+    /// Deserialization drops these from the field set rather than refusing
+    /// the sheet, so retiring a field costs no saved work. They are never
+    /// written back.
+    pub const RETIRED: [Self; 1] = [Self::Format];
 
     /// Editable title-block values whose authority is the project rather than
     /// one sheet. Visibility remains sheet-owned, but the value is resolved
@@ -679,20 +691,23 @@ impl DrawingSheetTitleFieldId {
     #[must_use]
     pub const fn policy(self) -> DrawingSheetTitleFieldPolicy {
         match self {
-            Self::Project | Self::CellView | Self::Page | Self::Revision | Self::Format => {
-                DrawingSheetTitleFieldPolicy {
-                    required_visible: true,
-                    value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
-                }
-            }
+            Self::CellView | Self::Page | Self::Revision => DrawingSheetTitleFieldPolicy {
+                required_visible: true,
+                value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
+            },
             Self::SheetTitle => DrawingSheetTitleFieldPolicy {
                 required_visible: true,
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
-            Self::Date | Self::Scale => DrawingSheetTitleFieldPolicy {
-                required_visible: false,
-                value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
-            },
+            // The project name is the leading segment of `Cell / view` in a
+            // single-library workspace, so the sheet must be free to carry
+            // one or the other rather than always both.
+            Self::Project | Self::Date | Self::Scale | Self::Format => {
+                DrawingSheetTitleFieldPolicy {
+                    required_visible: false,
+                    value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
+                }
+            }
             Self::DrawnBy
             | Self::CheckedBy
             | Self::ApprovedBy
@@ -703,6 +718,21 @@ impl DrawingSheetTitleFieldId {
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
         }
+    }
+
+    /// Whether a new sheet shows this field.
+    ///
+    /// The sign-off and classification cells are filled by a release
+    /// process, not by drawing the circuit, so a sheet that has never been
+    /// released would spend them on em dashes. They stay one click away in
+    /// Page Setup, and every field a sheet does show is one the engineer can
+    /// read: fewer columns means wider cells and more characters in each.
+    #[must_use]
+    pub const fn visible_by_default(self) -> bool {
+        !matches!(
+            self,
+            Self::DrawnBy | Self::CheckedBy | Self::ApprovedBy | Self::Classification
+        )
     }
 }
 
@@ -1217,7 +1247,15 @@ impl Default for DrawingSheetTitleBlock {
     fn default() -> Self {
         let fields = DrawingSheetTitleFieldId::ALL
             .into_iter()
-            .map(|field| (field, DrawingSheetTitleFieldState::default()))
+            .map(|field| {
+                (
+                    field,
+                    DrawingSheetTitleFieldState {
+                        visible: field.visible_by_default(),
+                        ..DrawingSheetTitleFieldState::default()
+                    },
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         Self {
             template: DrawingSheetTitleBlockTemplate::Compact,
@@ -1233,6 +1271,27 @@ impl Default for DrawingSheetTitleBlock {
 }
 
 impl DrawingSheetTitleBlock {
+    /// Bring an authored field set to exactly the fields the product has.
+    ///
+    /// A sheet written before a field was withdrawn still carries it, and
+    /// one written before a field existed is missing it. Dropping the first
+    /// and supplying the second means a renderer always sees the current set,
+    /// and neither retiring nor adding a field costs an operator their saved
+    /// sheet. Retired fields are never written back.
+    fn normalize_title_field_set(&mut self) {
+        for retired in DrawingSheetTitleFieldId::RETIRED {
+            self.fields.remove(&retired);
+        }
+        for field in DrawingSheetTitleFieldId::ALL {
+            self.fields
+                .entry(field)
+                .or_insert_with(|| DrawingSheetTitleFieldState {
+                    visible: field.visible_by_default(),
+                    ..DrawingSheetTitleFieldState::default()
+                });
+        }
+    }
+
     fn normalize_managed_template(&mut self) {
         if self.template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
             self.managed_template.get_or_insert_with(Default::default);
@@ -1504,6 +1563,7 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             .or_default()
             .value
             .clear();
+        format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
         if legacy_title_block {
             format.fit_default_title_block();
@@ -1524,6 +1584,7 @@ impl SchematicSheetFormat {
         mut draft: SchematicSheetFormatDraft,
     ) -> Result<Self, DesignManagementError> {
         draft.title_block.normalize_managed_template();
+        draft.title_block.normalize_title_field_set();
         let format = Self {
             size: draft.authored_size.legacy_projection(),
             orientation: draft.orientation,
