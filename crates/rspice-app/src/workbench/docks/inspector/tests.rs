@@ -1525,6 +1525,56 @@ fn a_compact_panel_readout_holds_four_significant_digits() {
 /// One review panel: its file name and the app state it renders.
 type ReviewPanel = (&'static str, fn() -> RSpiceApp);
 
+/// The Stimulus Library inspector with two adopters, one of which the library
+/// has published past.
+///
+/// Both states the Adopters list has to draw at once: an instance whose copy
+/// is current, which states no drift and carries two verbs, and one the
+/// library has moved past, which says so and offers re-adoption.
+fn stimulus_adopters_app() -> RSpiceApp {
+    use crate::state::stimulus_library::definition::StimulusDefinition;
+    use crate::state::stimulus_library::fixtures;
+    use crate::state::{Component, Point};
+
+    const DEFINITION: &str = "bridge_cal_step";
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workspace.content.stimulus_library = fixtures::library();
+    app.state.workbench.workspace = crate::workbench::state::Workspace::Stimulus;
+    app.state.workbench.selected_stimulus_definition = Some(DEFINITION.to_owned());
+    app.state
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    let adopt = |app: &mut RSpiceApp, id: u64, instance: &str| {
+        let definition: StimulusDefinition = app
+            .state
+            .workspace
+            .content
+            .stimulus_library
+            .get(DEFINITION)
+            .cloned()
+            .expect("fixture definition");
+        let mut component = Component::new(id, definition.component_type(), Point::new(4, 4));
+        component.name = instance.to_owned();
+        definition.adopt_onto(&mut component).expect("adopt");
+        app.state
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(component);
+    };
+    adopt(&mut app, 7, "V1");
+    // Publishing between the two adoptions is what leaves the first instance
+    // behind the library and the second in step with it, which is the
+    // comparison this section exists to make.
+    crate::workbench::app::actions::stimulus::edit_field(&mut app.state, "pw", "250u");
+    crate::workbench::app::actions::stimulus::apply_draft(&mut app.state);
+    adopt(&mut app, 8, "V3");
+    app
+}
+
 /// The inspector's panels as PNGs, with their measured geometry beside each,
 /// at the dock's default and minimum widths. `RSPICE_RASTER_DIR` names the
 /// directory; the system temp directory otherwise.
@@ -1533,7 +1583,7 @@ type ReviewPanel = (&'static str, fn() -> RSpiceApp);
 fn render_the_inspector_panels_for_review() {
     let directory = std::env::var("RSPICE_RASTER_DIR")
         .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    let panels: [ReviewPanel; 7] = [
+    let panels: [ReviewPanel; 8] = [
         ("design-component", design_component_app),
         ("design-net", design_net_app),
         ("design-sheet", cmos_inverter_app),
@@ -1541,6 +1591,7 @@ fn render_the_inspector_panels_for_review() {
         ("design-mos-op", design_mos_op_app),
         ("veriloga-inspector", veriloga_inspector_app),
         ("waves-details", waves_details_app),
+        ("stimulus-adopters", stimulus_adopters_app),
     ];
     for (name, fixture) in panels {
         for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {

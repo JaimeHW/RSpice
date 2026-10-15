@@ -27,18 +27,33 @@ use crate::workbench::state::{PURPOSE_FIELD, SimulationPage, Workspace};
 use crate::workbench::{AppState, MessageId};
 
 use super::super::super::design_system::{
-    card_well, property_row, property_row_input_with_hint, property_row_wrapped,
+    card_well, elide_text, panel_bleed, property_row, property_row_input_with_hint,
+    property_row_wrapped,
 };
 use super::{muted_inspector_copy, section_header};
 
-/// Air between two adopter cards, and the inset one keeps.
-const CARD_GAP: f32 = 8.0;
-const CARD_INSET: i8 = 8;
-/// A card's verbs sit on one row, because they are three readings of the same
-/// instance rather than three steps; this is the air between them and the
-/// height they claim.
-const ACTION_GAP: f32 = 6.0;
-const ACTION_HEIGHT: f32 = 24.0;
+/// The line that names one adopter, and the air an entry keeps either side of
+/// the rule that separates it from the next.
+const NAME_ROW_HEIGHT: f32 = 20.0;
+const ENTRY_FOOT: f32 = 7.0;
+/// Air between the name line and the card under it.
+const CARD_GAP: f32 = 3.0;
+/// The verb row under an adopter's card: how tall one verb is, the air between
+/// two of them, and the air above the row.
+///
+/// egui gives the row the theme's interact height rather than its content's,
+/// so the region is four points taller than the verbs in it and the air under
+/// the row measures four more than [`ENTRY_FOOT`] says. Measured at the dock's
+/// 312 pt width: name line 67..87, card 90..108, verbs 116..136, rule at 147,
+/// next entry at 155.
+const ACTION_HEIGHT: f32 = 20.0;
+const ACTION_GAP: f32 = 4.0;
+const ACTION_GAP_Y: f32 = 4.0;
+/// How far a verb's hover fill reaches past its words, which is what the kit's
+/// own header actions keep.
+const ACTION_PAD: f32 = 6.0;
+/// Least air between the instance an entry names and the state it is in.
+const CHIP_GAP: f32 = 8.0;
 
 /// One thing the reader asked the inspector to do, collected while painting so
 /// no section mutates the design under the sections after it.
@@ -103,14 +118,40 @@ fn adopters_section(
         return;
     }
     for (index, adopter) in adopters.iter().enumerate() {
-        adopter_card(ui, state, adopter, definition, index, verbs);
-        ui.add_space(CARD_GAP);
+        if index > 0 {
+            adopter_rule(ui);
+        }
+        adopter_entry(ui, state, adopter, definition, index, verbs);
     }
+}
+
+/// The hairline between two adopters.
+///
+/// A rule across the panel, not a box around each instance: the section is one
+/// list of one kind of thing, so one edge between two entries says what four
+/// edges around each of them said — and says it in the register the panel's
+/// own section headers are ruled in, rather than in a second one.
+fn adopter_rule(ui: &mut Ui) {
+    let palette = Tokens::get(ui.ctx()).color;
+    ui.add_space(ENTRY_FOOT);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(
+        panel_bleed(ui, rect).x_range(),
+        rect.center().y,
+        egui::Stroke::new(1.0, palette.border),
+    );
+    ui.add_space(ENTRY_FOOT);
 }
 
 /// One adopter: which instance it is, where the run reaches it, the card it
 /// really emits, and what can be done to it from here.
-fn adopter_card(
+///
+/// Three lines on the panel's own inset, with no container. A box around each
+/// instance drew four edges to say what the rule between two of them says, and
+/// charged every entry two insets, a corner radius and a second surface tone
+/// for it — which is what made a list of two instances read as a feed of two
+/// cards rather than as a section of the inspector.
+fn adopter_entry(
     ui: &mut Ui,
     state: &AppState,
     adopter: &StimulusAdopter,
@@ -120,110 +161,135 @@ fn adopter_card(
 ) {
     let messages = state.ui.messages();
     let palette = Tokens::get(ui.ctx()).color;
-    egui::Frame::NONE
-        .fill(palette.bg_panel)
-        .stroke(egui::Stroke::new(1.0, palette.border))
-        .corner_radius(3.0)
-        .inner_margin(egui::Margin::same(CARD_INSET))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.spacing_mut().item_spacing.y = 4.0;
-            // The chip is the decision to re-adopt: an instance in step with
-            // the library states nothing, and a drift is a fact rather than a
-            // tone — the Re-adopt button under it is what acts on it.
-            let chip = (adopter.behind || adopter.modified).then_some(adopter.chip.as_str());
-            // The occurrence is where the run reaches this instance; at the
-            // design root "/" is not a place the reader has to be told about.
-            let occurrence = (adopter.occurrence != "/").then_some(adopter.occurrence.as_str());
-            // The instance, where the run reaches it and where it stands share
-            // one line: three registers of one fact, and a reader comparing two
-            // cards reads down one column for each of them.
-            let (rect, response) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
-            let spoken = std::iter::once(adopter.source.reference.as_str())
-                .chain(occurrence)
-                .chain(chip)
-                .collect::<Vec<_>>()
-                .join(" \u{b7} ");
-            response
-                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &spoken));
-            let reference = ui.painter().layout_no_wrap(
-                adopter.source.reference.clone(),
-                theme::mono(tokens::FS_1, FontWeight::Medium),
-                palette.text,
-            );
-            let reference_width = reference.size().x;
-            ui.painter().galley(
-                egui::pos2(rect.left(), rect.center().y - reference.size().y * 0.5),
-                reference,
-                palette.text,
-            );
-            if let Some(occurrence) = occurrence {
-                ui.painter().text(
-                    egui::pos2(rect.left() + reference_width + 8.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    occurrence,
-                    theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-                    palette.text_faint,
-                );
-            }
-            if let Some(chip) = chip {
-                ui.painter().text(
-                    rect.right_center(),
-                    egui::Align2::RIGHT_CENTER,
-                    chip,
-                    theme::mono(tokens::FS_MICRO, FontWeight::Regular),
-                    palette.text_dim,
-                );
-            }
-            card_well(
+    // The chip is the decision to re-adopt: an instance in step with the
+    // library states nothing, and a drift is a fact rather than a tone — the
+    // Re-adopt verb under it is what acts on it.
+    let chip = (adopter.behind || adopter.modified).then_some(adopter.chip.as_str());
+    // The occurrence is where the run reaches this instance; at the design
+    // root "/" is not a place the reader has to be told about.
+    let occurrence = (adopter.occurrence != "/").then_some(adopter.occurrence.as_str());
+    // The instance, where the run reaches it and where it stands share one
+    // line: three registers of one fact, and a reader comparing two entries
+    // reads down one column for each of them.
+    let (row, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), NAME_ROW_HEIGHT),
+        Sense::hover(),
+    );
+    let spoken = std::iter::once(adopter.source.reference.as_str())
+        .chain(occurrence)
+        .chain(chip)
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &spoken));
+    let reference = ui.painter().layout_no_wrap(
+        adopter.source.reference.clone(),
+        theme::mono(tokens::FS_1, FontWeight::Medium),
+        palette.text,
+    );
+    let reference_width = reference.size().x;
+    ui.painter().galley(
+        egui::pos2(row.left(), row.center().y - reference.size().y * 0.5),
+        reference,
+        palette.text,
+    );
+    let micro = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    let mut spent = reference_width;
+    if let Some(occurrence) = occurrence {
+        let galley =
+            ui.painter()
+                .layout_no_wrap(occurrence.to_owned(), micro.clone(), palette.text_faint);
+        ui.painter().galley(
+            egui::pos2(
+                row.left() + reference_width + 8.0,
+                row.center().y - galley.size().y * 0.5,
+            ),
+            galley.clone(),
+            palette.text_faint,
+        );
+        spent += 8.0 + galley.size().x;
+    }
+    // The chip ends where the panel's rows end, so two entries state their
+    // drift in one column rather than each against its own box.
+    let mut shortened = None;
+    if let Some(chip) = chip {
+        let shown = elide_text(ui, chip, &micro, (row.width() - spent - CHIP_GAP).max(0.0));
+        ui.painter().text(
+            row.right_center(),
+            egui::Align2::RIGHT_CENTER,
+            &shown,
+            micro,
+            palette.text_dim,
+        );
+        shortened = (shown != chip).then(|| chip.to_owned());
+    }
+    // One hover, whichever the line most needs to say: an adopter drawn in
+    // another occurrence carries one of its three verbs and says why here,
+    // rather than spending two wrapped lines of the panel on it for every such
+    // instance; otherwise a chip the line had to shorten states itself whole.
+    let hover = if adopter.on_this_sheet {
+        shortened
+    } else {
+        Some(messages.text(MessageId::StimulusAdopterElsewhere))
+    };
+    if let Some(hover) = hover {
+        response.on_hover_text(hover);
+    }
+
+    ui.add_space(CARD_GAP);
+    card_well(
+        ui,
+        adopter.source.card.as_deref().map_err(String::as_str),
+        0.0,
+    );
+    adopter_verbs(ui, state, adopter, definition, index, verbs);
+}
+
+/// The verbs on one adopter, under the card they act on.
+///
+/// Each is as wide as its own words and they run from the panel's inset, so
+/// the first verb is at one x on every entry. Stretched across the panel in
+/// equal thirds — which is what the boxed card did — the same verb was a
+/// different width and a different place on every entry, and a two-verb
+/// adopter's buttons came out half as wide again as a three-verb one's.
+///
+/// Every verb but the first addresses the instance by a component id, which
+/// means something only inside the buffer on screen. An adopter drawn in
+/// another occurrence is therefore offered the one verb that reaches it, and
+/// carries no control that would edit whichever instance of the open sheet
+/// happened to share that id.
+fn adopter_verbs(
+    ui: &mut Ui,
+    state: &AppState,
+    adopter: &StimulusAdopter,
+    definition: &StimulusDefinition,
+    index: usize,
+    verbs: &mut Vec<Verb>,
+) {
+    let messages = state.ui.messages();
+    ui.add_space(ACTION_GAP_Y);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = ACTION_GAP;
+        if action(ui, &messages.text(MessageId::StimulusShowInSchematic)) {
+            verbs.push(Verb::Reveal(index));
+        }
+        if !adopter.on_this_sheet {
+            return;
+        }
+        if action(ui, &messages.text(MessageId::StimulusOpenPropertiesShort)) {
+            verbs.push(Verb::Properties(index));
+        }
+        if adopter.offers_readoption
+            && action(
                 ui,
-                adopter.source.card.as_deref().map_err(String::as_str),
-                0.0,
-            );
-            // Every verb but the first addresses the instance by a component
-            // id, which means something only inside the buffer on screen. An
-            // adopter drawn elsewhere is therefore offered the one verb that
-            // reaches it and a sentence saying how to reach the rest, never a
-            // control that is present and does nothing.
-            let verbs_here = if adopter.on_this_sheet {
-                2 + usize::from(adopter.offers_readoption)
-            } else {
-                1
-            };
-            let readopt = messages.format(
-                MessageId::StimulusReadopt,
-                &[("revision", &definition.revision().to_string())],
-            );
-            let track = ui.available_width();
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = ACTION_GAP;
-                let width = (track - ACTION_GAP * (verbs_here - 1) as f32) / verbs_here as f32;
-                if action(
-                    ui,
-                    &messages.text(MessageId::StimulusShowInSchematic),
-                    width,
-                ) {
-                    verbs.push(Verb::Reveal(index));
-                }
-                if !adopter.on_this_sheet {
-                    return;
-                }
-                if action(
-                    ui,
-                    &messages.text(MessageId::StimulusOpenPropertiesShort),
-                    width,
-                ) {
-                    verbs.push(Verb::Properties(index));
-                }
-                if adopter.offers_readoption && action(ui, &readopt, width) {
-                    verbs.push(Verb::Readopt(index));
-                }
-            });
-            if !adopter.on_this_sheet {
-                muted_inspector_copy(ui, &messages.text(MessageId::StimulusAdopterElsewhere));
-            }
-        });
+                &messages.format(
+                    MessageId::StimulusReadopt,
+                    &[("revision", &definition.revision().to_string())],
+                ),
+            )
+        {
+            verbs.push(Verb::Readopt(index));
+        }
+    });
 }
 
 /// Which analyses read the copies, and as what.
@@ -339,15 +405,49 @@ fn definition_section(
     // the project's, and every one of them is in the project document.
 }
 
-/// One verb on an adopter card, at the width its row divided between them.
-fn action(ui: &mut Ui, label: &str, width: f32) -> bool {
-    ui.add_sized(
-        [width.max(24.0), ACTION_HEIGHT],
-        egui::Button::new(
-            egui::RichText::new(label).font(theme::sans(tokens::FS_0, FontWeight::Regular)),
+/// One verb on an adopter, at the width of its own words.
+///
+/// Quiet until it is under the pointer, which is how every other verb the kit
+/// hangs off a panel row behaves: three outlined boxes under each entry are
+/// three more containers in a section whose whole fault was containers, and a
+/// verb that is permanently drawn as a box competes with the card above it for
+/// the entry's one piece of emphasis.
+fn action(ui: &mut Ui, label: &str) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, t.color.text_dim);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 2.0 * ACTION_PAD, ACTION_HEIGHT),
+        Sense::click(),
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    let hovered = ui.is_enabled() && response.hovered();
+    if hovered {
+        ui.painter().rect(
+            rect,
+            t.radius,
+            t.color.bg_hover,
+            egui::Stroke::new(1.0, t.color.border),
+            egui::StrokeKind::Inside,
+        );
+    }
+    let ink = if hovered {
+        t.color.text
+    } else {
+        t.color.text_dim
+    };
+    ui.painter().galley(
+        egui::pos2(
+            rect.left() + ACTION_PAD,
+            rect.center().y - galley.size().y * 0.5,
         ),
-    )
-    .clicked()
+        galley,
+        ink,
+    );
+    theme::paint_focus_ring_outset(ui, &response, rect);
+    response.clicked()
 }
 
 /// Carry out one thing the reader asked for.
