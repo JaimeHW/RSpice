@@ -2576,8 +2576,7 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
     let format = SchematicSheetFormat::default();
     let mut wire = serde_json::to_value(&format).unwrap();
     // Reintroduce the withdrawn field exactly as an older build wrote it.
-    wire["title_block"]["fields"]["format"] =
-        serde_json::json!({ "value": "", "visible": true });
+    wire["title_block"]["fields"]["format"] = serde_json::json!({ "value": "", "visible": true });
     let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
     assert!(
         !restored
@@ -2586,7 +2585,10 @@ fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
             .contains_key(&DrawingSheetTitleFieldId::Format),
         "a retired field must be dropped rather than refused or rendered"
     );
-    assert_eq!(restored.title_block.fields.len(), DrawingSheetTitleFieldId::ALL.len());
+    assert_eq!(
+        restored.title_block.fields.len(),
+        DrawingSheetTitleFieldId::ALL.len()
+    );
     assert!(restored.validate().is_ok());
     assert!(
         !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
@@ -2632,7 +2634,10 @@ fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
             "{field:?} must remain optional so it can default to hidden"
         );
     }
-    assert_eq!(visible.len(), DrawingSheetTitleFieldId::ALL.len() - hidden.len());
+    assert_eq!(
+        visible.len(),
+        DrawingSheetTitleFieldId::ALL.len() - hidden.len()
+    );
 
     // Fewer fields is the point: the cells that remain are wider, so more of
     // each value survives.
@@ -2674,8 +2679,7 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
             );
         }
         assert!(
-            lettering.caption_um < lettering.data_um
-                && lettering.data_um < lettering.reference_um,
+            lettering.caption_um < lettering.data_um && lettering.data_um < lettering.reference_um,
             "{standard:?} letters its captions at or above its values"
         );
     }

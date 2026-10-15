@@ -156,7 +156,6 @@ fn coordinates_only_zones_retain_bands_but_suppress_labels_and_references() {
             DrawingSheetLod::resolve(1.5, 1.0, test_lettering()),
             1.5,
             DrawingSheetPalette::resolve(&Tokens::get(context)),
-            test_lettering(),
         );
     });
     assert_eq!(

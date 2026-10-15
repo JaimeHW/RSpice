@@ -236,6 +236,11 @@ enum DrawingSheetLodTier {
 #[derive(Debug, Clone, Copy)]
 struct DrawingSheetLod {
     tier: DrawingSheetLodTier,
+    /// The heights this level of detail was resolved against. Every painter
+    /// that letters the sheet already carries the level of detail, so it
+    /// reads them from here rather than taking a second argument that could
+    /// disagree with the one the tier was decided from.
+    lettering: DrawingSheetLettering,
     show_border: bool,
     show_margins: bool,
     show_zone_labels: bool,
@@ -287,6 +292,7 @@ impl DrawingSheetLod {
         };
         Self {
             tier,
+            lettering,
             show_border: tier != DrawingSheetLodTier::Thumbnail,
             show_margins: tier != DrawingSheetLodTier::Thumbnail,
             show_zone_labels: matches!(
@@ -389,11 +395,7 @@ pub fn draw_base(
     let palette = DrawingSheetPalette::resolve(&tokens);
     let layers = input.layers;
     let lettering = sheet.format.authored_size.lettering();
-    let lod = DrawingSheetLod::resolve(
-        viewport.zoom,
-        painter.ctx().pixels_per_point(),
-        lettering,
-    );
+    let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point(), lettering);
     let paper = sheet.geometry.paper.screen_rect(viewport);
     let printable = sheet.geometry.printable.screen_rect(viewport);
     let drawing_area = sheet.geometry.drawing_area.screen_rect(viewport);
@@ -456,7 +458,6 @@ pub fn draw_base(
                 lod,
                 viewport.zoom,
                 palette,
-                lettering,
             );
         }
     }
@@ -1021,7 +1022,6 @@ fn draw_zone_band(
     lod: DrawingSheetLod,
     zoom: f32,
     palette: DrawingSheetPalette,
-    lettering: DrawingSheetLettering,
 ) {
     let column_width = drawing_area.width() / f32::from(zones.columns);
     let row_height = drawing_area.height() / f32::from(zones.rows);
@@ -1061,7 +1061,7 @@ fn draw_zone_band(
         return;
     }
     let font = theme::mono(
-        drawing_sheet_font_size(zoom, authored_lettering(lettering.reference_um)),
+        drawing_sheet_font_size(zoom, authored_lettering(lod.lettering.reference_um)),
         theme::FontWeight::Medium,
     );
     let top_y = (printable.top() + drawing_area.top()) * 0.5;
@@ -1296,8 +1296,7 @@ fn draw_title_block(
         // leaves the vertical placement to the font's real metrics rather
         // than to a guessed line box.
         let at = |(numerator, denominator): (u64, u64)| {
-            authored_cell.top()
-                + authored_cell.height() * numerator as f32 / denominator as f32
+            authored_cell.top() + authored_cell.height() * numerator as f32 / denominator as f32
         };
         let clipped = painter.with_clip_rect(cell);
         paint_title_text(
@@ -1307,10 +1306,7 @@ fn draw_title_block(
                 at(DRAWING_SHEET_TITLE_CAPTION_POSITION),
             )),
             Align2::LEFT_CENTER,
-            truncate_title_text(
-                &field.id.display_label().to_uppercase(),
-                caption_chars,
-            ),
+            truncate_title_text(&field.id.display_label().to_uppercase(), caption_chars),
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(lettering.caption_um)),
                 theme::FontWeight::Regular,
