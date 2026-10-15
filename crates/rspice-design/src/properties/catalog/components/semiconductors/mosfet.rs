@@ -334,7 +334,7 @@ impl PropertyCatalog {
                 .with_display_name("Drain Squares")
                 .with_description("Number of squares for drain series resistance")
                 .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
+                .with_default(PropertyValue::number(1.0))
                 .with_order(44)
                 .with_category("Parasitics"),
         );
@@ -343,7 +343,7 @@ impl PropertyCatalog {
                 .with_display_name("Source Squares")
                 .with_description("Number of squares for source series resistance")
                 .with_type(PropertyType::Number)
-                .with_default(PropertyValue::number(0.0))
+                .with_default(PropertyValue::number(1.0))
                 .with_order(45)
                 .with_category("Parasitics"),
         );
