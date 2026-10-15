@@ -1,8 +1,9 @@
 //! Preferences — canonical mockup shell with durable, validated settings.
 
-mod managed_preference_policy;
 mod preference_pages;
 mod preferences_shell;
+#[cfg(test)]
+mod raster;
 pub(crate) mod shortcut_portability_dialogs;
 mod shortcut_preferences;
 pub(crate) mod workspace_layout_manager;
@@ -26,16 +27,13 @@ use crate::workbench::app_state::session::shortcut_library::{
 };
 
 const CATEGORY_STATE_ID: &str = "rspice.preferences.active-category";
-pub(in crate::workbench) const ENGINEERING_PROFILE_HELP: &str = "Sets the discipline context used by specialist tool discovery. Deep links and project documents remain available.";
 
 #[derive(Debug, Default)]
 pub(in crate::workbench) struct PreferencePageActions {
-    pub(in crate::workbench) open_resolved_preference_policy: bool,
     pub(in crate::workbench) open_workspace_layout_manager: bool,
     pub(in crate::workbench) open_shortcut_editor: bool,
     pub(in crate::workbench) open_shortcut_import: bool,
     pub(in crate::workbench) open_shortcut_export: bool,
-    pub(in crate::workbench) open_resolved_shortcut_policy: bool,
     pub(in crate::workbench) shortcut_policy_candidate:
         Option<crate::workbench::ShortcutPreferences>,
     pub(in crate::workbench) updated_profile_label: Option<&'static str>,
@@ -48,15 +46,13 @@ impl RSpiceApp {
         let category_id = Id::new(CATEGORY_STATE_ID);
         let current_surface = self.state.workbench.current_route().surface_id();
         let route_owned = current_surface == SurfaceId::Preferences;
-        let retained_under_child_manager = self.state.dialogs.preferences_open
-            && current_surface == SurfaceId::AccountOrganization;
         let standalone_layout_manager = self.state.dialogs.workspace_layout_manager.open
             && !self.state.dialogs.preferences_open;
         if standalone_layout_manager {
             workspace_layout_manager::render(ctx, &mut self.state);
             return;
         }
-        if !route_owned && !retained_under_child_manager {
+        if !route_owned {
             let portability_action = self
                 .state
                 .dialogs
@@ -86,7 +82,6 @@ impl RSpiceApp {
             if close_editor {
                 self.state.dialogs.shortcut_editor.close_and_discard();
             }
-            self.state.dialogs.managed_preference_policy_open = false;
             self.state.dialogs.workspace_layout_manager.close();
             ctx.data_mut(|data| data.remove_temp::<PreferenceCategory>(category_id));
             preferences_shell::unmount(ctx);
@@ -97,8 +92,8 @@ impl RSpiceApp {
             .data_mut(|data| data.get_temp::<PreferenceCategory>(category_id))
             .unwrap_or_default();
         let mut actions = PreferencePageActions::default();
-        // The retained parent does not consume Escape while one of its real
-        // child executors is open above it.
+        // Preferences does not consume Escape while one of its own child
+        // executors is open above it.
         let nested_modal_open = self.state.dialogs.license_dialog.open
             || self.state.dialogs.shortcut_editor.open
             || self
@@ -106,9 +101,7 @@ impl RSpiceApp {
                 .dialogs
                 .shortcut_portability
                 .application_modal_open()
-            || self.state.dialogs.managed_preference_policy_open
-            || self.state.dialogs.workspace_layout_manager.open
-            || retained_under_child_manager;
+            || self.state.dialogs.workspace_layout_manager.open;
         let shell_response = {
             let state = &mut self.state;
             preferences_shell::show(ctx, &mut category, !nested_modal_open, |ui, category| {
@@ -126,20 +119,17 @@ impl RSpiceApp {
                 engineering_profile_updated_message(label),
             ));
         }
+        if shell_response.restore_defaults_requested {
+            preference_pages::restore_defaults(category, &mut self.state);
+        }
         if shell_response.close_requested {
             self.state.dialogs.preferences_open = false;
             if route_owned {
                 close_preferences(&mut self.state);
             }
         }
-        if shell_response.account_organization_requested {
-            crate::workbench::commands::vocabulary::Command::AccountOrganization.execute(self);
-            self.state.dialogs.preferences_open =
-                self.state.workbench.current_route().surface_id() == SurfaceId::AccountOrganization;
-        }
         self.execute_preference_page_actions(ctx, actions);
         shortcut_preferences::render_editor(ctx, &mut self.state);
-        managed_preference_policy::render(ctx, &mut self.state, category);
         workspace_layout_manager::render(ctx, &mut self.state);
         self.render_shortcut_portability_dialogs(ctx);
     }
@@ -154,9 +144,6 @@ impl RSpiceApp {
         }
         if actions.open_shortcut_export {
             self.state.dialogs.shortcut_portability.open_export();
-        }
-        if actions.open_resolved_preference_policy || actions.open_resolved_shortcut_policy {
-            self.state.dialogs.managed_preference_policy_open = true;
         }
         if actions.open_workspace_layout_manager {
             let preset = self
@@ -570,6 +557,10 @@ fn close_preferences(state: &mut AppState) {
     }
 }
 
+/// The autosave interval a fresh session carries, and the one Restore
+/// defaults puts the Projects page back to.
+pub(in crate::workbench) const DEFAULT_AUTOSAVE_MINUTES: u8 = 5;
+
 pub(in crate::workbench) fn normalize_autosave_minutes(minutes: u8) -> u8 {
     match minutes {
         2 | 5 | 10 => minutes,
@@ -691,7 +682,6 @@ mod tests {
         let mut app = test_app();
         app.state.dialogs.preferences_open = true;
         app.state.dialogs.shortcut_portability.open_import();
-        app.state.dialogs.managed_preference_policy_open = true;
         app.state
             .dialogs
             .workspace_layout_manager
@@ -708,14 +698,19 @@ mod tests {
                 .shortcut_portability
                 .application_modal_open()
         );
-        assert!(!app.state.dialogs.managed_preference_policy_open);
         assert!(!app.state.dialogs.workspace_layout_manager.open);
         assert!(!app.state.dialogs.application_modal_open());
     }
 
+    /// Every category reaches a page with something on it that can be
+    /// operated.
+    ///
+    /// This replaces a check that each page painted a level-3 heading, which
+    /// the three categories that held nothing else also passed: a heading and
+    /// a sentence saying the page had no settings satisfied it.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn every_runtime_backed_category_renders_owned_page_content() {
+    fn every_category_renders_a_control_the_reader_can_operate() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -741,11 +736,23 @@ mod tests {
                 .accesskit_update
                 .expect("AccessKit update")
                 .nodes;
+            let controls = nodes
+                .iter()
+                .filter(|(_, node)| {
+                    matches!(
+                        node.role(),
+                        egui::accesskit::Role::ComboBox
+                            | egui::accesskit::Role::CheckBox
+                            | egui::accesskit::Role::Button
+                            | egui::accesskit::Role::Slider
+                            | egui::accesskit::Role::SpinButton
+                            | egui::accesskit::Role::RadioButton
+                    )
+                })
+                .count();
             assert!(
-                nodes.iter().any(|(_, node)| {
-                    node.role() == egui::accesskit::Role::Heading && node.level() == Some(3)
-                }),
-                "{} has no page heading",
+                controls > 0,
+                "{} renders no control at all",
                 category.label()
             );
         }
@@ -850,16 +857,6 @@ mod tests {
                 .shortcut_portability
                 .application_modal_open()
         );
-
-        let mut policy_app = test_app();
-        policy_app.execute_preference_page_actions(
-            &ctx,
-            PreferencePageActions {
-                open_resolved_shortcut_policy: true,
-                ..PreferencePageActions::default()
-            },
-        );
-        assert!(policy_app.state.dialogs.managed_preference_policy_open);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -26,9 +26,7 @@ use crate::workbench::{
     ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
 
-use super::preferences_shell::{
-    actionable_scope_strip, page_heading, right_aligned, section_label, setting_row,
-};
+use super::preferences_shell::{control_width, section_heading, setting_row, value_column};
 use super::{AppState, PreferencePageActions};
 use crate::workbench::app::dialogs::state::{
     ShortcutCaptureTarget, ShortcutEditorContext, ShortcutEditorState,
@@ -37,53 +35,21 @@ use crate::workbench::app::dialogs::state::{
 const RESPONSIVE_TABLE_BREAKPOINT: f32 = 760.0;
 const ENGINEERING_TABLE_BREAKPOINT: f32 = 820.0;
 const EDITOR_NARROW_TABLE_MIN_WIDTH: f32 = 660.0;
-const REGISTRY_NARROW_TABLE_MIN_WIDTH: f32 = 640.0;
-const REGISTRY_COLUMN_COUNT: f32 = 5.0;
 const REGISTRY_ROW_HEIGHT: f32 = 28.0;
 const REGISTRY_HEADER_HEIGHT: f32 = 27.0;
-const KBD_HEIGHT: f32 = 18.0;
-const KBD_HORIZONTAL_PADDING: f32 = 4.0;
-const KBD_MIN_WIDTH: f32 = 19.0;
-const KBD_CORNER_RADIUS: u8 = 3;
 const KEY_CAPTURE_MIN_WIDTH: f32 = 74.0;
 
-const REGISTRY_ROWS: &[(Command, &str)] = &[
-    (Command::CommandPalette, "Command palette"),
-    (Command::ToggleFocusMode, "Focus workspace"),
-    (Command::RunSimulation, "Run active plan"),
-    (Command::StopSimulation, "Stop active run"),
-    (Command::OpenProject, "Open project"),
-    (Command::NewProject, "New project"),
-    (Command::Save, "Save project"),
-    (Command::CloseActiveDocument, "Close active document"),
-    (Command::ToggleFullScreen, "Enter full screen"),
-    (Command::GenerateNetlist, "Open generated netlist"),
-    (Command::ToggleConsole, "Toggle console"),
-];
-
 pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    if actionable_scope_strip(
-        ui,
-        "User profile",
-        "portable bindings with platform and organization exceptions",
-        "View resolved policy\u{2026}",
-    ) {
-        actions.open_resolved_shortcut_policy = true;
-    }
-    page_heading(
-        ui,
-        "Keyboard and command shortcuts",
-        "Bindings are editable, context-aware, platform-validated and portable. Protected browser commands always expose a conflict-free alternate.",
-    );
-
-    render_registry_table(ui, state.ui.preferences.shortcuts());
-
+    // A read-only five-column table of eleven hand-picked commands used to
+    // open this page. The editor below it is the searchable list of every
+    // command in the registry, so the table was a sample of the real thing
+    // presented as the thing itself, and nothing on it could be changed.
     setting_row(
         ui,
-        "Binding editor",
+        "Key bindings",
         "Record keys, resolve conflicts, set alternates and reset individual commands.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 if Button::new("Edit shortcuts\u{2026}")
                     .accent()
                     .show(ui)
@@ -100,7 +66,7 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         "Portable profile",
         "Import or export stable command identifiers and platform mappings.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let phone = ui.ctx().content_rect().width() <= 560.0;
                 let width = ui.available_width();
                 let action_height = if phone {
@@ -108,15 +74,15 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
                 } else {
                     Tokens::get(ui.ctx()).metrics.ctl_h
                 };
+                // Both buttons start at the page's control column, like every
+                // other value on it. They used to be pushed to the far right
+                // of the row, which put the only pair of controls on the page
+                // four hundred pixels clear of the column the rest share.
                 ui.allocate_ui_with_layout(
                     egui::vec2(width, action_height),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
-                        if !phone {
-                            let actions_width = portable_actions_width(ui);
-                            ui.add_space((width - actions_width).max(0.0));
-                        }
                         if ui
                             .push_id("preferences.shortcuts.import", |ui| {
                                 Button::new("Import\u{2026}")
@@ -145,7 +111,7 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         },
     );
 
-    section_label(ui, "Binding policy");
+    section_heading(ui, "Binding policy");
     // A browser commit is asynchronous. Keep showing the candidate selected
     // by the user while the persist-before-live owner has the controls locked.
     let policy_pending = state.dialogs.shortcut_policy_candidate.is_some();
@@ -164,22 +130,6 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         policy_draft,
         policy_pending,
     );
-}
-
-fn portable_actions_width(ui: &mut Ui) -> f32 {
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let text_width = ui.fonts_mut(|fonts| {
-        ["Import\u{2026}", "Export\u{2026}"]
-            .iter()
-            .map(|label| {
-                fonts
-                    .layout_no_wrap((*label).to_owned(), font.clone(), egui::Color32::WHITE)
-                    .size()
-                    .x
-            })
-            .sum::<f32>()
-    });
-    text_width + 40.0 + 6.0
 }
 
 fn queue_policy_candidate(
@@ -273,142 +223,17 @@ fn policy_select(
 ) -> Option<usize> {
     let mut picked = None;
     setting_row(ui, title, help, |ui| {
-        right_aligned(ui, |ui| {
-            picked = select(
-                ui,
-                id,
-                title,
-                current,
-                &options,
-                ui.available_width().min(360.0),
-            );
+        value_column(ui, |ui| {
+            picked = select(ui, id, title, current, &options, control_width(ui));
         });
     });
     picked
 }
 
-fn render_registry_table(ui: &mut Ui, profile: &ShortcutPreferences) {
-    let audit = profile.audit();
-    let operating_system = ui.ctx().os();
-    let viewport_width = ui.available_width().max(1.0);
-    let table_width = if viewport_width <= ENGINEERING_TABLE_BREAKPOINT {
-        viewport_width.max(REGISTRY_NARROW_TABLE_MIN_WIDTH)
-    } else {
-        viewport_width
-    };
-    let column_width = table_width / REGISTRY_COLUMN_COUNT;
-    let table_response = ui
-        .vertical(|ui| {
-            ui.set_width(viewport_width);
-            egui::ScrollArea::horizontal()
-                .id_salt("shortcut-registry-table-scroll")
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    ui.set_min_width(table_width);
-                    ui.vertical(|ui| {
-                        ui.set_width(table_width);
-                        ui.spacing_mut().item_spacing.y = 0.0;
-                        semantic_table_row(ui, "Shortcut registry column headings", |ui| {
-                            for heading in [
-                                "Command",
-                                "Desktop primary",
-                                "Browser / touch alternate",
-                                "Context",
-                                "Status",
-                            ] {
-                                table_text_cell(
-                                    ui,
-                                    heading,
-                                    true,
-                                    false,
-                                    column_width,
-                                    REGISTRY_HEADER_HEIGHT,
-                                    TableCellTone::Normal,
-                                );
-                            }
-                        });
-                        for (command, label) in REGISTRY_ROWS.iter().copied() {
-                            ui.push_id(command.stable_id(), |ui| {
-                                semantic_table_row(ui, label, |ui| {
-                                    table_text_cell(
-                                        ui,
-                                        label,
-                                        false,
-                                        false,
-                                        column_width,
-                                        REGISTRY_ROW_HEIGHT,
-                                        TableCellTone::Normal,
-                                    );
-                                    table_kbd(
-                                        ui,
-                                        &binding_for_platform(
-                                            profile,
-                                            command,
-                                            ShortcutBindingSlot::Primary,
-                                            CommandPlatform::Desktop,
-                                            operating_system,
-                                        ),
-                                        column_width,
-                                        REGISTRY_ROW_HEIGHT,
-                                    );
-                                    table_kbd(
-                                        ui,
-                                        &binding_for_platform(
-                                            profile,
-                                            command,
-                                            ShortcutBindingSlot::Alternate,
-                                            CommandPlatform::Browser,
-                                            operating_system,
-                                        ),
-                                        column_width,
-                                        REGISTRY_ROW_HEIGHT,
-                                    );
-                                    table_text_cell(
-                                        ui,
-                                        command.shortcut_context().label(),
-                                        false,
-                                        true,
-                                        column_width,
-                                        REGISTRY_ROW_HEIGHT,
-                                        TableCellTone::Normal,
-                                    );
-                                    table_text_cell(
-                                        ui,
-                                        registry_status(&audit, command),
-                                        false,
-                                        false,
-                                        column_width,
-                                        REGISTRY_ROW_HEIGHT,
-                                        registry_status_tone(&audit, command),
-                                    );
-                                });
-                            });
-                        }
-                    })
-                    .response
-                });
-        })
-        .response;
-    table_response.widget_info(|| {
-        WidgetInfo::labeled(
-            WidgetType::Label,
-            ui.is_enabled(),
-            "Protected shortcut registry",
-        )
-    });
-    ui.ctx().accesskit_node_builder(table_response.id, |node| {
-        node.set_role(egui::accesskit::Role::Table);
-        node.set_label("Protected shortcut registry");
-    });
-    ui.add_space(7.0);
-    egui::Frame::NONE
-        .inner_margin(egui::Margin::symmetric(24, 0))
-        .show(ui, |ui| audit_status(ui, profile, &audit));
-    ui.add_space(9.0);
-}
-
-/// A registry cell's severity. Only a failure is painted; everything else is
-/// the same neutral cell, because a shortcut that simply works is not news.
+/// What a cell in the binding editor's table is saying about its row.
+///
+/// Only a failure is painted; everything else is the same neutral cell,
+/// because a binding that simply works is not news.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableCellTone {
     Normal,
@@ -503,89 +328,6 @@ fn table_text_cell(
     response
 }
 
-fn table_kbd(ui: &mut Ui, text: &str, width: f32, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let (cell, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), text));
-    ui.painter().hline(
-        cell.x_range(),
-        cell.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let galley =
-        ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), font, t.color.text_faint));
-    let capsule_width = (galley.size().x + KBD_HORIZONTAL_PADDING * 2.0)
-        .max(KBD_MIN_WIDTH)
-        .min((width - 16.0).max(KBD_MIN_WIDTH));
-    let capsule = egui::Rect::from_min_size(
-        egui::pos2(cell.left() + 8.0, cell.center().y - KBD_HEIGHT * 0.5),
-        egui::vec2(capsule_width, KBD_HEIGHT),
-    );
-    ui.painter().rect_filled(
-        capsule,
-        egui::CornerRadius::same(KBD_CORNER_RADIUS),
-        t.color.bg_panel,
-    );
-    ui.painter().rect_stroke(
-        capsule,
-        egui::CornerRadius::same(KBD_CORNER_RADIUS),
-        Stroke::new(1.0, t.color.border_strong),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().with_clip_rect(capsule).galley(
-        egui::pos2(
-            capsule.left() + KBD_HORIZONTAL_PADDING,
-            capsule.center().y - galley.size().y * 0.5,
-        ),
-        galley,
-        t.color.text_faint,
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Cell);
-        node.set_label(text);
-        node.set_description("Keyboard binding capsule");
-    });
-}
-
-fn binding_for_platform(
-    profile: &ShortcutPreferences,
-    command: Command,
-    slot: ShortcutBindingSlot,
-    platform: CommandPlatform,
-    operating_system: egui::os::OperatingSystem,
-) -> String {
-    profile
-        .effective_bindings(command)
-        .into_iter()
-        .find(|binding| binding.slot() == slot && binding.platforms().contains(&platform))
-        .map_or_else(
-            || "\u{2014}".to_owned(),
-            |binding| binding.sequence().display_label_for(operating_system),
-        )
-}
-
-fn registry_status(audit: &ShortcutProfileAudit, command: Command) -> &'static str {
-    let issues = audit_issues_for_command(audit, command).collect::<Vec<_>>();
-    if issues.iter().any(|issue| {
-        issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate
-            && issue.severity() == ShortcutProfileIssueSeverity::Warning
-    }) {
-        "protected \u{00b7} exception acknowledged"
-    } else if issues
-        .iter()
-        .any(|issue| issue.severity() == ShortcutProfileIssueSeverity::Error)
-    {
-        "conflict requires review"
-    } else if !issues.is_empty() {
-        "review"
-    } else if command.primary_is_reserved_on(CommandPlatform::Browser) {
-        "protected \u{00b7} alternate resolved"
-    } else {
-        "available"
-    }
-}
-
 fn registry_status_tone(audit: &ShortcutProfileAudit, command: Command) -> TableCellTone {
     if audit_issues_for_command(audit, command)
         .any(|issue| issue.severity() == ShortcutProfileIssueSeverity::Error)
@@ -594,38 +336,6 @@ fn registry_status_tone(audit: &ShortcutProfileAudit, command: Command) -> Table
     } else {
         TableCellTone::Normal
     }
-}
-
-fn audit_status(ui: &mut Ui, profile: &ShortcutPreferences, audit: &ShortcutProfileAudit) {
-    let collisions = audit
-        .issues()
-        .iter()
-        .filter(|issue| {
-            matches!(
-                issue.code(),
-                ShortcutProfileIssueCode::ExactCollision
-                    | ShortcutProfileIssueCode::PrefixCollision
-            )
-        })
-        .count();
-    let reserved = audit
-        .issues()
-        .iter()
-        .filter(|issue| {
-            issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate
-                && issue.severity() == ShortcutProfileIssueSeverity::Error
-        })
-        .count();
-    let binding_count = COMMAND_REGISTRY
-        .iter()
-        .copied()
-        .flat_map(|command| profile.effective_bindings(command))
-        .map(|binding| binding.platforms().len())
-        .sum::<usize>();
-    let text = format!(
-        "{binding_count} normalized platform bindings \u{00b7} {collisions} unresolved collisions \u{00b7} {reserved} unhandled reserved bindings."
-    );
-    status_text(ui, &text, !audit.is_valid());
 }
 
 pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
@@ -1465,27 +1175,6 @@ fn editor_note(ui: &mut Ui, title: &str, body: &str) -> Response {
     response
 }
 
-fn status_text(ui: &mut Ui, text: &str, error: bool) {
-    let t = Tokens::get(ui.ctx());
-    let response = if error {
-        problem_note(ui, Problem::Failure, text)
-    } else {
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(text)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            )
-            .wrap(),
-        )
-    };
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(egui::accesskit::Role::Status);
-        node.set_label(text);
-        node.set_live(egui::accesskit::Live::Polite);
-    });
-}
-
 fn blocking_issue_count(audit: &ShortcutProfileAudit) -> usize {
     audit
         .issues()
@@ -1653,21 +1342,24 @@ mod tests {
         actions
     }
 
+    /// The page shows no table of its own.
+    ///
+    /// It used to open with a read-only five-column projection of eleven
+    /// hand-picked commands. The binding editor below it is the searchable
+    /// table of every command in the registry, so the page's copy was a
+    /// sample of the real list presented as the list, and nothing on it could
+    /// be changed.
     #[test]
-    fn page_registry_is_the_exact_mockup_review_projection() {
-        assert_eq!(REGISTRY_ROWS.len(), 11);
-        assert_eq!(REGISTRY_ROWS[0].1, "Command palette");
-        assert_eq!(REGISTRY_ROWS[10].1, "Toggle console");
-        assert_eq!(ENGINEERING_TABLE_BREAKPOINT, 820.0);
-        assert_eq!(EDITOR_NARROW_TABLE_MIN_WIDTH, 660.0);
-        assert_eq!(REGISTRY_NARROW_TABLE_MIN_WIDTH, 640.0);
-        assert_eq!(REGISTRY_COLUMN_COUNT, 5.0);
-        assert_eq!(REGISTRY_HEADER_HEIGHT, 27.0);
-        assert_eq!(REGISTRY_ROW_HEIGHT, 28.0);
-        assert_eq!(KBD_HEIGHT, 18.0);
-        assert_eq!(KBD_HORIZONTAL_PADDING, 4.0);
-        assert_eq!(KBD_MIN_WIDTH, 19.0);
-        assert_eq!(KBD_CORNER_RADIUS, 3);
+    fn the_page_does_not_reproduce_the_editors_table() {
+        let source = include_str!("shortcut_preferences.rs");
+        let page = source
+            .split("pub(super) fn render_page(")
+            .nth(1)
+            .and_then(|source| source.split("\nfn ").next())
+            .expect("page source");
+        assert!(!page.contains("semantic_table_row"));
+        assert!(!page.contains("table_text_cell"));
+        assert!(!page.contains("Browser / touch alternate"));
     }
 
     #[test]
@@ -1953,7 +1645,7 @@ mod tests {
     }
 
     #[test]
-    fn desktop_page_publishes_exact_heading_table_and_live_status_semantics() {
+    fn desktop_page_publishes_its_rows_its_actions_and_its_policy_heading() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -1971,86 +1663,56 @@ mod tests {
             .nodes;
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Heading
-                && node.label() == Some("Keyboard and command shortcuts")
-                && node.level() == Some(3)
+                && node.label() == Some("Binding policy")
+                && node.level() == Some(4)
         }));
-        assert!(nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Table
-                && node.label() == Some("Protected shortcut registry")
-        }));
-        assert!(nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Status
-                && node
-                    .label()
-                    .is_some_and(|label| label.contains("unresolved collisions"))
-        }));
-        for label in ["Binding editor", "Portable profile"] {
-            assert!(nodes.iter().any(|(_, node)| {
-                node.role() == egui::accesskit::Role::Label && node.label() == Some(label)
-            }));
+        for label in ["Key bindings", "Portable profile"] {
+            assert!(
+                nodes.iter().any(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Label && node.label() == Some(label)
+                }),
+                "missing row label {label}"
+            );
         }
-        for label in [
-            "View resolved policy\u{2026}",
-            "Edit shortcuts\u{2026}",
-            "Import\u{2026}",
-            "Export\u{2026}",
-        ] {
-            assert!(nodes.iter().any(|(_, node)| {
-                node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
-            }));
+        for label in ["Edit shortcuts\u{2026}", "Import\u{2026}", "Export\u{2026}"] {
+            assert!(
+                nodes.iter().any(|(_, node)| {
+                    node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+                }),
+                "missing action {label}"
+            );
         }
+        // The page no longer opens a table of its own, and no longer offers a
+        // resolved-policy review: every row of that review read "User
+        // profile", "allowed", unlocked.
+        assert!(
+            !nodes
+                .iter()
+                .any(|(_, node)| node.role() == egui::accesskit::Role::ColumnHeader)
+        );
+        assert!(!nodes.iter().any(|(_, node)| {
+            node.label() == Some("View resolved policy\u{2026}")
+                || node.label() == Some("Protected shortcut registry")
+        }));
+
+        let bindings = node_bounds(&nodes, egui::accesskit::Role::Label, "Key bindings");
         let portable = node_bounds(&nodes, egui::accesskit::Role::Label, "Portable profile");
-        let heading = node_bounds(
-            &nodes,
-            egui::accesskit::Role::Heading,
-            "Keyboard and command shortcuts",
-        );
-        let registry = node_bounds(
-            &nodes,
-            egui::accesskit::Role::Table,
-            "Protected shortcut registry",
-        );
-        let resolved = node_bounds(
+        let edit = node_bounds(
             &nodes,
             egui::accesskit::Role::Button,
-            "View resolved policy\u{2026}",
+            "Edit shortcuts\u{2026}",
         );
         let import = node_bounds(&nodes, egui::accesskit::Role::Button, "Import\u{2026}");
         let export = node_bounds(&nodes, egui::accesskit::Role::Button, "Export\u{2026}");
-        assert!(registry.x0 < heading.x0);
-        assert!(registry.x1 > heading.x1);
+
         assert_eq!(
-            nodes
-                .iter()
-                .filter(|(_, node)| node.role() == egui::accesskit::Role::ColumnHeader)
-                .count(),
-            5
+            bindings.x0, portable.x0,
+            "the two row labels share one left edge"
         );
         assert_eq!(
-            nodes
-                .iter()
-                .filter(|(_, node)| {
-                    node.role() == egui::accesskit::Role::Row
-                        && (node.label() == Some("Shortcut registry column headings")
-                            || REGISTRY_ROWS
-                                .iter()
-                                .any(|(_, label)| node.label() == Some(*label)))
-                })
-                .count(),
-            REGISTRY_ROWS.len() + 1
+            edit.x0, import.x0,
+            "the action on each row starts at the page's control column"
         );
-        assert!(
-            nodes
-                .iter()
-                .filter(|(_, node)| {
-                    node.role() == egui::accesskit::Role::Cell
-                        && node.description() == Some("Keyboard binding capsule")
-                })
-                .count()
-                >= REGISTRY_ROWS.len() * 2
-        );
-        assert!(resolved.x0 > portable.x0);
-        assert!(import.x0 > portable.x1);
         assert!(
             export.x0 > import.x1,
             "portable action controls overlap or are reversed: import={import:?}, export={export:?}"
@@ -2070,16 +1732,10 @@ mod tests {
         assert!(exported.open_shortcut_export);
         assert!(!exported.open_shortcut_import);
         assert!(!exported.open_shortcut_editor);
-
-        let resolved = click_page_button("View resolved policy\u{2026}");
-        assert!(resolved.open_resolved_shortcut_policy);
-        assert!(!resolved.open_shortcut_import);
-        assert!(!resolved.open_shortcut_export);
-        assert!(!resolved.open_shortcut_editor);
     }
 
     #[test]
-    fn phone_page_keeps_the_registry_fluid_and_portable_actions_in_source_order() {
+    fn phone_page_keeps_the_portable_actions_on_one_reachable_row() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
@@ -2095,17 +1751,6 @@ mod tests {
             .accesskit_update
             .expect("AccessKit update")
             .nodes;
-        let registry = node_bounds(
-            &nodes,
-            egui::accesskit::Role::Table,
-            "Protected shortcut registry",
-        );
-        assert!(registry.x0 >= 0.0);
-        assert!(registry.x1 <= 390.0);
-        assert!(registry.x1 - registry.x0 >= 360.0);
-        assert!(nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Row && node.label() == Some("Command palette")
-        }));
         let import = node_bounds(&nodes, egui::accesskit::Role::Button, "Import\u{2026}");
         let export = node_bounds(&nodes, egui::accesskit::Role::Button, "Export\u{2026}");
         assert!(import.x0 < export.x0);

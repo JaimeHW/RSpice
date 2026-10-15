@@ -8,7 +8,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select};
 use crate::workbench::{WorkspacePreset, state::Workspace};
 
 use super::AppState;
-use super::preferences_shell::{right_aligned, setting_row};
+use super::preferences_shell::{control_width, setting_row, value_column};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum LayoutTemplate {
@@ -262,7 +262,7 @@ fn render_scope(ui: &mut Ui, state: &mut WorkspaceLayoutManagerState) {
         "Scope",
         "Layout never changes portable project documents or result data.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let labels = LayoutScope::LABELS.map(str::to_owned);
                 let selected = select(
                     ui,
@@ -270,7 +270,7 @@ fn render_scope(ui: &mut Ui, state: &mut WorkspaceLayoutManagerState) {
                     "Workspace layout scope",
                     LayoutScope::LABELS[state.scope.index()],
                     &labels,
-                    ui.available_width().min(360.0),
+                    control_width(ui),
                 );
                 if let Some(selected) = selected {
                     state.scope = if selected == 0 {

@@ -1,4 +1,11 @@
-//! Runtime-backed Preferences page content from the approved workbench mockup.
+//! The settings each Preferences page holds.
+//!
+//! Every row here reaches a preference the running application reads. A row
+//! whose value nothing consumes is a control that does nothing, which is worse
+//! than an absent one: it tells a reader the behaviour is configurable and
+//! then does not configure it. Where this file is thinner than the preference
+//! store is wide, that is why — the store keeps keys for domains that have no
+//! runtime owner yet, and they stay off the page until one exists.
 
 use egui::Ui;
 
@@ -12,10 +19,14 @@ use crate::workbench::{
 };
 
 use super::preferences_shell::{
-    PreferenceCategory, actionable_scope_strip, informational_scope_strip, page_heading,
-    preference_switch, right_aligned, section_label, segmented, setting_row,
+    PreferenceCategory, control_width, preference_switch, section_heading, segmented, setting_row,
+    value_column,
 };
 use super::{AppState, PreferencePageActions};
+
+/// Width of a numeric field, which is sized to the digits it holds rather
+/// than to the control column the selects share.
+const NUMERIC_FIELD_WIDTH: f32 = 88.0;
 
 pub(super) fn render(
     ui: &mut Ui,
@@ -24,31 +35,16 @@ pub(super) fn render(
     actions: &mut PreferencePageActions,
 ) {
     match category {
-        PreferenceCategory::Appearance => appearance(ui, state, actions),
+        PreferenceCategory::Appearance => appearance(ui, state),
+        PreferenceCategory::Accessibility => accessibility(ui, state),
         PreferenceCategory::Workspace => workspace(ui, state, actions),
-        PreferenceCategory::Units => units(ui, state, actions),
-        PreferenceCategory::Schematic => schematic(ui, state, actions),
-        PreferenceCategory::Simulation => simulation(ui, state, actions),
-        PreferenceCategory::Results => results(ui, state, actions),
-        PreferenceCategory::Files => files(ui, state, actions),
-        PreferenceCategory::Compute => compute(ui, state, actions),
-        PreferenceCategory::Security => security(ui, state, actions),
-        PreferenceCategory::Accessibility => accessibility(ui, state, actions),
         PreferenceCategory::Shortcuts => {
             super::shortcut_preferences::render_page(ui, state, actions);
         }
-        PreferenceCategory::Integrations => integrations(ui, state, actions),
-    }
-}
-
-fn resolved_scope_strip(
-    ui: &mut Ui,
-    actions: &mut PreferencePageActions,
-    scope: &str,
-    detail: &str,
-) {
-    if actionable_scope_strip(ui, scope, detail, "View resolved policy\u{2026}") {
-        actions.open_resolved_preference_policy = true;
+        PreferenceCategory::Units => units(ui, state),
+        PreferenceCategory::Schematic => schematic(ui, state),
+        PreferenceCategory::Projects => projects(ui, state),
+        PreferenceCategory::Results => results(ui, state),
     }
 }
 
@@ -61,7 +57,7 @@ fn toggle_row(
     accessible_label: &'static str,
 ) {
     setting_row(ui, title, detail, |ui| {
-        right_aligned(ui, |ui| {
+        value_column(ui, |ui| {
             let mut value = state.ui.preferences.toggle(key);
             if preference_switch(ui, key.stable_id(), accessible_label, &mut value) {
                 state.ui.preferences.set_toggle(key, value);
@@ -79,11 +75,14 @@ fn scalar_row(
     range: std::ops::RangeInclusive<u32>,
 ) {
     setting_row(ui, title, detail, |ui| {
-        right_aligned(ui, |ui| {
+        value_column(ui, |ui| {
             let mut value = state.ui.preferences.scalar(key);
+            // A field holding at most two digits, at the width two digits
+            // need. Stretched to the column a select uses, it reads as an
+            // empty text box with a stray number floating in the middle.
             let response = ui.add_sized(
                 [
-                    ui.available_width().min(360.0),
+                    NUMERIC_FIELD_WIDTH.min(control_width(ui)),
                     Tokens::get(ui.ctx()).metrics.ctl_h,
                 ],
                 egui::DragValue::new(&mut value).range(range).speed(1.0),
@@ -111,7 +110,7 @@ fn action_row(
 ) -> bool {
     let mut clicked = false;
     setting_row(ui, title, detail, |ui| {
-        right_aligned(ui, |ui| {
+        value_column(ui, |ui| {
             clicked = ui
                 .push_id(action_id, |ui| Button::new(label).show(ui).clicked())
                 .inner;
@@ -129,21 +128,16 @@ fn choice_row(
     options: &'static [&'static str],
 ) {
     setting_row(ui, title, detail, |ui| {
-        right_aligned(ui, |ui| {
+        value_column(ui, |ui| {
             let active = state.ui.preferences.choice(key);
             let labels = options
                 .iter()
                 .map(|label| (*label).to_owned())
                 .collect::<Vec<_>>();
             let id = format!("preferences.choice.{key:?}");
-            if let Some(selected) = select(
-                ui,
-                &id,
-                title,
-                options[active],
-                &labels,
-                ui.available_width().min(360.0),
-            ) {
+            if let Some(selected) =
+                select(ui, &id, title, options[active], &labels, control_width(ui))
+            {
                 state
                     .ui
                     .preferences
@@ -154,101 +148,55 @@ fn choice_row(
     });
 }
 
-fn appearance(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
+fn appearance(ui: &mut Ui, state: &mut AppState) {
+    setting_row(ui, "Color mode", "", |ui| {
+        value_column(ui, |ui| {
+            let mut selected = Mode::ALL
+                .iter()
+                .position(|mode| *mode == state.ui.theme.mode)
+                .unwrap_or_default();
+            if segmented(
+                ui,
+                "preferences.appearance.color-mode",
+                &["Dark", "Light", "System"],
+                &mut selected,
+            ) {
+                state.ui.theme.mode = Mode::ALL[selected];
+            }
+        });
+    });
+    setting_row(ui, "Density", "", |ui| {
+        value_column(ui, |ui| {
+            let mut selected = usize::from(state.ui.theme.density == Density::Relaxed);
+            if segmented(
+                ui,
+                "preferences.appearance.density",
+                &["Compact", "Comfortable"],
+                &mut selected,
+            ) {
+                state.ui.theme.density = if selected == 0 {
+                    Density::Compact
+                } else {
+                    Density::Relaxed
+                };
+            }
+        });
+    });
+    // The zoom factor the shell applies on every frame. It has been a stored
+    // preference with no control since the dialog was written, so the only way
+    // to change it was to edit the session file.
+    choice_row(
         ui,
-        actions,
-        "User profile",
-        "portable across desktop and web",
+        state,
+        ChoicePreference::InterfaceScale,
+        "Interface scale",
+        "",
+        &["100%", "110%", "125%", "150%"],
     );
-    page_heading(
-        ui,
-        "Appearance",
-        "Shared across desktop and web. Touch target sizing follows the active platform.",
-    );
-    setting_row(
-        ui,
-        "Color mode",
-        "Choose the workspace surface mode.",
-        |ui| {
-            right_aligned(ui, |ui| {
-                let mut selected = Mode::ALL
-                    .iter()
-                    .position(|mode| *mode == state.ui.theme.mode)
-                    .unwrap_or_default();
-                if segmented(
-                    ui,
-                    "preferences.appearance.color-mode",
-                    &["Dark", "Light", "System"],
-                    &mut selected,
-                ) {
-                    state.ui.theme.mode = Mode::ALL[selected];
-                }
-            });
-        },
-    );
-    setting_row(
-        ui,
-        "Density",
-        "Compact is optimized for engineering workstations.",
-        |ui| {
-            right_aligned(ui, |ui| {
-                let mut selected = usize::from(state.ui.theme.density == Density::Relaxed);
-                if segmented(
-                    ui,
-                    "preferences.appearance.density",
-                    &["Compact", "Comfortable"],
-                    &mut selected,
-                ) {
-                    state.ui.theme.density = if selected == 0 {
-                        Density::Compact
-                    } else {
-                        Density::Relaxed
-                    };
-                }
-            });
-        },
-    );
-    setting_row(
-        ui,
-        "Color-safe traces",
-        "Use color, line style and marker redundancy.",
-        |ui| {
-            right_aligned(ui, |ui| {
-                preference_switch(
-                    ui,
-                    "result-document.settingspagecontent.enable-color-safe-traces.425c2b40",
-                    "Enable color-safe traces",
-                    &mut state.ui.theme.colorblind_traces,
-                );
-            });
-        },
-    );
-    setting_row(
-        ui,
-        "Canvas contrast",
-        "Increase symbol and grid separation.",
-        |ui| {
-            right_aligned(ui, |ui| {
-                let response = ui.add_sized(
-                    [
-                        ui.available_width().min(150.0),
-                        Tokens::get(ui.ctx()).metrics.ctl_h,
-                    ],
-                    egui::Slider::new(&mut state.ui.theme.canvas_contrast, 0..=100)
-                        .show_value(false),
-                );
-                response.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Canvas contrast")
-                });
-            });
-        },
-    );
-    section_label(ui, "Visual system");
     setting_row(
         ui,
         "Engineering canvas theme",
-        "Set schematic, layout, waveform and field-view backgrounds as one reviewed palette.",
+        "Schematic, layout, waveform and field-view backgrounds, as one palette.",
         |ui| {
             let themes = EngineeringCanvasTheme::ALL;
             let labels = themes
@@ -259,81 +207,105 @@ fn appearance(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAct
                 .iter()
                 .position(|theme| *theme == state.ui.theme.canvas_theme)
                 .unwrap_or_default();
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 if let Some(selected) = select(
                     ui,
                     "preferences.appearance.canvas-theme",
                     "Engineering canvas theme",
                     &labels[active],
                     &labels,
-                    ui.available_width().min(360.0),
+                    control_width(ui),
                 ) {
                     state.ui.theme.canvas_theme = themes[selected];
                 }
             });
         },
     );
+    setting_row(
+        ui,
+        "Canvas contrast",
+        "Separation between symbols, wires and the grid.",
+        |ui| {
+            value_column(ui, |ui| {
+                // A slider sizes itself from `spacing.slider_width` and
+                // ignores the size `add_sized` asks for, so it has to be told
+                // the control column's width rather than given it.
+                let width = control_width(ui);
+                ui.spacing_mut().slider_width = width - Tokens::get(ui.ctx()).metrics.ctl_h;
+                let response = ui.add_sized(
+                    [width, Tokens::get(ui.ctx()).metrics.ctl_h],
+                    egui::Slider::new(&mut state.ui.theme.canvas_contrast, 0..=100)
+                        .show_value(false),
+                );
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Slider, true, "Canvas contrast")
+                });
+            });
+        },
+    );
+    setting_row(
+        ui,
+        "Color-safe traces",
+        "Distinguish traces by line style and marker as well as color.",
+        |ui| {
+            value_column(ui, |ui| {
+                preference_switch(
+                    ui,
+                    "result-document.settingspagecontent.enable-color-safe-traces.425c2b40",
+                    "Enable color-safe traces",
+                    &mut state.ui.theme.colorblind_traces,
+                );
+            });
+        },
+    );
 }
 
 fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
-        ui,
-        actions,
-        "Device local",
-        "dock geometry and restored documents stay on this device",
-    );
-    section_label(ui, "Product scope");
-    setting_row(
-        ui,
-        "Engineering profile",
-        super::ENGINEERING_PROFILE_HELP,
-        |ui| {
-            let profiles = crate::workbench::EngineeringProfile::ALL;
-            let labels = profiles
-                .iter()
-                .map(|profile| profile.label().to_owned())
-                .collect::<Vec<_>>();
-            let active = profiles
-                .iter()
-                .position(|profile| *profile == state.workbench.engineering_profile)
-                .unwrap_or_default();
-            if let Some(selected) = select(
-                ui,
-                "preferences.workspace.engineering-profile",
-                "Engineering profile",
-                profiles[active].label(),
-                &labels,
-                ui.available_width().min(440.0),
-            ) {
-                let profile = profiles[selected];
-                if profile != state.workbench.engineering_profile {
-                    state.workbench.engineering_profile = profile;
-                    actions.updated_profile_label = Some(profile.label());
-                }
+    // No static help on this row: the line under the control says what the
+    // selected profile actually covers, which is the same question answered
+    // concretely. Two explanations of one setting is one too many.
+    setting_row(ui, "Engineering profile", "", |ui| {
+        let profiles = crate::workbench::EngineeringProfile::ALL;
+        let labels = profiles
+            .iter()
+            .map(|profile| profile.label().to_owned())
+            .collect::<Vec<_>>();
+        let active = profiles
+            .iter()
+            .position(|profile| *profile == state.workbench.engineering_profile)
+            .unwrap_or_default();
+        if let Some(selected) = select(
+            ui,
+            "preferences.workspace.engineering-profile",
+            "Engineering profile",
+            profiles[active].label(),
+            &labels,
+            control_width(ui),
+        ) {
+            let profile = profiles[selected];
+            if profile != state.workbench.engineering_profile {
+                state.workbench.engineering_profile = profile;
+                actions.updated_profile_label = Some(profile.label());
             }
-            ui.add_space(4.0);
-            setting_detail(
-                ui,
-                super::engineering_profile_detail(state.workbench.engineering_profile),
-            );
-        },
-    );
-    page_heading(
-        ui,
-        "Workspace layout",
-        "Saved per device while project documents remain portable.",
-    );
+        }
+        ui.add_space(4.0);
+        setting_detail(
+            ui,
+            super::engineering_profile_detail(state.workbench.engineering_profile),
+            control_width(ui),
+        );
+    });
     if state.ui.preferences.workspace().is_none() {
         return;
     }
 
-    section_label(ui, "Dock composition");
+    section_heading(ui, "Layout");
     setting_row(
         ui,
         "Workspace preset",
         "Engineering keeps contextual panes; Canvas focuses the active editor; Diagnostics opens the console.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let mut selected = state
                     .ui
                     .preferences
@@ -365,7 +337,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
         "Console on launch",
         "Errors and explicit Problem navigation always open it.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let mut selected = state
                     .ui
                     .preferences
@@ -394,42 +366,27 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
             });
         },
     );
-    setting_row(
-        ui,
-        "Dock sizes",
-        "Independent navigator, inspector and console sizes per workspace.",
-        |ui| {
-            right_aligned(ui, |ui| {
-                let layout = state.workbench.workspace_layout(state.workbench.workspace);
-                ui.vertical(|ui| {
-                    ui.label(format!(
-                        "navigator {:.0} px · inspector {:.0} px",
-                        layout.navigator_width, layout.inspector_width
-                    ));
-                    ui.label(format!("console {:.0} px · saved", layout.console_height));
-                });
-            });
-        },
-    );
-
-    section_label(ui, "Attention and navigation");
+    // A "Dock sizes" row used to sit here reading back the navigator,
+    // inspector and console widths in pixels. The reader sets those by
+    // dragging the splitter and sees the result as they drag; a second,
+    // non-interactive account of the same three numbers decides nothing.
     if action_row(
         ui,
-        "Remember per-workspace layouts",
-        "Design, Simulation, Results and DRC retain independent docks and console state.",
+        "Per-workspace layouts",
+        "Design, Simulation, Results and Verify retain independent docks and console state.",
         "workspace-layouts",
         "Manage layouts…",
     ) {
         actions.open_workspace_layout_manager = true;
     }
 
-    section_label(ui, "Startup and windows");
+    section_heading(ui, "Background work");
     setting_row(
         ui,
-        "Background task attention",
-        "Bring the application forward only for explicit user-blocking decisions.",
+        "Task attention",
+        "Whether a finished or failed background run may take the foreground.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let options = [
                     "Badge and notify; never steal focus",
                     "Notify on failure only",
@@ -446,10 +403,10 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
                 if let Some(selected) = select(
                     ui,
                     "preferences.workspace.background-task-attention",
-                    "Background task attention",
+                    "Task attention",
                     options[active],
                     &option_labels,
-                    ui.available_width().min(360.0),
+                    control_width(ui),
                 ) {
                     state
                         .ui
@@ -466,24 +423,13 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     );
 }
 
-fn units(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
-        ui,
-        actions,
-        "User profile",
-        "display-only; projects retain explicit stored units",
-    );
-    page_heading(
-        ui,
-        "Units and engineering notation",
-        "Parsing is strict and unit-safe; display choices never change stored values.",
-    );
+fn units(ui: &mut Ui, state: &mut AppState) {
     setting_row(
         ui,
         "Unit system",
-        "Mixed engineering is recommended for circuit design.",
+        "Display only. A project keeps the units its values were stored in.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let mut selected = state.ui.preferences.choice(ChoicePreference::UnitSystem);
                 if segmented(
                     ui,
@@ -535,18 +481,10 @@ fn units(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions)
             "Scientific notation + SI unit",
         ],
     );
-    section_label(ui, "Locale and reporting");
-    setting_row(
-        ui,
-        "Locale, date, time and numeric format",
-        "Display and reporting preferences never change parsed or stored values.",
-        |ui| {
-            right_aligned(ui, |ui| {
-                ui.label("System locale · portable engineering files");
-            });
-        },
-    );
-    section_label(ui, "Angles, coordinates and input");
+    // A "Locale, date, time and numeric format" row used to sit here whose
+    // whole value column was the static sentence "System locale · portable
+    // engineering files". There is no locale setting behind it.
+    section_heading(ui, "Angles, coordinates and input");
     choice_row(
         ui,
         state,
@@ -581,24 +519,13 @@ fn units(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions)
     );
 }
 
-fn schematic(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
-        ui,
-        actions,
-        "User default",
-        "each project may declare stricter design rules",
-    );
-    page_heading(
-        ui,
-        "Schematic editor",
-        "Interaction, units, hierarchy and connectivity behavior.",
-    );
+fn schematic(ui: &mut Ui, state: &mut AppState) {
     setting_row(
         ui,
         "Grid and snap",
-        "Visible grid and placement increments.",
+        "A project may declare a stricter increment.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let mut selected = state.ui.preferences.choice(ChoicePreference::SchematicGrid);
                 if segmented(
                     ui,
@@ -639,7 +566,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
         "Refresh incrementally while editing.",
         "Enable incremental connectivity checks",
     );
-    section_label(ui, "Editing and hierarchy");
+    section_heading(ui, "Editing and hierarchy");
     choice_row(
         ui,
         state,
@@ -696,41 +623,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     );
 }
 
-fn simulation(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
-        ui,
-        actions,
-        "User default + plan",
-        "the retained preset initializes new projects; each plan then owns its exact numerical options",
-    );
-    page_heading(
-        ui,
-        "Simulation defaults",
-        "The numerical preset a new project starts from. Execution targets, run-space budgets \
-         and failure handling are owned by each plan, on the Simulate workspace.",
-    );
-    choice_row(
-        ui,
-        state,
-        ChoicePreference::DefaultSolverPreset,
-        "Default solver preset",
-        "Individual plans may override this value.",
-        &["Balanced", "Fast", "Accurate", "Robust"],
-    );
-}
-
-fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
-        ui,
-        actions,
-        "User default",
-        "plot documents may override display behavior",
-    );
-    page_heading(
-        ui,
-        "Results and precision",
-        "Plot behavior never changes stored engineering precision. Trace accessibility is owned by Appearance.",
-    );
+fn results(ui: &mut Ui, state: &mut AppState) {
     scalar_row(
         ui,
         state,
@@ -763,7 +656,7 @@ fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAction
             "Magnitude / phase · radians",
         ],
     );
-    section_label(ui, "Axes, data and evaluation");
+    section_heading(ui, "Data and export");
     choice_row(
         ui,
         state,
@@ -797,23 +690,25 @@ fn results(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageAction
     );
 }
 
-fn files(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
+/// What a new project starts from, and what saving one does.
+///
+/// Three settings that used to be two pages: Simulation defaults held the
+/// solver preset alone under two paragraphs explaining which numerical options
+/// it does *not* own, and Files, storage and recovery held the other two under
+/// a section heading each. They answer one question between them.
+fn projects(ui: &mut Ui, state: &mut AppState) {
+    choice_row(
         ui,
-        actions,
-        "User + project",
-        "locations are device local; retention policy is project portable",
+        state,
+        ChoicePreference::DefaultSolverPreset,
+        "Default solver preset",
+        "The preset a new project starts from. Each plan may override it.",
+        &["Balanced", "Fast", "Accurate", "Robust"],
     );
-    page_heading(
-        ui,
-        "Files, storage and recovery",
-        "Transactional writes, content-addressed results and explicit retention.",
-    );
-    section_label(ui, "Recovery");
     setting_row(
         ui,
         "Autosave interval",
-        "Checkpoint active editable documents.",
+        "Checkpoints open editable documents.",
         |ui| {
             let values = [5_u8, 2, 10];
             let labels = ["5 minutes", "2 minutes", "10 minutes"]
@@ -824,101 +719,37 @@ fn files(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions)
                 .iter()
                 .position(|minutes| *minutes == normalized)
                 .unwrap_or_default();
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 if let Some(selected) = select(
                     ui,
-                    "preferences.files.autosave",
+                    "preferences.projects.autosave",
                     "Autosave interval",
                     &labels[active],
                     &labels,
-                    ui.available_width().min(360.0),
+                    control_width(ui),
                 ) {
                     state.ui.autosave_minutes = values[selected];
                 }
             });
         },
     );
-    section_label(ui, "Validation");
     toggle_row(
         ui,
         state,
         TogglePreference::RunDesignChecksOnSave,
         "Design checks on save",
-        "Findings are reported after the save completes; a save is never refused by them.",
+        "Findings are reported after the save completes. A save is never refused by them.",
         "Run design checks on save",
     );
 }
 
-fn compute(ui: &mut Ui, _state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
-        ui,
-        actions,
-        "Runtime capability",
-        "this build has no registered remote execution targets",
-    );
-    page_heading(
-        ui,
-        "Remote compute",
-        "Remote target and scheduling controls are shown only when backed by a configured execution service.",
-    );
-    setting_row(
-        ui,
-        "Local processor availability",
-        "Host-reported hardware concurrency; this is capability information, not a remote scheduling policy.",
-        |ui| {
-            right_aligned(ui, |ui| {
-                let threads =
-                    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-                ui.label(format!("{threads} logical threads detected"));
-            });
-        },
-    );
-}
-
-fn security(ui: &mut Ui, _state: &mut AppState, _actions: &mut PreferencePageActions) {
-    informational_scope_strip(
-        ui,
-        "Runtime capability",
-        "no credential vault, certificate store, proxy provider, or crash-report transport is registered",
-    );
-    page_heading(
-        ui,
-        "Security and privacy",
-        "Configurable security controls are shown only when an enforcing runtime service owns them.",
-    );
-}
-
-fn integrations(ui: &mut Ui, _state: &mut AppState, _actions: &mut PreferencePageActions) {
-    informational_scope_strip(
-        ui,
-        "Runtime capability",
-        "no integration registry, signed-extension loader, Python IPC host, or webhook delivery service is registered",
-    );
-    page_heading(
-        ui,
-        "Plug-ins and integrations",
-        "Configurable integration controls are shown only when a provider supplies executable actions and retained state.",
-    );
-}
-
-fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActions) {
-    resolved_scope_strip(
-        ui,
-        actions,
-        "User profile",
-        "saved on this device; capability may increase minimum touch targets",
-    );
-    page_heading(
-        ui,
-        "Accessibility",
-        "Keyboard, screen-reader, vision and motor-access settings apply across every workspace.",
-    );
+fn accessibility(ui: &mut Ui, state: &mut AppState) {
     setting_row(
         ui,
         "Reduced motion",
         "Disables non-essential transitions and animated progress.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let mut value = state.ui.preferences.toggle(TogglePreference::ReducedMotion);
                 if preference_switch(
                     ui,
@@ -939,7 +770,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePage
         "Canvas keyboard navigation",
         "Traverse symbols, nets, markers, traces and annotations without a pointer.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let mut value = state
                     .ui
                     .preferences
@@ -964,7 +795,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePage
         "Speak control changes (browser)",
         "Uses the browser speech fallback while a semantic accessibility tree is unavailable.",
         |ui| {
-            right_aligned(ui, |ui| {
+            value_column(ui, |ui| {
                 let mut value = state.ui.browser_spoken_feedback;
                 if preference_switch(
                     ui,
@@ -988,40 +819,217 @@ fn accessibility(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePage
     );
 }
 
-fn setting_detail(ui: &mut Ui, text: &str) {
+/// A line derived from the control above it, wrapped to that control's own
+/// width so the two share a right edge.
+fn setting_detail(ui: &mut Ui, text: &str, width: f32) {
     let t = Tokens::get(ui.ctx());
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(text)
-                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                .color(t.color.text_dim),
-        )
-        .wrap(),
-    );
+    ui.scope(|ui| {
+        ui.set_max_width(width);
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            )
+            .wrap(),
+        );
+    });
+}
+
+/// Put every setting on `category`'s page back to what RSpice ships.
+///
+/// Page-scoped rather than global: a reader who has made one page unreadable
+/// wants that page back, not a dialog that also discards their unit system and
+/// their key bindings. The lists below are the settings each page shows, so a
+/// row added to a page without being added here is a row the footer's control
+/// silently skips — which the test at the bottom of this file checks for.
+pub(super) fn restore_defaults(category: PreferenceCategory, state: &mut AppState) {
+    let preferences = &mut state.ui.preferences;
+    match category {
+        PreferenceCategory::Appearance => {
+            state.ui.theme = crate::ui::Theme::default();
+            preferences.restore_defaults(&[ChoicePreference::InterfaceScale], &[], &[]);
+        }
+        PreferenceCategory::Accessibility => preferences.restore_defaults(
+            &[ChoicePreference::MinimumTouchTarget],
+            &[
+                TogglePreference::ReducedMotion,
+                TogglePreference::CanvasKeyboardNavigation,
+            ],
+            &[],
+        ),
+        PreferenceCategory::Workspace => {
+            state.workbench.engineering_profile = crate::workbench::EngineeringProfile::default();
+            if let Ok(workspace) = preferences.workspace_mut() {
+                *workspace = WorkspacePreferences::default();
+                let preset = workspace.preset();
+                let console = workspace.console_on_launch();
+                state.workbench.apply_workspace_preset(preset);
+                state
+                    .workbench
+                    .apply_console_launch_behavior(console.is_open());
+            }
+        }
+        PreferenceCategory::Shortcuts => {
+            // The bindings and the three binding policies are one profile, and
+            // replacing it has to go through the persist-before-live owner that
+            // the editor and the policy rows already use.
+        }
+        PreferenceCategory::Units => preferences.restore_defaults(
+            &[
+                ChoicePreference::UnitSystem,
+                ChoicePreference::EngineeringSuffixes,
+                ChoicePreference::FrequencyDisplay,
+                ChoicePreference::TemperatureDisplay,
+                ChoicePreference::CopiedValueFormat,
+                ChoicePreference::AngleDisplay,
+                ChoicePreference::LayoutCoordinateDisplay,
+                ChoicePreference::TimeFrequencyInput,
+                ChoicePreference::DecimalSeparatorInput,
+            ],
+            &[],
+            &[],
+        ),
+        PreferenceCategory::Schematic => preferences.restore_defaults(
+            &[
+                ChoicePreference::SchematicGrid,
+                ChoicePreference::OperatingPointAnnotation,
+                ChoicePreference::WireJunctionBehavior,
+                ChoicePreference::SelectionCrossingPolicy,
+                ChoicePreference::NetNamingPolicy,
+                ChoicePreference::PropertyCommitPolicy,
+            ],
+            &[
+                TogglePreference::CrossProbeBehavior,
+                TogglePreference::IncrementalConnectivityChecks,
+                TogglePreference::HierarchicalEditInPlace,
+            ],
+            &[],
+        ),
+        PreferenceCategory::Projects => {
+            state.ui.autosave_minutes = super::DEFAULT_AUTOSAVE_MINUTES;
+            preferences.restore_defaults(
+                &[ChoicePreference::DefaultSolverPreset],
+                &[TogglePreference::RunDesignChecksOnSave],
+                &[],
+            );
+        }
+        PreferenceCategory::Results => preferences.restore_defaults(
+            &[
+                ChoicePreference::CursorInterpolation,
+                ChoicePreference::ComplexNumberDisplay,
+                ChoicePreference::LargeDatasetDisplay,
+                ChoicePreference::EngineeringExport,
+            ],
+            &[],
+            &[ScalarPreference::DisplayedSignificantDigits],
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn pages_do_not_expose_persistence_only_or_fabricated_controls() {
-        let source = include_str!("preference_pages.rs");
-        let production = source
+    use super::*;
+    use crate::workbench::RSpiceApp;
+
+    /// The page source, with this test module cut off the end.
+    fn production_source() -> &'static str {
+        include_str!("preference_pages.rs")
             .split("#[cfg(test)]")
             .next()
-            .expect("production source precedes tests");
+            .expect("production source precedes tests")
+    }
+
+    /// The same source with whole-line comments dropped.
+    ///
+    /// The scans below look for things the pages must not *do*, and several
+    /// of this file's comments name a deleted row in order to say why it is
+    /// gone. Reading the prose as if it were code makes an explanation of a
+    /// fix look exactly like the defect it explains.
+    fn production_code() -> String {
+        production_source()
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The pages, and the reset that has to cover them, as two source halves.
+    fn pages_and_restore() -> (String, String) {
+        let code = production_code();
+        let (pages, restore) = code
+            .split_once("pub(super) fn restore_defaults(")
+            .expect("restore_defaults follows the pages");
+        (pages.to_owned(), restore.to_owned())
+    }
+
+    /// Every preference key named in `source`.
+    fn named_keys(source: &str) -> Vec<String> {
+        let mut keys = Vec::new();
+        for enum_name in [
+            "ChoicePreference::",
+            "TogglePreference::",
+            "ScalarPreference::",
+        ] {
+            for fragment in source.split(enum_name).skip(1) {
+                let variant: String = fragment
+                    .chars()
+                    .take_while(char::is_ascii_alphanumeric)
+                    .collect();
+                if !variant.is_empty() {
+                    keys.push(format!("{enum_name}{variant}"));
+                }
+            }
+        }
+        keys
+    }
+
+    /// A control is a promise that the application reads the value behind it.
+    ///
+    /// These keys are in the preference store because an earlier
+    /// implementation wrote them, and nothing in the running application reads
+    /// any of them: this build has no remote execution service, no credential
+    /// store and no extension loader, and the solver options named here are
+    /// owned by each plan rather than by a profile default. Putting one back
+    /// on a page means first giving it a consumer.
+    #[test]
+    fn pages_expose_only_preferences_the_application_reads() {
+        let production = production_code();
         for unsupported in [
-            "ScalarPreference::LocalParallelSlots",
+            "ChoicePreference::ConvergenceFailurePolicy",
+            "ChoicePreference::CheckpointPolicy",
+            "ChoicePreference::EngineSelection",
+            "ChoicePreference::RandomSeedPolicy",
+            "ChoicePreference::IncrementalResultReuse",
+            "ChoicePreference::LicenseWaitBehavior",
+            "ChoicePreference::LiveResultStreaming",
+            "ChoicePreference::DiagnosticArtifact",
+            "ChoicePreference::FamilyTraceLabeling",
+            "ChoicePreference::DefaultAxisPolicy",
+            "ChoicePreference::MeasurementEvaluation",
             "ChoicePreference::DefaultComputeTarget",
-            "ScalarPreference::ParallelTaskCeiling",
+            "ChoicePreference::QueuePriority",
+            "ChoicePreference::RuntimeEnvironment",
+            "ChoicePreference::TransferPolicy",
+            "ChoicePreference::PreemptionTimeout",
+            "ChoicePreference::UnavailableTarget",
             "ChoicePreference::CertificateTrust",
-            "TogglePreference::AutomaticDiagnostics",
+            "ChoicePreference::NetworkProxy",
+            "ChoicePreference::LocalProjectEncryption",
+            "ChoicePreference::AutomationSandbox",
+            "ChoicePreference::DataResidency",
             "ChoicePreference::ExtensionPolicy",
+            "ChoicePreference::ExtensionUpdates",
+            "TogglePreference::RestorePlotDocuments",
+            "TogglePreference::SynchronizeResultFamilyCrossProbes",
+            "TogglePreference::AutomaticDiagnostics",
             "TogglePreference::PythonAutomationApi",
-            "ChoicePreference::InterfaceScale",
+            "ScalarPreference::LocalParallelSlots",
+            "ScalarPreference::ParallelTaskCeiling",
         ] {
             assert!(
                 !production.contains(unsupported),
-                "persistence-only control leaked into Preferences: {unsupported}"
+                "a preference with no runtime consumer reached a page: {unsupported}"
             );
         }
         for fabricated in [
@@ -1038,138 +1046,180 @@ mod tests {
         }
     }
 
+    /// The interface scale is the counter-example to the test above: the shell
+    /// applies it to the context's zoom factor on every frame, and until it
+    /// reached Appearance the only way to change it was to edit the stored
+    /// session by hand.
     #[test]
-    fn simulation_page_exposes_only_the_runtime_consumed_mockup_default() {
-        let source = include_str!("preference_pages.rs");
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        let simulation = production
-            .split("fn simulation(")
+    fn the_zoom_factor_the_shell_applies_is_reachable_from_appearance() {
+        let appearance = production_source()
+            .split("fn appearance(")
             .nth(1)
-            .and_then(|source| source.split("fn results(").next())
-            .expect("Simulation page source");
+            .and_then(|source| source.split("\nfn ").next())
+            .expect("Appearance page source");
+        assert!(appearance.contains("ChoicePreference::InterfaceScale"));
+        assert!(
+            (crate::workbench::UserPreferences::default().interface_scale() - 1.0).abs()
+                < f32::EPSILON,
+            "the first option on the row has to be the scale RSpice ships"
+        );
+    }
 
-        assert!(simulation.contains("Default solver preset"));
-        assert!(simulation.contains("ChoicePreference::DefaultSolverPreset"));
-        for missing_backend in [
-            "Local parallel slots",
-            "Convergence failure",
-            "Checkpoint policy",
+    /// Rows the pages used to carry that set nothing.
+    ///
+    /// Each was a label whose value column could not be operated: two dock
+    /// widths read back from a layout the reader sets by dragging, a static
+    /// sentence about the system locale, and a count of the host's logical
+    /// processors.
+    #[test]
+    fn pages_carry_no_read_only_readout_dressed_as_a_setting() {
+        let production = production_code();
+        for readout in [
+            "\"Dock sizes\"",
+            "navigator {:.0} px",
+            "Locale, date, time and numeric format",
+            "System locale",
+            "Local processor availability",
+            "logical threads detected",
         ] {
             assert!(
-                !simulation.contains(missing_backend),
-                "unsupported Simulation row was exposed: {missing_backend}"
+                !production.contains(readout),
+                "a read-only readout is presented as a setting: {readout}"
             );
         }
     }
 
+    /// Restore defaults is only as good as its coverage: a row added to a page
+    /// and not to [`restore_defaults`] is a setting the footer's control
+    /// silently skips, with nothing on screen to say which.
     #[test]
-    fn unavailable_provider_pages_do_not_offer_empty_policy_actions() {
-        let source = include_str!("preference_pages.rs");
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        let security = production
-            .split("fn security(")
-            .nth(1)
-            .and_then(|source| source.split("fn integrations(").next())
-            .expect("Security page source");
-        let integrations = production
-            .split("fn integrations(")
-            .nth(1)
-            .and_then(|source| source.split("fn accessibility(").next())
-            .expect("Integrations page source");
-
-        assert!(security.contains("informational_scope_strip"));
-        assert!(security.contains("credential vault"));
-        assert!(!security.contains("resolved_scope_strip"));
-        assert!(integrations.contains("informational_scope_strip"));
-        assert!(integrations.contains("integration registry"));
-        assert!(!integrations.contains("resolved_scope_strip"));
+    fn restore_defaults_covers_every_preference_the_pages_expose() {
+        let (pages, restore) = pages_and_restore();
+        let restored = named_keys(&restore);
+        for key in named_keys(&pages) {
+            assert!(
+                restored.contains(&key),
+                "{key} is on a page but Restore defaults does not reset it"
+            );
+        }
     }
 
+    /// And the reset has to reach the stored value in every domain the store
+    /// keeps a setting in: the plain key maps, the typed Units and Results
+    /// domains, the workspace domain, and the two settings that live on the
+    /// theme and the session rather than in preferences at all.
     #[test]
-    fn schematic_edit_in_place_matches_the_mockup_copy_and_order() {
-        let source = include_str!("preference_pages.rs");
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        let schematic = production
+    fn restoring_a_page_clears_every_override_behind_it() {
+        let shipped = serde_json::to_value(crate::workbench::UserPreferences::default())
+            .expect("default preferences serialize");
+        for category in PreferenceCategory::ALL {
+            let mut app = RSpiceApp::test_instance();
+            if !override_every_setting_on(category, &mut app.state) {
+                continue;
+            }
+            assert_ne!(
+                serde_json::to_value(&app.state.ui.preferences).expect("preferences serialize"),
+                shipped,
+                "{} set no stored override to restore",
+                category.label()
+            );
+            restore_defaults(category, &mut app.state);
+            assert_eq!(
+                serde_json::to_value(&app.state.ui.preferences).expect("preferences serialize"),
+                shipped,
+                "{} left a stored override behind",
+                category.label()
+            );
+            assert_eq!(
+                app.state.ui.theme,
+                crate::ui::Theme::default(),
+                "{} left the theme changed",
+                category.label()
+            );
+            assert_eq!(
+                app.state.ui.autosave_minutes,
+                super::super::DEFAULT_AUTOSAVE_MINUTES,
+                "{} left the autosave interval changed",
+                category.label()
+            );
+        }
+    }
+
+    /// Move every setting shown on `category` off its default. Returns `false`
+    /// for a page that stores nothing in `UserPreferences`.
+    fn override_every_setting_on(category: PreferenceCategory, state: &mut AppState) -> bool {
+        let (_, restore) = pages_and_restore();
+        let arm = restore
+            .split(&format!("PreferenceCategory::{category:?} =>"))
+            .nth(1)
+            .and_then(|source| source.split("PreferenceCategory::").next())
+            .unwrap_or_default();
+        let keys = named_keys(arm);
+        let mut stored = false;
+        for key in ChoicePreference::ALL {
+            if !keys.contains(&format!("ChoicePreference::{key:?}")) {
+                continue;
+            }
+            state
+                .ui
+                .preferences
+                .set_choice(key, 1)
+                .expect("every exposed choice has a second option");
+            stored = true;
+        }
+        for key in TogglePreference::ALL {
+            if !keys.contains(&format!("TogglePreference::{key:?}")) {
+                continue;
+            }
+            let flipped = !state.ui.preferences.toggle(key);
+            state.ui.preferences.set_toggle(key, flipped);
+            stored = true;
+        }
+        if keys.contains(&"ScalarPreference::DisplayedSignificantDigits".to_owned()) {
+            state
+                .ui
+                .preferences
+                .set_scalar(ScalarPreference::DisplayedSignificantDigits, 12)
+                .expect("twelve significant digits is inside the domain");
+            stored = true;
+        }
+        if category == PreferenceCategory::Appearance {
+            state.ui.theme.mode = crate::ui::Mode::Light;
+            state.ui.theme.canvas_contrast = 12;
+        }
+        if category == PreferenceCategory::Projects {
+            state.ui.autosave_minutes = 10;
+        }
+        if category == PreferenceCategory::Workspace
+            && let Ok(workspace) = state.ui.preferences.workspace_mut()
+        {
+            workspace.set_console_on_launch(
+                ConsoleLaunchBehavior::from_index(1).expect("the console may launch open"),
+            );
+            stored = true;
+        }
+        stored
+    }
+
+    /// The hierarchy rows read in the order a reader builds them up: what a
+    /// drag selects, then what descending into a child does, then what the
+    /// nets it connects may be called.
+    #[test]
+    fn the_schematic_page_orders_its_hierarchy_rows() {
+        let schematic = production_source()
             .split("fn schematic(")
             .nth(1)
-            .and_then(|source| source.split("fn simulation(").next())
+            .and_then(|source| source.split("\nfn ").next())
             .expect("Schematic page source");
-
         let selection = schematic
             .find("\"Selection crossing policy\"")
             .expect("selection policy row");
         let edit_in_place = schematic
             .find("TogglePreference::HierarchicalEditInPlace")
-            .expect("hierarchical edit-in-place preference row");
+            .expect("hierarchical edit-in-place row");
         let net_naming = schematic
             .find("\"Net naming policy\"")
             .expect("net naming policy row");
-
         assert!(selection < edit_in_place && edit_in_place < net_naming);
-        assert!(schematic.contains("\"Edit-in-place hierarchy\""));
-        assert!(schematic.contains(
-            "\"Parent context is read-only and visually subdued while a child view is edited.\""
-        ));
-        assert!(schematic.contains("\"Enable hierarchical edit in place\""));
-    }
-
-    #[test]
-    fn workspace_rows_follow_the_mockup_order_and_hide_missing_backends() {
-        let source = include_str!("preference_pages.rs");
-        let production = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source precedes tests");
-        let workspace = production
-            .split("fn workspace(")
-            .nth(1)
-            .and_then(|source| source.split("fn units(").next())
-            .expect("Workspace page source");
-
-        let mut cursor = 0;
-        for row in [
-            "Product scope",
-            "Engineering profile",
-            "Workspace layout",
-            "Dock composition",
-            "Workspace preset",
-            "Console on launch",
-            "Dock sizes",
-            "Attention and navigation",
-            "Remember per-workspace layouts",
-            "Startup and windows",
-            "Background task attention",
-        ] {
-            let offset = workspace[cursor..]
-                .find(row)
-                .unwrap_or_else(|| panic!("missing Workspace mockup row: {row}"));
-            cursor += offset + row.len();
-        }
-
-        for missing_backend in [
-            "Restore workspace documents",
-            "Portable preferences",
-            "Notifications and job alerts",
-            "Startup destination",
-            "Multi-window documents",
-            "Per-monitor placement",
-            "Phone window model",
-            "Document tabs and session",
-            "Feature ownership and availability",
-        ] {
-            assert!(
-                !workspace.contains(missing_backend),
-                "unsupported Workspace row was exposed: {missing_backend}"
-            );
-        }
     }
 }
