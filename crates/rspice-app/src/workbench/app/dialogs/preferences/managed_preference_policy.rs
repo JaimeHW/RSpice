@@ -152,14 +152,7 @@ fn policy_header_row(ui: &mut Ui, table_width: f32) {
             |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 for header in POLICY_HEADERS {
-                    policy_cell(
-                        ui,
-                        header,
-                        column_width,
-                        POLICY_HEADER_HEIGHT,
-                        true,
-                        PolicyCellTone::Normal,
-                    );
+                    policy_cell(ui, header, column_width, POLICY_HEADER_HEIGHT, true);
                 }
             },
         )
@@ -172,19 +165,14 @@ fn policy_header_row(ui: &mut Ui, table_width: f32) {
 
 fn policy_data_row(ui: &mut Ui, table_width: f32, row: &ResolvedPolicyRow) {
     let column_width = table_width / POLICY_COLUMN_COUNT as f32;
+    // The override column already reads "Locked" or "Allowed"; a colour on
+    // the word it is is the same fact twice.
     let cells = [
-        (row.setting.as_str(), PolicyCellTone::Normal),
-        (row.resolved_value.as_str(), PolicyCellTone::Normal),
-        (row.source.as_str(), PolicyCellTone::Normal),
-        (
-            row.override_state.as_str(),
-            if row.locked {
-                PolicyCellTone::Locked
-            } else {
-                PolicyCellTone::Allowed
-            },
-        ),
-        (row.reason.as_str(), PolicyCellTone::Normal),
+        row.setting.as_str(),
+        row.resolved_value.as_str(),
+        row.source.as_str(),
+        row.override_state.as_str(),
+        row.reason.as_str(),
     ];
     let response = ui
         .allocate_ui_with_layout(
@@ -192,8 +180,8 @@ fn policy_data_row(ui: &mut Ui, table_width: f32, row: &ResolvedPolicyRow) {
             Layout::left_to_right(Align::Center),
             |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                for (text, tone) in cells {
-                    policy_cell(ui, text, column_width, POLICY_ROW_HEIGHT, false, tone);
+                for text in cells {
+                    policy_cell(ui, text, column_width, POLICY_ROW_HEIGHT, false);
                 }
             },
         )
@@ -204,21 +192,7 @@ fn policy_data_row(ui: &mut Ui, table_width: f32, row: &ResolvedPolicyRow) {
     });
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PolicyCellTone {
-    Normal,
-    Locked,
-    Allowed,
-}
-
-fn policy_cell(
-    ui: &mut Ui,
-    text: &str,
-    width: f32,
-    height: f32,
-    header: bool,
-    tone: PolicyCellTone,
-) -> Response {
+fn policy_cell(ui: &mut Ui, text: &str, width: f32, height: f32, header: bool) -> Response {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     if header {
@@ -236,7 +210,11 @@ fn policy_cell(
             },
         ),
     );
-    let color = policy_cell_color(&t, header, tone);
+    let color = if header {
+        t.color.text_faint
+    } else {
+        t.color.text_dim
+    };
     let font = theme::sans(
         tokens::FS_0,
         if header {
@@ -249,12 +227,11 @@ fn policy_cell(
     let galley = if header {
         let mut job = egui::text::LayoutJob::default();
         job.append(
-            &text.to_uppercase(),
+            text,
             0.0,
             egui::TextFormat {
                 font_id: font,
                 color,
-                extra_letter_spacing: tokens::FS_0 * 0.04,
                 ..Default::default()
             },
         );
@@ -277,20 +254,6 @@ fn policy_cell(
         node.set_bounds(access_bounds(rect));
     });
     response
-}
-
-fn policy_cell_color(tokens: &Tokens, header: bool, tone: PolicyCellTone) -> egui::Color32 {
-    match tone {
-        PolicyCellTone::Normal => {
-            if header {
-                tokens.color.text_faint
-            } else {
-                tokens.color.text_dim
-            }
-        }
-        PolicyCellTone::Locked => tokens.color.err,
-        PolicyCellTone::Allowed => tokens.color.ok,
-    }
 }
 
 fn ellipsized_galley(
@@ -1009,16 +972,16 @@ mod tests {
         }
     }
 
+    /// The override column states itself in words, so the cell paints no
+    /// tone. The slice's colour guard asserts the second half of that.
     #[test]
-    fn override_state_tones_match_locked_and_allowed_contract_colors() {
-        let tokens = Tokens::default();
-        assert_eq!(
-            policy_cell_color(&tokens, false, PolicyCellTone::Locked),
-            tokens.color.err
-        );
-        assert_eq!(
-            policy_cell_color(&tokens, false, PolicyCellTone::Allowed),
-            tokens.color.ok
+    fn the_override_column_states_its_value_in_words() {
+        let state = AppState::default();
+        let rows = resolved_policy_rows(PreferenceCategory::Appearance, &state);
+        assert!(!rows.is_empty());
+        assert!(
+            rows.iter().all(|row| !row.override_state.is_empty()),
+            "an override cell has to read as a word, since nothing tones it"
         );
     }
 

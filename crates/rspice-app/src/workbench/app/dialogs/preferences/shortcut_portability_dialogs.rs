@@ -9,8 +9,11 @@ use egui::{Context, Sense, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
+use crate::ui::widgets::{
+    Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
+};
 use crate::workbench::ShortcutPreferences;
+use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::commands::ShortcutContext;
 use crate::workbench::commands::vocabulary::{Command, CommandPlatform};
 use crate::workbench::shortcuts::ShortcutProfileLibrary;
@@ -651,31 +654,17 @@ fn render_latest_import_receipt(ui: &mut Ui, state: &ShortcutImportDialogState) 
         return;
     };
     let t = Tokens::get(ui.ctx());
-    let response = egui::Frame::NONE
-        .fill(translucent(t.color.ok, 18))
-        .stroke(Stroke::new(1.0, t.color.ok))
-        .inner_margin(egui::Margin::symmetric(12, 10))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(
-                egui::RichText::new(format!("Latest receipt \u{00b7} {}", receipt.source_name()))
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.ok),
-            );
-            ui.label(
-                egui::RichText::new(format!(
-                    "Import completed and the prior shortcut profile was retained \u{00b7} {}",
-                    receipt.id()
-                ))
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-            );
-        });
-    ui.ctx()
-        .accesskit_node_builder(response.response.id, |node| {
-            node.set_role(egui::accesskit::Role::Status);
-            node.set_label("Latest shortcut import receipt");
-        });
+    // What was imported, and from where. That it completed, and the id it
+    // completed under, are not facts the reader can use.
+    let response = ui.label(
+        egui::RichText::new(format!("Imported from {}", receipt.source_name()))
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_label("Latest shortcut import");
+    });
 }
 
 /// Returns true when the source well was activated.
@@ -947,7 +936,7 @@ fn render_import_summary(
                                     if warning {
                                         TableCellTone::Warning
                                     } else {
-                                        TableCellTone::Ok
+                                        TableCellTone::Default
                                     },
                                 ),
                             ],
@@ -962,10 +951,11 @@ fn render_import_summary(
         });
 }
 
+/// A summary cell's severity. A policy that resolves cleanly is an ordinary
+/// cell; only one the reader has to look at carries a mark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableCellTone {
     Default,
-    Ok,
     Warning,
 }
 
@@ -1021,7 +1011,6 @@ fn summary_table_row(ui: &mut Ui, heading: bool, cells: [(&str, TableCellTone); 
         } else {
             match tone {
                 TableCellTone::Default => t.color.text_dim,
-                TableCellTone::Ok => t.color.ok,
                 TableCellTone::Warning => t.color.warn,
             }
         };
@@ -1248,7 +1237,7 @@ fn render_export_body(ui: &mut Ui, state: &mut ShortcutExportDialogState) {
                 ui.label(
                     egui::RichText::new("portable profile only")
                         .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.ok),
+                        .color(t.color.text_dim),
                 );
             });
         },
@@ -1384,29 +1373,17 @@ fn source_well(ui: &mut Ui, value: Option<&str>, enabled: bool) -> bool {
 }
 
 fn validation_message(ui: &mut Ui, message: &str, error: bool) {
-    let t = Tokens::get(ui.ctx());
-    let response = egui::Frame::NONE
-        .fill(translucent(
-            if error { t.color.err } else { t.color.warn },
-            20,
-        ))
-        .stroke(Stroke::new(
-            1.0,
-            if error { t.color.err } else { t.color.warn },
-        ))
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(if error { t.color.err } else { t.color.warn }),
-                )
-                .wrap(),
-            );
-        });
+    let response = problem_note(
+        ui,
+        if error {
+            Problem::Failure
+        } else {
+            Problem::Warning
+        },
+        message,
+    );
     ui.ctx()
-        .accesskit_node_builder(response.response.id, |node| {
+        .accesskit_node_builder(response.id, |node| {
             node.set_role(if error {
                 egui::accesskit::Role::Alert
             } else {

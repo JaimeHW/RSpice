@@ -11,7 +11,10 @@ use egui::{Context, Key, Modifiers, Response, Stroke, Ui, WidgetInfo, WidgetType
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, select};
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
+};
+use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::commands::{
     ShortcutContext,
     vocabulary::{COMMAND_REGISTRY, Command, CommandPlatform},
@@ -404,11 +407,11 @@ fn render_registry_table(ui: &mut Ui, profile: &ShortcutPreferences) {
     ui.add_space(9.0);
 }
 
+/// A registry cell's severity. Only a failure is painted; everything else is
+/// the same neutral cell, because a shortcut that simply works is not news.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TableCellTone {
     Normal,
-    Ok,
-    Warn,
     Error,
 }
 
@@ -463,8 +466,6 @@ fn table_text_cell(
     } else {
         match tone {
             TableCellTone::Normal => t.color.text_dim,
-            TableCellTone::Ok => t.color.ok,
-            TableCellTone::Warn => t.color.warn,
             TableCellTone::Error => t.color.err,
         }
     };
@@ -586,14 +587,13 @@ fn registry_status(audit: &ShortcutProfileAudit, command: Command) -> &'static s
 }
 
 fn registry_status_tone(audit: &ShortcutProfileAudit, command: Command) -> TableCellTone {
-    let mut tone = TableCellTone::Ok;
-    for issue in audit_issues_for_command(audit, command) {
-        match issue.severity() {
-            ShortcutProfileIssueSeverity::Error => return TableCellTone::Error,
-            ShortcutProfileIssueSeverity::Warning => tone = TableCellTone::Warn,
-        }
+    if audit_issues_for_command(audit, command)
+        .any(|issue| issue.severity() == ShortcutProfileIssueSeverity::Error)
+    {
+        TableCellTone::Error
+    } else {
+        TableCellTone::Normal
     }
-    tone
 }
 
 fn audit_status(ui: &mut Ui, profile: &ShortcutPreferences, audit: &ShortcutProfileAudit) {
@@ -660,9 +660,8 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
         let transaction_state = if editor.persistence_pending {
             Some((
                 DialogTransactionTone::Progress,
-                "Saving shortcut profile",
-                "Controls are locked until durable storage acknowledges the new profile."
-                    .to_owned(),
+                "Saving",
+                "Controls stay locked until the profile is written.".to_owned(),
             ))
         } else if editor.discard_confirmation {
             Some((
@@ -677,13 +676,9 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
                 summary.to_owned(),
             ))
         } else {
-            editor.repair_receipt.as_deref().map(|receipt| {
-                (
-                    DialogTransactionTone::Complete,
-                    "Incompatible entries removed",
-                    receipt.to_owned(),
-                )
-            })
+            // A repair reports what it removed, in the audit list beside the
+            // button that ran it; the strip is for work still to be done.
+            None
         };
         let mut dialog = Dialog::new(
             "Keyboard shortcut editor",
@@ -1278,21 +1273,13 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
                     .color(t.color.text),
             );
             for issue in audit.issues() {
-                let prefix = match issue.severity() {
-                    ShortcutProfileIssueSeverity::Error => "Error",
-                    ShortcutProfileIssueSeverity::Warning => "Warning",
-                };
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(format!("{prefix}: {}", issue.message()))
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(if issue.severity() == ShortcutProfileIssueSeverity::Error {
-                                t.color.err
-                            } else {
-                                t.color.warn
-                            }),
-                    )
-                    .wrap(),
+                problem_note(
+                    ui,
+                    match issue.severity() {
+                        ShortcutProfileIssueSeverity::Error => Problem::Failure,
+                        ShortcutProfileIssueSeverity::Warning => Problem::Warning,
+                    },
+                    issue.message(),
                 );
                 if issue.code() == ShortcutProfileIssueCode::MissingBrowserAlternate
                     && editor
@@ -1306,14 +1293,16 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
                         .command_id()
                         .and_then(|id| Command::from_stable_id(id.as_str()))
                 {
+                    // An acknowledged override is a settled state and says
+                    // nothing; only the one still to confirm has a row.
                     if issue.severity() == ShortcutProfileIssueSeverity::Error {
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(
-                                    "Allow with confirmation is active. This command will have no browser/touch alternate and may be unavailable where its primary is protected. Confirm this exception for the versioned profile before saving.",
+                                    "No browser alternate. Confirm before saving.",
                                 )
                                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.warn),
+                                .color(t.color.text_dim),
                             )
                             .wrap(),
                         );
@@ -1326,12 +1315,6 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
                                 .acknowledge_protected_override(command);
                             mark_editor_changed(editor);
                         }
-                    } else {
-                        ui.label(
-                            egui::RichText::new("Protected override acknowledged for this saved profile.")
-                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                .color(t.color.warn),
-                        );
                     }
                 }
             }
@@ -1355,6 +1338,18 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
                 {
                     repair_invalid_entries(editor);
                 }
+            }
+            // Which identifiers went is the only part of a repair the rows
+            // cannot show, so it is the only part that is reported.
+            if let Some(removed) = editor.repair_receipt.as_deref() {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(removed)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(t.color.text_dim),
+                    )
+                    .wrap(),
+                );
             }
         })
         .response;
@@ -1472,18 +1467,18 @@ fn editor_note(ui: &mut Ui, title: &str, body: &str) -> Response {
 
 fn status_text(ui: &mut Ui, text: &str, error: bool) {
     let t = Tokens::get(ui.ctx());
-    let response = ui.add(
-        egui::Label::new(
-            egui::RichText::new(text)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(if error {
-                    t.color.err
-                } else {
-                    t.color.text_faint
-                }),
+    let response = if error {
+        problem_note(ui, Problem::Failure, text)
+    } else {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            )
+            .wrap(),
         )
-        .wrap(),
-    );
+    };
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
         node.set_label(text);
@@ -2240,8 +2235,7 @@ mod tests {
             .expect("AccessKit update")
             .nodes;
         assert!(nodes.iter().any(|(_, node)| {
-            node.role() == egui::accesskit::Role::Status
-                && node.label() == Some("Saving shortcut profile")
+            node.role() == egui::accesskit::Role::Status && node.label() == Some("Saving")
         }));
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Button
