@@ -6071,8 +6071,11 @@ mod verification_footer;
 
 use verification_footer::*;
 
+// Named `tests` rather than for the rails it covers: `source_guard` locates a
+// file's production half by this exact boundary, and a module under any other
+// name leaves every guard that scans this file panicking instead of scanning.
 #[cfg(test)]
-mod project_tests {
+mod tests {
     use super::*;
 
     /// A project with two libraries, an active configuration and a recovery
