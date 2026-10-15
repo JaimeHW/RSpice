@@ -15,7 +15,8 @@ use crate::services::cloud_account::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
+use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::publication_snapshot::{
@@ -251,7 +252,7 @@ impl RSpiceApp {
             }
 
             if let Some(message) = &failed_message {
-                note(ui, message, c.err);
+                problem_note(ui, Problem::Failure, message);
                 ui.add_space(tokens::SP_4);
             }
             if let Some(live) = &live_publication {
@@ -273,10 +274,10 @@ impl RSpiceApp {
                 Some(Err(reason)) => {
                     ui.columns(2, |columns| {
                         section_head(&mut columns[0], "Scope");
-                        note(
+                        problem_note(
                             &mut columns[0],
+                            Problem::Failure,
                             &format!("Nothing can be published: {reason}"),
-                            c.err,
                         );
                         render_page_column(
                             &mut columns[1],
@@ -741,8 +742,6 @@ fn render_leaves_machine(
     scope: &PublishScope,
     dialog: &mut PublishWebDialogState,
 ) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
     section_head(ui, "Leaves this machine");
     let documents = scope.sheets.len() + scope.plots.len();
     kv_row(
@@ -756,21 +755,20 @@ fn render_leaves_machine(
             }
         ),
         &format_bytes(scope.payload_bytes),
-        c.text,
     );
     kv_row(
         ui,
         "Page copy, specification, author credit, and presentation choices",
         "included",
-        c.text,
     );
-    kv_row(ui, "Local file paths · account email", "not included", c.ok);
+    kv_row(ui, "Local file paths · account email", "not included");
     if scope.imported_model_sources > 0 {
         ui.add_space(tokens::SP_4);
-        note(
+        problem_note(
             ui,
+            Problem::Warning,
             &format!(
-                "The netlist may contain text from {} retained imported model source{}.",
+                "The netlist may contain text from {} imported model source{}.",
                 scope.imported_model_sources,
                 if scope.imported_model_sources == 1 {
                     ""
@@ -778,7 +776,6 @@ fn render_leaves_machine(
                     "s"
                 }
             ),
-            c.warn,
         );
         ui.checkbox(
             &mut dialog.imported_models_acknowledged,
@@ -795,7 +792,7 @@ fn render_progress(ui: &mut egui::Ui, publish_state: Option<&PublishState>) {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(14.0));
                 ui.label(
-                    egui::RichText::new("Uploading the snapshot and sealing the circuit revision…")
+                    egui::RichText::new("Uploading the snapshot")
                         .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                         .color(c.text),
                 );
@@ -805,7 +802,7 @@ fn render_progress(ui: &mut egui::Ui, publish_state: Option<&PublishState>) {
             ui.horizontal(|ui| {
                 ui.add(egui::Spinner::new().size(14.0));
                 ui.label(
-                    egui::RichText::new("Publication created — the page render is preparing.")
+                    egui::RichText::new("Rendering the page")
                         .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                         .color(c.text),
                 );
@@ -814,10 +811,12 @@ fn render_progress(ui: &mut egui::Ui, publish_state: Option<&PublishState>) {
             mono_row(ui, url_path, c.text_dim);
         }
         Some(PublishState::Live { url_path }) => {
+            // The URL is the fact the reader came for; "live" is the state it
+            // is in, and neither needs a tone to say so.
             ui.label(
                 egui::RichText::new("The page is live.")
                     .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                    .color(c.ok),
+                    .color(c.text),
             );
             ui.add_space(4.0);
             mono_row(ui, url_path, c.text);
@@ -825,7 +824,7 @@ fn render_progress(ui: &mut egui::Ui, publish_state: Option<&PublishState>) {
         Some(PublishState::Failed { message }) => {
             // Rendered by the compose pass; kept for exhaustiveness if the
             // executor reports failure between frames.
-            note(ui, message, c.err);
+            problem_note(ui, Problem::Failure, message);
         }
     }
 }
@@ -841,6 +840,7 @@ fn note(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
             .color(color),
     );
 }
+
 
 fn section_head(ui: &mut egui::Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
@@ -881,7 +881,7 @@ fn scope_row(ui: &mut egui::Ui, name: &str, detail: &str) {
     });
 }
 
-fn kv_row(ui: &mut egui::Ui, key: &str, value: &str, value_color: egui::Color32) {
+fn kv_row(ui: &mut egui::Ui, key: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     ui.horizontal(|ui| {
@@ -894,7 +894,7 @@ fn kv_row(ui: &mut egui::Ui, key: &str, value: &str, value_color: egui::Color32)
             ui.label(
                 egui::RichText::new(value)
                     .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(value_color),
+                    .color(c.text),
             );
         });
     });

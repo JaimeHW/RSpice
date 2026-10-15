@@ -78,7 +78,7 @@ impl RSpiceApp {
                 );
                 ui.add_space(tokens::SP_4);
 
-                outcome_row(ui, "Page and raw endpoints", "410 tombstone", c.text);
+                outcome_row(ui, "Page and raw endpoints", "410 tombstone");
                 outcome_row(
                     ui,
                     &if version_count > 0 {
@@ -86,15 +86,9 @@ impl RSpiceApp {
                     } else {
                         "Version history".to_owned()
                     },
-                    "retained privately in your account",
-                    c.text,
+                    "kept privately in your account",
                 );
-                outcome_row(
-                    ui,
-                    "Copies of downloaded data",
-                    "not recalled — anything fetched stays fetched",
-                    c.warn,
-                );
+                outcome_row(ui, "Copies of downloaded data", "not recalled");
                 ui.add_space(tokens::SP_4);
 
                 ui.checkbox(
@@ -127,7 +121,7 @@ impl RSpiceApp {
     }
 }
 
-fn outcome_row(ui: &mut egui::Ui, what: &str, outcome: &str, outcome_color: egui::Color32) {
+fn outcome_row(ui: &mut egui::Ui, what: &str, outcome: &str) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     ui.horizontal(|ui| {
@@ -140,7 +134,7 @@ fn outcome_row(ui: &mut egui::Ui, what: &str, outcome: &str, outcome_color: egui
             ui.label(
                 egui::RichText::new(outcome)
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(outcome_color),
+                    .color(c.text),
             );
         });
     });

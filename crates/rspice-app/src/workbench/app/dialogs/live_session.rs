@@ -16,8 +16,9 @@ use crate::services::cloud_account::{
 use crate::services::live_protocol::PeerIdentity;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::dialogs::review_primitives::problem_note;
 
 /// Live-session dialog state. The session itself lives in the cloud
 /// service's snapshot; this holds only the user's in-dialog inputs.
@@ -190,11 +191,11 @@ impl RSpiceApp {
             let t = Tokens::get(ui.ctx());
             let c = t.color;
             if incompatible_peer {
-                note(
+                problem_note(
                     ui,
+                    Problem::Warning,
                     "A participant runs an incompatible RSpice build; their changes cannot \
                      be shared.",
-                    c.warn,
                 );
                 ui.add_space(tokens::SP_4);
             }
@@ -203,7 +204,7 @@ impl RSpiceApp {
                     render_start(ui, dialog_state, project_open, &mut actions);
                 }
                 Some(LiveSessionState::Failed { message }) => {
-                    note(ui, message, c.err);
+                    problem_note(ui, Problem::Failure, message);
                     ui.add_space(tokens::SP_4);
                     render_start(ui, dialog_state, project_open, &mut actions);
                 }
@@ -224,7 +225,7 @@ impl RSpiceApp {
                     );
                     if let Some(notice) = &summary.notice {
                         ui.add_space(tokens::SP_4);
-                        note(ui, notice, c.warn);
+                        problem_note(ui, Problem::Warning, notice);
                     }
                 }
                 Some(LiveSessionState::Hosting(summary)) => {
@@ -345,7 +346,7 @@ fn render_start(
             }
             if !project_open {
                 ui.add_space(tokens::SP_4);
-                note(ui, "Open a project to host a session.", c.warn);
+                note(ui, "Open a project to host a session.", c.text_dim);
             }
         }
         {
@@ -403,7 +404,7 @@ fn render_hosting(
     let c = t.color;
 
     if let Some(notice) = &summary.notice {
-        note(ui, notice, c.warn);
+        problem_note(ui, Problem::Warning, notice);
         ui.add_space(tokens::SP_4);
     }
 
@@ -474,18 +475,13 @@ fn render_hosting(
                 ui,
                 "Relay",
                 if summary.relay_connected {
-                    "connected · streamed, not stored"
+                    "Connected"
                 } else {
-                    "reconnecting…"
-                },
-                if summary.relay_connected {
-                    c.ok
-                } else {
-                    c.warn
+                    "Reconnecting"
                 },
             );
-            kv_row(ui, "Live since", &summary.started_at, c.text);
-            kv_row(ui, "Stored on the service", "nothing · relayed only", c.ok);
+            kv_row(ui, "Live since", &summary.started_at);
+            kv_row(ui, "Stored on the service", "nothing");
         }
     });
 
@@ -505,7 +501,7 @@ fn render_participating(
     let c = t.color;
 
     if let Some(notice) = &summary.notice {
-        note(ui, notice, c.warn);
+        problem_note(ui, Problem::Warning, notice);
         ui.add_space(tokens::SP_4);
     }
     let host = summary
@@ -540,7 +536,6 @@ fn render_participating(
         } else {
             "viewer · read-only with live updates"
         },
-        c.text,
     );
     kv_row(
         ui,
@@ -550,28 +545,18 @@ fn render_participating(
         } else {
             "not allowed · work stays in the session"
         },
-        if summary.policy.allow_save_copy {
-            c.text
-        } else {
-            c.warn
-        },
     );
     kv_row(
         ui,
         "Relay",
         if summary.relay_connected {
-            "connected · streamed, not stored"
+            "Connected"
         } else {
-            "reconnecting…"
-        },
-        if summary.relay_connected {
-            c.ok
-        } else {
-            c.warn
+            "Reconnecting"
         },
     );
     if let Some(line) = host_run {
-        kv_row(ui, "Host run", &line, c.text);
+        kv_row(ui, "Host run", &line);
     }
     if mirroring {
         note(
@@ -610,7 +595,7 @@ fn render_participating(
         } else {
             participant.display_name.clone()
         };
-        kv_row(ui, &name, role, c.text_dim);
+        kv_row(ui, &name, role);
     }
 
     ui.add_space(tokens::SP_4);
@@ -655,7 +640,7 @@ fn render_participant_row(
                 ui.label(
                     egui::RichText::new("pending")
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(c.warn),
+                        .color(c.text_dim),
                 );
                 return;
             }
@@ -804,6 +789,7 @@ fn note(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
     );
 }
 
+
 fn bullet(ui: &mut egui::Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_wrapped(|ui| {
@@ -840,7 +826,7 @@ fn field_label(ui: &mut egui::Ui, label: &str) {
     );
 }
 
-fn kv_row(ui: &mut egui::Ui, key: &str, value: &str, value_color: egui::Color32) {
+fn kv_row(ui: &mut egui::Ui, key: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         ui.label(
@@ -852,7 +838,7 @@ fn kv_row(ui: &mut egui::Ui, key: &str, value: &str, value_color: egui::Color32)
             ui.label(
                 egui::RichText::new(value)
                     .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                    .color(value_color),
+                    .color(t.color.text),
             );
         });
     });
