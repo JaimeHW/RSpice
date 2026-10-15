@@ -698,29 +698,49 @@ pub(super) fn comparison_plot(ui: &mut Ui, outcome: &CorrelationMetricOutcome) {
             [reference, simulation],
             Stroke::new(1.0, t.color.border_strong),
         );
-        ui.painter().circle_filled(reference, 2.5, t.color.accent);
         ui.painter()
-            .circle_stroke(simulation, 3.0, Stroke::new(1.5, t.color.ok));
+            .circle_filled(reference, 2.5, t.color.traces[0]);
+        ui.painter()
+            .circle_stroke(simulation, 3.0, Stroke::new(1.5, t.color.traces[1]));
     }
-    ui.painter().text(
-        Pos2::new(source_rect.left(), rect.top() + 11.0),
-        Align2::LEFT_CENTER,
-        "● reference sample",
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.accent,
+    // The legend draws the two marks the plot draws, in the two colours the
+    // plot draws them in, and names them in the ink of every other label on
+    // the band. A `●` and a `○` set as text said the same thing in a font
+    // that is not the authority for either glyph.
+    let legend_y = rect.top() + 11.0;
+    let legend = |x: f32, series: Color32, filled: bool, label: &str| {
+        let center = Pos2::new(x + 3.0, legend_y);
+        if filled {
+            ui.painter().circle_filled(center, 2.5, series);
+        } else {
+            ui.painter()
+                .circle_stroke(center, 3.0, Stroke::new(1.5, series));
+        }
+        ui.painter().text(
+            Pos2::new(x + 13.0, legend_y),
+            Align2::LEFT_CENTER,
+            label,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+    };
+    legend(
+        source_rect.left(),
+        t.color.traces[0],
+        true,
+        "reference sample",
+    );
+    legend(
+        source_rect.left() + 138.0,
+        t.color.traces[1],
+        false,
+        "simulation sample",
     );
     ui.painter().text(
-        Pos2::new(source_rect.left() + 138.0, rect.top() + 11.0),
-        Align2::LEFT_CENTER,
-        "○ simulation sample",
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.ok,
-    );
-    ui.painter().text(
-        Pos2::new(source_rect.right(), rect.top() + 11.0),
+        Pos2::new(source_rect.right(), legend_y),
         Align2::RIGHT_CENTER,
         format!(
-            "SHOWING {} OF {} · DETERMINISTIC CATEGORICAL SAMPLE",
+            "showing {} of {} samples",
             samples.len(),
             outcome.residuals.len()
         ),
@@ -730,7 +750,7 @@ pub(super) fn comparison_plot(ui: &mut Ui, outcome: &CorrelationMetricOutcome) {
     ui.painter().text(
         Pos2::new(source_rect.left(), residual_rect.top() - 13.0),
         Align2::LEFT_CENTER,
-        "NORMALIZED RESIDUAL · 1.0× GATE",
+        "Normalized residual · 1.0× gate",
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_faint,
     );
@@ -1164,16 +1184,26 @@ pub(super) fn empty_state(
         .map_or((title, detail), |error| {
             ("Exact project model is unavailable", error)
         });
+    let title_left = rect.left() + 14.0;
+    let title_lead = if projection.source_error.is_some() {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                Pos2::new(title_left + MARK_SIDE * 0.5, rect.top() + 26.0),
+                Vec2::splat(MARK_SIDE),
+            ),
+            Problem::Failure,
+        );
+        MARK_ADVANCE
+    } else {
+        0.0
+    };
     ui.painter().text(
-        Pos2::new(rect.left() + 14.0, rect.top() + 18.0),
+        Pos2::new(title_left + title_lead, rect.top() + 18.0),
         Align2::LEFT_TOP,
         title,
         theme::sans(tokens::FS_1, FontWeight::SemiBold),
-        if projection.source_error.is_some() {
-            t.color.err
-        } else {
-            t.color.text
-        },
+        t.color.text,
     );
     let detail_rect = Rect::from_min_max(
         Pos2::new(rect.left() + 14.0, rect.top() + 43.0),

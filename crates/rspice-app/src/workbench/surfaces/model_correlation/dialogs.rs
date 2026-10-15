@@ -463,9 +463,13 @@ pub(super) fn retained_simulation_picker(
             key_value(ui, "Execution target", &run.execution_target);
         } else if runs.is_empty() {
             ui.add_space(6.0);
-            ui.colored_label(
-                Tokens::get(ui.ctx()).color.warn,
-                "No successfully completed retained run authenticates this exact model revision. Run the current simulation plan, then reopen this dialog.",
+            marked_line(
+                ui,
+                Problem::Warning,
+                egui::RichText::new(
+                    "No successfully completed retained run authenticates this exact model \
+                     revision. Run the current simulation plan, then reopen this dialog.",
+                ),
             );
         }
     });
@@ -724,15 +728,6 @@ pub(super) fn describe_region(ui: &Ui, response: &egui::Response, label: &str, d
     });
 }
 
-pub(super) fn tone_color(t: &Tokens, tone: Tone) -> Color32 {
-    match tone {
-        Tone::Neutral => t.color.text,
-        Tone::Good => t.color.ok,
-        Tone::Warning => t.color.warn,
-        Tone::Error => t.color.err,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,12 +735,11 @@ mod tests {
         CorrelationDatasetImport, CorrelationMetricInput, CorrelationSuiteInput,
     };
 
+    /// Every section band names its section, and names it only once.
     #[test]
     fn section_copy_is_complete_for_the_mockup_contract() {
         for section in ModelCorrelationSection::ALL {
-            let (title, description) = section_copy(section);
-            assert!(!title.is_empty());
-            assert!(!description.is_empty());
+            assert!(!section_copy(section).is_empty());
         }
     }
 
@@ -784,30 +778,34 @@ mod tests {
         );
     }
 
-    /// Absence is stated as absence, in the tone that says so.
+    /// Absence is stated as absence, and absence is not a problem.
     ///
     /// The ledger's middle segments are the only place a reader learns whether
-    /// a measure exists at all, so an unevaluated suite may not borrow the
-    /// neutral tone of a measured one, and may not print a number.
+    /// a measure exists at all, so an unevaluated suite may not print a
+    /// number. It carries no mark either: a mark means a value outside its
+    /// gate, and "No evidence" is a phrase nobody reads as a number.
     #[test]
-    fn ledger_measures_without_evidence_stay_in_the_warning_tone() {
+    fn ledger_measures_without_evidence_print_no_number_and_no_mark() {
         let measures = empty_projection().measures();
         assert_eq!(measures[1].value, "No evidence");
-        assert_eq!(measures[1].tone, Tone::Warning);
         assert_eq!(measures[2].value, "No evidence");
-        assert_eq!(measures[2].tone, Tone::Warning);
         assert_eq!(measures[0].value, "0 / 0");
-        assert_eq!(measures[0].tone, Tone::Warning);
         assert_eq!(measures[0].detail, "0 open dispositions");
+        assert!(
+            measures.iter().all(|measure| measure.problem.is_none()),
+            "an unconfigured suite has no value outside a gate to mark"
+        );
     }
 
-    /// Every ledger tone is a claim about evidence, not about layout.
+    /// A mark on a ledger segment is a value outside its gate, nothing else.
     ///
-    /// A gate set is only good when every review metric passed *and* nothing
-    /// is left undisposed, and a worst normalized error is only good at or
-    /// inside its declared limit.
+    /// A gate set is marked when a review metric failed *or* something is left
+    /// undisposed; a worst normalized error is marked outside its declared
+    /// limit. A measure that passes carries no mark, because passing is the
+    /// normal case, and coverage carries none at all — it is reported, not
+    /// gated.
     #[test]
-    fn ledger_measure_tones_follow_the_evidence() {
+    fn ledger_measure_marks_follow_the_evidence() {
         let passing = CorrelationProjection {
             metric_count: 4,
             passed_metrics: 4,
@@ -820,17 +818,15 @@ mod tests {
             (measures[0].short, measures[0].value.as_str()),
             ("gates", "4 / 4")
         );
-        assert_eq!(measures[0].tone, Tone::Good);
         assert_eq!(
             (measures[1].short, measures[1].value.as_str()),
             ("coverage", "92.1%")
         );
-        assert_eq!(measures[1].tone, Tone::Neutral);
         assert_eq!(
             (measures[2].short, measures[2].value.as_str()),
             ("worst", "0.812×")
         );
-        assert_eq!(measures[2].tone, Tone::Good);
+        assert!(measures.iter().all(|measure| measure.problem.is_none()));
 
         let disputed = CorrelationProjection {
             open_dispositions: 3,
@@ -838,10 +834,14 @@ mod tests {
             ..passing
         };
         let measures = disputed.measures();
-        assert_eq!(measures[0].tone, Tone::Warning);
+        assert_eq!(measures[0].problem, Some(Problem::Warning));
         assert_eq!(measures[0].detail, "3 open dispositions");
         assert_eq!(measures[2].value, "1.001×");
-        assert_eq!(measures[2].tone, Tone::Warning);
+        assert_eq!(measures[2].problem, Some(Problem::Warning));
+        assert_eq!(
+            measures[1].problem, None,
+            "coverage is reported, so there is no percentage to refuse"
+        );
     }
 
     /// The abbreviation the band paints is never what a screen reader hears.

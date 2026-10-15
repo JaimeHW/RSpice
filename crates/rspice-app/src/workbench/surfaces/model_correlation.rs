@@ -28,7 +28,9 @@ use crate::state::model_library::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone};
+use crate::ui::widgets::{
+    Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, paint_problem_mark,
+};
 use crate::workbench::RSpiceApp;
 
 use super::super::design_system;
@@ -46,8 +48,15 @@ use crate::workbench::documents::model_editor::{
 };
 
 const OUTER_HEADER_H: f32 = 58.0;
-const SUMMARY_H: f32 = 92.0;
+/// The identity band: one line, the suite this page is about. It was 92 px
+/// when it also carried a monogram, a kicker naming the model twice and a
+/// sentence describing what correlation is for.
+const SUMMARY_H: f32 = 46.0;
 const LEDGER_H: f32 = 54.0;
+/// A section's own band: its kicker line and the section's title. It was
+/// 70 px when a sentence under the title described what the section below it
+/// is for, and the rule has come up by exactly that sentence's ink and lead.
+const SECTION_HEADING_H: f32 = 51.0;
 const NAV_W: f32 = 196.0;
 const NAV_ROW_H: f32 = 36.0;
 const COMPACT_BREAKPOINT: f32 = 820.0;
@@ -60,8 +69,15 @@ const DISPOSITIONS_PER_PAGE: usize = 32;
 const PLOT_SAMPLE_LIMIT: usize = 192;
 const SIMULATION_SOURCE_DISPLAY_LIMIT: usize = 4;
 
-const SUMMARY: &str = "Align measured, vendor, oracle, and simulated evidence over the declared operating envelope; define metrics, inspect systematic error, govern outliers, and hand a versioned correlation conclusion to model qualification.";
-const EVIDENCE_CONTRACT: &str = "Dataset checksums, fixtures, calibration, axis alignment, model revision, conditions, metric definitions, aggregation, uncertainty, exclusions, residuals, outlier dispositions, and reviewer conclusions are retained.";
+/// Side of a problem mark set in front of one of this surface's values, and
+/// the advance from its left edge to where the words after it begin.
+///
+/// The kit keeps both values to itself, so they are restated here once. They
+/// are the kit's own, which is what makes a marked line and an unmarked one
+/// beside it differ by exactly the advance.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
+
 const LEDGER_TITLE: &str = "Correlation evidence";
 /// Exactly the chain `CorrelationProjection::state_label` walks, in its order.
 /// The band states what the verdict is made of, so the sentence may not claim
@@ -190,12 +206,28 @@ fn observation_coordinates(observation: &CorrelationObservation) -> String {
     }
 }
 
+/// How loudly one verdict is stated.
+///
+/// Only the two states a reader has to act on are stated loudly, and they are
+/// stated with a mark rather than a colour. There is no tone for a page that
+/// is fine: the words of the verdict say so, in the ink every other value on
+/// the band is painted in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tone {
     Neutral,
-    Good,
     Warning,
     Error,
+}
+
+impl Tone {
+    /// The mark this tone earns in front of the words it qualifies.
+    const fn problem(self) -> Option<Problem> {
+        match self {
+            Self::Neutral => None,
+            Self::Warning => Some(Problem::Warning),
+            Self::Error => Some(Problem::Failure),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,7 +250,12 @@ struct Measure {
     short: &'static str,
     value: String,
     detail: String,
-    tone: Tone,
+    /// Set when the value itself is outside the gate it is measured against.
+    ///
+    /// Not set for a measure that has nothing to report: "No evidence" is a
+    /// phrase a reader cannot misread as a number, and a mark in front of it
+    /// would say the same thing a second time.
+    problem: Option<Problem>,
 }
 
 #[derive(Debug, Clone)]
@@ -487,7 +524,7 @@ impl CorrelationProjection {
         {
             ("review approval not retained", Tone::Error)
         } else {
-            ("correlation evidence current", Tone::Good)
+            ("correlation evidence current", Tone::Neutral)
         }
     }
 
@@ -504,14 +541,12 @@ impl CorrelationProjection {
                 short: "gates",
                 value: format!("{} / {}", self.passed_metrics, self.metric_count),
                 detail: format!("{} open dispositions", self.open_dispositions),
-                tone: if self.metric_count > 0
-                    && self.passed_metrics == self.metric_count
-                    && self.open_dispositions == 0
-                {
-                    Tone::Good
-                } else {
-                    Tone::Warning
-                },
+                // A suite with no metrics in it has no gate to be outside of;
+                // the verdict beside these segments is what says it is not
+                // configured.
+                problem: (self.metric_count > 0
+                    && (self.passed_metrics < self.metric_count || self.open_dispositions > 0))
+                    .then_some(Problem::Warning),
             },
             Measure {
                 label: "Envelope coverage",
@@ -521,11 +556,9 @@ impl CorrelationProjection {
                     .map(|value| format!("{value:.1}%"))
                     .unwrap_or_else(|| "No evidence".to_owned()),
                 detail: "declared operating domain".to_owned(),
-                tone: if self.coverage_percent.is_some() {
-                    Tone::Neutral
-                } else {
-                    Tone::Warning
-                },
+                // Coverage is reported, not gated: there is no percentage
+                // this page refuses, so no percentage it can mark.
+                problem: None,
             },
             Measure {
                 label: "Worst normalized error",
@@ -535,11 +568,12 @@ impl CorrelationProjection {
                     .map(|value| format!("{value:.3}×"))
                     .unwrap_or_else(|| "No evidence".to_owned()),
                 detail: "retained evaluated comparisons".to_owned(),
-                tone: match self.worst_normalized_error {
-                    Some(value) if value <= 1.0 => Tone::Good,
-                    Some(_) => Tone::Warning,
-                    None => Tone::Warning,
-                },
+                // The gate is 1.0×, and a comparison outside it is the one
+                // number on this band the reader has to act on.
+                problem: self
+                    .worst_normalized_error
+                    .is_some_and(|value| value > 1.0)
+                    .then_some(Problem::Warning),
             },
         ]
     }
@@ -624,18 +658,10 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
     paint_elided(
         ui,
         copy,
-        "MODELS · BENCH DATA · REFERENCE EVIDENCE",
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.text_faint,
-        9.0,
-    );
-    paint_elided(
-        ui,
-        copy,
         "Measurement correlation",
         theme::sans(14.0, FontWeight::SemiBold),
         t.color.text,
-        29.0,
+        21.0,
     );
 
     let action_rect = if stacked {
@@ -742,72 +768,25 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
 fn summary_header(ui: &mut Ui, projection: &CorrelationProjection) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let compact = width <= COMPACT_BREAKPOINT;
-    // 110, not 132: the verdict occupied the bottom 22 px of the compact band
-    // and now terminates the evidence ledger, so the band gives that height
-    // back rather than holding it empty. The charter's galley is unchanged at
-    // both widths — it still ends 6 px above the rule.
-    let height = if compact { 110.0 } else { SUMMARY_H };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, SUMMARY_H), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     bottom_rule(ui, rect, t.color.border);
 
-    let mark = Rect::from_min_size(
-        Pos2::new(rect.left() + 14.0, rect.top() + 14.0),
-        Vec2::splat(48.0),
-    );
-    ui.painter().rect(
-        mark,
-        t.radius,
-        t.color.bg_panel_2,
-        Stroke::new(1.0, t.color.border),
-        egui::StrokeKind::Inside,
-    );
-    ui.painter().text(
-        mark.center(),
-        Align2::CENTER_CENTER,
-        "C",
-        theme::mono(tokens::FS_4, FontWeight::SemiBold),
-        t.color.accent,
-    );
-
-    let left = mark.right() + 12.0;
-    // The verdict lives on the evidence ledger below, so the identity band
-    // keeps its full width for the identity and the charter.
+    let left = rect.left() + 14.0;
     let text_right = (rect.right() - 12.0).max(left + 80.0);
     let copy = Rect::from_min_max(
         Pos2::new(left, rect.top()),
         Pos2::new(text_right, rect.bottom()),
     );
-    paint_elided(
-        ui,
-        copy,
-        &format!("{} · CORRELATION EVIDENCE", projection.model_label()).to_uppercase(),
-        theme::mono(tokens::FS_0, FontWeight::Medium),
-        t.color.text_faint,
-        9.0,
-    );
-    paint_elided(
-        ui,
-        copy,
-        &projection.suite_name,
-        theme::sans(14.0, FontWeight::SemiBold),
+    let font = theme::sans(14.0, FontWeight::SemiBold);
+    let title = design_system::elide_text(ui, &projection.suite_name, &font, copy.width().max(1.0));
+    ui.painter().with_clip_rect(copy).text(
+        Pos2::new(left, rect.center().y),
+        Align2::LEFT_CENTER,
+        title,
+        font,
         t.color.text,
-        28.0,
     );
-    let summary_rect = Rect::from_min_max(
-        Pos2::new(left, rect.top() + 49.0),
-        Pos2::new(text_right, rect.bottom() - 6.0),
-    );
-    let galley = ui.painter().layout(
-        SUMMARY.to_owned(),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-        summary_rect.width().max(1.0),
-    );
-    ui.painter()
-        .with_clip_rect(summary_rect)
-        .galley(summary_rect.min, galley, t.color.text_dim);
 
     describe_region(
         ui,
@@ -837,7 +816,6 @@ fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
     const LABEL_GAP: f32 = 6.0;
     const SEGMENT_GAP: f32 = 18.0;
     const VERDICT_GAP: f32 = 22.0;
-    const MARK_LEAD: f32 = 13.0;
 
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
@@ -848,21 +826,35 @@ fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
     let center = rect.center().y;
 
     let (state, state_tone) = projection.state_label();
-    let state_color = tone_color(&t, state_tone);
     let verdict_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     // The verdict is the terminal of the chain and never yields its place; the
     // measures are laid out against what is left of the band.
     let verdict =
         design_system::elide_text(ui, state, &verdict_font, (content.width() * 0.34).max(1.0));
-    let verdict_left = content.right() - MARK_LEAD - text_width(ui, &verdict, &verdict_font);
-    ui.painter()
-        .circle_filled(Pos2::new(verdict_left + 4.0, center), 2.5, state_color);
+    let state_problem = state_tone.problem();
+    let verdict_lead = if state_problem.is_some() {
+        MARK_ADVANCE
+    } else {
+        0.0
+    };
+    let verdict_left =
+        content.right() - verdict_lead - text_width(ui, &verdict, &verdict_font).max(1.0);
+    if let Some(problem) = state_problem {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                Pos2::new(verdict_left + MARK_SIDE * 0.5, center),
+                Vec2::splat(MARK_SIDE),
+            ),
+            problem,
+        );
+    }
     ui.painter().with_clip_rect(content).text(
-        Pos2::new(verdict_left + MARK_LEAD, center),
+        Pos2::new(verdict_left + verdict_lead, center),
         Align2::LEFT_CENTER,
         &verdict,
         verdict_font,
-        state_color,
+        t.color.text,
     );
 
     let measures = projection.measures();
@@ -873,7 +865,12 @@ fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
         .map(|measure| {
             (
                 text_width(ui, measure.short, &label_font),
-                text_width(ui, &measure.value, &value_font),
+                text_width(ui, &measure.value, &value_font)
+                    + if measure.problem.is_some() {
+                        MARK_ADVANCE
+                    } else {
+                        0.0
+                    },
             )
         })
         .collect::<Vec<_>>();
@@ -900,12 +897,24 @@ fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
             label_font.clone(),
             t.color.text_faint,
         );
+        let value_x = x + label_w + LABEL_GAP;
+        let value_lead = measure.problem.map_or(0.0, |problem| {
+            paint_problem_mark(
+                &painter,
+                Rect::from_center_size(
+                    Pos2::new(value_x + MARK_SIDE * 0.5, center),
+                    Vec2::splat(MARK_SIDE),
+                ),
+                problem,
+            );
+            MARK_ADVANCE
+        });
         painter.text(
-            Pos2::new(x + label_w + LABEL_GAP, center),
+            Pos2::new(value_x + value_lead, center),
             Align2::LEFT_CENTER,
             &measure.value,
             value_font.clone(),
-            tone_color(&t, measure.tone),
+            t.color.text,
         );
         let segment = Rect::from_min_max(
             Pos2::new(x, rect.top()),
@@ -1066,31 +1075,6 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
             select_section(&mut app.state.workbench.model_correlation, section);
         }
     }
-    let note_top = (rect.top() + NAV_ROW_H * 7.0).min(rect.bottom());
-    let note = Rect::from_min_max(Pos2::new(rect.left(), note_top), rect.max);
-    if note.height() > 65.0 {
-        ui.painter()
-            .hline(note.x_range(), note.top(), Stroke::new(1.0, t.color.border));
-        let copy = note.shrink2(Vec2::new(12.0, 10.0));
-        paint_elided(
-            ui,
-            copy,
-            "EVIDENCE CONTRACT",
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text_dim,
-            0.0,
-        );
-        let body = Rect::from_min_max(Pos2::new(copy.left(), copy.top() + 19.0), copy.max);
-        let galley = ui.painter().layout(
-            EVIDENCE_CONTRACT.to_owned(),
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_faint,
-            body.width().max(1.0),
-        );
-        ui.painter()
-            .with_clip_rect(body)
-            .galley(body.min, galley, t.color.text_faint);
-    }
 }
 
 fn navigation_row(
@@ -1215,14 +1199,16 @@ fn section_content(
 fn section_heading(ui: &mut Ui, section: ModelCorrelationSection) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 70.0), Sense::hover());
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(width, SECTION_HEADING_H), Sense::hover());
     bottom_rule(ui, rect, t.color.border);
-    let (title, description) = section_copy(section);
+    let title = section_copy(section);
+    let kicker = format!("Correlation · {}", section.label());
     let copy = rect.shrink2(Vec2::new(12.0, 0.0));
     paint_elided(
         ui,
         copy,
-        &format!("COR · {}", section.label().to_uppercase()),
+        &kicker,
         theme::mono(tokens::FS_0, FontWeight::Medium),
         t.color.text_faint,
         10.0,
@@ -1235,47 +1221,25 @@ fn section_heading(ui: &mut Ui, section: ModelCorrelationSection) {
         t.color.text,
         28.0,
     );
-    paint_elided(
-        ui,
-        copy,
-        description,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-        49.0,
-    );
-    describe_region(ui, &response, title, description);
+    describe_region(ui, &response, title, &kicker);
 }
 
-fn section_copy(section: ModelCorrelationSection) -> (&'static str, &'static str) {
+/// What one section's band calls the section.
+///
+/// The title alone. Each one used to carry a sentence under it describing
+/// what the section below it is for — the same sentence the model editor's
+/// bands carried, and the one its rows restate by existing.
+const fn section_copy(section: ModelCorrelationSection) -> &'static str {
     match section {
-        ModelCorrelationSection::Datasets => (
-            "Reference datasets, fixtures, and calibration",
-            "Distinguish independent evidence from derived or duplicated sources.",
-        ),
-        ModelCorrelationSection::Conditions => (
-            "Operating-envelope alignment and interpolation",
-            "Make voltage, temperature, load, frequency, lot, unit, and fixture dimensions explicit.",
-        ),
-        ModelCorrelationSection::Metrics => (
-            "Metric definitions, uncertainty, aggregation, and gates",
-            "A correlation result is meaningful only with a declared comparison contract.",
-        ),
-        ModelCorrelationSection::Comparison => (
-            "Categorical aligned samples and residual structure",
-            "Inspect each retained reference observation without implying an undeclared continuous axis.",
-        ),
-        ModelCorrelationSection::Outliers => (
-            "Outlier and exclusion disposition ledger",
-            "Exclusion changes evidence scope and therefore requires an accountable, reviewable decision.",
-        ),
-        ModelCorrelationSection::Evidence => (
-            "Reproduction bundle and independent review",
-            "Record exactly what another reviewer needs to reproduce the correlation result.",
-        ),
-        ModelCorrelationSection::Gate => (
-            "Qualification handoff and release meaning",
-            "Correlation concludes evidence fitness; Model qualification owns final vector and promotion gates.",
-        ),
+        ModelCorrelationSection::Datasets => "Reference datasets, fixtures, and calibration",
+        ModelCorrelationSection::Conditions => "Operating-envelope alignment and interpolation",
+        ModelCorrelationSection::Metrics => {
+            "Metric definitions, uncertainty, aggregation, and gates"
+        }
+        ModelCorrelationSection::Comparison => "Categorical aligned samples and residual structure",
+        ModelCorrelationSection::Outliers => "Outlier and exclusion disposition ledger",
+        ModelCorrelationSection::Evidence => "Reproduction bundle and independent review",
+        ModelCorrelationSection::Gate => "Qualification handoff and release meaning",
     }
 }
 
@@ -1466,7 +1430,7 @@ fn section_panel_with_meta(
 fn table_header(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
-        egui::RichText::new(text.to_uppercase())
+        egui::RichText::new(text)
             .font(theme::mono(tokens::FS_0, FontWeight::Medium))
             .color(t.color.text_faint),
     );
@@ -1497,33 +1461,44 @@ fn error_panel(ui: &mut Ui, error: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.err))
+        .stroke(Stroke::new(1.0, t.color.border_strong))
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
-            ui.label(
+            marked_line(
+                ui,
+                Problem::Failure,
                 egui::RichText::new("Correlation configuration blocked")
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.err),
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold)),
             );
             ui.label(error);
         });
 }
 
+/// One state line: the mark a failure earns, then the words.
+///
+/// The glyph that used to lead this line was a `●` in the success or the
+/// failure tone, which made a passing gate as loud as a failing one and put
+/// two readings of the same fact on one line. A pass now reads in the ink of
+/// the rows around it.
 fn status_text(ui: &mut Ui, passed: bool, text: &str) {
-    let t = Tokens::get(ui.ctx());
+    let words = egui::RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Medium));
+    if passed {
+        ui.label(words);
+        return;
+    }
+    marked_line(ui, Problem::Failure, words);
+}
+
+/// A line the reader has to notice: the problem's mark, then neutral words.
+pub(super) fn marked_line(ui: &mut Ui, problem: Problem, text: egui::RichText) {
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        ui.label(
-            egui::RichText::new("●")
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(if passed { t.color.ok } else { t.color.err }),
-        );
-        ui.label(
-            egui::RichText::new(text)
-                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(if passed { t.color.ok } else { t.color.err }),
-        );
+        // The kit's own advance, so a marked line and an unmarked one beside
+        // it start their words the same distance apart.
+        ui.spacing_mut().item_spacing.x = MARK_ADVANCE - MARK_SIDE;
+        let (mark, _) = ui.allocate_exact_size(Vec2::splat(MARK_SIDE), Sense::hover());
+        paint_problem_mark(ui.painter(), mark, problem);
+        ui.label(text);
     });
 }
 
