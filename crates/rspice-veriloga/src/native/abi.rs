@@ -323,8 +323,11 @@ pub unsafe extern "C" fn rspice_checked_value_native(
     let (primal, derivative) = unsafe { (*operands, *operands.add(1)) };
     match rspice_veriloga_runtime::checked_derivative_value(primal, derivative) {
         Ok(value) => value,
+        // A non-finite operand or derivative belongs to this iterate, as the
+        // interpreter's `InvalidNumericResult` says: the Newton trial fails
+        // and the solver may retry, rather than the analysis stopping.
         Err(reason) => {
-            set_native_context_error_ptr(ctx, reason);
+            set_native_context_classified_ptr(ctx, true, reason);
             0.0
         }
     }

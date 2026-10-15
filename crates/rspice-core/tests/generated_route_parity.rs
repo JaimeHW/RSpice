@@ -1333,6 +1333,37 @@ fn bsimsoi_thermal_runaway_is_refused_in_bounded_time() {
         refusals.push(message);
     }
     assert_eq!(refusals[0], refusals[1], "both cards refuse alike");
+
+    // The `.va` route on the native JIT refuses in bounded time too, and as a
+    // convergence failure: a non-finite `ddx()` operand at a wild iterate is
+    // a rejected trial, not a fault of the JIT. The interpreter's `.va` route
+    // refuses with the same message after the same 2,013 iterations, but takes
+    // 230 s in release, about 114 ms per iteration: it re-evaluates the
+    // model's parameter preprocessing on every evaluation. That cost is
+    // inherent to interpretation, so that route is not timed here.
+    #[cfg(feature = "veriloga-native")]
+    {
+        let source = Bsimsoi47Source::write("runaway");
+        let deck = source.runtime_deck(
+            "BSIM-SOI 4.7 runaway",
+            &format!("{supplies}\nX1 d g 0 0 bsimsoi__18c250bc {parameters}"),
+        );
+        assert!(!uses_generated_devices(&deck));
+        let start = std::time::Instant::now();
+        let trace = operating_point_trace(&deck, &[], &[]);
+        let elapsed = start.elapsed();
+        let message = trace[0].text.clone().unwrap_or_default();
+        assert!(
+            message != "ok" && !message.contains("native JIT error"),
+            "the .va route refuses as a convergence failure: {trace:?}"
+        );
+        if !cfg!(debug_assertions) {
+            assert!(
+                elapsed < std::time::Duration::from_secs(30),
+                "the .va route refuses in {elapsed:?}"
+            );
+        }
+    }
 }
 
 /// ANGELOV_GAN ties its thermal node `t` to ground (`I(t) <+ V(t) *

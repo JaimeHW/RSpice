@@ -1819,6 +1819,43 @@ fn a_nonfinite_verilog_a_dc_trial_is_rejected_and_source_stepped() {
     let _ = std::fs::remove_file(model);
 }
 
+/// The same overshoot, met inside `ddx()`: the current is `1e-3 *
+/// ddx(F(V), V(p))` with `F(V) = (V + 0.1) ln(V + 0.1) - V`, so `ddx()`'s
+/// operand is the one non-finite value at that iterate. Its non-finite
+/// operand belongs to the iterate as any other does, on the interpreter and
+/// on the native JIT alike: the trial is rejected and the operating point is
+/// the one above.
+#[test]
+fn a_nonfinite_ddx_operand_is_a_rejected_dc_trial() {
+    let model = write_model(
+        "nonfinite_ddx_trial",
+        "module nonfinite_ddx_trial(p,n); inout p,n; electrical p,n;\n\
+             analog I(p,n) <+ 1.0e-3*ddx((V(p,n) + 0.1)*ln(V(p,n) + 0.1) - V(p,n), V(p));\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse_validated(&format!(
+        "* plain Newton overshoots the domain of a ddx operand from the zero guess\n\
+         V1 in 0 DC -5\n\
+         R1 in p 1k\n\
+         X1 p 0 nonfinite_ddx_trial\n\
+         .va \"{}\" nonfinite_ddx_trial\n\
+         .end\n",
+        deck_path(&model)
+    ))
+    .unwrap();
+    let dc = Engine::default()
+        .run_dc_op(&netlist)
+        .expect("a non-finite ddx operand must reject the iterate, not the run");
+    let voltage = node_voltage(&dc, "p");
+    let residual = (voltage + 5.0) * 1.0e-3 + 1.0e-3 * (voltage + 0.1).ln();
+    assert!(
+        voltage > -0.1 && residual.abs() < 1.0e-6,
+        "V(p) = {voltage} leaves KCL residual {residual}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
 /// When no retry can produce a finite evaluation the run still fails - and the
 /// failure has to name the instance, the failing contribution and the iterate
 /// the device was handed, not just an iteration count.
