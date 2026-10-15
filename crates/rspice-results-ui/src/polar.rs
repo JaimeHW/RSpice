@@ -925,11 +925,16 @@ pub fn right_panel(
     };
     let rows = register_rows(locus, samples, policy);
     register_table(ui, &rows);
-    crate::presentation::panel_note(
-        ui,
-        "Phase is the principal value; the Δ column unwraps it before differencing. \
-         Group delay is the A\u{2192}B secant −Δφ/2πΔf, not an instantaneous derivative.",
-    );
+}
+
+/// What a register row's own convention is, where it has one. A sentence
+/// about two of the rows belongs on those rows, not under the table.
+fn row_hover(name: &str) -> Option<&'static str> {
+    match name {
+        "Phase" => Some("Principal value; the Δ column unwraps it before differencing."),
+        "Group delay" => Some("The A→B secant −Δφ/2πΔf, not an instantaneous derivative."),
+        _ => None,
+    }
 }
 
 fn register_rows(
@@ -988,13 +993,13 @@ fn register_rows(
             decades,
         ),
         (
-            "|\u{b7}|",
+            "Magnitude",
             at(samples.a, &magnitude),
             at(samples.b, &magnitude),
             magnitude_delta,
         ),
         (
-            "|\u{b7}| dB",
+            "Magnitude dB",
             at(samples.a, &decibels),
             at(samples.b, &decibels),
             decibel_delta,
@@ -1105,6 +1110,9 @@ fn register_table(ui: &mut Ui, rows: &[RegisterRow]) {
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Row);
         });
+        if let Some(hover) = row_hover(name) {
+            response.on_hover_text(hover);
+        }
         if !ui.is_rect_visible(rect) {
             continue;
         }
@@ -1385,8 +1393,8 @@ mod tests {
             rows.iter().map(|row| row.0).collect::<Vec<_>>(),
             [
                 "Frequency",
-                "|\u{b7}|",
-                "|\u{b7}| dB",
+                "Magnitude",
+                "Magnitude dB",
                 "Phase",
                 "Re",
                 "Im",
