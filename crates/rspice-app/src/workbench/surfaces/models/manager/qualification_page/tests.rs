@@ -207,18 +207,15 @@ fn run_page(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
 }
 
 /// The closure ledger counts only the population the gate governs, and states
-/// no verdict at all over an empty one.
+/// no verdict at all.
 ///
-/// Both halves encode a defect the four bordered tiles shipped: a fresh
-/// project holding nothing but compiled-in cards read "0 / 16 qualified" in
-/// the warning tone — a failure claim assembled entirely out of models the
-/// gate has nothing to say about — and the three ratios beside it read "0 / 0"
-/// in that same tone, which is a warning about nothing.
+/// A fresh project holding nothing but compiled-in cards once read
+/// "0 / 16 qualified" — a failure claim assembled entirely out of models the
+/// gate has nothing to say about — so the denominator is still pinned here.
+/// The tones are gone outright: the band summarises the matrix below it, and
+/// the matrix's own domain and gate columns are where a shortfall is read.
 #[test]
-fn the_closure_inputs_count_gate_subjects_and_stay_neutral_over_an_empty_population() {
-    let ctx = themed_context();
-    let t = Tokens::get(&ctx);
-
+fn the_closure_inputs_count_gate_subjects_and_not_the_exempt_population() {
     let app = RSpiceApp::test_instance();
     let summaries = qualification_summaries(&app);
     let exempt = summaries
@@ -229,27 +226,22 @@ fn the_closure_inputs_count_gate_subjects_and_stay_neutral_over_an_empty_populat
         exempt > 0 && exempt == summaries.len(),
         "a fresh project holds the engine-owned families and nothing else"
     );
-    for input in &closure_inputs(&t, &summaries) {
+    for input in &closure_inputs(&summaries) {
         assert_eq!(
             input.value, "0/0",
             "`{}` totalled the exempt population into its denominator",
             input.label
         );
-        assert_eq!(
-            input.color, t.color.text_dim,
-            "`{}` claims a verdict over an empty population",
-            input.label
-        );
     }
     assert_eq!(
-        closure_inputs(&t, &summaries)[2].detail,
+        closure_inputs(&summaries)[2].detail,
         format!("{exempt} engine-owned exempt"),
         "the exempt population is what the qualified segment has to account for"
     );
 
     let app = source_owned_app();
     let summaries = qualification_summaries(&app);
-    let inputs = closure_inputs(&t, &summaries);
+    let inputs = closure_inputs(&summaries);
     assert_eq!(
         inputs
             .iter()
@@ -263,15 +255,8 @@ fn the_closure_inputs_count_gate_subjects_and_stay_neutral_over_an_empty_populat
         ],
         "the ledger read the whole corpus rather than the one family the gate governs"
     );
-    for input in &inputs {
-        assert_eq!(
-            input.color, t.color.warn,
-            "`{}` stands open and is not toned as one",
-            input.label
-        );
-    }
     assert_eq!(inputs[0].detail, "no open dispositions");
-    assert_eq!(inputs[1].detail, "exact retained evidence");
+    assert_eq!(inputs[1].detail, "vectors with a retained reference");
     assert_eq!(inputs[3].detail, "desktop · WebAssembly");
 }
 
@@ -281,7 +266,7 @@ fn the_closure_inputs_count_gate_subjects_and_stay_neutral_over_an_empty_populat
 #[test]
 fn the_closure_ledger_paints_one_chain_and_never_the_tiles_again() {
     let mut app = source_owned_app();
-    let verdict_label = owned_summary(&app).gate.label().to_uppercase();
+    let verdict_label = owned_summary(&app).gate.label().to_owned();
     let output = run_page(&mut app, PAGE_SIZE[0]);
     let ctx = themed_context();
     let t = Tokens::get(&ctx);
@@ -312,11 +297,14 @@ fn the_closure_ledger_paints_one_chain_and_never_the_tiles_again() {
                 .any(|text| text.text == label && text.color == Some(t.color.text_faint)),
             "the `{label}` segment is missing its label or does not recede behind its value"
         );
+        // The ratio is a summary of the matrix below, not a verdict cell: it
+        // is painted in plain text, and the matrix's own domain and gate
+        // columns are where a shortfall is read.
         assert!(
             painted
                 .iter()
-                .any(|text| text.text == value && text.color == Some(t.color.warn)),
-            "the `{label}` segment does not paint {value} in the tone of a ratio that stands open"
+                .any(|text| text.text == value && text.color == Some(t.color.text)),
+            "the `{label}` segment tones {value} rather than stating it"
         );
     }
 
@@ -353,14 +341,14 @@ fn the_closure_ledger_paints_one_chain_and_never_the_tiles_again() {
 
 /// The band degrades by clipping, never by overlapping.
 ///
-/// The sentence is the first casualty — it already elided — and the cluster is
-/// floored at the heading, so a document too narrow to hold both cuts a
-/// segment rather than painting one over the words that say what the gate is.
+/// The cluster is floored at the heading, so a document too narrow to hold
+/// both cuts a segment rather than painting one over the words that say what
+/// the gate is.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_narrow_document_clips_the_closure_ledger_rather_than_overlapping_it() {
     let mut app = source_owned_app();
-    let verdict_label = owned_summary(&app).gate.label().to_uppercase();
+    let verdict_label = owned_summary(&app).gate.label().to_owned();
     let output = run_page(&mut app, 620.0);
     let painted = painted_text(&output);
     let title = painted
@@ -419,7 +407,7 @@ fn every_closure_segment_announces_its_ratio_and_the_fact_behind_it() {
         .collect::<Vec<_>>();
     for announced in [
         "vectors 0/3, no open dispositions",
-        "references 0/3, exact retained evidence",
+        "references 0/3, vectors with a retained reference",
         "parity 0/1, desktop · WebAssembly",
     ] {
         assert!(
@@ -452,8 +440,14 @@ fn the_matrix_columns_name_every_analysis_domain_and_tile_the_track() {
             .to_vec(),
         "a domain column heading has drifted from the domain it counts"
     );
-    assert_eq!(MATRIX_COLUMNS[REFERENCES_COLUMN].0, "REFERENCES");
-    assert_eq!(MATRIX_COLUMNS[GATE_COLUMN].0, "GATE");
+    assert_eq!(MATRIX_COLUMNS[REFERENCES_COLUMN].0, "References");
+    assert_eq!(MATRIX_COLUMNS[GATE_COLUMN].0, "Gate");
+    assert!(
+        MATRIX_COLUMNS
+            .iter()
+            .all(|(label, _)| *label != label.to_uppercase() || label.len() <= 2),
+        "a column heading is shouting; headings are sentence case, acronyms aside"
+    );
     let track = MATRIX_COLUMNS
         .iter()
         .map(|(_, fraction)| fraction)

@@ -47,7 +47,8 @@ use crate::ui::tokens::{self, Tokens};
 // it through `use super::*`, which is what keeps one spelling of a button, a
 // chip, a select and a modal across all six of them.
 use crate::ui::widgets::{
-    self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, SegmentedWidth,
+    self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, SegmentedWidth,
+    paint_problem_mark,
 };
 use crate::workbench::app::open_create_subcircuit_bound_symbol_dialog;
 use crate::workbench::app_state::design_history::{

@@ -95,9 +95,9 @@ impl QualificationDomain {
     pub(super) const fn column_label(self) -> &'static str {
         match self {
             Self::Dc => "DC",
-            Self::Ac => "AC · CHARGE",
-            Self::Transient => "TRANSIENT",
-            Self::Noise => "NOISE",
+            Self::Ac => "AC · charge",
+            Self::Transient => "Transient",
+            Self::Noise => "Noise",
         }
     }
 

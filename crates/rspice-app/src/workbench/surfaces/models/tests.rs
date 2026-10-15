@@ -54,7 +54,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-05-qualification",
         page: ModelsPage::Qualification,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "a5147d53bd668a915e50ddd5372988fb827622ca683584b11b4cae8521cc4a4b",
+        fingerprint: "0cef78dd1be9c552576c7c4bcffbbc323563c6c7a11b5e743588e00c24b504c4",
     },
     ModelsBaseline {
         name: "models-00b-rspice-library",

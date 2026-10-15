@@ -13,6 +13,8 @@
 
 use super::*;
 
+use crate::ui::accessibility::plural_suffix;
+
 use super::super::{
     QualificationDomain, QualificationGate, QualificationModelSummary, QualificationPageAction,
     QualificationRailRow, execute_qualification_action, qualification_action_block_reason,
@@ -53,13 +55,13 @@ const CONTRACT_TRACK_MIN_W: f32 = 260.0;
 /// would pose a coverage question the page can never answer. What temperature
 /// a noise vector runs at is a condition on that vector, stated with it.
 const MATRIX_COLUMNS: [(&str, f32); 7] = [
-    ("MODEL FAMILY", 0.24),
+    ("Model family", 0.24),
     (QualificationDomain::Dc.column_label(), 0.09),
     (QualificationDomain::Ac.column_label(), 0.12),
     (QualificationDomain::Transient.column_label(), 0.11),
     (QualificationDomain::Noise.column_label(), 0.09),
-    ("REFERENCES", 0.12),
-    ("GATE", 0.23),
+    ("References", 0.12),
+    ("Gate", 0.23),
 ];
 
 /// Where each domain's cell sits in [`MATRIX_COLUMNS`].
@@ -81,7 +83,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .map(|summary| summary.vectors)
         .sum::<usize>();
     let subtitle = format!(
-        "{} model families · {} vectors · source-owned release evidence",
+        "{} model families · {} vectors",
         summaries.len(),
         total_vectors
     );
@@ -195,7 +197,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 /// The height of the closure band, and of nothing else on the page.
-const CLOSURE_LEDGER_H: f32 = 54.0;
+///
+/// One line: the band used to carry a second one explaining what release
+/// closure reads, which was the four segment labels beside it written out as
+/// a sentence.
+const CLOSURE_LEDGER_H: f32 = 34.0;
 
 /// The band's own padding, and the gaps that hold the chain apart: between a
 /// segment's label and its value, between segments, and between the last
@@ -216,11 +222,10 @@ struct ClosureInput {
     /// The fact the band has room for only on hover, and the one a reader who
     /// cannot see the band is read along with the ratio.
     detail: String,
-    color: Color32,
 }
 
 /// The four closure inputs over the whole loaded corpus.
-fn closure_inputs(t: &Tokens, summaries: &[QualificationModelSummary]) -> [ClosureInput; 4] {
+fn closure_inputs(summaries: &[QualificationModelSummary]) -> [ClosureInput; 4] {
     let total_vectors = summaries
         .iter()
         .map(|summary| summary.vectors)
@@ -262,18 +267,9 @@ fn closure_inputs(t: &Tokens, summaries: &[QualificationModelSummary]) -> [Closu
         .filter(|summary| summary.gate.is_gate_subject())
         .count();
     let exempt = summaries.len() - gate_subjects;
-    // A ratio over an empty population carries no verdict, so it is painted in
-    // neither verdict's colour: "0/0" in the warning tone is a warning about
-    // nothing, and on the fresh project above it was four of them.
-    let verdict = |whole: usize, part: usize| {
-        if whole == 0 {
-            t.color.text_dim
-        } else if part == whole {
-            t.color.ok
-        } else {
-            t.color.warn
-        }
-    };
+    // The four ratios are a summary of the matrix below, not verdict cells, so
+    // none of them is toned: the matrix's own domain and gate columns are
+    // where a shortfall is read.
     [
         ClosureInput {
             label: "vectors",
@@ -287,13 +283,11 @@ fn closure_inputs(t: &Tokens, summaries: &[QualificationModelSummary]) -> [Closu
             } else {
                 format!("{open_failed} failed · {open_stale} stale open")
             },
-            color: verdict(total_vectors, passing_vectors),
         },
         ClosureInput {
             label: "references",
             value: format!("{evidenced_vectors}/{total_vectors}"),
-            detail: "exact retained evidence".to_owned(),
-            color: verdict(total_vectors, evidenced_vectors),
+            detail: "vectors with a retained reference".to_owned(),
         },
         ClosureInput {
             label: "qualified",
@@ -303,13 +297,11 @@ fn closure_inputs(t: &Tokens, summaries: &[QualificationModelSummary]) -> [Closu
             } else {
                 format!("{exempt} engine-owned exempt")
             },
-            color: verdict(gate_subjects, qualified),
         },
         ClosureInput {
             label: "parity",
             value: format!("{parity}/{gate_subjects}"),
             detail: "desktop · WebAssembly".to_owned(),
-            color: verdict(gate_subjects, parity),
         },
     ]
 }
@@ -351,7 +343,7 @@ fn closure_ledger(
         .size()
         .x;
     ui.painter().text(
-        egui::pos2(rect.left() + LEDGER_PAD, rect.top() + 16.0),
+        egui::pos2(rect.left() + LEDGER_PAD, rect.center().y),
         egui::Align2::LEFT_CENTER,
         "Release closure",
         title_font,
@@ -359,27 +351,45 @@ fn closure_ledger(
     );
 
     // The verdict owns the right edge and is placed first, because everything
-    // to its left is laid out against where it ends.
+    // to its left is laid out against where it ends. With nothing selected
+    // there is no verdict to state: the matrix's own gate column is where one
+    // is read, and "no selection" is visible in the matrix itself.
     let gate = selected.map(|summary| summary.gate);
-    let verdict_color = gate.map_or(t.color.text_faint, |gate| gate_color(gate, &t));
-    let verdict_label = gate
-        .map_or("NO SELECTION", QualificationGate::label)
-        .to_uppercase();
+    let verdict_label = gate.map(QualificationGate::label).unwrap_or_default();
+    let verdict_problem = (gate == Some(QualificationGate::Blocked)).then_some(Problem::Failure);
     let verdict_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
-    let verdict_w = ui
-        .painter()
-        .layout_no_wrap(verdict_label.clone(), verdict_font.clone(), verdict_color)
-        .size()
-        .x;
+    let mut verdict_w = if verdict_label.is_empty() {
+        0.0
+    } else {
+        ui.painter()
+            .layout_no_wrap(
+                verdict_label.to_owned(),
+                verdict_font.clone(),
+                t.color.text_dim,
+            )
+            .size()
+            .x
+    };
     ui.painter().text(
         egui::pos2(rect.right() - LEDGER_PAD, rect.center().y),
         egui::Align2::RIGHT_CENTER,
         verdict_label,
         verdict_font,
-        verdict_color,
+        t.color.text_dim,
     );
+    if let Some(problem) = verdict_problem {
+        let mark = egui::Rect::from_center_size(
+            egui::pos2(
+                rect.right() - LEDGER_PAD - verdict_w - MARK_ADVANCE * 0.5,
+                rect.center().y,
+            ),
+            Vec2::splat(MARK_SIDE),
+        );
+        paint_problem_mark(ui.painter(), mark, problem);
+        verdict_w += MARK_ADVANCE;
+    }
 
-    let inputs = closure_inputs(&t, summaries);
+    let inputs = closure_inputs(summaries);
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let value_font = theme::mono(tokens::FS_0, FontWeight::SemiBold);
     let measured: [(f32, f32); 4] = std::array::from_fn(|index| {
@@ -394,7 +404,7 @@ fn closure_ledger(
                 .size()
                 .x,
             ui.painter()
-                .layout_no_wrap(input.value.clone(), value_font.clone(), input.color)
+                .layout_no_wrap(input.value.clone(), value_font.clone(), t.color.text)
                 .size()
                 .x,
         )
@@ -444,7 +454,7 @@ fn closure_ledger(
             egui::Align2::LEFT_CENTER,
             &input.value,
             value_font.clone(),
-            input.color,
+            t.color.text,
         );
         // Painted glyphs publish no accessibility node, so each segment states
         // its own whole line — the count, the ratio, and the fact the band has
@@ -463,31 +473,13 @@ fn closure_ledger(
 
     // The verdict is the chain's terminal rather than a fifth input, and a
     // hairline says so where a wider gap alone would not.
-    ui.painter().vline(
-        cluster_right + VERDICT_GAP / 2.0,
-        egui::Rangef::new(rect.center().y - 9.0, rect.center().y + 9.0),
-        Stroke::new(1.0, t.color.border),
-    );
-
-    // What the band says is a statement about the *selected* model, so for one
-    // the gate does not govern it states the exemption rather than reciting a
-    // closure contract that will never be applied to it.
-    let contract = if selected.is_some_and(|summary| !summary.gate.is_gate_subject()) {
-        "Engine-owned: this card is compiled into the simulator and is exempt from the source-owned release gate."
-    } else {
-        "Release closure consumes exact source revisions, retained references, runtime parity, and governed dispositions."
-    };
-    // The sentence is the band's first casualty: it is clipped to stop before
-    // the cluster begins, so a long contract can never reach the ledger.
-    let sentence_x = rect.left() + LEDGER_PAD;
-    let sentence_w = (clip_left - LEDGER_PAD - sentence_x).max(1.0);
-    ui.painter().text(
-        egui::pos2(sentence_x, rect.bottom() - 13.0),
-        egui::Align2::LEFT_CENTER,
-        elide(ui, contract, sentence_w, false),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
+    if !verdict_label.is_empty() {
+        ui.painter().vline(
+            cluster_right + VERDICT_GAP / 2.0,
+            egui::Rangef::new(rect.center().y - 9.0, rect.center().y + 9.0),
+            Stroke::new(1.0, t.color.border),
+        );
+    }
 }
 
 /// The family × domain matrix, filling the track it was handed.
@@ -509,7 +501,11 @@ fn family_matrix(
     // "16 source revisions" over sixteen compiled-in cards names something none
     // of them has, so the meta counts the two populations apart.
     let meta = if exempt == 0 {
-        format!("{} source revisions", summaries.len())
+        format!(
+            "{} source revision{}",
+            summaries.len(),
+            plural_suffix(summaries.len())
+        )
     } else {
         format!(
             "{} source · {exempt} engine-owned",
@@ -532,7 +528,7 @@ fn family_matrix(
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(12, 6))
                 .show(ui, |ui| {
-                    card_title(ui, "FAMILY COVERAGE BY DOMAIN", Some(&meta));
+                    card_title(ui, "Family coverage by domain", Some(&meta));
                 });
             table_header(ui, &MATRIX_COLUMNS);
             // The rows take what the title band and the header left, less the
@@ -851,6 +847,14 @@ fn contract_rail(
         );
         return;
     };
+    // An engine-owned card has no dispositions and declares no tolerance
+    // policy, by design. Two cards whose whole content would be a row reading
+    // "not applicable" are two sections shown only to say they are empty; the
+    // contract card states the exemption once, and takes the rail.
+    if !selected.gate.is_gate_subject() {
+        contract_pane(ui, selected, height.max(DETAIL_PANE_MIN_H));
+        return;
+    }
     let card_h = (height / 3.0).max(DETAIL_PANE_MIN_H);
     if card_h * 3.0 <= height + 1.0 {
         dispositions_pane(ui, app, selected, requested_action, card_h);
@@ -872,9 +876,8 @@ fn contract_rail(
 }
 
 // "not configured" and "fail closed" are findings against a model that was
-// supposed to declare something. An engine-owned card was never supposed to, so
-// each pane below states the exemption rather than reporting the absence it was
-// designed to have.
+// supposed to declare something. An engine-owned card was never supposed to,
+// so it never reaches the two panes that would report the absence.
 
 fn dispositions_pane(
     ui: &mut Ui,
@@ -885,15 +888,11 @@ fn dispositions_pane(
 ) {
     filled_detail_pane(
         ui,
-        "OPEN DISPOSITIONS",
+        "Open dispositions",
         Some(&format!("{} pending", selected.open_dispositions)),
         height,
         "models-qualification-dispositions",
         |ui| {
-            if !selected.gate.is_gate_subject() {
-                property(ui, "Domains", "not applicable", "engine-owned");
-                return;
-            }
             if selected.domains.is_empty() {
                 property(ui, "Domains", "not configured", "suite contract");
                 return;
@@ -926,15 +925,11 @@ fn dispositions_pane(
 fn tolerance_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32) {
     filled_detail_pane(
         ui,
-        "TOLERANCE POLICY",
+        "Tolerance policy",
         Some("domain-owned contracts"),
         height,
         "models-qualification-tolerance",
         |ui| {
-            if !selected.gate.is_gate_subject() {
-                property(ui, "Policy", "not applicable", "engine-owned");
-                return;
-            }
             if selected.domains.is_empty() {
                 property(ui, "Policy", "not declared", "fail closed");
                 return;
@@ -954,7 +949,7 @@ fn tolerance_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32
 fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32) {
     filled_detail_pane(
         ui,
-        "QUALIFICATION CONTRACT",
+        "Qualification contract",
         Some(selected.gate.label()),
         height,
         "models-qualification-contract",
@@ -999,10 +994,7 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
             property(
                 ui,
                 "Evidence set",
-                selected
-                    .evidence_digest
-                    .as_deref()
-                    .unwrap_or("not retained"),
+                selected.evidence_digest.as_deref().unwrap_or("none"),
                 &format!("{} references", selected.references),
             );
             property(
@@ -1012,7 +1004,7 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
                 selected
                     .correlation_evidence_digest
                     .as_deref()
-                    .unwrap_or("not retained"),
+                    .unwrap_or("no evidence"),
             );
             property(
                 ui,
@@ -1024,9 +1016,14 @@ fn contract_pane(ui: &mut Ui, selected: &QualificationModelSummary, height: f32)
     );
 }
 
+/// The gate column's verdict colour.
+///
+/// A pass is not a colour: "qualified" is the state every row is supposed to
+/// reach, and a column of green on the families that are fine is wallpaper
+/// behind the two that are not. Only a finding is toned.
 fn gate_color(gate: QualificationGate, t: &Tokens) -> Color32 {
     match gate {
-        QualificationGate::Qualified => t.color.ok,
+        QualificationGate::Qualified => t.color.text,
         QualificationGate::Review | QualificationGate::Unqualified => t.color.warn,
         QualificationGate::Blocked => t.color.err,
         // Neither a pass nor a finding: an engine-owned card is outside the
