@@ -73,10 +73,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     view::show(ui, active_transfer_function(state));
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    view::right_panel(ui, active_transfer_function(state));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

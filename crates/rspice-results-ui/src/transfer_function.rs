@@ -1,6 +1,6 @@
 //! Transfer-function cards and inspector over host-qualified scalar evidence.
 
-use crate::presentation::{panel_note, well_hint};
+use crate::presentation::well_hint;
 use crate::strip::StripHeader;
 use egui::Ui;
 use rspice_app_types::product::DatasetId;
@@ -9,7 +9,6 @@ use rspice_results::transfer_function::{
     TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 use rspice_ui_kit::{
-    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::measurement_table,
@@ -282,46 +281,6 @@ fn nominal_value_label(value: Option<f64>, unit: &str) -> String {
         || "Not retained".to_owned(),
         |value| exact_value(value, unit),
     )
-}
-
-pub fn right_panel(ui: &mut Ui, view: Option<TransferFunctionView<'_>>) {
-    section_header(ui, "Transfer function", None);
-    let Some(view) = view else {
-        panel_note(
-            ui,
-            "Select an analysis with retained transfer-function evidence.",
-        );
-        return;
-    };
-
-    let input_quantity = quantity_label(view.input_quantity);
-    let output_quantity = quantity_label(view.output_quantity);
-    measurement_table(
-        ui,
-        &[
-            ("Analysis", view.analysis_label),
-            ("Input", view.input_source),
-            ("Input quantity", input_quantity),
-            ("Output", view.output_expression),
-            ("Output quantity", output_quantity),
-            ("Operating state", "DC operating point"),
-            ("Normalization", normalization_label(view.normalization)),
-            ("Accuracy", accuracy_label(view.accuracy)),
-        ],
-    );
-
-    section_header(ui, "Exact scalar evidence", None);
-    let gain = display_scalar(view.gain, gain_unit(&view));
-    let rin = display_scalar(view.input_resistance, "ohm");
-    let rout = display_scalar(view.output_resistance, "ohm");
-    measurement_table(
-        ui,
-        &[
-            ("Transfer gain", gain.as_str()),
-            ("Input resistance", rin.as_str()),
-            ("Output resistance", rout.as_str()),
-        ],
-    );
 }
 
 fn display_scalar(value: Option<TransferFunctionScalarEvidence>, unit: &str) -> String {

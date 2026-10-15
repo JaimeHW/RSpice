@@ -19,10 +19,9 @@ use rspice_results::{
     result_presentation::{AnalysisPresentationKey, TracePresentationKey},
 };
 use rspice_ui_kit::{
-    panels::section_header,
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{chip, measurement_table},
+    widgets::chip,
 };
 use std::borrow::Cow;
 type AnalysisResult = rspice_results::analysis_result::AnalysisResult<WaveformData>;
@@ -1045,46 +1044,6 @@ fn elide_label(label: &str) -> String {
     }
     let kept: String = label.chars().take(21).collect();
     format!("{kept}…")
-}
-
-pub fn operating_point_panel(ui: &mut Ui, analysis: &AnalysisResult) {
-    section_header(ui, "Typed datasheet", None);
-    let owned_rows = [
-        ("Analysis".to_owned(), analysis.label.clone()),
-        (
-            "Authority".to_owned(),
-            "immutable operating-point evidence".to_owned(),
-        ),
-        (
-            "Rows".to_owned(),
-            operating_point_row_count(analysis).to_string(),
-        ),
-        ("Precision".to_owned(), "exact retained values".to_owned()),
-    ];
-    let borrowed = owned_rows
-        .iter()
-        .map(|(label, value)| (label.as_str(), value.as_str()))
-        .collect::<Vec<_>>();
-    measurement_table(ui, &borrowed);
-}
-
-pub fn sample_panel(ui: &mut Ui, model: &StripModel) {
-    section_header(ui, "Sample grid", None);
-    let retained = model.sample_grid().map_or(0, <[f64]>::len);
-    let rows = [
-        ("Analysis", model.table_label()),
-        ("X axis", model.x_axis_heading()),
-        ("Retained rows", format!("{retained}")),
-        (
-            "Signals",
-            format!("{}", model.visible_signal_indices().count()),
-        ),
-    ];
-    let rows: Vec<(&str, &str)> = rows
-        .iter()
-        .map(|(name, value)| (*name, value.as_str()))
-        .collect();
-    measurement_table(ui, &rows);
 }
 
 fn status_line(shown: usize, retained: usize, view: &TableView, cursor: Option<f64>) -> String {

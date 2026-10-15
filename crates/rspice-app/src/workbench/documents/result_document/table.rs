@@ -206,33 +206,6 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
     );
 }
 
-pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
-    if let Some(analysis) = state.simulation.active_analysis()
-        && analysis.analysis_type == AnalysisType::DcOp
-        && viewer::operating_point_row_count(&analysis.data) > 0
-    {
-        viewer::operating_point_panel(ui, &analysis.data);
-        return;
-    }
-    let presentation = state.ui.result_presentation_policy();
-    let models = cached_models(
-        &state.simulation,
-        &mut state.ui.results,
-        presentation.complex_number_display(),
-        &t,
-    );
-    let analysis_key = state.ui.results.session.table.analysis;
-    let Some(model) = models
-        .iter()
-        .find(|model| Some(model.analysis_key()) == analysis_key)
-        .or_else(|| models.first())
-    else {
-        return;
-    };
-    viewer::sample_panel(ui, model);
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::AnalysisPresentationKey;

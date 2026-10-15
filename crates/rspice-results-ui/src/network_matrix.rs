@@ -49,13 +49,6 @@ pub struct OpenCoefficient {
     pub frequency: f64,
 }
 
-pub fn right_panel(ui: &mut Ui) {
-    crate::presentation::panel_note(
-        ui,
-        "Exact retained power-wave coefficients. Select a frequency and sideband block in the matrix. Hover or copy for full numerical precision.",
-    );
-}
-
 pub fn formatted(real: f64, imaginary: f64, representation: usize) -> String {
     if real == 0.0 && imaginary == 0.0 && representation != 0 {
         return if representation == 2 {

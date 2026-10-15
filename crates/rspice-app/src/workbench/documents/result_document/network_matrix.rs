@@ -96,8 +96,6 @@ pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
     }
 }
 
-pub(super) use view::right_panel;
-
 pub(super) fn show(ui: &mut Ui, context: &mut SheetContext<'_>) {
     let Some(run) = context.simulation.active_run() else {
         well_hint(ui, "Run a network analysis to inspect its matrix");

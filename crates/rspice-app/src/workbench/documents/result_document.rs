@@ -2665,14 +2665,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Op => op_inspector::right_panel(ui, state),
         ResultViewer::NoiseContrib => noise_contrib::right_panel(ui, state),
         ResultViewer::Contribution => sensitivity::right_panel(ui, state),
-        ResultViewer::TransferFunction => transfer_function::right_panel(ui, state),
         ResultViewer::Specs => specs::right_panel(ui, state),
-        ResultViewer::Table => table::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::Polar => polar::right_panel(ui, &mut SheetContext::of(state)),
-        ResultViewer::NetworkMatrix => network_matrix::right_panel(ui),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
+        // The transfer-function, table and network-matrix panels held
+        // nothing but what their own sheet already states.
+        ResultViewer::TransferFunction | ResultViewer::Table | ResultViewer::NetworkMatrix => {}
         ResultViewer::Scatter => scatter::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::BoxViolin => box_violin::right_panel(ui, &mut SheetContext::of(state)),
         ResultViewer::Events => events::right_panel(ui, state),
