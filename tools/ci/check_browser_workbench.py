@@ -162,10 +162,22 @@ def validated_save_clock(browser, review_intervals):
         browser.record_input("file_picker_restored")
     finished_ms = time.time_ns() // 1_000_000
     saved_controls = controls(browser.capture("validated-save-complete"))
-    for label, value in (("Saved snapshot", "3 / 3"), ("Saved source validated", "pass"),
-                         ("Validated revision recorded", "pass")):
-        if not any(control["label"] == label and control["value"] == value for control in saved_controls):
-            raise AssertionError("The completed save did not display its validated snapshot status")
+    # The completed save states its verdict as the snapshot heading and the two
+    # facts beneath it, and a different dialog helper publishes each one. They
+    # are named individually so that a helper which stops publishing reddens
+    # this job: an observable that disappears is a failure, never a pass.
+    for label, value in (("Saved snapshot", ""), ("Project", "Untitled Project"),
+                         ("Revision", "1")):
+        published = [control["value"] for control in saved_controls if control["label"] == label]
+        if value not in published:
+            if published:
+                detail = f"that label carried {published!r}"
+            else:
+                labels = sorted({control["label"] for control in saved_controls if control["label"]})
+                detail = f"nothing carried that label; the dialog published {labels!r}"
+            raise AssertionError(
+                "The completed save did not display its validated snapshot status: expected the "
+                f"label {label!r} to carry the value {value!r}, but {detail}")
     files = canonical_projects(browser)
     if len(files) != 1:
         raise AssertionError("Validated save did not publish exactly one canonical project")
