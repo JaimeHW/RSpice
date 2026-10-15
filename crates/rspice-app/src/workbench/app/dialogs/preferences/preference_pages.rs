@@ -229,9 +229,10 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
             value_column(ui, |ui| {
                 // A slider sizes itself from `spacing.slider_width` and
                 // ignores the size `add_sized` asks for, so it has to be told
-                // the control column's width rather than given it.
+                // the control column's width rather than given it. Told that,
+                // its track ends where the selects above and below it end.
                 let width = control_width(ui);
-                ui.spacing_mut().slider_width = width - Tokens::get(ui.ctx()).metrics.ctl_h;
+                ui.spacing_mut().slider_width = width;
                 let response = ui.add_sized(
                     [width, Tokens::get(ui.ctx()).metrics.ctl_h],
                     egui::Slider::new(&mut state.ui.theme.canvas_contrast, 0..=100)

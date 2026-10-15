@@ -53,7 +53,14 @@ const SETTING_ROW_COLUMN_GAP: f32 = 20.0;
 /// Widest a select or numeric field grows to, so neighbouring rows agree.
 const CONTROL_MAX_WIDTH: f32 = 300.0;
 /// Padding above and below a row's tallest element.
-const SETTING_ROW_PADDING: f32 = 9.0;
+///
+/// The density's own bar padding rather than a number of this dialog's own:
+/// a 28 px control inside nine pixels either side is a row that is half air,
+/// and the design system already states how much space a control of this
+/// density sits in.
+fn setting_row_padding(ui: &Ui) -> f32 {
+    Tokens::get(ui.ctx()).metrics.bar_pad
+}
 /// Gap between a row's label and the help under it.
 const SETTING_COPY_HELP_GAP: f32 = 2.0;
 /// Gap between a stacked label and its control on a phone.
@@ -812,7 +819,7 @@ pub(super) fn section_heading(ui: &mut Ui, title: &str) {
     let (rect, response) = ui.allocate_exact_size(
         vec2(
             ui.available_width(),
-            text_height + SETTING_ROW_PADDING * 2.0,
+            text_height + setting_row_padding(ui) * 2.0,
         ),
         Sense::hover(),
     );
@@ -858,7 +865,7 @@ pub(super) fn setting_row<R>(
     let response = egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(
             horizontal,
-            SETTING_ROW_PADDING as i8,
+            setting_row_padding(ui) as i8,
         ))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -1168,7 +1175,7 @@ mod tests {
     fn a_desktop_window_gets_the_full_fixed_surface() {
         let layout =
             PreferencesLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0)));
-        assert_eq!(layout.surface.size(), vec2(1000.0, 680.0));
+        assert_eq!(layout.surface.size(), vec2(DESKTOP_WIDTH, DESKTOP_HEIGHT));
         assert!(!layout.narrow);
         assert!(!layout.phone);
     }
@@ -1212,7 +1219,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let standard = standard_row_height(&ctx);
         assert!(
-            standard >= Tokens::get(&ctx).metrics.ctl_h + SETTING_ROW_PADDING * 2.0,
+            standard >= Tokens::get(&ctx).metrics.ctl_h + Tokens::get(&ctx).metrics.bar_pad * 2.0,
             "the page's row height clears a control and its padding"
         );
         assert!(
@@ -1235,7 +1242,7 @@ mod tests {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     height = standard_copy_height(ui, LABEL_COLUMN_WIDTH)
                         .max(Tokens::get(ui.ctx()).metrics.ctl_h)
-                        + SETTING_ROW_PADDING * 2.0;
+                        + setting_row_padding(ui) * 2.0;
                 });
             },
         );
@@ -1256,7 +1263,7 @@ mod tests {
     fn tablet_uses_category_selector_without_phone_full_height_override() {
         let layout =
             PreferencesLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, vec2(768.0, 1024.0)));
-        assert_eq!(layout.surface.size(), vec2(740.0, 680.0));
+        assert_eq!(layout.surface.size(), vec2(740.0, DESKTOP_HEIGHT));
         assert!(layout.narrow);
         assert!(!layout.phone);
         assert_eq!(FOOTER_HEIGHT, 48.0);
@@ -1471,7 +1478,10 @@ mod tests {
 
         let dialog_bounds = node_bounds(nodes, egui::accesskit::Role::Dialog, "Preferences");
         assert_eq!(dialog_bounds.x1 - dialog_bounds.x0, 1000.0);
-        assert_eq!(dialog_bounds.y1 - dialog_bounds.y0, 680.0);
+        assert_eq!(
+            dialog_bounds.y1 - dialog_bounds.y0,
+            f64::from(DESKTOP_HEIGHT)
+        );
 
         assert!(nodes.iter().any(|(_, node)| {
             node.role() == egui::accesskit::Role::Dialog
