@@ -439,9 +439,7 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
             "Compare…",
             "Export…",
             "Archive…",
-            // The aside's head is a band, and a band sets its label in
-            // uppercase.
-            "SELECTED PLAN",
+            "Selected plan",
             "Name",
             "Revision",
             "Reference PVT corner",
@@ -529,7 +527,7 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
             "Compare…",
             "Export…",
             "Archive…",
-            "SELECTED PLAN",
+            "Selected plan",
             "Declared run set",
             "Modelled cost",
             "Regression baseline",
@@ -693,7 +691,7 @@ fn the_campaign_route_fits_every_gated_viewport() {
     assert_route_fits_every_gated_viewport(SimulationPlanManagerMode::Campaign);
 }
 
-/// Every column is painted, in order and in the head band's uppercase, and the
+/// Every column is painted, in order and in the heading's own spelling, and the
 /// two the authored table carries and RSpice cannot own are not among them.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
@@ -704,7 +702,7 @@ fn the_table_paints_the_columns_whose_facts_have_owners() {
 
     let headings = PLAN_COLUMNS
         .iter()
-        .map(|column| column.heading.to_uppercase())
+        .map(|column| (*column.heading).to_owned())
         .collect::<Vec<_>>();
     // The aside repeats two of these words as property-row labels, so the
     // count is taken over the records column alone: everything the body
@@ -712,7 +710,7 @@ fn the_table_paints_the_columns_whose_facts_have_owners() {
     let aside = rendered
         .painted
         .iter()
-        .position(|text| text == "SELECTED PLAN")
+        .position(|text| text == "Selected plan")
         .expect("the aside's head is painted");
     assert_eq!(
         rendered.painted[..aside]
@@ -873,27 +871,25 @@ fn the_filter_matches_the_four_fields_its_placeholder_names() {
     );
 }
 
-/// Three states, three words, three tones, all from their one owner.
+/// Three states, three words, one owner, no tone.
+///
+/// "Active" is the plan's own domain state, not the reader's selection, so it
+/// takes no accent and no second colour distinguishes the other two.
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
-fn the_lifecycle_tone_follows_the_word_its_owner_publishes() {
+fn every_lifecycle_state_is_stated_by_the_word_its_owner_publishes() {
     let (app, active, available, retired) = app_with_every_lifecycle_state();
     let records = plan_catalog_records(&app);
-    for (id, word, tone) in [
-        (active, "active", LifecycleTone::Active),
-        (available, "available", LifecycleTone::Available),
-        (retired, "archived", LifecycleTone::Archived),
+    for (id, word) in [
+        (active, "active"),
+        (available, "available"),
+        (retired, "archived"),
     ] {
         let record = records
             .iter()
             .find(|record| record.id == id)
             .expect("the projection carries every catalog entry");
         assert_eq!(record.lifecycle_label(), word);
-        assert_eq!(
-            lifecycle_tone(record),
-            tone,
-            "'{word}' is toned as another state"
-        );
     }
 }
 
@@ -918,7 +914,7 @@ fn import_is_a_toolbar_action_and_not_an_operation_on_the_selected_plan() {
     };
 
     assert!(
-        at("Import…") < at("PLAN / IDENTITY"),
+        at("Import…") < at("Plan / identity"),
         "Import is painted after the table's first heading, so it is not in \
          the toolbar"
     );
@@ -928,7 +924,7 @@ fn import_is_a_toolbar_action_and_not_an_operation_on_the_selected_plan() {
     );
     for kept in ["Rename…", "Clone…", "Compare…", "Export…", "Archive…"] {
         assert!(
-            at(kept) > at("PLAN / IDENTITY"),
+            at(kept) > at("Plan / identity"),
             "'{kept}' is painted before the table, so it left the \
              selected-plan action row"
         );
@@ -956,16 +952,17 @@ fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
         let head = rendered
             .painted
             .iter()
-            .position(|text| text == "SELECTED PLAN")
+            .position(|text| text == "Selected plan")
             .expect("the aside's head is painted");
-        // The band sets the word in uppercase; the Lifecycle column, painted
-        // before the head, keeps the projection's own spelling.
+        // The band and the Lifecycle column state the projection's own
+        // spelling; the column is painted before the head, so the first word
+        // after it is the band's.
         assert_eq!(
             rendered.painted[head..]
                 .iter()
-                .find(|text| matches!(text.as_str(), "ACTIVE" | "AVAILABLE" | "ARCHIVED"))
+                .find(|text| matches!(text.as_str(), "active" | "available" | "archived"))
                 .map(String::as_str),
-            Some(word.to_uppercase().as_str()),
+            Some(word),
             "the aside head states the wrong lifecycle for {id}"
         );
     }
@@ -1171,10 +1168,10 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
             .iter()
             .filter(|text| matches!(
                 text.as_str(),
-                "SELECTED PLAN" | "DECLARED WORK" | "PLAN-OWNED RECORDS"
+                "Selected plan" | "Declared work" | "Plan-owned records"
             ))
             .collect::<Vec<_>>(),
-        ["SELECTED PLAN"],
+        ["Selected plan"],
         "the aside is grouped again; the authored one is a single list"
     );
     assert_eq!(

@@ -58,9 +58,6 @@ const FLUSH_HEAD_HEIGHT: f32 = 26.0;
 /// A flush row: the two identity lines with a point of air above and below, so
 /// the name does not sit on the rule that closes the row before it.
 const FLUSH_ROW_HEIGHT: f32 = ROW_HEIGHT + 2.0;
-/// Letter spacing of an uppercase head, as a share of its font size. The
-/// authored `.data-table th` tracking.
-const HEAD_TRACKING: f32 = 0.04;
 
 /// Inset between a note's edge and its content, all sides.
 const COLUMN_PADDING: i8 = 8;
@@ -426,12 +423,9 @@ fn table(
     clicked
 }
 
-/// Uppercase, tracked, caption-sized text elided to `width`: the one treatment a
-/// flush table's head and a band heading share. Returns the painted width.
-///
-/// The text is uppercased here rather than where it is authored, so a heading
-/// keeps one spelling in the source and the tests that look for it say which
-/// treatment they expect.
+/// Sentence-case heading text elided to `width`: the one treatment a flush
+/// table's head and a band heading share, in the kit section header's font.
+/// Returns the painted width.
 fn paint_band_text(
     ui: &Ui,
     anchor: egui::Pos2,
@@ -446,7 +440,7 @@ fn paint_band_text(
         align,
         text,
         width,
-        (theme::sans(tokens::FS_MICRO, FontWeight::SemiBold), color),
+        (theme::sans(tokens::FS_0, FontWeight::SemiBold), color),
     )
 }
 
@@ -458,22 +452,8 @@ fn paint_band_text_in(
     width: f32,
     (font, color): (egui::FontId, Color32),
 ) -> f32 {
-    let tracking = HEAD_TRACKING * tokens::FS_MICRO;
-    let upper = text.to_uppercase();
-    // `elide_text` measures untracked, so the tracking the galley will add is
-    // taken off the width it is asked to fit.
-    let budget = (width - tracking * upper.chars().count() as f32).max(0.0);
-    let shown = elide_text(ui, &upper, &font, budget);
-    let job = egui::text::LayoutJob::single_section(
-        shown,
-        egui::TextFormat {
-            font_id: font,
-            color,
-            extra_letter_spacing: tracking,
-            ..Default::default()
-        },
-    );
-    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    let shown = elide_text(ui, text, &font, width.max(0.0));
+    let galley = ui.painter().layout_no_wrap(shown, font, color);
     let size = galley.size();
     ui.painter()
         .galley(align.anchor_size(anchor, size).min, galley, color);
@@ -594,35 +574,13 @@ pub(super) fn prose_column_width(ui: &Ui, heading: &str, value: &str) -> f32 {
         .ceil()
 }
 
-/// The three lifecycle states a plan can be in, which are the only three
-/// `active` and `archived` can express between them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LifecycleTone {
-    /// The single editable plan. One per catalog, by construction.
-    Active,
-    /// Retained and not archived — a plan the reader can switch to.
-    Available,
-    /// Recoverably retired.
-    Archived,
-}
-
-impl LifecycleTone {
-    fn color(self, t: &Tokens) -> Color32 {
-        match self {
-            Self::Active => t.color.accent,
-            Self::Available => t.color.ok,
-            Self::Archived => t.color.text_faint,
-        }
-    }
-}
-
-/// A lifecycle word in its state's tone.
+/// A plan's lifecycle word, neutral.
 ///
-/// Flat toned mono text, not a boxed pill: the authored `row-status` treatment
-/// is exactly this, and a bordered chip repeated down every row of a records
-/// table is the decorative-card density this product bar rules out. The tone
-/// carries the state; the box would carry nothing.
-pub(super) fn lifecycle_chip(ui: &mut Ui, label: &str, tone: LifecycleTone) {
+/// Flat mono text, not a boxed pill: a bordered chip repeated down every row of
+/// a records table is the decorative-card density this product bar rules out.
+/// The word carries the state. "active" is the plan's domain state, not a
+/// selection, so it takes no accent.
+pub(super) fn lifecycle_chip(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     let rect = ui.max_rect();
     let font = theme::mono(tokens::FS_0, FontWeight::Medium);
@@ -632,14 +590,8 @@ pub(super) fn lifecycle_chip(ui: &mut Ui, label: &str, tone: LifecycleTone) {
         Align2::LEFT_CENTER,
         text,
         font,
-        tone.color(&t),
+        t.color.text_dim,
     );
-}
-
-/// A lifecycle word to sit at the trailing edge of a section head.
-pub(super) struct HeadStatus<'label> {
-    pub(super) label: &'label str,
-    pub(super) tone: LifecycleTone,
 }
 
 /// A section heading, optionally closed by a status word at its trailing edge.
@@ -649,7 +601,7 @@ pub(super) struct HeadStatus<'label> {
 /// returns nothing, so there is no rect left to place a trailing status in.
 /// This is the module's one section-head painter for that reason rather than a
 /// second treatment standing beside it.
-pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'_>>) {
+pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEAD_HEIGHT), Sense::hover());
     ui.painter().hline(
@@ -661,13 +613,9 @@ pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
     // order: a reader working through the surface left to right meets the
     // heading and then its state, and so does anything reading the paint back.
     let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let status_width = status.as_ref().map_or(0.0, |status| {
+    let status_width = status.map_or(0.0, |status| {
         ui.painter()
-            .layout_no_wrap(
-                status.label.to_owned(),
-                status_font.clone(),
-                t.color.text_dim,
-            )
+            .layout_no_wrap(status.to_owned(), status_font.clone(), t.color.text_dim)
             .size()
             .x
             + CELL_GAP
@@ -685,20 +633,19 @@ pub(super) fn section_head(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
         ui.painter().text(
             rect.right_center(),
             Align2::RIGHT_CENTER,
-            status.label,
+            status,
             status_font,
-            status.tone.color(&t),
+            t.color.text_dim,
         );
     }
 }
 
 /// [`section_head`] as a band: the head of a flush column.
 ///
-/// The authored `.section-head` — a filled strip the width of its column, an
-/// uppercase label at its leading edge and the state at its trailing one. It is
-/// the same height and fill as a flush table's head, so the two columns of a
-/// split open on one line.
-pub(super) fn section_band(ui: &mut Ui, label: &str, status: Option<HeadStatus<'_>>) {
+/// A filled strip the width of its column, the label at its leading edge and
+/// the state at its trailing one. It is the same height and fill as a flush
+/// table's head, so the two columns of a split open on one line.
+pub(super) fn section_band(ui: &mut Ui, label: &str, status: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
         vec2(ui.available_width(), FLUSH_HEAD_HEIGHT),
@@ -726,11 +673,11 @@ pub(super) fn section_band(ui: &mut Ui, label: &str, status: Option<HeadStatus<'
             ui,
             inner.right_center(),
             Align2::RIGHT_CENTER,
-            status.label,
+            status,
             (inner.width() - label_width - CELL_GAP).max(0.0),
             (
-                theme::mono(tokens::FS_MICRO, FontWeight::SemiBold),
-                status.tone.color(&t),
+                theme::mono(tokens::FS_0, FontWeight::Medium),
+                t.color.text_dim,
             ),
         );
     }
@@ -1237,30 +1184,6 @@ mod tests {
              two to one, not equal columns",
             geometry.records,
             geometry.aside
-        );
-    }
-
-    /// Three states, three tones, no two the same — a lifecycle word whose tone
-    /// repeated another state's would state less than the word alone.
-    #[test]
-    fn every_lifecycle_state_has_its_own_tone() {
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        let t = Tokens::get(&ctx);
-        let tones = [
-            LifecycleTone::Active.color(&t),
-            LifecycleTone::Available.color(&t),
-            LifecycleTone::Archived.color(&t),
-        ];
-        for (index, tone) in tones.iter().enumerate() {
-            for other in &tones[index + 1..] {
-                assert_ne!(tone, other, "two lifecycle states share one tone");
-            }
-        }
-        assert_eq!(
-            LifecycleTone::Active.color(&t),
-            t.color.accent,
-            "the active plan is the accent state"
         );
     }
 }

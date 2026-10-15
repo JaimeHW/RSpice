@@ -20,15 +20,12 @@ mod lifecycle;
 mod records;
 
 use super::*;
-use kit::{ColumnTrack, HeadStatus, LifecycleTone, SplitColumn, TableColumn, TableRow};
+use kit::{ColumnTrack, SplitColumn, TableColumn, TableRow};
 use records::{PlanCatalogRecord, plan_catalog_records};
 
 use crate::ui::accessibility::plural_suffix;
 use crate::workbench::app::purpose_line;
 use crate::workbench::app_state::ReferencePvtPoint;
-/// Re-exported through this module's `use super::*` for the child routes, which
-/// state their transactions as property lists.
-use crate::workbench::design_system::property_row_status;
 use crate::workbench::state::SimulationPlanScope;
 
 /// The dialog's own copy, in one place because the tests reconstruct the dialog
@@ -342,22 +339,6 @@ fn matches_plan_filter(record: &PlanCatalogRecord, query: &str) -> bool {
         .any(|field| field.to_ascii_lowercase().contains(query))
 }
 
-/// The tone that states this plan's lifecycle.
-///
-/// The word itself comes from `record.lifecycle_label()`, which is its one
-/// owner; this maps the same two booleans to a tone. Tone is presentation and
-/// the word is projection, so they are one derivation each rather than two
-/// spellings of the same string.
-const fn lifecycle_tone(record: &PlanCatalogRecord) -> LifecycleTone {
-    if record.active {
-        LifecycleTone::Active
-    } else if record.archived {
-        LifecycleTone::Archived
-    } else {
-        LifecycleTone::Available
-    }
-}
-
 /// The manager's body: a purpose line, a toolbar spanning the whole dialog, and
 /// a records column beside a selected-plan aside.
 ///
@@ -569,10 +550,10 @@ fn plan_manager_records_column(
             let t = Tokens::get(ui.ctx());
             match column {
                 0 => kit::cell_identity(ui, &record.name, &record.id.to_string()),
-                1 => kit::lifecycle_chip(ui, record.lifecycle_label(), lifecycle_tone(record)),
+                1 => kit::lifecycle_chip(ui, record.lifecycle_label()),
                 2 => kit::cell_value(ui, &record.revision.to_string(), t.color.text),
-                // A run set that does not validate is toned as the error it is;
-                // `point_count` is absent exactly when the declaration is.
+                // A run set that does not validate has no count to state; the
+                // selected plan's detail list carries the problem.
                 3 => kit::cell_value_over_note(
                     ui,
                     &record.run_set_label(),
@@ -580,7 +561,7 @@ fn plan_manager_records_column(
                     if record.point_count().is_some() {
                         t.color.text
                     } else {
-                        t.color.err
+                        t.color.text_faint
                     },
                 ),
                 4 => kit::cell_value(ui, &record.model_bindings.to_string(), t.color.text),
@@ -818,14 +799,7 @@ fn plan_detail_rows(selected: &PlanCatalogRecord) -> Vec<PlanDetailRow> {
 /// them. One row list feeds both arrangements, so the two cannot come to state
 /// different things.
 fn selected_plan_properties(ui: &mut Ui, selected: &PlanCatalogRecord, columns: usize) {
-    kit::section_band(
-        ui,
-        "Selected plan",
-        Some(HeadStatus {
-            label: selected.lifecycle_label(),
-            tone: lifecycle_tone(selected),
-        }),
-    );
+    kit::section_band(ui, "Selected plan", Some(selected.lifecycle_label()));
     let rows = plan_detail_rows(selected);
     if columns <= 1 {
         for row in &rows {

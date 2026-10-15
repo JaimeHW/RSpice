@@ -53,10 +53,10 @@ const RENAME_DESCRIPTION: &str = "Renaming writes the plan's display name and no
 /// claim — that the catalog decides, not this dialog — twice over a surface
 /// whose whole content is three rows and two fields.
 const RENAME_BOUNDARIES: &[(&str, &str)] = &[(
-    "Refused by the catalog itself",
+    "Names are unique",
     "A name another plan already holds is rejected, compared without regard to \
-     case, and a plan whose analysis instances are executing keeps its name \
-     until they finish. Either refusal is reported here and nothing is written.",
+     case, and a plan whose analyses are running keeps its name until they \
+     finish.",
 )];
 
 fn rename(
@@ -83,7 +83,6 @@ fn rename(
         .show(ctx, |ui| {
             if let Some(selected) = selected {
                 rename_name_group(ui, &mut draft.name, selected);
-                rename_preserved_group(ui, selected);
             }
             kit::note_grid(ui, RENAME_BOUNDARIES);
             workflow_validation_message(ui, draft.validation_error.as_deref());
@@ -108,41 +107,9 @@ fn rename(
 /// whether a name is available, which is the one sentence this dialog must not
 /// accidentally say.
 fn rename_name_group(ui: &mut Ui, name: &mut String, selected: &PlanCatalogRecord) {
-    kit::section_head(
-        ui,
-        "Plan to rename",
-        Some(HeadStatus {
-            label: selected.lifecycle_label(),
-            tone: lifecycle_tone(selected),
-        }),
-    );
+    kit::section_head(ui, "Plan to rename", Some(selected.lifecycle_label()));
     property_row(ui, "Current name", &selected.name);
     property_row_input(ui, "New unique name", name, name.trim().is_empty());
-}
-
-/// What the rename leaves alone.
-///
-/// The revision is stated because it is the fact a reader is most likely to
-/// doubt: renaming an object is exactly the kind of edit that bumps a revision
-/// elsewhere, and here it does not.
-fn rename_preserved_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
-    let t = Tokens::get(ui.ctx());
-    kit::section_head(ui, "Preserved by this rename", None);
-    property_row_status(
-        ui,
-        "Stable plan identity",
-        &selected.id.to_string(),
-        t.color.ok,
-        StatusMark::Success,
-    );
-    property_row_status(
-        ui,
-        "Plan revision",
-        &selected.revision.to_string(),
-        t.color.ok,
-        StatusMark::Success,
-    );
-    result_reference_row(ui, selected);
 }
 
 /// What archiving does, from the stored plan's own documented meaning: a
@@ -183,10 +150,9 @@ fn confirm_archive(
         // every one of them is reported through the validation message below.
         .primary_enabled(selected.is_some_and(|record| !record.active && !record.archived))
         .show(ctx, |ui| {
-            concept_banner(ui, ARCHIVE_BANNER, true);
+            concept_banner(ui, ARCHIVE_BANNER, false);
             if let Some(selected) = selected {
                 archive_subject_group(ui, selected);
-                archive_retained_group(ui, selected);
             }
             workflow_validation_message(ui, draft.validation_error.as_deref());
         });
@@ -202,76 +168,8 @@ fn confirm_archive(
 
 /// Which plan is being retired, named and identified.
 fn archive_subject_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
-    kit::section_head(
-        ui,
-        "Plan to archive",
-        Some(HeadStatus {
-            label: selected.lifecycle_label(),
-            tone: lifecycle_tone(selected),
-        }),
-    );
+    kit::section_head(ui, "Plan to archive", Some(selected.lifecycle_label()));
     property_row(ui, "Name", &selected.name);
-    property_row(ui, "Stable identity", &selected.id.to_string());
-}
-
-/// What survives the retirement, counted rather than promised.
-///
-/// `archive_plan` moves one boolean on the stored plan and reaches nothing else
-/// on it, so every count here reads the same after the transaction as before it.
-/// Stating them as the catalog's own numbers is what makes "complete
-/// configuration" a checkable claim instead of reassurance.
-///
-/// The counts are grouped exactly as the browse aside groups them, and for the
-/// same reason: the labels carry the nouns and the values carry only figures, so
-/// no row has to pluralize a word to stay true.
-fn archive_retained_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
-    let t = Tokens::get(ui.ctx());
-    kit::section_head(ui, "Retained while archived", None);
-    property_row_status(
-        ui,
-        "Analyses, model bindings",
-        &format!("{} · {}", selected.analyses, selected.model_bindings),
-        t.color.ok,
-        StatusMark::Success,
-    );
-    property_row_status(
-        ui,
-        "Variables, outputs, specifications",
-        &format!(
-            "{} · {} · {}",
-            selected.design_variables, selected.saved_outputs, selected.specifications
-        ),
-        t.color.ok,
-        StatusMark::Success,
-    );
-    result_reference_row(ui, selected);
-}
-
-/// The runs that reference this plan.
-///
-/// One painter for both transactions, because both make the same promise about
-/// the same number: a run's authenticated receipt names a plan by its stable
-/// identity, so neither renaming nor archiving can detach a result from the plan
-/// that produced it.
-///
-/// With no runs yet there is nothing to promise. A "0 references retained" row
-/// would dress an empty set as a guarantee, so the empty case says what is
-/// actually true instead.
-fn result_reference_row(ui: &mut Ui, selected: &PlanCatalogRecord) {
-    let t = Tokens::get(ui.ctx());
-    match selected.results {
-        0 => property_row(ui, "Result references", "no run references this plan yet"),
-        count => property_row_status(
-            ui,
-            "Result references",
-            &format!(
-                "{count} run receipt{} · matched by identity",
-                plural_suffix(count)
-            ),
-            t.color.ok,
-            StatusMark::Success,
-        ),
-    };
 }
 
 /// Open a plan: the setup and the plan-owned workspace payload move together,

@@ -98,108 +98,15 @@ const EXPORT_NOTES: [(&str, &str); 2] = [
     ),
     (
         "Excluded",
-        "Result samples and datasets. A run's authenticated receipt names the \
-         plan it was dispatched from and cannot travel with it, and the pinned \
-         regression baseline the package carries is dropped rather than \
-         recreated when the package is imported. No digest and no signature \
-         either: this build has nothing to verify one against.",
+        "Result samples and datasets. A run's receipt names the plan it was \
+         dispatched from and cannot travel with it, and the pinned regression \
+         baseline the package carries is dropped rather than recreated when \
+         the package is imported.",
     ),
-];
-
-/// The authored validation table's three columns.
-const IMPORT_STAGE_HEADINGS: [&str; 3] =
-    ["Validation stage", "Required outcome", "Failure behavior"];
-
-/// The stages [`commit_import_simulation_plan`] runs, in the order it runs them,
-/// each with the outcome it demands and what a refusal there leaves behind.
-///
-/// The two halves of the authored table that RSpice cannot own are absent rather
-/// than restated: nothing here checks a digest or a signature, and nothing
-/// classifies a capability or an entitlement.
-///
-/// The three rows are three *failure behaviors*, which is why they are three
-/// rows and not seven. Everything up to the model-binding check runs before any
-/// copy of the project exists, so a refusal there touches nothing at all; the
-/// four stages after it run against clones of the setup and the workspace that
-/// replace the real ones only once every stage has passed, so a refusal in any
-/// of them discards the candidate and leaves the current plan active. A column
-/// repeating one of those two sentences four times is what the authored table
-/// spends a third of its width on.
-const IMPORT_STAGES: [[&str; 3]; 3] = [
-    [
-        "Envelope format and version",
-        "a package this build's reader accepts",
-        "package rejected · no project mutation",
-    ],
-    [
-        "Model bindings",
-        "every binding resolves in the library",
-        "import blocked until bindings are reviewed",
-    ],
-    [
-        "Catalog, payload, configuration, context",
-        "each applies to a copy of the project",
-        "candidate discarded · plan stays active",
-    ],
 ];
 
 /// What the envelope row says before a package has been chosen.
 const NO_PACKAGE_CHOSEN: &str = "no package chosen";
-
-/// [`IMPORT_STAGES`] as the authored table, or as one group per stage where the
-/// track cannot hold three columns.
-///
-/// The columns are measured from the cells rather than authored, because a
-/// three-column table of clauses is exactly the shape that elides silently: a
-/// stage shortened to `Catalog, payload, config…` sits inside its clip rect and
-/// passes every fit gate this module has.
-fn import_stage_table(ui: &mut Ui) {
-    let columns = IMPORT_STAGE_HEADINGS
-        .iter()
-        .enumerate()
-        .map(|(index, heading)| {
-            let width = IMPORT_STAGES
-                .iter()
-                .map(|stage| kit::prose_column_width(ui, heading, stage[index]))
-                .fold(0.0_f32, f32::max);
-            TableColumn {
-                heading,
-                track: if index + 1 == IMPORT_STAGE_HEADINGS.len() {
-                    ColumnTrack::Elastic(width)
-                } else {
-                    ColumnTrack::Fixed(width)
-                },
-            }
-        })
-        .collect::<Vec<_>>();
-    if ui.available_width() >= kit::table_minimum_width(&columns) {
-        let rows = IMPORT_STAGES
-            .iter()
-            .map(|stage| TableRow {
-                selected: false,
-                announced: format!("{}: {} · on failure, {}", stage[0], stage[1], stage[2]),
-            })
-            .collect::<Vec<_>>();
-        kit::read_only_records_table(
-            ui,
-            "simulation.plan-manager.import.stages",
-            &columns,
-            &rows,
-            |ui, row, column| {
-                let t = Tokens::get(ui.ctx());
-                kit::cell_prose(ui, IMPORT_STAGES[row][column], t.color.text);
-            },
-        );
-        return;
-    }
-    // Too narrow for three tracks. Each stage keeps its two claims, under its
-    // own name, where the values have the whole width instead of a third of it.
-    for stage in IMPORT_STAGES {
-        kit::section_head(ui, stage[0], None);
-        property_row(ui, IMPORT_STAGE_HEADINGS[1], stage[1]);
-        property_row(ui, IMPORT_STAGE_HEADINGS[2], stage[2]);
-    }
-}
 
 /// The route's dialog. See the shell's child-dialog signature contract.
 pub(super) fn dialog(
@@ -247,10 +154,7 @@ fn export(
         kit::section_head(
             ui,
             "Exported plan",
-            selected.map(|record| HeadStatus {
-                label: record.lifecycle_label(),
-                tone: lifecycle_tone(record),
-            }),
+            selected.map(PlanCatalogRecord::lifecycle_label),
         );
         if let Some(record) = selected {
             property_row(ui, "Name", &record.name);
@@ -351,7 +255,6 @@ fn import(
     .hint("Choose a package file, or paste one with Ctrl+V")
     .primary_enabled(!draft.name.trim().is_empty() && matches!(inspected, Some(Ok(_))))
     .show(ctx, |ui| {
-        let t = Tokens::get(ui.ctx());
         // No status word on this head. Whether a package is loaded, and whether
         // it is one this build accepts, are the same question, and the envelope
         // row below answers it with a mark. A second answer here would either
@@ -365,12 +268,10 @@ fn import(
         });
         match &inspected {
             Some(Ok(package)) => {
-                property_row_status(
+                property_row(
                     ui,
                     "Package envelope",
                     &envelope_label(draft.exchange_text.len()),
-                    t.color.ok,
-                    StatusMark::Success,
                 );
                 property_row(
                     ui,
@@ -410,22 +311,15 @@ fn import(
             // because a deserializer's reason is a sentence and a property row
             // is one elided line.
             Some(Err(_)) => {
-                property_row_status(
+                property_row_problem(
                     ui,
                     "Package envelope",
                     "not a package this build accepts",
-                    t.color.err,
-                    StatusMark::Failure,
+                    Some(Problem::Failure),
                 );
             }
             None => {
-                property_row_status(
-                    ui,
-                    "Package envelope",
-                    NO_PACKAGE_CHOSEN,
-                    t.color.text_dim,
-                    StatusMark::Neutral,
-                );
+                property_row(ui, "Package envelope", NO_PACKAGE_CHOSEN);
             }
         }
         // No gap before the head: it draws its own closing rule, which is the
@@ -438,8 +332,6 @@ fn import(
         // input is what says which control the refusal is about.
         let unnamed = draft.name.trim().is_empty();
         property_row_input(ui, "Name", &mut draft.name, unnamed);
-        ui.add_space(8.0);
-        import_stage_table(ui);
         // The commit's refusal wins: it is the later and more specific of the
         // two, and it is the one the reader just pressed a button to get.
         workflow_validation_message(

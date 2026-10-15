@@ -131,10 +131,12 @@ enum Compatibility {
 }
 
 impl Compatibility {
+    /// The verdict's tone. Agreeing and differing are both answers the reader
+    /// asked for, so both are neutral; a run set that does not validate is the
+    /// one row with a problem in it.
     fn tone(self, t: &Tokens) -> Color32 {
         match self {
-            Self::Same => t.color.ok,
-            Self::Differs => t.color.warn,
+            Self::Same | Self::Differs => t.color.text,
             Self::Unavailable => t.color.err,
         }
     }
@@ -194,7 +196,6 @@ pub(super) fn dialog(
     .hint("Differences are stated from the base plan to the compared plan")
     .size(DialogSize::SimulationWorkflow)
     .show(ctx, |ui| {
-        let t = Tokens::get(ui.ctx());
         match &domains {
             Some((base, target, domains)) => {
                 plan_picker_row(ui, draft, records, base, target);
@@ -202,19 +203,16 @@ pub(super) fn dialog(
                 domain_table(ui, domains);
                 ui.add_space(8.0);
                 named_differences(ui, domains);
-                ui.add_space(8.0);
-                kit::note_grid(ui, &COMPARISON_BOUNDARY_NOTES);
             }
             // The catalog can lose a plan between the frame that picked it and
             // this one, and both sides resolve through the projection for
             // exactly that reason. Reaching here means it lost both.
             None => {
-                property_row_status(
+                property_row_problem(
                     ui,
                     "Comparison",
-                    "the catalog carries neither side of this comparison",
-                    t.color.err,
-                    StatusMark::Failure,
+                    "Both plans are gone.",
+                    Some(Problem::Failure),
                 );
             }
         }
@@ -238,22 +236,6 @@ pub(super) fn dialog(
 /// absence is now held where an absence belongs: the omission register in
 /// `tests.rs` forbids the domain's vocabulary across every route and every gated
 /// viewport, so it cannot come back unnoticed and it costs the surface nothing.
-/// The empty state of the named differences, in one row.
-///
-/// It is the same claim the four domain rows make with their zeroes, said once
-/// in words, because a reader who scanned the counts should not have to conclude
-/// "and therefore nothing is named" for themselves.
-const NO_NAMED_DIFFERENCES: &str = "every declared entry matches in all four domains";
-
-const COMPARISON_BOUNDARY_NOTES: [(&str, &str); 1] = [(
-    "Read-only comparison",
-    "This surface performs no transaction. It reads the same catalog \
-         projection the plan table reads and writes nothing back, so both plans \
-         are left exactly as they were and closing it changes neither. Applying \
-         a difference means editing the plan that should carry it, after \
-         opening that plan.",
-)];
-
 /// The two plans, each pickable, in the order the counts are stated in.
 ///
 /// Both lists offer every plan in the catalog, including the one already on the
@@ -386,18 +368,10 @@ fn named_differences(ui: &mut Ui, domains: &[ComparedDomain]) {
         .filter(|domain| !domain.difference.is_empty())
         .map(|domain| (domain.domain, named_difference(&domain.difference)))
         .collect::<Vec<_>>();
-    // Nothing to name is one line, not a heading over a box explaining that the
-    // box is empty. The box cost four lines and a rule to say what the table's
-    // twelve zeroes have already said.
+    // Nothing to name is nothing to paint. The table's twelve zeroes have
+    // already said that every declared entry matches, and a row saying so
+    // again would be a section shown only to report success.
     if differing.is_empty() {
-        let t = Tokens::get(ui.ctx());
-        property_row_status(
-            ui,
-            "Named differences",
-            NO_NAMED_DIFFERENCES,
-            t.color.ok,
-            StatusMark::Success,
-        );
         return;
     }
     kit::section_head(ui, "Named differences", None);
@@ -1155,10 +1129,6 @@ mod tests {
             owed.push(domain.key.to_owned());
             owed.push(domain.verdict.clone());
             owed.push(named_difference(&domain.difference));
-        }
-        for (caption, body) in COMPARISON_BOUNDARY_NOTES {
-            owed.push(caption.to_owned());
-            owed.push(body.to_owned());
         }
 
         for screen in GATED_VIEWPORTS {

@@ -126,11 +126,11 @@ impl PlanCatalogRecord {
     /// The declared run set as the table states it.
     ///
     /// One owner, because the manager's filter matches this text and its table
-    /// paints it. Two spellings of "invalid" would make a plan findable by a
-    /// word the row does not show, or shown a word it cannot be found by.
+    /// paints it. A run set that does not validate has no count, so the cell
+    /// shows a dash; the selected plan's detail list states the problem.
     pub(super) fn run_set_label(&self) -> String {
         self.point_count()
-            .map_or_else(|| "invalid".to_owned(), |count| format!("{count} PVT"))
+            .map_or_else(|| "—".to_owned(), |count| format!("{count} PVT"))
     }
 
     pub(super) const fn lifecycle_label(&self) -> &'static str {

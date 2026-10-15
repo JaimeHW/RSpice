@@ -249,7 +249,6 @@ fn campaign_notes(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str>) {
 /// How much work the selected members declare, and what stands between this
 /// draft and being queued.
 fn declared_scope_group(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str>) {
-    let t = Tokens::get(ui.ctx());
     kit::section_head(ui, "Combined declared scope", None);
     // The eligible count and the membership bound moved to the footer hint. The
     // table above states eligibility per row — an archived plan is not in it at
@@ -260,29 +259,20 @@ fn declared_scope_group(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str
         "Members",
         &format!("{} plan{}", scope.members, plural_suffix(scope.members)),
     );
-    // "After", not "before". This route used to call the same number
-    // "approximately N tasks before dependency expansion", and it is neither
-    // approximate nor before: `task_count` is the run set's own expansion, and
-    // that expansion is what adds analysis families and their prerequisites.
-    // Queueing then re-derives the identical quantity from each member's
-    // prepared snapshot and reports it on the receipt, which is the count the
-    // success message carries.
+    // `task_count` is the run set's own expansion, prerequisites included, and
+    // queueing re-derives the identical quantity from each member's prepared
+    // snapshot, so the count is exact.
     if scope.unforecast == 0 {
-        property_row(
-            ui,
-            "Authenticated tasks",
-            &format!("{} · after dependency expansion", scope.tasks),
-        );
+        property_row(ui, "Tasks", &scope.tasks.to_string());
     } else {
-        property_row_status(
+        property_row_problem(
             ui,
-            "Authenticated tasks",
+            "Tasks",
             &format!(
                 "{} of {} {RUN_SET_DOES_NOT_VALIDATE}",
                 scope.unforecast, scope.members
             ),
-            t.color.err,
-            StatusMark::Failure,
+            Some(Problem::Failure),
         );
     }
     // Admission is all or nothing at preparation: the controller activates and
@@ -293,7 +283,7 @@ fn declared_scope_group(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str
     // repeated the bounds the footer hint carries, so it was a row that said
     // nothing about this draft on every surface where the draft is fine.
     if let Some(reason) = refusal {
-        property_row_status(ui, "Admission", reason, t.color.err, StatusMark::Failure);
+        property_row_problem(ui, "Admission", reason, Some(Problem::Failure));
     }
 }
 
@@ -325,10 +315,7 @@ fn member_table(
         "Member plans",
         // Stated only when the catalog actually holds one. A rule about a set
         // that is empty is a sentence the reader has to rule out.
-        has_archived.then_some(HeadStatus {
-            label: "archived plans are not eligible",
-            tone: LifecycleTone::Archived,
-        }),
+        has_archived.then_some("archived plans are not eligible"),
     );
     let positions = eligible
         .iter()
@@ -377,16 +364,16 @@ fn member_table(
                     &format!("{} / {}", record.enabled, record.analyses),
                     tone,
                 ),
-                // A run set that does not validate is toned as the error it is,
-                // and the three columns derived from it go absent rather than
-                // printing a zero none of them measured.
+                // A run set that does not validate has no count, and the three
+                // columns derived from it go absent too rather than printing a
+                // zero none of them measured.
                 3 => kit::cell_value(
                     ui,
                     &record.run_set_label(),
                     if record.point_count().is_some() {
                         tone
                     } else {
-                        t.color.err
+                        t.color.text_faint
                     },
                 ),
                 4 => kit::cell_value(
@@ -875,9 +862,7 @@ mod tests {
             "the scope was painted before the members it sums"
         );
         assert!(
-            painted
-                .iter()
-                .any(|text| text == &format!("{expected} · after dependency expansion")),
+            painted.iter().any(|text| text == &expected.to_string()),
             "the scope did not state the summed task count {expected}: {painted:?}"
         );
         // The caps are on screen before anything is rejected: the membership
@@ -914,7 +899,7 @@ mod tests {
         let scope = campaign_scope(&members, &records);
         let owed = [
             "2 plans".to_owned(),
-            format!("{} · after dependency expansion", scope.tasks),
+            scope.tasks.to_string(),
             "all members frozen up front".to_owned(),
             "one at a time, in order shown".to_owned(),
             "later members still run".to_owned(),
