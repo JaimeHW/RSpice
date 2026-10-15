@@ -1154,6 +1154,9 @@ pub(super) struct RegressionWaveformPair<'a> {
     pub(super) target: crate::state::RegressionTargetSelector,
     pub(super) baseline: &'a crate::state::WaveformData,
     pub(super) current: &'a crate::state::WaveformData,
+    /// The analysis both waveforms came out of, which is what names the
+    /// quantity their shared sweep axis is in.
+    pub(super) analysis_type: crate::state::AnalysisType,
 }
 
 pub(super) fn regression_waveform_pairs<'a>(
@@ -1208,6 +1211,7 @@ pub(super) fn regression_waveform_pairs<'a>(
                     },
                     baseline: baseline_waveform,
                     current: current_waveform,
+                    analysis_type: baseline_analysis.analysis_type,
                 });
             }
         }

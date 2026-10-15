@@ -1072,6 +1072,7 @@ fn symmetric_waveform_envelope_rejects_candidate_only_spike_and_missing_coverage
                 target: target.clone(),
                 baseline: &baseline,
                 current: &spike,
+                analysis_type: AnalysisType::Transient,
             },
             Some(&rule),
         )
@@ -1087,6 +1088,7 @@ fn symmetric_waveform_envelope_rejects_candidate_only_spike_and_missing_coverage
                 target,
                 baseline: &baseline,
                 current: &truncated,
+                analysis_type: AnalysisType::Transient,
             },
             Some(&rule),
         )
@@ -1121,6 +1123,7 @@ fn waveform_window_evaluates_interpolated_inclusive_boundaries() {
                 target,
                 baseline: &baseline,
                 current: &candidate,
+                analysis_type: AnalysisType::Transient,
             },
             Some(&rule),
         )
@@ -1232,6 +1235,7 @@ fn every_supported_waveform_method_rejects_nonfinite_and_nonmonotonic_samples() 
         target: target.clone(),
         baseline: &baseline,
         current: &invalid,
+        analysis_type: AnalysisType::Transient,
     };
     for method in crate::state::RegressionComparisonMethod::ALL {
         let rule = tolerance_rule(target.clone(), method);

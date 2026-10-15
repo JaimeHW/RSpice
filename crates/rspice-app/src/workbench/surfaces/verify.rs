@@ -6,6 +6,7 @@
 //! when that row is selected, and — when the run holds nothing for the page —
 //! one line saying what produces data, with the action that produces it.
 
+mod axes;
 mod corners;
 mod histogram;
 mod optimization;

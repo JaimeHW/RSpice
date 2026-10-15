@@ -208,14 +208,18 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         });
         let body = ui.available_height();
         let detail = selected.map_or(0.0, |_| (body * 0.45).clamp(DETAIL_MIN_H, DETAIL_MAX_H));
+        // Method and Tolerance hold whole phrases — "Absolute + relative
+        // envelope", "abs 20m + rel 2 % · skew 20n · 0 … 3u" — and a column
+        // that elides one in every row states nothing, so they are measured
+        // for their longest and Check takes what is left.
         let columns = [
             Column::name("Check", 160.0),
-            Column::words("Method", 120.0),
-            Column::number("Baseline", 100.0),
-            Column::number("Current", 100.0),
-            Column::number("Delta", 100.0),
-            Column::words("Tolerance", 150.0),
-            Column::words("Result", 180.0),
+            Column::words("Method", 190.0),
+            Column::number("Baseline", 96.0),
+            Column::number("Current", 96.0),
+            Column::number("Delta", 110.0),
+            Column::words("Tolerance", 290.0),
+            Column::words("Result", 150.0),
         ];
         clicked = DataTable::new("verify.regression.checks", &columns, rows.len())
             .clickable()
@@ -354,9 +358,12 @@ fn regression_rows(
 fn regression_status_cell(verdict: &RegressionVerdict) -> Cell {
     match verdict {
         RegressionVerdict::Pass { .. } => Cell::verdict(Verdict::Pass),
-        RegressionVerdict::Fail { detail, .. } => {
-            Cell::text(format!("Fail \u{00b7} {detail}")).judged(Verdict::Fail)
-        }
+        // A failure is the word and nothing else: how far outside the
+        // tolerance the candidate landed is the Delta column held against the
+        // Tolerance column, both already on the row, and the verdict's exact
+        // `{:.6e}` sentence goes to the JUnit and TAP documents, which are
+        // read by a machine. Spelled into the cell it only ever elided.
+        RegressionVerdict::Fail { .. } => Cell::verdict(Verdict::Fail),
         RegressionVerdict::NotConfigured => Cell::text("No tolerance"),
         RegressionVerdict::NotEvaluated(detail) => {
             Cell::problem(format!("Blocked \u{00b7} {detail}"), Problem::Warning)
@@ -509,6 +516,7 @@ fn regression_waveform_chart(
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let baseline = pair.baseline;
     let current = pair.current;
+    let sweep_unit = axes::sweep_unit(pair.analysis_type);
     let candidate_color = t.color.traces[0];
     let header = egui::Rect::from_min_size(rect.min, egui::vec2(width, PANEL_HEADER_H_CHART));
     ui.painter().text(
@@ -518,37 +526,23 @@ fn regression_waveform_chart(
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
-    let legend_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let mut x = header.right() - TABLE_EDGE_INSET;
-    for (label, stroke, dashed) in [
-        ("tolerance", egui::Stroke::new(1.0, t.color.text_faint), true),
+    let mut legend = vec![
+        (
+            "tolerance",
+            egui::Stroke::new(1.0, t.color.text_faint),
+            true,
+        ),
         ("candidate", egui::Stroke::new(1.5, candidate_color), false),
         ("baseline", egui::Stroke::new(1.5, t.color.text_dim), false),
-    ] {
-        if rule.is_none() && dashed {
-            continue;
-        }
-        let galley =
-            ui.painter()
-                .layout_no_wrap(label.to_owned(), legend_font.clone(), t.color.text_dim);
-        x -= galley.size().x;
-        ui.painter().galley(
-            egui::pos2(x, header.center().y - galley.size().y * 0.5),
-            galley,
-            t.color.text_dim,
-        );
-        let line = [
-            egui::pos2(x - 20.0, header.center().y),
-            egui::pos2(x - 6.0, header.center().y),
-        ];
-        if dashed {
-            ui.painter()
-                .extend(egui::Shape::dashed_line(&line, stroke, 3.0, 2.0));
-        } else {
-            ui.painter().line_segment(line, stroke);
-        }
-        x -= 34.0;
+    ];
+    if rule.is_none() {
+        legend.remove(0);
     }
+    axes::legend(
+        ui,
+        header.shrink2(egui::vec2(TABLE_EDGE_INSET, 0.0)),
+        &legend,
+    );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Other,
@@ -597,45 +591,21 @@ fn regression_waveform_chart(
     ) else {
         return;
     };
-    let plot = egui::Rect::from_min_max(
-        header.left_bottom() + egui::vec2(TABLE_EDGE_INSET, 6.0),
-        rect.right_bottom() - egui::vec2(TABLE_EDGE_INSET, TABLE_EDGE_INSET),
+    let area = egui::Rect::from_min_max(
+        header.left_bottom() + egui::vec2(TABLE_EDGE_INSET, 2.0),
+        rect.right_bottom() - egui::vec2(TABLE_EDGE_INSET, 4.0),
     );
-    if plot.width() <= 4.0 || plot.height() <= 4.0 {
+    if area.width() <= 4.0 || area.height() <= 4.0 {
         return;
     }
-    ui.painter().rect_filled(plot, 0.0, t.color.canvas_bg);
-    for step in 1..4 {
-        let y = egui::lerp(plot.bottom()..=plot.top(), step as f32 / 4.0);
-        ui.painter().hline(
-            plot.x_range(),
-            y,
-            egui::Stroke::new(1.0, t.color.canvas_grid),
-        );
-    }
-    let points = |x_values: &[f64], y_values: &[f64]| {
-        x_values
-            .iter()
-            .zip(y_values)
-            .filter(|(x_value, y_value)| x_value.is_finite() && y_value.is_finite())
-            .map(|(x_value, y_value)| {
-                let x_fraction = if (x_max - x_min).abs() <= f64::EPSILON {
-                    0.5
-                } else {
-                    ((*x_value - x_min) / (x_max - x_min)) as f32
-                };
-                let y_fraction = if (y_max - y_min).abs() <= f64::EPSILON {
-                    0.5
-                } else {
-                    ((*y_value - y_min) / (y_max - y_min)) as f32
-                };
-                egui::pos2(
-                    egui::lerp(plot.left()..=plot.right(), x_fraction),
-                    egui::lerp(plot.bottom()..=plot.top(), y_fraction),
-                )
-            })
-            .collect::<Vec<_>>()
+    let axes = axes::Axes {
+        x: (x_min, x_max),
+        y: (y_min, y_max),
+        x_unit: sweep_unit,
+        y_unit: current.unit.as_deref().unwrap_or(""),
     };
+    let plot = axes::paint(ui, area, &axes);
+    let points = |x_values: &[f64], y_values: &[f64]| axes::points(plot, &axes, x_values, y_values);
     ui.painter().add(egui::Shape::line(
         points(baseline.x.as_slice(), baseline.y.as_slice()),
         egui::Stroke::new(1.5, t.color.text_dim),

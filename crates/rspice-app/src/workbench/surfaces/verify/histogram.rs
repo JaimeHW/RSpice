@@ -43,7 +43,7 @@ pub(super) struct HistogramModel {
 }
 
 /// A 1-2-5 step near `raw`.
-fn nice_step(raw: f64) -> f64 {
+pub(super) fn nice_step(raw: f64) -> f64 {
     if !(raw.is_finite() && raw > 0.0) {
         return 1.0;
     }

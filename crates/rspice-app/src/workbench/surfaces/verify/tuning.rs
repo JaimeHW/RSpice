@@ -14,6 +14,8 @@ use super::*;
 /// Least and greatest height of the variables and response panes.
 const TUNING_PANE_MIN_H: f32 = 240.0;
 const TUNING_PANE_MAX_H: f32 = 380.0;
+/// The row over the response plot: its waveform's name and the legend.
+const PLOT_HEADER_H: f32 = 20.0;
 
 pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
     let active_plan_run = verification_run(app).and_then(|run| {
@@ -895,9 +897,9 @@ fn tuning_range_si(variable: &crate::state::DesignVariable) -> Option<(f64, f64)
 /// waveform once a committed candidate has run.
 fn tuning_response_pane(ui: &mut Ui, app: &RSpiceApp) {
     crate::workbench::design_system::section_header(ui, "Response", None);
-    let baseline = tuning_baseline_run(app)
-        .and_then(|run| run.analyses.iter().find(|analysis| analysis.success))
-        .and_then(|analysis| analysis.waveforms.first());
+    let analysis = tuning_baseline_run(app)
+        .and_then(|run| run.analyses.iter().find(|analysis| analysis.success));
+    let baseline = analysis.and_then(|analysis| analysis.waveforms.first());
     let candidate = tuning_candidate_run(app)
         .and_then(|run| run.analyses.iter().find(|analysis| analysis.success))
         .and_then(|analysis| {
@@ -908,34 +910,21 @@ fn tuning_response_pane(ui: &mut Ui, app: &RSpiceApp) {
                     .find(|waveform| waveform.name.eq_ignore_ascii_case(&baseline.name))
             })
         });
-    tuning_waveform_preview(ui, baseline, candidate);
+    let sweep_unit = analysis.map_or("", |analysis| axes::sweep_unit(analysis.analysis_type));
+    tuning_waveform_preview(ui, baseline, candidate, sweep_unit);
 }
 
 fn tuning_waveform_preview(
     ui: &mut Ui,
     baseline: Option<&crate::state::WaveformData>,
     candidate: Option<&crate::state::WaveformData>,
+    sweep_unit: &str,
 ) {
     let t = Tokens::get(ui.ctx());
     let (pane, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
     let rect = pane.shrink(TABLE_EDGE_INSET);
     if rect.width() <= 1.0 || rect.height() <= 1.0 {
         return;
-    }
-    ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
-    for index in 1..4 {
-        let x = egui::lerp(rect.x_range(), index as f32 / 4.0);
-        let y = egui::lerp(rect.y_range(), index as f32 / 4.0);
-        ui.painter().vline(
-            x,
-            rect.y_range(),
-            egui::Stroke::new(1.0, t.color.canvas_grid),
-        );
-        ui.painter().hline(
-            rect.x_range(),
-            y,
-            egui::Stroke::new(1.0, t.color.canvas_grid),
-        );
     }
     let valid_waveform = |waveform: &&crate::state::WaveformData| {
         waveform.x.len() == waveform.y.len()
@@ -952,6 +941,7 @@ fn tuning_waveform_preview(
         .filter(valid_waveform)
         .collect::<Vec<_>>();
     if waveforms.is_empty() {
+        ui.painter().rect_filled(rect, 0.0, t.color.canvas_bg);
         ui.painter().text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -977,24 +967,49 @@ fn tuning_waveform_preview(
         .iter()
         .flat_map(|waveform| waveform.y.iter().copied())
         .fold(f64::NEG_INFINITY, f64::max);
-    let x_span = (x_max - x_min).max(f64::EPSILON);
-    let y_span = (y_max - y_min).max(f64::EPSILON);
-    let points_for = |waveform: &crate::state::WaveformData| {
-        waveform
-            .x
-            .iter()
-            .zip(waveform.y.iter())
-            .map(|(x, y)| {
-                egui::pos2(
-                    rect.left() + (((x - x_min) / x_span) as f32) * rect.width(),
-                    rect.bottom() - (((y - y_min) / y_span) as f32) * rect.height(),
-                )
-            })
-            .collect::<Vec<_>>()
+    let named = baseline.or(candidate);
+    let axes = axes::Axes {
+        x: (x_min, x_max),
+        y: (y_min, y_max),
+        x_unit: sweep_unit,
+        y_unit: named.and_then(|waveform| waveform.unit.as_deref()).unwrap_or(""),
     };
+
+    // The header row carries the waveform's name and what each line is; the
+    // axes are painted under it, so neither sits on the other.
+    let header = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), PLOT_HEADER_H));
+    ui.painter().text(
+        header.left_center(),
+        egui::Align2::LEFT_CENTER,
+        named.map_or("Retained waveform", |waveform| waveform.name.as_str()),
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    let mut legend = vec![(
+        "baseline",
+        egui::Stroke::new(1.3, t.color.text_dim),
+        true,
+    )];
+    if candidate.is_some() {
+        legend.insert(
+            0,
+            (
+                "candidate",
+                egui::Stroke::new(1.5, t.color.traces[0]),
+                false,
+            ),
+        );
+    }
+    axes::legend(ui, header, &legend);
+
+    let plot = axes::paint(
+        ui,
+        egui::Rect::from_min_max(header.left_bottom(), rect.max),
+        &axes,
+    );
     if let Some(baseline) = baseline.filter(valid_waveform) {
         ui.painter().extend(egui::Shape::dashed_line(
-            &points_for(baseline),
+            &axes::points(plot, &axes, &baseline.x, &baseline.y),
             egui::Stroke::new(1.3, t.color.text_dim),
             5.0,
             4.0,
@@ -1002,30 +1017,10 @@ fn tuning_waveform_preview(
     }
     if let Some(candidate) = candidate.filter(valid_waveform) {
         ui.painter().add(egui::Shape::line(
-            points_for(candidate),
+            axes::points(plot, &axes, &candidate.x, &candidate.y),
             egui::Stroke::new(1.5, t.color.traces[0]),
         ));
     }
-    ui.painter().text(
-        rect.left_top() + egui::vec2(8.0, 7.0),
-        egui::Align2::LEFT_TOP,
-        baseline
-            .or(candidate)
-            .map_or("Retained waveform", |waveform| waveform.name.as_str()),
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    ui.painter().text(
-        rect.right_top() + egui::vec2(-8.0, 7.0),
-        egui::Align2::RIGHT_TOP,
-        if candidate.is_some() {
-            "solid candidate · dashed baseline"
-        } else {
-            "dashed baseline"
-        },
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
 }
 
 /// The plan's limits against the baseline run and the committed candidate.
