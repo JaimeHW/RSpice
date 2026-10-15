@@ -206,6 +206,9 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                     run_width,
                     pvt_width,
                 );
+                ui.data_mut(|data| {
+                    data.insert_temp(context_lane_width_id(), context_width);
+                });
                 egui::ScrollArea::horizontal()
                     .id_salt("workbench.context_toolbar.tools")
                     .max_width(context_width)
@@ -1546,6 +1549,8 @@ fn toolbar_command(
         format!("{base_label} ({shortcut})")
     };
     let enabled = availability == CommandAvailability::Available;
+    let label_width = explicit_label_width(&label);
+    let show_label = show_label && label_fits_the_context_lane(ui, label_width);
     let response = ui.add_enabled_ui(enabled, |ui| {
         if show_label {
             labeled_icon_button_sized(
@@ -1553,7 +1558,7 @@ fn toolbar_command(
                 icon,
                 &label,
                 selected,
-                explicit_label_width(&label),
+                label_width,
                 layout.toolbar_control_height,
             )
         } else {
@@ -1576,6 +1581,24 @@ fn toolbar_command(
 
 fn projected_tool_count_id() -> egui::Id {
     egui::Id::new("workbench.context_toolbar.projected_tool_count")
+}
+
+fn context_lane_width_id() -> egui::Id {
+    egui::Id::new("workbench.context_toolbar.lane_width")
+}
+
+/// Can a labelled tool still show its label inside the context lane?
+///
+/// The lane scrolls horizontally with its bar hidden, so a label that runs
+/// past the lane's right edge is painted as half a word with nothing on
+/// screen to say it continues — at 1440 px with a live run, "Run schematic
+/// checks" was painted as "Ru". A tool that cannot show its label shows its
+/// icon, which carries the same command and the same tooltip.
+fn label_fits_the_context_lane(ui: &egui::Ui, label_width: f32) -> bool {
+    let Some(lane) = ui.data(|data| data.get_temp::<f32>(context_lane_width_id())) else {
+        return true;
+    };
+    ui.min_rect().width() + ui.spacing().item_spacing.x + label_width <= lane
 }
 
 fn take_projected_tool_slot(ui: &mut egui::Ui, layout: LayoutSpec) -> bool {

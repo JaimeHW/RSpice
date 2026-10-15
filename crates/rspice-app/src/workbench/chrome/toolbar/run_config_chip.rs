@@ -43,7 +43,10 @@ fn run_config_chip_copy(app: &RSpiceApp) -> RunConfigChipCopy {
     RunConfigChipCopy {
         accessibility: format!("Simulation plan {title}; manage and switch simulation plans"),
         title,
-        summary: format!("{pvt_count} PVT · {analysis_count} analyses"),
+        summary: format!(
+            "{pvt_count} PVT \u{00b7} {analysis_count} analys{}",
+            if analysis_count == 1 { "is" } else { "es" }
+        ),
     }
 }
 
@@ -203,8 +206,10 @@ mod tests {
         );
         assert!(!copy.title.contains("Lab characterization"));
         assert!(!copy.accessibility.contains("Lab characterization"));
-        // The live half of the chip is unchanged by the rename.
-        assert!(copy.summary.ends_with(" analyses"));
+        // The live half of the chip is unchanged by the rename, and one
+        // analysis is one analysis.
+        assert!(copy.summary.ends_with(" analysis") || copy.summary.ends_with(" analyses"));
+        assert!(!copy.summary.contains("1 analyses"));
     }
 
     /// Three literals — the width measurement, the accessibility label and the
