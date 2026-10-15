@@ -50,10 +50,21 @@ pub struct RunPreparationInputs<'a, R, A> {
     pub imported_transient_checkpoints:
         &'a rspice_results::transient_checkpoint::TransientCheckpointLibrary,
     pub display_waveform_cache_samples: usize,
+    /// Ceiling on concurrent solver workers for this run, device-local like
+    /// the cache size above. `None` keeps the ceiling this build ships; the
+    /// engine takes the smaller of whatever it ends up with and the
+    /// parallelism the host reports.
+    pub max_parallel_workers: Option<usize>,
     pub compilation: Option<&'a crate::project_veriloga::receipt::ProjectCompileReceipt>,
 }
 
 impl<R, A> RunPreparationInputs<'_, R, A> {
+    /// The resource ceilings this run executes under: the reviewed shipped
+    /// limits, with the only one the reader controls applied over them.
+    fn execution_limits(&self) -> rspice_core::ResourceLimits {
+        execution_limits_for(self.max_parallel_workers)
+    }
+
     fn plan_data(
         &self,
         plan_id: rspice_app_types::product::SimulationPlanId,
@@ -72,6 +83,26 @@ pub struct ManualSourceInputs<'a> {
     pub generated_artifact: Option<&'a rspice_design::netlist_document::GeneratedArtifact>,
     pub owned: bool,
     pub origin: Option<&'a Path>,
+}
+
+/// The reviewed shipped ceilings, with the one the reader controls applied.
+///
+/// `None` leaves the limits exactly as this build ships them, byte for byte.
+/// That is deliberate rather than an optimization: a snapshot carrying
+/// anything else is a snapshot with custom resource limits, and the analyses
+/// that do not enforce them refuse to run under one. A reader who has chosen
+/// nothing must not be handed a custom-limits run.
+///
+/// A free function so the arithmetic can be read and tested without
+/// assembling a run's worth of borrowed catalogs. Every other limit stays at
+/// the shipped value: the worker count is the only one a preference reaches,
+/// and a run must not quietly widen the rest along with it.
+fn execution_limits_for(max_parallel_workers: Option<usize>) -> rspice_core::ResourceLimits {
+    let mut limits = rspice_core::ResourceLimits::default();
+    if let Some(workers) = max_parallel_workers {
+        limits.max_parallel_workers = workers;
+    }
+    limits
 }
 
 pub fn build_analysis_plan(
@@ -416,7 +447,7 @@ where
 
     PreparedRunSnapshot::new(SnapshotParts {
         task_source_policy: super::snapshot::TaskSourcePolicy::PreparedObservations,
-        execution_limits: rspice_core::ResourceLimits::default(),
+        execution_limits: inputs.execution_limits(),
         measurement_references,
         intent: SimulationRunIntent::SimulateRunSet,
         simulation_plan_id: Some(plan.plan_id()),
@@ -645,7 +676,7 @@ pub fn build_prepared_manual_deck<R, A>(
 
     PreparedRunSnapshot::new(SnapshotParts {
         task_source_policy: super::snapshot::TaskSourcePolicy::AuthoredDeck,
-        execution_limits: rspice_core::ResourceLimits::default(),
+        execution_limits: inputs.execution_limits(),
         measurement_references,
         intent: SimulationRunIntent::ManualDeck,
         simulation_plan_id: None,
@@ -835,4 +866,40 @@ fn append_model_execution_plan_identity(
         ),
         plan.digest(),
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_worker_ceiling_is_the_only_limit_a_preference_moves() {
+        let shipped = rspice_core::ResourceLimits::default();
+        let limits = execution_limits_for(Some(6));
+
+        assert_eq!(limits.max_parallel_workers, 6);
+        // Everything a run is allowed to materialize stays where the build
+        // put it. A reader asking for fewer threads is not asking for a
+        // larger netlist, more analysis points, or a deeper hierarchy.
+        assert_eq!(limits.max_netlist_bytes, shipped.max_netlist_bytes);
+        assert_eq!(limits.max_analysis_points, shipped.max_analysis_points);
+        assert_eq!(limits.max_result_values, shipped.max_result_values);
+        assert_eq!(limits.max_hierarchy_depth, shipped.max_hierarchy_depth);
+        assert_eq!(limits.max_batch_runs, shipped.max_batch_runs);
+    }
+
+    /// Choosing nothing must produce the shipped limits *exactly*.
+    ///
+    /// Not merely equivalent ones: `execution_resource_policy_blocker`
+    /// compares against `ResourceLimits::default()` and refuses any run that
+    /// differs, so a snapshot that restated the worker ceiling rather than
+    /// leaving it alone would turn every default session's run into a
+    /// custom-limits run and get it refused.
+    #[test]
+    fn choosing_no_ceiling_leaves_the_shipped_limits_untouched() {
+        assert_eq!(
+            execution_limits_for(None),
+            rspice_core::ResourceLimits::default()
+        );
+    }
 }

@@ -8,7 +8,7 @@ use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::workbench::{MessageCatalog, MessageId, RSpiceApp, ScalarPreference};
+use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
 use super::super::design_system::inspector::muted_inspector_copy;
 use super::super::design_system::{
@@ -1637,7 +1637,11 @@ struct ExecutionPreview {
     task_points: usize,
     pvt_points: usize,
     release_checks: usize,
-    slots: u32,
+    /// Workers a run will actually get here: the reader's ceiling narrowed to
+    /// the parallelism this host reports, which is the same arithmetic the
+    /// engine does. Reporting the stored preference instead would print "0"
+    /// for the default, which asks for every core rather than none.
+    slots: usize,
     release_ready: bool,
 }
 
@@ -1690,7 +1694,9 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
             .state
             .ui
             .preferences
-            .scalar(ScalarPreference::LocalParallelSlots),
+            .solver_worker_limit()
+            .unwrap_or_else(|| rspice_core::ResourceLimits::default().max_parallel_workers)
+            .min(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)),
         release_ready: corner_enabled && pvt_points > 0 && release_checks > 0,
     }
 }

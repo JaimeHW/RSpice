@@ -84,6 +84,7 @@ fn run_preparation_inputs(
         imported_checkpoints: &state.simulation.retained.imported_monte_carlo_checkpoints,
         imported_transient_checkpoints: &state.simulation.retained.imported_transient_checkpoints,
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
+        max_parallel_workers: state.ui.preferences.solver_worker_limit(),
         compilation: state
             .ui
             .code_workspace
