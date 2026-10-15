@@ -198,14 +198,14 @@ fn every_band_publishes_its_own_strings() {
         "Bias & small-signal",
         "Transient shape \u{b7} SIN",
         "Frequency (FREQ) *",
-        // Realization.
-        "Realization \u{b7} no adopters",
-        // Audit.
-        "valid",
+        // Footer. The card is the band's own subject, and the verdict beside
+        // it is what the engine says about that card.
+        "sensor_diff_1k p n SIN(0 2m 1k 0 0 0) AC 1m 0",
+        "Parameters satisfy the SIN engine contract",
     ] {
         assert!(
             published.iter().any(|text| text == expected),
-            "the stage never published {expected:?}"
+            "the stage never published {expected:?}; it published {published:?}"
         );
     }
 }
@@ -760,19 +760,28 @@ fn guide_labels_that_would_touch_are_merged() {
     }
 }
 
-/// One error is `1 error`.
+/// One error is `1 error`, and the instrument says so once.
+///
+/// The footer used to repeat the count as its own verdict word beside a
+/// `1 E · 0 W` tally, which made three spellings of one fact on one screen.
+/// The lifecycle chip is the one that states it; the footer states the
+/// finding itself.
 #[test]
 fn a_count_of_one_is_singular() {
     let mut app = seeded("bridge_cal_step");
     crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "sensor_diff_1k");
     let published = published(&mut app.state, vec2(1000.0, 470.0));
     assert!(
-        published.iter().any(|text| text == "1 error"),
-        "{published:?}"
-    );
-    assert!(
         published.iter().any(|text| text == "draft \u{b7} 1 error"),
         "{published:?}"
+    );
+    assert_eq!(
+        published
+            .iter()
+            .filter(|text| text.contains("1 error"))
+            .count(),
+        1,
+        "one error is stated once: {published:?}"
     );
     for text in &published {
         assert!(

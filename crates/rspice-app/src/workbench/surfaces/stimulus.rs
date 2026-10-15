@@ -1,11 +1,11 @@
 //! The Stimulus Library instrument.
 //!
-//! One fused instrument rather than five panels: a definition is a single
-//! object, and the five bands are five things to know about that one object —
-//! what it is, what it does, what it is made of, what it emits, and what the
-//! engine will say about it. They share a frame and are separated by a rule,
-//! because a card per band would put four scroll bars and four margins between
-//! facts that have to be read together.
+//! One fused instrument rather than four panels: a definition is a single
+//! object, and the four bands are four things to know about that one object —
+//! what it is, what it does, what it is made of, and what comes out of it.
+//! They share a frame and are separated by a rule, because a card per band
+//! would put three scroll bars and three margins between facts that have to be
+//! read together.
 //!
 //! Nothing here interprets a waveform, a parameter name or a lifecycle word.
 //! The curve and its readouts come from `simulation::stimulus_realize`, which
@@ -18,16 +18,15 @@
 //!
 //! The instrument never scrolls as a whole. It is laid out into the stage it
 //! is given, and the two bands whose content is unbounded — the parameter
-//! program and the realization list — scroll inside their own band. A stage
-//! that scrolled would put the audit strip below the fold, which is the one
+//! program and the findings under the card — scroll inside their own band. A
+//! stage that scrolled would put the footer below the fold, which is the one
 //! place a reader must never have to go looking for.
 
-mod audit;
+mod footer;
 mod identity;
 mod program;
 mod proof;
 mod pwl;
-mod realization;
 
 #[cfg(test)]
 mod tests;
@@ -92,11 +91,12 @@ pub(super) enum StageAction {
     /// Copy text to the clipboard.
     Copy(String),
     /// Arm the placement cursor with the saved revision.
+    ///
+    /// Re-adopting a revision onto a placed source, and opening Component
+    /// Properties on one, are the inspector's — it is where the adopters are
+    /// listed, and it addresses an instance by a component id that means
+    /// something only inside the buffer on screen.
     Place,
-    /// Re-adopt the current revision onto one placed source.
-    Readopt(u64),
-    /// Open Component Properties for one placed source.
-    OpenProperties(u64),
 }
 
 /// One line of the audit strip.
@@ -145,11 +145,6 @@ impl Stage {
             .iter()
             .filter(|finding| finding.blocking)
             .count()
-    }
-
-    /// How many findings state something the card's labels do not.
-    pub fn advisories(&self) -> usize {
-        self.findings.len() - self.errors()
     }
 
     /// Why Apply is unavailable, or `None` when it is available.
@@ -382,14 +377,13 @@ fn name_findings(state: &AppState, record: &StimulusDefinition) -> Vec<String> {
     findings
 }
 
-/// Lay the five bands into the stage and paint them.
+/// Lay the four bands into the stage and paint them.
 fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
     let frame = ui.available_rect_before_wrap();
     let (rect, _) = ui.allocate_exact_size(frame.size(), Sense::hover());
     let seam_color = Tokens::get(ui.ctx()).color.border_strong;
-    let realization = realization::content_height(stage);
-    let audit = audit::content_height(stage);
-    let fixed = IDENTITY_HEIGHT + realization + audit + 4.0 * SEAM;
+    let footer = footer::content_height(stage);
+    let fixed = IDENTITY_HEIGHT + footer + 3.0 * SEAM;
     let proof_and_program = (rect.height() - fixed).max(PROOF_MINIMUM_HEIGHT);
     let program = program::content_height(ui, state, stage, rect.width())
         .min((proof_and_program - PROOF_MINIMUM_HEIGHT).max(0.0));
@@ -407,10 +401,9 @@ fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAc
     let identity_rect = band(IDENTITY_HEIGHT);
     let proof_rect = band(proof);
     let program_rect = band(program);
-    let realization_rect = band(realization);
-    let audit_rect = band(audit);
+    let footer_rect = band(footer);
 
-    for seam in [identity_rect, proof_rect, program_rect, realization_rect] {
+    for seam in [identity_rect, proof_rect, program_rect] {
         ui.painter().hline(
             rect.x_range(),
             seam.bottom(),
@@ -427,11 +420,8 @@ fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAc
     in_band(ui, program_rect, |ui| {
         program::show(ui, state, stage, actions);
     });
-    in_band(ui, realization_rect, |ui| {
-        realization::show(ui, state, stage, actions);
-    });
-    in_band(ui, audit_rect, |ui| {
-        audit::show(ui, state, stage);
+    in_band(ui, footer_rect, |ui| {
+        footer::show(ui, state, stage, actions);
     });
 }
 
@@ -479,34 +469,6 @@ pub(super) fn split_row(
     let mut tail_ui = ui.new_child(UiBuilder::new().max_rect(tail));
     tail_ui.set_clip_rect(clip.intersect(tail));
     tail_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), trailing);
-}
-
-/// One run of text in the trailing half of a [`split_row`], elided to a width
-/// the caller states.
-///
-/// A `Label` in a right-to-left slot anchors at the slot's edge and grows the
-/// wrong way, so trailing text is laid out here as a fixed-size item — the same
-/// allocation a button makes, which the layout places correctly — and elided
-/// against an explicit budget rather than against a remaining width the slot
-/// cannot report.
-pub(super) fn trailing_text(
-    ui: &mut Ui,
-    text: &str,
-    font: egui::FontId,
-    color: egui::Color32,
-    max_width: f32,
-) -> egui::Response {
-    let shown = crate::workbench::design_system::elide_text(ui, text, &font, max_width.max(0.0));
-    let galley = ui.painter().layout_no_wrap(shown.clone(), font, color);
-    let (rect, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    ui.painter().galley(rect.min, galley, color);
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-    if shown != text {
-        response.on_hover_text(text)
-    } else {
-        response
-    }
 }
 
 /// Paint one band into exactly its rectangle, clipped to it.
@@ -580,11 +542,5 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
         StageAction::ImportDataFile => stimulus::import_data_file(state),
         StageAction::Copy(text) => state.ui.clipboard_text_request = Some(text),
         StageAction::Place => stimulus::place_selected_definition(state),
-        StageAction::Readopt(id) => {
-            stimulus::readopt_adopter(state, id, stage.saved.name());
-        }
-        StageAction::OpenProperties(id) => {
-            crate::workbench::app::open_property_editor(state, id);
-        }
     }
 }
