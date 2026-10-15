@@ -182,7 +182,7 @@ fn configuration_context(ui: &mut Ui, app: &RSpiceApp) -> Option<ContextIntent> 
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 7.0;
                 ui.label(
-                    egui::RichText::new("CONFIGURATION")
+                    egui::RichText::new("Configuration")
                         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
                         .color(t.color.text_faint),
                 );
@@ -204,19 +204,19 @@ fn configuration_context(ui: &mut Ui, app: &RSpiceApp) -> Option<ContextIntent> 
                     ui.label(
                         egui::RichText::new("No configuration sets")
                             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.warn),
+                            .color(t.color.text_dim),
                     );
                 }
 
                 if let Some(configuration) = active {
                     ui.separator();
-                    context_value(ui, "TESTBENCH", &configuration.root().display_path());
+                    context_value(ui, "Testbench", &configuration.root().display_path());
                     ui.separator();
                     context_value(ui, "DUT", configuration.dut_path());
                     ui.separator();
                     context_value(
                         ui,
-                        "BINDING",
+                        "Binding",
                         &format!("{} overrides", configuration.overrides().len()),
                     );
                 }
@@ -378,21 +378,62 @@ fn activation_error(ui: &mut Ui) {
     };
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(theme::mix(t.color.bg_panel, t.color.err, 0.08))
+        .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(10, 7))
         .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                status_dot(ui, t.color.err, "Activation blocked");
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(error)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text),
-                    )
-                    .wrap(),
-                );
-            });
+            ui.set_width(ui.available_width());
+            problem_mark_line(
+                ui,
+                Problem::Failure,
+                &format!("Activation blocked. {error}"),
+            );
         });
+}
+
+/// Side of a problem mark set in front of a line on this page, and the
+/// advance from its left edge to the text after it: the kit's own values.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
+
+/// A mark and then neutral words, laid out inside whatever frame the caller
+/// has already opened.
+///
+/// The kit's `problem_line` carries a panel body's inset of its own, which
+/// lands a second indent inside a framed strip; this one starts where its
+/// caller's margin does.
+fn problem_mark_line(ui: &mut Ui, problem: Problem, message: &str) {
+    let t = Tokens::get(ui.ctx());
+    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let width = ui.available_width().max(1.0);
+    let galley = ui.painter().layout(
+        message.to_owned(),
+        font,
+        t.color.text,
+        (width - MARK_ADVANCE).max(1.0),
+    );
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(width, galley.size().y.max(MARK_SIDE)), Sense::hover());
+    let announcement = problem.announce(message);
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+    });
+    let first_line = galley
+        .rows
+        .first()
+        .map_or(galley.size().y * 0.5, |row| row.rect().center().y);
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            pos2(rect.left() + MARK_SIDE * 0.5, rect.top() + first_line),
+            vec2(MARK_SIDE, MARK_SIDE),
+        ),
+        problem,
+    );
+    ui.painter().galley(
+        pos2(rect.left() + MARK_ADVANCE, rect.top()),
+        galley,
+        t.color.text,
+    );
 }
 
 fn no_active_configuration(ui: &mut Ui, count: usize) -> bool {
@@ -421,7 +462,6 @@ fn no_active_configuration(ui: &mut Ui, count: usize) -> bool {
 }
 
 fn precedence_panel(ui: &mut Ui, configuration: &ConfigurationSet) {
-    let t = Tokens::get(ui.ctx());
     let definition = configuration.definition();
     section_header(
         ui,
@@ -431,7 +471,7 @@ fn precedence_panel(ui: &mut Ui, configuration: &ConfigurationSet) {
             definition.executable_view_policy.len(),
             plural_suffix(definition.executable_view_policy.len())
         ),
-        t.color.ok,
+        None,
     );
     for (index, view) in definition.executable_view_policy.iter().enumerate() {
         let is_stop = definition
@@ -484,13 +524,13 @@ fn precedence_row(ui: &mut Ui, ordinal: usize, view: &str, stop_view: bool) {
         rect.right_center() - vec2(10.0, 0.0),
         Align2::RIGHT_CENTER,
         if stop_view {
-            "STOP BOUNDARY"
+            "Stop boundary"
         } else {
-            "DESCEND"
+            "Descend"
         },
         theme::mono(tokens::FS_0, FontWeight::Medium),
         if stop_view {
-            t.color.accent
+            t.color.text_dim
         } else {
             t.color.text_faint
         },
@@ -498,7 +538,6 @@ fn precedence_row(ui: &mut Ui, ordinal: usize, view: &str, stop_view: bool) {
 }
 
 fn execution_contract(ui: &mut Ui, configuration: &ConfigurationSet, app: &RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
     let definition = configuration.definition();
     let technology = app
         .state
@@ -513,7 +552,7 @@ fn execution_contract(ui: &mut Ui, configuration: &ConfigurationSet, app: &RSpic
         ui,
         "Execution contract",
         &format!("configuration r{}", configuration.revision()),
-        t.color.text_dim,
+        None,
     );
     dense_property_row(ui, "Root", &definition.root.display_path(), true);
     dense_property_row(ui, "DUT occurrence", &definition.dut_path, true);
@@ -541,22 +580,15 @@ fn execution_contract(ui: &mut Ui, configuration: &ConfigurationSet, app: &RSpic
 }
 
 fn connectivity_contract(ui: &mut Ui, app: &RSpiceApp) {
-    let t = Tokens::get(ui.ctx());
     let connectivity = &app.state.workspace.content.connectivity;
     let validation = connectivity.validate();
+    // A contract that holds is the ordinary case and says nothing; the error
+    // below the rows is what a blocked one has to say.
     section_header(
         ui,
         "Connectivity contract",
-        if validation.is_ok() {
-            "valid"
-        } else {
-            "blocked"
-        },
-        if validation.is_ok() {
-            t.color.ok
-        } else {
-            t.color.err
-        },
+        if validation.is_ok() { "" } else { "blocked" },
+        validation.is_err().then_some(Problem::Failure),
     );
     dense_property_row(
         ui,
@@ -632,7 +664,6 @@ fn overrides_panel(
     overrides: &[ConfigurationSetOverride],
     plan: Option<&crate::state::workspace::ConfigurationExecutionPlan>,
 ) {
-    let t = Tokens::get(ui.ctx());
     let mut query = ui.ctx().data(|data| {
         data.get_temp::<String>(egui::Id::new(FILTER_STATE_ID))
             .unwrap_or_default()
@@ -655,12 +686,12 @@ fn overrides_panel(
                 ui,
                 width,
                 [
-                    "INSTANCE",
-                    "ORDERED VIEWS",
-                    "RESOLVED VIEW",
-                    "STOP",
-                    "MODEL SECTION",
-                    "PLATFORM / STATUS",
+                    "Instance",
+                    "Ordered views",
+                    "Resolved view",
+                    "Stop",
+                    "Model section",
+                    "Platform / status",
                 ],
                 true,
                 None,
@@ -708,11 +739,7 @@ fn overrides_panel(
                         &status,
                     ],
                     false,
-                    Some(if binding.is_some() {
-                        t.color.ok
-                    } else {
-                        t.color.warn
-                    }),
+                    binding.is_none().then_some(Problem::Warning),
                 );
             }
         });
@@ -762,7 +789,7 @@ fn override_table_row(
     width: f32,
     cells: [&str; 6],
     header: bool,
-    status_color: Option<Color32>,
+    status_problem: Option<Problem>,
 ) {
     let t = Tokens::get(ui.ctx());
     let height = if header {
@@ -808,23 +835,44 @@ fn override_table_row(
         if index > 0 {
             painter.vline(left, rect.y_range(), Stroke::new(1.0, t.color.border));
         }
-        painter.with_clip_rect(cell.shrink2(vec2(7.0, 0.0))).text(
-            cell.left_center() + vec2(7.0, 0.0),
-            Align2::LEFT_CENTER,
-            *value,
-            if header {
-                theme::sans(tokens::FS_0, FontWeight::Medium)
-            } else {
-                theme::mono(tokens::FS_0, FontWeight::Regular)
-            },
-            if header {
-                t.color.text_faint
-            } else if index + 1 == cells.len() {
-                status_color.unwrap_or(t.color.text_dim)
-            } else {
-                t.color.text_dim
-            },
-        );
+        // Only the status column can carry a mark, and only an override the
+        // configuration could not bind has one.
+        let mark = (index + 1 == cells.len())
+            .then_some(status_problem)
+            .flatten();
+        if let Some(problem) = mark {
+            paint_problem_mark(
+                &painter,
+                Rect::from_center_size(
+                    pos2(cell.left() + 7.0 + MARK_SIDE * 0.5, cell.center().y),
+                    vec2(MARK_SIDE, MARK_SIDE),
+                ),
+                problem,
+            );
+        }
+        let text_left = 7.0 + if mark.is_some() { MARK_ADVANCE } else { 0.0 };
+        let font = if header {
+            theme::sans(tokens::FS_0, FontWeight::Medium)
+        } else {
+            theme::mono(tokens::FS_0, FontWeight::Regular)
+        };
+        // A cell that simply clips cuts its value mid-glyph at the pane edge,
+        // which is what the platform column did: elide it so the reader can
+        // see that there is more rather than read half a word.
+        let text = elide_text(ui, value, &font, (cell.width() - text_left - 7.0).max(1.0));
+        painter
+            .with_clip_rect(cell.shrink2(vec2(text_left, 0.0)))
+            .text(
+                cell.left_center() + vec2(text_left, 0.0),
+                Align2::LEFT_CENTER,
+                text,
+                font,
+                if header {
+                    t.color.text_faint
+                } else {
+                    t.color.text_dim
+                },
+            );
         left = right;
     }
 }
@@ -855,14 +903,15 @@ fn validation_panel(
     projection: &ProjectionState,
     resolution: Option<&crate::state::workspace::HierarchyResolution>,
 ) {
-    let t = Tokens::get(ui.ctx());
     let valid = matches!(projection, ProjectionState::Executable(_))
         && resolution.is_some_and(crate::state::workspace::HierarchyResolution::is_valid);
+    // "Executable" is what the rows below already read as; only a blocked
+    // configuration is worth a word in the band.
     section_header(
         ui,
         "Execution validation",
-        if valid { "executable" } else { "blocked" },
-        if valid { t.color.ok } else { t.color.err },
+        if valid { "" } else { "blocked" },
+        (!valid).then_some(Problem::Failure),
     );
     dense_property_row(
         ui,
@@ -950,18 +999,25 @@ fn projection_facts(
     })
 }
 
-fn section_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
+/// A band over one of the page's property lists. Its meta is a fact about
+/// the list, never a verdict painted in a verdict's colour: a section that is
+/// in order says nothing, and one that is not carries a mark.
+fn section_header(ui: &mut Ui, title: &str, meta: &str, problem: Option<Problem>) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
         vec2(ui.available_width().max(1.0), SECTION_HEADER_HEIGHT),
         Sense::hover(),
     );
+    let announcement = if meta.is_empty() {
+        title.to_owned()
+    } else {
+        format!("{title}: {meta}")
+    };
+    let announcement = problem.map_or(announcement.clone(), |problem| {
+        problem.announce(&announcement)
+    });
     response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("{title}: {meta}"),
-        )
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
     });
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().hline(
@@ -976,30 +1032,34 @@ fn section_header(ui: &mut Ui, title: &str, meta: &str, meta_color: Color32) {
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
-    ui.painter().text(
-        rect.right_center() - vec2(10.0, 0.0),
-        Align2::RIGHT_CENTER,
-        meta,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        meta_color,
-    );
+    let meta_right = ui
+        .painter()
+        .text(
+            rect.right_center() - vec2(10.0, 0.0),
+            Align2::RIGHT_CENTER,
+            meta,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_faint,
+        )
+        .left();
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                pos2(meta_right - 6.0 - MARK_SIDE * 0.5, rect.center().y),
+                vec2(MARK_SIDE, MARK_SIDE),
+            ),
+            problem,
+        );
+    }
 }
 
 fn inline_diagnostic(ui: &mut Ui, message: &str) {
-    let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(theme::mix(t.color.bg_panel, t.color.err, 0.08))
         .inner_margin(Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(message)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.err),
-                )
-                .wrap(),
-            );
+            problem_mark_line(ui, Problem::Failure, message);
         });
 }
 

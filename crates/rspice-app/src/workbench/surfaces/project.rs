@@ -31,7 +31,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 
 use super::super::commands::vocabulary::Command;
-use super::super::design_system::{WorkbenchIcon, property_card, property_row, status_dot};
+use super::super::design_system::{WorkbenchIcon, property_card, property_row};
 use super::super::state::{ProjectPage, Workspace};
 use recovery::recovery;
 use technology::{open_technology_attachment_dialog, show_technology_attachment_dialog};
@@ -1467,6 +1467,23 @@ mod tests {
                 std::fs::write(&path, canvas.png(height)).expect("write the render");
                 writeln!(report_output, "{}", path.display()).ok();
             }
+        }
+        // The populated project has no configuration set, so its Configuration
+        // page is one empty state and none of the page's own panels. The
+        // hierarchy reference is the project that opens all five of them.
+        {
+            let mut app = RSpiceApp::test_instance();
+            app.state = crate::workbench::examples::hierarchy_reference::build().state;
+            app.state.workbench.project_page = ProjectPage::Configuration;
+            let size = egui::vec2(1440.0, 900.0);
+            let canvas = crate::ui::raster::render(size, |ui, _| show(ui, &mut app));
+            let path = directory.join("project-configuration-active-1440x900.png");
+            std::fs::write(
+                &path,
+                canvas.png(canvas.content_height().max(1).max(size.y as usize)),
+            )
+            .expect("write the render");
+            writeln!(report_output, "{}", path.display()).ok();
         }
         let mut app = netlist_first_project_app();
         let size = egui::vec2(1440.0, 900.0);
