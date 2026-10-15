@@ -859,15 +859,24 @@ fn stale_interface_repair_row(ui: &mut Ui, instance: &str) -> bool {
                     ))
                     .clicked();
                 let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-                let galley = ui.painter().layout_no_wrap(
-                    format!("{instance}: pins differ from master"),
-                    font,
-                    t.color.text,
-                );
-                let (rect, _) = ui.allocate_exact_size(
+                let text = format!("{instance}: pins differ from master");
+                let galley = ui
+                    .painter()
+                    .layout_no_wrap(text.clone(), font, t.color.text);
+                let (rect, response) = ui.allocate_exact_size(
                     vec2(galley.size().x + MARK_ADVANCE, galley.size().y),
                     Sense::hover(),
                 );
+                // The blocker the mark states is painted text only, so it had
+                // no node of its own and was never announced.
+                let announcement = Problem::Failure.announce(&text);
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Label,
+                        ui.is_enabled(),
+                        &announcement,
+                    )
+                });
                 paint_problem_mark(
                     ui.painter(),
                     egui::Rect::from_center_size(
@@ -948,11 +957,18 @@ fn section_heading(ui: &mut Ui, label: &str) {
         theme::sans(tokens::FS_0, FontWeight::SemiBold),
         t.color.text,
     );
+    // `widget_info` is what gives the node its role and its bounds. The
+    // builder on its own only creates a default node, and a node with no
+    // bounds cannot be hit-tested, focused or routed to, so it is dropped
+    // before it ever reaches assistive technology.
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
         node.set_label(label);
+        // A `Role::Label`'s text is filed under `value`, so without this the
+        // heading carries its own title twice and is announced twice.
+        node.clear_value();
     });
 }
 
@@ -1033,8 +1049,18 @@ fn table_row(ui: &mut Ui, values: &[&str], header: bool) {
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
+    // Same publication trap as the fact rows: without `widget_info` the row
+    // has no role and no bounds, so every row of the change preview was
+    // dropped and the table read as empty.
+    let announcement = values.join("; ");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+    });
     ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(values.join("; "));
+        node.set_label(announcement.as_str());
+        // The row is one announcement, not a label/value pair; `Role::Label`
+        // would otherwise repeat it as the value as well.
+        node.clear_value();
     });
     if truncated {
         response.on_hover_text(values.join(" · "));
@@ -1091,6 +1117,12 @@ fn fact_row(ui: &mut Ui, label: &str, value: &str) {
         value_font,
         t.color.text,
     );
+    // The builder alone would leave a roleless, bounds-less node that no
+    // assistive technology can reach, which is how both facts of the snapshot
+    // went missing. `widget_info` supplies the role and the bounds, and the
+    // builder then states the pair the row paints.
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
     ui.ctx().accesskit_node_builder(response_id, |node| {
         node.set_label(label);
         node.set_value(value);
@@ -1128,6 +1160,102 @@ mod tests {
     fn operation_layout_stacks_only_at_the_mockup_breakpoint() {
         assert!(!check_and_save_uses_stacked_layout(761.0));
         assert!(check_and_save_uses_stacked_layout(760.0));
+    }
+
+    /// Everything Check and save paints must also reach assistive technology.
+    ///
+    /// The row helpers used to write their text straight into an AccessKit
+    /// node builder with no `widget_info` call in front of it. That leaves a
+    /// node with no role and, decisively, no bounds, and a bounds-less node is
+    /// dropped by every consumer of the tree: the facts of the snapshot and
+    /// the whole change preview were unreadable. Each case below therefore
+    /// asserts the bounds as well as the text, because the text alone was
+    /// always there.
+    #[test]
+    fn every_painted_row_is_published_with_bounds() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.authority.open_session();
+        app.state
+            .workbench
+            .activate(crate::workbench::state::Workspace::Design);
+        crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+        open_check_and_save_dialog(&mut app.state);
+        assert!(app.state.dialogs.check_and_save.open);
+
+        let mut render = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.render_frame_dialogs(ui.ctx()),
+            )
+        };
+        let _ = render();
+        let nodes = render()
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+
+        // Every case is collected rather than asserted on the spot, so one
+        // run names every row that stopped publishing instead of only the
+        // first.
+        let mut unpublished = Vec::new();
+        let mut published = |what: &str, matches: &dyn Fn(&egui::accesskit::Node) -> bool| {
+            let found = nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| matches(node));
+            match found {
+                None => unpublished.push(format!("{what}: no node carries it")),
+                Some(node) => match node.bounds() {
+                    None => unpublished.push(format!("{what}: published without bounds")),
+                    Some(bounds) if bounds.x1 <= bounds.x0 || bounds.y1 <= bounds.y0 => {
+                        unpublished.push(format!("{what}: published with an empty rectangle"));
+                    }
+                    Some(_) => {}
+                },
+            }
+        };
+
+        // Both section headings, named once each: a `Role::Label`'s text is
+        // filed under `value`, so a heading that still carries one is being
+        // announced twice over.
+        for heading in ["Exact change preview", "Validated snapshot"] {
+            published(heading, &|node| {
+                node.role() == egui::accesskit::Role::Heading
+                    && node.label() == Some(heading)
+                    && node.value().is_none()
+            });
+        }
+
+        // The two facts of the snapshot, each as the pair it paints.
+        for fact in ["Project", "Revision"] {
+            published(fact, &|node| {
+                node.label() == Some(fact) && node.value().is_some_and(|value| !value.is_empty())
+            });
+        }
+
+        // Every row of the change preview, its header row included.
+        for row in [
+            "Owned object; Reviewed operation; Dependent effect; Recovery",
+            "active schematic working document; validate then save explicit revision; prior saved revision and results remain retained; revert new working revision",
+        ] {
+            published(row, &|node| node.label() == Some(row));
+        }
+
+        assert!(
+            unpublished.is_empty(),
+            "Check and save paints rows that never reach the accessibility tree:\n  {}",
+            unpublished.join("\n  ")
+        );
     }
 
     /// Check and save as PNGs, wide and narrow, for a human to measure.
