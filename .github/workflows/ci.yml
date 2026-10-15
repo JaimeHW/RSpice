@@ -34,22 +34,19 @@ jobs:
       - name: Install Rust toolchain
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --component rustfmt --component clippy
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      # The loop this replaced ran `cargo fmt -p` per member under
+      # `set -euo pipefail`, which meant the first unformatted member ended the
+      # step and the members after it were never checked. It also could not be
+      # run on a Windows checkout at all: cargo fmt hands every target of a
+      # package to one rustfmt process, and rspice-core declares enough targets
+      # to exceed the 32767-byte command line, so a violation in the engine was
+      # undetectable outside CI. The script drives rustfmt in batches that fit a
+      # command line, reports every offending file in one pass, and asserts the
+      # member-count floor itself.
       - name: Format
-        shell: bash
-        run: |
-          set -euo pipefail
-          members=$(cargo metadata --locked --no-deps --format-version 1 \
-            | python3 -c 'import json,sys; print("\n".join(sorted(p["name"] for p in json.load(sys.stdin)["packages"])))')
-          checked=0
-          for member in $members; do
-            case "$member" in
-              rspice-veriloga-models|rspice-veriloga-model-*) continue ;;
-            esac
-            cargo fmt -p "$member" -- --check
-            checked=$((checked + 1))
-          done
-          echo "rustfmt checked $checked workspace member(s)"
-          test "$checked" -ge 41
+        run: python3 tools/ci/check_formatting.py
+      - name: Formatting gate regression tests
+        run: python3 tools/ci/test_check_formatting.py
       - name: Lint GitHub workflows
         run: |
           export GOBIN="$RUNNER_TEMP/actionlint-bin"

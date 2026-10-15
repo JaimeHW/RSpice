@@ -745,16 +745,33 @@ class CiConfigurationTests(unittest.TestCase):
         The only members it may skip are the generated Verilog-A model crates,
         whose bytes are validated against a content digest that reformatting
         would break.
+
+        The enumeration now lives in `tools/ci/check_formatting.py` rather than
+        in the step. The inline loop it replaced ran `cargo fmt -p` per member
+        under `set -euo pipefail`, so the first unformatted member ended the
+        step and the rest went unchecked, and it could not be run on a Windows
+        checkout at all: cargo fmt puts every target of a package on one
+        rustfmt command line, and rspice-core declares enough targets to pass
+        the 32767 bytes Windows allows. A gate that only CI can run is a gate
+        that reports a formatting break after it has landed.
         """
         workflow = read_text(".github/workflows/ci.yml")
         format_step = workflow.split("- name: Format", 1)[1].split("- name:", 1)[0]
-
-        self.assertIn("cargo metadata --locked --no-deps --format-version 1", format_step)
-        self.assertIn('cargo fmt -p "$member" -- --check', format_step)
-        self.assertIn(
-            "rspice-veriloga-models|rspice-veriloga-model-*) continue ;;", format_step
+        self.assertIn("python3 tools/ci/check_formatting.py", format_step)
+        self.assertNotIn(
+            "cargo fmt",
+            format_step,
+            "cargo fmt cannot format rspice-core on a Windows checkout",
         )
-        self.assertNotIn("-p rspice-core", format_step)
+
+        gate = read_text("tools/ci/check_formatting.py")
+        self.assertIn(
+            '"cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"',
+            gate,
+        )
+        self.assertIn('EXCLUDED_MEMBERS = {"rspice-veriloga-models"}', gate)
+        self.assertIn('EXCLUDED_MEMBER_PREFIXES = ("rspice-veriloga-model-",)', gate)
+        self.assertNotIn("-p rspice-core", gate)
 
         members = workspace_member_names()
         covered = sorted(
@@ -779,8 +796,8 @@ class CiConfigurationTests(unittest.TestCase):
         ):
             self.assertIn(package, covered)
 
-        floor = re.search(r'test "\$checked" -ge (\d+)', format_step)
-        self.assertIsNotNone(floor, "the format step must assert a member-count floor")
+        floor = re.search(r"^MINIMUM_MEMBERS = (\d+)$", gate, re.MULTILINE)
+        self.assertIsNotNone(floor, "the format gate must assert a member-count floor")
         self.assertEqual(
             int(floor.group(1)),
             len(covered),
