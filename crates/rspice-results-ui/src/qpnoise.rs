@@ -1,14 +1,19 @@
 //! Retained QPNOISE integrals and contributor rankings alongside the plots.
 use crate::presentation::panel_note;
 use rspice_core::engine::{
-    QpnoiseAnalysisResult, QpnoiseObservation, QpnoiseUnavailable, QpnoiseValue, QpxfQuantity,
+    QpnoiseAnalysisResult, QpnoiseIntegrationMethod, QpnoiseObservation, QpnoiseUnavailable,
+    QpnoiseValue, QpxfQuantity,
 };
 use rspice_ui_kit::panels::section_header;
+use rspice_ui_kit::plot::fmt_si_readout;
 use rspice_ui_kit::widgets::measurement_table;
+
+/// The contributors a reader acts on. Below this the shares are rounding.
+const RANKED_CONTRIBUTORS: usize = 10;
 
 fn value(v: QpnoiseValue, unit: &str) -> String {
     match v {
-        QpnoiseValue::Finite(v) => format!("{v:.6e} {unit}"),
+        QpnoiseValue::Finite(v) => fmt_si_readout(v, unit, 4),
         QpnoiseValue::Unavailable(why) => format!(
             "Unavailable: {}",
             match why {
@@ -32,19 +37,22 @@ fn value(v: QpnoiseValue, unit: &str) -> String {
 /// label/value grid as the rest of the inspector rather than as sentences on
 /// its edge.
 pub fn summary(ui: &mut egui::Ui, response: &QpnoiseAnalysisResult) {
-    section_header(ui, "QPNOISE measurements", None);
-    panel_note(
-        ui,
-        "Each spectrum uses its output's physical frequency. Cross spectra retain complex \
-         correlation. Gaps mark unavailable referred measurements.",
-    );
+    section_header(ui, "Noise", None);
     let request = &response.metadata.request;
     if let Some(integration) = &request.integration {
         let band = match integration.band_hz {
-            Some([low, high]) => format!("{low:.6e}–{high:.6e} Hz"),
-            None => "full physical output band".into(),
+            Some([low, high]) => format!(
+                "{} – {}",
+                fmt_si_readout(low, "Hz", 4),
+                fmt_si_readout(high, "Hz", 4)
+            ),
+            None => "full output band".into(),
         };
-        let integration = format!("{band} ({:?})", integration.method);
+        let method = match integration.method {
+            QpnoiseIntegrationMethod::Linear => "linear",
+            QpnoiseIntegrationMethod::LogLog => "log-log",
+        };
+        let integration = format!("{band} · {method}");
         measurement_table(ui, &[("Integration", integration.as_str())]);
     }
     for (index, spectrum) in response.outputs.iter().enumerate() {
@@ -56,8 +64,7 @@ pub fn summary(ui: &mut egui::Ui, response: &QpnoiseAnalysisResult) {
             QpnoiseObservation::BranchCurrent { branch } => (format!("I({branch})"), "A"),
         };
         section_header(ui, &format!("Output {}: {name}", index + 1), None);
-        let mut rows: Vec<(String, String)> =
-            vec![("Lattice".into(), format!("{:?}", output.lattice))];
+        let mut rows: Vec<(String, String)> = Vec::new();
         if let Some(integral) = &spectrum.integrated {
             rows.push(("Output RMS".into(), value(integral.output_rms, unit)));
             if let Some(input) = integral.input_rms {
@@ -74,27 +81,37 @@ pub fn summary(ui: &mut egui::Ui, response: &QpnoiseAnalysisResult) {
                 rows.push(("Input RMS".into(), value(input, unit)));
             }
         }
-        let indices: Vec<_> = spectrum
-            .ranking
-            .as_ref()
-            .map(|r| r.iter().map(|v| v.source_index).collect())
-            .unwrap_or_else(|| (0..response.sources.len()).collect());
+        // Without a ranking there is no order to truncate to, and listing
+        // every noise source in the circuit is not a contributor list; the
+        // "ranking unavailable" line below says so instead.
+        let indices: Vec<_> = spectrum.ranking.as_ref().map_or_else(Vec::new, |ranking| {
+            ranking
+                .iter()
+                .take(RANKED_CONTRIBUTORS)
+                .map(|v| v.source_index)
+                .collect()
+        });
         for (rank, source) in indices.into_iter().enumerate() {
             let share = spectrum
                 .ranking
                 .as_ref()
-                .map(|r| format!("{:.4}%", r[rank].percentage));
+                .map(|r| format!("{:.1}%", r[rank].percentage));
+            // "RMS" names the quantity, so it goes on the measurement and
+            // never on the sentence that says why there is none.
             let rms = spectrum
                 .integrated
                 .as_ref()
-                .map(|i| format!("{} RMS", value(i.contributor_rms[source], unit)));
+                .map(|i| match i.contributor_rms[source] {
+                    QpnoiseValue::Finite(_) => {
+                        format!("{} rms", value(i.contributor_rms[source], unit))
+                    }
+                    QpnoiseValue::Unavailable(_) => value(i.contributor_rms[source], unit),
+                });
             let reading = [share, rms].into_iter().flatten().collect::<Vec<_>>();
-            let reading = if reading.is_empty() {
-                "retained".to_owned()
-            } else {
-                reading.join(" · ")
-            };
-            rows.push((response.sources[source].name.clone(), reading));
+            if reading.is_empty() {
+                continue;
+            }
+            rows.push((response.sources[source].name.clone(), reading.join(" · ")));
         }
         let unavailable = spectrum
             .input_noise
@@ -105,8 +122,8 @@ pub fn summary(ui: &mut egui::Ui, response: &QpnoiseAnalysisResult) {
             .count();
         if unavailable > 0 {
             rows.push((
-                "Unavailable samples".into(),
-                format!("{unavailable} · reasons retained in CSV"),
+                "Undefined points".into(),
+                format!("{unavailable} (see CSV)"),
             ));
         }
         let refs: Vec<(&str, &str)> = rows
