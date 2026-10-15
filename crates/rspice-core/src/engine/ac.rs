@@ -2082,7 +2082,12 @@ impl Engine {
         }
         #[cfg(feature = "veriloga")]
         {
-            for device in circuit.veriloga_devices().iter() {
+            // Pole-zero (the fill without reduced dynamic stamps) takes every
+            // runtime device and host analog half through its exact
+            // descriptor instead, so none of them is stamped here; a host's
+            // D/A bridges still are.
+            let complex_stamps = include_reduced_dynamic_stamps;
+            for device in circuit.veriloga_devices().iter().filter(|_| complex_stamps) {
                 // Stateful Verilog-A derivatives are complex transfer
                 // actions. The runtime evaluates the complete differentiated
                 // program as one phasor so nested ddt/idt, Laplace, Zi, and
@@ -2116,38 +2121,40 @@ impl Engine {
             // digital half contributes no derivative (S2, S5(a)). Its own D/A
             // bridges add the conductance of their held level (S3).
             for host in &circuit.mixed_signal_hosts {
-                let mut cloned = host.analog_device().clone();
-                let instance = host.instance_name();
-                cloned
-                    .try_set_analysis_type(physical_analysis.runtime_code())
-                    .map_err(|err| {
-                        SimulationError::Circuit(format!(
-                            "mixed Verilog-AMS instance '{instance}' small-signal analysis setup failed: {err}"
-                        ))
-                    })?;
-                // The host's own solver inputs hold the time of its last
-                // trial; the linearization reads the circuit's point time,
-                // as the runtime devices do.
-                cloned
-                    .try_set_time(circuit.veriloga_point_time)
-                    .map_err(|err| {
-                        SimulationError::Circuit(format!(
-                            "mixed Verilog-AMS instance '{instance}' small-signal time setup failed: {err}"
-                        ))
-                    })?;
-                cloned
-                    .try_stamp_small_signal_complex(
-                        op_voltages,
-                        frequency_hz,
-                        |row, col, real, imag| {
-                            matrix.add(row, col, Complex64::new(real, imag));
-                        },
-                    )
-                    .map_err(|err| {
-                        SimulationError::Circuit(format!(
-                            "mixed Verilog-AMS instance '{instance}' small-signal stamping failed: {err}"
-                        ))
-                    })?;
+                if complex_stamps {
+                    let mut cloned = host.analog_device().clone();
+                    let instance = host.instance_name();
+                    cloned
+                        .try_set_analysis_type(physical_analysis.runtime_code())
+                        .map_err(|err| {
+                            SimulationError::Circuit(format!(
+                                "mixed Verilog-AMS instance '{instance}' small-signal analysis setup failed: {err}"
+                            ))
+                        })?;
+                    // The host's own solver inputs hold the time of its last
+                    // trial; the linearization reads the circuit's point time,
+                    // as the runtime devices do.
+                    cloned
+                        .try_set_time(circuit.veriloga_point_time)
+                        .map_err(|err| {
+                            SimulationError::Circuit(format!(
+                                "mixed Verilog-AMS instance '{instance}' small-signal time setup failed: {err}"
+                            ))
+                        })?;
+                    cloned
+                        .try_stamp_small_signal_complex(
+                            op_voltages,
+                            frequency_hz,
+                            |row, col, real, imag| {
+                                matrix.add(row, col, Complex64::new(real, imag));
+                            },
+                        )
+                        .map_err(|err| {
+                            SimulationError::Circuit(format!(
+                                "mixed Verilog-AMS instance '{instance}' small-signal stamping failed: {err}"
+                            ))
+                        })?;
+                }
                 host.stamp_small_signal_bridges(|row, col, conductance| {
                     matrix.add(row, col, Complex64::new(conductance, 0.0));
                 });

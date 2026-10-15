@@ -11,6 +11,8 @@ use crate::{CircuitData, Netlist, Value};
 mod ac_nqs;
 mod descriptor;
 mod reduction;
+#[cfg(feature = "veriloga")]
+mod veriloga;
 mod xspice;
 
 impl Engine {

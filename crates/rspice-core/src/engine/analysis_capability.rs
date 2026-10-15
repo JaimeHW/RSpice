@@ -306,6 +306,12 @@ const NATIVE_REFUSALS: &str =
 const PERIODIC_REFUSALS: &str =
     "tests/capability_refusals.rs::harmonic_balance_refuses_a_device_it_cannot_stamp";
 const PZ_REFUSALS: &str = "tests/capability_refusals.rs::pole_zero_refuses_transmission_lines";
+const PZ_RATIONAL: &str =
+    "tests/pole_zero_veriloga_rational.rs::an_rc_with_a_laplace_filter_has_both_closed_form_poles";
+const PZ_NON_RATIONAL: &str =
+    "tests/pole_zero_veriloga_rational.rs::a_transport_delay_refuses_by_instance_and_module";
+const PZ_MIXED: &str =
+    "tests/pole_zero_veriloga_rational.rs::a_mixed_host_with_laplace_and_trim_matches_its_twin";
 const PZ_HELD_CONVERTERS: &str =
     "tests/pole_zero_veriloga_rational.rs::held_converters_take_part_as_their_held_stamps";
 const MIXED_HELD: &str =
@@ -347,6 +353,15 @@ const fn periodic_contracts(token: &'static str, condition: &'static str) -> Cel
         token,
         condition,
         evidence: &[FIXTURES, PERIODIC_REFUSALS],
+    }
+}
+
+const fn rational_descriptor(evidence: &'static [&'static str]) -> CellSupport {
+    CellSupport::Restricted {
+        gate: InstanceGate::RationalDescriptor,
+        token: "analysis.pz.non_rational_operator",
+        condition: "every Verilog-A analog body without absdelay, zi_* or idtmod, whose ddt, idt and laplace_* operators become explicit G + sC descriptor states",
+        evidence,
     }
 }
 
@@ -408,7 +423,7 @@ pub const fn capability_cell(
         },
         A::Pz => match family {
             F::SpiceNative => native_checks("analysis.pz.device"),
-            F::XspiceAnalog | F::VerilogARuntime => CellSupport::Restricted {
+            F::XspiceAnalog => CellSupport::Restricted {
                 gate: InstanceGate::PeriodicContracts,
                 token: "analysis.pz.device",
                 condition: "every instance whose dynamic state exports a complete rational G + sC descriptor",
@@ -420,12 +435,9 @@ pub const fn capability_cell(
             F::XspiceEvent | F::RealNumber => CellSupport::Supported {
                 evidence: &[FIXTURES, PZ_HELD_CONVERTERS],
             },
+            F::VerilogARuntime => rational_descriptor(&[FIXTURES, PZ_RATIONAL, PZ_NON_RATIONAL]),
             F::VerilogAGenerated => supported(),
-            F::VerilogAmsMixed => CellSupport::Refused {
-                token: DISCRETE_STATE,
-                reason: "the descriptor of a held discrete state is not wired into pole-zero extraction yet",
-                plan: "P1.6 (L2b)",
-            },
+            F::VerilogAmsMixed => rational_descriptor(&[FIXTURES, PZ_MIXED, PZ_NON_RATIONAL]),
         },
         A::TranNoise => match family {
             F::SpiceNative => renderable(&[FIXTURES]),

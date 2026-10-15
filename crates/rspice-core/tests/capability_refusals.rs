@@ -291,9 +291,10 @@ fn a_capability_refusal_keeps_its_category_across_the_parse_boundary() {
 /// decided per instance by the operators the compiled analog body uses.
 ///
 /// Placed beside [`pole_zero_refuses_transmission_lines`] because it is the
-/// same refusal: a `G + sC` descriptor pair has no room for a transport delay
-/// or for state the runtime carries privately, and either one linearized at a
-/// single frequency is a two-point fit rather than the device's response.
+/// same refusal: a `G + sC` descriptor pair has no room for a transport
+/// delay, which linearized at a single frequency is a two-point fit rather
+/// than the device's response. A filter's or an integrator's state is
+/// rational, and the instance exports it as explicit descriptor states.
 #[cfg(feature = "veriloga")]
 mod veriloga_pole_zero {
     use super::{Engine, capability_token, node, parse};
@@ -326,9 +327,10 @@ mod veriloga_pole_zero {
         )
     }
 
-    /// Run the deck, require a `analysis.pz.device` refusal, and hand back its
-    /// text folded to lower case: a deck names its instance in whichever case
-    /// the elaborator kept, and that is not what these tests are pinning.
+    /// Run the deck, require a `analysis.pz.non_rational_operator` refusal,
+    /// and hand back its text folded to lower case: a deck names its instance
+    /// in whichever case the elaborator kept, and that is not what these
+    /// tests are pinning.
     fn refused(model: &Path, module: &str, why: &str) -> String {
         let netlist = parse(&pz_deck(model, module));
         let input = node(&netlist, "in");
@@ -340,7 +342,10 @@ mod veriloga_pole_zero {
             ),
             Err(error) => error,
         };
-        assert_eq!(capability_token(&error), "analysis.pz.device");
+        assert_eq!(
+            capability_token(&error),
+            "analysis.pz.non_rational_operator"
+        );
         error.to_string().to_ascii_lowercase()
     }
 
@@ -375,12 +380,11 @@ mod veriloga_pole_zero {
     }
 
     #[test]
-    fn pole_zero_refuses_a_verilog_a_laplace_filter() {
-        // A rational response is refused too, and for a reason the analytic
-        // answer makes concrete. Yd(s) = 1e-3/(1 + s*1n) gives a transfer of
-        // 1000*(1 + s*1n)/(2 + s*1n): a pole at -2e9 and a zero at -1e9. The
-        // filter's state is the runtime's own, never a descriptor column, so
-        // the two-point fit returned a pole at +2e9 and NO zero at all.
+    fn pole_zero_admits_a_verilog_a_laplace_filter() {
+        // Yd(s) = 1e-3/(1 + s*1n) gives a transfer of 1000*(1 + s*1n)/(2 +
+        // s*1n): a pole at -2e9 and a zero at -1e9. Before the filter's
+        // realization became descriptor states, the two-point fit returned a
+        // pole at +2e9 and no zero at all.
         let model = write_model(
             "laplace",
             "module pz_laplace(p, n);\n\
@@ -389,17 +393,24 @@ mod veriloga_pole_zero {
              analog I(p, n) <+ 1.0e-3 * laplace_nd(V(p, n), '{1.0}, '{1.0, 1.0e-9});\n\
              endmodule\n",
         );
-        let message = refused(
-            &model,
-            "pz_laplace",
-            "a laplace filter's state is not a descriptor column",
+        let netlist = parse(&pz_deck(&model, "pz_laplace"));
+        let result = Engine::default()
+            .run_pz(&netlist, node(&netlist, "in"), node(&netlist, "out"))
+            .expect("a laplace filter exports its realization as descriptor states");
+        let close = |root: rspice_core::Complex64, expected: f64| {
+            (root.re - expected).abs() <= 1.0e-9 * expected.abs()
+                && root.im.abs() <= 1.0e-9 * expected.abs()
+        };
+        assert!(
+            result.poles.len() == 1 && close(result.poles[0], -2.0e9),
+            "the analytic pole -2e9: {:?}",
+            result.poles
         );
-        for expected in ["'x1'", "'pz_laplace'", "uses laplace"] {
-            assert!(
-                message.contains(expected),
-                "the refusal must name the instance, the module and the operator: {message}"
-            );
-        }
+        assert!(
+            result.zeros.len() == 1 && close(result.zeros[0], -1.0e9),
+            "the analytic zero -1e9: {:?}",
+            result.zeros
+        );
         let _ = std::fs::remove_file(model);
     }
 
@@ -442,11 +453,10 @@ mod veriloga_pole_zero {
 /// equilibrium, and the ones that still refuse it by name.
 ///
 /// The operating point is committed as the held equilibrium (P1 design S1),
-/// so every small-signal analysis and a DC sweep run on a mixed deck. A
-/// periodic analysis asks for a steady state with a *running* discrete half,
-/// which has no formulation yet (P7), and pole-zero waits for the descriptor
-/// wiring (P1.6); both refuse through the capability matrix with a typed
-/// token, analysis kind, instance and module.
+/// so every small-signal analysis, pole-zero and a DC sweep run on a mixed
+/// deck. A periodic analysis asks for a steady state with a *running*
+/// discrete half, which has no formulation yet (P7), and refuses through the
+/// capability matrix with a typed token, analysis kind, instance and module.
 #[cfg(feature = "veriloga")]
 mod mixed_signal_discrete_state {
     use super::{Engine, SimulationError, capability_token, node, parse};
@@ -566,14 +576,20 @@ mod mixed_signal_discrete_state {
         engine
             .run_dc_op(&netlist)
             .expect("`.op` solves a mixed deck at its coupled time-zero fixed point");
+        // The held module is a 1k conductance on p behind r1 from an ideal
+        // source: one node, no capacitance, so no finite pole.
+        let pz = engine
+            .run_pole_spectrum(&netlist)
+            .expect("pole-zero takes the held module's descriptor");
+        assert!(pz.poles.is_empty(), "{:?}", pz.poles);
 
         let _ = std::fs::remove_file(model);
     }
 
     /// A periodic analysis asks for a steady state with the discrete half
-    /// running, which the matrix refuses (P7), and pole-zero waits for the
-    /// descriptor wiring (P1.6). Both name the analysis kind, the instance
-    /// and its module as typed fields, not only in prose.
+    /// running, which the matrix refuses (P7). Each refusal names the
+    /// analysis kind, the instance and its module as typed fields, not only
+    /// in prose.
     #[test]
     fn a_periodic_analysis_refuses_a_running_discrete_state_by_name() {
         use rspice_core::identity::AnalysisKind;
@@ -602,16 +618,6 @@ mod mixed_signal_discrete_state {
             "analysis.mixed_signal.discrete_state",
             AnalysisKind::HarmonicBalance,
             "harmonic-balance analysis",
-        );
-
-        let pz = engine
-            .run_pz(&netlist, node(&netlist, "in"), node(&netlist, "p"))
-            .expect_err("pole-zero of a held mixed module lands with the descriptor wiring");
-        assert_refusal(
-            &pz,
-            "analysis.mixed_signal.discrete_state",
-            AnalysisKind::PoleZero,
-            "pole-zero analysis",
         );
 
         let _ = std::fs::remove_file(model);
@@ -906,7 +912,8 @@ mod capability_matrix_cells {
                         CellSupport::Restricted {
                             gate:
                                 InstanceGate::NativeDeviceChecks
-                                | InstanceGate::TransientNoiseRenderable,
+                                | InstanceGate::TransientNoiseRenderable
+                                | InstanceGate::RationalDescriptor,
                             ..
                         },
                         Err(error),

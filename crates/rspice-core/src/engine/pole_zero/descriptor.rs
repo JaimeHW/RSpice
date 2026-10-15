@@ -1,4 +1,6 @@
 //! One frozen small-signal descriptor shared by transfer and natural-pole studies.
+#[cfg(feature = "veriloga")]
+use super::veriloga::VerilogADescriptor;
 use super::xspice::RationalDescriptor;
 use super::*;
 use crate::analysis::pole_zero::PoleSpectrum;
@@ -12,6 +14,8 @@ pub(super) struct LinearizedDescriptor<'a> {
     circuit: &'a CircuitData,
     operating_point: &'a [Value],
     xspice: Vec<RationalDescriptor<'a>>,
+    #[cfg(feature = "veriloga")]
+    veriloga: Vec<VerilogADescriptor>,
 }
 
 impl LinearizedDescriptor<'_> {
@@ -23,6 +27,17 @@ impl LinearizedDescriptor<'_> {
             .any(|bjt| bjt.uses_vbic_dynamic_charges())
             || Engine::pz_ac_nqs_state_count(self.circuit) != 0
             || !self.xspice.is_empty()
+            || self.veriloga_state_count() != 0
+    }
+
+    #[cfg(feature = "veriloga")]
+    fn veriloga_state_count(&self) -> usize {
+        veriloga_state_count(&self.veriloga)
+    }
+
+    #[cfg(not(feature = "veriloga"))]
+    fn veriloga_state_count(&self) -> usize {
+        0
     }
 
     pub(super) fn into_analyzer(
@@ -40,7 +55,8 @@ impl LinearizedDescriptor<'_> {
                     .iter()
                     .map(RationalDescriptor::state_count)
                     .fold(0usize, usize::saturating_add),
-            );
+            )
+            .saturating_add(self.veriloga_state_count());
         ResourceLimitError::ensure(
             ResourceKind::ResultValues,
             order.saturating_mul(order.saturating_mul(8).saturating_add(1)),
@@ -56,8 +72,18 @@ impl LinearizedDescriptor<'_> {
             &mut c,
         )?;
         RationalDescriptor::stamp_all(&self.xspice, self.circuit, &mut g, &mut c);
+        #[cfg(feature = "veriloga")]
+        VerilogADescriptor::stamp_states(&self.veriloga, &mut g, &mut c);
         Ok(PoleZeroAnalyzer::new(g, c).with_resource_limits(limits))
     }
+}
+
+#[cfg(feature = "veriloga")]
+fn veriloga_state_count(descriptors: &[VerilogADescriptor]) -> usize {
+    descriptors
+        .iter()
+        .map(VerilogADescriptor::state_count)
+        .fold(0usize, usize::saturating_add)
 }
 
 pub(super) fn extraction_error(error: PoleZeroAnalysisError) -> SimulationError {
@@ -90,6 +116,14 @@ impl Engine {
             return Err(SimulationError::Aborted);
         }
         let xspice = RationalDescriptor::collect(circuit)?;
+        // Runtime devices and host analog halves are not in the base fill in
+        // pole-zero mode; every one of them arrives through its descriptor.
+        #[cfg(feature = "veriloga")]
+        let veriloga = VerilogADescriptor::collect(circuit, operating_point)?;
+        #[cfg(feature = "veriloga")]
+        let veriloga_states = veriloga_state_count(&veriloga);
+        #[cfg(not(feature = "veriloga"))]
+        let veriloga_states = 0;
         let order = circuit
             .matrix_size()
             .saturating_add(Self::pz_ac_nqs_state_count(circuit))
@@ -98,7 +132,8 @@ impl Engine {
                     .iter()
                     .map(RationalDescriptor::state_count)
                     .fold(0usize, usize::saturating_add),
-            );
+            )
+            .saturating_add(veriloga_states);
         ResourceLimitError::ensure(
             ResourceKind::MatrixUnknowns,
             order,
@@ -106,6 +141,10 @@ impl Engine {
         )?;
         let g = Self::try_build_small_signal_pz_matrix(circuit, matrix, operating_point, 0.0)?;
         let c = Self::try_build_small_signal_pz_matrix(circuit, matrix, operating_point, 1.0)?;
+        #[cfg(feature = "veriloga")]
+        let (mut g, mut c) = (g, c);
+        #[cfg(feature = "veriloga")]
+        VerilogADescriptor::stamp_circuit_entries(&veriloga, &mut g, &mut c);
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -115,6 +154,8 @@ impl Engine {
             circuit,
             operating_point,
             xspice,
+            #[cfg(feature = "veriloga")]
+            veriloga,
         })
     }
 

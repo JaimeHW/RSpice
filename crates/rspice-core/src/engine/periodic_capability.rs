@@ -355,13 +355,13 @@ const CYCLOSTATIONARY_FLICKER: &str = "stationary thermal/shot noise is exact; a
 const RESISTOR_CYCLOSTATIONARY_FLICKER: &str = "thermal noise and AF=2 signed-current flicker modulation are exact; other AF values \
      need qualified cyclostationary amplitude spectra";
 /// The condition behind a runtime Verilog-A module's dynamic-state
-/// declaration. Written like the transmission line's, because it is the same
-/// answer: a delay has no rational descriptor, and a filter or integrator the
-/// runtime carries privately has no descriptor column to be exported into.
-const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body whose only dynamic operator is `ddt`; `absdelay` is a transport delay with \
-     no rational transfer function, and `laplace_*`, `zi_*`, `idt` and `idtmod` hold runtime \
-     state the `G + sC` descriptor pair has no column for, so linearizing either at one \
-     frequency fits a capacitance instead of reporting the device's response";
+/// declaration, and a mixed module's analog half's. Written like the
+/// transmission line's, because it is the same answer: a delay has no
+/// rational descriptor. `ddt`, `idt` and `laplace_*` each export explicit
+/// descriptor states; the operators named here have none.
+const RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR: &str = "an analog body without `absdelay`, `zi_*` or `idtmod`: `absdelay` is a transport delay \
+     with no rational transfer function, and a `zi_*` filter or an `idtmod` modulus is \
+     discrete or wrapping state with no finite `G + sC` realization";
 /// One reason covers all six contracts for a mixed Verilog-AMS module, so it
 /// is stated once instead of six near-identical times.
 const MIXED_SIGNAL_INTERLEAVE: &str = "periodic steady state with running discrete state (P7): a mixed Verilog-AMS module's \
@@ -708,9 +708,13 @@ pub(crate) const fn periodic_capability_descriptor(
         // declared here so that the table stays exhaustive over what
         // `CircuitData` can hold, and so a route that ever reaches a gap query
         // without passing that guard fails closed instead of omitting the host.
+        //
+        // Pole-zero is the exception: it linearizes the held equilibrium, so
+        // the descriptor is the analog half's, held exactly like a runtime
+        // module's.
         F::MixedSignalHost => PeriodicCapabilityDescriptor {
             residual_jacobian: Absent(MIXED_SIGNAL_INTERLEAVE),
-            dynamic_state: Absent(MIXED_SIGNAL_INTERLEAVE),
+            dynamic_state: Restricted(RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR),
             small_signal: Absent(MIXED_SIGNAL_INTERLEAVE),
             noise: Absent(MIXED_SIGNAL_INTERLEAVE),
             pss_state: Absent(MIXED_SIGNAL_INTERLEAVE),
@@ -1594,28 +1598,41 @@ pub(in crate::engine) fn dynamic_state_descriptor_gaps(
                         }
                     }
                 }
-                // Read off the compiled program's own state vocabulary rather
-                // than a list kept here: the runtime is what decides which
-                // operator owns a private state record, and a module that only
-                // integrates charge with `ddt` exports that charge as the
-                // descriptor's `C` exactly like a native capacitor does.
-                F::RuntimeVerilogA =>
-                {
+                // Read off the compiled program's own operator vocabulary
+                // rather than a list kept here: the runtime decides which
+                // operators its descriptor evaluator realizes as explicit
+                // states (`ddt`, `idt`, `laplace_*`) and which have none.
+                F::RuntimeVerilogA | F::MixedSignalHost => {
                     #[cfg(feature = "veriloga")]
-                    for device in circuit.veriloga_devices().iter() {
-                        let operators = device.non_rational_analog_operators();
-                        if operators.is_empty() {
-                            continue;
+                    {
+                        let devices: Vec<(&str, &crate::device::veriloga::VerilogADevice)> =
+                            if family == F::RuntimeVerilogA {
+                                circuit
+                                    .veriloga_devices()
+                                    .iter()
+                                    .map(|device| (device.name.as_str(), device))
+                                    .collect()
+                            } else {
+                                circuit
+                                    .mixed_signal_hosts
+                                    .iter()
+                                    .map(|host| (host.instance_name(), host.analog_device()))
+                                    .collect()
+                            };
+                        for (instance, device) in devices {
+                            let operators = device.small_signal_descriptor_blockers();
+                            if operators.is_empty() {
+                                continue;
+                            }
+                            gaps.push(CapabilityGap::new(
+                                family,
+                                format!(
+                                    "Verilog-A instance '{instance}' (module '{}') uses {}: {condition}",
+                                    device.model_name(),
+                                    operators.join(", "),
+                                ),
+                            ));
                         }
-                        gaps.push(CapabilityGap::new(
-                            family,
-                            format!(
-                                "Verilog-A instance '{}' (module '{}') uses {}: {condition}",
-                                device.name,
-                                device.model_name(),
-                                operators.join(", "),
-                            ),
-                        ));
                     }
                 }
                 _ => {}
@@ -1899,6 +1916,15 @@ mod tests {
     fn a_mixed_signal_host_refuses_every_periodic_contract_for_the_same_reason() {
         let descriptor = periodic_capability_descriptor(PeriodicDeviceFamily::MixedSignalHost);
         for capability in PeriodicCapability::ALL {
+            // Pole-zero linearizes the held equilibrium: the analog half's
+            // descriptor is restricted exactly as a runtime module's is.
+            if capability == PeriodicCapability::DynamicStateDescriptor {
+                assert_eq!(
+                    descriptor.support(capability),
+                    Restricted(RUNTIME_VERILOGA_RATIONAL_DESCRIPTOR)
+                );
+                continue;
+            }
             let Absent(missing) = descriptor.support(capability) else {
                 panic!(
                     "a mixed module may not declare {capability:?} anything but absent, got {:?}",
@@ -1966,8 +1992,11 @@ endmodule
             "the family must count the hosts the circuit actually holds"
         );
 
-        // The five contracts whose gap query is generic over the table. The
-        // sixth, `cyclostationary_noise_gaps`, is hand-written over the
+        // The four periodic contracts whose gap query is generic over the
+        // table. The dynamic-state descriptor is pole-zero's, which
+        // linearizes the held equilibrium, so a host whose analog half has
+        // no non-rational operator is no gap in it. The sixth,
+        // `cyclostationary_noise_gaps`, is hand-written over the
         // families that *restrict* colored noise per instance and asks the
         // table nothing about an absent one — so it reports no family that
         // declares `NoiseSources` absent, the mixed host included. That is the
@@ -1978,7 +2007,6 @@ endmodule
             ("descriptor", periodic_descriptor_gaps(&circuit)),
             ("pss state", pss_state_gaps(&circuit)),
             ("envelope", envelope_gaps(&circuit)),
-            ("dynamic state", dynamic_state_descriptor_gaps(&circuit)),
         ] {
             assert!(
                 gaps.iter()
@@ -1990,6 +2018,10 @@ endmodule
                 "the {contract} contract must summarize a gap it found"
             );
         }
+        assert!(
+            dynamic_state_descriptor_gaps(&circuit).is_empty(),
+            "a held host with a rational analog half is no pole-zero gap"
+        );
         assert!(
             !has_exact_periodic_nonlinear_devices(&circuit),
             "a mixed host must not be mistaken for a device with an exact periodic residual"
