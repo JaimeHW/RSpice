@@ -34,9 +34,9 @@ use crate::workbench::state::SimulationPlanManagerMode;
 
 /// Route-major, then viewport-major, matching `EVERY_ROUTE × GATED_VIEWPORTS`.
 const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
-    "2d893c721f594d843e2546d2023fe04f25abbc407aae9520d53fc1e5fc2618c7",
-    "37e53f274a54a0ca2e11734498c10f595d8b91762c27ba7cacfbb508899ff8e5",
-    "9f707566d4cbb48c3a52341be992bd9601733ddc4961fa696affb9ea4a325c45",
+    "d9563505999d135dd1aafee44485144ca660ef552e0b632ba91fd2df92764ad4",
+    "3a015088b1655159db7b64dcd5bbaf3617d03811efa676a3ac8e87f64dfeda3e",
+    "fbf3d43eaa0b5278d1db100f6fae30f339539a603a1f03a27f005cc2bd166ee9",
     "1d98b28655ce3cc8aa3fc8b34149edd0b9040dca6677cbf55ff0b146280f439f",
     "4e0b618c952ca4d09665d4e0e91bc1d731980b95cde88f426c582e108c39172c",
     "fe24a91d3a4957c6982a39e2ddbd7ba6f7cd47c722bb50e1ba73187ae8558079",
