@@ -804,6 +804,39 @@ fn workspace_presets_apply_to_the_live_layout_owner() {
 }
 
 #[test]
+fn an_unvisited_workspace_opens_from_the_preset_not_the_shipped_default() {
+    let mut state = WorkbenchState::default();
+    state.set_workspace_preset(WorkspacePreset::Diagnostics);
+
+    // Nothing has arranged Results yet, so it has no snapshot of its own and
+    // the preset is the only thing that can say what it opens with. Before
+    // the preset was mirrored here this resolved to the shipped default,
+    // whose console is hidden.
+    assert!(state.workspace_layout(Workspace::Results).console_visible);
+    state.activate(Workspace::Results);
+    assert!(state.console_visible);
+    assert_eq!(state.console_height, 260.0);
+}
+
+#[test]
+fn choosing_a_preset_leaves_an_arranged_workspace_alone() {
+    let mut state = WorkbenchState::default();
+    state.activate(Workspace::Results);
+    state.console_visible = false;
+    state.console_height = 180.0;
+    state.activate(Workspace::Design);
+
+    state.set_workspace_preset(WorkspacePreset::Diagnostics);
+
+    // Results was arranged by hand, so it keeps what it was given while the
+    // workspaces that were never opened take the preset.
+    state.activate(Workspace::Results);
+    assert!(!state.console_visible);
+    assert_eq!(state.console_height, 180.0);
+    assert!(state.workspace_layout(Workspace::Models).console_visible);
+}
+
+#[test]
 fn workspace_switches_restore_independent_dock_compositions() {
     let mut state = WorkbenchState::default();
     state.navigator_width = 340.0;

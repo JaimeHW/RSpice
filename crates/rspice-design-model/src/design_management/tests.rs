@@ -212,11 +212,9 @@ fn drawing_sheet_series_margins_and_border_mark_defaults_are_normative() {
 fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility() {
     let format = SchematicSheetFormat::default();
     for field in [
-        DrawingSheetTitleFieldId::Project,
         DrawingSheetTitleFieldId::CellView,
         DrawingSheetTitleFieldId::Page,
         DrawingSheetTitleFieldId::Revision,
-        DrawingSheetTitleFieldId::Format,
     ] {
         let policy = field.policy();
         assert!(policy.required_visible);
@@ -226,6 +224,15 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
         );
         assert!(format.title_block.fields[&field].visible);
     }
+    // The project name repeats the leading segment of `Cell / view`, so it is
+    // shown by default but the sheet may drop it.
+    let project = DrawingSheetTitleFieldId::Project.policy();
+    assert!(!project.required_visible);
+    assert_eq!(
+        project.value_authority,
+        DrawingSheetTitleFieldValueAuthority::Automatic
+    );
+    assert!(format.title_block.fields[&DrawingSheetTitleFieldId::Project].visible);
     let sheet_title = DrawingSheetTitleFieldId::SheetTitle.policy();
     assert!(sheet_title.required_visible);
     assert_eq!(
@@ -250,11 +257,28 @@ fn drawing_sheet_title_contract_matches_field_provenance_and_required_visibility
         "210 × 297 mm"
     );
 
+    // The project name may be dropped now that `Cell / view` carries it.
+    let without_project = format
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::Project)
+                .unwrap()
+                .visible = false;
+        })
+        .expect("the project name is no longer a required cell");
+    assert!(
+        !resolve_drawing_sheet_title_fields(&without_project, &BTreeMap::new())
+            .iter()
+            .any(|field| field.id == DrawingSheetTitleFieldId::Project)
+    );
+
     let hidden = format.try_update(|draft| {
         draft
             .title_block
             .fields
-            .get_mut(&DrawingSheetTitleFieldId::Project)
+            .get_mut(&DrawingSheetTitleFieldId::CellView)
             .unwrap()
             .visible = false;
     });
@@ -291,6 +315,13 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
                 .get_mut(&DrawingSheetTitleFieldId::SheetTitle)
                 .unwrap()
                 .value = "Power tree".to_owned();
+            // A release-process field is hidden until a sheet opts into it.
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::DrawnBy)
+                .unwrap()
+                .visible = true;
             draft
                 .title_block
                 .fields
@@ -311,7 +342,6 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
         (DrawingSheetTitleFieldId::CellView, "analog/top/schematic"),
         (DrawingSheetTitleFieldId::Page, "2 of 4"),
         (DrawingSheetTitleFieldId::Revision, "B"),
-        (DrawingSheetTitleFieldId::Format, "A3 · landscape"),
         (DrawingSheetTitleFieldId::Scale, "1:1"),
         (DrawingSheetTitleFieldId::Date, "2026-08-04"),
         (DrawingSheetTitleFieldId::Organization, "RSpice Engineering"),
@@ -341,6 +371,11 @@ fn drawing_sheet_title_resolution_is_one_renderer_independent_authority() {
         Some("RSpice Engineering")
     );
     assert_eq!(value(DrawingSheetTitleFieldId::CheckedBy), None);
+    assert_eq!(
+        value(DrawingSheetTitleFieldId::Format),
+        None,
+        "a retired field resolves to nothing even when a value is offered"
+    );
     assert_eq!(
         DrawingSheetTitleFieldId::SheetTitle.display_label(),
         "Sheet title"
@@ -447,19 +482,37 @@ fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritativ
         })
         .unwrap();
     assert!(
-        drawing_sheet_title_cell_capacity(&custom, &custom.geometry().unwrap(), 9).unwrap()
+        drawing_sheet_title_cell_capacity(
+            &custom,
+            &custom.geometry().unwrap(),
+            9,
+            custom.authored_size.lettering().data_um
+        )
+        .unwrap()
             < drawing_sheet_title_cell_capacity(
                 &without_logo,
                 &without_logo.geometry().unwrap(),
-                9
+                9,
+                without_logo.authored_size.lettering().data_um
             )
             .unwrap()
     );
+    // A managed template governs the order fields resolve in; sheet-owned
+    // visibility decides which of them appear, and the two compose.
+    let resolved_order = resolve_drawing_sheet_title_fields(&custom, &BTreeMap::new())
+        .into_iter()
+        .map(|field| field.id)
+        .collect::<Vec<_>>();
+    let expected_order = reversed
+        .iter()
+        .copied()
+        .filter(|field| custom.title_block.fields[field].visible)
+        .collect::<Vec<_>>();
+    assert_eq!(resolved_order, expected_order);
     assert_eq!(
-        resolve_drawing_sheet_title_fields(&custom, &BTreeMap::new())
-            .first()
-            .map(|field| field.id),
-        Some(DrawingSheetTitleFieldId::Classification)
+        resolved_order.first(),
+        Some(&DrawingSheetTitleFieldId::DocumentId),
+        "classification leads the template order but is hidden until released"
     );
 
     let mut tampered = serde_json::to_value(&custom).unwrap();
@@ -2465,8 +2518,13 @@ fn drawing_sheet_transactions_retain_complete_revisioned_project_receipts() {
 fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
     let upright = SchematicSheetFormat::default();
     let upright_geometry = upright.geometry().unwrap();
-    let upright_capacity =
-        drawing_sheet_title_cell_capacity(&upright, &upright_geometry, 14).unwrap();
+    let upright_capacity = drawing_sheet_title_cell_capacity(
+        &upright,
+        &upright_geometry,
+        14,
+        upright.authored_size.lettering().data_um,
+    )
+    .unwrap();
     let rotated = upright
         .try_update(|draft| {
             draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
@@ -2491,8 +2549,180 @@ fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
         None
     );
     assert_eq!(
-        drawing_sheet_title_cell_capacity(&rotated, &rotated_geometry, 14),
+        drawing_sheet_title_cell_capacity(
+            &rotated,
+            &rotated_geometry,
+            14,
+            rotated.authored_size.lettering().data_um
+        ),
         Some(upright_capacity),
         "rotating the complete block must not change a field's authored text budget"
     );
+    assert!(
+        drawing_sheet_title_cell_capacity(
+            &upright,
+            &upright_geometry,
+            14,
+            upright.authored_size.lettering().caption_um
+        )
+        .unwrap()
+            > upright_capacity,
+        "smaller caption lettering must buy more characters in the same cell"
+    );
+}
+
+#[test]
+fn a_sheet_authored_before_a_field_retired_still_loads_without_it() {
+    let format = SchematicSheetFormat::default();
+    let mut wire = serde_json::to_value(&format).unwrap();
+    // Reintroduce the withdrawn field exactly as an older build wrote it.
+    wire["title_block"]["fields"]["format"] =
+        serde_json::json!({ "value": "", "visible": true });
+    let restored: SchematicSheetFormat = serde_json::from_value(wire).unwrap();
+    assert!(
+        !restored
+            .title_block
+            .fields
+            .contains_key(&DrawingSheetTitleFieldId::Format),
+        "a retired field must be dropped rather than refused or rendered"
+    );
+    assert_eq!(restored.title_block.fields.len(), DrawingSheetTitleFieldId::ALL.len());
+    assert!(restored.validate().is_ok());
+    assert!(
+        !resolve_drawing_sheet_title_fields(&restored, &BTreeMap::new())
+            .iter()
+            .any(|field| field.id == DrawingSheetTitleFieldId::Format)
+    );
+
+    // A sheet missing a field the product has gained is filled in, so the
+    // same normalization covers both directions.
+    let mut sparse = serde_json::to_value(&format).unwrap();
+    sparse["title_block"]["fields"]
+        .as_object_mut()
+        .unwrap()
+        .remove("document-id");
+    let filled: SchematicSheetFormat = serde_json::from_value(sparse).unwrap();
+    assert!(filled.validate().is_ok());
+    assert!(
+        filled
+            .title_block
+            .fields
+            .contains_key(&DrawingSheetTitleFieldId::DocumentId)
+    );
+}
+
+#[test]
+fn a_new_sheet_shows_only_the_fields_an_unreleased_drawing_can_fill() {
+    let format = SchematicSheetFormat::default();
+    let visible = resolve_drawing_sheet_title_fields(&format, &BTreeMap::new());
+    let hidden = [
+        DrawingSheetTitleFieldId::DrawnBy,
+        DrawingSheetTitleFieldId::CheckedBy,
+        DrawingSheetTitleFieldId::ApprovedBy,
+        DrawingSheetTitleFieldId::Classification,
+    ];
+    for field in hidden {
+        assert!(
+            !visible.iter().any(|resolved| resolved.id == field),
+            "{field:?} is filled by a release process and must not occupy a \
+             cell on a sheet that has never been released"
+        );
+        assert!(
+            !field.policy().required_visible,
+            "{field:?} must remain optional so it can default to hidden"
+        );
+    }
+    assert_eq!(visible.len(), DrawingSheetTitleFieldId::ALL.len() - hidden.len());
+
+    // Fewer fields is the point: the cells that remain are wider, so more of
+    // each value survives.
+    let geometry = format.geometry().unwrap();
+    let lettering = format.authored_size.lettering();
+    let shown =
+        drawing_sheet_title_cell_capacity(&format, &geometry, visible.len(), lettering.data_um)
+            .unwrap();
+    let crowded = drawing_sheet_title_cell_capacity(
+        &format,
+        &geometry,
+        DrawingSheetTitleFieldId::ALL.len() + 1,
+        lettering.data_um,
+    )
+    .unwrap();
+    assert!(
+        shown > crowded,
+        "hiding the release fields must widen the remaining cells: {shown} vs {crowded}"
+    );
+}
+
+#[test]
+fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
+    // Every height a sheet can letter at, for every size RSpice supports,
+    // must be a step on the ISO 3098 series, and a caption must never
+    // outweigh the value it names nor a value its zone reference.
+    const SERIES: [u64; 8] = [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
+    for standard in DrawingSheetStandard::ALL {
+        let (width_um, height_um) = standard.portrait_dimensions_um();
+        let lettering = DrawingSheetLettering::for_sheet(width_um, height_um);
+        for height in [
+            lettering.caption_um,
+            lettering.data_um,
+            lettering.reference_um,
+        ] {
+            assert!(
+                SERIES.contains(&height),
+                "{height} um on {standard:?} is not an ISO 3098 lettering height"
+            );
+        }
+        assert!(
+            lettering.caption_um < lettering.data_um
+                && lettering.data_um < lettering.reference_um,
+            "{standard:?} letters its captions at or above its values"
+        );
+    }
+
+    // The recommended minimum rises with the sheet, and A4 takes the row the
+    // standard gives it: 1.8 mm notes, 2.5 mm titles, 3.5 mm headings.
+    let a4 = DrawingSheetLettering::for_sheet(210_000, 297_000);
+    assert_eq!(
+        (a4.caption_um, a4.data_um, a4.reference_um),
+        (1_800, 2_500, 3_500)
+    );
+    let a0 = DrawingSheetLettering::for_sheet(841_000, 1_189_000);
+    assert_eq!(
+        (a0.caption_um, a0.data_um, a0.reference_um),
+        (3_500, 5_000, 7_000)
+    );
+    assert_eq!(
+        DrawingSheetLettering::for_sheet(297_000, 420_000),
+        DrawingSheetLettering::for_sheet(594_000, 841_000),
+        "A3 and A1 share the standard's middle row"
+    );
+
+    // IBM Plex Mono advances 600 and ascends 1025 over 1000-unit em, as the
+    // shipped faces report. Both derivations are exact at every height used.
+    assert_eq!(drawing_sheet_mono_advance_um(2_500), 1_500);
+    assert_eq!(drawing_sheet_mono_advance_um(1_800), 1_080);
+    assert_eq!(drawing_sheet_mono_baseline_offset_um(2_500), 937);
+    assert_eq!(drawing_sheet_mono_baseline_offset_um(1_800), 675);
+
+    // Every caption must fit the narrowest cell the default sheet produces,
+    // because a caption is fixed wording that no operator can shorten.
+    let format = SchematicSheetFormat::default();
+    let geometry = format.geometry().unwrap();
+    let fields = DrawingSheetTitleFieldId::ALL.len();
+    let caption_chars = drawing_sheet_title_cell_capacity(
+        &format,
+        &geometry,
+        fields,
+        format.authored_size.lettering().caption_um,
+    )
+    .unwrap();
+    for field in DrawingSheetTitleFieldId::ALL {
+        let caption = field.display_label();
+        assert!(
+            caption.chars().count() <= caption_chars,
+            "caption {caption:?} needs {} of {caption_chars} characters in the default block",
+            caption.chars().count()
+        );
+    }
 }

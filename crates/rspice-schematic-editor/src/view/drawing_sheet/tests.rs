@@ -92,19 +92,19 @@ fn letter_dimensions_retain_fractional_world_edges_without_rounding() {
 #[test]
 fn level_of_detail_is_driven_by_physical_pixel_density() {
     assert_eq!(
-        DrawingSheetLod::resolve(0.1, 1.0).tier,
+        DrawingSheetLod::resolve(0.1, 1.0, test_lettering()).tier,
         DrawingSheetLodTier::Thumbnail
     );
     assert_eq!(
-        DrawingSheetLod::resolve(0.25, 1.0).tier,
+        DrawingSheetLod::resolve(0.25, 1.0, test_lettering()).tier,
         DrawingSheetLodTier::Outline
     );
     assert_eq!(
-        DrawingSheetLod::resolve(0.5, 1.0).tier,
+        DrawingSheetLod::resolve(0.5, 1.0, test_lettering()).tier,
         DrawingSheetLodTier::Working
     );
     assert_eq!(
-        DrawingSheetLod::resolve(1.5, 1.0).tier,
+        DrawingSheetLod::resolve(1.5, 1.0, test_lettering()).tier,
         DrawingSheetLodTier::Detail
     );
 }
@@ -153,9 +153,10 @@ fn coordinates_only_zones_retain_bands_but_suppress_labels_and_references() {
                 labels: DrawingSheetZoneLabels::Coordinates,
                 edges: DrawingSheetZoneEdges::All,
             },
-            DrawingSheetLod::resolve(1.5, 1.0),
+            DrawingSheetLod::resolve(1.5, 1.0, test_lettering()),
             1.5,
             DrawingSheetPalette::resolve(&Tokens::get(context)),
+            test_lettering(),
         );
     });
     assert_eq!(
@@ -170,15 +171,59 @@ fn coordinates_only_zones_retain_bands_but_suppress_labels_and_references() {
     );
 }
 
+/// The lettering of the default A4 sheet, for tests that only need some.
+fn test_lettering() -> DrawingSheetLettering {
+    SchematicSheetFormat::default().authored_size.lettering()
+}
+
 #[test]
-fn drawing_sheet_text_has_a_readable_floor_and_scales_from_fit_sheet_zoom() {
-    assert_eq!(drawing_sheet_font_size(0.25, 7.0, 9.0), 9.0);
-    assert_eq!(drawing_sheet_font_size(0.55, 7.0, 9.0), 9.0);
+fn drawing_sheet_lettering_keeps_its_authored_height_on_the_page() {
+    let data = authored_lettering(test_lettering().data_um);
+    assert_eq!(data, 10.0, "2.5 mm is ten world units on A4");
+
+    // A larger sheet letters larger, as ISO 3098 requires: text legible on A4
+    // at arm's length is not legible on a sheet four times the size.
+    let a0 = DrawingSheetLettering::for_sheet(841_000, 1_189_000);
+    assert!(a0.data_um > test_lettering().data_um);
+
+    // Sheet lettering is paper annotation: it magnifies with the sheet and is
+    // never pinned to a screen size, because a pinned size overruns the cell
+    // whose character budget was derived from the authored height.
+    for zoom in [0.25_f32, 0.55, 1.0, 2.0, 4.0] {
+        let painted = drawing_sheet_font_size(zoom, data);
+        assert!(
+            (painted - data * zoom).abs() <= 0.25,
+            "at {zoom}x the painted height {painted} must track the authored {data}"
+        );
+    }
     assert!(
-        drawing_sheet_font_size(0.6, 7.0, 9.0) > drawing_sheet_font_size(0.55, 7.0, 9.0),
-        "text must begin growing as soon as the operator zooms in from a normal fit-sheet view"
+        drawing_sheet_font_size(0.25, data) < drawing_sheet_font_size(0.55, data),
+        "lettering must shrink with the sheet rather than hold a floor"
     );
-    assert!(drawing_sheet_font_size(2.0, 5.5, 7.0) > drawing_sheet_font_size(1.0, 5.5, 7.0));
+
+    // A caption never outgrows the value it names, at any zoom.
+    let caption = authored_lettering(test_lettering().caption_um);
+    for zoom in [0.25_f32, 1.0, 4.0] {
+        assert!(drawing_sheet_font_size(zoom, caption) < drawing_sheet_font_size(zoom, data));
+    }
+}
+
+#[test]
+fn title_block_fields_are_withheld_until_their_lettering_is_legible() {
+    let legible = DrawingSheetLod::resolve(1.0, 1.0, test_lettering());
+    assert!(
+        legible.show_title_block_fields,
+        "2.5 mm lettering at four pixels per millimetre is ten pixels and must be drawn"
+    );
+    let illegible = DrawingSheetLod::resolve(0.3, 1.0, test_lettering());
+    assert!(
+        !illegible.show_title_block_fields,
+        "2.5 mm lettering at three pixels is unreadable and must be withheld, not inflated"
+    );
+    assert!(
+        illegible.show_border,
+        "the block stays ruled when its text is withheld"
+    );
 }
 
 #[test]
@@ -210,14 +255,14 @@ fn cursor_status_uses_the_configured_unit_and_explicit_sheet_context() {
 #[test]
 fn fit_and_detail_contracts_match_the_permanent_canvas_mockup() {
     assert_eq!(FIT_SCREEN_INSET, 26.0);
-    let detail = DrawingSheetLod::resolve(1.5, 1.0);
+    let detail = DrawingSheetLod::resolve(1.5, 1.0, test_lettering());
     assert!(detail.show_origin);
     assert!(detail.show_dimensions);
 }
 
 #[test]
 fn overflow_advisories_remain_visible_in_thumbnail_views() {
-    let thumbnail = DrawingSheetLod::resolve(0.1, 1.0);
+    let thumbnail = DrawingSheetLod::resolve(0.1, 1.0, test_lettering());
     assert_eq!(thumbnail.tier, DrawingSheetLodTier::Thumbnail);
     assert!(!thumbnail.show_grid);
     assert!(overflow_advisories_visible(thumbnail.tier));

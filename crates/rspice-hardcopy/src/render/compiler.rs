@@ -1167,44 +1167,68 @@ impl<'a> SemanticSceneCompiler<'a> {
                 });
             }
         }
+        // Every cell in the grid is the same width, so the budget and the
+        // lettering are the block's, not each field's.
+        let geometry = format
+            .geometry()
+            .map_err(|error| conversion_error(format!("drawing-sheet geometry: {error}")))?;
+        let capacity = |lettering_um| {
+            rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
+                format,
+                &geometry,
+                visible_field_count,
+                lettering_um,
+            )
+            .ok_or_else(|| conversion_error("title block has no authored cell capacity"))
+        };
+        let lettering = format.authored_size.lettering();
+        let value_chars = capacity(lettering.data_um)?;
+        let caption_chars = capacity(lettering.caption_um)?;
         for (index, (label, value, automatic)) in fields.into_iter().enumerate() {
             let row = index as u64 / columns;
             let column = index as u64 % columns;
-            let max_chars =
-                rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
-                    format,
-                    &format.geometry().map_err(|error| {
-                        conversion_error(format!("drawing-sheet geometry: {error}"))
-                    })?,
-                    visible_field_count,
-                )
-                .ok_or_else(|| conversion_error("title block has no authored cell capacity"))?;
             let label = if automatic {
                 format!("• {label}")
             } else {
                 label
             };
+            // Caption and value sit on the shared fractions of the cell that
+            // the canvas also places them on. The canvas centres a line on
+            // that point while publication places a baseline on it, so each
+            // is converted to a baseline here and a field's ink lands in the
+            // same place on screen and on paper.
+            let at = |(numerator, denominator): (u64, u64)| {
+                (row_height * numerator / denominator) as i64
+            };
+            let text_x = field_grid_x
+                + (cell_width * column) as i64
+                + DRAWING_SHEET_TITLE_CELL_PADDING_UM as i64;
+            let row_y = authored_block.y_um + (row_height * row) as i64;
             self.add_text_rotated(
                 transform(
                     self,
-                    field_grid_x + (cell_width * column) as i64 + 2_000,
-                    authored_block.y_um + (row_height * row) as i64 + 2_800,
+                    text_x,
+                    row_y
+                        + at(DRAWING_SHEET_TITLE_CAPTION_POSITION)
+                        + drawing_sheet_mono_baseline_offset_um(lettering.caption_um) as i64,
                 )?,
-                &label,
-                SceneFont::Sans,
-                1_800,
+                &truncate_title_block_text(&label, caption_chars),
+                SceneFont::Monospace,
+                lettering.caption_um,
                 stroke.color,
                 text_rotation,
             )?;
             self.add_text_rotated(
                 transform(
                     self,
-                    field_grid_x + (cell_width * column) as i64 + 2_000,
-                    authored_block.y_um + (row_height * (row + 1)) as i64 - 2_200,
+                    text_x,
+                    row_y
+                        + at(DRAWING_SHEET_TITLE_VALUE_POSITION)
+                        + drawing_sheet_mono_baseline_offset_um(lettering.data_um) as i64,
                 )?,
-                &truncate_title_block_text(&value, max_chars),
-                SceneFont::SansSemibold,
-                2_400,
+                &truncate_title_block_text(&value, value_chars),
+                SceneFont::Monospace,
+                lettering.data_um,
                 stroke.color,
                 text_rotation,
             )?;

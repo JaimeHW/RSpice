@@ -609,6 +609,12 @@ pub enum DrawingSheetTitleFieldId {
     SheetTitle,
     Page,
     Revision,
+    /// Retired. The sheet format restated the paper the reader is holding,
+    /// in prose, in a cell narrow enough that it rarely fitted; Page Setup
+    /// owns that fact and the border itself shows it. The variant remains
+    /// only so sheets authored before it was withdrawn still load — it is
+    /// absent from [`Self::ALL`], so nothing offers, resolves, or renders
+    /// it, and deserialization drops it from the field set.
     Format,
     Scale,
     DrawnBy,
@@ -621,13 +627,12 @@ pub enum DrawingSheetTitleFieldId {
 }
 
 impl DrawingSheetTitleFieldId {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 13] = [
         Self::Project,
         Self::CellView,
         Self::SheetTitle,
         Self::Page,
         Self::Revision,
-        Self::Format,
         Self::Scale,
         Self::DrawnBy,
         Self::CheckedBy,
@@ -637,6 +642,13 @@ impl DrawingSheetTitleFieldId {
         Self::DocumentId,
         Self::Classification,
     ];
+
+    /// Fields withdrawn from the product that older sheets may still carry.
+    ///
+    /// Deserialization drops these from the field set rather than refusing
+    /// the sheet, so retiring a field costs no saved work. They are never
+    /// written back.
+    pub const RETIRED: [Self; 1] = [Self::Format];
 
     /// Editable title-block values whose authority is the project rather than
     /// one sheet. Visibility remains sheet-owned, but the value is resolved
@@ -679,20 +691,23 @@ impl DrawingSheetTitleFieldId {
     #[must_use]
     pub const fn policy(self) -> DrawingSheetTitleFieldPolicy {
         match self {
-            Self::Project | Self::CellView | Self::Page | Self::Revision | Self::Format => {
-                DrawingSheetTitleFieldPolicy {
-                    required_visible: true,
-                    value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
-                }
-            }
+            Self::CellView | Self::Page | Self::Revision => DrawingSheetTitleFieldPolicy {
+                required_visible: true,
+                value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
+            },
             Self::SheetTitle => DrawingSheetTitleFieldPolicy {
                 required_visible: true,
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
-            Self::Date | Self::Scale => DrawingSheetTitleFieldPolicy {
-                required_visible: false,
-                value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
-            },
+            // The project name is the leading segment of `Cell / view` in a
+            // single-library workspace, so the sheet must be free to carry
+            // one or the other rather than always both.
+            Self::Project | Self::Date | Self::Scale | Self::Format => {
+                DrawingSheetTitleFieldPolicy {
+                    required_visible: false,
+                    value_authority: DrawingSheetTitleFieldValueAuthority::Automatic,
+                }
+            }
             Self::DrawnBy
             | Self::CheckedBy
             | Self::ApprovedBy
@@ -703,6 +718,21 @@ impl DrawingSheetTitleFieldId {
                 value_authority: DrawingSheetTitleFieldValueAuthority::Authored,
             },
         }
+    }
+
+    /// Whether a new sheet shows this field.
+    ///
+    /// The sign-off and classification cells are filled by a release
+    /// process, not by drawing the circuit, so a sheet that has never been
+    /// released would spend them on em dashes. They stay one click away in
+    /// Page Setup, and every field a sheet does show is one the engineer can
+    /// read: fewer columns means wider cells and more characters in each.
+    #[must_use]
+    pub const fn visible_by_default(self) -> bool {
+        !matches!(
+            self,
+            Self::DrawnBy | Self::CheckedBy | Self::ApprovedBy | Self::Classification
+        )
     }
 }
 
@@ -1217,7 +1247,15 @@ impl Default for DrawingSheetTitleBlock {
     fn default() -> Self {
         let fields = DrawingSheetTitleFieldId::ALL
             .into_iter()
-            .map(|field| (field, DrawingSheetTitleFieldState::default()))
+            .map(|field| {
+                (
+                    field,
+                    DrawingSheetTitleFieldState {
+                        visible: field.visible_by_default(),
+                        ..DrawingSheetTitleFieldState::default()
+                    },
+                )
+            })
             .collect::<BTreeMap<_, _>>();
         Self {
             template: DrawingSheetTitleBlockTemplate::Compact,
@@ -1233,6 +1271,27 @@ impl Default for DrawingSheetTitleBlock {
 }
 
 impl DrawingSheetTitleBlock {
+    /// Bring an authored field set to exactly the fields the product has.
+    ///
+    /// A sheet written before a field was withdrawn still carries it, and
+    /// one written before a field existed is missing it. Dropping the first
+    /// and supplying the second means a renderer always sees the current set,
+    /// and neither retiring nor adding a field costs an operator their saved
+    /// sheet. Retired fields are never written back.
+    fn normalize_title_field_set(&mut self) {
+        for retired in DrawingSheetTitleFieldId::RETIRED {
+            self.fields.remove(&retired);
+        }
+        for field in DrawingSheetTitleFieldId::ALL {
+            self.fields
+                .entry(field)
+                .or_insert_with(|| DrawingSheetTitleFieldState {
+                    visible: field.visible_by_default(),
+                    ..DrawingSheetTitleFieldState::default()
+                });
+        }
+    }
+
     fn normalize_managed_template(&mut self) {
         if self.template == DrawingSheetTitleBlockTemplate::OrganizationManaged {
             self.managed_template.get_or_insert_with(Default::default);
@@ -1504,6 +1563,7 @@ impl<'de> Deserialize<'de> for SchematicSheetFormat {
             .or_default()
             .value
             .clear();
+        format.title_block.normalize_title_field_set();
         format.title_block.normalize_managed_template();
         if legacy_title_block {
             format.fit_default_title_block();
@@ -1524,6 +1584,7 @@ impl SchematicSheetFormat {
         mut draft: SchematicSheetFormatDraft,
     ) -> Result<Self, DesignManagementError> {
         draft.title_block.normalize_managed_template();
+        draft.title_block.normalize_title_field_set();
         let format = Self {
             size: draft.authored_size.legacy_projection(),
             orientation: draft.orientation,
@@ -2233,15 +2294,108 @@ pub const fn drawing_sheet_title_block_rows(
     }
 }
 
-/// Conservative physical character capacity of one authored title-grid cell.
+/// Authored padding between a title-grid rule and the lettering inside it.
+pub const DRAWING_SHEET_TITLE_CELL_PADDING_UM: u64 = 2_000;
+
+/// Where a caption sits in its title cell, as a fraction of the cell height
+/// measured from the top rule. Captions ride high and values sit below them
+/// on the cell's lower portion, the proportion that keeps the value dominant.
 ///
-/// The budget is expressed in integer micrometres and is therefore stable
-/// across monitor DPI, canvas zoom, SVG/PDF export, and raster publication.
+/// Canvas and hardcopy both place a line on this fraction — the canvas
+/// centring the laid-out line on it, publication converting it to a baseline
+/// — so the two must read it from here rather than each carrying its own
+/// copy, or a change to one silently moves a field relative to the other.
+pub const DRAWING_SHEET_TITLE_CAPTION_POSITION: (u64, u64) = (1, 3);
+
+/// Where a field value sits in its title cell. See
+/// [`DRAWING_SHEET_TITLE_CAPTION_POSITION`].
+pub const DRAWING_SHEET_TITLE_VALUE_POSITION: (u64, u64) = (7, 10);
+
+/// The ISO 3098 lettering heights a sheet letters its annotation at.
+///
+/// The standard's height series is 1.8, 2.5, 3.5, 5, 7, 10, 14, and 20 mm,
+/// each step larger than the last by about the square root of two, and the
+/// recommended minimum rises with the sheet: text that is legible on A4 at
+/// arm's length is not legible on a drawing twice the size read from the
+/// same distance. Every renderer letters a sheet from this one table, so a
+/// field is the same physical height on the canvas and on the plot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DrawingSheetLettering {
+    /// Field captions: the smallest text on the sheet, since a caption only
+    /// names the value beside it.
+    pub caption_um: u64,
+    /// Field values and sheet dimensions — the text the reader came for.
+    pub data_um: u64,
+    /// Zone references in the border band, which are read while scanning the
+    /// whole sheet rather than while reading one cell.
+    pub reference_um: u64,
+}
+
+impl DrawingSheetLettering {
+    /// Heights for a sheet of the given portrait dimensions.
+    ///
+    /// ISO 3098 states its recommended minimums per A-series size — one row
+    /// for A4, one for A1 through A3, one for A0 — and the A series is a
+    /// progression in area, each size twice the one below it. Selecting on
+    /// area therefore reproduces the standard's own rows while also placing
+    /// the ANSI, architectural, JIS, and custom sheets RSpice supports, none
+    /// of which appear in the table. The thresholds sit at the geometric
+    /// means of the bounding sizes, so each sheet falls in the row of the
+    /// A-series size it is closest to.
+    #[must_use]
+    pub const fn for_sheet(portrait_width_um: u64, portrait_height_um: u64) -> Self {
+        /// Halfway between A4 and A3, in square micrometres.
+        const A4_TO_A3_UM2: u128 = 88_000_000_000;
+        /// Halfway between A1 and A0.
+        const A1_TO_A0_UM2: u128 = 707_000_000_000;
+
+        let area = portrait_width_um as u128 * portrait_height_um as u128;
+        if area < A4_TO_A3_UM2 {
+            Self {
+                caption_um: 1_800,
+                data_um: 2_500,
+                reference_um: 3_500,
+            }
+        } else if area < A1_TO_A0_UM2 {
+            Self {
+                caption_um: 2_500,
+                data_um: 3_500,
+                reference_um: 5_000,
+            }
+        } else {
+            Self {
+                caption_um: 3_500,
+                data_um: 5_000,
+                reference_um: 7_000,
+            }
+        }
+    }
+}
+
+impl AuthoredDrawingSheetSize {
+    /// The ISO 3098 lettering heights this sheet is annotated at.
+    #[must_use]
+    pub const fn lettering(&self) -> DrawingSheetLettering {
+        let (width_um, height_um) = self.portrait_dimensions_um();
+        DrawingSheetLettering::for_sheet(width_um, height_um)
+    }
+}
+
+/// Exact physical character capacity of one authored title-grid cell at the
+/// requested lettering height.
+///
+/// Canvas and hardcopy both letter the title block in IBM Plex Mono, whose
+/// advance is exactly 600/1000 em, so the budget is derived rather than
+/// estimated: every renderer that honours `lettering_um` fits the same text
+/// in the same cell. The budget is expressed in integer micrometres and is
+/// therefore stable across monitor DPI, canvas zoom, SVG/PDF export, and
+/// raster publication.
 #[must_use]
 pub fn drawing_sheet_title_cell_capacity(
     format: &SchematicSheetFormat,
     geometry: &DrawingSheetGeometry,
     visible_field_count: usize,
+    lettering_um: u64,
 ) -> Option<usize> {
     let block = geometry.title_block?;
     let rows = format.title_block_rows(geometry.effective_title_block_template)?;
@@ -2255,7 +2409,31 @@ pub fn drawing_sheet_title_cell_capacity(
         .title_block_logo(geometry.effective_title_block_template)
         .map_or(0, DrawingSheetManagedLogo::reserved_width_um);
     let cell_width_um = authored_width_um.saturating_sub(logo_reserve_um) / columns;
-    Some(((cell_width_um.saturating_sub(4_000)) / 1_400).max(4) as usize)
+    let advance_um = drawing_sheet_mono_advance_um(lettering_um);
+    let lettered_um = cell_width_um.saturating_sub(DRAWING_SHEET_TITLE_CELL_PADDING_UM * 2);
+    Some((lettered_um / advance_um).max(4) as usize)
+}
+
+/// Advance width of one IBM Plex Mono character at the given lettering
+/// height. The face advances 600 units per 1000-unit em for every glyph, so
+/// this is a width measurement, not an approximation of one.
+#[must_use]
+pub const fn drawing_sheet_mono_advance_um(lettering_um: u64) -> u64 {
+    let advance_um = lettering_um * 3 / 5;
+    if advance_um == 0 { 1 } else { advance_um }
+}
+
+/// Distance from the vertical centre of a line of IBM Plex Mono down to its
+/// alphabetic baseline.
+///
+/// The canvas centres a laid-out line on a point; publication backends place
+/// the baseline on one. The face ascends 1025 and descends 275 units per
+/// 1000-unit em, so the two conventions differ by exactly 3/8 of the
+/// lettering height, and converting between them keeps a field's ink in the
+/// same place on screen and on paper.
+#[must_use]
+pub const fn drawing_sheet_mono_baseline_offset_um(lettering_um: u64) -> u64 {
+    lettering_um * 3 / 8
 }
 
 pub(super) mod presets;

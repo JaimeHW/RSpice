@@ -836,7 +836,12 @@ impl ScalarPreference {
 
     const fn default_value(self) -> u32 {
         match self {
-            Self::LocalParallelSlots => 12,
+            // Zero is "every core this machine offers", which is what a
+            // simulator should do when nobody has said otherwise. It is a
+            // sentinel rather than a detected number because the shipped
+            // default has to be the same on every machine a session moves
+            // between; `solver_worker_limit` resolves it.
+            Self::LocalParallelSlots => 0,
             Self::DisplayedSignificantDigits => 7,
             Self::ParallelTaskCeiling => 64,
         }
@@ -844,7 +849,7 @@ impl ScalarPreference {
 
     const fn bounds(self) -> (u32, u32) {
         match self {
-            Self::LocalParallelSlots => (1, 1024),
+            Self::LocalParallelSlots => (0, 1024),
             Self::DisplayedSignificantDigits => (3, 17),
             Self::ParallelTaskCeiling => (1, 4096),
         }
@@ -1297,6 +1302,26 @@ impl UserPreferences {
         [1.0, 1.1, 1.25, 1.5][self.choice(ChoicePreference::InterfaceScale)]
     }
 
+    /// The ceiling the reader put on concurrent solver workers, if any.
+    ///
+    /// `None` is not "no limit" — it means nobody has chosen one, so the
+    /// engine keeps the ceiling this build ships rather than being handed a
+    /// number from here. That distinction matters: a run prepared with
+    /// anything other than the shipped limits is a run with *custom* limits,
+    /// which some analyses refuse, so the default has to leave them untouched
+    /// rather than restate them.
+    ///
+    /// A chosen ceiling is an upper bound, not a request: the engine takes the
+    /// smaller of it and the parallelism the host reports, so a session
+    /// carried to a smaller machine narrows on its own.
+    #[must_use]
+    pub fn solver_worker_limit(&self) -> Option<usize> {
+        match self.scalar(ScalarPreference::LocalParallelSlots) {
+            0 => None,
+            slots => Some(slots as usize),
+        }
+    }
+
     /// The Component shelf's personal pin set and placement history.
     ///
     /// A domain written by an incompatible future build reads as the default,
@@ -1410,6 +1435,45 @@ mod tests {
         assert_eq!(restored.choice(ChoicePreference::DefaultSolverPreset), 3);
         assert!(restored.toggle(TogglePreference::ReducedMotion));
         assert_eq!(restored.interface_scale(), 1.25);
+    }
+
+    #[test]
+    fn the_solver_worker_ceiling_defaults_to_every_core_and_round_trips() {
+        let mut preferences = UserPreferences::default();
+        assert_eq!(
+            preferences.solver_worker_limit(),
+            None,
+            "nobody has chosen a ceiling, so the run keeps the shipped limits \
+             rather than being given custom ones"
+        );
+
+        preferences
+            .set_scalar(ScalarPreference::LocalParallelSlots, 6)
+            .unwrap();
+        let json = serde_json::to_string(&preferences).unwrap();
+        let restored: UserPreferences = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.solver_worker_limit(), Some(6));
+
+        // Setting it back to the sentinel removes the override rather than
+        // storing a zero that a later build would have to interpret.
+        let mut restored = restored;
+        restored
+            .set_scalar(ScalarPreference::LocalParallelSlots, 0)
+            .unwrap();
+        assert_eq!(restored.solver_worker_limit(), None);
+        let encoded = serde_json::to_value(&restored).unwrap();
+        assert!(encoded["scalars"]["local-parallel-slots"].is_null());
+    }
+
+    /// A ceiling of zero workers would refuse to solve anything, so zero is
+    /// the sentinel and never a quantity. One worker is the real floor.
+    #[test]
+    fn a_single_worker_is_distinguishable_from_asking_for_all_of_them() {
+        let mut preferences = UserPreferences::default();
+        preferences
+            .set_scalar(ScalarPreference::LocalParallelSlots, 1)
+            .unwrap();
+        assert_eq!(preferences.solver_worker_limit(), Some(1));
     }
 
     #[test]

@@ -26,7 +26,7 @@ use crate::workbench::{
     ShortcutProfileIssueSeverity, ShortcutSequence, ShortcutStroke, SingleKeyCanvasPolicy,
 };
 
-use super::preferences_shell::{control_width, section_heading, setting_row, value_column};
+use super::preferences_shell::{control_width, preference_row, section_heading, value_column};
 use super::{AppState, PreferencePageActions};
 use crate::workbench::app::dialogs::state::{
     ShortcutCaptureTarget, ShortcutEditorContext, ShortcutEditorState,
@@ -44,7 +44,7 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
     // open this page. The editor below it is the searchable list of every
     // command in the registry, so the table was a sample of the real thing
     // presented as the thing itself, and nothing on it could be changed.
-    setting_row(
+    preference_row(
         ui,
         "Key bindings",
         "Record keys, resolve conflicts, set alternates and reset individual commands.",
@@ -61,7 +61,7 @@ pub(super) fn render_page(ui: &mut Ui, state: &mut AppState, actions: &mut Prefe
         },
     );
 
-    setting_row(
+    preference_row(
         ui,
         "Portable profile",
         "Import or export stable command identifiers and platform mappings.",
@@ -222,7 +222,7 @@ fn policy_select(
     options: Vec<String>,
 ) -> Option<usize> {
     let mut picked = None;
-    setting_row(ui, title, help, |ui| {
+    preference_row(ui, title, help, |ui| {
         value_column(ui, |ui| {
             picked = select(ui, id, title, current, &options, control_width(ui));
         });

@@ -73,6 +73,47 @@ fn render_every_preferences_category_for_review() {
     }
 }
 
+/// The dialog as a reader meets it mid-search.
+///
+/// The filtered view is the one composition no category render shows: rows
+/// drawn from pages that are not open, under the heading naming each page
+/// they came from. A query matching nothing is rendered too, because an empty
+/// result is a layout like any other and is the one most easily left ugly.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "writes PNGs for a human to look at; run with --ignored"]
+fn render_preferences_search_for_review() {
+    use std::io::Write as _;
+
+    let directory = std::env::var("RSPICE_RASTER_DIR")
+        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+    std::fs::create_dir_all(&directory).expect("raster output directory");
+    let stderr = std::io::stderr();
+    let mut report = stderr.lock();
+
+    for (query, name) in [("grid", "matches"), ("qqq", "empty")] {
+        let mut app = RSpiceApp::test_instance();
+        let mut active = PreferenceCategory::Appearance;
+        let canvas =
+            crate::ui::raster::render(vec2(DIALOG_WIDTH, DIALOG_HEIGHT), |ui, background| {
+                preferences_shell::set_filter_for_review(ui.ctx(), query);
+                let state = &mut app.state;
+                let mut actions = super::PreferencePageActions::default();
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(background))
+                    .show(ui, |ui| {
+                        let _ =
+                            preferences_shell::show(ui.ctx(), &mut active, true, |ui, category| {
+                                preference_pages::render(ui, category, state, &mut actions);
+                            });
+                    });
+            });
+        let path = directory.join(format!("preferences-search-{name}.png"));
+        std::fs::write(&path, canvas.png(DIALOG_HEIGHT as usize)).expect("write png");
+        writeln!(report, "wrote {}", path.display()).ok();
+    }
+}
+
 /// Where the dialog actually put its edges, as numbers.
 ///
 /// A render shows the design only if someone measures it: "nothing clipped,
@@ -141,6 +182,7 @@ fn report_preferences_geometry() {
                     egui::accesskit::Role::Slider => "slider",
                     egui::accesskit::Role::Button => "button",
                     egui::accesskit::Role::SpinButton => "number",
+                    egui::accesskit::Role::TextInput => "field",
                     _ => return None,
                 };
                 Some((

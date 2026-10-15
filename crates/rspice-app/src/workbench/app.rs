@@ -435,6 +435,16 @@ impl RSpiceApp {
             .unwrap_or_default()
             .is_open();
         state.workbench.apply_console_launch_behavior(console_open);
+        // The retained snapshots above cover the workspaces this reader has
+        // visited. Every other one opens from the preset, so the workbench
+        // needs it before the first navigation resolves a layout.
+        let workspace_preset = state
+            .ui
+            .preferences
+            .workspace()
+            .map(crate::workbench::WorkspacePreferences::preset)
+            .unwrap_or_default();
+        state.workbench.set_workspace_preset(workspace_preset);
         state.workbench.window_session.normalize_after_restore();
         state.workspace.content.migrate_owned_netlist_deck_ids();
 

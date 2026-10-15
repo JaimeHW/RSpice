@@ -66,6 +66,59 @@ const SETTING_COPY_HELP_GAP: f32 = 2.0;
 /// Gap between a stacked label and its control on a phone.
 const SETTING_ROW_PHONE_VALUE_GAP: f32 = 8.0;
 const SHELL_ID: &str = "rspice.preferences.shell";
+/// Height the rail gives the filter field, including the space around it.
+const SEARCH_FIELD_BAND: f32 = 12.0;
+
+/// The settings filter.
+///
+/// Forty-odd settings across eight categories is past the point where a reader
+/// can be expected to know which page holds the one they want, so a query
+/// searches every page at once and the content area answers with a flat list
+/// of matching rows. Nothing here indexes the pages: a row's own label and
+/// help are what it is matched on, as it renders, which is why the list cannot
+/// drift out of step with the settings that exist.
+#[derive(Debug, Clone, Default)]
+struct SettingFilter {
+    /// What the reader typed. Persists across frames.
+    query: String,
+    /// Per-pass scratch: the category whose heading has not been painted yet.
+    /// The body sets it before each page and the first matching row on that
+    /// page takes it, so a page that matches nothing announces nothing.
+    pending_category: Option<&'static str>,
+    /// Per-pass scratch: how many rows matched, to tell an empty result from
+    /// a result the reader has simply not scrolled to.
+    matches: usize,
+}
+
+fn filter_id() -> Id {
+    Id::new(SHELL_ID).with("settings-filter")
+}
+
+fn read_filter(ctx: &Context) -> SettingFilter {
+    ctx.data(|data| data.get_temp::<SettingFilter>(filter_id()))
+        .unwrap_or_default()
+}
+
+fn write_filter(ctx: &Context, filter: SettingFilter) {
+    ctx.data_mut(|data| data.insert_temp(filter_id(), filter));
+}
+
+/// The query every row is tested against, or `None` when the pages are being
+/// read normally and no row is to be hidden.
+fn active_query(ctx: &Context) -> Option<String> {
+    let query = read_filter(ctx).query.trim().to_lowercase();
+    (!query.is_empty()).then_some(query)
+}
+
+/// Whether a row answers `query`, on its label or on the help under it.
+///
+/// The query is folded here rather than trusted to arrive folded: a predicate
+/// that is only correct when its caller remembered to lowercase is one
+/// refactor away from matching nothing, and silently.
+fn row_matches(title: &str, help: &str, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    title.to_lowercase().contains(&query) || help.to_lowercase().contains(&query)
+}
 
 /// The two things a reader is looking for when they open Preferences: how the
 /// application behaves, or how engineering quantities are read and written.
@@ -240,7 +293,7 @@ pub(super) fn show(
     ctx: &Context,
     category: &mut PreferenceCategory,
     allow_escape_close: bool,
-    render_page: impl FnOnce(&mut Ui, PreferenceCategory),
+    render_page: impl FnMut(&mut Ui, PreferenceCategory),
 ) -> PreferencesShellResponse {
     let viewport = ctx.content_rect();
     let layout = PreferencesLayout::resolve(viewport);
@@ -352,7 +405,15 @@ pub(super) fn show(
         && !popup_was_open
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
-        response.close_requested = true;
+        // Escape undoes the narrowing before it closes the dialog. Dropping a
+        // filter and dismissing the surface the filter was applied to are not
+        // the same request, and losing the second to the first would make a
+        // reader reopen Preferences to get out of a search.
+        if active_query(ctx).is_some() {
+            clear_filter(ctx);
+        } else {
+            response.close_requested = true;
+        }
     }
     if let Some(close_control_id) = close_control_id {
         if opened_this_pass || !focus_is_within_modal(ctx, modal_layer) {
@@ -373,6 +434,9 @@ pub(super) fn show(
 /// browser Back). This mirrors normal modal teardown instead of leaving a
 /// hidden control focused for the next shortcut-resolution pass.
 pub(super) fn unmount(ctx: &Context) {
+    // A query is a reading position, not a stored preference: Preferences
+    // opens on the pages, never on someone's last search.
+    ctx.data_mut(|data| data.remove_temp::<SettingFilter>(filter_id()));
     let area_id = Id::new(SHELL_ID);
     let modal_layer = egui::LayerId::new(Order::Foreground, area_id);
     let focus_state =
@@ -528,15 +592,37 @@ fn render_body(
     rect: Rect,
     layout: PreferencesLayout,
     category: &mut PreferenceCategory,
-    render_page: impl FnOnce(&mut Ui, PreferenceCategory),
+    render_page: impl FnMut(&mut Ui, PreferenceCategory),
 ) -> Option<Id> {
     if layout.narrow {
-        let selector_height = Tokens::get(surface.ctx()).metrics.ctl_h + 16.0;
-        let selector_rect = Rect::from_min_max(
+        let control_height = Tokens::get(surface.ctx()).metrics.ctl_h;
+        let selector_height = control_height + 16.0;
+        let search_height = control_height + SEARCH_FIELD_BAND;
+        let search_rect = Rect::from_min_max(
             rect.min,
             egui::pos2(
                 rect.right(),
-                (rect.top() + selector_height).min(rect.bottom()),
+                (rect.top() + search_height).min(rect.bottom()),
+            ),
+        );
+        let inset = content_inset(surface);
+        let mut search = surface.new_child(
+            egui::UiBuilder::new()
+                .id_salt("preferences.search.narrow")
+                .max_rect(search_rect)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        search.add_space(SEARCH_FIELD_BAND * 0.5);
+        search.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.add_space(inset);
+            render_search_field(ui, (search_rect.width() - inset * 2.0).max(1.0));
+        });
+        let selector_rect = Rect::from_min_max(
+            egui::pos2(rect.left(), search_rect.bottom()),
+            egui::pos2(
+                rect.right(),
+                (search_rect.bottom() + selector_height).min(rect.bottom()),
             ),
         );
         let active_category_id = render_mobile_category(surface, selector_rect, category);
@@ -567,6 +653,65 @@ fn render_body(
     }
 }
 
+/// The rail's filter field: the one control that searches every page.
+///
+/// It sits at the head of the rail because searching is navigating here — it
+/// answers the same question the category list answers, for a reader who knows
+/// the setting's name but not which page holds it.
+fn render_search_field(ui: &mut Ui, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let mut filter = read_filter(ui.ctx());
+    let before = filter.query.clone();
+    let response = ui.add_sized(
+        [width, t.metrics.ctl_h],
+        egui::TextEdit::singleline(&mut filter.query)
+            .id(Id::new(SHELL_ID).with("filter-field"))
+            .hint_text("Search settings")
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .margin(egui::Margin {
+                left: 29,
+                right: 8,
+                top: 5,
+                bottom: 5,
+            }),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Search settings");
+        node.set_description("Filter every Preferences page by setting name");
+    });
+    crate::workbench::design_system::WorkbenchIcon::Search.paint(
+        ui.painter(),
+        Rect::from_center_size(
+            egui::pos2(response.rect.left() + 15.0, response.rect.center().y),
+            vec2(16.0, 16.0),
+        ),
+        t.color.text_faint,
+    );
+    if filter.query != before {
+        write_filter(ui.ctx(), filter);
+    }
+}
+
+/// Put a query in the field without typing it, so a review render and the
+/// tests can show the filtered dialog as a reader would meet it.
+#[cfg(test)]
+pub(super) fn set_filter_for_review(ctx: &Context, query: &str) {
+    write_filter(
+        ctx,
+        SettingFilter {
+            query: query.to_owned(),
+            ..SettingFilter::default()
+        },
+    );
+}
+
+/// Drop the query, so the rail and the pages read normally again.
+fn clear_filter(ctx: &Context) {
+    let mut filter = read_filter(ctx);
+    filter.query.clear();
+    write_filter(ctx, filter);
+}
+
 fn render_category_rail(
     surface: &mut Ui,
     rect: Rect,
@@ -578,6 +723,14 @@ fn render_category_rail(
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     rail.spacing_mut().item_spacing.y = 0.0;
+    let inset = content_inset(&rail);
+    rail.add_space(SEARCH_FIELD_BAND * 0.5);
+    rail.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(inset);
+        render_search_field(ui, (rect.width() - inset * 2.0).max(1.0));
+    });
+    rail.add_space(SEARCH_FIELD_BAND * 0.5);
     let mut active_category_id = None;
     let mut rendered_group = None;
     for candidate in PreferenceCategory::ALL {
@@ -593,6 +746,9 @@ fn render_category_rail(
             }
             if response.clicked() {
                 *category = candidate;
+                // Picking a page is a request to read that page, not to read
+                // it filtered down to a query about something else.
+                clear_filter(ui.ctx());
             }
         });
     }
@@ -675,7 +831,15 @@ fn category_button(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
             t.color.text_dim
         },
     );
-    theme::paint_focus_ring(ui, &response, rect);
+    // Opening Preferences puts keyboard focus on the category you are on, so
+    // the shell's shortcuts work without a click. Ringing it for that reason
+    // frames the rail the moment the dialog appears and says the reader did
+    // something they did not do — the page is already marked as current by
+    // its fill, its accent edge and its weight. The ring is for a reader who
+    // tabbed here, which is what `focus_is_visible` distinguishes.
+    if theme::focus_is_visible(ui.ctx(), &response) {
+        theme::paint_focus_ring(ui, &response, rect);
+    }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -724,8 +888,9 @@ fn render_scrolling_page(
     surface: &mut Ui,
     rect: Rect,
     category: PreferenceCategory,
-    render_page: impl FnOnce(&mut Ui, PreferenceCategory),
+    mut render_page: impl FnMut(&mut Ui, PreferenceCategory),
 ) {
+    let filtering = active_query(surface.ctx()).is_some();
     let mut content = surface.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
@@ -733,7 +898,13 @@ fn render_scrolling_page(
     );
     content.set_clip_rect(rect);
     egui::ScrollArea::vertical()
-        .id_salt(("preferences.page", category.stable_id()))
+        // A filtered list is one surface over every page, so it keeps one
+        // scroll position rather than inheriting whichever page was open.
+        .id_salt(if filtering {
+            "preferences.search-results"
+        } else {
+            category.stable_id()
+        })
         .auto_shrink([false, false])
         .show(&mut content, |ui| {
             ui.set_min_width(ui.available_width());
@@ -741,7 +912,64 @@ fn render_scrolling_page(
             // mockup is explicit, so egui's global 4 px item gap must not be
             // added between rows or on top of those margins.
             ui.spacing_mut().item_spacing.y = 0.0;
-            render_page(ui, category);
+            if filtering {
+                render_filtered_pages(ui, render_page);
+            } else {
+                render_page(ui, category);
+            }
+        });
+}
+
+/// Every page in rail order, each showing only the rows that matched.
+///
+/// All eight run because a query is about the settings, not about the page
+/// that happens to be open; the rows themselves decide whether they appear,
+/// and a page contributing nothing contributes no heading either.
+fn render_filtered_pages(ui: &mut Ui, mut render_page: impl FnMut(&mut Ui, PreferenceCategory)) {
+    let mut filter = read_filter(ui.ctx());
+    filter.matches = 0;
+    filter.pending_category = None;
+    write_filter(ui.ctx(), filter);
+
+    for candidate in PreferenceCategory::ALL {
+        let mut filter = read_filter(ui.ctx());
+        filter.pending_category = Some(candidate.label());
+        write_filter(ui.ctx(), filter);
+        ui.push_id(("preferences.filtered", candidate.stable_id()), |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            render_page(ui, candidate);
+        });
+    }
+
+    let mut filter = read_filter(ui.ctx());
+    let matches = filter.matches;
+    filter.pending_category = None;
+    write_filter(ui.ctx(), filter);
+    if matches == 0 {
+        no_matches_row(ui);
+    }
+}
+
+/// What the content area says when nothing matched: the row grid's own inset
+/// and padding, so an empty result is still a row of the page it replaces.
+fn no_matches_row(ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let horizontal = content_inset(ui) as i8;
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(
+            horizontal,
+            setting_row_padding(ui) as i8,
+        ))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new("No setting matches this search.")
+                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                        .color(t.color.text_dim),
+                )
+                .wrap(),
+            );
         });
 }
 
@@ -807,6 +1035,32 @@ fn content_inset(ui: &Ui) -> f32 {
 /// labels — so it separates two runs of settings without any spacing that
 /// belongs to it alone. Every number here is read off the row beside it.
 pub(super) fn section_heading(ui: &mut Ui, title: &str) {
+    if active_query(ui.ctx()).is_some() {
+        // A filtered page is a flat list of the rows that matched, so its
+        // sections are no longer contiguous. A band naming one would sit above
+        // rows that are not in it.
+        return;
+    }
+    heading_band(ui, title, 4);
+}
+
+/// Which page a run of filtered matches came from.
+///
+/// Painted above the first match on each page, because a flat result list
+/// otherwise states forty settings without saying where any of them live. It
+/// is the section band's own geometry at a level above it, rather than a
+/// second heading style invented for the filtered view.
+fn category_heading(ui: &mut Ui, title: &str) {
+    heading_band(ui, title, 3);
+}
+
+/// A full-width band carrying one heading.
+///
+/// Every number in it comes from the row grid — the same inset a label starts
+/// at, the same padding above and below, and the rule a row closes with — so
+/// the band is a row of the grid rather than a box of chosen size with a word
+/// in it. Its height is measured from the text it was given.
+fn heading_band(ui: &mut Ui, title: &str, level: usize) {
     let t = Tokens::get(ui.ctx());
     let horizontal = content_inset(ui);
     let font = theme::sans(tokens::FS_1, FontWeight::SemiBold);
@@ -827,7 +1081,7 @@ pub(super) fn section_heading(ui: &mut Ui, title: &str) {
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
         node.set_label(title);
-        node.set_level(4);
+        node.set_level(level);
     });
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().text(
@@ -842,6 +1096,43 @@ pub(super) fn section_heading(ui: &mut Ui, title: &str) {
         rect.bottom(),
         Stroke::new(1.0, t.color.border),
     );
+}
+
+/// One setting on a Preferences page, hidden when a filter excludes it.
+///
+/// Every page row goes through here rather than through `setting_row` so the
+/// filter is applied in exactly one place. `setting_row` stays the grid
+/// primitive the sibling dialogs in this module use, and they are not
+/// filtered by a query typed into this one.
+///
+/// A filtered-out row does not render, so its closure never runs and a
+/// control that is not on screen cannot report having been used. That is why
+/// this returns nothing: a row reporting what the reader did with it captures
+/// that itself, as `action_row` does, instead of reading it back from here.
+pub(super) fn preference_row<R>(
+    ui: &mut Ui,
+    title: &str,
+    help: &str,
+    add_value: impl FnOnce(&mut Ui) -> R,
+) {
+    if let Some(query) = active_query(ui.ctx()) {
+        if !row_matches(title, help, &query) {
+            return;
+        }
+        accept_filtered_row(ui);
+    }
+    setting_row(ui, title, help, add_value);
+}
+
+/// Count a match and, if this is the first on its page, name the page.
+fn accept_filtered_row(ui: &mut Ui) {
+    let mut filter = read_filter(ui.ctx());
+    filter.matches += 1;
+    let pending = filter.pending_category.take();
+    write_filter(ui.ctx(), filter);
+    if let Some(label) = pending {
+        category_heading(ui, label);
+    }
 }
 
 /// One setting: a label, optional help under it, and the control that sets it.
@@ -1247,6 +1538,237 @@ mod tests {
             },
         );
         height
+    }
+
+    /// What the dialog publishes to assistive technology, by role, after a
+    /// few passes. The filter decides what exists rather than what is merely
+    /// scrolled out of view, so the AT tree is the honest oracle for it: a
+    /// row that is not in here was not rendered at all.
+    fn published_labels(query: &str) -> Vec<(egui::accesskit::Role, String)> {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        if !query.is_empty() {
+            write_filter(
+                &ctx,
+                SettingFilter {
+                    query: query.to_owned(),
+                    ..SettingFilter::default()
+                },
+            );
+        }
+        let mut category = PreferenceCategory::Appearance;
+        let mut update = None;
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1_060.0, 760.0))),
+                    ..Default::default()
+                },
+                |ctx| {
+                    let _ = show(ctx, &mut category, true, |ui, category| {
+                        // Two pages' worth of rows, enough to prove a query
+                        // reaches past the page that happens to be open.
+                        match category {
+                            PreferenceCategory::Appearance => {
+                                section_heading(ui, "Appearance section");
+                                preference_row(ui, "Color mode", "", |_| {});
+                                preference_row(ui, "Canvas contrast", "", |_| {});
+                            }
+                            PreferenceCategory::Results => {
+                                preference_row(ui, "Cursor interpolation", "", |_| {});
+                            }
+                            _ => {}
+                        }
+                    });
+                },
+            );
+            update = output.platform_output.accesskit_update;
+        }
+        update
+            .expect("AccessKit tree update")
+            .nodes
+            .into_iter()
+            .filter_map(|(_, node)| {
+                // egui publishes a plain `Label`'s text as the node's value
+                // and a widget's accessible name as its label, so a scan that
+                // reads only one of the two misses half the page.
+                let text = node
+                    .label()
+                    .or_else(|| node.value())
+                    .map(std::string::ToString::to_string)?;
+                Some((node.role(), text))
+            })
+            .collect()
+    }
+
+    fn labelled(labels: &[(egui::accesskit::Role, String)], label: &str) -> bool {
+        labels.iter().any(|(_, published)| published == label)
+    }
+
+    #[test]
+    fn with_no_query_a_page_shows_its_own_rows_and_its_sections() {
+        let labels = published_labels("");
+        assert!(labelled(&labels, "Color mode"));
+        assert!(labelled(&labels, "Canvas contrast"));
+        assert!(
+            labelled(&labels, "Appearance section"),
+            "an unfiltered page keeps its section bands"
+        );
+        assert!(
+            !labelled(&labels, "Cursor interpolation"),
+            "an unfiltered dialog shows one page, not all of them"
+        );
+    }
+
+    #[test]
+    fn a_query_reaches_rows_on_pages_that_are_not_open() {
+        let labels = published_labels("cursor");
+        assert!(
+            labelled(&labels, "Cursor interpolation"),
+            "a match on Results is reachable while Appearance is the open page"
+        );
+        assert!(
+            !labelled(&labels, "Color mode"),
+            "a row that does not match is not rendered"
+        );
+    }
+
+    #[test]
+    fn a_match_is_published_under_the_page_it_came_from() {
+        let labels = published_labels("cursor");
+        assert!(
+            labels.iter().any(|(role, label)| {
+                *role == egui::accesskit::Role::Heading && label == "Results and precision"
+            }),
+            "a flat result list names the page each run of matches belongs to"
+        );
+        assert!(
+            !labelled(&labels, "Appearance section"),
+            "a filtered list drops section bands, whose runs are no longer contiguous"
+        );
+    }
+
+    #[test]
+    fn a_query_matches_a_rows_help_as_well_as_its_label() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        assert!(row_matches(
+            "Solver threads",
+            "Concurrent workers",
+            "worker"
+        ));
+        assert!(row_matches("Solver threads", "", "SOLVER"));
+        assert!(!row_matches("Solver threads", "Concurrent workers", "grid"));
+    }
+
+    #[test]
+    fn a_query_that_matches_nothing_says_so_instead_of_showing_an_empty_page() {
+        let labels = published_labels("xyzzy");
+        assert!(labelled(&labels, "No setting matches this search."));
+        assert!(!labelled(&labels, "Color mode"));
+        assert!(!labelled(&labels, "Cursor interpolation"));
+    }
+
+    #[test]
+    fn the_filter_field_is_published_once_and_reaches_every_page() {
+        let labels = published_labels("");
+        let fields = labels
+            .iter()
+            .filter(|(_, label)| label == "Search settings")
+            .count();
+        assert_eq!(fields, 1, "one filter field, in the rail");
+    }
+
+    /// Whether a pixel is carrying the accent rather than a panel grey.
+    ///
+    /// Tested by how far red runs ahead of blue, not by equality with the
+    /// token: the modal fades in over several passes, so accent reaches the
+    /// canvas blended toward the backdrop and never matches exactly. Every
+    /// surface behind it is a neutral whose channels sit together, while the
+    /// accent is `rgb(242, 184, 36)` — 206 apart — so the gap survives the
+    /// blend by a wide margin.
+    fn carries_accent(pixel: egui::Color32) -> bool {
+        i16::from(pixel.r()) - i16::from(pixel.b()) > 40
+    }
+
+    /// Paint the shell and report the first rail row's top edge and left edge.
+    ///
+    /// The two edges tell the marks apart: a focus ring strokes the whole row
+    /// and so puts accent along the top, while the current-page marker is a
+    /// bar down the left only. Sampling the top away from both corners
+    /// therefore sees the ring and nothing else.
+    fn active_row_edges() -> (Vec<egui::Color32>, Vec<egui::Color32>) {
+        let mut category = PreferenceCategory::Appearance;
+        let canvas = crate::ui::raster::render(vec2(1_060.0, 760.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    let _ = show(ui.ctx(), &mut category, true, |_, _| {});
+                });
+        });
+        // Appearance is the first category, so its row opens the rail under
+        // that group's label. Located from the rail's own constants rather
+        // than from numbers read off a picture.
+        let rail_left = 31.0;
+        let row_top = 153.0;
+        let row_height = CATEGORY_ROW_HEIGHT;
+        let top = canvas
+            .pixels_in(Rect::from_min_max(
+                egui::pos2(rail_left + 40.0, row_top),
+                egui::pos2(rail_left + 120.0, row_top + 2.0),
+            ))
+            .collect();
+        let left = canvas
+            .pixels_in(Rect::from_min_max(
+                egui::pos2(rail_left, row_top + row_height * 0.25),
+                egui::pos2(rail_left + 2.0, row_top + row_height * 0.75),
+            ))
+            .collect();
+        (top, left)
+    }
+
+    /// Opening Preferences focuses the category you are on so the dialog's
+    /// keys work without a click. That is not the reader navigating, and it
+    /// must not draw a ring around the rail the instant the dialog appears.
+    #[test]
+    fn opening_the_dialog_marks_the_current_page_without_ringing_it() {
+        let (top, left) = active_row_edges();
+
+        assert!(!top.is_empty() && !left.is_empty(), "sampled off-canvas");
+        assert!(
+            !top.iter().copied().any(carries_accent),
+            "the active row's top edge carries accent, so a ring was painted \
+             around a row the reader never navigated to"
+        );
+        assert!(
+            left.iter().copied().any(carries_accent),
+            "the current page still has to be marked, by its left accent edge"
+        );
+    }
+
+    /// The ring is withheld by the `:focus-visible` rule, not deleted.
+    ///
+    /// `focus_is_visible` is the kit's own helper and carries its own tests
+    /// for telling a tabbed-to focus from a pointer-given one. What belongs
+    /// here is that the rail asks it before ringing anything, because the
+    /// failure this guards against is someone restoring the unconditional
+    /// call and taking the dialog back to ringing itself on open.
+    #[test]
+    fn the_rail_rings_a_row_only_when_the_keyboard_put_focus_there() {
+        let production = crate::source_guard::production_half(include_str!("preferences_shell.rs"));
+        let ring = production
+            .match_indices("paint_focus_ring")
+            .next()
+            .expect("the rail still paints a keyboard ring");
+        assert!(
+            production[..ring.0].ends_with("        theme::"),
+            "the ring call moved; check it is still inside a focus_is_visible gate"
+        );
+        assert!(
+            production.contains("if theme::focus_is_visible(ui.ctx(), &response) {"),
+            "the rail must ask whether focus is visible before ringing a row"
+        );
     }
 
     #[test]

@@ -1539,14 +1539,6 @@ fn title_field_automatic_values(
         document_control.revision.clone(),
     );
     values.insert(
-        DrawingSheetTitleFieldId::Format,
-        format!(
-            "{} · {}",
-            format.authored_size.label(),
-            format.orientation.label().to_lowercase()
-        ),
-    );
-    values.insert(
         DrawingSheetTitleFieldId::Scale,
         match format.title_block.scale {
             crate::state::DrawingSheetScale::NotToScale => "NTS".to_owned(),
@@ -1578,7 +1570,7 @@ fn title_field_owner(id: DrawingSheetTitleFieldId) -> &'static str {
         DrawingSheetTitleFieldId::Scale => "drawing sheet",
         DrawingSheetTitleFieldId::Page => "document order",
         DrawingSheetTitleFieldId::Revision => "working revision",
-        DrawingSheetTitleFieldId::Format => "drawing sheet",
+        DrawingSheetTitleFieldId::Format => "retired",
         DrawingSheetTitleFieldId::Date => "document",
         DrawingSheetTitleFieldId::Organization | DrawingSheetTitleFieldId::DocumentId => "project",
         DrawingSheetTitleFieldId::Classification => "project policy",
