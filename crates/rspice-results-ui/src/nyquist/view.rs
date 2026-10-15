@@ -77,22 +77,16 @@ fn criterion_note(count: EncirclementCount) -> String {
                 .to_owned(),
         };
     };
-    let criterion = format!(
-        "Nyquist criterion: Z = N + P = {n:+} + P closed-loop right-half-plane poles, where P counts \
-         the open-loop ones. P has to come from a pole-zero analysis of the loop-broken deck — a \
-         pole-zero run on this deck returns closed-loop poles."
-    );
     if n < 0 {
         let p = -n;
         return format!(
-            "{criterion} A counter-clockwise winding proves P ≥ {p}, since Z cannot be negative: \
-             with P = {p} the loop is stable (Z = 0), and each open-loop pole beyond that is one \
-             the loop does not close."
+            "N = {n:+}: a counter-clockwise winding proves the open loop has at least {p} \
+             right-half-plane pole(s), and with exactly {p} the loop is stable."
         );
     }
     let z = super::closed_loop_rhp_poles(n, 0);
     let verdict = if z == 0 { "stable" } else { "unstable" };
-    format!("{criterion} With P = 0 the loop is {verdict} (Z = {z}).")
+    format!("N = {n:+}: {verdict} if the open loop has no right-half-plane poles.")
 }
 
 /// Viewer-scoped base for this sheet's entries in the workspace-wide derived
@@ -367,22 +361,23 @@ mod tests {
     use super::*;
 
     /// The panel states the criterion instead of pronouncing a verdict it
-    /// cannot support: P is not something this run retains, so it stays in
-    /// the sentence rather than being silently assumed away.
+    /// cannot support: P is not something this run retains, so the verdict
+    /// stays conditional on it rather than being silently assumed away.
     #[test]
     fn the_criterion_note_carries_the_count_and_names_what_p_needs() {
         let note = criterion_note(EncirclementCount::Counted(2));
 
-        assert!(note.contains("Z = N + P"), "{note}");
-        assert!(note.contains("+2"), "{note}");
+        assert!(note.contains("N = +2"), "{note}");
         assert!(
-            note.contains("pole-zero analysis of the loop-broken deck"),
+            note.contains("unstable if the open loop has no right-half-plane poles"),
             "{note}"
         );
-        assert!(note.contains("With P = 0 the loop is unstable"), "{note}");
 
         let stable = criterion_note(EncirclementCount::Counted(0));
-        assert!(stable.contains("With P = 0 the loop is stable"), "{stable}");
+        assert!(
+            stable.contains("stable if the open loop has no right-half-plane poles"),
+            "{stable}"
+        );
     }
 
     /// A contour with no winding number gets no criterion applied to it.
@@ -408,14 +403,10 @@ mod tests {
     fn a_negative_winding_states_the_open_loop_poles_it_proves() {
         let note = criterion_note(EncirclementCount::Counted(-1));
 
-        assert!(note.contains("P ≥ 1"), "{note}");
-        assert!(
-            note.contains("with P = 1 the loop is stable (Z = 0)"),
-            "{note}"
-        );
+        assert!(note.contains("at least 1 right-half-plane pole"), "{note}");
+        assert!(note.contains("with exactly 1 the loop is stable"), "{note}");
         // The one thing it must never print is a negative pole count.
         assert!(!note.contains("(Z = -"), "{note}");
-        assert!(!note.contains("With P = 0"), "{note}");
         assert!(!note.contains("unstable"), "{note}");
     }
 
