@@ -1080,6 +1080,15 @@ pub struct WorkbenchState {
     /// Independent device-local dock snapshots for every visited workspace.
     #[serde(default)]
     workspace_layouts: HashMap<Workspace, WorkspaceLayoutState>,
+    /// The composition a workspace with no snapshot above opens with.
+    ///
+    /// Mirrored from the Workspace preference, because layout reconciliation
+    /// runs deep inside navigation and cannot reach the preference store from
+    /// there. Without it an unvisited workspace resolved to the shipped
+    /// default and the preference governed only whichever workspace happened
+    /// to be active when it was chosen.
+    #[serde(default)]
+    workspace_preset: WorkspacePreset,
     #[serde(default)]
     pub console_page: ConsolePage,
     /// The producer the Console page is narrowed to. Transient: a reading
@@ -1405,6 +1414,7 @@ impl Default for WorkbenchState {
             inspector_width_custom: false,
             console_height: default_console_height(),
             workspace_layouts: HashMap::new(),
+            workspace_preset: WorkspacePreset::default(),
             console_page: ConsolePage::Console,
             console_producer_filter: None,
             design_panel: DesignPanel::Navigator,
@@ -1919,14 +1929,31 @@ impl WorkbenchState {
         if workspace == self.workspace {
             return self.current_workspace_layout();
         }
+        self.retained_or_preset_layout(workspace)
+    }
+
+    /// What `workspace` opens with: its own retained snapshot if it has been
+    /// visited, otherwise the composition the preference asks new ones for.
+    fn retained_or_preset_layout(&self, workspace: Workspace) -> WorkspaceLayoutState {
         self.workspace_layouts
             .get(&workspace)
             .copied()
-            .unwrap_or_default()
+            .unwrap_or_else(|| WorkspaceLayoutState::for_preset(self.workspace_preset))
+    }
+
+    /// Record the composition unvisited workspaces open with.
+    ///
+    /// This only sets the fallback. Workspaces the reader has already arranged
+    /// keep their own snapshots, so choosing a preset never discards work;
+    /// `apply_preset_to_all_workspaces` is the surface that does that, and it
+    /// says so.
+    pub fn set_workspace_preset(&mut self, preset: WorkspacePreset) {
+        self.workspace_preset = preset;
     }
 
     pub fn apply_preset_to_all_workspaces(&mut self, preset: WorkspacePreset) {
         let layout = WorkspaceLayoutState::for_preset(preset);
+        self.workspace_preset = preset;
         for workspace in Workspace::ALL {
             self.workspace_layouts.insert(workspace, layout);
         }
@@ -2008,11 +2035,7 @@ impl WorkbenchState {
             self.capture_workspace_layout(previous_workspace);
         }
         if let Some(current_workspace) = current_workspace {
-            let layout = self
-                .workspace_layouts
-                .get(&current_workspace)
-                .copied()
-                .unwrap_or_default();
+            let layout = self.retained_or_preset_layout(current_workspace);
             self.apply_workspace_layout(layout);
         }
     }
