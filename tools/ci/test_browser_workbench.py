@@ -11,7 +11,7 @@ import threading
 import urllib.request
 from unittest.mock import Mock, patch
 
-from browser_workbench import WorkbenchBrowser, controls
+from browser_workbench import WorkbenchBrowser, controls, unsaved
 from check_browser_workbench import (
     run_with_saved_provider, verify_checkpoint, verify_clock_rejection, verify_recovery_copy,
     wait_for_checkpoint_publication,
@@ -131,6 +131,39 @@ class BrowserWorkbenchTests(unittest.TestCase):
         self.assertEqual(observed[0]["id"], str(child))
         self.assertEqual(observed[0]["label"], "Save project")
         self.assertEqual(observed[0]["center"], (0, 50))
+
+    def test_unsaved_state_is_read_from_the_tab_that_publishes_it(self):
+        bounds = {"x0": 0, "y0": 0, "x1": 100, "y1": 20}
+
+        def snapshot(*descriptions):
+            identities = range(2, 2 + len(descriptions))
+            return {"tree": {"tree": {"root": 1}, "nodes": [
+                [1, {"role": "window", "properties": {"children": list(identities)}}],
+                *([identity, {"role": "tab", "properties": {
+                    "bounds": bounds, "label": "design", "description": description}}]
+                  for identity, description in zip(identities, descriptions)),
+            ]}}
+
+        self.assertTrue(unsaved(snapshot("Unsaved changes.")))
+        self.assertTrue(unsaved(snapshot("Unsaved changes. Press Delete to close.")))
+        self.assertFalse(unsaved(snapshot("Press Delete to close.")))
+        self.assertFalse(unsaved(snapshot("Pinned primary document.")))
+        # One dirty document among clean ones leaves the project unsaved.
+        self.assertTrue(unsaved(snapshot("Pinned primary document.", "Unsaved changes.")))
+
+    def test_an_absent_saved_state_fails_rather_than_reading_as_saved(self):
+        # The regression this guards: the status bar's Saved segment was
+        # deleted, every reader of it silently became "not unsaved", and the
+        # assertions that a failed operation had not dirtied the project could
+        # no longer fire. A missing observable is a failure, never a pass.
+        snapshot = {"tree": {"tree": {"root": 1}, "nodes": [
+            [1, {"role": "window", "properties": {"children": [2]}}],
+            [2, {"role": "button", "properties": {
+                "bounds": {"x0": 0, "y0": 0, "x1": 10, "y1": 20},
+                "label": "Save all", "description": "Writes every open document."}}],
+        ]}}
+        with self.assertRaisesRegex(AssertionError, "whether the project is saved"):
+            unsaved(snapshot)
 
     def test_duplicate_or_cyclic_controls_are_not_click_authority(self):
         snapshot = {"tree": {"tree": {"root": 1}, "nodes": [

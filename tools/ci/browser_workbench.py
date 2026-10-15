@@ -80,6 +80,35 @@ def controls(snapshot):
     return result
 
 
+# Every document tab publishes exactly one of these as its description.
+DOCUMENT_TAB_STATES = (
+    "Unsaved changes. Press Delete to close.",
+    "Unsaved changes.",
+    "Press Delete to close.",
+    "Pinned primary document.",
+)
+
+
+def unsaved(snapshot):
+    """Whether the workbench is reporting unsaved changes.
+
+    The status bar used to carry a Saved / Unsaved changes segment and this
+    suite read its value. The segment went when unsaved state became a `*`
+    after the window title, leaving the document tab's own description as the
+    only rendered control that states it. Reading a value nothing publishes
+    any more is why the save waits timed out and why the two assertions that
+    a failed operation had not dirtied the project could never fire.
+
+    Absence is an error rather than "saved": a check that passes because its
+    observable disappeared is the failure this replaced.
+    """
+    states = [control["description"] for control in controls(snapshot)
+              if control["description"] in DOCUMENT_TAB_STATES]
+    if not states:
+        raise AssertionError("No document tab reported whether the project is saved")
+    return any(state.startswith("Unsaved changes") for state in states)
+
+
 def key_actions(sequence):
     """Build one ordered WebDriver sequence, including modifier releases."""
     actions = []

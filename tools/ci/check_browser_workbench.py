@@ -18,7 +18,7 @@ from pathlib import Path
 import time
 import uuid
 
-from browser_workbench import WorkbenchBrowser, controls, wait_for
+from browser_workbench import WorkbenchBrowser, controls, unsaved, wait_for
 
 REVIEW_TITLE = "Browser recovery qualification"
 REVIEW_BODY = "Verify that this review survives recovery export."
@@ -228,7 +228,7 @@ def model_validation_clock(browser):
         return (files, receipt) if receipt else None
 
     files, receipt = wait_for(persisted, "the persisted model-validation receipt")
-    wait_for(lambda: any(control["value"] == "Saved" for control in controls(browser.snapshot())),
+    wait_for(lambda: not unsaved(browser.snapshot()),
              "the accepted model-validation save")
     if (not started_ms <= receipt["validated_at_unix_ms"] <= finished_ms
             or receipt["platform"] != "browser-wasm32"):
@@ -241,7 +241,7 @@ def model_validation_clock(browser):
             if not any("system clock cannot timestamp model validation" in control["value"]
                        for control in controls(snapshot)):
                 raise AssertionError("Model validation did not report its clock failure")
-        if any(control["value"] == "Unsaved changes" for control in controls(browser.snapshot())):
+        if unsaved(browser.snapshot()):
             raise AssertionError("A failed model validation dirtied the saved project")
         if canonical_projects(browser) != files:
             raise AssertionError("A failed validation replaced the canonical model receipt")
@@ -272,7 +272,7 @@ def model_validation_clock(browser):
     expected["execution_context"]["model_validation_receipt"] = retried_receipt
     if json.loads(next(iter(files.values()))) != expected:
         raise AssertionError("Saving a new model receipt changed unrelated project content")
-    wait_for(lambda: any(control["value"] == "Saved" for control in controls(browser.snapshot())),
+    wait_for(lambda: not unsaved(browser.snapshot()),
              "the accepted active-model save")
     (browser.output / "model-validation-project.rspiceproj").write_bytes(next(iter(files.values())).encode("utf-8"))
     browser.capture("model-validation-retried")
@@ -308,7 +308,7 @@ def provider_decision_clock(browser):
     finally:
         browser.cdp("Page.setInterceptFileChooserDialog", {"enabled": False})
     choose_command(browser, "Save all")
-    wait_for(lambda: any(c["value"] == "Saved" for c in controls(browser.snapshot())),
+    wait_for(lambda: not unsaved(browser.snapshot()),
              "the saved model sources")
     files = canonical_projects(browser)
     if len(files) != 1:
@@ -347,7 +347,7 @@ def provider_decision_clock(browser):
                     raise AssertionError("Provider publication lost its selected source")
             if canonical_projects(browser) != files:
                 raise AssertionError("Failed provider publication changed the saved project")
-            if any(c["value"] == "Unsaved changes" for c in controls(browser.snapshot())):
+            if unsaved(browser.snapshot()):
                 raise AssertionError("Failed provider publication dirtied the saved project")
         started_ms = time.time_ns() // 1_000_000
         browser.click("Publish provider decision", "button")
@@ -365,7 +365,7 @@ def provider_decision_clock(browser):
             return current
 
         files = wait_for(persisted, "the saved model provider decision")
-        wait_for(lambda: any(c["value"] == "Saved" for c in controls(browser.snapshot())),
+        wait_for(lambda: not unsaved(browser.snapshot()),
                  "the accepted provider save")
         records = json.loads(next(iter(files.values())))["execution_context"]["model_resolution_records"]
         if len(records) != 1:
