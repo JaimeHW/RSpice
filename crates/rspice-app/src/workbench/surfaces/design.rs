@@ -11,7 +11,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::{AppState, RSpiceApp};
 
-use super::super::design_system::empty_state;
+use super::super::design_system::{Problem, empty_state, paint_problem_mark};
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.is_netlist_first_without_schematic() {
@@ -19,7 +19,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     if app.state.active_view_read_only() {
-        read_only_banner(ui, app);
+        read_only_banner(ui);
     }
     occurrence_scope_banner(ui, app);
     let content_rect = ui.available_rect_before_wrap();
@@ -152,6 +152,9 @@ fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
     }
 }
 
+/// Side of a canvas banner's problem mark, sized to the banner's text.
+const CANVAS_BANNER_MARK_SIDE: f32 = 12.0;
+const CANVAS_BANNER_MARK_GAP: f32 = 7.0;
 const CANVAS_BREADCRUMB_FONT_SIZE: f32 = tokens::FS_1;
 const CANVAS_BREADCRUMB_SEPARATOR: &str = " / ";
 const CANVAS_BREADCRUMB_ELISION: &str = "\u{2026}";
@@ -428,37 +431,50 @@ fn occurrence_scope_banner(ui: &mut Ui, app: &RSpiceApp) {
     if occurrences.len() < 2 {
         return;
     }
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .fill(t.color.info.gamma_multiply(0.12))
-        .inner_margin(egui::Margin::symmetric(12, 6))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(format!(
-                    "Edits here apply to all {} occurrences of {}.",
-                    occurrences.len(),
-                    app.state.workspace.content.active_view.cell
-                ))
-                .color(t.color.info),
-            )
-            .on_hover_text(occurrences.join("\n"));
-        });
+    canvas_banner(
+        ui,
+        Problem::Warning,
+        &format!(
+            "Edits here apply to all {} occurrences of {}.",
+            occurrences.len(),
+            app.state.workspace.content.active_view.cell
+        ),
+    )
+    .on_hover_text(occurrences.join("\n"));
 }
 
-fn read_only_banner(ui: &mut Ui, app: &RSpiceApp) {
+/// Say that the open document cannot be edited, and how to get one that can.
+///
+/// The tab already names the document, so the banner states the condition and
+/// the route out of it rather than repeating the path.
+fn read_only_banner(ui: &mut Ui) {
+    canvas_banner(
+        ui,
+        Problem::Warning,
+        "Read only. Make an editable copy to edit.",
+    );
+}
+
+/// One banner over the canvas: a problem's mark, then the words in the
+/// ordinary tone on the panel's own inset.
+fn canvas_banner(ui: &mut Ui, problem: Problem, message: &str) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(t.color.warn.gamma_multiply(0.14))
+        .fill(t.color.bg_inset)
         .inner_margin(egui::Margin::symmetric(12, 6))
         .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} is read only. Create an editable copy before changing this document.",
-                    app.state.workspace.content.active_display_path()
-                ))
-                .color(t.color.warn),
-            );
-        });
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = CANVAS_BANNER_MARK_GAP;
+                let (mark, _) = ui.allocate_exact_size(
+                    egui::vec2(CANVAS_BANNER_MARK_SIDE, CANVAS_BANNER_MARK_SIDE),
+                    egui::Sense::hover(),
+                );
+                paint_problem_mark(ui.painter(), mark, problem);
+                ui.label(message)
+            })
+            .inner
+        })
+        .inner
 }
 
 /// A SPICE or Verilog view, which names a source by reference.

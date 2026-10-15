@@ -16,6 +16,7 @@ use crate::state::{
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
+use crate::workbench::design_system::{Problem, problem_line};
 
 const DEFAULT_ZOOM_PX_PER_DBU: f32 = 0.05;
 const MIN_ZOOM_PX_PER_DBU: f32 = 1.0e-7;
@@ -48,7 +49,9 @@ struct LayoutEditorSession {
     selected: Option<LayoutObjectId>,
     rectangle_start: Option<LayoutPoint>,
     fit_requested: bool,
-    status: Option<(bool, String)>,
+    /// Why the last edit was refused, when one was. A committed edit says
+    /// nothing: the toolbar's revision row is the receipt.
+    status: Option<String>,
 }
 
 impl Default for LayoutEditorSession {
@@ -125,11 +128,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .state
             .apply_physical_layout_transaction(&owner, document.revision(), &edits)
         {
-            Ok(revision) => {
-                session.status = Some((
-                    true,
-                    format!("Committed physical-layout revision {}", revision.get()),
-                ));
+            Ok(_) => {
+                // The toolbar already prints the revision the commit produced,
+                // so a line announcing it would restate the row beside it.
+                session.status = None;
                 if edits.iter().any(|edit| {
                     matches!(
                         edit,
@@ -143,7 +145,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
             Err(error) => {
-                session.status = Some((false, error.clone()));
+                session.status = Some(error.clone());
                 app.state.push_user_message(ConsoleMessage::error(error));
             }
         }
@@ -177,7 +179,11 @@ fn show_missing_document(ui: &mut Ui, app: &mut RSpiceApp, owner: &CellViewRef) 
                 }
             }
             if !enabled {
-                ui.colored_label(t.color.warn, "The active view is read-only.");
+                // Read-only is where this view is, not something wrong with
+                // it: the button above is already disabled.
+                ui.label(
+                    egui::RichText::new("The active view is read-only.").color(t.color.text_dim),
+                );
             }
         });
 }
@@ -185,10 +191,10 @@ fn show_missing_document(ui: &mut Ui, app: &mut RSpiceApp, owner: &CellViewRef) 
 fn show_fail_closed(ui: &mut Ui, error: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(t.color.err.gamma_multiply(0.12))
+        .fill(t.color.bg_inset)
         .inner_margin(egui::Margin::same(18))
         .show(ui, |ui| {
-            ui.colored_label(t.color.err, "Physical layout is unavailable");
+            problem_line(ui, Problem::Failure, "Physical layout is unavailable");
             ui.label(error);
         });
 }
@@ -328,8 +334,8 @@ fn show_toolbar(
                     display.profile_label
                 ));
             });
-            if let Some((ok, message)) = &session.status {
-                ui.colored_label(if *ok { t.color.ok } else { t.color.err }, message);
+            if let Some(refusal) = &session.status {
+                problem_line(ui, Problem::Failure, refusal);
             }
         });
     ui.ctx().accesskit_node_builder(shown.response.id, |node| {
@@ -483,10 +489,7 @@ fn show_canvas(
                 if let Some(edit) = rectangle_edit(start, end, layer) {
                     return Some(vec![edit]);
                 }
-                session.status = Some((
-                    false,
-                    "Rectangle must have non-zero width and height".to_owned(),
-                ));
+                session.status = Some("Rectangle must have non-zero width and height".to_owned());
             }
         }
     } else if response.clicked_by(egui::PointerButton::Primary) {

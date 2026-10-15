@@ -19,8 +19,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
-    WorkbenchIcon, action_row, centered_content_rect, elide_text, property_card, property_row,
-    property_row_toned,
+    Problem, WorkbenchIcon, action_row, centered_content_rect, elide_text, paint_problem_mark,
+    property_card, property_row, property_row_problem,
 };
 use crate::workbench::documents::netlist_document::{
     OwnedNetlistPublicationState, owned_netlist_publication_state, visible_source_index,
@@ -39,6 +39,9 @@ const RAIL_WIDTH: f32 = 322.0;
 const COLUMN_GAP: f32 = 18.0;
 const STACK_BREAKPOINT: f32 = 900.0;
 
+/// Side of the publication state's problem mark, sized to its text.
+const PUBLICATION_MARK_SIDE: f32 = 11.0;
+const PUBLICATION_MARK_GAP: f32 = 6.0;
 const PREVIEW_TOOLBAR_HEIGHT: f32 = 34.0;
 const PREVIEW_LINE_HEIGHT: f32 = 17.0;
 const PREVIEW_GUTTER_WIDTH: f32 = 44.0;
@@ -242,7 +245,6 @@ fn rail(ui: &mut Ui, facts: &DeckFacts, action: &mut Option<NetlistFirstAction>)
 }
 
 fn deck_summary_card(ui: &mut Ui, facts: &DeckFacts) {
-    let t = Tokens::get(ui.ctx());
     property_card(ui, "Deck summary", |ui| {
         property_row(ui, "Source", &facts.name);
         if let Some(dialect) = facts.dialect {
@@ -254,14 +256,14 @@ fn deck_summary_card(ui: &mut Ui, facts: &DeckFacts) {
         property_row(ui, "Models", &facts.models.to_string());
         property_row(ui, "Subcircuits", &facts.subcircuits.to_string());
         if facts.unresolved_dependencies > 0 {
-            property_row_toned(
+            property_row_problem(
                 ui,
                 "Dependencies",
                 &format!(
                     "{} \u{00b7} {} unresolved",
                     facts.dependencies, facts.unresolved_dependencies
                 ),
-                t.color.warn,
+                Some(Problem::Warning),
             );
         } else {
             property_row(ui, "Dependencies", &facts.dependencies.to_string());
@@ -372,16 +374,30 @@ fn preview_toolbar_text(ui: &Ui, toolbar: Rect, facts: &DeckFacts, t: &Tokens) {
     let state_left = facts
         .publication
         .map_or(toolbar.right() - 11.0, |publication| {
-            let (label, tone) = publication_presentation(publication, t);
-            ui.painter()
+            let (label, problem) = publication_presentation(publication);
+            let mut left = ui
+                .painter()
                 .text(
                     pos2(toolbar.right() - 11.0, toolbar.center().y),
                     Align2::RIGHT_CENTER,
                     label,
                     state_font.clone(),
-                    tone,
+                    t.color.text_dim,
                 )
-                .left()
+                .left();
+            if let Some(problem) = problem {
+                left -= PUBLICATION_MARK_GAP;
+                paint_problem_mark(
+                    ui.painter(),
+                    Rect::from_center_size(
+                        pos2(left - PUBLICATION_MARK_SIDE / 2.0, toolbar.center().y),
+                        vec2(PUBLICATION_MARK_SIDE, PUBLICATION_MARK_SIDE),
+                    ),
+                    problem,
+                );
+                left -= PUBLICATION_MARK_SIDE;
+            }
+            left
         });
     let name_font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let name_left = title_rect.right() + 9.0;
@@ -504,18 +520,23 @@ fn card_tone(t: &Tokens, line: usize, card: &str) -> Color32 {
     }
 }
 
-fn publication_presentation(
+/// What the deck toolbar says about the owned source's publication, and
+/// whether it is worth a mark.
+///
+/// Validation and synchronization are states the deck is in, not verdicts on
+/// it, so they are stated in the ordinary tone. A change made to the file
+/// outside this project is the one the reader has to act on.
+const fn publication_presentation(
     publication: OwnedNetlistPublicationState,
-    t: &Tokens,
-) -> (&'static str, Color32) {
-    let tone = if publication.external_change_pending {
-        t.color.warn
-    } else if publication.validated {
-        t.color.ok
-    } else {
-        t.color.text_dim
-    };
-    (publication.label(), tone)
+) -> (&'static str, Option<Problem>) {
+    (
+        publication.label(),
+        if publication.external_change_pending {
+            Some(Problem::Warning)
+        } else {
+            None
+        },
+    )
 }
 
 /// Everything the page states about the deck, derived once per frame from the
