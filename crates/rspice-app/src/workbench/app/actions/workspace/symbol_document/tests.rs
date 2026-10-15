@@ -8,9 +8,10 @@
 
 use super::*;
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
-    Cell, Component, ComponentType, Library, LibraryCellInstance, Point, PortDirection,
-    SchematicState, SymbolPin, SymbolShape, View, ViewType, Wire, WireConnection,
+    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point,
+    PortDirection, SchematicState, SymbolPin, SymbolShape, View, ViewType, Wire, WireConnection,
 };
 
 const PARENT: &str = "work/top/schematic";
@@ -422,4 +423,75 @@ fn generated_symbols_come_from_one_constructor() {
         "symbol seeding belongs to state::symbol::generated_from_ports; this \
          module must not grow a second body generator"
     );
+}
+
+/// A symbol view whose paired schematic declares `count` ports that the
+/// symbol places none of, so the pin checks report one finding per port.
+fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
+    let mut state = AppState::default();
+
+    let mut library = Library::new("work");
+    let mut amp = Cell::new("amp");
+    amp.add_view(View::new("schematic", ViewType::Schematic));
+    amp.add_view(View::new("symbol", ViewType::Symbol));
+    library.add_cell(amp);
+    state.library_manager.add_library(library);
+
+    let mut schematic = SchematicState::default();
+    for index in 0..count {
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(index as i32, 0));
+        schematic
+            .document_mut_for_test()
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = format!("P{index}");
+    }
+    state.workspace.insert_schematic_editor(
+        CellViewRef::new("work", "amp", "schematic").key(),
+        schematic,
+    );
+    state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+    state
+        .store_active_symbol_document(&SymbolDocument::default())
+        .expect("symbol document stores");
+    state
+}
+
+/// Every finding stays in the receipt and the Console gets one line.
+///
+/// The check used to write one anchored log row per finding as well, capped
+/// at fifty. That put each finding on the Problems page twice — once from
+/// the receipt and once from the log — counted it twice in the tab strip,
+/// and left the findings past the cap reachable only through the navigation
+/// commands, while the receipt always carried every one.
+#[test]
+fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
+    let mut state = state_with_unplaced_amp_symbol_pins(55);
+
+    state.run_active_symbol_pin_checks();
+
+    let result = state.dialogs.drc_results.as_ref().expect("result stored");
+    assert_eq!(result.violations().len(), 55);
+    let entries: Vec<_> = state.log_buffer.entries().collect();
+    assert!(
+        entries.iter().all(|entry| entry.source != LogSource::Drc),
+        "a finding is reported by the receipt, not copied into the log",
+    );
+    let lines: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.message.contains("Symbol pin checks"))
+        .collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "one line for the check, not one per finding"
+    );
+    assert_eq!(
+        lines[0].severity,
+        LogSeverity::Info,
+        "a check having run is an event, not a problem of its own",
+    );
+    assert!(lines[0].message.contains("55 findings"));
 }

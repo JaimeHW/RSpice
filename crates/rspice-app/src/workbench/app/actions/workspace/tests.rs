@@ -301,38 +301,6 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
     state
 }
 
-fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
-    let mut state = AppState::default();
-
-    let mut library = Library::new("work");
-    let mut amp = Cell::new("amp");
-    amp.add_view(View::new("schematic", ViewType::Schematic));
-    amp.add_view(View::new("symbol", ViewType::Symbol));
-    library.add_cell(amp);
-    state.library_manager.add_library(library);
-
-    let mut schematic = SchematicState::default();
-    for index in 0..count {
-        let port_id = schematic.add_component(ComponentType::Port, Point::new(index as i32, 0));
-        schematic
-            .document_mut_for_test()
-            .components
-            .iter_mut()
-            .find(|component| component.id == port_id)
-            .expect("port exists")
-            .value = format!("P{index}");
-    }
-    state.workspace.insert_schematic_editor(
-        CellViewRef::new("work", "amp", "schematic").key(),
-        schematic,
-    );
-    state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-    state
-        .store_active_symbol_document(&SymbolDocument::default())
-        .expect("symbol document stores");
-    state
-}
-
 /// A persisted session whose active tab points into the legacy seeded
 /// "primitives" library must come back with the drawn content moved to
 /// the user library and the placeholder library gone — otherwise
@@ -1016,46 +984,24 @@ fn symbol_pin_checks_store_structured_drc_results_with_symbol_anchors() {
     state.run_active_symbol_pin_checks();
 
     let result = state.dialogs.drc_results.as_ref().expect("result stored");
+    // Reachable because its location resolves through the one resolver every
+    // "go to this finding" surface shares, not because the check also wrote an
+    // anchored log row that put the finding on the Problems page twice.
     assert!(result.violations().iter().any(|violation| {
         violation.violation_type == DrcViolationType::SymbolUnplacedPin
             && matches!(
                 &violation.location,
                 DrcLocation::SymbolPin { pin_name, .. } if pin_name == "IN"
             )
-    }));
-    assert!(state.log_buffer.entries().any(|entry| {
-        matches!(
-            &entry.anchor,
-            Some(LogAnchor::Symbol { pin_name, .. }) if pin_name == "IN"
-        )
+            && matches!(
+                crate::schematic::view::violations::location_anchor(&state, &violation.location),
+                Some(LogAnchor::Symbol { ref pin_name, .. }) if pin_name == "IN"
+            )
     }));
 }
 
-#[test]
-fn symbol_pin_checks_cap_console_rows_and_keep_all_results() {
-    let mut state = state_with_unplaced_amp_symbol_pins(55);
-
-    state.run_active_symbol_pin_checks();
-
-    let result = state.dialogs.drc_results.as_ref().expect("result stored");
-    assert_eq!(result.violations().len(), 55);
-
-    let drc_rows: Vec<_> = state
-        .log_buffer
-        .entries()
-        .filter(|entry| entry.source == LogSource::Drc)
-        .collect();
-    let anchored_symbol_rows = drc_rows
-        .iter()
-        .filter(|entry| matches!(entry.anchor, Some(LogAnchor::Symbol { .. })))
-        .count();
-    assert_eq!(anchored_symbol_rows, 50);
-    assert!(
-        drc_rows
-            .iter()
-            .any(|entry| entry.message.contains("+5 more findings"))
-    );
-}
+// The bulk-findings case, and the fixture only it uses, live next to the
+// check itself in `symbol_document/tests.rs`.
 
 #[test]
 fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {

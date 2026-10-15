@@ -234,8 +234,8 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
             // is made of is said in the tab's name and under the pointer, so
             // the strip can never imply that twelve advisories are twelve
             // errors.
-            let breakdown = (page == ConsolePage::Problems && count > 0)
-                .then(|| problems.announcement());
+            let breakdown =
+                (page == ConsolePage::Problems && count > 0).then(|| problems.announcement());
             let response = console_tab(
                 ui,
                 page,

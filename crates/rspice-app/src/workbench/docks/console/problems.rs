@@ -131,13 +131,14 @@ fn check_source(state: &AppState) -> CheckSource<'_> {
 /// stays. Every other source — the engine, the netlister, the checks, the
 /// system — reports conditions, so all of its errors and warnings stay.
 fn log_problems(state: &AppState) -> impl Iterator<Item = &LogEntry> {
-    state.log_buffer.entries().filter(|entry| {
-        match entry.severity {
+    state
+        .log_buffer
+        .entries()
+        .filter(|entry| match entry.severity {
             LogSeverity::Error => true,
             LogSeverity::Warning => entry.source != LogSource::User,
             LogSeverity::Info | LogSeverity::Debug | LogSeverity::Trace => false,
-        }
-    })
+        })
 }
 
 /// The counts behind the tab strip's badge. Derived from exactly the rows the
@@ -325,10 +326,8 @@ fn netlist_problems(ui: &mut Ui, state: &mut AppState) {
                 if diagnostic.details.is_empty() {
                     response.on_hover_text(&diagnostic.message);
                 } else {
-                    response.on_hover_text(format!(
-                        "{}\n\n{}",
-                        diagnostic.message, diagnostic.details
-                    ));
+                    response
+                        .on_hover_text(format!("{}\n\n{}", diagnostic.message, diagnostic.details));
                 }
             }
         });
@@ -487,8 +486,7 @@ fn problem_row(ui: &mut Ui, metrics: &ColumnMetrics, row: ProblemRow<'_>) -> egu
     } else {
         Sense::hover()
     };
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), sense);
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), sense);
     let label = announced_row(row.problem, &[row.severity, row.location, row.message]);
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -520,7 +518,7 @@ fn problem_row(ui: &mut Ui, metrics: &ColumnMetrics, row: ProblemRow<'_>) -> egu
     ui.painter().text(
         egui::pos2(location_x, center_y),
         egui::Align2::LEFT_CENTER,
-        &elide_head(row.location, metrics),
+        elide_head(row.location, metrics),
         theme::mono(CONSOLE_FONT_SIZE, FontWeight::Medium),
         dim,
     );
@@ -639,6 +637,106 @@ mod tests {
         assert!(
             elided.chars().count() <= 10,
             "{elided} must fit the column it was measured against",
+        );
+    }
+
+    /// Every cell the page paints, with the x it was painted at.
+    fn painted_cells(state: &mut AppState, width: f32) -> Vec<(String, f32)> {
+        fn scan(shape: &egui::epaint::Shape, found: &mut Vec<(String, f32)>) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    found.push((text.galley.job.text.clone(), text.pos.x));
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        scan(shape, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(width, 400.0),
+            )),
+            ..Default::default()
+        };
+        let output = ctx.run_ui(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| problems(ui, state));
+        });
+        let mut found = Vec::new();
+        for clipped in &output.shapes {
+            scan(&clipped.shape, &mut found);
+        }
+        found
+    }
+
+    /// The columns the page actually paints, measured rather than eyeballed.
+    ///
+    /// Severity, location and message each start where the one before it ends
+    /// plus the gap, the location keeps its tail when it is too long for its
+    /// column, and no cell is painted on top of another. The old row clipped
+    /// severity at a fixed 58 px and location at 62 px — eight characters —
+    /// so a location was unreadable and a long severity word lost its end.
+    #[test]
+    fn the_painted_columns_start_where_the_measurements_say() {
+        use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+
+        let mut state = AppState::default();
+        let mut result = DrcResult::new();
+        result.add_violation(DrcViolation::new(
+            1,
+            DrcViolationType::FloatingNode,
+            "Node 'bias_reference_ladder_tap' has only 1 connection(s)",
+            DrcLocation::Node {
+                net_name: "bias_reference_ladder_tap".to_owned(),
+            },
+        ));
+        result.completed = true;
+        state.dialogs.drc_results = Some(result);
+
+        let width = 900.0;
+        let cells = painted_cells(&mut state, width);
+        let severity = cells
+            .iter()
+            .find(|(text, _)| text == "Error")
+            .expect("the severity cell is painted");
+        let location = cells
+            .iter()
+            .find(|(text, _)| text.contains("bias_reference") || text.starts_with('…'))
+            .expect("the location cell is painted");
+        let message = cells
+            .iter()
+            .find(|(text, _)| text.contains("only 1 connection"))
+            .expect("the message cell is painted");
+
+        assert!(
+            location.1 > severity.1,
+            "location at {} must start after severity at {}",
+            location.1,
+            severity.1,
+        );
+        assert!(
+            message.1 > location.1,
+            "message at {} must start after location at {}",
+            message.1,
+            location.1,
+        );
+        // The gap between two column starts is the earlier column's width
+        // plus one gap, so a cell can never be painted over its neighbour.
+        assert!(
+            message.1 - location.1 >= CONSOLE_COLUMN_GAP,
+            "columns must not overlap: {} then {}",
+            location.1,
+            message.1,
+        );
+        assert!(
+            location.0.contains("bias_reference_ladder_tap") || location.0.ends_with("ladder_tap'"),
+            "the location must keep the part that says where to go, got {:?}",
+            location.0,
         );
     }
 
