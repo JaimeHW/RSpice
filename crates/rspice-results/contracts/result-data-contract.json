@@ -5920,7 +5920,7 @@
       },
       "capability": {
         "viewerId": "viewer-contribution",
-        "classification": "release-planned",
+        "classification": "release-target",
         "creationFamilyIds": [
           "statistics-yield"
         ],
