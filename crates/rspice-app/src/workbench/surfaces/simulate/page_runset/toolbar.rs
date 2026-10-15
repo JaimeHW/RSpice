@@ -7,6 +7,44 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use egui::Ui;
+use rspice_simulation_contract::run_set::{self, RunSetStatus};
+
+/// The whole forecast, once, on the page's own command row.
+///
+/// It used to close the run-space strip as a tile of five stacked numbers,
+/// three of which the two tables below already carried in their heads. The
+/// page states it here instead, where the revision it belongs to is, and the
+/// tables state only what is true of their own rows.
+///
+/// The status word is printed only when it is not `Ready`: a run set that
+/// validates says so by having a forecast at all.
+fn forecast_line(app: &RSpiceApp, validation: &RunSetValidation, revision: u32) -> String {
+    let forecast = validation.forecast;
+    let points = if forecast.exact {
+        format!(
+            "{} point{}",
+            forecast.point_count,
+            if forecast.point_count == 1 { "" } else { "s" }
+        )
+    } else {
+        format!(
+            "{}\u{2013}{} points",
+            forecast.point_count_minimum, forecast.point_count_maximum
+        )
+    };
+    let mut line = format!(
+        "working revision {revision} \u{b7} {points} \u{b7} {} task{} \u{b7} {} \u{b7} {}",
+        forecast.task_count,
+        if forecast.task_count == 1 { "" } else { "s" },
+        super::super::workload::modelled_duration(&app.state, forecast.task_count),
+        run_set::format_bytes(forecast.storage_bytes),
+    );
+    if !matches!(validation.status, RunSetStatus::Ready) {
+        line.push_str(&format!(" \u{b7} {}", validation.status.as_str()));
+    }
+    line
+}
+
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
     let addable = app.state.sim_setup.run_set.addable_kinds();
@@ -45,10 +83,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidati
                 .icon(Icon::Grid)
                 .min_height(minimum_height)
                 .max_width(inner_width);
-            let status_text = format!(
-                "working revision {revision} · {}",
-                validation.status.as_str()
-            );
+            let status_text = forecast_line(app, validation, revision);
             let status_font = theme::mono(tokens::FS_0, FontWeight::Regular);
             let status_width = ui
                 .painter()

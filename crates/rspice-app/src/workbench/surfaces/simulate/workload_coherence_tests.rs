@@ -231,20 +231,19 @@ fn every_surface_prices_the_same_queue_in_the_same_currency() {
     let validation = plan_run_set_validation(&app);
     let forecast = validation.forecast;
 
-    // The forecast tile's "Cost" row and the preview receipt both read
-    // `forecast.cost_ms`; the point table's status line calls
-    // `modelled_duration`; the task-rate card sums its rows. All three have to
-    // be one sentence about one queue.
-    let tile = run_set::format_duration_ms(forecast.cost_ms);
+    // The preview receipt reads `forecast.cost_ms`; the toolbar's forecast
+    // line calls `modelled_duration`; the task-rate card's rows sum to a
+    // third. All three have to be one sentence about one queue.
+    let receipt = run_set::format_duration_ms(forecast.cost_ms);
     let priced = modelled_duration(&app.state, forecast.task_count);
     let card = workload.total_duration().expect("the fixture prices");
 
     assert_eq!(forecast.task_count, tasks, "one queue");
     assert_eq!(
-        tile, priced,
-        "the forecast tile and the point table's status line agree"
+        receipt, priced,
+        "the receipt and the toolbar's forecast line agree"
     );
-    assert_eq!(tile, card, "the forecast tile and the task-rate card agree");
+    assert_eq!(receipt, card, "the receipt and the task-rate rows agree");
 
     // And the rows themselves add up in milliseconds, not just in tasks — a
     // per-row duration rounded independently could sum to a different total
@@ -466,7 +465,8 @@ fn a_refused_instance_is_stated_as_refused_rather_than_counted_two_ways() {
     assert_eq!(op_row.points, points);
 
     // The note under the table is where the two are reconciled.
-    let note = super::page_runset::point_table_note(points, points, true, refused.len());
+    let note = super::page_runset::point_table_note(points, points, refused.len())
+        .expect("a refused participation is the one thing the rows cannot show");
     assert!(
         note.contains("refused") && note.contains("whole matrix"),
         "the table has to say why its cells and the plan total do not add up: {note}"

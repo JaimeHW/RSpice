@@ -347,6 +347,13 @@ impl PlanWorkload {
     }
 
     /// The plan's modelled duration, as the surfaces state it.
+    ///
+    /// Test-only since the task-rate card stopped restating the forecast in
+    /// its head: the page states a duration once, on the toolbar, out of
+    /// `forecast.cost_ms`. This is the other way of folding the same queue,
+    /// and `every_surface_prices_the_same_queue_in_the_same_currency` is what
+    /// holds the two to one answer.
+    #[cfg(test)]
     pub(super) fn total_duration(&self) -> Result<String, String> {
         self.total_tasks().map(|tasks| {
             run_set::format_duration_ms(run_set::modelled_cost_ms(tasks, self.cost_per_task_ms))
@@ -557,116 +564,107 @@ pub(super) fn task_rate_card(
         return;
     }
 
-    let (status, tone) = match resolved {
-        Ok(workload) => match workload.total_tasks() {
-            Ok(tasks) => (
-                format!(
-                    "{tasks} task{} \u{b7} {}",
-                    if tasks == 1 { "" } else { "s" },
-                    workload
-                        .total_duration()
-                        .unwrap_or_else(|_| "over capacity".to_owned()),
-                ),
-                Tone::Neutral,
-            ),
-            Err(error) => (error, Tone::Error),
-        },
-        Err(error) => (error.clone(), Tone::Error),
+    // Only a refusal. The queue and its duration are the toolbar's forecast
+    // line and this table's own last two columns; a head that stated them a
+    // third time was the same two numbers at three altitudes of one page.
+    let status = match resolved {
+        Ok(workload) => workload.total_tasks().err(),
+        Err(error) => Some(error.clone()),
     };
 
-    super::page_kit::card(ui, "Task rate", Some((status.as_str(), tone)), |ui| {
-        let Ok(workload) = resolved else {
-            // The refusal is already the card's status line. Repeating it in
-            // the body would state one fault twice and imply two.
-            return;
-        };
-        if workload.rows.is_empty() {
-            super::page_kit::card_note(
-                ui,
-                "No analysis instance is enabled, so the plan expands to no tasks.",
-            );
-            return;
-        }
-        super::page_kit::ledger_head(
-            ui,
-            &RATE_COLUMNS,
-            &["Analysis", "At", "Tasks/pt", "Tasks", "Duration"],
-        );
-        // Named by the plan, not by the row's own copy of the display name.
-        // Two unnamed transients answer to the same display name, so the
-        // Analysis column read "TRAN · Transient" on both rows and priced two
-        // different queues under one heading. `instance_list_label` is the
-        // plan's answer to what an instance is called beside its siblings, and
-        // the tab strip above this card now asks the same question of it.
-        let plan = app.state.sim_setup.stable_analysis_plan().ok();
-        for row in &workload.rows {
-            let listed = plan
-                .and_then(|plan| {
-                    let index = plan
-                        .instances()
-                        .iter()
-                        .position(|instance| instance.id() == row.id)?;
-                    plan.instance_list_label(index)
-                })
-                .unwrap_or_else(|| row.display_name.clone());
-            let name = format!("{} \u{b7} {listed}", row.kind.code());
-            let at = row.at_cell(workload.matrix_points);
-            let rate = row.rate_cell();
-            let tasks = row.tasks().to_string();
-            let duration = run_set::format_duration_ms(run_set::modelled_cost_ms(
-                row.tasks(),
-                workload.cost_per_task_ms,
-            ));
-            let response = super::page_kit::ledger_row(
+    super::page_kit::card(
+        ui,
+        "Task rate",
+        status.as_deref().map(|status| (status, Tone::Error)),
+        |ui| {
+            let Ok(workload) = resolved else {
+                // The refusal is already the card's status line. Repeating it in
+                // the body would state one fault twice and imply two.
+                return;
+            };
+            if workload.rows.is_empty() {
+                super::page_kit::card_note(
+                    ui,
+                    "No analysis instance is enabled, so the plan expands to no tasks.",
+                );
+                return;
+            }
+            super::page_kit::ledger_head(
                 ui,
                 &RATE_COLUMNS,
-                &[
-                    (name.as_str(), Tone::Neutral),
-                    (
-                        at.as_str(),
-                        if row.unresolved {
-                            Tone::Error
-                        } else {
-                            Tone::Neutral
-                        },
-                    ),
-                    (
-                        rate.as_str(),
-                        if row.tasks_per_point > 1 {
-                            Tone::Text
-                        } else {
-                            Tone::Neutral
-                        },
-                    ),
-                    (tasks.as_str(), Tone::Neutral),
-                    (duration.as_str(), Tone::Neutral),
-                ],
-                false,
-                super::page_kit::RowPress::Ignored,
+                &["Analysis", "At", "Tasks/pt", "Tasks", "Duration"],
             );
-            // The identity first, as the plan stack spells it, so a row here
-            // and a row there are visibly the same instance. The rate is the
-            // one number a reader cannot account for from the other cells, so
-            // it explains itself here rather than spending a column on prose.
-            let mut hover = format!("{} \u{b7} {}", row.id, row.display_name);
-            if let Some(note) = row.rate_note {
-                hover.push_str(&format!(
-                    "\n{} tasks per point: {note}.",
-                    row.tasks_per_point
+            // Named by the plan, not by the row's own copy of the display name.
+            // Two unnamed transients answer to the same display name, so the
+            // Analysis column read "TRAN · Transient" on both rows and priced two
+            // different queues under one heading. `instance_list_label` is the
+            // plan's answer to what an instance is called beside its siblings, and
+            // the tab strip above this card now asks the same question of it.
+            let plan = app.state.sim_setup.stable_analysis_plan().ok();
+            for row in &workload.rows {
+                let listed = plan
+                    .and_then(|plan| {
+                        let index = plan
+                            .instances()
+                            .iter()
+                            .position(|instance| instance.id() == row.id)?;
+                        plan.instance_list_label(index)
+                    })
+                    .unwrap_or_else(|| row.display_name.clone());
+                let name = format!("{} \u{b7} {listed}", row.kind.code());
+                let at = row.at_cell(workload.matrix_points);
+                let rate = row.rate_cell();
+                let tasks = row.tasks().to_string();
+                let duration = run_set::format_duration_ms(run_set::modelled_cost_ms(
+                    row.tasks(),
+                    workload.cost_per_task_ms,
                 ));
-            }
-            if row.unresolved {
-                hover.push_str(
+                let response = super::page_kit::ledger_row(
+                    ui,
+                    &RATE_COLUMNS,
+                    &[
+                        (name.as_str(), Tone::Neutral),
+                        (
+                            at.as_str(),
+                            if row.unresolved {
+                                Tone::Error
+                            } else {
+                                Tone::Neutral
+                            },
+                        ),
+                        (
+                            rate.as_str(),
+                            if row.tasks_per_point > 1 {
+                                Tone::Text
+                            } else {
+                                Tone::Neutral
+                            },
+                        ),
+                        (tasks.as_str(), Tone::Neutral),
+                        (duration.as_str(), Tone::Neutral),
+                    ],
+                    false,
+                    super::page_kit::RowPress::Ignored,
+                );
+                // The identity first, as the plan stack spells it, so a row here
+                // and a row there are visibly the same instance. The rate is the
+                // one number a reader cannot account for from the other cells, so
+                // it explains itself here rather than spending a column on prose.
+                let mut hover = format!("{} \u{b7} {}", row.id, row.display_name);
+                if let Some(note) = row.rate_note {
+                    hover.push_str(&format!(
+                        "\n{} tasks per point: {note}.",
+                        row.tasks_per_point
+                    ));
+                }
+                if row.unresolved {
+                    hover.push_str(
                     "\nThis participation does not resolve against the declared space, so it is \
                      priced at every point. Re-open its point selection.",
                 );
+                }
+                response.on_hover_text(hover);
             }
-            response.on_hover_text(hover);
-        }
-        super::page_kit::card_note(
-            ui,
-            "Tasks are the rate times the participation. Duration prices them at the run set's \
-             modelled cost per task, which the budgets card declares.",
-        );
-    });
+        },
+    );
 }

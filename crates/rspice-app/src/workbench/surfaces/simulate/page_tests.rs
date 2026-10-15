@@ -301,8 +301,10 @@ fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
 /// The run-space page states its declaration, its cost and its composition.
 ///
 /// Each of these is a fact the page is the owner of: the axes it declares, the
-/// forecast they resolve to, and the rule that combines them. A page that drew
-/// the strip without the forecast would be showing a space with no stated cost.
+/// forecast they resolve to, and the rule that combines them. The forecast is
+/// the toolbar's own line — points, tasks, duration and storage, beside the
+/// working revision they belong to — and a page that drew the strip without it
+/// would be showing a space with no stated cost.
 #[test]
 fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
@@ -322,8 +324,7 @@ fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
         "Supply voltage",
         "Temperature",
         "cartesian composition",
-        "Tasks",
-        "Storage",
+        "Task rate",
         "Resolved point table",
         "Execution budgets",
         "Composition",
@@ -333,9 +334,26 @@ fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
             "the run-space page omitted {fragment:?}:\n{rendered}"
         );
     }
+    // Once, on the toolbar, against the revision it is a forecast of. The
+    // strip used to close on a tile that stated the same five numbers, three
+    // of which the two tables below already carried in their heads.
     assert!(
-        rendered.contains("27"),
-        "the forecast must state the resolved point count:\n{rendered}"
+        rendered.contains("27 points"),
+        "the toolbar must state the resolved point count:\n{rendered}"
+    );
+    assert_eq!(
+        rendered.matches("27 points").count(),
+        1,
+        "the forecast has one owner:\n{rendered}"
+    );
+    let line = rendered
+        .lines()
+        .find(|line| line.starts_with("working revision"))
+        .expect("the toolbar states the working revision");
+    assert!(
+        line.contains("27 points") && line.contains("task"),
+        "the toolbar's forecast line is the revision, the points and the queue \
+         in one statement: {line:?}"
     );
 }
 

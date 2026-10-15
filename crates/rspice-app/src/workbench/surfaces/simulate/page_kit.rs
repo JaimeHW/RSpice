@@ -1351,7 +1351,7 @@ mod tests {
             }
         }
         assert!(
-            scanned >= 30,
+            scanned >= 25,
             "the scan matched only {scanned} label calls; the pattern has stopped matching"
         );
         assert!(

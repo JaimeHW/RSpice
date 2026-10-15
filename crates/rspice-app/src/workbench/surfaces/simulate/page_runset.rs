@@ -46,9 +46,6 @@ const AXIS_CHIP_LIMIT: usize = 8;
 /// axes with different value counts must still read as the same kind of thing.
 const AXIS_CARD_W: f32 = 214.0;
 
-/// Width of the closing forecast tile.
-const FORECAST_TILE_W: f32 = 232.0;
-
 /// Outside width of an axis card, including its horizontal frame margins. What
 /// the strip packs its terms by; the cards themselves still own their exact
 /// layout.
@@ -246,11 +243,6 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     };
     let mut action = None;
     let mut selection = None;
-    let worst_point_tasks = frame
-        .workload
-        .as_ref()
-        .ok()
-        .and_then(|workload| worst_point_task_cost_of(&frame.participation, workload));
 
     super::page_kit::card_with_head(
         ui,
@@ -261,51 +253,38 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
                 let dimensions = app.state.sim_setup.run_set.dimensions.clone();
                 for row in space_rows(ui.available_width(), dimensions.len()) {
                     // Top-aligned, because an egui row places each item
-                    // against the row height known when the item is added: a
-                    // centred row hung the forecast tile -- the tallest term,
-                    // and the last -- forty points below the axis cards it is
-                    // the product of, so the expression had no common edge to
-                    // read along.
+                    // against the row height known when the item is added, and
+                    // never moves it once a taller neighbour arrives: the
+                    // operator between two cards has to sit level with the card
+                    // it introduces, not at the top of the tallest one.
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = SPACE_TERM_GAP;
                         ui.add_space(((ui.available_width() - row.width) * 0.5).max(0.0));
                         for term in row.terms {
-                            let pending = term.index.checked_sub(1).map(|previous| {
-                                let active = match dimensions.get(term.index) {
-                                    Some(dimension) => {
-                                        dimensions[previous].enabled && dimension.enabled
-                                    }
-                                    None => validation.is_ready(),
-                                };
-                                let glyph = if term.index < dimensions.len() {
-                                    mode.operator()
-                                } else {
-                                    "="
-                                };
-                                operator_tile(ui, glyph, active)
-                            });
-                            let placed = match dimensions.get(term.index) {
-                                Some(dimension) => {
-                                    let is_selected =
-                                        selected.as_deref() == Some(dimension.id.as_str());
-                                    let (rect, event) =
-                                        axis_card(ui, dimension, term.index, is_selected);
-                                    match event {
-                                        Some(AxisEvent::Select) => {
-                                            selection = Some(dimension.id.clone());
-                                        }
-                                        Some(AxisEvent::SetEnabled(enabled)) => {
-                                            action = Some(RunSetAction::SetEnabled {
-                                                id: dimension.id.clone(),
-                                                enabled,
-                                            });
-                                        }
-                                        None => {}
-                                    }
-                                    rect
-                                }
-                                None => forecast_tile(ui, validation, worst_point_tasks),
+                            let Some(dimension) = dimensions.get(term.index) else {
+                                continue;
                             };
+                            let pending = term.index.checked_sub(1).map(|previous| {
+                                operator_tile(
+                                    ui,
+                                    mode.operator(),
+                                    dimensions[previous].enabled && dimension.enabled,
+                                )
+                            });
+                            let is_selected = selected.as_deref() == Some(dimension.id.as_str());
+                            let (placed, event) = axis_card(ui, dimension, term.index, is_selected);
+                            match event {
+                                Some(AxisEvent::Select) => {
+                                    selection = Some(dimension.id.clone());
+                                }
+                                Some(AxisEvent::SetEnabled(enabled)) => {
+                                    action = Some(RunSetAction::SetEnabled {
+                                        id: dimension.id.clone(),
+                                        enabled,
+                                    });
+                                }
+                                None => {}
+                            }
                             if let Some(pending) = pending {
                                 pending.settle(ui, placed);
                             }
@@ -334,9 +313,9 @@ enum AxisEvent {
 
 /// One term of the composed expression, and where it sits in the run.
 ///
-/// `index` addresses the declared dimensions; the one index past the last is
-/// the forecast the run resolves to. Every term but the first is preceded by an
-/// operator, which is what binds the two into one atom that wraps together.
+/// `index` addresses the declared dimensions. Every term but the first is
+/// preceded by an operator, which is what binds the two into one atom that
+/// wraps together.
 struct SpaceTerm {
     index: usize,
 }
@@ -347,25 +326,19 @@ struct SpaceRow {
     width: f32,
 }
 
-/// Pack the cards, their operators and the forecast tile into as few rows as
-/// `available` holds.
+/// Pack the cards and their operators into as few rows as `available` holds.
 ///
 /// The strip is one expression, so its terms are packed and centred rather than
 /// laid out on a grid: a fixed two-column grid left a 2×2 island with empty
 /// gutters at 1600 points and a 500-point island inside a 2540-point card at
-/// 2560, and it stranded the forecast on a row of its own however much room the
-/// axes had left beside it. Terms neither grow nor shrink — every axis reads at
-/// the same weight, and the run wraps where the width runs out.
+/// 2560. Terms neither grow nor shrink — every axis reads at the same weight,
+/// and the run wraps where the width runs out.
 fn space_rows(available: f32, dimension_count: usize) -> Vec<SpaceRow> {
     let mut rows: Vec<SpaceRow> = Vec::new();
     let mut terms: Vec<SpaceTerm> = Vec::new();
     let mut width = 0.0f32;
-    for index in 0..=dimension_count {
-        let term_width = if index < dimension_count {
-            AXIS_CARD_OUTER_W
-        } else {
-            FORECAST_TILE_W + 20.0
-        };
+    for index in 0..dimension_count {
+        let term_width = AXIS_CARD_OUTER_W;
         // The operator belongs to the term it introduces rather than to the one
         // it follows, so a wrap carries it onto the next row with its term
         // instead of leaving it dangling at the end of the previous one.
@@ -390,7 +363,9 @@ fn space_rows(available: f32, dimension_count: usize) -> Vec<SpaceRow> {
         }
         terms.push(SpaceTerm { index });
     }
-    rows.push(SpaceRow { terms, width });
+    if !terms.is_empty() {
+        rows.push(SpaceRow { terms, width });
+    }
     rows
 }
 
@@ -649,106 +624,6 @@ fn operator_tile(ui: &mut Ui, glyph: &str, active: bool) -> PendingOperator {
     }
 }
 
-/// What the axes multiply out to.
-///
-/// Returns the extent it took, which the `=` before it is placed against.
-fn forecast_tile(
-    ui: &mut Ui,
-    validation: &RunSetValidation,
-    worst_point_tasks: Option<usize>,
-) -> Rect {
-    let t = Tokens::get(ui.ctx());
-    let forecast = validation.forecast;
-    let tile = ui.allocate_ui_with_layout(
-        vec2(FORECAST_TILE_W + 20.0, 0.0),
-        egui::Layout::top_down(egui::Align::Min),
-        |ui| {
-            ui.set_width(FORECAST_TILE_W + 20.0);
-            egui::Frame::new()
-                .fill(t.color.bg_panel_2)
-                .stroke(egui::Stroke::new(1.0, t.color.border))
-                .corner_radius(t.radius)
-                .inner_margin(egui::Margin::symmetric(9, 7))
-                .show(ui, |ui| {
-                    ui.set_width(FORECAST_TILE_W);
-                    ui.spacing_mut().item_spacing.y = 4.0;
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new(if forecast.exact {
-                                forecast.point_count.to_string()
-                            } else {
-                                format!(
-                                    "{}–{}",
-                                    forecast.point_count_minimum, forecast.point_count_maximum
-                                )
-                            })
-                            .font(theme::mono(tokens::FS_4, FontWeight::SemiBold))
-                            .color(t.color.text),
-                        );
-                        ui.label(
-                            egui::RichText::new(if forecast.exact && forecast.point_count == 1 {
-                                "point"
-                            } else {
-                                "points"
-                            })
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
-                        );
-                    });
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{} enabled analysis instance{}",
-                            forecast.enabled_analysis_count,
-                            if forecast.enabled_analysis_count == 1 {
-                                ""
-                            } else {
-                                "s"
-                            }
-                        ))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                    );
-                    let mut rows = vec![("Tasks", forecast.task_count.to_string())];
-                    // Stated only where it is a bound the reader cannot derive
-                    // from the two numbers above. With every analysis at every
-                    // point every point costs tasks ÷ points, and a row
-                    // restating that is noise on a tile this small.
-                    if let Some(ceiling) = worst_point_tasks
-                        && forecast.exact
-                        && forecast.task_count != ceiling.saturating_mul(forecast.point_count)
-                    {
-                        rows.push((
-                            "Worst point",
-                            format!("{ceiling} task{}", if ceiling == 1 { "" } else { "s" }),
-                        ));
-                    }
-                    rows.push(("Cost", run_set::format_duration_ms(forecast.cost_ms)));
-                    rows.push(("Storage", run_set::format_bytes(forecast.storage_bytes)));
-                    for (label, value) in rows {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(label)
-                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                    .color(t.color.text_dim),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.label(
-                                        egui::RichText::new(value)
-                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                            .color(t.color.text),
-                                    );
-                                },
-                            );
-                        });
-                    }
-                });
-        },
-    );
-    tile.response.rect
-}
-
 /// Statistical variation is a Monte Carlo analysis, not an axis of this space.
 fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
@@ -802,30 +677,31 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
                     });
                 }
             });
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(match sample_count {
-                            Some(samples) => format!(
-                                "Each PVT point executes one Monte Carlo task with {samples} \
-                                 configured samples. The task forecast remains analysis-level; \
-                                 the declared seed keeps the trial stream reproducible."
-                            ),
-                            None if active => "Monte Carlo is enabled, but its sample count is \
-                                invalid. Correct the analysis before dispatch."
-                                .to_owned(),
-                            None => "Statistical variation is owned by a Monte Carlo analysis \
-                                instance. None is enabled in this plan, so the matrix carries \
-                                deterministic points only."
-                                .to_owned(),
-                        })
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                    )
-                    .wrap(),
-                );
-            });
+            // Nothing is painted when no Monte Carlo instance is enabled: the
+            // state word beside the button already says so, and a sentence
+            // under it said it a second time.
+            let note = match sample_count {
+                Some(samples) => Some(format!("one task at every point · {samples} samples")),
+                None if active => Some(
+                    "Monte Carlo is enabled, but its sample count is invalid. Correct the \
+                     analysis before dispatch."
+                        .to_owned(),
+                ),
+                None => None,
+            };
+            if let Some(note) = note {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(8.0, 4.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(note)
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        )
+                        .wrap(),
+                    );
+                });
+            }
         });
 
     if add_monte_carlo {
@@ -1149,13 +1025,10 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                         current_composition.with_mode(mode),
                     ));
                 }
-                rule_row(
-                    ui,
-                    "Adaptive",
-                    RunSetCompositionMode::Adaptive
-                        .execution_blocker()
-                        .expect("adaptive composition is deliberately unavailable"),
-                );
+                // No row for adaptive composition: the mode list above already
+                // omits it, and a row that explains why an absent option is
+                // absent is a sentence about the engine build rather than
+                // about this plan.
                 if mode == RunSetCompositionMode::Conditional {
                     let mut edited = current_composition.clone();
                     let mut predicate = edited.predicate.clone();
@@ -1312,10 +1185,6 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                     "every coordinate is carried into the run manifest",
                 );
             });
-            card_note(
-                ui,
-                "Conditional predicates and nested traversal resolve deterministically into exact point identities. Adaptive declarations remain fail-closed until the campaign scheduler can authorize proposals from completed evidence; a direct run never pretends the maximum proposal budget is an executed matrix.",
-            );
         },
     );
     if let Some(action) = action {
@@ -1413,12 +1282,6 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
                     }
                 }
             });
-            card_note(
-                ui,
-                "Exceeding a budget blocks preview and dispatch. Nothing is truncated silently, \
-                 and the cost and storage models are the plan's own — they state what this run \
-                 would consume, not a measured result.",
-            );
         },
     );
     if let Some(action) = action {
@@ -1502,31 +1365,28 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
 
     let composed = points.len();
     let running = validation.forecast.point_count;
-    // The same queue the table's rows add up to, so it is priced the same way
-    // rather than left as a count the reader has to convert themselves.
-    let duration = super::workload::modelled_duration(&app.state, validation.forecast.task_count);
-    let status = if composed == running {
-        format!(
-            "{composed} point{} · {} task{} · {duration}",
-            if composed == 1 { "" } else { "s" },
-            validation.forecast.task_count,
-            if validation.forecast.task_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        )
-    } else {
-        format!(
-            "{running} of {composed} points · {} task{} · {duration}",
-            validation.forecast.task_count,
-            if validation.forecast.task_count == 1 {
-                ""
-            } else {
-                "s"
-            }
-        )
-    };
+    // The toolbar states the forecast for the whole page, so this head carries
+    // only what is true of the table and not of the run: how many of the
+    // composed points actually execute, and the ceiling its Tasks column runs
+    // to where that is not simply the rate at every point.
+    let mut facts: Vec<String> = Vec::new();
+    if composed != running {
+        facts.push(format!("{running} of {composed} points"));
+    }
+    if let Some(ceiling) = frame
+        .workload
+        .as_ref()
+        .ok()
+        .and_then(|workload| worst_point_task_cost_of(&frame.participation, workload))
+        && validation.forecast.exact
+        && validation.forecast.task_count != ceiling.saturating_mul(running)
+    {
+        facts.push(format!(
+            "worst point {ceiling} task{}",
+            if ceiling == 1 { "" } else { "s" }
+        ));
+    }
+    let status = facts.join(" \u{b7} ");
 
     // Resolved once for the whole table rather than per row: the answer is
     // the same for every point, and a per-row manifest build would cost a
@@ -1587,7 +1447,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     card(
         ui,
         "Resolved point table",
-        Some((status.as_str(), Tone::Neutral)),
+        (!status.is_empty()).then_some((status.as_str(), Tone::Neutral)),
         |ui| {
             ledger_head(ui, &fractions, &header_refs);
             for (index, point, key, is_excluded) in &rows {
@@ -1615,10 +1475,9 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
                     family_request = Some(point.coordinates.clone());
                 }
             }
-            card_note(
-                ui,
-                &point_table_note(composed, rows.len(), excludable, refused.len()),
-            );
+            if let Some(note) = point_table_note(composed, rows.len(), refused.len()) {
+                card_note(ui, &note);
+            }
         },
     );
 
@@ -1988,51 +1847,37 @@ fn point_row(ui: &mut Ui, row: PointRow<'_>, action: &mut Option<RunSetAction>) 
     }
 }
 
-/// What the table is and is not showing.
+/// What the table is *not* showing, and nothing a reader can read off it.
 ///
-/// `refused` is how many enabled analyses do not resolve against the declared
-/// space at all. They are in no row's cells, and the plan total above the table
-/// still prices them at the whole matrix, so the two numbers do not add up on
-/// purpose — and a table whose arithmetic does not close without saying why is
-/// a table a reader has to distrust.
-pub(super) fn point_table_note(
-    composed: usize,
-    drawn: usize,
-    excludable: bool,
-    refused: usize,
-) -> String {
-    let mut note = if composed > drawn {
-        format!(
-            "The first {POINT_TABLE_LIMIT} of {composed} composed points are listed, together with \
-             every excluded point beyond them wherever it falls. Points that are not listed are \
-             executed and recorded in the run manifest; this table exists to check the \
-             composition, not to enumerate the run."
-        )
-    } else if excludable {
-        "Each row is one point of the declared matrix, and its Tasks cell is what that point \
-         costs: every enabled analysis that runs there, at its own rate — one task per point, or \
-         two where the analysis retains a spectrum or assembles its own family. Clearing a row \
-         removes that point by identity: the axes keep every value they declare, and the \
-         exclusion is recorded in the plan rather than applied by rewriting the space."
-            .to_owned()
-    } else {
-        "Each row is one execution point of the declared matrix, and its Tasks cell is what that \
-         point costs: every enabled analysis that runs there, at its own rate. The run manifest \
-         carries these exact identities."
-            .to_owned()
-    };
-    if refused > 0 {
+/// Two constraints, each stated only when it holds. Truncation: a composed
+/// space larger than the cap is listed in part, so the row count and the point
+/// count disagree. Refusal: `refused` is how many enabled analyses do not
+/// resolve against the declared space at all. They are in no row's cells, and
+/// the plan total is still priced at the whole matrix, so the two numbers do
+/// not add up on purpose — and a table whose arithmetic does not close without
+/// saying why is a table a reader has to distrust.
+pub(super) fn point_table_note(composed: usize, drawn: usize, refused: usize) -> Option<String> {
+    let mut note = String::new();
+    if composed > drawn {
         note.push_str(&format!(
-            " {refused} enabled analys{} refused {} participation and {} at no point here, so \
-             {} in no row's cells — while the plan total above is still priced at the whole \
-             matrix, which is the direction a budget may not shrink in.",
+            "The first {POINT_TABLE_LIMIT} of {composed} composed points are listed, with every \
+             excluded point beyond them wherever it falls."
+        ));
+    }
+    if refused > 0 {
+        if !note.is_empty() {
+            note.push(' ');
+        }
+        note.push_str(&format!(
+            "{refused} enabled analys{} refused {} participation and {} at no point here, so \
+             {} in no row's cells, while the plan total is still priced at the whole matrix.",
             if refused == 1 { "is" } else { "es" },
             if refused == 1 { "its" } else { "their" },
             if refused == 1 { "runs" } else { "run" },
             if refused == 1 { "it is" } else { "they are" },
         ));
     }
-    note
+    (!note.is_empty()).then_some(note)
 }
 
 // ------------------------------------------------------------------ commit
@@ -2242,23 +2087,18 @@ fn plan_run_set_validation_from(
 
 #[cfg(test)]
 mod run_space_layout_tests {
-    use super::{AXIS_CARD_OUTER_W, FORECAST_TILE_W, OPERATOR_TILE_W, SPACE_TERM_GAP, space_rows};
+    use super::{AXIS_CARD_OUTER_W, OPERATOR_TILE_W, SPACE_TERM_GAP, space_rows};
 
     /// What one row of the strip actually measures, from the same arithmetic
     /// the paint advances by: the first term bare, every later one preceded by
     /// its operator, and a gap between atoms.
-    fn measured(row: &super::SpaceRow, dimensions: usize) -> f32 {
+    fn measured(row: &super::SpaceRow) -> f32 {
         let mut width = 0.0;
         for (position, term) in row.terms.iter().enumerate() {
-            let term_width = if term.index < dimensions {
+            let atom = if term.index == 0 {
                 AXIS_CARD_OUTER_W
             } else {
-                FORECAST_TILE_W + 20.0
-            };
-            let atom = if term.index == 0 {
-                term_width
-            } else {
-                OPERATOR_TILE_W + SPACE_TERM_GAP + term_width
+                OPERATOR_TILE_W + SPACE_TERM_GAP + AXIS_CARD_OUTER_W
             };
             width += if position == 0 {
                 atom
@@ -2269,7 +2109,7 @@ mod run_space_layout_tests {
         width
     }
 
-    /// Every term appears exactly once, in order, and no row overflows the
+    /// Every axis appears exactly once, in order, and no row overflows the
     /// card it is packed into. The grid this replaced could not overflow --
     /// it just left holes -- so the property worth pinning is that packing
     /// by width never spills.
@@ -2281,7 +2121,7 @@ mod run_space_layout_tests {
                 let mut seen = Vec::new();
                 for row in &rows {
                     assert!(!row.terms.is_empty(), "no empty row at {available}");
-                    let width = measured(row, dimensions);
+                    let width = measured(row);
                     assert!(
                         (row.width - width).abs() <= 0.01,
                         "row reports {} but measures {width} at {available}",
@@ -2290,28 +2130,35 @@ mod run_space_layout_tests {
                     // A single term wider than the card still gets its own row;
                     // it cannot be made to fit and splitting it would hide it.
                     assert!(
-                        width <= available.max(FORECAST_TILE_W + 20.0) + 0.01,
+                        width <= available.max(AXIS_CARD_OUTER_W) + 0.01,
                         "row of {width} overflows {available} with {dimensions} axes"
                     );
                     seen.extend(row.terms.iter().map(|term| term.index));
                 }
                 assert_eq!(
                     seen,
-                    (0..=dimensions).collect::<Vec<_>>(),
-                    "every axis and the total, once, in order, at {available}"
+                    (0..dimensions).collect::<Vec<_>>(),
+                    "every axis, once, in order, at {available}"
                 );
             }
         }
     }
 
     /// The defect: a two-column cap left a 2x2 island at 1600 and a 500-point
-    /// island at 2560. Four axes and their total are 1214 points of terms, so
-    /// any card wider than that has to hold the whole run on one row.
+    /// island at 2560. Four axes are 976 points of terms, so any card wider
+    /// than that has to hold the whole run on one row.
     #[test]
     fn a_wide_card_holds_the_whole_run_on_one_row() {
         let rows = space_rows(2540.0, 4);
-        assert_eq!(rows.len(), 1, "four axes and the total fit 2540 points");
-        assert_eq!(rows[0].terms.len(), 5);
+        assert_eq!(rows.len(), 1, "four axes fit 2540 points");
+        assert_eq!(rows[0].terms.len(), 4);
+    }
+
+    /// No axes, no strip: an empty row would paint a band of nothing where the
+    /// expression used to close on a tile.
+    #[test]
+    fn a_run_with_no_axes_packs_no_rows() {
+        assert!(space_rows(1100.0, 0).is_empty());
     }
 }
 
@@ -2325,19 +2172,30 @@ mod point_table_note_tests {
     /// refused their participation and runs at no point here".
     #[test]
     fn the_refusal_sentence_agrees_with_the_count_it_states() {
-        let one = point_table_note(4, 4, true, 1);
+        let one = point_table_note(4, 4, 1).expect("a refusal is a note");
         assert!(
             one.contains("1 enabled analysis refused its participation and runs at no point here"),
             "{one}"
         );
-        let two = point_table_note(4, 4, true, 2);
+        let two = point_table_note(4, 4, 2).expect("a refusal is a note");
         assert!(
             two.contains("2 enabled analyses refused their participation and run at no point here"),
             "{two}"
         );
-        assert!(
-            !point_table_note(4, 4, true, 0).contains("refused"),
-            "nothing refused, nothing to reconcile"
-        );
+    }
+
+    /// A table that shows every point and reconciles with the plan total says
+    /// nothing at all: the rows are the answer and a sentence under them that
+    /// restated the rows was the page's longest piece of prose.
+    #[test]
+    fn a_whole_untroubled_table_carries_no_note() {
+        assert_eq!(point_table_note(4, 4, 0), None);
+    }
+
+    /// Truncation is the one thing the rows cannot show, so it is stated.
+    #[test]
+    fn a_truncated_table_states_how_much_of_the_space_it_lists() {
+        let note = point_table_note(500, 40, 0).expect("a truncated table states the cap");
+        assert!(note.contains("first 40 of 500 composed points"), "{note}");
     }
 }
