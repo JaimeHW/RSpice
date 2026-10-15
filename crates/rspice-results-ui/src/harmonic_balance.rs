@@ -256,7 +256,6 @@ pub fn right_panel(
     source: Result<&HarmonicBalanceModel, SpectrumAbsence<'_>>,
     quantity_policy: &QuantityPresentationPolicy,
 ) {
-    section_header(ui, "Retained spectrum", None);
     let model = match source {
         Ok(model) => model,
         Err(reason) => {
@@ -268,40 +267,23 @@ pub fn right_panel(
                 SpectrumAbsence::IncompleteHistory(sentence) => {
                     crate::presentation::panel_note(ui, &sentence)
                 }
-                SpectrumAbsence::Unavailable => crate::presentation::panel_note(
-                    ui,
-                    "Select a completed HB, QPSS or Fourier result with retained complex coefficients.",
-                ),
+                SpectrumAbsence::Unavailable => {
+                    crate::presentation::panel_note(ui, "No harmonic-balance result in this run.")
+                }
             }
             return;
         }
     };
-    let lowest_retained = model
-        .traces
-        .iter()
-        .flat_map(|trace| trace.frequency.iter().copied())
-        .filter(|frequency| *frequency > 0.0)
-        .min_by(f64::total_cmp);
-    let highest_retained = model
-        .traces
-        .iter()
-        .flat_map(|trace| trace.frequency.iter().copied())
-        .max_by(f64::total_cmp);
-
-    let retained_samples = format!(
-        "{} spectral sample{} · f₀ not retained",
-        model.retained_frequency_count,
-        if model.retained_frequency_count == 1 {
-            ""
-        } else {
-            "s"
-        }
-    );
-    // A recorded FFT states the transform the engine performed, so the
-    // "Not retained" rows below would be false of it.
+    // A recorded FFT states the transform the engine performed; a quasi-period
+    // steady state states the lattice it was solved on. Plain harmonic
+    // balance, `.FOUR` and PSS state neither, and the sheet beside this panel
+    // already draws every coefficient they retained — so the panel says
+    // nothing rather than four rows of "Not retained".
     if let Some(spectrum) = &model.fft {
+        section_header(ui, "Spectrum", None);
         crate::presentation::stat_table(ui, &recorded_fft::inspector_rows(spectrum));
     } else if let Some(point) = &model.qpss {
+        section_header(ui, "Harmonics", None);
         let config = point.config();
         let rows = [
             (
@@ -337,60 +319,12 @@ pub fn right_panel(
             ("Newton iterations", point.iterations().to_string(), false),
             (
                 "Normalized residual",
-                format!("{:.6e}", point.normalized_residual()),
+                format!("{:.2e}", point.normalized_residual()),
                 false,
             ),
-            ("Amplitude", "Peak; signed DC unchanged".into(), false),
-        ];
-        crate::presentation::stat_table(ui, &rows);
-        crate::presentation::panel_note(
-            ui,
-            "Each component has a signed tone tuple. Export CSV for the complete signed Fourier coefficients and their tuples.",
-        );
-    } else {
-        let rows = [
-            ("Tones / f₀", retained_samples, true),
-            ("Harmonic order", "Not retained".to_owned(), false),
-            (
-                "Convergence",
-                "Completed · solver iterations not retained".to_owned(),
-                false,
-            ),
-            ("Fundamental", "Not retained".to_owned(), false),
-            ("THD", "Not retained".to_owned(), true),
         ];
         crate::presentation::stat_table(ui, &rows);
     }
-
-    section_header(ui, "Retained spectrum", None);
-    let rows = [
-        ("Signals", model.traces.len().to_string(), false),
-        (
-            "Lowest frequency",
-            lowest_retained.map_or_else(
-                || "DC only".to_owned(),
-                |frequency| quantity_policy.format_frequency(frequency, 3),
-            ),
-            false,
-        ),
-        (
-            "Highest frequency",
-            highest_retained.map_or("—".to_owned(), |frequency| {
-                quantity_policy.format_frequency(frequency, 3)
-            }),
-            false,
-        ),
-        (
-            "Magnitude range",
-            format!(
-                "{} … {}",
-                fmt_si(model.magnitude_min, "", 4),
-                fmt_si(model.magnitude_max, "", 4)
-            ),
-            false,
-        ),
-    ];
-    crate::presentation::stat_table(ui, &rows);
 }
 
 #[cfg(test)]

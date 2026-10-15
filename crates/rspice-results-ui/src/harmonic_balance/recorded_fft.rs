@@ -4,7 +4,7 @@ use rspice_results::{
     analysis_payload::AnalysisResultPayload, analysis_result::AnalysisResult,
     fft::spectrum::FftSpectrumEvidence,
 };
-use rspice_ui_kit::plot::{Axis, fmt_si};
+use rspice_ui_kit::plot::{Axis, fmt_si, fmt_si_readout};
 
 /// Stems are one painted segment per coefficient, so they are drawn only for
 /// a spectrum short enough that the cost is bounded.
@@ -61,62 +61,49 @@ pub(super) fn decade_ordinate(
     Some(Axis::log_decades(floor, largest * 1.2, unit).with_label("magnitude"))
 }
 
-/// The inspector rows a recorded spectrum states, in place of the
-/// harmonic-balance sheet's "Not retained" rows.
+/// The inspector rows a recorded spectrum states: what the engine
+/// transformed, over which record, and the figures of merit it measured.
+///
+/// Sample counts, the card's own format and mode keywords, the window's
+/// coherent gain and the fundamental's bin index are bookkeeping the reader
+/// cannot act on. Sampling states itself only when it was interpolated, which
+/// is the case that qualifies every number under it.
 pub(super) fn inspector_rows(spectrum: &FftSpectrumEvidence) -> Vec<(&'static str, String, bool)> {
     let mut rows = vec![
         ("Output", spectrum.output.clone(), false),
         ("Window", spectrum.window.clone(), false),
-        ("Samples", spectrum.point_count.to_string(), true),
         (
             "Record",
             format!(
                 "{} … {}",
-                fmt_si(spectrum.start_time_s, "s", 4),
-                fmt_si(spectrum.stop_time_s, "s", 4)
+                fmt_si_readout(spectrum.start_time_s, "s", 4),
+                fmt_si_readout(spectrum.stop_time_s, "s", 4)
             ),
             false,
         ),
         (
             "Resolution",
-            fmt_si(spectrum.frequency_resolution_hz, "Hz", 4),
+            fmt_si_readout(spectrum.frequency_resolution_hz, "Hz", 4),
             false,
-        ),
-        ("Format", spectrum.format.keyword().to_owned(), false),
-        ("Mode", spectrum.mode.label().to_owned(), false),
-        (
-            "Sampling",
-            if spectrum.accurate_sampling {
-                "exact sample times".to_owned()
-            } else {
-                "interpolated".to_owned()
-            },
-            false,
-        ),
-        (
-            "Coherent gain",
-            fmt_si(spectrum.coherent_gain, "", 6),
-            false,
-        ),
-        (
-            "Fundamental",
-            format!(
-                "bin {} · {}",
-                spectrum.fundamental_bin,
-                fmt_si(
-                    spectrum.fundamental_bin as f64 * spectrum.frequency_resolution_hz,
-                    "Hz",
-                    4
-                )
-            ),
-            true,
         ),
     ];
+    if !spectrum.accurate_sampling {
+        rows.push(("Sampling", "interpolated".to_owned(), false));
+    }
+    rows.push((
+        "Fundamental",
+        fmt_si_readout(
+            spectrum.fundamental_bin as f64 * spectrum.frequency_resolution_hz,
+            "Hz",
+            4,
+        ),
+        true,
+    ));
     if let Some(metrics) = &spectrum.metrics {
-        rows.push(("THD", fmt_si(metrics.thd_db, "dB", 4), false));
-        rows.push(("SNDR", fmt_si(metrics.sndr_db, "dB", 4), false));
-        rows.push(("SNR", fmt_si(metrics.snr_db, "dB", 4), false));
-        rows.push(("SFDR", fmt_si(metrics.sfdr_db, "dB", 4), false));
+        rows.push(("THD", fmt_si_readout(metrics.thd_db, "dB", 4), false));
+        rows.push(("SNDR", fmt_si_readout(metrics.sndr_db, "dB", 4), false));
+        rows.push(("SNR", fmt_si_readout(metrics.snr_db, "dB", 4), false));
+        rows.push(("SFDR", fmt_si_readout(metrics.sfdr_db, "dB", 4), false));
         rows.push(("ENOB", format!("{:.2} bits", metrics.enob_bits), true));
     }
     rows
@@ -233,26 +220,36 @@ mod tests {
         let labels = rows.iter().map(|(label, _, _)| *label).collect::<Vec<_>>();
         assert_eq!(
             labels,
-            [
-                "Output",
-                "Window",
-                "Samples",
-                "Record",
-                "Resolution",
-                "Format",
-                "Mode",
-                "Sampling",
-                "Coherent gain",
-                "Fundamental",
-            ]
+            ["Output", "Window", "Record", "Resolution", "Fundamental"]
         );
         assert!(
             rows.iter()
                 .any(|(label, value, _)| *label == "Window" && value == "RECT")
         );
+        // The fundamental is a frequency, not a bin index.
         assert!(
             rows.iter()
-                .any(|(label, value, _)| *label == "Sampling" && value == "exact sample times")
+                .any(|(label, value, _)| *label == "Fundamental" && value == "1 kHz"),
+            "{rows:?}"
+        );
+    }
+
+    /// Exact sampling is the normal case, so it says nothing; interpolation
+    /// qualifies every number under it, so it does.
+    #[test]
+    fn sampling_is_stated_only_when_it_was_interpolated() {
+        let mut spectrum =
+            evidence_fixture(rspice_results::fft::spectrum::FftSpectrumStatusEvidence::Complete);
+        assert!(
+            !inspector_rows(&spectrum)
+                .iter()
+                .any(|(label, _, _)| *label == "Sampling")
+        );
+        spectrum.accurate_sampling = false;
+        assert!(
+            inspector_rows(&spectrum)
+                .iter()
+                .any(|(label, value, _)| *label == "Sampling" && value == "interpolated")
         );
     }
 }
