@@ -484,10 +484,10 @@ fn the_inspector_cards_every_adopter_in_the_design() {
     );
 }
 
-/// A library nothing has adopted says how to adopt it rather than heading an
-/// empty list.
+/// A definition nothing has adopted states that, rather than heading an empty
+/// list or explaining how adoption works.
 #[test]
-fn the_inspector_says_how_to_adopt_when_nothing_has() {
+fn the_inspector_says_the_definition_is_unused_when_nothing_has_adopted_it() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     let published = inspector(&mut app.state);
@@ -497,7 +497,7 @@ fn the_inspector_says_how_to_adopt_when_nothing_has() {
         "{published:?}"
     );
     assert!(
-        published.contains(&"Not used in this design.".to_owned()),
+        published.contains(&"Not used in this design".to_owned()),
         "{published:?}"
     );
     // With no adopter there is no reader, so the consumers section is absent

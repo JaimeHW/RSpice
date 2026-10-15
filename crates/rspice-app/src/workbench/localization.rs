@@ -923,7 +923,7 @@ define_messages! {
     StimulusBrowserBehindSingular => "1 placed source uses an older revision",
     StimulusBrowserBehind => "{behind} placed sources use an older revision",
     StimulusAdoptersSection => "Adopters",
-    StimulusAdoptersNone => "Not used in this design.",
+    StimulusAdoptersNone => "Not used in this design",
     StimulusShowInSchematic => "Show in schematic",
     StimulusOpenPropertiesShort => "Properties…",
     StimulusAdopterElsewhere => "Open the occurrence this instance is drawn in to edit or re-adopt it",
