@@ -765,7 +765,6 @@ fn every_row_announces_the_facts_its_cells_paint() {
             .unwrap_or_else(|| panic!("no row announced for '{}'", record.name));
         assert_eq!(record.lifecycle_label(), lifecycle);
         for fact in [
-            record.id.to_string(),
             record.lifecycle_label().to_owned(),
             format!("revision {}", record.revision),
             format!("{} of {} analyses enabled", record.enabled, record.analyses),
@@ -779,6 +778,13 @@ fn every_row_announces_the_facts_its_cells_paint() {
                 record.name
             );
         }
+        // The node announces what the cells paint, and no cell paints the
+        // plan's stable identity any more.
+        assert!(
+            !row.contains(&record.id.to_string()),
+            "the row for '{}' reads a UUID aloud: {row}",
+            record.name
+        );
     }
 }
 
@@ -914,7 +920,7 @@ fn import_is_a_toolbar_action_and_not_an_operation_on_the_selected_plan() {
     };
 
     assert!(
-        at("Import…") < at("Plan / identity"),
+        at("Import…") < at("Plan"),
         "Import is painted after the table's first heading, so it is not in \
          the toolbar"
     );
@@ -924,7 +930,7 @@ fn import_is_a_toolbar_action_and_not_an_operation_on_the_selected_plan() {
     );
     for kept in ["Rename…", "Clone…", "Compare…", "Export…", "Archive…"] {
         assert!(
-            at(kept) > at("Plan / identity"),
+            at(kept) > at("Plan"),
             "'{kept}' is painted before the table, so it left the \
              selected-plan action row"
         );
@@ -2023,6 +2029,63 @@ fn assert_route_loses_no_fact_to_elision(mode: SimulationPlanManagerMode) {
                  hold it or the widget has to publish it.",
                 clipped_label_preview(text)
             );
+        }
+    }
+}
+
+/// Whether `text` holds a UUID-shaped run: `8-4-4-4-12` hexadecimal digits.
+///
+/// The shape rather than the fixture's own ids, because the fixture mints a
+/// fresh plan on every call and the ids this module could name would not be
+/// the ids the render was built from.
+#[cfg(not(target_arch = "wasm32"))]
+fn holds_an_identity(text: &str) -> bool {
+    const GROUPS: [usize; 5] = [8, 4, 4, 4, 12];
+    let bytes = text.as_bytes();
+    (0..bytes.len()).any(|start| {
+        let mut at = start;
+        for (index, group) in GROUPS.into_iter().enumerate() {
+            if index > 0 {
+                if bytes.get(at) != Some(&b'-') {
+                    return false;
+                }
+                at += 1;
+            }
+            if !(at..at + group).all(|i| bytes.get(i).is_some_and(u8::is_ascii_hexdigit)) {
+                return false;
+            }
+            at += group;
+        }
+        true
+    })
+}
+
+/// No route states a plan's stable identity, in either channel.
+///
+/// Every row of the browse and campaign tables used to carry the plan's id
+/// under its name, and export and import each spent a property row on one. An
+/// id is not something a reader decides with: two plans are told apart by
+/// their names, their revisions and what they declare, and a column of hex
+/// under every one of those was a column of noise.
+///
+/// The filter still matches an id, so a reader holding one in the clipboard
+/// can paste it and land on the plan. Nothing paints one at them, and nothing
+/// reads one aloud: an announcement is what a reader who cannot see the table
+/// gets instead of it, not a place to put what the table was spared.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn no_route_states_a_plan_identity() {
+    for mode in EVERY_ROUTE {
+        for (arrangement, screen) in GATED_VIEWPORTS {
+            let RouteSpeech { painted, announced } = route_speech(screen, mode);
+            for (channel, lines) in [("painted", &painted), ("announced", &announced)] {
+                if let Some(text) = lines.iter().find(|text| holds_an_identity(text)) {
+                    panic!(
+                        "{mode:?} in {arrangement} {channel} a stable identity: {:?}",
+                        clipped_label_preview(text)
+                    );
+                }
+            }
         }
     }
 }

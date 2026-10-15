@@ -492,7 +492,7 @@ fn cell_two_lines(
     );
 }
 
-/// The plan's name over its stable identity, both elided to the cell.
+/// A domain's name over the key that qualifies it, both elided to the cell.
 pub(super) fn cell_identity(ui: &mut Ui, name: &str, identity: &str) {
     let t = Tokens::get(ui.ctx());
     cell_two_lines(
@@ -507,6 +507,26 @@ pub(super) fn cell_identity(ui: &mut Ui, name: &str, identity: &str) {
             theme::mono(tokens::FS_0, FontWeight::Regular),
             t.color.text_faint,
         ),
+    );
+}
+
+/// A plan's name, elided to the cell.
+///
+/// One line, not two: the second used to carry the plan's stable identity, and
+/// a UUID under every row is a column of hex a reader cannot act on. The
+/// filter still matches it, so a reader who has one in the clipboard can paste
+/// it and find the plan.
+pub(super) fn cell_name(ui: &mut Ui, name: &str) {
+    let t = Tokens::get(ui.ctx());
+    let rect = ui.max_rect();
+    let font = theme::sans(tokens::FS_1, FontWeight::SemiBold);
+    let text = elide_text(ui, name, &font, rect.width());
+    ui.painter().text(
+        rect.left_center(),
+        Align2::LEFT_CENTER,
+        text,
+        font,
+        t.color.text,
     );
 }
 

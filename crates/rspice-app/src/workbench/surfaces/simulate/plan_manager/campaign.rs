@@ -15,8 +15,8 @@
 //!   begun. Preparation walks the members with `?`, so a member that cannot be
 //!   prepared refuses the whole campaign and nothing is queued at all. The
 //!   reader is deciding at the moment the strict half applies, so the surface
-//!   states both: admission is all or nothing, and after that a failed member
-//!   does not stop the ones behind it.
+//!   states that half — the Admission row, and only when there is a refusal to
+//!   state.
 //! * *Per-plan manifests plus one campaign summary record.* The per-member
 //!   half holds — each member is its own prepared snapshot, and dispatch gives
 //!   it its own receipt, run, job and dataset identity — but nothing in RSpice
@@ -24,7 +24,7 @@
 //!   `ActiveSimulationCampaign` is controller state that ends with the last
 //!   member; the only thing that outlives the dispatch is
 //!   `SimulationCampaignMembership`, written onto each member's own run and
-//!   persisted with it. So the evidence is per member, which is what this says.
+//!   persisted with it.
 //! * *Members dispatch in declared order · shared target queue.* The order half
 //!   is real and is this table's `Order` column. The queue is shared with
 //!   nothing: the controller refuses to start while any run or campaign is
@@ -70,13 +70,6 @@ const MAX_CAMPAIGN_NAME_CHARS: usize = 160;
 /// only that they have nothing to report.
 const NO_FORECAST: &str = "—";
 
-/// Width at which the campaign's two note groups stop stacking.
-///
-/// A property row elides its value to one line, so the pairs cost height in one
-/// track and legibility in two. Below this the seven rows are worth 203 points
-/// of a body that has them; above it they are two columns of four and three.
-const NOTE_TWO_COLUMN_WIDTH: f32 = 700.0;
-
 /// Whitespace closing the body, for the reason `kit`'s `SPLIT_BOTTOM_INSET`
 /// documents: this dialog's body viewport resolves a couple of points under the
 /// content it was measured from, so whatever is painted last is cut mid-glyph.
@@ -114,7 +107,7 @@ const MEMBER_COLUMNS: [TableColumn; 7] = [
         track: ColumnTrack::Fixed(42.0),
     },
     TableColumn {
-        heading: "Plan / identity",
+        heading: "Plan",
         track: ColumnTrack::Elastic(120.0),
     },
     TableColumn {
@@ -188,7 +181,7 @@ pub(super) fn dialog(
             // larger catalog from pushing the sum off the bottom.
             member_table(ui, &mut draft.campaign.member_ids, &eligible, has_archived);
             ui.add_space(8.0);
-            campaign_notes(ui, &scope, refusal.as_deref());
+            declared_scope_group(ui, &scope, refusal.as_deref());
             ui.add_space(8.0);
             campaign_name_row(ui, &mut draft.campaign.name);
             workflow_validation_message(ui, draft.validation_error.as_deref());
@@ -223,27 +216,6 @@ fn campaign_name_row(ui: &mut Ui, name: &mut String) {
                 }),
         );
     });
-}
-
-/// What this campaign declares, and what queueing it does.
-///
-/// Two groups rather than one list: the left is about this draft and changes as
-/// the reader picks members, the right is about the transaction and does not.
-/// They are side by side where there is width for both to stay legible, and
-/// stacked where a value would elide to nothing.
-fn campaign_notes(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str>) {
-    if ui.available_width() >= NOTE_TWO_COLUMN_WIDTH {
-        kit::equal_columns(ui, 2, |ui, index| {
-            if index == 0 {
-                declared_scope_group(ui, scope, refusal);
-            } else {
-                dispatch_guarantee_group(ui);
-            }
-        });
-    } else {
-        declared_scope_group(ui, scope, refusal);
-        dispatch_guarantee_group(ui);
-    }
 }
 
 /// How much work the selected members declare, and what stands between this
@@ -285,21 +257,6 @@ fn declared_scope_group(ui: &mut Ui, scope: &CampaignScope, refusal: Option<&str
     if let Some(reason) = refusal {
         property_row_problem(ui, "Admission", reason, Some(Problem::Failure));
     }
-}
-
-/// What queueing the campaign does, stated from the dispatch path rather than
-/// from the authored reference's claims about it.
-fn dispatch_guarantee_group(ui: &mut Ui) {
-    kit::section_head(ui, "What queueing does", None);
-    // Every member is prepared against one clone of the project taken before
-    // the first one starts, so a later member never sees an edit made while an
-    // earlier member is running.
-    property_row(ui, "Freeze", "all members frozen up front");
-    property_row(ui, "Dispatch", "one at a time, in order shown");
-    // After dispatch a member that fails is counted and the next is dispatched;
-    // the campaign closes as completed with errors rather than stopping.
-    property_row(ui, "After a failure", "later members still run");
-    property_row(ui, "Evidence", "own run, receipt and dataset");
 }
 
 /// The catalog as members: which plans are in, in what position, and what each
@@ -358,7 +315,7 @@ fn member_table(
                         t.color.text_faint
                     },
                 ),
-                1 => kit::cell_identity(ui, &record.name, &record.id.to_string()),
+                1 => kit::cell_name(ui, &record.name),
                 2 => kit::cell_value(
                     ui,
                     &format!("{} / {}", record.enabled, record.analyses),
@@ -451,8 +408,8 @@ fn announced_member_row(
         _ => format!("declared run set {RUN_SET_DOES_NOT_VALIDATE}"),
     };
     format!(
-        "{} · {} · {membership} · {} of {} analyses enabled · {scale}",
-        record.name, record.id, record.enabled, record.analyses
+        "{} · {membership} · {} of {} analyses enabled · {scale}",
+        record.name, record.enabled, record.analyses
     )
 }
 
@@ -790,9 +747,8 @@ mod tests {
         assert_eq!(
             announced_member_row(record_of(&records, plans[0]), Some(0), 2),
             format!(
-                "{} · {} · member 1 of 2 · click to remove · {} of {} analyses enabled · declared run set {RUN_SET_DOES_NOT_VALIDATE}",
+                "{} · member 1 of 2 · click to remove · {} of {} analyses enabled · declared run set {RUN_SET_DOES_NOT_VALIDATE}",
                 record_of(&records, plans[0]).name,
-                plans[0],
                 record_of(&records, plans[0]).enabled,
                 record_of(&records, plans[0]).analyses
             )
@@ -881,15 +837,18 @@ mod tests {
         );
     }
 
-    /// Every fact the two note groups state is painted whole at all three
-    /// gated shapes.
+    /// Every fact the scope group states is painted whole at all three gated
+    /// shapes.
     ///
     /// The fit gate next door proves nothing is off screen, which is a
     /// different question from whether it is readable: a property row elides
     /// its value to one line, so a note that outgrows its track is silently
     /// truncated on screen and the gate still passes. These are the exact
-    /// strings, so the arrangement has to keep every one of them intact — which
-    /// is what the two-column breakpoint above is for.
+    /// strings, so the arrangement has to keep every one of them intact.
+    ///
+    /// The four dispatch guarantees this also covered are gone with the group
+    /// that stated them: Freeze, Dispatch, After a failure and Evidence each
+    /// restated a clause of the purpose strip two inches above them.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn every_fact_the_notes_state_is_painted_whole_at_every_gated_viewport() {
@@ -900,10 +859,6 @@ mod tests {
         let owed = [
             "2 plans".to_owned(),
             scope.tasks.to_string(),
-            "all members frozen up front".to_owned(),
-            "one at a time, in order shown".to_owned(),
-            "later members still run".to_owned(),
-            "own run, receipt and dataset".to_owned(),
             // The purpose strip and the footer hint carry the two rules the
             // surface cannot show, so both have to survive the narrow shapes.
             CAMPAIGN_PURPOSE.to_owned(),

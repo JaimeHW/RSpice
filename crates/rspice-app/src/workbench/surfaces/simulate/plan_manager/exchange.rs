@@ -158,11 +158,7 @@ fn export(
         );
         if let Some(record) = selected {
             property_row(ui, "Name", &record.name);
-            property_row(
-                ui,
-                "Source identity",
-                &format!("{} · revision {}", record.id, record.revision),
-            );
+            property_row(ui, "Revision", &record.revision.to_string());
             property_row(
                 ui,
                 "Declares",
@@ -275,12 +271,8 @@ fn import(
                 );
                 property_row(
                     ui,
-                    "Source plan",
-                    &format!(
-                        "{} · revision {}",
-                        package.plan.source_plan_id,
-                        package.plan.source_revision.get()
-                    ),
+                    "Source revision",
+                    &package.plan.source_revision.get().to_string(),
                 );
                 property_row(
                     ui,

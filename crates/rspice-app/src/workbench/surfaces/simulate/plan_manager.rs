@@ -49,16 +49,15 @@ use crate::workbench::state::SimulationPlanScope;
 const PLAN_DIALOG_TITLE: &str = "Simulation plans";
 const PLAN_DIALOG_PRIMARY: &str = "Open selected plan";
 
-/// What this dialog is for, in one sentence with one owner.
+/// The dialog's accessible description, and nothing painted.
 ///
-/// It is painted as the surface's purpose line and published as the dialog's
-/// accessible description, from here. Two copies of a purpose sentence is how a
-/// surface comes to tell a reader one thing and a screen reader another.
-///
-/// The authored sentence also says "govern". RSpice has no governance state on
-/// a plan — no approval, no waiver, no release — so that verb is the one word of
-/// it not ported.
-const PLAN_DIALOG_DESCRIPTION: &str = "Create, select, compare, import, export, and retire simulation plans without copying immutable results or obscuring their exact source plan revision.";
+/// It used to open the surface as an ⓘ strip too, in a longer form that
+/// explained what the dialog does not copy and does not obscure — a lecture
+/// over a table and a toolbar that already say what they are. A reader
+/// arriving by keyboard still needs the dialog named, so the sentence stays
+/// here and the strip is gone.
+const PLAN_DIALOG_DESCRIPTION: &str =
+    "Create, select, compare, import, export, and retire simulation plans.";
 
 /// The records table, left to right.
 ///
@@ -87,14 +86,13 @@ const PLAN_DIALOG_DESCRIPTION: &str = "Create, select, compare, import, export, 
 /// not fit.
 ///
 /// The elastic floor is the one width in the set that is not measured to
-/// anything: the identity cell holds a plan's name over its stable identity,
-/// neither of which has a longest form, so both are elided to the cell at every
-/// width the dialog is ever laid out at. It also costs nothing anywhere but at
-/// the breakpoint itself: this column absorbs the whole of the track's surplus,
-/// so at every width above the floor it is exactly as wide as it was.
+/// anything: a plan's name has no longest form, so it is elided to the cell at
+/// every width the dialog is ever laid out at. It also costs nothing anywhere
+/// but at the breakpoint itself: this column absorbs the whole of the track's
+/// surplus, so at every width above the floor it is exactly as wide as it was.
 const PLAN_COLUMNS: [TableColumn; 6] = [
     TableColumn {
-        heading: "Plan / identity",
+        heading: "Plan",
         track: ColumnTrack::Elastic(110.0),
     },
     TableColumn {
@@ -339,8 +337,8 @@ fn matches_plan_filter(record: &PlanCatalogRecord, query: &str) -> bool {
         .any(|field| field.to_ascii_lowercase().contains(query))
 }
 
-/// The manager's body: a purpose line, a toolbar spanning the whole dialog, and
-/// a records column beside a selected-plan aside.
+/// The manager's body: a toolbar spanning the whole dialog, and a records
+/// column beside a selected-plan aside.
 ///
 /// The split's breakpoint is the table's own minimum width rather than a number
 /// authored here, so the records column is never handed a track its columns
@@ -352,7 +350,6 @@ fn plan_manager_body(
     records: &[PlanCatalogRecord],
     action: &mut Option<PlanManagerAction>,
 ) {
-    purpose_line(ui, PLAN_DIALOG_DESCRIPTION);
     plan_manager_toolbar(ui, draft, records, action);
     let query = draft.filter.trim().to_ascii_lowercase();
     let visible = records
@@ -549,7 +546,7 @@ fn plan_manager_records_column(
             let record = &visible[row];
             let t = Tokens::get(ui.ctx());
             match column {
-                0 => kit::cell_identity(ui, &record.name, &record.id.to_string()),
+                0 => kit::cell_name(ui, &record.name),
                 1 => kit::lifecycle_chip(ui, record.lifecycle_label()),
                 2 => kit::cell_value(ui, &record.revision.to_string(), t.color.text),
                 // A run set that does not validate has no count to state; the
@@ -582,13 +579,13 @@ fn plan_manager_records_column(
 ///
 /// The row is the interactive unit, so its node has to carry the whole row.
 /// Separately announced numbers with no plan attached to them are not readable
-/// in sequence, and the identity a cell paints is elided to its column
-/// while this states it in full.
+/// in sequence. It announces exactly what is painted: the stable identity left
+/// the name cell, so it left this too rather than reading a UUID aloud on
+/// every row of the catalog.
 fn announced_plan_row(record: &PlanCatalogRecord) -> String {
     format!(
-        "{} · {} · {} · revision {} · {} of {} analyses enabled · run set {} · {} model binding{} · {} result reference{}",
+        "{} · {} · revision {} · {} of {} analyses enabled · run set {} · {} model binding{} · {} result reference{}",
         record.name,
-        record.id,
         record.lifecycle_label(),
         record.revision,
         record.enabled,
