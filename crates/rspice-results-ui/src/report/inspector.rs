@@ -86,7 +86,7 @@ pub fn show(
                             );
                             changed |= inspector_switch_row(
                                 ui,
-                                "Canonical JSON",
+                                "JSON data",
                                 &mut output_formats.canonical_json,
                                 writable && (!canonical_json_enabled || enabled_count > 1),
                                 writable && canonical_json_enabled && enabled_count == 1,
@@ -94,7 +94,7 @@ pub fn show(
                             );
                             changed |= inspector_switch_row(
                                 ui,
-                                "Selected CSV",
+                                "CSV tables",
                                 &mut output_formats.selected_csv,
                                 writable && (!selected_csv_enabled || enabled_count > 1),
                                 writable && selected_csv_enabled && enabled_count == 1,
