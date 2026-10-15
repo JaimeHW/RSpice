@@ -79,7 +79,14 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     border_strong: Color32::from_rgb(68, 76, 80),
     text: Color32::from_rgb(215, 219, 222),
     text_dim: Color32::from_rgb(147, 153, 158),
-    text_faint: Color32::from_rgb(0x96, 0x9d, 0xa2),
+    // One step below `text_dim` against a dark ground, which the mockup's
+    // own token (0x96, 0x9d, 0xa2) is not: at (150, 157, 162) the tertiary
+    // tone carried *more* contrast than the secondary one, so a unit caption
+    // outshone the value it annotated and a placeholder read as a declared
+    // value. Same hue, 21% less contrast than `text_dim` on every ground the
+    // palette paints on. `text_tones_descend_against_every_ground` holds the
+    // ladder.
+    text_faint: Color32::from_rgb(126, 133, 138),
     accent: Color32::from_rgb(242, 184, 36),
     accent_ink: Color32::from_rgb(23, 24, 26),
     accent_dim: Color32::from_rgba_premultiplied(27, 20, 4, 28),
@@ -161,10 +168,6 @@ mod tests {
             INSTRUMENT_DARK.bg_panel_2,
             Color32::from_rgb(0x20, 0x28, 0x2d)
         );
-        assert_eq!(
-            INSTRUMENT_DARK.text_faint,
-            Color32::from_rgb(0x96, 0x9d, 0xa2)
-        );
         assert_eq!(INSTRUMENT_DARK.err, Color32::from_rgb(0xef, 0x80, 0x6f));
         assert_eq!(INSTRUMENT_DARK.info, Color32::from_rgb(0x7c, 0xb8, 0xe8));
         assert_eq!(INSTRUMENT_DARK.accent_dim.a(), 28);
@@ -178,5 +181,75 @@ mod tests {
         );
         assert_eq!(INSTRUMENT_LIGHT.info, Color32::from_rgb(0x3d, 0x72, 0xa8));
         assert_eq!(INSTRUMENT_LIGHT.accent_dim.a(), 23);
+    }
+
+    /// sRGB relative luminance (WCAG 2.x).
+    fn relative_luminance(color: Color32) -> f64 {
+        fn linear(channel: u8) -> f64 {
+            let channel = f64::from(channel) / 255.0;
+            if channel <= 0.040_45 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+    }
+
+    /// How far an ink stands off the ground it is painted on, as the WCAG
+    /// contrast ratio. Channel values cannot answer this: on a dark ground a
+    /// brighter grey stands further off, on a light ground it stands closer,
+    /// which is exactly how the dark tertiary tone came to be brighter than
+    /// the secondary one and nobody noticed.
+    fn contrast(ink: Color32, ground: Color32) -> f64 {
+        let (ink, ground) = (relative_luminance(ink), relative_luminance(ground));
+        let (brighter, darker) = if ink > ground {
+            (ink, ground)
+        } else {
+            (ground, ink)
+        };
+        (brighter + 0.05) / (darker + 0.05)
+    }
+
+    /// Primary, secondary, tertiary: each tone must stand off its ground less
+    /// than the one above it, in both palettes and on every surface the
+    /// palette paints text on.
+    ///
+    /// A tertiary tone is a third step or it is noise, so it must also give
+    /// up a real share of the secondary tone's contrast — and still be
+    /// readable, since a ladder nobody can read at the bottom is a worse
+    /// defect than the inversion it replaced.
+    #[test]
+    fn text_tones_descend_against_every_ground() {
+        for (mode, palette) in [("dark", INSTRUMENT_DARK), ("light", INSTRUMENT_LIGHT)] {
+            for (surface, ground) in [
+                ("bg_app", palette.bg_app),
+                ("bg_panel", palette.bg_panel),
+                ("bg_panel_2", palette.bg_panel_2),
+                ("bg_inset", palette.bg_inset),
+                ("bg_elevated", palette.bg_elevated),
+            ] {
+                let text = contrast(palette.text, ground);
+                let dim = contrast(palette.text_dim, ground);
+                let faint = contrast(palette.text_faint, ground);
+                assert!(
+                    dim < text,
+                    "{mode} text_dim ({dim:.2}:1) must be fainter than text ({text:.2}:1) on {surface}"
+                );
+                assert!(
+                    faint < dim,
+                    "{mode} text_faint ({faint:.2}:1) must be fainter than text_dim ({dim:.2}:1) on {surface}"
+                );
+                assert!(
+                    faint <= 0.90 * dim,
+                    "{mode} text_faint ({faint:.2}:1) is not a step below text_dim ({dim:.2}:1) on {surface}, only {:.0}% of it",
+                    100.0 * faint / dim
+                );
+                assert!(
+                    faint >= 3.5,
+                    "{mode} text_faint is unreadable on {surface} at {faint:.2}:1"
+                );
+            }
+        }
     }
 }
