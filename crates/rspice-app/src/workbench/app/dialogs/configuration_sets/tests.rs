@@ -164,6 +164,105 @@ fn configuration_page_handoff_keeps_immediate_name_input() {
     }
 }
 
+/// Escape on the new-configuration page returns to the manager, and the
+/// manager's opening input is its filter: what the reader types next belongs
+/// in the filter, not in the field the cancelled draft was carrying.
+#[test]
+fn cancelling_a_configuration_draft_returns_the_opening_input_to_the_filter() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
+    let (mut app, _) = valid_configuration_app();
+    open_configuration_sets_dialog(&mut app.state);
+    let catalog = app.state.workspace.content.configuration_sets.clone();
+    let render = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| app.render_frame_dialogs(ui),
+        )
+    };
+    let select_all = egui::Event::Key {
+        key: egui::Key::A,
+        physical_key: Some(egui::Key::A),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+    };
+    let _ = render(&mut app, Vec::new());
+    let output = render(&mut app, Vec::new());
+    let tree = output.platform_output.accesskit_update.unwrap();
+    let bounds = tree
+        .nodes
+        .iter()
+        .find(|(_, node)| {
+            node.role() == egui::accesskit::Role::Button
+                && node.label() == Some("New configuration")
+        })
+        .expect("the manager offers a new configuration")
+        .1
+        .bounds()
+        .unwrap();
+    let pos = egui::pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    let pointer = |pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = render(
+        &mut app,
+        vec![egui::Event::PointerMoved(pos), pointer(true)],
+    );
+    let _ = render(
+        &mut app,
+        vec![
+            pointer(false),
+            select_all.clone(),
+            egui::Event::Paste("Abandoned draft".to_owned()),
+        ],
+    );
+    assert_eq!(
+        app.state.dialogs.configuration_sets.new_name, "Abandoned draft",
+        "the new page takes the opening input"
+    );
+    let _ = render(
+        &mut app,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: Some(egui::Key::Escape),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    assert_eq!(
+        app.state.dialogs.configuration_sets.page,
+        ConfigurationDialogPage::Manager,
+        "Escape leaves the draft page"
+    );
+    let _ = render(
+        &mut app,
+        vec![select_all, egui::Event::Paste("Returned filter".to_owned())],
+    );
+    assert_eq!(
+        app.state.dialogs.configuration_sets.query, "Returned filter",
+        "the manager's filter takes the opening input after a cancelled draft"
+    );
+    assert!(app.state.dialogs.configuration_sets.open);
+    assert_eq!(app.state.workspace.content.configuration_sets, catalog);
+}
+
 fn opening_configuration_text(page: ConfigurationDialogPage) {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
