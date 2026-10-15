@@ -743,6 +743,46 @@ mod tests {
         }
     }
 
+    /// Nothing in the correlation workspace paints a status in colour.
+    ///
+    /// The slice's own guard. Colour here belongs to the comparison plot's
+    /// two series and to the active rail entry; a warning or a failure
+    /// anywhere else is a `Problem` mark in front of neutral words, and
+    /// success has no styling at all. The dot that used to lead a state line
+    /// is banned as the literal it was painted from, so the comments that
+    /// record why it went still read.
+    #[test]
+    fn no_correlation_file_paints_a_status_in_colour() {
+        const BANNED: [&str; 8] = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+            "color.ok",
+            "color.info",
+            "Tone::Good",
+            "\"●\"",
+        ];
+        // Each entry is one shipped file of this slice, read back as it ships.
+        const SLICE: [(&str, &str); 3] = [
+            (
+                "model_correlation.rs",
+                include_str!("../model_correlation.rs"),
+            ),
+            ("model_correlation/sections.rs", include_str!("sections.rs")),
+            ("model_correlation/dialogs.rs", include_str!("dialogs.rs")),
+        ];
+        for (name, source) in SLICE {
+            let production = crate::source_guard::production_source(source);
+            for banned in BANNED {
+                assert!(
+                    !production.contains(banned),
+                    "{name} still paints a status with {banned:?}"
+                );
+            }
+        }
+    }
+
     fn empty_projection() -> CorrelationProjection {
         CorrelationProjection {
             model: Some("dut".to_owned()),

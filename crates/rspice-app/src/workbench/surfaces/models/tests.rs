@@ -837,8 +837,12 @@ fn no_slice_file_paints_a_status_in_colour() {
         ".color(t.color.info",
     ];
     // Each entry is one shipped file of this slice, read back as it ships.
-    const SLICE: [(&str, &str); 14] = [
+    const SLICE: [(&str, &str); 17] = [
         ("models/manager.rs", include_str!("../models/manager.rs")),
+        (
+            "models/manager/adoption.rs",
+            include_str!("../models/manager/adoption.rs"),
+        ),
         (
             "models/manager/bindings.rs",
             include_str!("../models/manager/bindings.rs"),
@@ -860,8 +864,16 @@ fn no_slice_file_paints_a_status_in_colour() {
             include_str!("../models/manager/detail.rs"),
         ),
         (
+            "models/manager/dialogs.rs",
+            include_str!("../models/manager/dialogs.rs"),
+        ),
+        (
             "models/manager/drift.rs",
             include_str!("../models/manager/drift.rs"),
+        ),
+        (
+            "models/manager/hub.rs",
+            include_str!("../models/manager/hub.rs"),
         ),
         (
             "models/manager/held_catalog.rs",
