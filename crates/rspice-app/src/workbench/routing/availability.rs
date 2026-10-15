@@ -85,10 +85,6 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui canonical specialist workspace discovery manager",
             evidence_boundary: "Search, profile filtering, personal favorites and pins, device-local recents, canonical metadata inspection, and route availability disclosure are executable. Discoverability never implies that the selected engineering surface, engine, connector, entitlement, platform, or sign-off path is available.",
         },
-        SurfaceId::VisualizationStudio => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui persistent Visualization Studio result-document executor",
-            evidence_boundary: "Versioned pane composition, native waveform/Bode/spectrum/Smith/table/histogram/eye/pole-zero viewers, exact source-row inspection, cursor/marker/annotation entities, retained-run overlays, display LOD policy, and CSV/Touchstone/PNG export are executable. Catalog viewers without a compatible native renderer or qualified external producer remain explicitly unavailable and never receive fabricated fallback data.",
-        },
         SurfaceId::ReportAuthoring => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned report and datasheet document composer",
             evidence_boundary: "Versioned project-owned report documents, template-seeded outlines, page creation/reordering/paper settings, typed prose and result blocks, live result references that re-resolve against current project evidence, frozen references that capture deterministic authenticated raster artifacts, publication settings, and hardcopy export are executable. Unresolved, stale, or unbound evidence references are disclosed and fail closed rather than rendering fabricated content. The composer discloses release-handoff readiness and routes to Release Closure; it never freezes, approves, promotes, or signs off a release candidate, and it exposes no external publication or distribution service.",
@@ -191,7 +187,6 @@ mod tests {
                 SurfaceId::Verify,
                 SurfaceId::Models,
                 SurfaceId::Netlist,
-                SurfaceId::VisualizationStudio,
                 SurfaceId::ReportAuthoring,
                 SurfaceId::ModelEditor,
                 SurfaceId::ModelCorrelation,

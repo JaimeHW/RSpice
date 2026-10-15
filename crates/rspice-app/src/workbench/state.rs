@@ -1333,11 +1333,6 @@ pub struct WorkbenchState {
     /// The owned engineering documents remain in their canonical surfaces.
     #[serde(default)]
     pub specialist_tool_browser: SpecialistToolBrowserState,
-    /// Persistent presentation document for Visualization Studio. It stores
-    /// stable viewer composition and annotation identities only; immutable
-    /// result samples remain owned by the result datasets.
-    #[serde(default)]
-    pub visualization_studio: rspice_results_ui::studio::session::VisualizationStudioState,
     /// Runtime-only draft for the project-owned result-document transaction.
     #[serde(skip)]
     pub create_result_document: CreateResultDocumentDialogState,
@@ -1495,7 +1490,6 @@ impl Default for WorkbenchState {
             preflight: PreflightDialogState::default(),
             jobs_manager: JobsManagerState::default(),
             specialist_tool_browser: SpecialistToolBrowserState::default(),
-            visualization_studio: rspice_results_ui::studio::session::VisualizationStudioState::default(),
             create_result_document: CreateResultDocumentDialogState::default(),
             result_document_dialog: None,
             result_import: ResultImportDialogState::default(),
@@ -1742,116 +1736,6 @@ impl WorkbenchState {
             );
         }
         self.specialist_tool_browser.normalize();
-        self.normalize_visualization_studio();
-    }
-
-    /// Repair presentation-only Visualization Studio state restored from a
-    /// prior or malformed session. Stable pane order is preserved; duplicate
-    /// or zero identities are reassigned instead of silently dropping a
-    /// configured viewer or annotation.
-    fn normalize_visualization_studio(&mut self) {
-        let studio = &mut self.visualization_studio;
-        studio.zoom = if studio.zoom.is_finite() {
-            studio.zoom.clamp(0.25, 8.0)
-        } else {
-            1.0
-        };
-        studio.revision = studio.revision.max(1);
-        studio.tile_memory_mib = studio.tile_memory_mib.clamp(64, 16_384);
-        studio.significant_digits = studio.significant_digits.clamp(3, 17);
-
-        if crate::results::viewer_catalog::viewer_document(&studio.selected_viewer_document)
-            .is_none()
-        {
-            studio.selected_viewer_document = "viewer-waveform".to_owned();
-        }
-
-        let greatest_restored_identity = studio
-            .panes
-            .iter()
-            .map(|pane| pane.id)
-            .chain(studio.annotations.iter().map(|annotation| annotation.id))
-            .chain(studio.markers.iter().map(|marker| marker.id))
-            .max()
-            .unwrap_or_default();
-        let mut next_identity = studio
-            .next_identity
-            .max(greatest_restored_identity.saturating_add(1))
-            .max(1);
-        let mut used = HashSet::new();
-
-        studio.panes.retain_mut(|pane| {
-            let Some(canonical_document_id) = pane.viewer.viewer_document_id() else {
-                // Dataset-native projections (currently Manifest) are owned
-                // by the Results frame and can never become Visualization
-                // Studio panes. Reject malformed/restored presentation state
-                // instead of assigning it a misleading viewer document.
-                return false;
-            };
-            if pane.viewer_document_id != canonical_document_id {
-                pane.viewer_document_id = canonical_document_id.to_owned();
-            }
-            if pane.id != 0 && used.insert(pane.id) {
-                return true;
-            }
-            let Some(replacement) = allocate_restored_identity(&used, &mut next_identity) else {
-                return false;
-            };
-            pane.id = replacement;
-            used.insert(replacement);
-            true
-        });
-
-        studio.annotations.retain_mut(|annotation| {
-            if !annotation.x.is_finite() {
-                return false;
-            }
-            if annotation.id != 0 && used.insert(annotation.id) {
-                return true;
-            }
-            let Some(replacement) = allocate_restored_identity(&used, &mut next_identity) else {
-                return false;
-            };
-            annotation.id = replacement;
-            used.insert(replacement);
-            true
-        });
-
-        studio.markers.retain_mut(|marker| {
-            if !marker.x.is_finite() || !marker.y.is_finite() {
-                return false;
-            }
-            if marker.id != 0 && used.insert(marker.id) {
-                return true;
-            }
-            let Some(replacement) = allocate_restored_identity(&used, &mut next_identity) else {
-                return false;
-            };
-            marker.id = replacement;
-            marker.label = format!("M{replacement}");
-            used.insert(replacement);
-            true
-        });
-
-        if studio
-            .active_pane
-            .is_none_or(|id| !studio.panes.iter().any(|pane| pane.id == id))
-        {
-            studio.active_pane = studio.panes.first().map(|pane| pane.id);
-        }
-        if let Some(active) = studio.active_pane
-            && let Some(pane) = studio.panes.iter().find(|pane| pane.id == active)
-        {
-            studio.selected_viewer_document = pane.viewer_document_id.clone();
-        }
-        studio.next_identity = used
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or_default()
-            .saturating_add(1)
-            .max(next_identity)
-            .max(1);
     }
 
     pub fn record_route_diagnostic(&mut self, diagnostic: impl Into<String>) {
@@ -2230,15 +2114,6 @@ impl WorkbenchState {
         self.close_drawer();
         self.capture_workspace_layout(self.workspace);
     }
-}
-
-fn allocate_restored_identity(used: &HashSet<u64>, next_identity: &mut u64) -> Option<u64> {
-    while *next_identity == 0 || used.contains(next_identity) {
-        *next_identity = next_identity.checked_add(1)?;
-    }
-    let allocated = *next_identity;
-    *next_identity = next_identity.saturating_add(1);
-    Some(allocated)
 }
 
 #[cfg(test)]

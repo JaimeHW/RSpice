@@ -39,11 +39,12 @@ mod current_impulses;
 #[cfg(test)]
 pub(crate) use current_impulses::current_impulse_history_fixture;
 
+pub use rspice_results::sensitivity::SensitivityStudyRow;
 #[cfg(test)]
-pub use rspice_results::sensitivity::SensitivityBasisEvidence;
 pub use rspice_results::sensitivity::{
-    SensitivityResultMode, SensitivityResultRow, SensitivityStudyEvidence, SensitivityStudyRow,
+    SensitivityBasisEvidence, SensitivityResultMode, SensitivityResultRow, SensitivityStudyEvidence,
 };
+#[cfg(test)]
 pub use rspice_results::simulation_values::ComplexResultValue;
 
 pub use rspice_results::floquet::{
@@ -54,9 +55,8 @@ pub use rspice_results::floquet::{
 pub use rspice_results::floquet::{
     FloquetSpectrumCertificateEvidence, PssFloquetMultiplierEvidence, PstbFloquetModeEvidence,
 };
-pub use rspice_results::pole_zero::PoleZeroRootSetEvidence;
 #[cfg(test)]
-pub use rspice_results::pole_zero::PoleZeroSpectrumCertificate;
+pub use rspice_results::pole_zero::{PoleZeroRootSetEvidence, PoleZeroSpectrumCertificate};
 
 pub use ac_bode::{
     ac_bode_shape_for_analysis, ac_bode_shape_for_selection, ac_bode_summary_for_analysis,

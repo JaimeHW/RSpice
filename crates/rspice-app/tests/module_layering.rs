@@ -628,7 +628,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "docks",
     "menu_bar",
     "surfaces",
-    "documents/visualization_studio",
     "tools/notification_center",
     "tools/project_launcher",
     "tools/specialist_tool_browser",
@@ -667,7 +666,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
 /// not uniformly worse — but the raised ones are real drift, not slack:
 /// `documents/result_document -> app_state` 24 -> 34,
 /// `documents/code_workspace -> browser/file_import` 7 -> 14,
-/// `docks -> documents/visualization_studio` 1 -> 5,
 /// `documents/code_workspace -> app` and `state -> documents/model_editor`
 /// 2 -> 5, `app -> workflows/export_workflow` 14 -> 16, and one each on
 /// `app -> browser/accessibility` and
@@ -760,7 +758,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // and the document engines. This is the same inversion the top-level
     // `state -> *` entries describe, one layer down: `WorkbenchState` stores
     // what a surface is showing instead of the surface deriving it.
-    ("state", "documents/visualization_studio", 7),
     ("state", "routing/availability", 4),
     ("state", "documents/model_correlation", 2),
     ("state", "documents/model_editor", 5),
@@ -801,7 +798,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/code_workspace", "workflows/export_workflow", 1),
     // Presentation reaching sideways into a peer surface.
     ("documents/result_document", "chrome", 1),
-    ("surfaces", "documents/visualization_studio", 1),
     // A route describing its own catalog and availability.
     ("routing/surface_route", "routing/surface_catalog", 1),
 ];
@@ -1488,9 +1484,8 @@ fn budgeted_lines(source: &str) -> usize {
 ///
 /// Worst first, by measurement rather than by ceiling:
 /// `workbench/documents/result_document.rs` 7_352, `workbench/docks/navigator.rs`
-/// 6_427, `workbench/surfaces/pdk_technology_admin.rs` 5_115,
-/// `state/pdk_config/technology_package.rs` 4_742, and
-/// `workbench/documents/visualization_studio.rs` 4_695.
+/// 6_427, `workbench/surfaces/pdk_technology_admin.rs` 5_115, and
+/// `state/pdk_config/technology_package.rs` 4_742.
 ///
 /// Six entries below then sat under their ceiling. Lowering each to its
 /// measured length is free ground to hold — done on 2026-08-28, see below.

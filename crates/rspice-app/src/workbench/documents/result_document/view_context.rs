@@ -368,7 +368,7 @@ fn viewer_can_render(
         // tab strip's own gate: `op_inspector` renders nothing for an
         // analysis that is not a DC operating point, so a transient that
         // retained its bias solution must not be bindable to the OP sheet
-        // from a Studio pane or a persistent document either.
+        // from a persistent document either.
         ResultViewer::Op => {
             analysis.analysis_type == AnalysisType::DcOp
                 && operating_point_evidence_is_renderable(analysis)

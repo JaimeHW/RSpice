@@ -62,7 +62,6 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::RfWorkbench
                     | SurfaceId::HighSigmaWorkbench
                     | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::VisualizationStudio
                     | SurfaceId::DigitalEventWorkbench
                     | SurfaceId::StatisticalVisualizationWorkbench
                     | SurfaceId::ReportAuthoring
@@ -88,7 +87,6 @@ impl SpecialistWorkspaceRow {
                     | SurfaceId::RfApplicationWorkbench
                     | SurfaceId::HighSigmaWorkbench
                     | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::VisualizationStudio
                     | SurfaceId::RfDataDisplayWorkbench
                     | SurfaceId::StatisticalVisualizationWorkbench
                     | SurfaceId::ReportAuthoring
@@ -110,7 +108,6 @@ impl SpecialistWorkspaceRow {
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
                     | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::VisualizationStudio
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::JobDiagnostics
                     | SurfaceId::RegressionOrchestration
@@ -127,7 +124,6 @@ impl SpecialistWorkspaceRow {
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
                     | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::VisualizationStudio
                     | SurfaceId::StatisticalVisualizationWorkbench
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::ModelEditor
@@ -147,7 +143,6 @@ impl SpecialistWorkspaceRow {
                 SurfaceId::ReleaseCockpit
                     | SurfaceId::MultiTestStudio
                     | SurfaceId::DeviceSafetyWorkbench
-                    | SurfaceId::VisualizationStudio
                     | SurfaceId::ReportAuthoring
                     | SurfaceId::ModelEditor
                     | SurfaceId::ModelExtraction
@@ -187,7 +182,7 @@ impl SpecialistWorkspaceRow {
     }
 }
 
-pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
+pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 40] = [
     SpecialistWorkspaceRow {
         surface_id: SurfaceId::ReleaseCockpit,
         owner: Workspace::Verify,
@@ -265,14 +260,6 @@ pub const SPECIALIST_WORKSPACE_ROWS: [SpecialistWorkspaceRow; 41] = [
         owner: Workspace::Verify,
         purpose: "Configure SOA checks, inspect device stress and rule violations, and cross-probe their circuit locations.",
         tier: CanonicalTier::Preview,
-        primary_module_id: "results-verification",
-        module_availability: CommercialModuleAvailability::Included,
-    },
-    SpecialistWorkspaceRow {
-        surface_id: SurfaceId::VisualizationStudio,
-        owner: Workspace::Results,
-        purpose: "Create persistent dataset-bound result documents and structured engineering viewers without mutating samples.",
-        tier: CanonicalTier::ReleaseTarget,
         primary_module_id: "results-verification",
         module_availability: CommercialModuleAvailability::Included,
     },

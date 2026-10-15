@@ -38,4 +38,3 @@ pub(crate) mod result_document;
 pub(crate) mod text_document_model;
 pub(crate) mod text_editor_commands;
 pub(crate) mod virtual_text_editor;
-pub(crate) mod visualization_studio;

@@ -182,10 +182,6 @@ fn every_results_surface_paints_through_this_boundary() {
             "notations.display(name)",
         ),
         (
-            "workbench/documents/visualization_studio/dock/traces.rs",
-            "notations.display(label)",
-        ),
-        (
             "schematic/view/scene.rs",
             "notations.display(&voltage.name)",
         ),

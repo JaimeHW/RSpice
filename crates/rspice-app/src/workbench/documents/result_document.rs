@@ -97,10 +97,6 @@ pub(crate) fn harmonic_balance_analysis_is_renderable(analysis: &AnalysisResult)
     harmonic_balance::analysis_is_renderable(analysis)
 }
 
-pub(crate) fn harmonic_balance_waveform_is_renderable(waveform: &WaveformData) -> bool {
-    harmonic_balance::spectrum_trace_is_renderable(waveform)
-}
-
 pub(crate) fn phase_noise_analysis_is_renderable(analysis: &AnalysisResult) -> bool {
     phase_noise::phase_noise_is_renderable(analysis)
 }
@@ -153,10 +149,6 @@ pub(crate) fn selected_noise_analysis_index(
             run.analyses.iter().position(qpnoise_spectrum_is_renderable)
         }
     })
-}
-
-pub(crate) fn phase_noise_waveform_is_renderable(waveform: &WaveformData) -> bool {
-    phase_noise::phase_noise_waveform_is_renderable(waveform)
 }
 
 /// Whether the tab strip offers a frequency-response sheet for one analysis.
@@ -237,6 +229,7 @@ pub(crate) use document_edit::{
     open_family, open_measurement, open_properties, set_family_filter, toggle_linked_cursors,
 };
 
+#[cfg(test)]
 pub(crate) fn visualization_source_dataset(
     run: &crate::state::SimulationRun,
     analysis: &crate::state::AnalysisResult,
@@ -1801,10 +1794,7 @@ fn readout_strip_height(state: &mut AppState) -> f32 {
 /// analysis turned out to be — one waveform renderer serves transient and DC
 /// sweeps, one spectrum renderer serves FFT and harmonic balance, one AC
 /// renderer serves Bode and ordinary noise. Which of the pair to draw is one
-/// question, so it is answered once: the persistent-document layer and the
-/// Studio each answered it separately and the Studio's copy was missing the
-/// noise rule, so the same pane drew the noise spectrum in a result document
-/// and reported an unsatisfiable Bode contract in the Studio.
+/// question, so it is answered once, here, for every pane that draws.
 pub(crate) fn project_viewer_for_analysis(
     viewer: ResultViewer,
     analysis: &crate::state::AnalysisResult,
@@ -1840,23 +1830,6 @@ pub(crate) fn viewer_unavailability_reason(
 ) -> Option<&'static str> {
     let availability = viewer_availability(state, viewer);
     (!availability.available).then_some(availability.reason)
-}
-
-/// Render only the canonical result viewer well. Visualization Studio owns
-/// its document toolbar, library, exact-data dock, and entity inspector, so
-/// embedding the same retained renderer must not duplicate the quick-view
-/// docbar or create a second result document.
-pub(crate) fn show_embedded_with_sample_selection(
-    ui: &mut Ui,
-    app: &mut RSpiceApp,
-    selection: Option<SourceSampleSelection>,
-) {
-    // The Studio stage is a quick-style surface too: it embeds the renderer
-    // against the global projection, never against a retained document pane.
-    app.state.ui.results.session.leave_persistent_document();
-    app.state.ui.results.set_sample_selection(selection);
-    prepare_viewer_state(app);
-    show_viewer_well(ui, app, ResultChrome::Full);
 }
 
 /// Render one already-resolved persistent pane through an exact existing
@@ -1982,30 +1955,6 @@ pub(crate) fn active_axis_range(
             PaneAxis::Y => facts.y_extent,
         };
     }
-    let drawn = state.ui.results.session.drawn_axes.get(&viewer).copied();
-    let pinned = state.ui.results.session.plot_view(viewer, 0);
-    match axis {
-        PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
-        PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
-    }
-}
-
-/// Resolve the interval currently consumed by the active renderer.
-///
-/// Callers outside the result-document drawing code must use this adapter
-/// rather than reading the legacy ordinal plot store. The waveform stack is
-/// keyed by stable analysis and unit-pane identity, while single-canvas
-/// viewers remain keyed by their global plot slot.
-pub(crate) fn active_renderer_axis_range(
-    ctx: &egui::Context,
-    state: &mut AppState,
-    axis: PaneAxis,
-) -> Option<(f64, f64)> {
-    if viewer_uses_wave_stack(state.ui.results.session.viewer) {
-        let facts = active_pane_facts(&Tokens::get(ctx), state);
-        return active_axis_range(state, &facts, axis);
-    }
-    let viewer = state.ui.results.session.viewer;
     let drawn = state.ui.results.session.drawn_axes.get(&viewer).copied();
     let pinned = state.ui.results.session.plot_view(viewer, 0);
     match axis {

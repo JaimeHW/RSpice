@@ -1,7 +1,7 @@
 //! Canonical specialist-workspace discovery manager.
 //!
 //! The mockup makes every specialist owner searchable without duplicating
-//! documents. This implementation projects the governed 41-workspace catalog,
+//! documents. This implementation projects the governed 40-workspace catalog,
 //! personal pins/favorites, device-local recents, and the fail-closed runtime
 //! availability registry. A card can only navigate when its exact surface has
 //! a registered executor; catalog metadata never turns a design into a feature.
@@ -1102,10 +1102,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_query_projects_all_41_governed_specialist_owners() {
+    fn empty_query_projects_all_40_governed_specialist_owners() {
         let browser = SpecialistToolBrowserState::default();
         let rows = visible_rows(&browser, EngineeringProfile::AnalogIc);
-        assert_eq!(rows.len(), 41);
+        assert_eq!(rows.len(), 40);
         assert_eq!(
             rows[0].surface_id.archetype().as_str(),
             "specialist-workspace"
@@ -1188,7 +1188,7 @@ mod tests {
             "adaptive authoring · focused steps"
         );
         assert_eq!(
-            phone_mode(SurfaceId::VisualizationStudio),
+            phone_mode(SurfaceId::DeviceSafetyWorkbench),
             "full compact task · author · review · monitor"
         );
     }

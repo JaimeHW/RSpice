@@ -137,37 +137,40 @@ pub(crate) use simulation::RunHistoryRevision;
 #[cfg(test)]
 pub use simulation::SensitivityBasisEvidence;
 #[cfg(test)]
+pub use simulation::SensitivityStudyEvidence;
+pub use simulation::SensitivityStudyRow;
+#[cfg(test)]
 pub use simulation::TransientConvergenceEvidence;
 #[cfg(test)]
 pub(crate) use simulation::current_impulse_history_fixture;
 pub use simulation::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisResultProvenance,
-    AnalysisResultSourceDomain, AnalysisType, ComplexResultValue, ConvergenceAttribution,
-    CrossProbeIndex, DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalBusEvidence,
+    AnalysisResultSourceDomain, AnalysisType, ConvergenceAttribution, CrossProbeIndex,
+    DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES, DcOpResult, DigitalBusEvidence,
     DigitalBusSourceEvidence, DigitalEventPointEvidence, DigitalEventTraceEvidence, EvidenceDomain,
     ExecutedDeck, ExecutedDeckArchive, ExecutedDeckPoint, ExecutionTarget, FamilyMemberId,
     FloquetOrbitKindEvidence, FloquetSpectrumEvidence, FloquetStabilityVerdictEvidence,
     MonteCarloVariableMetadata, OccurrenceProbeSpelling, OperatingPointAnnotationEvidence,
-    OperatingPointValue, PoleZeroRootSetEvidence, PreparedRunReceipt, PreparedSpecification,
+    OperatingPointValue, PreparedRunReceipt, PreparedSpecification,
     PstbStabilityClassificationEvidence, RealEventPointEvidence, RealEventTraceEvidence,
     ResultImportFormat, ResultImportSource, RetainedSimulationState, RunHistory, RunRetention,
-    SavedOutputMaterializationStatus, SensitivityResultMode, SensitivityResultRow,
-    SharedWaveformValues, SignOffStanding, SimulationCampaignMembership, SimulationExecutionState,
-    SimulationRun, SimulationRunIntent, SimulationRunLifecycle, SimulationRunProvenance,
-    SimulationSourceState, SimulationState, SimulationViewState, SoaEvaluationEvidence,
-    SoaParameterEvidence, SoaRuleVerdictEvidence, SpecificationVerdictStatus, WaveformData,
-    absent_deck_reason, ac_bode_shape_for_analysis, ac_bode_shape_for_selection,
-    ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
+    SavedOutputMaterializationStatus, SharedWaveformValues, SignOffStanding,
+    SimulationCampaignMembership, SimulationExecutionState, SimulationRun, SimulationRunIntent,
+    SimulationRunLifecycle, SimulationRunProvenance, SimulationSourceState, SimulationState,
+    SimulationViewState, SoaEvaluationEvidence, SoaParameterEvidence, SoaRuleVerdictEvidence,
+    SpecificationVerdictStatus, WaveformData, absent_deck_reason, ac_bode_shape_for_analysis,
+    ac_bode_shape_for_selection, ac_bode_summary_for_analysis, ac_bode_summary_for_selection,
 };
 #[cfg(test)]
 pub use simulation::{
-    AnalysisResultPvtPoint, FamilyMeasurementEvidence, FamilyMemberMeasurements, HierarchyMapRow,
-    NoiseContributorRow, OperatingPointDeviceDetailEvidence, PeriodicNoiseConversionEvidence,
+    AnalysisResultPvtPoint, ComplexResultValue, FamilyMeasurementEvidence,
+    FamilyMemberMeasurements, HierarchyMapRow, NoiseContributorRow,
+    OperatingPointDeviceDetailEvidence, PeriodicNoiseConversionEvidence, PoleZeroRootSetEvidence,
     PoleZeroSpectrumCertificate, PreparedModelSourceIdentity, PreparedRunReceiptInput,
     PreparedRunTaskReceipt, PreparedSourceCheckReceipt, PreparedSpecificationPolicy,
-    SavedOutputReceipt, SoaSourceHistory, SoaSourceWaveform, TransferFunctionAccuracyEvidence,
-    TransferFunctionNormalizationEvidence, TransferFunctionQuantityEvidence,
-    TransferFunctionScalarEvidence,
+    SavedOutputReceipt, SensitivityResultMode, SensitivityResultRow, SoaSourceHistory,
+    SoaSourceWaveform, TransferFunctionAccuracyEvidence, TransferFunctionNormalizationEvidence,
+    TransferFunctionQuantityEvidence, TransferFunctionScalarEvidence,
 };
 pub use simulation::{ConvergenceReport, PeriodicInitializationMethod};
 #[cfg(test)]
@@ -187,7 +190,6 @@ pub use simulation::{
 };
 #[cfg(test)]
 pub use simulation::{SavedOutputAxis, SavedOutputBoundSource, SavedOutputSourceBindings};
-pub use simulation::{SensitivityStudyEvidence, SensitivityStudyRow};
 // Only the two types the persisted model itself names are hoisted here. The
 // rest of the stimulus vocabulary — the definition record, the draft state
 // machine, the adoption verbs — is read through `state::stimulus_library::*`,

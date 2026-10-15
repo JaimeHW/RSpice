@@ -66,10 +66,6 @@ fn publish_source_editor(
 }
 
 fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.workbench.current_route().surface_id() == super::SurfaceId::VisualizationStudio {
-        crate::workbench::documents::visualization_studio::show(ui, app);
-        return;
-    }
     if app.state.workbench.current_route().surface_id() == super::SurfaceId::ReportAuthoring {
         report_authoring::show(ui, app);
         return;

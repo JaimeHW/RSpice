@@ -54,7 +54,7 @@ use crate::results::report_document::{ReportDocument, ReportReferenceInventory};
 use crate::results::visualization_document::{Page, Pane, VisualizationDocument};
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
-    SheetCatalog, SheetId, SimulationRun, SimulationState, ViewType,
+    SheetCatalog, SheetId, SimulationRun, ViewType,
 };
 use crate::workbench::AppState;
 
@@ -70,11 +70,6 @@ use rspice_hardcopy_contract::sources::{
     HardcopyPublicationIdentity, HardcopySourceError, HardcopySourceIdentity, HardcopySourceSet,
     MAX_HARDCOPY_SOURCE_SET_MEMBERS,
 };
-use rspice_results::studio_presentation::VisualizationPane as StudioPane;
-#[cfg(test)]
-use rspice_results::studio_presentation::VisualizationStudioPresentation;
-#[cfg(test)]
-use rspice_results_ui::studio::session::VisualizationStudioState;
 #[cfg(test)]
 use rspice_schematic_editor::symbol_editor::session::SymbolSelection;
 
@@ -102,17 +97,6 @@ pub struct SymbolHardcopySource<'a> {
     pub identity: HardcopySourceIdentity,
     pub document: &'a SymbolDocument,
     pub selection: Option<&'a SymbolSelection>,
-    pub scope: HardcopyScope,
-}
-
-/// Adapter over retained Studio presentation and application result history.
-#[cfg(test)]
-pub(crate) struct ActiveStudioPaneHardcopySource<'a> {
-    pub source_key: String,
-    pub project_id: ProjectId,
-    pub studio: &'a VisualizationStudioPresentation,
-    pub simulation: &'a SimulationState,
-    pub pane_id: u64,
     pub scope: HardcopyScope,
 }
 
@@ -318,30 +302,6 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
                 HardcopyScope::AllSheetsOrPanes,
             ],
             availability: visualization_document_pane_availability(document, pane),
-        });
-    }
-
-    for pane in &state.workbench.visualization_studio.panes {
-        let pane_id = pane.id;
-        let availability = studio_pane_availability(state, pane);
-        let mut allowed_scopes = vec![
-            HardcopyScope::ActivePlotDocument,
-            HardcopyScope::ActiveDocument,
-        ];
-        if state.workbench.visualization_studio.active_pane == Some(pane_id)
-            && state.workbench.visualization_studio.panes.len() > 1
-        {
-            allowed_scopes.push(HardcopyScope::AllSheetsOrPanes);
-        }
-        descriptors.push(RetainedHardcopySourceDescriptor {
-            source_key: format!(
-                "project:{}:visualization-pane:{pane_id}",
-                project_id.as_uuid()
-            ),
-            display_name: format!("{} · {}", pane.page, pane.viewer.label()),
-            document_kind: HardcopyDocumentKind::PlotOrWorksheet,
-            allowed_scopes,
-            availability,
         });
     }
 
@@ -665,42 +625,6 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         }
     }
 
-    if let Some(pane) = state
-        .workbench
-        .visualization_studio
-        .panes
-        .iter()
-        .find(|pane| {
-            format!(
-                "project:{}:visualization-pane:{}",
-                project_id.as_uuid(),
-                pane.id
-            ) == source_key
-        })
-    {
-        let all_panes = matches!(scope, HardcopyScope::AllSheetsOrPanes);
-        let mut studio = state.workbench.visualization_studio.presentation.clone();
-        let relevant_panes = if all_panes {
-            studio.panes.clone()
-        } else {
-            studio.panes.retain(|candidate| candidate.id == pane.id);
-            studio.active_pane = Some(pane.id);
-            studio.panes.clone()
-        };
-        let runs = prepared_runs_for_panes(&state.simulation, &relevant_panes);
-        return PreparedRetainedHardcopyResolution::try_capture(
-            RetainedHardcopySourceInput::Studio {
-                source_key: source_key.to_owned(),
-                project_id,
-                studio,
-                runs,
-                pane_id: pane.id,
-                all_panes,
-                scope,
-            },
-        );
-    }
-
     if let Some(document_id) = state.workbench.report_authoring.selected_document {
         let report_key = format!("project:{}:report:{}", project_id.as_uuid(), document_id);
         if source_key == report_key {
@@ -775,30 +699,6 @@ fn capture_hardcopy_run(run: SimulationRun) -> HardcopyRun {
     })
 }
 
-fn prepared_runs_for_panes(simulation: &SimulationState, panes: &[StudioPane]) -> Vec<HardcopyRun> {
-    let dataset_ids = panes
-        .iter()
-        .map(|pane| pane.dataset_id)
-        .collect::<std::collections::HashSet<_>>();
-    let analysis_ids = panes
-        .iter()
-        .map(|pane| (pane.dataset_id, pane.analysis_sequence))
-        .collect::<std::collections::HashSet<_>>();
-    simulation
-        .retained
-        .runs
-        .iter()
-        .filter(|run| dataset_ids.contains(&run.dataset_id))
-        .cloned()
-        .map(|mut run| {
-            run.data
-                .analyses
-                .retain(|analysis| analysis_ids.contains(&(run.data.dataset_id, analysis.id)));
-            capture_hardcopy_run(run)
-        })
-        .collect()
-}
-
 /// Per-frame command predicate. This deliberately performs identity and
 /// evidence-shape checks only; full digesting and semantic resolution occur
 /// when the dialog opens or commits.
@@ -830,31 +730,6 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
             }
             _ => false,
         },
-        SurfaceId::VisualizationStudio => {
-            if let Some(WorkspaceDocumentId::VisualizationDocument(document_id)) =
-                state.workbench.documents.active(Workspace::Results)
-            {
-                active_visualization_document_pane(state, *document_id).is_some_and(
-                    |(document, _, pane)| {
-                        visualization_document_pane_availability(document, pane).is_available()
-                    },
-                )
-            } else {
-                state
-                    .workbench
-                    .visualization_studio
-                    .active_pane
-                    .and_then(|pane_id| {
-                        state
-                            .workbench
-                            .visualization_studio
-                            .panes
-                            .iter()
-                            .find(|pane| pane.id == pane_id)
-                    })
-                    .is_some_and(|pane| studio_pane_availability(state, pane).is_available())
-            }
-        }
         SurfaceId::ReportAuthoring => state
             .workbench
             .report_authoring
@@ -1203,72 +1078,6 @@ fn quick_result_analysis_index(
     }
 }
 
-fn studio_pane_availability(
-    state: &AppState,
-    pane: &StudioPane,
-) -> RetainedHardcopySourceAvailability {
-    let unavailable = |reason: String| RetainedHardcopySourceAvailability::Unavailable { reason };
-    let Some(run) = state.simulation.retained.run_by_dataset_id(pane.dataset_id) else {
-        return unavailable(format!("dataset {} is not retained", pane.dataset_id));
-    };
-    if !run.lifecycle.is_terminal() {
-        return unavailable(format!("dataset {} is not terminal", pane.dataset_id));
-    }
-    let Some(analysis) = run
-        .analyses
-        .iter()
-        .find(|analysis| analysis.id == pane.analysis_sequence)
-    else {
-        return unavailable(format!(
-            "analysis {} is not retained in dataset {}",
-            pane.analysis_sequence, pane.dataset_id
-        ));
-    };
-    if !analysis.success {
-        return unavailable(format!(
-            "analysis {} is unsuccessful",
-            pane.analysis_sequence
-        ));
-    }
-    if is_curve_viewer(pane.viewer) && !studio_curve_viewer_is_supported(pane.viewer) {
-        return unavailable(format!(
-            "{} has no faithful semantic Studio figure writer",
-            pane.viewer.label()
-        ));
-    }
-    let specialist_evidence_available = match pane.viewer {
-        ResultViewer::HarmonicBalance => {
-            crate::workbench::documents::result_document::harmonic_balance_analysis_is_renderable(
-                analysis,
-            ) && analysis.waveforms.iter().any(|waveform| {
-                waveform.visible
-                    && crate::workbench::documents::result_document::harmonic_balance_waveform_is_renderable(
-                        waveform,
-                    )
-            })
-        }
-        ResultViewer::PhaseNoise => {
-            crate::workbench::documents::result_document::phase_noise_analysis_is_renderable(
-                analysis,
-            ) && analysis.waveforms.iter().any(|waveform| {
-                waveform.visible
-                    && crate::workbench::documents::result_document::phase_noise_waveform_is_renderable(
-                        waveform,
-                    )
-            })
-        }
-        _ => true,
-    };
-    if !specialist_evidence_available {
-        return unavailable(format!(
-            "analysis {} does not retain visible exact evidence for {}",
-            pane.analysis_sequence,
-            pane.viewer.label()
-        ));
-    }
-    RetainedHardcopySourceAvailability::Available
-}
-
 fn active_visualization_document_pane(
     state: &AppState,
     document_id: crate::product::ResultDocumentId,
@@ -1457,34 +1266,6 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                 "results registry points at {other:?}"
             ))),
         },
-        SurfaceId::VisualizationStudio => {
-            let pane_id = state.workbench.visualization_studio.active_pane.ok_or(
-                HardcopySourceError::NoActiveDocumentAuthority("visualization pane"),
-            )?;
-            let pane = state
-                .workbench
-                .visualization_studio
-                .panes
-                .iter()
-                .find(|pane| pane.id == pane_id)
-                .ok_or_else(|| {
-                    HardcopySourceError::StaleActiveDocumentAuthority(format!(
-                        "visualization pane {pane_id} is not retained"
-                    ))
-                })?;
-            require_active_result_document(state, pane.dataset_id)?;
-            resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
-                source_key: format!(
-                    "project:{}:visualization-pane:{pane_id}",
-                    project_id.as_uuid()
-                ),
-                project_id,
-                studio: &state.workbench.visualization_studio,
-                simulation: &state.simulation,
-                pane_id,
-                scope: HardcopyScope::ActivePlotDocument,
-            })
-        }
         SurfaceId::ReportAuthoring => {
             let document_id = state.workbench.report_authoring.selected_document.ok_or(
                 HardcopySourceError::NoActiveDocumentAuthority("report document"),

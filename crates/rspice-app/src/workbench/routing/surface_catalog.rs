@@ -135,7 +135,7 @@ macro_rules! define_surface_catalog {
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
             #[cfg(test)]
-            pub const ALL: [Self; 64] = [$(Self::$variant),+];
+            pub const ALL: [Self; 63] = [$(Self::$variant),+];
 
             #[must_use]
             pub const fn metadata(self) -> SurfaceMetadata {
@@ -215,7 +215,6 @@ macro_rules! define_surface_catalog {
             #[must_use]
             pub const fn owner_workspace(self) -> Option<Workspace> {
                 match self {
-                    Self::VisualizationStudio => Some(Workspace::Results),
                     Self::DesignManagement => Some(Workspace::Design),
                     Self::ModelEditor
                     | Self::ModelCorrelation
@@ -271,7 +270,6 @@ define_surface_catalog! {
     EmWorkbench => { id: "em-workbench", label: "EM, IR and electrothermal", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=em-workbench" },
     SiPiWorkbench => { id: "si-pi-workbench", label: "SI, PI and SerDes", archetype: SpecialistWorkspace, tier: QualifiedExternalFirst, status: ExternalFirst, deep_link: "?surface=si-pi-workbench" },
     DeviceSafetyWorkbench => { id: "device-safety-workbench", label: "Safe operating area", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=device-safety-workbench" },
-    VisualizationStudio => { id: "visualization-studio", label: "Visualization Studio", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=visualization-studio" },
     DigitalEventWorkbench => { id: "digital-event-workbench", label: "Digital & AMS event viewer", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=digital-event-workbench" },
     RfDataDisplayWorkbench => { id: "rf-data-display-workbench", label: "RF data display worksheet", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: Preview, deep_link: "?surface=rf-data-display-workbench" },
     MeasurementInterchangeWorkbench => { id: "measurement-interchange-workbench", label: "Measurement data interchange", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=measurement-interchange-workbench" },
@@ -380,7 +378,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_count_and_unique_contract_values() {
-        assert_eq!(SurfaceId::ALL.len(), 64);
+        assert_eq!(SurfaceId::ALL.len(), 63);
 
         let ids = SurfaceId::ALL
             .iter()
@@ -395,9 +393,9 @@ mod tests {
             .map(|surface| surface.deep_link())
             .collect::<HashSet<_>>();
 
-        assert_eq!(ids.len(), 64);
-        assert_eq!(labels.len(), 64);
-        assert_eq!(deep_links.len(), 64);
+        assert_eq!(ids.len(), 63);
+        assert_eq!(labels.len(), 63);
+        assert_eq!(deep_links.len(), 63);
     }
 
     #[test]
@@ -408,7 +406,7 @@ mod tests {
                 .filter(|surface| surface.release_status() == status)
                 .count()
         };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 21);
+        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 20);
         assert_eq!(count_status(ReleaseStatus::Preview), 35);
         assert_eq!(count_status(ReleaseStatus::ExternalFirst), 6);
         assert_eq!(count_status(ReleaseStatus::InternalOnly), 2);
@@ -420,7 +418,7 @@ mod tests {
                 .count()
         };
         assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 8);
-        assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 41);
+        assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 40);
         assert_eq!(count_archetype(SurfaceArchetype::Manager), 9);
         assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
         assert_eq!(count_archetype(SurfaceArchetype::Overlay), 3);
@@ -525,25 +523,6 @@ mod tests {
             Err(NonPrimarySurface {
                 surface_id: SurfaceId::ReleaseCockpit,
             })
-        );
-    }
-
-    #[test]
-    fn visualization_studio_keeps_specialist_identity_with_results_ownership() {
-        assert_eq!(SurfaceId::VisualizationStudio.workspace(), None);
-        assert_eq!(
-            SurfaceId::VisualizationStudio.owner_workspace(),
-            Some(Workspace::Results)
-        );
-        assert_eq!(
-            Workspace::try_from(SurfaceId::VisualizationStudio),
-            Err(NonPrimarySurface {
-                surface_id: SurfaceId::VisualizationStudio,
-            })
-        );
-        assert_eq!(
-            SurfaceId::VisualizationStudio.deep_link(),
-            "?surface=visualization-studio"
         );
     }
 

@@ -1,47 +1,12 @@
 //! Printable sources built from what a results viewer is currently showing.
 //!
-//! Studio panes and quick-view plots are resolved from the retained result
-//! record and the pane's own declared presentation — never from a screenshot,
+//! Quick-view plots are resolved from the retained result record and the
+//! viewer's own declared presentation — never from a screenshot,
 //! framebuffer, or transient viewer cache.  That is what lets a printed page
 //! be reproduced exactly from the same inputs long after the window that
 //! showed it has gone.
 
 use super::*;
-
-fn studio_source<'a>(
-    project_id: ProjectId,
-    studio: &'a VisualizationStudioPresentation,
-    simulation: &'a SimulationState,
-) -> StudioHardcopySource<'a, SimulationRun, WaveformData> {
-    StudioHardcopySource {
-        project_id,
-        studio: studio.into(),
-        runs: &simulation.retained.runs,
-        waveform_style: |waveform| StudioWaveformStyle {
-            color: &waveform.color,
-            visible: waveform.visible,
-        },
-    }
-}
-
-pub(crate) fn resolve_all_studio_panes(
-    project_id: ProjectId,
-    studio: &VisualizationStudioPresentation,
-    simulation: &SimulationState,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    resolve_studio_document(&studio_source(project_id, studio, simulation))
-}
-
-pub(crate) fn resolve_active_studio_pane_source(
-    source: ActiveStudioPaneHardcopySource<'_>,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    resolve_studio_pane(
-        &studio_source(source.project_id, source.studio, source.simulation),
-        source.source_key,
-        source.pane_id,
-        source.scope,
-    )
-}
 
 #[cfg(test)]
 pub(super) fn active_quick_result(

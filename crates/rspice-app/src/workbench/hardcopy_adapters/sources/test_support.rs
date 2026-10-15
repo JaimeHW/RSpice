@@ -231,42 +231,6 @@ pub(crate) fn resolve_retained_hardcopy_source(
         }
     }
 
-    if let Some(pane) = state
-        .workbench
-        .visualization_studio
-        .panes
-        .iter()
-        .find(|pane| {
-            format!(
-                "project:{}:visualization-pane:{}",
-                project_id.as_uuid(),
-                pane.id
-            ) == source_key
-        })
-    {
-        if matches!(scope, HardcopyScope::AllSheetsOrPanes) {
-            let mut resolved = resolve_all_studio_panes(
-                project_id,
-                &state.workbench.visualization_studio,
-                &state.simulation,
-            )?;
-            // The transient all-panes definition is addressed through the
-            // selected retained pane descriptor, so commit-time revalidation
-            // must keep that stable dialog key.
-            resolved = resolved.with_source_key(source_key.to_owned())?;
-            return Ok(resolved);
-        }
-        let pane_id = pane.id;
-        return resolve_active_studio_pane_source(ActiveStudioPaneHardcopySource {
-            source_key: source_key.to_owned(),
-            project_id,
-            studio: &state.workbench.visualization_studio,
-            simulation: &state.simulation,
-            pane_id,
-            scope,
-        });
-    }
-
     if let Some(document_id) = state.workbench.report_authoring.selected_document {
         let report_key = format!("project:{}:report:{}", project_id.as_uuid(), document_id);
         if source_key == report_key {

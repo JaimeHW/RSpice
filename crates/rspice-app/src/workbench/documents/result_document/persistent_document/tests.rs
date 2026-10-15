@@ -373,32 +373,6 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
     assert_eq!(app.state.ui.results.session.markers[0].note, "dataset note");
 }
 
-/// (h.8) The Studio stage embeds the renderer against the global
-/// projection, so it clears the pane context and its overlay too.
-#[test]
-fn the_studio_stage_clears_the_persistent_pane_context_and_overlay() {
-    let (mut app, document_id) = persistent_transient_fixture();
-    let (analysis, anchor) = active_analysis_anchor(&mut app.state);
-    let _pane = projected_pane(&mut app.state, document_id);
-    super::super::place_marker(&mut app.state, placement(analysis, &anchor, "V(out)", 0.5))
-        .expect("the document retains its own marker");
-    assert!(!app.state.ui.results.session.document_markers.is_empty());
-
-    drive_frame(|ui| {
-        super::super::show_embedded_with_sample_selection(ui, &mut app, None);
-    });
-
-    assert!(
-        app.state
-            .ui
-            .results
-            .session
-            .persistent_pane_context
-            .is_none()
-    );
-    assert!(app.state.ui.results.session.document_markers.is_empty());
-}
-
 /// (h.2, h.3) The two stores never contend: a document serial cannot
 /// advance the quick allocator, and the project save carries exactly the
 /// quick markers.

@@ -102,85 +102,6 @@ fn workbench_without_a_project_page_defaults_to_overview() {
 }
 
 #[test]
-fn visualization_studio_presentation_round_trips_with_the_workbench() {
-    use crate::workbench::documents::visualization_studio::{ViewerTool, VisualizationSection};
-
-    use rspice_results_ui::studio::session::VisualizationStudioState;
-
-    let mut state = WorkbenchState::default();
-    state.visualization_studio.section = VisualizationSection::Axes;
-    state.visualization_studio.tool = ViewerTool::Pan;
-    state.visualization_studio.zoom = 2.5;
-    state.visualization_studio.selected_viewer_document = "viewer-bode".to_owned();
-
-    state.visualization_studio.family_query = "session-only filter".to_owned();
-
-    let encoded = serde_json::to_string(&state).expect("workbench serializes");
-    let restored: WorkbenchState =
-        serde_json::from_str(&encoded).expect("visualization document restores");
-
-    assert_eq!(
-        restored.visualization_studio.section,
-        VisualizationSection::Axes
-    );
-    assert_eq!(restored.visualization_studio.tool, ViewerTool::Pan);
-    assert_eq!(restored.visualization_studio.zoom, 2.5);
-    assert_eq!(
-        restored.visualization_studio.selected_viewer_document,
-        "viewer-bode"
-    );
-
-    let presentation_json = serde_json::to_value(&state.visualization_studio).unwrap();
-    let fields = presentation_json.as_object().unwrap();
-    assert_eq!(fields.len(), 25);
-    assert!(!fields.contains_key("presentation"));
-    assert!(!fields.contains_key("family_query"));
-    assert!(restored.visualization_studio.family_query.is_empty());
-    let presentation: rspice_results::studio_presentation::VisualizationStudioPresentation =
-        serde_json::from_value(presentation_json.clone()).unwrap();
-    assert_eq!(presentation, state.visualization_studio.presentation);
-    assert_eq!(
-        serde_json::to_value(&presentation).unwrap(),
-        presentation_json
-    );
-
-    let ron = ron::ser::to_string_pretty(
-        &state.visualization_studio,
-        ron::ser::PrettyConfig::default().struct_names(true),
-    )
-    .unwrap();
-    assert!(ron.starts_with("VisualizationStudioState("));
-    assert_eq!(
-        ron,
-        ron::ser::to_string_pretty(
-            &presentation,
-            ron::ser::PrettyConfig::default().struct_names(true),
-        )
-        .unwrap(),
-    );
-    let restored: VisualizationStudioState = ron::from_str(&ron).unwrap();
-    assert_eq!(restored.presentation, presentation);
-    assert!(restored.family_query.is_empty());
-}
-
-#[test]
-fn legacy_workbench_defaults_the_visualization_document() {
-    let mut encoded = serde_json::to_value(WorkbenchState::default()).unwrap();
-    encoded
-        .as_object_mut()
-        .expect("workbench is an object")
-        .remove("visualization_studio");
-
-    let restored: WorkbenchState = serde_json::from_value(encoded).unwrap();
-    assert_eq!(restored.visualization_studio.zoom, 1.0);
-    assert_eq!(
-        restored.visualization_studio.selected_viewer_document,
-        "viewer-waveform"
-    );
-    assert!(restored.visualization_studio.panes.is_empty());
-}
-
-#[test]
 fn ordinary_noise_uses_the_frequency_document_identity() {
     use super::super::ResultViewer;
     assert_eq!(
@@ -194,9 +115,9 @@ fn ordinary_noise_uses_the_frequency_document_identity() {
 }
 
 /// Every document a sheet claims must exist in the catalog and must accept
-/// the sheet's analysis. Three copies of this map used to exist; the Studio's
-/// said the noise sheet renders `viewer-spectrum`, whose catalog entry rejects
-/// a `noise` analysis outright.
+/// the sheet's analysis. Three copies of this map used to exist; one said
+/// the noise sheet renders `viewer-spectrum`, whose catalog entry rejects a
+/// `noise` analysis outright.
 #[test]
 fn every_claimed_viewer_document_is_in_the_catalog() {
     use super::super::ResultViewer;
@@ -217,99 +138,65 @@ fn every_claimed_viewer_document_is_in_the_catalog() {
     );
 }
 
+/// A session saved while the Visualization Studio existed carries its
+/// `visualization_studio` block and may have quit on the Studio. The block
+/// below is copied from a real session file, with a pane, a selection and a
+/// cache budget added. The session must still load: the block is ignored,
+/// the Studio route is dropped with one diagnostic, and the rest of the
+/// session survives.
 #[test]
-fn restored_visualization_document_repairs_bounds_and_identities() {
-    use crate::product::DatasetId;
-    use crate::workbench::documents::visualization_studio::{
-        VisualizationAnnotation, VisualizationPane,
-    };
-
+fn session_saved_with_the_deleted_visualization_studio_still_restores() {
+    const STUDIO: &str = concat!(
+        "visualization_studio:(section:viewers,tool:select,zoom:2.5,",
+        "selected_viewer_document:\"viewer-bode\",panes:[(id:42,viewer:Bode,",
+        "viewer_document_id:\"viewer-bode\",",
+        "dataset_id:\"6f1c2c1e-5b7a-4c1d-9a54-0d3c2f6b8e01\",analysis_sequence:1,",
+        "x_link:Some(1),cursor_group:None,page:\"Page 1\",placement:r#below-selected)],",
+        "active_pane:Some(42),next_identity:43,revision:7,annotations:[],markers:[],",
+        "measurements:[],linked_x_ranges:{1:(0.0,1e-3)},linked_cursor_positions:{},",
+        "pane_x_ranges:{},pane_cursor_positions:{},family_policies:{},",
+        "report_page_policies:{},comparison_receipts:[],difference_trace_sets:[],",
+        "autoscale:r#robust-visible,complex_projection:r#magnitude-phase,",
+        "display_lod:r#envelope-preserving,tile_memory_mib:2048,significant_digits:9,",
+        "touch_pane:stage)"
+    );
     let mut state = WorkbenchState::default();
-    let dataset_id = DatasetId::new();
-    state.visualization_studio.zoom = 99.0;
-    state.visualization_studio.selected_viewer_document = "removed-viewer".to_owned();
-    state.visualization_studio.next_identity = 0;
-    state.visualization_studio.revision = 0;
-    state.visualization_studio.active_pane = Some(42);
-    state.visualization_studio.panes = vec![
-        VisualizationPane {
-            id: 42,
-            viewer: super::super::ResultViewer::Waves,
-            viewer_document_id: "removed-viewer".to_owned(),
-            dataset_id,
-            analysis_sequence: 1,
-            x_link: None,
-            cursor_group: None,
-            page: "Page 1".to_owned(),
-            placement: Default::default(),
-        },
-        VisualizationPane {
-            id: 42,
-            viewer: super::super::ResultViewer::Bode,
-            viewer_document_id: "viewer-bode".to_owned(),
-            dataset_id,
-            analysis_sequence: 1,
-            x_link: None,
-            cursor_group: None,
-            page: "Page 1".to_owned(),
-            placement: Default::default(),
-        },
-    ];
-    state.visualization_studio.annotations = vec![VisualizationAnnotation {
-        id: 42,
-        dataset_id,
-        analysis_sequence: 1,
-        x: 0.0,
-        text: "threshold".to_owned(),
-    }];
-
-    state.normalize_visualization_studio();
-
-    assert_eq!(state.visualization_studio.zoom, 8.0);
-    assert_eq!(state.visualization_studio.revision, 1);
-    assert_eq!(
-        state.visualization_studio.selected_viewer_document,
-        "viewer-waveform"
+    state.engineering_profile = EngineeringProfile::RfMicrowave;
+    state.activate(Workspace::Results);
+    let saved = ron::to_string(&state).expect("workbench serializes");
+    let saved = saved.replacen(
+        "current:\"?view=results\"",
+        "current:\"?surface=visualization-studio\"",
+        1,
     );
-    assert_eq!(state.visualization_studio.panes.len(), 2);
-    assert_eq!(state.visualization_studio.panes[0].id, 42);
-    assert_eq!(
-        state.visualization_studio.panes[0].viewer_document_id,
-        "viewer-waveform"
+    assert!(
+        saved.contains("?surface=visualization-studio"),
+        "the session must have quit on the Studio for this to prove anything"
     );
-    let identities = state
-        .visualization_studio
-        .panes
-        .iter()
-        .map(|pane| pane.id)
-        .chain(
-            state
-                .visualization_studio
-                .annotations
-                .iter()
-                .map(|annotation| annotation.id),
-        )
-        .collect::<HashSet<_>>();
-    assert_eq!(identities.len(), 3);
-    assert_eq!(state.visualization_studio.active_pane, Some(42));
-    assert!(state.visualization_studio.next_identity > identities.iter().copied().max().unwrap());
-}
+    let saved = format!(
+        "{},{STUDIO})",
+        saved
+            .strip_suffix(')')
+            .expect("a workbench session is a RON struct")
+    );
 
-#[test]
-fn visualization_studio_is_a_persistent_surface_not_an_application_modal() {
-    let mut state = WorkbenchState::default();
-    state.navigation.replace(
-        SurfaceRoute::surface(SurfaceId::VisualizationStudio),
-        RouteTransitionSource::Restore,
-    );
-    state.workspace = Workspace::Results;
+    let mut restored: WorkbenchState =
+        ron::from_str(&saved).expect("a session that kept the Studio's state restores");
+    restored.reconcile_restored_navigation();
 
     assert_eq!(
-        state.current_route().surface_id(),
-        SurfaceId::VisualizationStudio
+        restored.engineering_profile,
+        EngineeringProfile::RfMicrowave
     );
-    assert_eq!(state.workspace, Workspace::Results);
-    assert!(!state.application_modal_open());
+    assert_eq!(
+        restored.current_route(),
+        SurfaceRoute::surface(SurfaceId::Design)
+    );
+    assert!(
+        restored
+            .take_route_diagnostic()
+            .is_some_and(|message| message.contains("Malformed routes"))
+    );
 }
 
 #[test]
