@@ -542,7 +542,6 @@ fn library_entry(
 }
 
 /// What a reader can do to one preset, in the order they would reach for it.
-#[expect(clippy::too_many_arguments, reason = "one row's full state")]
 fn library_verbs(
     ui: &mut Ui,
     preset: &DrawingSheetPreset,
