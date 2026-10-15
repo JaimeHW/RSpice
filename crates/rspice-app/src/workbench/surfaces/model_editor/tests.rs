@@ -593,6 +593,49 @@ fn the_workspace_body_tiles_the_surface_under_the_specialist_header() {
     );
 }
 
+/// Nothing in the model editor paints a status in colour.
+///
+/// The slice's own guard. Colour on this surface belongs to a verdict column
+/// and to the active rail entry; a warning or a failure anywhere else is a
+/// `Problem` mark in front of neutral text. Success has no styling at all, so
+/// the success tone and the two `StatusMark` variants that are not problems
+/// may not appear in any of these files.
+#[test]
+fn no_model_editor_file_paints_a_status_in_colour() {
+    const BANNED: [&str; 7] = [
+        "colored_label",
+        "status_dot(",
+        "StatusMark::Success",
+        "StatusMark::Neutral",
+        "color.ok",
+        "color.info",
+        "MetricTone::Good",
+    ];
+    // Each entry is one shipped file of this slice, read back as it ships.
+    const SLICE: [(&str, &str); 5] = [
+        ("model_editor.rs", include_str!("../model_editor.rs")),
+        ("model_editor/promotion.rs", include_str!("promotion.rs")),
+        (
+            "model_editor/qualification.rs",
+            include_str!("qualification.rs"),
+        ),
+        (
+            "model_editor/schema_editors.rs",
+            include_str!("schema_editors.rs"),
+        ),
+        ("model_editor/workflows.rs", include_str!("workflows.rs")),
+    ];
+    for (name, source) in SLICE {
+        let production = crate::source_guard::production_source(source);
+        for banned in BANNED {
+            assert!(
+                !production.contains(banned),
+                "{name} still paints a status with {banned:?}"
+            );
+        }
+    }
+}
+
 /// Renders every model editor section to `RSPICE_RASTER_DIR` (or the system
 /// temp directory); read them for layout, not wording — the rasterizer's own
 /// header says why.
