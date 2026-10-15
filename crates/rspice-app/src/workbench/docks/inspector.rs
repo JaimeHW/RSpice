@@ -1760,11 +1760,7 @@ fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
             );
         }
         if let Some(run) = run {
-            property_row(
-                ui,
-                "Duration",
-                &crate::ui::plot::fmt_si_significant(run.elapsed_time, "s", 3),
-            );
+            property_row(ui, "Duration", &compact_readout(run.elapsed_time, "s"));
         }
     } else {
         muted_inspector_copy(ui, "No Monte Carlo run");
