@@ -510,28 +510,25 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                             .into_iter()
                             .any(|view| view.name.to_ascii_lowercase().contains(&query))
                 });
-            (
-                library.name.clone(),
-                library.cell_count(),
-                library.read_only,
-                matches_query,
-            )
+            (library.name.clone(), library.read_only, matches_query)
         })
         .collect::<Vec<_>>();
-    let visible = libraries
-        .iter()
-        .filter(|(_, _, _, visible)| *visible)
-        .count();
+    let visible = libraries.iter().filter(|(_, _, visible)| *visible).count();
+    // The ratio is a fact only while the filter is hiding something; with no
+    // filter it reads "3 / 3" on every project.
     section_header(
         ui,
         "Libraries",
-        Some(&format!("{visible} / {}", libraries.len())),
+        (!query.is_empty())
+            .then(|| format!("{visible} / {}", libraries.len()))
+            .as_deref(),
     );
-    for (name, cells, read_only, visible) in libraries {
+    for (name, read_only, visible) in libraries {
         if !visible {
             continue;
         }
-        let meta = format!("{} {}", cells, if read_only { "ro" } else { "rw" });
+        // Writable is every ordinary library and the cell count is not acted
+        // on here, so the only meta a row carries is the one exception.
         if nav_row(
             ui,
             if read_only {
@@ -541,73 +538,11 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             },
             &name,
             app.state.library_manager.selected_library.as_deref() == Some(name.as_str()),
-            Some(&meta),
+            read_only.then_some("read-only"),
         ) {
             app.state.library_manager.select_library(&name);
         }
     }
-
-    let active_configuration = app.state.workspace.content.configuration_sets.active();
-    section_header(
-        ui,
-        "Active simulation context",
-        Some(if active_configuration.is_some() {
-            "current"
-        } else {
-            "review"
-        }),
-    );
-    nav_property(
-        ui,
-        "Testbench",
-        &active_configuration.map_or_else(
-            || "not configured".to_owned(),
-            |configuration| configuration.root().display_path(),
-        ),
-    );
-    nav_property(
-        ui,
-        "Configuration",
-        active_configuration.map_or("not configured", |configuration| configuration.name()),
-    );
-    nav_property(
-        ui,
-        "Run plan",
-        app.state.sim_setup.active_plan_name().as_str(),
-    );
-    nav_property(
-        ui,
-        "Revision",
-        &app.state
-            .workspace
-            .content
-            .project
-            .revision()
-            .get()
-            .to_string(),
-    );
-
-    section_header(ui, "Project source", None);
-    nav_property(
-        ui,
-        "Path",
-        &app.state
-            .workspace
-            .content
-            .project
-            .path
-            .as_ref()
-            .map_or_else(|| "not saved".to_owned(), |path| path.display().to_string()),
-    );
-    nav_property(
-        ui,
-        "Working tree",
-        if crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&app.state) > 0 {
-            "modified"
-        } else {
-            "clean"
-        },
-    );
 }
 
 fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -639,56 +574,44 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     .to_ascii_lowercase()
                     .contains(&query)
         })
-        .map(|configuration| {
-            (
-                configuration.id(),
-                configuration.name().to_owned(),
-                configuration.revision(),
-            )
-        })
+        .map(|configuration| (configuration.id(), configuration.name().to_owned()))
         .collect::<Vec<_>>();
+    let total = app
+        .state
+        .workspace
+        .content
+        .configuration_sets
+        .configurations()
+        .len();
     section_header(
         ui,
         "Configuration sets",
-        Some(&format!(
-            "{} / {}",
-            configurations.len(),
-            app.state
-                .workspace
-                .content
-                .configuration_sets
-                .configurations()
-                .len()
-        )),
+        (!query.is_empty())
+            .then(|| format!("{} / {total}", configurations.len()))
+            .as_deref(),
     );
-    for (id, name, revision) in configurations {
+    for (id, name) in configurations {
+        // The row the catalog is bound to is the one the list marks; naming
+        // every other row "available" says only that it is a row.
         let active = active_id == Some(id);
-        if nav_row(
-            ui,
-            WorkbenchIcon::Sliders,
-            &name,
-            active,
-            Some(if active { "current" } else { "available" }),
-        ) {
+        if nav_row(ui, WorkbenchIcon::Sliders, &name, active, None) {
             app.state.workbench.project_page = ProjectPage::Configuration;
             if !active {
                 Command::ConfigurationSets.execute(app);
             }
         }
-        if active {
-            nav_property(ui, "Revision", &revision.to_string());
-        }
     }
-    section_header(ui, "Active binding", None);
-    if let Some(configuration) = app.state.workspace.content.configuration_sets.active() {
-        nav_property(ui, "Testbench", &configuration.root().display_path());
-        nav_property(ui, "DUT", configuration.dut_path());
-        nav_property(
-            ui,
-            "Overrides",
-            &configuration.definition().overrides.len().to_string(),
-        );
-    } else {
+    // The inspector's "Active binding" section already states the testbench,
+    // the DUT and the override count, so the rail keeps only the state the
+    // inspector cannot explain.
+    if app
+        .state
+        .workspace
+        .content
+        .configuration_sets
+        .active()
+        .is_none()
+    {
         muted(ui, "No project configuration is active.");
     }
 }
@@ -705,15 +628,13 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .library_manager
         .libraries_sorted()
         .into_iter()
+        // A writable design library and a model library whose sources resolve
+        // are the ordinary cases; only the exception is worth a row's meta.
         .map(|library| {
             (
                 library.name.clone(),
                 "Design library",
-                if library.read_only {
-                    "read only"
-                } else {
-                    "writable"
-                },
+                library.read_only.then_some("read-only"),
                 WorkbenchIcon::Project,
             )
         })
@@ -726,20 +647,16 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                     (
                         library.name.clone(),
                         "Model library",
-                        if library.source_authority.has_execution_source()
-                            && !library.source_closure.is_empty()
-                        {
-                            "qualified"
-                        } else {
-                            "catalog"
-                        },
+                        (!library.source_authority.has_execution_source()
+                            || library.source_closure.is_empty())
+                        .then_some("no model files"),
                         WorkbenchIcon::Models,
                     )
                 }),
         )
         .filter(|(name, kind, status, _)| {
             query.is_empty()
-                || format!("{name} {kind} {status}")
+                || format!("{name} {kind} {}", status.unwrap_or_default())
                     .to_ascii_lowercase()
                     .contains(&query)
         })
@@ -749,50 +666,18 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         app.state.workbench.project_dependency_selection =
             rows.first().map(|(name, _, _, _)| name.clone());
     }
-    section_header(ui, "Resolved closure", Some(&rows.len().to_string()));
+    section_header(ui, "Dependencies", Some(&rows.len().to_string()));
     for (name, _, status, icon) in &rows {
         if nav_row(
             ui,
             *icon,
             name,
             app.state.workbench.project_dependency_selection.as_deref() == Some(name.as_str()),
-            Some(status),
+            *status,
         ) {
             app.state.workbench.project_dependency_selection = Some(name.clone());
         }
     }
-    let unresolved = rows
-        .iter()
-        .filter(|(_, _, status, _)| *status == "catalog")
-        .count();
-    section_header(
-        ui,
-        "Closure contract",
-        Some(if unresolved == 0 {
-            "portable"
-        } else {
-            "review"
-        }),
-    );
-    nav_property(ui, "Missing", "0");
-    nav_property(ui, "Source advisories", &unresolved.to_string());
-    nav_property(
-        ui,
-        "Technology",
-        if app
-            .state
-            .workspace
-            .content
-            .project
-            .technology_binding()
-            .is_some()
-        {
-            "attached"
-        } else {
-            "not attached"
-        },
-    );
-    nav_property(ui, "Manifest", "project dependencies");
 }
 
 fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -831,47 +716,44 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         "Project checkpoints",
         Some(&checkpoints.len().to_string()),
     );
+    // Every checkpoint is restorable, so the meta that said so told the
+    // reader nothing and left several "Autosave" rows indistinguishable. The
+    // time is what tells them apart.
+    let now_unix_ms = crate::time_compat::checked_unix_time_ms().ok();
     for checkpoint in &checkpoints {
         let id = checkpoint.checkpoint_id().to_string();
+        let age = checkpoint_age(checkpoint.created_unix_ms(), now_unix_ms);
         if nav_row(
             ui,
             WorkbenchIcon::History,
             checkpoint.reason().label(),
             app.state.workbench.project_checkpoint_selection.as_deref() == Some(id.as_str()),
-            Some("restorable"),
+            Some(&age),
         ) {
             app.state.workbench.project_checkpoint_selection = Some(id);
         }
     }
-    section_header(
-        ui,
-        "Recovery store",
-        Some(
-            if app
-                .state
-                .dialogs
-                .project_checkpoint_recovery
-                .quarantined
-                .is_empty()
-            {
-                "verified"
-            } else {
-                "review"
-            },
-        ),
-    );
-    nav_property(ui, "Protected", &checkpoints.len().to_string());
-    nav_property(
-        ui,
-        "Quarantined",
-        &app.state
-            .dialogs
-            .project_checkpoint_recovery
-            .quarantined
-            .len()
-            .to_string(),
-    );
-    nav_property(ui, "Integrity", "payloads verified on load");
+}
+
+/// How long ago a checkpoint was taken, for the rail's row meta.
+///
+/// A checkpoint stamped after the clock's present says the clock moved, not
+/// how old the checkpoint is, so that case reports nothing.
+fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
+    let Some(elapsed) = now_unix_ms
+        .filter(|_| created_unix_ms != 0)
+        .and_then(|now| now.checked_sub(created_unix_ms))
+    else {
+        return String::new();
+    };
+    let seconds = elapsed / 1_000;
+    match seconds {
+        0..=59 => "just now".to_owned(),
+        60..=3_599 => format!("{} min ago", seconds / 60),
+        3_600..=86_399 => format!("{} h ago", seconds / 3_600),
+        86_400..=172_799 => "yesterday".to_owned(),
+        _ => format!("{} d ago", seconds / 86_400),
+    }
 }
 
 /// Whether one line of the simulation rail survives the navigator's filter.
@@ -6188,3 +6070,185 @@ fn verification_navigator_requires_scroll(available_height: f32) -> bool {
 mod verification_footer;
 
 use verification_footer::*;
+
+#[cfg(test)]
+mod project_tests {
+    use super::*;
+
+    /// A project with two libraries, an active configuration and a recovery
+    /// catalog behind it, so every Project rail has rows to show.
+    fn project_app(page: ProjectPage) -> RSpiceApp {
+        use crate::workbench::lifecycle::project_checkpoint::{
+            ProjectCheckpointReason, fixture_summary,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state = crate::workbench::examples::hierarchy_reference::build().state;
+        app.state.workbench.workspace = Workspace::Project;
+        app.state.workbench.project_page = page;
+        let now = crate::time_compat::checked_unix_time_ms().expect("clock");
+        let name = app.state.workspace.content.project.name().to_owned();
+        app.state.dialogs.project_checkpoint_recovery.project_id =
+            Some(app.state.workspace.content.project.id().to_string());
+        app.state.dialogs.project_checkpoint_recovery.initialized = true;
+        app.state.dialogs.project_checkpoint_recovery.checkpoints = [
+            (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
+            (
+                ProjectCheckpointReason::TechnologyAttachment,
+                2,
+                2 * 3_600_000,
+                47_902,
+            ),
+            (ProjectCheckpointReason::Manual, 1, 3 * 86_400_000, 31_577),
+        ]
+        .into_iter()
+        .map(|(reason, revision, age, bytes)| {
+            fixture_summary(&name, revision, reason, now - age, bytes)
+        })
+        .collect();
+        app
+    }
+
+    /// The four Project rails as PNGs, with their measured geometry beside
+    /// each. Run with `--ignored`; the renders go to `RSPICE_RASTER_DIR`.
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_the_project_navigators_for_review() {
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        for page in ProjectPage::ALL {
+            let mut app = project_app(page);
+            crate::ui::raster::write_panel_review(
+                &directory,
+                &format!(
+                    "project-navigator-{}",
+                    page.label().to_lowercase().replace(' ', "-")
+                ),
+                crate::ui::Theme::default(),
+                Vec2::new(260.0, 900.0),
+                10.0,
+                |ui, _| {
+                    let panel = Tokens::get(ui.ctx()).color.bg_panel;
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE.fill(panel))
+                        .show(ui, |ui| show(ui, &mut app));
+                },
+            );
+        }
+    }
+
+    /// Painted text of one Project rail.
+    fn painted(page: ProjectPage) -> String {
+        let mut app = project_app(page);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(260.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            },
+        );
+        let mut text = String::new();
+        fn collect(shape: &egui::epaint::Shape, out: &mut String) {
+            match shape {
+                egui::epaint::Shape::Text(painted) => {
+                    out.push_str(&painted.galley.job.text);
+                    out.push('\n');
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut text);
+        }
+        text
+    }
+
+    /// The Project rails list what the reader selects from, and nothing the
+    /// inspector, the toolbar or the status bar already owns.
+    #[test]
+    fn the_project_rails_state_no_fact_a_panel_beside_them_owns() {
+        let library = painted(ProjectPage::Library);
+        assert!(library.contains("Libraries"), "{library}");
+        for retired in [
+            // The overview inspector's rows, the toolbar's plan, a revision
+            // counter, the inspector's Location and the status bar's
+            // unsaved-changes marker, each restated on the rail.
+            "Active simulation context",
+            "Run plan",
+            "Revision",
+            "Project source",
+            "Working tree",
+            // "3 / 3" with nothing filtered, and "rw" on every row.
+            " / ",
+            "rw",
+        ] {
+            assert!(!library.contains(retired), "{retired:?} in:\n{library}");
+        }
+
+        let configuration = painted(ProjectPage::Configuration);
+        assert!(
+            configuration.contains("Configuration sets"),
+            "{configuration}"
+        );
+        for retired in ["available", "current", "Active binding", "DUT", "Overrides"] {
+            assert!(
+                !configuration.contains(retired),
+                "{retired:?} in:\n{configuration}"
+            );
+        }
+
+        let dependencies = painted(ProjectPage::Dependencies);
+        assert!(dependencies.contains("Dependencies"), "{dependencies}");
+        for retired in [
+            "Resolved closure",
+            "Closure contract",
+            "Missing",
+            "Source advisories",
+            "Manifest",
+            "writable",
+            "qualified",
+        ] {
+            assert!(
+                !dependencies.contains(retired),
+                "{retired:?} in:\n{dependencies}"
+            );
+        }
+
+        let recovery = painted(ProjectPage::Recovery);
+        assert!(recovery.contains("Project checkpoints"), "{recovery}");
+        // Rows carry the time that tells two autosaves apart, not a word that
+        // is true of every checkpoint.
+        assert!(recovery.contains("min ago"), "{recovery}");
+        for retired in [
+            "restorable",
+            "Recovery store",
+            "Protected",
+            "Quarantined",
+            "Integrity",
+        ] {
+            assert!(!recovery.contains(retired), "{retired:?} in:\n{recovery}");
+        }
+    }
+
+    #[test]
+    fn a_checkpoint_with_no_usable_stamp_reports_no_age_rather_than_a_wrong_one() {
+        assert_eq!(checkpoint_age(0, Some(10_000)), "");
+        assert_eq!(checkpoint_age(20_000, Some(10_000)), "");
+        assert_eq!(checkpoint_age(10_000, None), "");
+        assert_eq!(checkpoint_age(9_000, Some(10_000)), "just now");
+        assert_eq!(checkpoint_age(10_000, Some(190_000)), "3 min ago");
+        assert_eq!(checkpoint_age(0, None), "");
+    }
+}
