@@ -1,6 +1,6 @@
 //! Output profile controls and release handoff over an application-owned report.
 use super::{PaneSeparators, paint_pane_separators, paper_switch};
-use egui::{ScrollArea, Stroke, Ui, Vec2};
+use egui::{ScrollArea, Ui, Vec2};
 use rspice_app_types::product::ResultDocumentId;
 use rspice_results::report_document::{
     ReportDocument, ReportDraftMarking, ReportOutputFormats, ReportPageNumbering,
@@ -9,7 +9,7 @@ use rspice_results::report_document::{
 };
 use rspice_ui_kit::{
     panels::{
-        Problem, code_inspector_section, panel_body, panel_inset, problem_line, property_row,
+        Problem, code_inspector_section, panel_body, panel_inset, problem_line,
         property_row_problem, section_block_gap,
     },
     theme::{self, FontWeight},
@@ -43,7 +43,6 @@ pub fn show(
     let blocked_reason = host.blocked_reason();
     let mut pending_edit = None;
     let mut open_release_owner = false;
-    let mut open_package_assembly = false;
     let pane = egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
         // One body around every section, so they stack on the section gap
@@ -207,31 +206,25 @@ pub fn show(
                             }
                         });
                     });
-                    code_inspector_section(ui, "Release handoff", None, None, |ui| {
+                    // Which run the report reads, and a mark when that
+                    // binding is incomplete. "Candidate", "Package owner" and
+                    // "Physical DRC" were constants — the last of them for a
+                    // check RSpice does not run — and the report's own UUID
+                    // is not the reader's. Both buttons called the same
+                    // thing, so there is one.
+                    code_inspector_section(ui, "Release", None, None, |ui| {
                         ui.scope(|ui| {
                             let (bound_result, exact_binding) = host.bound_result_label(document);
-                            property_row(ui, "Artifact identity", &document.id().to_string());
-                            property_row(ui, "Bound result", &bound_result);
-                            property_row(ui, "Candidate", "Not attached");
-                            // The one statement of the binding: a mark when it is
-                            // incomplete, plain words when it is not.
                             property_row_problem(
                                 ui,
-                                "Compatibility",
-                                if exact_binding {
-                                    "awaiting candidate review"
-                                } else {
-                                    "result binding incomplete"
-                                },
+                                "Bound result",
+                                &bound_result,
                                 (!exact_binding).then_some(Problem::Warning),
                             );
-                            property_row(ui, "Package owner", "Release closure");
-                            property_row(ui, "Physical DRC", "No retained DRC evidence");
                         });
-                        release_handoff_card(ui, document, &mut open_release_owner);
                         section_block_gap(ui);
-                        if Button::new("Open package assembly").show(ui).clicked() {
-                            open_package_assembly = true;
+                        if Button::new("Release…").show(ui).clicked() {
+                            open_release_owner = true;
                         }
                     });
                     if let Some(error) = host.transaction_error() {
@@ -244,7 +237,7 @@ pub fn show(
     if let Some(setting) = pending_edit {
         host.commit_publication(document.id(), setting);
     }
-    if open_release_owner || open_package_assembly {
+    if open_release_owner {
         host.open_release();
     }
 }
@@ -338,38 +331,4 @@ where
         }
     }
     false
-}
-
-fn release_handoff_card(ui: &mut Ui, document: &ReportDocument, open_owner: &mut bool) {
-    let t = Tokens::get(ui.ctx());
-    let shown = egui::Frame::new()
-        .fill(t.color.bg_panel_2)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::symmetric(10, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            let id = document.id().to_string();
-            ui.label(
-                egui::RichText::new(format!(
-                    "Attach report {} to a release candidate",
-                    id.get(..8).unwrap_or(&id)
-                ))
-                .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
-                .color(t.color.text),
-            );
-            ui.add_space(6.0);
-            let button_width = ui.available_width();
-            if Button::new("Open owner →")
-                .min_width(button_width)
-                .show(ui)
-                .clicked()
-            {
-                *open_owner = true;
-            }
-        });
-    ui.painter().hline(
-        shown.response.rect.x_range(),
-        shown.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
 }
