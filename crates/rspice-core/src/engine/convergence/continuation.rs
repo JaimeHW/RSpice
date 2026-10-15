@@ -919,10 +919,12 @@ impl Engine {
         initial_guess: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        // ngspice's dynamic GMIN stepping (`cktop.c`, `dynamic_gmin`), in
+        // decades: a step is log10 of its `factor`, which starts at
+        // `gminfactor` = 10, one decade.
         const MAX_GMIN_STEP_DECADES: Value = 1.0;
-        const MIN_GMIN_STEP_DECADES: Value = 1.0e-3;
-        const GMIN_STEP_GROWTH: Value = 1.35;
-        const GMIN_STEP_SHRINK: Value = 0.5;
+        // A failure that finds the factor below 1.00005 gives up.
+        let min_gmin_step_decades: Value = 1.00005_f64.log10();
         const MAX_GMIN_ATTEMPTS: usize = 2048;
         let stopped = |reached: Option<Value>, unsolved: Value, iterations: usize| {
             SimulationError::from(ContinuationFailure {
@@ -953,7 +955,9 @@ impl Engine {
             circuit.reset_b3soi_operating_point_history();
         }
         let mut damping_state = NewtonDampingState::default();
-        let gmin_iterations = self.continuation_iteration_budget(10, 12);
+        // Each stage takes ITL2 Newton iterations, as `NIiter(ckt,
+        // ckt->CKTdcTrcvMaxIter)` does there.
+        let gmin_iterations = self.config.dc_transfer_max_iterations.max(1);
         let mut total_iterations = 0usize;
 
         let (initial_solution, initial_converged, initial_iterations) = self
@@ -1027,13 +1031,24 @@ impl Engine {
                 solution = candidate;
                 accepted_gmin = target_gmin;
                 damping_state = trial_damping_state;
-                step_decades = (step_decades * GMIN_STEP_GROWTH).min(MAX_GMIN_STEP_DECADES);
+                // A fast stage (at most a quarter of ITL2) raises the factor
+                // to its 1.5th power, up to `gminfactor`; a slow one (over
+                // three quarters) takes its square root.
+                if used_iterations <= gmin_iterations / 4 {
+                    step_decades = (step_decades * 1.5).min(MAX_GMIN_STEP_DECADES);
+                }
+                if used_iterations > 3 * gmin_iterations / 4 {
+                    step_decades = (step_decades * 0.5).max(min_gmin_step_decades);
+                }
             } else {
                 circuit.restore_nonlinear_state(accepted_state);
-                step_decades *= GMIN_STEP_SHRINK;
-                if step_decades < MIN_GMIN_STEP_DECADES {
+                // A failure retries from the accepted stage with the fourth
+                // root of the factor, and gives up once the factor is below
+                // 1.00005: the walk has stalled against a fold.
+                if step_decades < min_gmin_step_decades {
                     return Err(stopped(Some(accepted_gmin), target_gmin, total_iterations));
                 }
+                step_decades *= 0.25;
             }
 
             attempts += 1;

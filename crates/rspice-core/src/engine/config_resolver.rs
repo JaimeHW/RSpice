@@ -194,6 +194,9 @@ pub fn resolve_simulation_config(
         if let Some(itl1) = opts.itl1 {
             max_iterations = itl1;
         }
+        if let Some(itl2) = opts.itl2 {
+            resolved.dc_transfer_max_iterations = itl2;
+        }
         if let Some(itl4) = opts.itl4 {
             transient_max_iterations = itl4;
         }

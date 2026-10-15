@@ -523,6 +523,10 @@ pub struct SimulationConfig {
     /// This is the transient-specific SPICE `ITL4` limit. It is intentionally
     /// separate from the DC operating-point iteration budget.
     pub transient_max_iterations: usize,
+    /// Newton-Raphson iterations per DC-transfer point and per GMIN-stepping
+    /// stage: SPICE's `ITL2`, 50 by default as in ngspice
+    /// (`CKTdcTrcvMaxIter`).
+    pub dc_transfer_max_iterations: usize,
     /// Preferred minimum timestep for transient analysis.
     ///
     /// The transient engine may temporarily shrink below this during nonlinear
@@ -1158,6 +1162,7 @@ impl Default for SimulationConfig {
             tolerance: crate::constants::DEFAULT_TOLERANCE,
             max_iterations: crate::constants::MAX_NR_ITERATIONS,
             transient_max_iterations: crate::constants::MAX_TRANSIENT_NR_ITERATIONS,
+            dc_transfer_max_iterations: 50,
             min_timestep: crate::constants::MIN_TIMESTEP,
             max_timestep: crate::constants::MAX_TIMESTEP,
             transient_initial_timestep: None,

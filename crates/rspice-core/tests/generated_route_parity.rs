@@ -1275,6 +1275,66 @@ fn bsimsoi_reaches_an_operating_point_with_body_and_thermal_terminals_omitted() 
     }
 }
 
+/// BSIM-SOI 4.7 at `shmod=1 rth0=1e3`, Vd = Vg = 1 V, has no operating point:
+/// thermal runaway. The operating point must refuse, and in bounded time.
+///
+/// The runaway, measured against Xyce 7.10's ADMS BSIM-SOI 4.6 (`level=70`,
+/// 4.6.1 and 4.7 differ there by under 0.12%):
+/// - Xyce's `.dc Vd` continuation finds the cold root at Vd = 1 V for
+///   rth0 = 140, 200, 250 and 400, rising 2.61, 4.06, 5.52 and 14.03 K. Its
+///   direct operating point jumps to the hot middle-branch root at 140.
+/// - At rth0 = 1e3 the cold branch folds near Vd = 0.43 V, so no cold root
+///   exists at Vd = 1 V.
+/// - At rth0 = 140 RSpice's `.va` route lands on the hot root and the
+///   generated route on the cold one. The routes are compared only where the
+///   root is single (shmod=0, rth0=50 and rth0=120).
+/// - ngspice's native B4SOI converges here with a 17.3 K rise. It is BSIM-SOI
+///   4.4, from before 4.6 carried the self-heating rise into the
+///   temperature-dependent values (`bsimsoi.va:3661`, "v4.6").
+///
+/// GMIN stepping creeps toward the fold. It gives up as ngspice's dynamic GMIN
+/// does (`cktop.c`, `dynamic_gmin`): when a failed stage finds the step
+/// factor below 1.00005. Before, it crept for 13,035 Newton iterations, about
+/// 0.7 s here and an estimated half hour on the interpreter's `.va` route.
+/// Now it takes
+/// 6,817 iterations and about 0.2 s.
+#[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
+#[test]
+fn bsimsoi_thermal_runaway_is_refused_in_bounded_time() {
+    let supplies = "Vd d 0 1.0\nVg g 0 1.0";
+    let parameters = "shmod=1 rth0=1e3";
+    let mut refusals = Vec::new();
+    for (card, body) in [
+        (
+            "X",
+            format!("{supplies}\nX1 d g 0 0 bsimsoi__18c250bc {parameters}"),
+        ),
+        (
+            "M",
+            format!("{supplies}\nM1 d g 0 0 nch {parameters}\n.model nch bsimsoi47"),
+        ),
+    ] {
+        let deck = format!("* BSIM-SOI 4.7 runaway, generated {card} card\n{body}\n.end\n");
+        assert!(uses_generated_devices(&deck), "the {card} card");
+        let start = std::time::Instant::now();
+        let trace = operating_point_trace(&deck, &[], &[]);
+        let elapsed = start.elapsed();
+        let message = trace[0].text.clone().unwrap_or_default();
+        assert!(
+            message.contains("GMIN stepping stopped"),
+            "the {card} card refuses: {trace:?}"
+        );
+        if !cfg!(debug_assertions) {
+            assert!(
+                elapsed < std::time::Duration::from_secs(30),
+                "the {card} card refuses in {elapsed:?}"
+            );
+        }
+        refusals.push(message);
+    }
+    assert_eq!(refusals[0], refusals[1], "both cards refuse alike");
+}
+
 /// ANGELOV_GAN ties its thermal node `t` to ground (`I(t) <+ V(t) *
 /// SPICE_GMIN` without self-heating), and nothing else in the module reaches
 /// a port single-ended. Left out, `t` is a net of the instance's own and the
