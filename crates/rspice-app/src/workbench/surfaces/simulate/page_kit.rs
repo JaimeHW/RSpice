@@ -129,30 +129,40 @@ fn note_line_sensing(ui: &mut Ui, text: &str, tone: Tone, sense: Option<Sense>) 
     if let Some(sense) = sense {
         label = label.sense(sense);
     }
-    let Some(problem) = tone.problem() else {
-        return ui.add(label);
+    let response = match tone.problem() {
+        None => ui.add(label),
+        Some(problem) => {
+            let line_height = ui
+                .painter()
+                .layout_no_wrap("M".to_owned(), font, color)
+                .size()
+                .y;
+            let response = ui
+                .horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = MARK_ADVANCE - MARK_SIDE;
+                    let (rect, _) =
+                        ui.allocate_exact_size(vec2(MARK_SIDE, line_height), Sense::hover());
+                    paint_problem_mark(
+                        ui.painter(),
+                        Rect::from_center_size(rect.center(), vec2(MARK_SIDE, MARK_SIDE)),
+                        problem,
+                    );
+                    ui.add(label)
+                })
+                .inner;
+            let announced = problem.announce(text);
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
+            });
+            response
+        }
     };
-    let line_height = ui
-        .painter()
-        .layout_no_wrap("M".to_owned(), font, color)
-        .size()
-        .y;
-    let response = ui
-        .horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = MARK_ADVANCE - MARK_SIDE;
-            let (rect, _) = ui.allocate_exact_size(vec2(MARK_SIDE, line_height), Sense::hover());
-            paint_problem_mark(
-                ui.painter(),
-                Rect::from_center_size(rect.center(), vec2(MARK_SIDE, MARK_SIDE)),
-                problem,
-            );
-            ui.add(label)
-        })
-        .inner;
-    let announced = problem.announce(text);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announced)
-    });
+    // A line that takes a press is reached by Tab as well, so it shows where
+    // the keyboard is the way the page's other controls do. A press never
+    // frames it, only focus that Tab moved here.
+    if sense.is_some() && theme::focus_is_visible(ui.ctx(), &response) {
+        theme::paint_focus_ring(ui, &response, response.rect);
+    }
     response
 }
 

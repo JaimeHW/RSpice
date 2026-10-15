@@ -252,8 +252,6 @@ pub(crate) fn show_virtual_text_editor(
                 if response.clicked() {
                     response.request_focus();
                 }
-                // No focus ring: the editor takes focus on every press, and
-                // its caret already says where typing goes.
 
                 let origin = content_rect.min;
                 let first_row = ((viewport.top() - style.top_padding).max(0.0) / style.line_height)
@@ -560,6 +558,18 @@ pub(crate) fn show_virtual_text_editor(
                         );
                         ui.scroll_to_rect(rect, Some(egui::Align::Center));
                     }
+                }
+                // The editor takes focus on every press, so a press never
+                // frames it: only focus that Tab moved here shows the ring,
+                // and the caret says where typing goes the rest of the time.
+                // Painted last, over the code, and around the visible part of
+                // a document that scrolls past its viewport.
+                if crate::ui::theme::focus_is_visible(ui.ctx(), &response) {
+                    crate::ui::theme::paint_focus_ring(
+                        ui,
+                        &response,
+                        ui.clip_rect().intersect(content_rect),
+                    );
                 }
                 response
             })
