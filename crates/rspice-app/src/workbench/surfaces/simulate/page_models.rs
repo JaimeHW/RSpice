@@ -972,12 +972,15 @@ mod tests {
         let first = add_sectioned_library(&mut app, "models-first.lib", "first_nch");
         let second = add_sectioned_library(&mut app, "models-second.lib", "second_nch");
         let initial_revision = active_plan_revision(&app);
-        app.state.workbench.preflight.open = true;
+        app.state.workbench.preflight.report =
+            Some(crate::workbench::state::PreflightReport::retained_for_test(
+                app.state.workspace.content.project.revision().get(),
+            ));
 
         apply_model_binding_action(&mut app, ModelBindingAction::Attach(first.clone()));
         assert_eq!(app.state.sim_setup.model_bindings[0].library_name, first);
         assert_ne!(active_plan_revision(&app), initial_revision);
-        assert!(!app.state.workbench.preflight.open);
+        assert!(app.state.workbench.preflight.report.is_none());
 
         apply_model_binding_action(&mut app, ModelBindingAction::Attach(second.clone()));
         assert_eq!(

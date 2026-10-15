@@ -38,6 +38,7 @@ pub(crate) mod browser;
 pub(crate) mod chrome;
 pub(crate) mod commands;
 mod cross_probe;
+pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod docks;
 pub(crate) mod documents;

@@ -876,7 +876,10 @@ mod tests {
     fn valid_save_policy_commit_is_revisioned_and_invalidates_preflight() {
         let mut app = RSpiceApp::test_instance();
         let before_revision = active_plan_revision(&app);
-        app.state.workbench.preflight.open = true;
+        app.state.workbench.preflight.report =
+            Some(crate::workbench::state::PreflightReport::retained_for_test(
+                app.state.workspace.content.project.revision().get(),
+            ));
         let mut policy = app.state.sim_setup.save_policy;
         policy.maximum_storage_bytes /= 2;
 
@@ -888,7 +891,7 @@ mod tests {
 
         assert_eq!(app.state.sim_setup.save_policy, policy);
         assert_ne!(active_plan_revision(&app), before_revision);
-        assert!(!app.state.workbench.preflight.open);
+        assert!(app.state.workbench.preflight.report.is_none());
         assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 
@@ -897,7 +900,10 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let before_policy = app.state.sim_setup.save_policy;
         let before_revision = active_plan_revision(&app);
-        app.state.workbench.preflight.open = true;
+        app.state.workbench.preflight.report =
+            Some(crate::workbench::state::PreflightReport::retained_for_test(
+                app.state.workspace.content.project.revision().get(),
+            ));
         let mut invalid = before_policy;
         invalid.maximum_storage_bytes = 0;
 
@@ -909,7 +915,7 @@ mod tests {
 
         assert_eq!(app.state.sim_setup.save_policy, before_policy);
         assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(app.state.workbench.preflight.open);
+        assert!(app.state.workbench.preflight.report.is_some());
         assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 

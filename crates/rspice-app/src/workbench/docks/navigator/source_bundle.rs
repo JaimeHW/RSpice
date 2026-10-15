@@ -23,7 +23,7 @@ use crate::workbench::app_state::cell_usage::CellInstanceUse;
 use crate::workbench::design_system::{Problem, elide_text, paint_problem_mark};
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceFileAction, SourceIncludeTarget, SourceNavigation, SourceOutlineGroup,
-    VerilogAFileSelection, VerilogAHeaderView, document_navigation,
+    VerilogAHeaderView, document_navigation,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -293,27 +293,13 @@ fn active_path(state: &AppState, language: ProjectSourceLanguage) -> Option<Stri
     code_workspace::active_bundle_path(&state.workspace, &state.ui.code_workspace, language)
 }
 
-/// Choose `logical_path` of the bundle in front of the reader. A built-in
-/// header open in the editor gives way to it: choosing a file is choosing to
-/// edit.
 fn select(state: &mut AppState, language: ProjectSourceLanguage, logical_path: &str) {
-    let Some(bundle_id) = active_bundle(state, language).map(crate::state::ProjectSourceBundle::id)
-    else {
-        return;
-    };
-    match language {
-        ProjectSourceLanguage::VerilogA => {
-            let veriloga = &mut state.ui.code_workspace.veriloga;
-            veriloga.viewed_header = None;
-            veriloga.selected_file = Some(VerilogAFileSelection {
-                bundle_id,
-                logical_path: logical_path.to_owned(),
-            });
-        }
-        ProjectSourceLanguage::RSpiceAutomation => {
-            state.ui.code_workspace.automation.selected_file = Some(logical_path.to_owned());
-        }
-    }
+    code_workspace::select_source_document(
+        &state.workspace,
+        &mut state.ui.code_workspace,
+        language,
+        logical_path,
+    );
 }
 
 /// What a click in the rail asked for, applied once the rows are painted.

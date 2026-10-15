@@ -1219,6 +1219,24 @@ pub struct PreflightReport {
 }
 
 impl PreflightReport {
+    /// A retained report with no findings and no authorization, for the tests
+    /// that only need preflight evidence to exist so they can watch a plan
+    /// mutation drop it.
+    #[cfg(test)]
+    pub(crate) fn retained_for_test(project_revision: u64) -> Self {
+        Self {
+            project_revision,
+            topology_root: String::new(),
+            topology_revision: 0,
+            topology_closure: Vec::new(),
+            simulation_plan_id: None,
+            simulation_plan_revision: None,
+            blockers: Vec::new(),
+            advisories: Vec::new(),
+            prepared: None,
+        }
+    }
+
     /// Whether the immutable report contains a complete authorization. Call
     /// `is_runnable_for` at every live UI or dispatch boundary so currentness
     /// is evaluated as well.
@@ -1293,38 +1311,34 @@ pub struct PreparedPreflightContract {
     pub model_identity_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreflightToast {
-    pub message: String,
-    pub warning: bool,
-}
-
-/// Transient state for the simulation-preflight dialog and its one-frame
-/// notification. Reports never survive a project or application reload.
+/// Transient state for the simulation-preflight pass: the report it produced
+/// and the request that starts it. Reports never survive a project or
+/// application reload.
+///
+/// There is no visibility flag any more. The pass used to open a dialog over
+/// the design to state what it found; its findings are now records in the
+/// canonical diagnostic store, so what the pass leaves behind is evidence
+/// rather than a window.
 #[derive(Debug, Clone, Default)]
 pub struct PreflightDialogState {
-    pub open: bool,
     pub report: Option<PreflightReport>,
-    pub pending_toast: Option<PreflightToast>,
     /// A caller asked for the governed preflight-and-queue pass. The frame
-    /// loop consumes it immediately before the dialog is rendered, so the
-    /// request records intent without its origin naming the workflow.
+    /// loop consumes it on its next pass, so the request records intent
+    /// without its origin naming the workflow.
     pub(in crate::workbench) run_and_queue_requested: bool,
 }
 
 impl PreflightDialogState {
-    /// Drop every presentation artifact backed by a no-longer-current
-    /// execution contract. The controller's one-shot permit is invalidated by
-    /// the owning `RSpiceApp` at the same mutation boundary.
+    /// Drop every artifact backed by a no-longer-current execution contract.
+    /// The controller's one-shot permit is invalidated by the owning
+    /// `RSpiceApp` at the same mutation boundary.
     ///
     /// A pending run request deliberately survives: the workflow it asks for
     /// re-runs preflight and digest-compares the live contract before it
     /// queues anything, so dropping the request here would lose a deliberate
     /// operator action to a design edit that the workflow already refuses.
     pub fn invalidate(&mut self) {
-        self.open = false;
         self.report = None;
-        self.pending_toast = None;
     }
 
     /// Ask the frame loop to run the governed preflight-and-queue pass.

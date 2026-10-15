@@ -157,7 +157,9 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     if app.state.workbench.preflight.take_run_and_queue_request() {
         preflight::run_and_queue(app);
     }
-    preflight::show(ctx, app);
+    // A finding the reader chose to follow. The page that offered it holds
+    // the session, not the application root, so the jump happens here.
+    crate::workbench::diagnostic_routes::apply_pending(ctx, app);
     docks::show_run_details(ctx, app);
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     // Export requests originate in retained result-document engines but IO is

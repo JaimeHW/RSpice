@@ -629,6 +629,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "workflows/file_actions",
     // Command dispatch.
     "commands",
+    // Following a finding to the object it is about. It reads a route a page
+    // recorded and opens its destination, which takes the command vocabulary
+    // and the document engines — so it sits above dispatch and below every
+    // surface that offers one, none of which it references.
+    "diagnostic_routes",
     // Chrome, docks, surfaces, and the rest of the presentation layer.
     "chrome",
     "docks",

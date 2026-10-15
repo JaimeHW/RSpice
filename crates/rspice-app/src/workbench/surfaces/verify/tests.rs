@@ -190,7 +190,6 @@ fn retain_preflight_report(app: &mut RSpiceApp) {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     app.state.workbench.preflight = crate::workbench::state::PreflightDialogState {
-        open: true,
         report: Some(crate::workbench::state::PreflightReport {
             project_revision: app.state.workspace.content.project.revision().get(),
             topology_root,
@@ -201,10 +200,6 @@ fn retain_preflight_report(app: &mut RSpiceApp) {
             blockers: Vec::new(),
             advisories: Vec::new(),
             prepared: None,
-        }),
-        pending_toast: Some(crate::workbench::state::PreflightToast {
-            message: "retained preflight".to_owned(),
-            warning: false,
         }),
         ..Default::default()
     };
@@ -232,9 +227,7 @@ fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
             .revision(),
         source_revision.next().expect("revision advances")
     );
-    assert!(!app.state.workbench.preflight.open);
     assert!(app.state.workbench.preflight.report.is_none());
-    assert!(app.state.workbench.preflight.pending_toast.is_none());
 }
 
 #[test]
@@ -573,7 +566,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
             .design_variables
             .is_empty()
     );
-    assert!(app.state.workbench.preflight.open);
+    assert!(app.state.workbench.preflight.report.is_some());
     assert!(tuning_is_dirty(&app));
     assert!(!app.state.simulation.execution.trigger_simulation);
 }
@@ -614,11 +607,10 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    app.state.workbench.preflight.open = true;
-    app.state.workbench.preflight.pending_toast = Some(crate::workbench::state::PreflightToast {
-        message: "Retain this preflight state".to_owned(),
-        warning: true,
-    });
+    app.state.workbench.preflight.report =
+        Some(crate::workbench::state::PreflightReport::retained_for_test(
+            app.state.workspace.content.project.revision().get(),
+        ));
     sync_tuning_session(&mut app);
     app.state.workbench.verification.tuning_variables[0].candidate_expression =
         "620 ohm".to_owned();
@@ -645,15 +637,9 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
             .expression,
         "499 ohm"
     );
-    assert!(app.state.workbench.preflight.open);
-    assert_eq!(
-        app.state
-            .workbench
-            .preflight
-            .pending_toast
-            .as_ref()
-            .map(|toast| toast.message.as_str()),
-        Some("Retain this preflight state")
+    assert!(
+        app.state.workbench.preflight.report.is_some(),
+        "a blocked tuning run rolls back without dropping retained preflight evidence",
     );
     assert!(tuning_is_dirty(&app));
     assert!(!app.state.simulation.execution.trigger_simulation);

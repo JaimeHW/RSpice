@@ -1507,7 +1507,6 @@ impl WorkbenchState {
     /// these surfaces.
     pub fn application_modal_open(&self) -> bool {
         self.project_launcher_open
-            || self.preflight.open
             || self.notification_center_open
             || self.model_correlation.dialog_open()
             || self.create_result_document.open

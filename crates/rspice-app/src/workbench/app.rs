@@ -1854,20 +1854,16 @@ mod tests {
     #[test]
     fn frame_topology_edits_drop_preflight_authority_at_one_central_boundary() {
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.preflight.open = true;
-        app.state.workbench.preflight.pending_toast =
-            Some(crate::workbench::state::PreflightToast {
-                message: "prepared".to_owned(),
-                warning: false,
-            });
+        app.state.workbench.preflight.report =
+            Some(crate::workbench::state::PreflightReport::retained_for_test(
+                app.state.workspace.content.project.revision().get(),
+            ));
         let before = FrameSimulationInput::capture(&app.state);
 
         app.state.schematic.bump_topology_version();
         app.invalidate_simulation_preflight_after_frame_edit(&before);
 
-        assert!(!app.state.workbench.preflight.open);
         assert!(app.state.workbench.preflight.report.is_none());
-        assert!(app.state.workbench.preflight.pending_toast.is_none());
     }
 
     #[test]

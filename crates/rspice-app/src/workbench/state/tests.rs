@@ -561,7 +561,6 @@ fn toggling_the_active_drawer_closes_it_deterministically() {
 #[test]
 fn invalidating_preflight_drops_every_revision_bound_presentation_artifact() {
     let mut preflight = PreflightDialogState {
-        open: true,
         report: Some(PreflightReport {
             project_revision: 4,
             topology_root: "user/top/schematic".to_owned(),
@@ -573,18 +572,12 @@ fn invalidating_preflight_drops_every_revision_bound_presentation_artifact() {
             advisories: Vec::new(),
             prepared: None,
         }),
-        pending_toast: Some(PreflightToast {
-            message: "stale success".to_owned(),
-            warning: false,
-        }),
         ..Default::default()
     };
 
     preflight.invalidate();
 
-    assert!(!preflight.open);
     assert!(preflight.report.is_none());
-    assert!(preflight.pending_toast.is_none());
 }
 
 #[test]
@@ -611,9 +604,6 @@ fn application_modals_own_global_input_exclusively() {
     state.project_launcher_open = true;
     assert!(state.application_modal_open());
     state.project_launcher_open = false;
-    state.preflight.open = true;
-    assert!(state.application_modal_open());
-    state.preflight.open = false;
     state.verification.regression_baseline_picker_open = true;
     assert!(state.application_modal_open());
     state.verification.regression_baseline_picker_open = false;

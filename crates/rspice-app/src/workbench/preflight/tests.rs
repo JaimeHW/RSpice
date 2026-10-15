@@ -5,63 +5,10 @@
 //! separate concerns, and the file was at its line budget.
 
 use super::*;
+use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::diagnostic_routes::apply_remediation;
 
 mod variants;
-
-fn blocker_report(observed: &str) -> PreflightReport {
-    PreflightReport {
-        project_revision: 7,
-        topology_root: "user/top/schematic".to_owned(),
-        topology_revision: 11,
-        topology_closure: vec![("user/top/schematic".to_owned(), 11)],
-        simulation_plan_id: None,
-        simulation_plan_revision: None,
-        blockers: vec![PreflightIssue {
-            check: "Source and netlist currentness".to_owned(),
-            observed: observed.to_owned(),
-            required: "A current validated input with an exact source closure".to_owned(),
-            remediation: PreflightRemediation::DesignChecks,
-        }],
-        advisories: Vec::new(),
-        prepared: None,
-    }
-}
-
-fn action_bounds(width: f32) -> egui::accesskit::Rect {
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let input = egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(width, 900.0))),
-        ..egui::RawInput::default()
-    };
-    let report = blocker_report(
-        "Generated input revision differs from the validated dependency closure and must wrap safely.",
-    );
-    let output = ctx.run_ui(input, |ctx| {
-        egui::CentralPanel::default()
-            .frame(Frame::new())
-            .show(ctx, |ui| {
-                let mut requested_fix = None;
-                blocker_list(ui, &report, &mut requested_fix);
-            });
-    });
-    output
-        .platform_output
-        .accesskit_update
-        .expect("AccessKit update")
-        .nodes
-        .iter()
-        .find_map(|(_, node)| {
-            (node.role() == egui::accesskit::Role::Button
-                && node
-                    .label()
-                    .is_some_and(|label| label.starts_with("Run source checks for blocker:")))
-            .then(|| node.bounds())
-            .flatten()
-        })
-        .expect("preflight remediation button bounds")
-}
 
 fn prepared_contract() -> PreparedPreflightContract {
     PreparedPreflightContract {
@@ -115,19 +62,35 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
         .as_ref()
         .expect("Run retains the same blocked report as explicit preflight");
     assert!(!report.blockers.is_empty());
-    assert!(app.state.workbench.preflight.open);
-    let toast = app
-        .state
-        .workbench
-        .preflight
-        .pending_toast
-        .as_ref()
-        .expect("blocked preflight retains its notification");
+    // The outcome is stated on the status line, and the blockers are on the
+    // Problems page rather than in a modal over the design.
+    let outcome = app.state.workbench.analysis_lifecycle_status.message();
     assert!(
-        toast.message.contains("design revision"),
-        "preflight must distinguish the input-design revision from the simulation-plan revision: {}",
-        toast.message
+        outcome.contains("design revision"),
+        "preflight must distinguish the input-design revision from the simulation-plan revision: {outcome}"
     );
+    assert_eq!(
+        app.state.workbench.console_page,
+        ConsolePage::Problems,
+        "a blocked pass leaves the reader where its findings are listed"
+    );
+    assert!(app.state.workbench.console_visible);
+    let blockers: Vec<String> = report
+        .blockers
+        .iter()
+        .map(|issue| issue.observed.clone())
+        .collect();
+    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let listed_messages: Vec<String> = (0..listed.len())
+        .filter_map(|index| listed.row(index))
+        .map(|row| row.message.to_owned())
+        .collect();
+    for blocker in &blockers {
+        assert!(
+            listed_messages.contains(blocker),
+            "every blocker stands on the page: {blocker} is missing from {listed_messages:?}"
+        );
+    }
 }
 
 #[test]
@@ -151,104 +114,6 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
     assert!(queue_retained_run(&mut app));
     assert!(app.state.simulation.execution.trigger_simulation);
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
-}
-
-#[test]
-fn preflight_uses_the_mockup_workflow_geometry_and_local_breakpoints() {
-    assert_eq!(PREFLIGHT_DIALOG_SIZE, DialogSize::SimulationWorkflow);
-    assert_eq!(
-        PreflightBodyLayout::resolve(760.0, 1_440.0),
-        PreflightBodyLayout {
-            issues: IssueLayout::Table,
-            context: ContextLayout::Split,
-        }
-    );
-    assert_eq!(
-        PreflightBodyLayout::resolve(760.0, 760.0),
-        PreflightBodyLayout {
-            issues: IssueLayout::Table,
-            context: ContextLayout::Stacked,
-        }
-    );
-    assert_eq!(
-        PreflightBodyLayout::resolve(390.0, 390.0),
-        PreflightBodyLayout {
-            issues: IssueLayout::Records,
-            context: ContextLayout::Stacked,
-        }
-    );
-}
-
-#[test]
-fn advisories_header_is_full_bleed_while_only_its_body_is_inset() {
-    let ctx = Context::default();
-    crate::ui::Theme::default().apply(&ctx);
-    ctx.enable_accesskit();
-    let output = ctx.run_ui(
-        egui::RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(400.0, 160.0))),
-            ..Default::default()
-        },
-        |ctx| {
-            egui::CentralPanel::default()
-                .frame(Frame::NONE)
-                .show(ctx, |ui| {
-                    context_panel(ui, "Advisories", |ui| {
-                        ui.label("Body content");
-                    });
-                });
-        },
-    );
-    let header = output
-        .platform_output
-        .accesskit_update
-        .expect("accessibility update")
-        .nodes
-        .iter()
-        .find_map(|(_, node)| {
-            (node.role() == egui::accesskit::Role::Label && node.label() == Some("Advisories"))
-                .then(|| node.bounds())
-                .flatten()
-        })
-        .expect("advisories header bounds");
-
-    assert!(header.x0 <= 0.5, "header left edge was inset: {header:?}");
-    assert!(
-        header.x1 >= 399.5,
-        "header right edge was inset: {header:?}"
-    );
-}
-
-#[test]
-fn issue_table_regions_are_contiguous_and_non_overlapping_at_the_boundary() {
-    let geometry = IssueTableGeometry::resolve(680.0, 104.0);
-    assert_eq!(geometry.column_edges[0], 0.0);
-    assert!((geometry.column_edges[5] - 680.0).abs() < f32::EPSILON);
-    assert!(
-        geometry
-            .column_edges
-            .windows(2)
-            .all(|edges| edges[0] < edges[1])
-    );
-    for cells in geometry.column_edges.windows(3) {
-        assert!(cells[1] >= cells[0] && cells[2] >= cells[1]);
-    }
-}
-
-#[test]
-fn remediation_action_stays_inside_wide_table_and_phone_record_surfaces() {
-    for width in [680.0_f32, 390.0] {
-        let bounds = action_bounds(width);
-        assert!(
-            bounds.x0 >= 0.0,
-            "button started outside {width}: {bounds:?}"
-        );
-        assert!(
-            bounds.x1 <= f64::from(width) + 0.5,
-            "button overflowed {width}: {bounds:?}"
-        );
-        assert!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0);
-    }
 }
 
 #[test]
@@ -751,80 +616,9 @@ fn a_topology_the_engine_refuses_is_an_ordered_preflight_blocker() {
     assert_eq!(topology.remediation, PreflightRemediation::DesignChecks);
 }
 
+/// Every preparation stage is repaired where the thing it failed on lives.
 #[test]
-fn visible_mockup_labels_are_exact_and_do_not_expose_internal_contract_rows() {
-    assert_eq!(
-        ISSUE_TABLE_HEADERS,
-        ["Order", "Check", "Observed", "Required", "Action"]
-    );
-    assert_eq!(CLEAN_CHECK, "No blocking issues.");
-    assert_eq!(EMPTY_CELL, "—");
-    assert_eq!(
-        FROZEN_DISPATCH_ROWS,
-        [
-            "Revision",
-            "Analysis identities",
-            "PVT points",
-            "Tasks",
-            "Target"
-        ]
-    );
-    assert_eq!(
-        remediation_label(&PreflightRemediation::DesignChecks),
-        "Run source checks"
-    );
-    assert_eq!(
-        remediation_label(&PreflightRemediation::SimulationPlan),
-        "Open plan"
-    );
-    assert_eq!(
-        remediation_label(&PreflightRemediation::ProjectTechnology),
-        "Attach technology"
-    );
-}
-
-#[test]
-fn summary_copy_and_blocker_action_mapping_match_the_mockup_contract() {
-    let runnable = PreflightReport {
-        project_revision: 7,
-        topology_root: "user/top/schematic".to_owned(),
-        topology_revision: 11,
-        topology_closure: vec![("user/top/schematic".to_owned(), 11)],
-        simulation_plan_id: None,
-        simulation_plan_revision: None,
-        blockers: Vec::new(),
-        advisories: Vec::new(),
-        prepared: Some(prepared_contract()),
-    };
-    assert_eq!(summary_heading(&runnable), RUNNABLE_HEADING);
-    assert_eq!(
-        RUNNABLE_SUMMARY,
-        "Immutable inputs, target, task graph, and save policy are ready for dispatch."
-    );
-    assert_eq!(
-        BLOCKED_SUMMARY,
-        "The run was not queued. Resolve the ordered issues below, then rerun preflight."
-    );
-
-    let issue = |check: &str| PreflightIssue {
-        check: check.to_owned(),
-        observed: "blocked".to_owned(),
-        required: "fixed".to_owned(),
-        remediation: PreflightRemediation::DesignChecks,
-    };
-    let one = PreflightReport {
-        blockers: vec![issue("Source closure")],
-        prepared: None,
-        ..runnable.clone()
-    };
-    assert_eq!(summary_heading(&one), "1 blocking issue");
-    let two = PreflightReport {
-        blockers: vec![issue("Model bindings"), issue("Executable netlist")],
-        prepared: None,
-        ..runnable
-    };
-    assert_eq!(summary_heading(&two), "2 blocking issues");
-
+fn a_preparation_failure_names_the_destination_that_repairs_it() {
     use crate::simulation::execution::PreparationStage;
     for stage in [
         PreparationStage::DesignChecks,
@@ -946,7 +740,6 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
         preparation_remediation(PreparationStage::ModelBindings, None),
         expected
     );
-    assert_eq!(remediation_label(&expected), "Open Corners & sections");
 
     // A library whose selected corner it does not define fails to
     // materialize the reference process, which is the row the other site
@@ -1215,7 +1008,6 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
         remediation,
         PreflightRemediation::NetlistSource { line: Some(42) }
     );
-    assert_eq!(remediation_label(&remediation), "Open netlist source");
 
     let mut app = RSpiceApp::test_instance();
     app.state.project_lifecycle.authority.open_session();
@@ -1234,41 +1026,6 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
         Some(42),
         "a finding that named a line must land on it, not merely open the deck"
     );
-}
-
-/// A located finding is a jump; an unlocated one is a row.
-///
-/// The row-level click is offered only where the failure named a line,
-/// because that is the only case where pressing the row means something more
-/// than the Action button already does. Every row keeps that button, so
-/// nothing is taken away from the findings that stay rows.
-#[test]
-fn only_a_blocker_naming_a_line_makes_its_row_a_jump() {
-    use crate::simulation::execution::PreparationStage;
-
-    assert_eq!(
-        remediation_source_line(&preparation_remediation(PreparationStage::Netlist, Some(7))),
-        Some(7)
-    );
-    assert_eq!(
-        remediation_source_line(&preparation_remediation(PreparationStage::Netlist, None)),
-        None,
-        "a netlist failure that reported no line offers no jump"
-    );
-    for stage in [
-        PreparationStage::DesignChecks,
-        PreparationStage::SourceChecks,
-        PreparationStage::ModelBindings,
-        PreparationStage::AnalysisPlan,
-        PreparationStage::Authorization,
-    ] {
-        assert_eq!(
-            remediation_source_line(&preparation_remediation(stage, Some(7))),
-            None,
-            "{stage:?} names a workspace, not a line — a line offered to it \
-             would be a coordinate in the wrong document"
-        );
-    }
 }
 
 /// The parser numbers a deck from 1; the buffer indexes it from 0. A

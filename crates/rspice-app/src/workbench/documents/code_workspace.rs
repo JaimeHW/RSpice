@@ -255,6 +255,37 @@ pub(crate) fn source_editor_id(
     }
 }
 
+/// Choose `logical_path` of the bundle in front of the reader, and report the
+/// bundle it belongs to so a caller can address the editor that will show it.
+///
+/// A built-in header open in the editor well gives way to it: choosing a file
+/// is choosing to edit. `None` means this project holds no active bundle for
+/// `language`, which is the honest answer when a finding outlived its source.
+pub(crate) fn select_source_document(
+    workspace: &crate::state::ProjectWorkspace,
+    code: &mut CodeWorkspaceRuntimeState,
+    language: crate::state::ProjectSourceLanguage,
+    logical_path: &str,
+) -> Option<crate::state::ProjectSourceId> {
+    use crate::state::ProjectSourceLanguage;
+
+    let bundle_id =
+        active_source_bundle(workspace, language).map(crate::state::ProjectSourceBundle::id)?;
+    match language {
+        ProjectSourceLanguage::VerilogA => {
+            code.veriloga.viewed_header = None;
+            code.veriloga.selected_file = Some(page::VerilogAFileSelection {
+                bundle_id,
+                logical_path: logical_path.to_owned(),
+            });
+        }
+        ProjectSourceLanguage::RSpiceAutomation => {
+            code.automation.selected_file = Some(logical_path.to_owned());
+        }
+    }
+    Some(bundle_id)
+}
+
 /// The netlist page names the artifact it is editing. A generated primary has
 /// no file of its own, so it is named after the cell that produces it and
 /// marked as generated rather than borrowing a filename it does not have.

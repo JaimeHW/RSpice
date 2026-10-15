@@ -163,6 +163,64 @@ impl PreflightChip {
     }
 }
 
+/// The five rows of the frozen dispatch contract, under the ordered plan.
+///
+/// This is what the retained report *authorizes*: the exact design revision,
+/// the stable analysis identities, the PVT points, the task count and the
+/// target. It belongs with the plan because the plan is the thing it
+/// authorizes — it used to be a panel inside the preflight dialog, which
+/// meant the one statement of what a run will dispatch was readable only
+/// while a modal was up, and never while anyone was editing the plan.
+///
+/// Nothing is drawn without an authorized current report. A blocked or
+/// expired report has no contract to state, and fabricating one would be
+/// stating a dispatch nobody is authorized to make; the chip beside the
+/// heading already says which of the two it is.
+pub(super) fn dispatch_contract(ui: &mut Ui, app: &RSpiceApp) {
+    use crate::workbench::design_system::{property_card, property_row};
+
+    if !matches!(
+        preflight_currency(app),
+        PreflightCurrency::Authorized { .. }
+    ) {
+        return;
+    }
+    let Some(prepared) = app
+        .state
+        .workbench
+        .preflight
+        .report
+        .as_ref()
+        .and_then(|report| report.prepared.as_ref().map(|prepared| (report, prepared)))
+    else {
+        return;
+    };
+    let (report, prepared) = prepared;
+    ui.add_space(CONTRACT_GAP);
+    property_card(ui, "Authorized for dispatch", |ui| {
+        property_row(ui, "Revision", &report.project_revision.to_string());
+        property_row(
+            ui,
+            "Analysis identities",
+            &format!(
+                "{} stable instance{}",
+                prepared.analysis_ids.len(),
+                if prepared.analysis_ids.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+        );
+        property_row(ui, "PVT points", &prepared.pvt_point_count.to_string());
+        property_row(ui, "Tasks", &prepared.task_count.to_string());
+        property_row(ui, "Target", prepared.target);
+    });
+}
+
+/// The gap between the last plan row and the contract under it.
+const CONTRACT_GAP: f32 = 12.0;
+
 /// Where this session's preflight report stands, for the chip above.
 ///
 /// A session with no report short-circuits before the topology closure is

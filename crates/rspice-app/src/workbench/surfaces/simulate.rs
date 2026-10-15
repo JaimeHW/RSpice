@@ -337,6 +337,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
                     let participation = participation::PlanParticipation::resolve(&app.state);
                     ordered_instance_stack(ui, app, &participation);
+                    pages::dispatch_contract(ui, app);
                     ui.add_space(STACKED_WORKSPACE_GAP);
                     analysis_editor(
                         ui,
@@ -500,6 +501,7 @@ fn split_analysis_route(
         .show(&mut stack, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ordered_instance_stack(ui, app, &participation);
+            pages::dispatch_contract(ui, app);
         });
 
     // The editor's height follows its width, so it withholds the scrollbar's

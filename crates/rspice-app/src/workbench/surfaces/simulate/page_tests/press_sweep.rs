@@ -653,7 +653,12 @@ const PRESSES_THIS_HARNESS_CANNOT_SEE: &[&str] = &[
 ];
 
 /// How many sweep presses open a modal.
-const MODAL_OPENERS_FLOOR: usize = 7;
+///
+/// Six, down from seven: "Validate plan" runs the preflight pass, and the
+/// pass no longer draws a report over the design. It states its outcome on
+/// the status line and files its findings on the Problems page, so pressing
+/// it opens nothing.
+const MODAL_OPENERS_FLOOR: usize = 6;
 
 /// The two whole-sweep numbers above, split by the surface that produced them:
 /// segments excused for holding their selection, and presses that opened a
@@ -667,7 +672,7 @@ const MODAL_OPENERS_FLOOR: usize = 7;
 /// summing to [`HELD_SELECTION_CEILING`] and [`MODAL_OPENERS_FLOOR`], so
 /// neither total can be quietly re-cut.
 const SEGMENTS_AND_MODALS_PER_SURFACE: &[(&str, usize, usize)] = &[
-    ("Analyses/Transient", 1, 4),
+    ("Analyses/Transient", 1, 3),
     ("Analyses/Stb", 0, 1),
     ("Solver", 1, 0),
     ("Variables", 0, 1),
@@ -678,11 +683,11 @@ const SEGMENTS_AND_MODALS_PER_SURFACE: &[(&str, usize, usize)] = &[
 
 /// Modals a sweep press opened that Escape does not close here.
 ///
-/// One, and it is this harness's limit rather than the studio's: "Validate
-/// plan" runs `Command::PreflightChecks`, and the preflight report is drawn by
-/// `workbench::frame`, which these surface-and-overlay passes do not run.
-/// There is no dialog on screen for Escape to reach.
-const MODALS_ESCAPE_DOES_NOT_CLOSE: &[&str] = &["Analyses/Transient: Button \"Validate plan\""];
+/// None. The one entry was "Validate plan", whose preflight report used to be
+/// drawn by `workbench::frame` — which these surface-and-overlay passes do
+/// not run, so there was no dialog on screen for Escape to reach. The pass
+/// draws no report at all now, so the exemption has nothing to cover.
+const MODALS_ESCAPE_DOES_NOT_CLOSE: &[&str] = &[];
 
 /// How many destructive controls the sweep finds.
 ///
