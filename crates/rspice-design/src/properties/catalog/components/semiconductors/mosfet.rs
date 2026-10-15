@@ -355,7 +355,7 @@ impl PropertyCatalog {
                     .with_display_name("Body Squares")
                     .with_description("Number of squares for the SOI body-contact resistance")
                     .with_type(PropertyType::Number)
-                    .with_default(PropertyValue::number(0.0))
+                    .with_default(PropertyValue::number(1.0))
                     .with_order(46)
                     .with_category("Parasitics"),
             );
