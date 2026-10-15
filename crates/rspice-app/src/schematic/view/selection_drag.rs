@@ -225,6 +225,60 @@ mod tests {
     use crate::state::{CellViewRef, ComponentType, Point, ViewType};
     use rspice_schematic_editor::view::pointer_target::PointerTarget;
 
+    /// A vertex drag follows the pointer for the whole gesture, including over
+    /// a point that carries a junction and no wire vertex.
+    ///
+    /// The anchor only advances when the edit reports a move, so a point whose
+    /// move went unreported moved once and was then dragged from an anchor it
+    /// had already left: every later frame matched nothing and the object sat
+    /// still under a moving pointer for as long as the button was held.
+    #[test]
+    fn a_vertex_drag_over_a_lone_junction_follows_the_pointer_every_frame() {
+        let ctx = egui::Context::default();
+        let mut state = AppState::default();
+        let junction = Point::new(100, 100);
+        state.schematic.add_junction(junction);
+        // No component takes part, so one context serves the whole gesture.
+        let symbols = super::super::schematic_symbol_context(&state);
+
+        dispatch(
+            &mut state,
+            &ctx,
+            &symbols,
+            SelectionDragAction::BeginWireVertex(junction),
+        );
+        let operation_id = state
+            .schematic
+            .pending_operation_id()
+            .expect("the gesture owns a transaction");
+
+        let mut from = junction;
+        for step in 1..=3 {
+            let position = Point::new(junction.x, junction.y - step * 10);
+            dispatch(
+                &mut state,
+                &ctx,
+                &symbols,
+                SelectionDragAction::MoveWireVertex {
+                    operation_id,
+                    from,
+                    position,
+                },
+            );
+            assert_eq!(
+                state.schematic.document().junctions[0].pos,
+                position,
+                "step {step} left the junction behind the pointer"
+            );
+            assert_eq!(
+                state.dialogs.interaction.drag.last_pos,
+                Some((position.x, position.y)),
+                "step {step} left the drag anchored where the junction no longer is"
+            );
+            from = position;
+        }
+    }
+
     #[test]
     fn queued_drag_requests_reject_changed_sources_and_replacement_transactions() {
         let ctx = egui::Context::default();

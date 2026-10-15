@@ -231,10 +231,15 @@ pub fn move_vertices_at(document: &mut SchematicDocument, old_pos: Point, new_po
         }
     }
 
-    // Also move any junction at this position
+    // Also move any junction at this position. A junction counts as a move:
+    // the caller advances the gesture's anchor only when this reports one, and
+    // a point that carries a junction but no wire vertex would otherwise move
+    // once and then be dragged from an anchor it no longer sits on, freezing
+    // the gesture for as long as the pointer is held.
     for junction in &mut document.junctions {
         if junction.pos == old_pos {
             junction.pos = new_pos;
+            moved = true;
         }
     }
 
@@ -252,4 +257,47 @@ pub fn wires_to_split_at(document: &SchematicDocument, point: Point) -> Vec<u64>
         })
         .map(|w| w.id)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::net_label::Junction;
+    use super::*;
+
+    /// A point can carry a junction without any wire holding a vertex there —
+    /// a junction left behind by an earlier edit is the common way. Dragging
+    /// it moves it, so it has to be reported as a move: the caller advances
+    /// the gesture's anchor only on `true`, and an anchor left behind freezes
+    /// the drag after its first step.
+    #[test]
+    fn moving_a_point_that_only_carries_a_junction_reports_the_move() {
+        let mut document = SchematicDocument::default();
+        document
+            .junctions
+            .push(Junction::new(1, Point::new(100, 100)));
+
+        assert!(move_vertices_at(
+            &mut document,
+            Point::new(100, 100),
+            Point::new(100, 90)
+        ));
+        assert_eq!(document.junctions[0].pos, Point::new(100, 90));
+    }
+
+    /// And a point nothing sits on still reports nothing, so a gesture that
+    /// grabbed empty space does not claim an edit.
+    #[test]
+    fn moving_a_point_nothing_sits_on_reports_no_move() {
+        let mut document = SchematicDocument::default();
+        document
+            .junctions
+            .push(Junction::new(1, Point::new(100, 100)));
+
+        assert!(!move_vertices_at(
+            &mut document,
+            Point::new(400, 400),
+            Point::new(400, 390)
+        ));
+        assert_eq!(document.junctions[0].pos, Point::new(100, 100));
+    }
 }
