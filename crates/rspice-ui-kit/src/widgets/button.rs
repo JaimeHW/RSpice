@@ -27,12 +27,18 @@ pub struct Button<'a> {
     ghost: bool,
     destructive: bool,
     enabled: bool,
+    compact: bool,
     min_width: f32,
     min_height: f32,
     max_width: Option<f32>,
     square: bool,
     accessible_label: Option<&'a str>,
 }
+
+/// The gap a compact button leaves above and below itself inside its row, and
+/// what it takes off each side of its label against a standard button.
+const COMPACT_ROW_GAP: f32 = 3.0;
+const COMPACT_PADDING_RELIEF: f32 = 6.0;
 
 impl<'a> Button<'a> {
     /// A standard bordered button.
@@ -44,12 +50,26 @@ impl<'a> Button<'a> {
             ghost: false,
             destructive: false,
             enabled: true,
+            compact: false,
             min_width: 0.0,
             min_height: 0.0,
             max_width: None,
             square: false,
             accessible_label: None,
         }
+    }
+
+    /// Shorten the control for a verb that lives inside a table row.
+    ///
+    /// A row is as tall as the design's row height, which is the control
+    /// height or a point over it: a standard button in one is clipped at both
+    /// ends. A compact button gives up six points of height and six of label
+    /// padding, which is also what keeps a row of four verbs from spending a
+    /// table's whole trailing column. A touch shell is left alone — there the
+    /// control height is the touch target and may not be given up.
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
     }
 
     /// Add a leading 13 px icon.
@@ -124,6 +144,15 @@ impl<'a> Button<'a> {
         self
     }
 
+    /// What `compact` gives up here, which is nothing in a touch shell.
+    fn compact_relief(&self, t: &Tokens, relief: f32) -> f32 {
+        if self.compact && !t.metrics.is_touch() {
+            relief
+        } else {
+            0.0
+        }
+    }
+
     /// The label galley and the width the control is laid out at.
     ///
     /// One owner for that arithmetic, because two surfaces ask for it: the
@@ -154,7 +183,8 @@ impl<'a> Button<'a> {
         );
         let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
-        let unconstrained_width = (galley.size().x + icon_w + 20.0).max(self.min_width);
+        let padding = 20.0 - self.compact_relief(&t, COMPACT_PADDING_RELIEF);
+        let unconstrained_width = (galley.size().x + icon_w + padding).max(self.min_width);
         let width = self
             .max_width
             .map_or(unconstrained_width, |max_width| {
@@ -204,11 +234,19 @@ impl<'a> Button<'a> {
         let (galley, width) = self.measure(ui, fg);
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
         let content_width = galley.size().x + icon_w;
-        let height = t
-            .metrics
-            .ctl_h
-            .max(galley.size().y + 8.0)
-            .max(self.min_height);
+        // A compact button is sized from the row it sits in, not from the
+        // control height: the row's last point is its rule, and what is left
+        // takes an equal gap above and below, so the two are never a point
+        // apart. Deriving it from the control height instead left whichever of
+        // the two densities had an odd remainder visibly off-centre.
+        let height = if self.compact_relief(&t, 1.0) > 0.0 {
+            (t.metrics.row_h - 1.0 - 2.0 * COMPACT_ROW_GAP)
+                .min(t.metrics.ctl_h)
+                .max(galley.size().y + 4.0)
+        } else {
+            t.metrics.ctl_h.max(galley.size().y + 8.0)
+        }
+        .max(self.min_height);
         let (rect, mut response) = ui.allocate_exact_size(
             vec2(width, height),
             if self.enabled {
