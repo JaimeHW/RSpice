@@ -14,11 +14,13 @@ use egui::{
 use crate::session::visibility::DrawingSheetLayerVisibility;
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{
-    DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DrawingSheetBorderTemplate,
-    DrawingSheetDisplayUnit, DrawingSheetGeometry as AuthoredDrawingSheetGeometry,
-    DrawingSheetRect, DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldValueAuthority,
-    DrawingSheetZoneEdges, DrawingSheetZoneGrid, DrawingSheetZoneLabels,
-    ResolvedDrawingSheetTitleField, SchematicSheetFormat,
+    DRAWING_SHEET_MANAGED_LOGO_COORDINATE_BASIS, DRAWING_SHEET_TITLE_CAPTION_POSITION,
+    DRAWING_SHEET_TITLE_CELL_PADDING_UM, DRAWING_SHEET_TITLE_VALUE_POSITION,
+    DrawingSheetBorderTemplate, DrawingSheetDisplayUnit,
+    DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
+    DrawingSheetTitleBlockRotation, DrawingSheetTitleFieldValueAuthority, DrawingSheetZoneEdges,
+    DrawingSheetZoneGrid, DrawingSheetZoneLabels, ResolvedDrawingSheetTitleField,
+    SchematicSheetFormat,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -244,26 +246,36 @@ struct DrawingSheetLod {
     show_dimensions: bool,
 }
 
-/// Desktop fit-sheet views land between roughly 0.55x and 0.85x world scale,
-/// depending on dock width and window geometry. Treat authored sizes smaller
-/// than the requested readable floor at the lower bound as under-specified:
-/// otherwise the floor remains active through several normal wheel steps,
-/// making the title-block cells grow while their text appears frozen. Below
-/// this reference the floor still protects overview legibility; at and above
-/// it the text grows continuously with the sheet.
-const DRAWING_SHEET_TEXT_FIT_REFERENCE_ZOOM: f32 = 0.55;
-
-fn drawing_sheet_font_size(zoom: f32, authored_size: f32, readable_floor: f32) -> f32 {
-    let authored_for_fit =
-        authored_size.max(readable_floor / DRAWING_SHEET_TEXT_FIT_REFERENCE_ZOOM);
-    let scaled = authored_for_fit * zoom.max(0.0);
-    ((scaled.max(readable_floor) * 4.0).round() * 0.25).max(1.0)
+/// Sheet lettering is paper annotation, exactly as it is on the plot: its
+/// height is authored in millimetres on the page and simply magnifies with
+/// the sheet. Nothing pins its size on screen, because a pinned size makes
+/// the canvas disagree with hardcopy and overruns cells whose text budget was
+/// derived from the authored height. Legibility at small zoom is the level of
+/// detail's decision — it withholds text it cannot render legibly — not the
+/// font's.
+fn drawing_sheet_font_size(zoom: f32, authored_size: f32) -> f32 {
+    // Quarter-pixel quantization keeps glyph rasterization stable across
+    // wheel steps without decoupling the size from the page.
+    ((authored_size * zoom.max(0.0) * 4.0).round() * 0.25).max(1.0)
 }
 
+/// ISO 3098-1 lettering heights in world units, four of which span one
+/// millimetre. These mirror the micrometre constants the durable sheet
+/// domain publishes, so canvas and hardcopy letter a field identically.
+fn authored_lettering(lettering_um: u64) -> f32 {
+    lettering_um as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
+}
+
+/// Smallest em height, in physical pixels, at which title-block lettering is
+/// worth drawing. Below it the glyphs carry no readable detail and the field
+/// text is withheld rather than drawn as grey mush.
+const DRAWING_SHEET_LEGIBLE_LETTERING_PX: f32 = 8.0;
+
 impl DrawingSheetLod {
-    fn resolve(zoom: f32, pixels_per_point: f32) -> Self {
+    fn resolve(zoom: f32, pixels_per_point: f32, lettering: DrawingSheetLettering) -> Self {
         let millimetre_pixels =
             DRAWING_SHEET_UNITS_PER_MM as f32 * zoom * pixels_per_point.max(0.5);
+        let data_lettering_px = millimetre_pixels * lettering.data_um as f32 / 1_000.0;
         let tier = if millimetre_pixels < 0.55 {
             DrawingSheetLodTier::Thumbnail
         } else if millimetre_pixels < 1.5 {
@@ -281,10 +293,11 @@ impl DrawingSheetLod {
                 tier,
                 DrawingSheetLodTier::Working | DrawingSheetLodTier::Detail
             ),
-            show_title_block_fields: matches!(
-                tier,
-                DrawingSheetLodTier::Working | DrawingSheetLodTier::Detail
-            ),
+            // Title-block lettering is drawn at its authored paper height, so
+            // it is legible only once that height resolves on screen. Below
+            // that the block stays ruled and empty, which is what the sheet
+            // looks like from the same distance on paper.
+            show_title_block_fields: data_lettering_px >= DRAWING_SHEET_LEGIBLE_LETTERING_PX,
             show_grid: tier != DrawingSheetLodTier::Thumbnail,
             show_origin: tier == DrawingSheetLodTier::Detail,
             show_marks: tier == DrawingSheetLodTier::Detail,
@@ -375,7 +388,12 @@ pub fn draw_base(
     let tokens = Tokens::get(painter.ctx());
     let palette = DrawingSheetPalette::resolve(&tokens);
     let layers = input.layers;
-    let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point());
+    let lettering = sheet.format.authored_size.lettering();
+    let lod = DrawingSheetLod::resolve(
+        viewport.zoom,
+        painter.ctx().pixels_per_point(),
+        lettering,
+    );
     let paper = sheet.geometry.paper.screen_rect(viewport);
     let printable = sheet.geometry.printable.screen_rect(viewport);
     let drawing_area = sheet.geometry.drawing_area.screen_rect(viewport);
@@ -438,6 +456,7 @@ pub fn draw_base(
                 lod,
                 viewport.zoom,
                 palette,
+                lettering,
             );
         }
     }
@@ -466,7 +485,7 @@ pub fn draw_base(
         }
     }
     if lod.show_origin {
-        draw_origin(painter, paper, viewport.zoom, palette);
+        draw_origin(painter, paper, viewport.zoom, palette, lettering);
     }
     if lod.show_dimensions && layers.dimensions_at_detail_zoom {
         draw_dimensions(painter, paper, viewport.zoom, palette, sheet);
@@ -491,7 +510,11 @@ pub fn draw_overflow_advisories(
     symbol_context: &SchematicSymbolContext,
     sheet: &ActiveDrawingSheet,
 ) {
-    let lod = DrawingSheetLod::resolve(viewport.zoom, painter.ctx().pixels_per_point());
+    let lod = DrawingSheetLod::resolve(
+        viewport.zoom,
+        painter.ctx().pixels_per_point(),
+        sheet.format.authored_size.lettering(),
+    );
     if !overflow_advisories_visible(lod.tier) {
         return;
     }
@@ -998,6 +1021,7 @@ fn draw_zone_band(
     lod: DrawingSheetLod,
     zoom: f32,
     palette: DrawingSheetPalette,
+    lettering: DrawingSheetLettering,
 ) {
     let column_width = drawing_area.width() / f32::from(zones.columns);
     let row_height = drawing_area.height() / f32::from(zones.rows);
@@ -1037,7 +1061,7 @@ fn draw_zone_band(
         return;
     }
     let font = theme::mono(
-        drawing_sheet_font_size(zoom, 8.0, 8.0),
+        drawing_sheet_font_size(zoom, authored_lettering(lettering.reference_um)),
         theme::FontWeight::Medium,
     );
     let top_y = (printable.top() + drawing_area.top()) * 0.5;
@@ -1213,12 +1237,18 @@ fn draw_title_block(
     else {
         return;
     };
-    let max_chars = rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
-        &sheet.format,
-        &sheet.geometry.physical,
-        fields.len(),
-    )
-    .unwrap_or(4);
+    let lettering = sheet.format.authored_size.lettering();
+    let capacity = |lettering_um| {
+        rspice_design_model::design_management::drawing_sheet_title_cell_capacity(
+            &sheet.format,
+            &sheet.geometry.physical,
+            fields.len(),
+            lettering_um,
+        )
+        .unwrap_or(4)
+    };
+    let value_chars = capacity(lettering.data_um);
+    let caption_chars = capacity(lettering.caption_um);
     let columns = fields.len().div_ceil(rows).max(1);
     let cell_width = field_grid.width() / columns as f32;
     let cell_height = field_grid.height() / rows as f32;
@@ -1256,44 +1286,78 @@ fn draw_title_block(
                 field_grid.top() + cell_height * (row + 1) as f32,
             ),
         )
-        .shrink2(vec2(4.0 * zoom.max(1.0), 2.0 * zoom.max(1.0)));
+        .shrink2(vec2(authored_title_cell_padding() * zoom, 0.0));
         let cell = Rect::from_two_pos(
             transform(authored_cell.left_top()),
             transform(authored_cell.right_bottom()),
         );
+        // Caption and value sit on the shared fractions of the cell that
+        // hardcopy also places them on. Anchoring each line on its own centre
+        // leaves the vertical placement to the font's real metrics rather
+        // than to a guessed line box.
+        let at = |(numerator, denominator): (u64, u64)| {
+            authored_cell.top()
+                + authored_cell.height() * numerator as f32 / denominator as f32
+        };
         let clipped = painter.with_clip_rect(cell);
         paint_title_text(
             &clipped,
-            transform(authored_cell.left_top()),
-            Align2::LEFT_TOP,
-            field.id.display_label().to_uppercase(),
+            transform(pos2(
+                authored_cell.left(),
+                at(DRAWING_SHEET_TITLE_CAPTION_POSITION),
+            )),
+            Align2::LEFT_CENTER,
+            truncate_title_text(
+                &field.id.display_label().to_uppercase(),
+                caption_chars,
+            ),
             theme::mono(
-                drawing_sheet_font_size(zoom, 5.5, 7.0),
+                drawing_sheet_font_size(zoom, authored_lettering(lettering.caption_um)),
                 theme::FontWeight::Regular,
             ),
             palette.block_label,
             rotation,
         );
         if field.authority == DrawingSheetTitleFieldValueAuthority::Automatic {
+            // The marker is a canvas affordance rather than paper geometry —
+            // hardcopy prefixes the caption instead — so it keeps a readable
+            // screen radius while sitting at a fixed physical corner of the
+            // cell, clear of the grid rules on either side of it.
+            let marker_inset = authored_title_cell_padding() * 0.5 * zoom;
             clipped.circle_filled(
-                transform(pos2(authored_cell.right() - 2.0, authored_cell.top() + 2.0)),
+                transform(pos2(
+                    authored_cell.right() - marker_inset,
+                    authored_cell.top() + marker_inset,
+                )),
                 1.25 * zoom.max(1.0),
                 palette.block_label,
             );
         }
         paint_title_text(
             &clipped,
-            transform(pos2(authored_cell.left(), authored_cell.bottom())),
-            Align2::LEFT_BOTTOM,
-            truncate_canvas_title_value(&field.value, max_chars),
+            transform(pos2(
+                authored_cell.left(),
+                at(DRAWING_SHEET_TITLE_VALUE_POSITION),
+            )),
+            Align2::LEFT_CENTER,
+            truncate_canvas_title_value(&field.value, value_chars),
             theme::mono(
-                drawing_sheet_font_size(zoom, 7.0, 9.0),
-                theme::FontWeight::Medium,
+                drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
+                theme::FontWeight::Regular,
             ),
             palette.block_ink,
             rotation,
         );
     }
+}
+
+/// Horizontal padding between a title-grid rule and its lettering, in world
+/// units — scale it by the zoom before applying it to a screen rectangle.
+/// Canvas and hardcopy inset by the same physical amount, and the character
+/// budget subtracts exactly this much from the cell, so a padding that drifts
+/// with zoom would put the budget and the painted text back out of step.
+fn authored_title_cell_padding() -> f32 {
+    DRAWING_SHEET_TITLE_CELL_PADDING_UM as f32 * DRAWING_SHEET_UNITS_PER_MM as f32 / 1_000.0
 }
 
 fn draw_managed_title_logo(
@@ -1444,7 +1508,13 @@ fn draw_folding_marks(painter: &Painter, paper: Rect, zoom: f32, palette: Drawin
     }
 }
 
-fn draw_origin(painter: &Painter, paper: Rect, zoom: f32, palette: DrawingSheetPalette) {
+fn draw_origin(
+    painter: &Painter,
+    paper: Rect,
+    zoom: f32,
+    palette: DrawingSheetPalette,
+    lettering: DrawingSheetLettering,
+) {
     let stroke = Stroke::new(1.0, palette.zone_ink);
     painter.line_segment(
         [paper.left_top(), paper.left_top() + vec2(9.0, 0.0)],
@@ -1459,7 +1529,7 @@ fn draw_origin(painter: &Painter, paper: Rect, zoom: f32, palette: DrawingSheetP
         Align2::LEFT_TOP,
         "0,0",
         theme::mono(
-            drawing_sheet_font_size(zoom, 7.0, 8.0),
+            drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
             theme::FontWeight::Regular,
         ),
         palette.zone_ink,
@@ -1475,12 +1545,13 @@ fn draw_dimensions(
 ) {
     let (width, height) = sheet.format.oriented_dimensions_um();
     let unit = sheet.format.display_unit;
+    let lettering = sheet.format.authored_size.lettering();
     painter.text(
         paper.center_top() - vec2(0.0, 7.0),
         Align2::CENTER_BOTTOM,
         format!("{} {}", unit.format_um(width), unit.suffix()),
         theme::mono(
-            drawing_sheet_font_size(zoom, 7.0, 8.0),
+            drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
             theme::FontWeight::Regular,
         ),
         palette.zone_ink,
@@ -1490,7 +1561,7 @@ fn draw_dimensions(
         Align2::RIGHT_CENTER,
         format!("{} {}", unit.format_um(height), unit.suffix()),
         theme::mono(
-            drawing_sheet_font_size(zoom, 7.0, 8.0),
+            drawing_sheet_font_size(zoom, authored_lettering(lettering.data_um)),
             theme::FontWeight::Regular,
         ),
         palette.zone_ink,

@@ -447,11 +447,18 @@ fn managed_title_templates_are_versioned_digest_verified_and_layout_authoritativ
         })
         .unwrap();
     assert!(
-        drawing_sheet_title_cell_capacity(&custom, &custom.geometry().unwrap(), 9).unwrap()
+        drawing_sheet_title_cell_capacity(
+            &custom,
+            &custom.geometry().unwrap(),
+            9,
+            custom.authored_size.lettering().data_um
+        )
+        .unwrap()
             < drawing_sheet_title_cell_capacity(
                 &without_logo,
                 &without_logo.geometry().unwrap(),
-                9
+                9,
+                without_logo.authored_size.lettering().data_um
             )
             .unwrap()
     );
@@ -2465,8 +2472,13 @@ fn drawing_sheet_transactions_retain_complete_revisioned_project_receipts() {
 fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
     let upright = SchematicSheetFormat::default();
     let upright_geometry = upright.geometry().unwrap();
-    let upright_capacity =
-        drawing_sheet_title_cell_capacity(&upright, &upright_geometry, 14).unwrap();
+    let upright_capacity = drawing_sheet_title_cell_capacity(
+        &upright,
+        &upright_geometry,
+        14,
+        upright.authored_size.lettering().data_um,
+    )
+    .unwrap();
     let rotated = upright
         .try_update(|draft| {
             draft.title_block.rotation = DrawingSheetTitleBlockRotation::Clockwise90;
@@ -2491,8 +2503,97 @@ fn drawing_sheet_title_cell_budget_is_physical_and_rotation_stable() {
         None
     );
     assert_eq!(
-        drawing_sheet_title_cell_capacity(&rotated, &rotated_geometry, 14),
+        drawing_sheet_title_cell_capacity(
+            &rotated,
+            &rotated_geometry,
+            14,
+            rotated.authored_size.lettering().data_um
+        ),
         Some(upright_capacity),
         "rotating the complete block must not change a field's authored text budget"
     );
+    assert!(
+        drawing_sheet_title_cell_capacity(
+            &upright,
+            &upright_geometry,
+            14,
+            upright.authored_size.lettering().caption_um
+        )
+        .unwrap()
+            > upright_capacity,
+        "smaller caption lettering must buy more characters in the same cell"
+    );
+}
+
+#[test]
+fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
+    // Every height a sheet can letter at, for every size RSpice supports,
+    // must be a step on the ISO 3098 series, and a caption must never
+    // outweigh the value it names nor a value its zone reference.
+    const SERIES: [u64; 8] = [1_800, 2_500, 3_500, 5_000, 7_000, 10_000, 14_000, 20_000];
+    for standard in DrawingSheetStandard::ALL {
+        let (width_um, height_um) = standard.portrait_dimensions_um();
+        let lettering = DrawingSheetLettering::for_sheet(width_um, height_um);
+        for height in [
+            lettering.caption_um,
+            lettering.data_um,
+            lettering.reference_um,
+        ] {
+            assert!(
+                SERIES.contains(&height),
+                "{height} um on {standard:?} is not an ISO 3098 lettering height"
+            );
+        }
+        assert!(
+            lettering.caption_um < lettering.data_um
+                && lettering.data_um < lettering.reference_um,
+            "{standard:?} letters its captions at or above its values"
+        );
+    }
+
+    // The recommended minimum rises with the sheet, and A4 takes the row the
+    // standard gives it: 1.8 mm notes, 2.5 mm titles, 3.5 mm headings.
+    let a4 = DrawingSheetLettering::for_sheet(210_000, 297_000);
+    assert_eq!(
+        (a4.caption_um, a4.data_um, a4.reference_um),
+        (1_800, 2_500, 3_500)
+    );
+    let a0 = DrawingSheetLettering::for_sheet(841_000, 1_189_000);
+    assert_eq!(
+        (a0.caption_um, a0.data_um, a0.reference_um),
+        (3_500, 5_000, 7_000)
+    );
+    assert_eq!(
+        DrawingSheetLettering::for_sheet(297_000, 420_000),
+        DrawingSheetLettering::for_sheet(594_000, 841_000),
+        "A3 and A1 share the standard's middle row"
+    );
+
+    // IBM Plex Mono advances 600 and ascends 1025 over 1000-unit em, as the
+    // shipped faces report. Both derivations are exact at every height used.
+    assert_eq!(drawing_sheet_mono_advance_um(2_500), 1_500);
+    assert_eq!(drawing_sheet_mono_advance_um(1_800), 1_080);
+    assert_eq!(drawing_sheet_mono_baseline_offset_um(2_500), 937);
+    assert_eq!(drawing_sheet_mono_baseline_offset_um(1_800), 675);
+
+    // Every caption must fit the narrowest cell the default sheet produces,
+    // because a caption is fixed wording that no operator can shorten.
+    let format = SchematicSheetFormat::default();
+    let geometry = format.geometry().unwrap();
+    let fields = DrawingSheetTitleFieldId::ALL.len();
+    let caption_chars = drawing_sheet_title_cell_capacity(
+        &format,
+        &geometry,
+        fields,
+        format.authored_size.lettering().caption_um,
+    )
+    .unwrap();
+    for field in DrawingSheetTitleFieldId::ALL {
+        let caption = field.display_label();
+        assert!(
+            caption.chars().count() <= caption_chars,
+            "caption {caption:?} needs {} of {caption_chars} characters in the default block",
+            caption.chars().count()
+        );
+    }
 }
