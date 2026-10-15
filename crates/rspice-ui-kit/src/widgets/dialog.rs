@@ -56,11 +56,18 @@ pub enum DialogSize {
     /// gutter that shows as bare surface down the trailing edge.
     CommandForm,
     /// Transactional edits and confirmations: 760 pt wide, content-height,
-    /// capped at 760 pt, with the full-viewport shell applied at 560 pt.
+    /// capped at 760 pt, and a content-height card with the same 12 pt gutter
+    /// as [`Self::Confirmation`] at 560 pt and below.
     Transaction,
     /// Mockup-authored workflow transactions: 760 pt wide and
     /// content-height, with the full-viewport workflow shell applied at the
     /// shared 820 pt dialog breakpoint; individual fields stack by local width.
+    ///
+    /// The shell stays rather than becoming a content-height card because the
+    /// tallest route on it — the plan manager's Create form — measures 890 pt
+    /// of content in a 900 pt portrait viewport. Held to this size's own
+    /// 760 pt ceiling it scrolls its last section away, and the plan manager
+    /// is gated on no route scrolling at any supported shape.
     SimulationWorkflow,
     /// Mockup-owned specialist workspace discovery manager: 760 pt wide on
     /// desktop and full-viewport at the 820 pt one-column breakpoint.
@@ -73,10 +80,10 @@ pub enum DialogSize {
     /// perimeter gutter on phone-sized viewports.
     AnalysisCatalog,
     /// Wide numerical/setup workflows: 980 pt wide, content-height capped at
-    /// 760 pt, and edge-to-edge at the mockup's 820 pt breakpoint.
+    /// 760 pt, and a 12 pt gutter card at the mockup's 820 pt breakpoint.
     WideWorkflow,
     /// Two-pane pick-and-preview transactions: 860 pt wide, content-height
-    /// capped at 620 pt, edge-to-edge at the shared 820 pt breakpoint.
+    /// capped at 620 pt, a 12 pt gutter card at the shared 820 pt breakpoint.
     ///
     /// Narrower than [`Self::WideWorkflow`] because the right pane holds
     /// stacked waveform strips rather than a table: past about 860 pt the
@@ -86,12 +93,16 @@ pub enum DialogSize {
     /// Drawing-sheet supporting workflows: 1160 pt wide, content-height
     /// capped at 760 pt, and edge-to-edge at the shared 820 pt breakpoint.
     DrawingSheetWorkflow,
-    /// The drawing-sheet preset catalog: 880 pt wide, otherwise
-    /// [`Self::DrawingSheetWorkflow`].
+    /// The drawing-sheet preset catalog: 880 pt wide and content-height at
+    /// every viewport, otherwise [`Self::DrawingSheetWorkflow`].
     ///
     /// Narrower because its table states six short columns and four row
     /// verbs. Given the workflow width it spent a third of the surface on
     /// nothing at all, however the columns were sized.
+    ///
+    /// Content-height on a narrow viewport where the workflow fills it,
+    /// because a catalog of presets is as tall as the presets there are: a
+    /// project holding none spent two thirds of a phone screen saying so.
     DrawingSheetLibrary,
     /// Account, license, and privacy console: one 600 pt reading column,
     /// content-height capped at 760 pt, and a full-viewport sheet at 560 pt
@@ -99,6 +110,11 @@ pub enum DialogSize {
     AccountManager,
     /// Governed capability matrices: 1040 pt wide, content-height capped at
     /// 760 pt, edge-to-edge at the mockup's 820 pt breakpoint.
+    ///
+    /// Edge to edge rather than a gutter card, because at exactly 820 pt the
+    /// 24 pt a gutter costs leaves a 794 pt body — one point class under the
+    /// plan manager's split minimum, which stacks its records table over its
+    /// aside, and stacked does not fit the 640 pt that shape has.
     CapabilityReview,
     /// Execution queue, target, and retained-run manager: 1120 × 680 pt with
     /// the mockup's 12 pt desktop perimeter and 4 pt phone perimeter.
@@ -170,11 +186,11 @@ impl DialogSize {
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 560.0,
-                narrow_inset: 0.0,
-                narrow_vertical_inset: 0.0,
+                narrow_inset: 24.0,
+                narrow_vertical_inset: 24.0,
                 cap_narrow_height: false,
-                edge_to_edge_narrow: true,
-                fill_narrow_viewport: true,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: false,
                 fill_height: false,
                 app_background: true,
                 radius: 4.0,
@@ -250,11 +266,11 @@ impl DialogSize {
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 820.0,
-                narrow_inset: 0.0,
-                narrow_vertical_inset: 0.0,
+                narrow_inset: 24.0,
+                narrow_vertical_inset: 24.0,
                 cap_narrow_height: false,
-                edge_to_edge_narrow: true,
-                fill_narrow_viewport: true,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: false,
                 fill_height: false,
                 app_background: true,
                 radius: 4.0,
@@ -266,11 +282,11 @@ impl DialogSize {
                 horizontal_inset: 24.0,
                 vertical_inset: 24.0,
                 narrow_max_width: 820.0,
-                narrow_inset: 0.0,
-                narrow_vertical_inset: 0.0,
+                narrow_inset: 24.0,
+                narrow_vertical_inset: 24.0,
                 cap_narrow_height: false,
-                edge_to_edge_narrow: true,
-                fill_narrow_viewport: true,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: false,
                 fill_height: false,
                 app_background: true,
                 radius: 4.0,
@@ -342,6 +358,10 @@ impl DialogSize {
             },
             Self::DrawingSheetLibrary => DialogSurfaceSpec {
                 width: 880.0,
+                narrow_inset: 24.0,
+                narrow_vertical_inset: 24.0,
+                edge_to_edge_narrow: false,
+                fill_narrow_viewport: false,
                 ..Self::DrawingSheetWorkflow.spec()
             },
             Self::SchematicPageSetup => DialogSurfaceSpec {

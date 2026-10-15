@@ -139,12 +139,20 @@ fn capability_review_desktop_layout_uses_mockup_caps_and_is_centered() {
     assert_eq!(layout.surface_rect.top(), 100.0);
 }
 
+/// A short narrow viewport clamps the card rather than letting it overrun.
+///
+/// The surface still keeps its gutter on every side: a card that filled the
+/// 300 points there are would have its first row under the status bar and its
+/// footer off the bottom edge.
 #[test]
-fn transaction_short_narrow_viewport_is_full_viewport() {
+fn transaction_short_narrow_viewport_clamps_to_the_gutter() {
     let screen = Rect::from_min_size(egui::pos2(3.0, 5.0), vec2(390.0, 300.0));
     let layout = DialogLayout::resolve(DialogSize::Transaction, screen, None);
 
-    assert_eq!(layout.surface_rect, screen);
+    assert_eq!(layout.surface_rect.size(), vec2(366.0, 276.0));
+    assert_eq!(layout.surface_rect.center(), screen.center());
+    assert_eq!(layout.surface_rect.left() - screen.left(), 12.0);
+    assert_eq!(layout.surface_rect.top() - screen.top(), 12.0);
 }
 
 #[test]
@@ -160,9 +168,12 @@ fn transaction_tablet_retains_mockup_gutters_until_the_phone_breakpoint() {
 
     let phone_breakpoint = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(560.0, 900.0));
     let phone = DialogLayout::resolve(DialogSize::Transaction, phone_breakpoint, Some(500.0));
-    assert_eq!(phone.surface_rect, phone_breakpoint);
-    assert_eq!(phone.radius, 0.0);
+    assert_eq!(phone.surface_rect.size(), vec2(536.0, 500.0));
+    assert_eq!(phone.surface_rect.center(), phone_breakpoint.center());
+    assert_eq!(phone.surface_rect.left() - phone_breakpoint.left(), 12.0);
+    assert_eq!(phone.radius, 4.0);
     assert!(phone.narrow);
+    assert!(!phone.fill_height);
 }
 
 #[test]
@@ -301,13 +312,20 @@ fn analysis_catalog_uses_mockup_top_anchor_caps_and_phone_gutter() {
     assert_eq!(phone.radius, 8.0);
 }
 
+/// Past the mockup's 820 pt breakpoint a wide workflow gives up its own
+/// width, not its content height: it takes the viewport less the 12 pt
+/// gutter, and stays exactly as tall as its content.
 #[test]
-fn wide_workflow_becomes_edge_to_edge_at_the_mockup_breakpoint() {
+fn wide_workflow_narrows_to_the_gutter_at_the_mockup_breakpoint() {
     let screen = Rect::from_min_size(egui::pos2(5.0, 7.0), vec2(820.0, 900.0));
     let layout = DialogLayout::resolve(DialogSize::WideWorkflow, screen, Some(500.0));
 
-    assert_eq!(layout.surface_rect, screen);
-    assert_eq!(layout.radius, 0.0);
+    assert_eq!(layout.surface_rect.size(), vec2(796.0, 500.0));
+    assert_eq!(layout.surface_rect.center(), screen.center());
+    assert_eq!(layout.surface_rect.left() - screen.left(), 12.0);
+    assert_eq!(layout.radius, 4.0);
+    assert!(layout.narrow);
+    assert!(!layout.fill_height);
 }
 
 #[test]
