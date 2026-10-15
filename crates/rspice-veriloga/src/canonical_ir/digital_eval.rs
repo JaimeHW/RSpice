@@ -73,8 +73,9 @@ use super::cfg::{
 };
 use super::digital::{
     CanonicalDigitalPlan, CfgDigitalProcess, DigitalDriverId, DigitalEdge, DigitalEventExpression,
-    DigitalRoutineId, DigitalSchedulingRegion, DigitalScopeId, DigitalSensitivityTerm,
-    DigitalSignal, DigitalSystemCallId, DigitalWriteSelect, DigitalWriteTarget,
+    DigitalOverrideId, DigitalRoutineId, DigitalSchedulingRegion, DigitalScopeId,
+    DigitalSensitivityTerm, DigitalSignal, DigitalSystemCallId, DigitalWriteSelect,
+    DigitalWriteTarget,
 };
 use super::digital_value::{self, FourStateValue, truth};
 use super::ids::{BlockId, DigitalAnalogProbeId, DigitalProcessId, DigitalSignalId, ValueId};
@@ -254,6 +255,20 @@ pub trait DigitalEnvironment {
         Err(DigitalEvalError::SystemCallUnavailable {
             site,
             detail: "this environment hosts no system functions".into(),
+        })
+    }
+
+    /// Execute the procedural continuous assignment statement `site` (IEEE
+    /// 1364-2005 section 9.3). The plan's entry says what it installs or
+    /// removes; the environment evaluates an installed right-hand side through
+    /// [`evaluate_override`] now and whenever an operand changes. An
+    /// environment with no override store refuses rather than skipping one,
+    /// because a skipped `force` is a design that runs on values its author
+    /// overrode.
+    fn procedural_override(&mut self, site: DigitalOverrideId) -> Result<(), DigitalEvalError> {
+        Err(DigitalEvalError::OverrideUnavailable {
+            site,
+            detail: "this environment holds no procedural continuous assignments".into(),
         })
     }
 }
@@ -947,6 +962,12 @@ pub enum DigitalEvalError {
         site: DigitalSystemCallId,
         detail: String,
     },
+    /// The environment cannot carry out this procedural continuous
+    /// assignment statement, or the plan does not declare it.
+    OverrideUnavailable {
+        site: DigitalOverrideId,
+        detail: String,
+    },
     /// Routine calls nested deeper than [`MAX_CALL_DEPTH`] (design P2 §4.1):
     /// an automatic routine recursing without end.
     CallDepth,
@@ -1103,6 +1124,7 @@ impl std::fmt::Display for DigitalEvalError {
                 write!(f, "system call {site} cannot run here: {detail}")
             }
             Self::SystemCallFailed { site, detail } => write!(f, "system call {site}: {detail}"),
+            Self::OverrideUnavailable { site, detail } => write!(f, "{site}: {detail}"),
         }
     }
 }
@@ -1839,6 +1861,50 @@ pub fn run_observer<E: DigitalEnvironment + ?Sized>(
         | DigitalProcessOutcome::Disabling(_) => {
             Err(DigitalEvalError::InvalidSystemCall(ValueId::from(0usize)))
         }
+    }
+}
+
+/// Evaluate the right-hand side of the `force` or procedural `assign`
+/// statement `site` (IEEE 1364-2005 section 9.3) against the environment's
+/// current signal values.
+///
+/// The value is the targets' total width, or a real for a real target. The
+/// function only reads (the plan validator holds it to that), so evaluating it
+/// has no effect but the value.
+pub fn evaluate_override<E: DigitalEnvironment + ?Sized>(
+    plan: &CanonicalDigitalPlan,
+    site: DigitalOverrideId,
+    environment: &mut E,
+    scratch: &mut DigitalEvalScratch,
+) -> Result<DigitalScalar, DigitalEvalError> {
+    if plan.content_identity == [0; 32] {
+        return Err(DigitalEvalError::UnsealedPlan);
+    }
+    let value = plan
+        .overrides
+        .get(site.index())
+        .and_then(|entry| entry.value.as_ref())
+        .ok_or_else(|| DigitalEvalError::OverrideUnavailable {
+            site,
+            detail: "the plan declares no right-hand side for it".into(),
+        })?;
+    let process = &value.evaluator;
+    let function = &process.function;
+    if !function.block(function.entry).params.is_empty() {
+        return Err(DigitalEvalError::EntryBlockHasParameters(function.entry));
+    }
+    scratch.arguments.clear();
+    match Interpreter::with_function(plan, process, function, environment, scratch)
+        .run(function.entry, DEFAULT_PROCESS_STEP_LIMIT)?
+    {
+        DigitalProcessOutcome::Finished => scratch
+            .table
+            .get(function, value.result)
+            .map(ScalarRef::into_owned),
+        _ => Err(DigitalEvalError::OverrideUnavailable {
+            site,
+            detail: "its right-hand side suspended".into(),
+        }),
     }
 }
 
@@ -3486,6 +3552,10 @@ impl<'a, 's, E: DigitalEnvironment + ?Sized> Interpreter<'a, 's, E> {
                 .get(*index as usize)
                 .cloned()
                 .ok_or(DigitalEvalError::UndefinedValue(id)),
+            CfgValueKind::DigitalOverride { site } => {
+                self.environment.procedural_override(*site)?;
+                Ok(DigitalScalar::Effect)
+            }
             CfgValueKind::DigitalRoutineCompleted => Ok(DigitalScalar::FourState(
                 FourStateValue::from_u64(1, u64::from(self.scratch.routine_completed)),
             )),

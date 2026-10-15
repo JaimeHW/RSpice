@@ -6435,3 +6435,197 @@ fn saving_the_current_of_a_runtime_veriloga_instance_reports_it() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// `force` on boundary nets (IEEE 1364-2005 section 9.3.2; design P2 §4.2)
+// ---------------------------------------------------------------------------
+
+/// `a` arrives across an A/D bridge and `z` leaves across a D/A one; both are
+/// forced from 20 ns to 70 ns.
+const FORCED_BOUNDARY: &str = r#"
+`include "disciplines.vams"
+`timescale 1ns/1ns
+module forced_boundary(p, n, a, y, z);
+    inout p, n;
+    electrical p, n;
+    input a;
+    output y, z;
+    wire a, y, z;
+    reg zr;
+    assign y = a;
+    assign z = zr;
+    initial begin
+        zr = 1'b0;
+        #20 force a = 1'b0; force z = 1'b1;
+        #50 release a; release z;
+    end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+fn forced_boundary_deck(model: &ModelFile) -> String {
+    format!(
+        "* forced boundary nets\n\
+         vin in 0 pulse(0 3.3 10n 0.1n 0.1n 20n 50n)\n\
+         x1 p 0 in ys zs forced_boundary\n\
+         rp p 0 1meg\n\
+         ry ys 0 10k\n\
+         rz zs 0 10k\n\
+         .va \"{}\" forced_boundary\n\
+         .tran 0.2n 120n\n\
+         .end\n",
+        model.deck_path()
+    )
+}
+
+fn levels(result: &TransientResult, net: &str) -> Vec<(f64, String)> {
+    result
+        .digital_trace_named(net)
+        .unwrap_or_else(|| panic!("net '{net}' has no digital trace"))
+        .iter()
+        .map(|point| (point.time, format!("{:?}", point.value.state)))
+        .collect()
+}
+
+/// The A/D drive into a forced input is overridden for as long as the force
+/// lasts: the input's edges at 30 ns and 60 ns never reach `y`, and the
+/// release at 70 ns re-resolves `a` to the bridge's high level at once. The
+/// D/A bridge on a forced output converts the forced value, not the driver's.
+#[test]
+fn a_forced_boundary_net_overrides_its_bridge_and_reaches_its_converter() {
+    let model = ModelFile::new("forced_boundary", FORCED_BOUNDARY);
+    let result = run(&forced_boundary_deck(&model), 120.0e-9, 0.2e-9);
+    let near = |points: &[(f64, String)], expected: &[(f64, &str)]| {
+        assert_eq!(points.len(), expected.len(), "{points:?}");
+        for ((time, state), (want, level)) in points.iter().zip(expected) {
+            assert!((time - want).abs() < 0.5e-9, "{points:?}");
+            assert_eq!(state, level, "{points:?}");
+        }
+    };
+    near(
+        &levels(&result, "ys"),
+        &[
+            (0.0, "Zero"),
+            (10.0e-9, "One"),
+            (20.0e-9, "Zero"),
+            (70.0e-9, "One"),
+            (80.2e-9, "Zero"),
+            (110.1e-9, "One"),
+        ],
+    );
+    near(
+        &levels(&result, "zs"),
+        &[(0.0, "Zero"), (20.0e-9, "One"), (70.0e-9, "Zero")],
+    );
+    let zs = waveform(&result, "zs");
+    assert!(
+        zs.iter().any(|volts| *volts > 1.0),
+        "the D/A drives the forced one"
+    );
+}
+
+/// A trial rejected while a force is in effect, or while one is being
+/// installed or released, leaves the overrides exactly as it found them.
+#[test]
+fn rejected_timepoints_leave_forces_exactly_where_they_found_them() {
+    let model = ModelFile::new("forced_boundary_rollback", FORCED_BOUNDARY);
+    let deck = forced_boundary_deck(&model).replace(".tran 0.2n 120n", ".tran 1n 200n");
+    let (coarse, coarse_rejections) = run_divider_with_rejection_count(&deck, 4.0e-9);
+    let (fine, _) = run_divider_with_rejection_count(&deck, 2.0e-11);
+    assert!(
+        coarse_rejections > 0,
+        "this test is vacuous unless the coarse run actually rejected timepoints"
+    );
+    for net in ["ys", "zs"] {
+        let coarse = levels(&coarse, net);
+        let fine = levels(&fine, net);
+        assert_eq!(
+            coarse.len(),
+            fine.len(),
+            "{net}: {coarse:?} against {fine:?}"
+        );
+        for (coarse, fine) in coarse.iter().zip(&fine) {
+            assert_eq!(coarse.1, fine.1, "{net}");
+            assert!(
+                (coarse.0 - fine.0).abs() < 1.0e-15,
+                "{net}: {coarse:?} {fine:?}"
+            );
+        }
+    }
+}
+
+/// A toggling output variable, forced high from 25 ns to 55 ns; after the
+/// release it keeps the forced value until its next procedural write.
+const FORCED_OUTPUT: &str = r#"
+`include "disciplines.vams"
+`timescale 1ns/1ns
+module forced_output(p, n, z);
+    inout p, n;
+    electrical p, n;
+    output z;
+    reg z;
+    initial z = 1'b0;
+    always #10 z = ~z;
+    initial begin #25 force z = 1'b1; #30 release z; end
+    analog I(p, n) <+ V(p, n) / 1000000.0;
+endmodule
+"#;
+
+/// A checkpoint taken while a force is in effect resumes with it in effect,
+/// and the release after the seam happens as in the unbroken run.
+#[test]
+fn a_mixed_checkpoint_resumes_with_the_forces_in_effect() {
+    use rspice_core::engine::{TransientCheckpoint, TransientStartupMode};
+    let model = ModelFile::new("forced_output_checkpoint", FORCED_OUTPUT);
+    let deck = format!(
+        "* a forced output across a checkpoint\n\
+         x1 p 0 zs forced_output\n\
+         rp p 0 1meg\n\
+         rz zs 0 10k\n\
+         .va \"{}\" forced_output\n\
+         .tran 0.2n 120n\n\
+         .end\n",
+        model.deck_path()
+    );
+    let baseline = run(&deck, 120.0e-9, 0.2e-9);
+    let near = levels(&baseline, "zs");
+    let expected = [
+        (0.0, "Zero"),
+        (10.0e-9, "One"),
+        (20.0e-9, "Zero"),
+        (25.0e-9, "One"),
+        (60.0e-9, "Zero"),
+        (70.0e-9, "One"),
+    ];
+    for ((time, state), (want, level)) in near.iter().zip(expected) {
+        assert!((time - want).abs() < 0.5e-9 && state == level, "{near:?}");
+    }
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            120e-9,
+            0.2e-9,
+            TransientStartupMode::OperatingPoint,
+            &[40e-9],
+        )
+        .unwrap();
+    let saved = &scheduled[0].checkpoint;
+    let text = saved
+        .to_bytes(rspice_core::engine::TransientCheckpointEncoding::Unpacked)
+        .unwrap();
+    let restored = TransientCheckpoint::from_bytes(&text).unwrap();
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &restored, 120e-9, 0.2e-9)
+        .unwrap();
+    let after = |points: Vec<(f64, String)>| {
+        points
+            .into_iter()
+            .filter(|(at, _)| *at > saved.time)
+            .collect::<Vec<_>>()
+    };
+    let expected = after(levels(&baseline, "zs"));
+    assert!(!expected.is_empty(), "zs must move after the seam");
+    assert_eq!(after(levels(&resumed, "zs")), expected);
+}

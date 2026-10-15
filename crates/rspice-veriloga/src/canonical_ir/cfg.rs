@@ -1342,6 +1342,13 @@ pub enum CfgValueKind {
     DigitalUnwinding {
         scope: super::digital::DigitalScopeId,
     },
+    /// Execute the procedural continuous assignment statement `site` (IEEE
+    /// 1364-2005 section 9.3): install or remove the override its plan entry
+    /// describes. Ordered like a write and typed [`CfgValueType::Effect`]; the
+    /// right-hand side is the entry's own function, which the host evaluates.
+    DigitalOverride {
+        site: super::digital::DigitalOverrideId,
+    },
     /// Read slot `slot` of the running automatic activation's frame.
     FrameSlotRead {
         slot: u32,
@@ -1496,6 +1503,7 @@ impl CfgValueKind {
             | Self::DigitalRoutineOutput { .. }
             | Self::DigitalRoutineCompleted
             | Self::DigitalUnwinding { .. }
+            | Self::DigitalOverride { .. }
             | Self::FrameSlotRead { .. }
             | Self::FrameSlotWrite { .. } => true,
         }

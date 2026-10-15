@@ -39,9 +39,11 @@ pub(super) struct CallTables {
     pub scope_base: u32,
     pub site_base: u32,
     pub observer_base: u32,
+    pub override_base: u32,
     pub scopes: Vec<DigitalScope>,
     pub sites: Vec<DigitalSystemCall>,
     pub observers: Vec<DigitalObserver>,
+    pub overrides: Vec<super::super::digital::DigitalOverride>,
     /// The scope being lowered, innermost last; the frame's module scope is at
     /// the bottom. Empty for a constant or a continuous assignment, where no
     /// call is allowed.
@@ -61,6 +63,7 @@ pub(super) struct PlanCalls {
     pub scopes: Vec<DigitalScope>,
     pub sites: Vec<DigitalSystemCall>,
     pub observers: Vec<DigitalObserver>,
+    pub overrides: Vec<super::super::digital::DigitalOverride>,
     pub module_scopes: Arc<HashMap<SmolStr, DigitalScopeId>>,
     /// Every name a `disable` of the design targets.
     pub disabled: Arc<std::collections::HashSet<SmolStr>>,
@@ -102,6 +105,7 @@ impl PlanCalls {
             scope_base: self.scopes.len() as u32,
             site_base: self.sites.len() as u32,
             observer_base: self.observers.len() as u32,
+            override_base: self.overrides.len() as u32,
             stack: scope.cloned().into_iter().collect(),
             module_scopes: Arc::clone(&self.module_scopes),
             threads: super::disable::ThreadTables::new(Arc::clone(&self.disabled)),
@@ -115,9 +119,11 @@ impl PlanCalls {
         debug_assert_eq!(tables.scope_base as usize, self.scopes.len());
         debug_assert_eq!(tables.site_base as usize, self.sites.len());
         debug_assert_eq!(tables.observer_base as usize, self.observers.len());
+        debug_assert_eq!(tables.override_base as usize, self.overrides.len());
         self.scopes.extend(tables.scopes);
         self.sites.extend(tables.sites);
         self.observers.extend(tables.observers);
+        self.overrides.extend(tables.overrides);
         self.pending_disables
             .extend(tables.threads.pending.into_iter().map(|mut pending| {
                 pending.owner = Some(owner);
@@ -398,13 +404,13 @@ impl ProcessLowerer<'_> {
             || name == cell
             || module.path.rsplit('.').next() == Some(name)
         {
-                // The module's own name (`$printtimescale(top)` inside `top`).
-                Some(module.id)
-            } else {
-                [name.to_string(), format!("{}.{name}", module.path)]
-                    .iter()
-                    .find_map(|path| self.calls.module_scopes.get(path.as_str()).copied())
-            };
+            // The module's own name (`$printtimescale(top)` inside `top`).
+            Some(module.id)
+        } else {
+            [name.to_string(), format!("{}.{name}", module.path)]
+                .iter()
+                .find_map(|path| self.calls.module_scopes.get(path.as_str()).copied())
+        };
         match found {
             Some(id) => DigitalSystemArgument::Scope(id),
             None => {

@@ -455,15 +455,43 @@ impl DigitalSignalStore {
     /// Project one driver's update into all aliases before observing any
     /// expression/event subscription. Aliases never become extra drivers.
     pub(super) fn publish_connected(&mut self, signal: DigitalSignalId, value: FourStateValue) {
+        self.publish_connected_with(signal, value, true);
+    }
+
+    /// Publish an overridden signal's effective value, re-resolving its
+    /// connected bits, which consult the forced bits themselves.
+    pub(super) fn publish_effective(&mut self, signal: DigitalSignalId, value: FourStateValue) {
+        self.publish_connected_with(signal, value, false);
+    }
+
+    fn publish_connected_with(
+        &mut self,
+        signal: DigitalSignalId,
+        value: FourStateValue,
+        admit: bool,
+    ) {
         let Some(mut connected) = self.connected.take() else {
-            self.publish(signal, value);
+            if admit {
+                self.publish(signal, value);
+            } else {
+                self.publish_unadmitted(signal, value);
+            }
             return;
         };
         if connected.topology.by_signal[usize::from(signal)].is_empty() {
             self.connected = Some(connected);
-            self.publish(signal, value);
+            if admit {
+                self.publish(signal, value);
+            } else {
+                self.publish_unadmitted(signal, value);
+            }
             return;
         }
+        let value = if admit && !self.overrides.is_empty() {
+            self.admit(signal, value)
+        } else {
+            value
+        };
         connected
             .edit(signal, &self.values[usize::from(signal)])
             .clone_from(&value);
@@ -534,6 +562,7 @@ impl DigitalSignalStore {
             members.extend(net.members.iter().copied());
             let hdl = self.connected_hdl_value(connected, index);
             let resolved = self.connected_external_value(connected, index, hdl, None);
+            let resolved = self.forced_connected_value(net).unwrap_or(resolved);
             if connected.resolved[index] != resolved
                 || net.members.iter().any(|member| {
                     self.values[usize::from(member.signal)].bit(member.bit) != hdl_bit(resolved)
@@ -564,7 +593,12 @@ impl DigitalSignalStore {
         let topology = Arc::clone(&connected.topology);
         let net = &topology.nets[net_index];
         let hdl = self.connected_hdl_value(connected, net_index);
-        let resolved = self.connected_external_value(connected, net_index, hdl, None);
+        // A forced member bit decides the whole connected net (IEEE 1364-2005
+        // section 9.3.2): a converter reading it sees the forced value, and a
+        // drive from outside the design is overridden while the force lasts.
+        let resolved = self
+            .forced_connected_value(net)
+            .unwrap_or_else(|| self.connected_external_value(connected, net_index, hdl, None));
         for &slot in &topology.external_by_net[net_index] {
             if topology.other_driver_observers[slot] {
                 let value = self.connected_external_value(connected, net_index, hdl, Some(slot));
@@ -635,6 +669,25 @@ impl DigitalSignalStore {
                         && value.bit(member.bit) != self.values[usize::from(signal)].bit(member.bit)
                 })
             })
+    }
+}
+
+impl DigitalSignalStore {
+    /// The value a `force` on one of its members gives a connected net.
+    fn forced_connected_value(&self, net: &BitNet) -> Option<DigitalValue> {
+        if self.overrides.is_empty() {
+            return None;
+        }
+        let bit = net
+            .members
+            .iter()
+            .find_map(|member| self.forced_bit(member.signal, member.bit))?;
+        Some(match bit {
+            FourStateBit::Zero => DigitalValue::zero(),
+            FourStateBit::One => DigitalValue::one(),
+            FourStateBit::Unknown => DigitalValue::unknown(),
+            FourStateBit::HighImpedance => DigitalValue::high_z(),
+        })
     }
 }
 

@@ -133,11 +133,13 @@ impl SemanticAnalyzer {
                         .flat_map(|declaration| &declaration.items)
                         .map(|item| item.name.clone()),
                 );
-                if let Some((name, span)) = automatic_nonblocking(&routine.body, &mut locals) {
+                if let Some((name, span, construct)) =
+                    automatic_nonblocking(&routine.body, &mut locals)
+                {
                     self.record_error_at(
                         SemanticErrorKind::InvalidExpression(format!(
-                            "a nonblocking assignment cannot write `{name}`, a variable of the \
-                             automatic {} `{}` (IEEE 1364-2005 section 10.2.1)",
+                            "{construct} `{name}`, a variable of the automatic {} `{}` (IEEE \
+                             1364-2005 section 10.2.1)",
                             if routine.is_function() {
                                 "function"
                             } else {
@@ -545,7 +547,20 @@ fn statement_suspends(
         | DigitalStatement::SystemTask(_)
         | DigitalStatement::Disable(_)
         | DigitalStatement::EventTrigger(_)
+        | DigitalStatement::ProceduralContinuous(_)
         | DigitalStatement::Null(_) => false,
+    }
+}
+
+/// The variable an expression node reads directly, if it names one.
+fn expression_base_name(expression: &Expression) -> Option<(SmolStr, crate::source::Span)> {
+    match expression {
+        Expression::Identifier(identifier) => Some((identifier.name.clone(), identifier.span)),
+        Expression::ArrayAccess(access) => Some((access.array.clone(), access.span)),
+        Expression::Digital(digital) => digital
+            .base_name()
+            .map(|name| (name.clone(), expression.span())),
+        _ => None,
     }
 }
 
@@ -555,7 +570,7 @@ fn statement_suspends(
 fn automatic_nonblocking(
     statement: &DigitalStatement,
     locals: &mut HashSet<SmolStr>,
-) -> Option<(SmolStr, crate::source::Span)> {
+) -> Option<(SmolStr, crate::source::Span, &'static str)> {
     if let DigitalStatement::Block(block) | DigitalStatement::Fork(block) = statement {
         locals.extend(
             block
@@ -579,7 +594,39 @@ fn automatic_nonblocking(
             .written_names()
             .into_iter()
             .find(|(name, _)| locals.contains(*name))
-            .map(|(name, span)| (name.clone(), span)),
+            .map(|(name, span)| (name.clone(), span, "a nonblocking assignment cannot write")),
+        // Section 10.2.1 forbids an automatic variable as the target or an
+        // operand of a procedural continuous assignment: the override outlives
+        // the activation that owns the variable.
+        DigitalStatement::ProceduralContinuous(statement) => {
+            let construct = match statement.kind {
+                ProceduralContinuousKind::Force | ProceduralContinuousKind::Release => {
+                    "a `force` or `release` cannot use"
+                }
+                ProceduralContinuousKind::Assign | ProceduralContinuousKind::Deassign => {
+                    "a procedural `assign` or `deassign` cannot use"
+                }
+            };
+            let mut found = statement
+                .target
+                .written_names()
+                .into_iter()
+                .find(|(name, _)| locals.contains(*name))
+                .map(|(name, span)| (name.clone(), span, construct));
+            if let Some(value) = &statement.value
+                && found.is_none()
+            {
+                crate::ast::visit_expression(value, &mut |expression| {
+                    if found.is_none()
+                        && let Some((name, span)) = expression_base_name(expression)
+                        && locals.contains(&name)
+                    {
+                        found = Some((name, span, construct));
+                    }
+                });
+            }
+            found
+        }
         DigitalStatement::Block(block) | DigitalStatement::Fork(block) => {
             block.statements.iter().find_map(nested)
         }
@@ -618,6 +665,12 @@ fn find_function_violation(
         DigitalStatement::Wait(wait) => *found = Some(("a `wait`", wait.span)),
         DigitalStatement::TaskEnable(enable) => *found = Some(("a task enable", enable.span)),
         DigitalStatement::Fork(block) => *found = Some(("a `fork`", block.span)),
+        DigitalStatement::ProceduralContinuous(statement) => {
+            *found = Some((
+                "a procedural continuous assignment, which section 10.4.4 also forbids",
+                statement.span,
+            ))
+        }
         DigitalStatement::BlockingAssign(assign) | DigitalStatement::NonblockingAssign(assign)
             if assign.timing.is_some() =>
         {
@@ -700,6 +753,7 @@ fn collect_block_names(statement: &DigitalStatement, names: &mut HashSet<SmolStr
         | DigitalStatement::TaskEnable(_)
         | DigitalStatement::Disable(_)
         | DigitalStatement::EventTrigger(_)
+        | DigitalStatement::ProceduralContinuous(_)
         | DigitalStatement::Null(_) => {}
     }
 }

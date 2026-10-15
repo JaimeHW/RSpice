@@ -150,6 +150,12 @@ fn walk_roots(
                 DigitalStatement::EventTrigger(trigger) => {
                     pending.push(Work::Target(&trigger.target))
                 }
+                DigitalStatement::ProceduralContinuous(statement) => {
+                    if let Some(value) = &statement.value {
+                        visit(value, &locals);
+                    }
+                    pending.push(Work::Target(&statement.target));
+                }
                 DigitalStatement::Disable(_) | DigitalStatement::Null(_) => {}
             },
             Work::Assignment(assign) => {
@@ -290,6 +296,12 @@ pub(super) fn rewrite_roots(body: &mut DigitalStatement, visit: &mut impl FnMut(
                 }
                 DigitalStatement::EventTrigger(trigger) => {
                     pending.push(Work::Target(&mut trigger.target))
+                }
+                DigitalStatement::ProceduralContinuous(statement) => {
+                    if let Some(value) = &mut statement.value {
+                        visit(value);
+                    }
+                    pending.push(Work::Target(&mut statement.target));
                 }
                 DigitalStatement::Disable(_) | DigitalStatement::Null(_) => {}
             },
@@ -525,6 +537,18 @@ pub(super) fn collect_module_writes(
                         .into_iter()
                         .map(|(name, _)| name.clone())
                         .collect();
+                    record(names, &locals, written);
+                }
+                DigitalStatement::ProceduralContinuous(statement) => {
+                    let mut names: Vec<smol_str::SmolStr> = statement
+                        .target
+                        .written_names()
+                        .into_iter()
+                        .map(|(name, _)| name.clone())
+                        .collect();
+                    if let Some(value) = &statement.value {
+                        expression_call_output_names(value, &mut names);
+                    }
                     record(names, &locals, written);
                 }
                 DigitalStatement::Fork(block) => {

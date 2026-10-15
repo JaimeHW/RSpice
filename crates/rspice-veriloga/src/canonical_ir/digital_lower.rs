@@ -95,6 +95,7 @@ mod disable;
 mod expressions;
 mod local_arrays;
 mod local_storage;
+mod overrides;
 mod routines;
 mod system_calls;
 pub(crate) use connection_shapes::ConnectionShapes;
@@ -1121,6 +1122,7 @@ fn lower_with_analog_variables(
         system_calls: calls.sites,
         observers: calls.observers,
         routines: plan_routines,
+        overrides: calls.overrides,
     }
     .seal()
     // Structural validation of the plan this pass just built, reached only
@@ -2276,6 +2278,7 @@ impl ProcessLowerer<'_> {
             | DigitalStatement::TaskEnable(_)
             | DigitalStatement::Disable(_)
             | DigitalStatement::EventTrigger(_)
+            | DigitalStatement::ProceduralContinuous(_)
             | DigitalStatement::Null(_) => {}
         }
     }
@@ -2444,6 +2447,10 @@ impl ProcessLowerer<'_> {
             DigitalStatement::TaskEnable(enable) => self.task_enable(block, enable),
             DigitalStatement::Wait(wait) => self.wait_statement(block, wait),
             DigitalStatement::EventTrigger(trigger) => self.event_trigger(block, trigger),
+            DigitalStatement::ProceduralContinuous(statement) => {
+                self.procedural_continuous(block, statement);
+                block
+            }
             DigitalStatement::Fork(fork) => self.fork_statement(block, fork),
             DigitalStatement::Disable(disable) => self.disable_statement(block, disable),
             DigitalStatement::BlockingAssign(assign) => self.assign(block, assign, false),

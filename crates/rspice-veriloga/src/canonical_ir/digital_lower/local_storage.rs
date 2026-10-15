@@ -268,6 +268,19 @@ impl ProcessLowerer<'_> {
                     self.storage_dependencies(statement, required);
                 }
             }
+            // A procedural continuous assignment's right-hand side is
+            // re-evaluated outside any activation of this process, and its
+            // target is overridden in the store: both live in signal storage.
+            DigitalStatement::ProceduralContinuous(statement) => {
+                let mut names = BTreeSet::new();
+                for (name, _) in statement.target.written_names() {
+                    names.insert(name.to_string());
+                }
+                if let Some(value) = &statement.value {
+                    collect_expression_reads(value, &mut names);
+                }
+                self.mark_names(&names, required);
+            }
             DigitalStatement::SystemTask(_)
             | DigitalStatement::TaskEnable(_)
             | DigitalStatement::Disable(_)
@@ -352,6 +365,11 @@ impl ProcessLowerer<'_> {
             DigitalStatement::Wait(wait) => {
                 self.event_expression_reads(&wait.condition, &mut names);
                 children.extend(wait.statement.as_deref());
+            }
+            DigitalStatement::ProceduralContinuous(statement) => {
+                if let Some(value) = &statement.value {
+                    self.event_expression_reads(value, &mut names);
+                }
             }
             DigitalStatement::Disable(_)
             | DigitalStatement::EventTrigger(_)

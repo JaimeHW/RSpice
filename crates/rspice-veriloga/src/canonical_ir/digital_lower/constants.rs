@@ -813,6 +813,14 @@ fn collect_parameters(
             collect_lvalue_index_reads(&trigger.target, &mut names);
             reads.extend(names.into_iter().filter(|name| !locals.contains(name)));
         }
+        DigitalStatement::ProceduralContinuous(statement) => {
+            let mut names = BTreeSet::new();
+            collect_lvalue_index_reads(&statement.target, &mut names);
+            reads.extend(names.into_iter().filter(|name| !locals.contains(name)));
+            if let Some(value) = &statement.value {
+                expression(value, reads);
+            }
+        }
         DigitalStatement::Wait(wait) => {
             expression(&wait.condition, reads);
             if let Some(inner) = &wait.statement {

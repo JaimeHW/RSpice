@@ -238,6 +238,7 @@ impl CanonicalDigitalPlan {
                 &self.system_calls,
                 &self.observers,
                 &self.routines,
+                &self.overrides,
             ),
         )
         .map_err(|detail| error(format!("cannot hash digital plan: {detail}")))?;
@@ -249,6 +250,12 @@ impl CanonicalDigitalPlan {
             .map(|process| &process.function)
             .chain(self.observers.iter().map(|observer| &observer.function))
             .chain(self.routines.iter().map(|routine| &routine.function))
+            .chain(
+                self.overrides
+                    .iter()
+                    .filter_map(|site| site.value.as_ref())
+                    .map(|value| &value.evaluator.function),
+            )
         {
             for function in process_functions(function) {
                 for value in &function.values {
@@ -1312,6 +1319,16 @@ impl CanonicalDigitalPlan {
                                 return Err(error("task completion must be one bit"));
                             }
                         }
+                        CfgValueKind::DigitalOverride { site } => {
+                            if value.value_type != CfgValueType::Effect
+                                || self
+                                    .overrides
+                                    .get(site.index())
+                                    .is_none_or(|entry| entry.id != *site)
+                            {
+                                return Err(error("digital override node names no override site"));
+                            }
+                        }
                         CfgValueKind::DigitalUnwinding { scope } => {
                             if value.value_type != (CfgValueType::FourState { width: 1 }) {
                                 return Err(error("an unwinding test must be one bit"));
@@ -1756,6 +1773,135 @@ impl CanonicalDigitalPlan {
                 return Err(error(
                     "digital observer must report through exactly one call",
                 ));
+            }
+        }
+        self.validate_overrides()
+    }
+
+    /// The override table is dense; each target is a variable or net the
+    /// kind may name; and each right-hand side is a straight-line evaluation
+    /// that only reads signals and leaves a value of the targets' width.
+    fn validate_overrides(&self) -> IrValidationResult {
+        use crate::ast::ProceduralContinuousKind;
+        for (index, site) in self.overrides.iter().enumerate() {
+            if site.id.index() != index || site.targets.is_empty() {
+                return Err(error("digital override table must be dense and non-empty"));
+            }
+            let mut real = false;
+            for target in &site.targets {
+                let Some(signal) = self.signal(target.target.signal) else {
+                    return Err(error("digital override names an undeclared signal"));
+                };
+                let variable_only = matches!(
+                    site.kind,
+                    ProceduralContinuousKind::Assign | ProceduralContinuousKind::Deassign
+                );
+                let width = if signal.kind.is_real() {
+                    real = true;
+                    (target.target.select == DigitalWriteSelect::Whole).then_some(0)
+                } else {
+                    target.target.select.checked_width(signal.declared_range())
+                };
+                if width != Some(target.width)
+                    || (variable_only && !signal.procedurally_assignable)
+                    || (signal.procedurally_assignable
+                        && target.target.select != DigitalWriteSelect::Whole)
+                {
+                    return Err(error(format!(
+                        "digital {} names an invalid target",
+                        site.kind.keyword()
+                    )));
+                }
+            }
+            if real && site.targets.len() != 1 {
+                return Err(error("a real override target cannot be concatenated"));
+            }
+            match (&site.value, site.kind.installs()) {
+                (None, false) => {}
+                (Some(value), true) => {
+                    let function = &value.evaluator.function;
+                    function
+                        .validate()
+                        .map_err(|detail| error(format!("digital override: {detail}")))?;
+                    let expected = if real {
+                        CfgValueType::Real
+                    } else {
+                        CfgValueType::FourState {
+                            width: site.width(),
+                        }
+                    };
+                    if !function.block(function.entry).params.is_empty()
+                        || function
+                            .values
+                            .get(usize::from(value.result))
+                            .is_none_or(|result| result.value_type != expected)
+                        || !value.dependencies.windows(2).all(|pair| pair[0] < pair[1])
+                        || value
+                            .dependencies
+                            .iter()
+                            .any(|signal| self.signal(*signal).is_none())
+                    {
+                        return Err(error(
+                            "digital override has an invalid entry, result or dependency list",
+                        ));
+                    }
+                    if function.blocks.iter().any(|block| {
+                        !matches!(
+                            block.terminator,
+                            CfgTerminator::Return
+                                | CfgTerminator::Jump { .. }
+                                | CfgTerminator::Branch { .. }
+                        )
+                    }) {
+                        return Err(error("digital override function must not suspend"));
+                    }
+                    for entry in &function.values {
+                        if !entry.kind.is_digital()
+                            && !matches!(
+                                entry.kind,
+                                CfgValueKind::RealConstant(_) | CfgValueKind::BlockParameter
+                            )
+                        {
+                            return Err(error("analog value kind in digital override"));
+                        }
+                        match &entry.kind {
+                            CfgValueKind::DigitalSignalRead { signal }
+                            | CfgValueKind::DigitalRealSignalRead { signal } => {
+                                if value.dependencies.binary_search(signal).is_err() {
+                                    return Err(error(
+                                        "digital override reads a signal outside its dependencies",
+                                    ));
+                                }
+                            }
+                            CfgValueKind::DigitalPure { .. } => {
+                                self.check_call_value(function, entry, true)?;
+                            }
+                            CfgValueKind::DigitalSystemTask { .. }
+                            | CfgValueKind::DigitalSystemFunction { .. }
+                            | CfgValueKind::DigitalCallOutput { .. }
+                            | CfgValueKind::DigitalBlockingWrite { .. }
+                            | CfgValueKind::DigitalNonblockingWrite { .. }
+                            | CfgValueKind::DigitalDriverWrite { .. }
+                            | CfgValueKind::DigitalPackedBlockingWrite { .. }
+                            | CfgValueKind::DigitalPackedNonblockingWrite { .. }
+                            | CfgValueKind::DigitalArrayBlockingWrite { .. }
+                            | CfgValueKind::DigitalArrayNonblockingWrite { .. }
+                            | CfgValueKind::DigitalOverride { .. }
+                            | CfgValueKind::FrameSlotRead { .. }
+                            | CfgValueKind::FrameSlotWrite { .. } => {
+                                return Err(error(
+                                    "a digital override's right-hand side must only read signals",
+                                ));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {
+                    return Err(error(
+                        "digital override has a right-hand side exactly when it installs one",
+                    ));
+                }
             }
         }
         Ok(())

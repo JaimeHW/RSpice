@@ -14,6 +14,9 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 167 lowers `force`/`release` and procedural `assign`/`deassign`:
+/// the plan's override table and the `DigitalOverride` node. Earlier
+/// artifacts refused every such statement and carry neither.
 /// Version 166 lets a source specialization assign a `string` parameter
 /// (`ScalarParameterValue::String`). Earlier artifacts refused every string
 /// parameter at code generation and cannot carry the assignment.
@@ -175,7 +178,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 166;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 167;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

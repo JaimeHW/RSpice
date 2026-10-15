@@ -2493,6 +2493,7 @@ impl Emitter<'_> {
             | CfgValueKind::DigitalRoutineOutput { .. }
             | CfgValueKind::DigitalRoutineCompleted
             | CfgValueKind::DigitalUnwinding { .. }
+            | CfgValueKind::DigitalOverride { .. }
             | CfgValueKind::FrameSlotRead { .. }
             | CfgValueKind::FrameSlotWrite { .. } => {
                 return Err(EmitError::DigitalValueInAnalogEmitter(value));

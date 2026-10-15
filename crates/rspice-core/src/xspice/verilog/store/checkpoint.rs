@@ -157,6 +157,7 @@ impl DigitalSignalStore {
     pub(crate) fn restored_checkpoint(
         &self,
         image: &StoreCheckpoint,
+        forces: Option<&OverridesImage>,
         reader: &mut DigitalCheckpointReader<'_>,
     ) -> Result<Self, String> {
         if image.version != 1 || image.plan != self.plan.content_identity {
@@ -270,6 +271,9 @@ impl DigitalSignalStore {
             restored.insert_expression_wait(subscription.token, wait, remaining);
             last = Some(subscription.token);
         }
+        if let Some(forces) = forces {
+            restored.restore_overrides(forces)?;
+        }
         restored.validate_checkpoint_resolution()?;
         Ok(restored)
     }
@@ -291,11 +295,14 @@ impl DigitalSignalStore {
                     self.spans[usize::from(*member)].count != 0
                         || self.external_real_values(*member).next().is_some()
                 });
-                if driven && self.resolve_real(signal.id).to_bits() != self.reals[index].to_bits() {
+                let expected = self
+                    .forced_real(signal.id)
+                    .unwrap_or_else(|| self.resolve_real(signal.id));
+                if driven && expected.to_bits() != self.reals[index].to_bits() {
                     return Err("real net value differs from its driver resolution".into());
                 }
             } else if self.spans[index].count != 0 {
-                let expected = self.resolve(signal.id);
+                let expected = self.overlay_forced(signal.id, self.resolve(signal.id));
                 for bit in 0..signal.width {
                     if !connected.contains(&DigitalBitConnection {
                         signal: signal.id,
@@ -360,7 +367,7 @@ mod tests {
     ) -> Result<DigitalSignalStore, String> {
         let mut reader =
             DigitalCheckpointReader::new(&store.plan, DigitalCheckpointLimits::default()).unwrap();
-        store.restored_checkpoint(image, &mut reader)
+        store.restored_checkpoint(image, None, &mut reader)
     }
     fn run_drivers(store: &mut DigitalSignalStore) {
         let plan = Arc::clone(&store.plan);

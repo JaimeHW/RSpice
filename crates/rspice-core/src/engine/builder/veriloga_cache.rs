@@ -439,7 +439,12 @@ use super::*;
 // the cell of its `library.cell`, so a source an earlier build compiled one
 // way can now resolve another. No artifact changes shape, so the schema
 // stays; the fail-closed reading is to rebuild.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 152;
+//
+// Version 153 follows the canonical IR's schema to 167, whose digital plan
+// carries procedural continuous assignments. A version-152 record refused
+// every module that wrote one; rebuilding keeps the record and the schema in
+// step.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 153;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

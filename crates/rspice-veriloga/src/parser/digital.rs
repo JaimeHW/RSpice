@@ -704,11 +704,42 @@ impl Parser<'_> {
                 self.expect(TokenKind::Semicolon)?;
                 Ok(DigitalStatement::BlockingAssign(assign))
             }
-            // Every procedural statement outside the digital subset so far —
-            // `force`, `release`, `assign` and `deassign` as procedural
-            // statements — stops here on its own keyword.
+            TokenKind::Force => self.parse_procedural_continuous(ProceduralContinuousKind::Force),
+            TokenKind::Release => {
+                self.parse_procedural_continuous(ProceduralContinuousKind::Release)
+            }
+            TokenKind::Assign => self.parse_procedural_continuous(ProceduralContinuousKind::Assign),
+            TokenKind::Deassign => {
+                self.parse_procedural_continuous(ProceduralContinuousKind::Deassign)
+            }
             _ => Err(self.unsupported_digital_statement()),
         }
+    }
+
+    /// `force lvalue = expression;`, `release lvalue;`, `assign lvalue =
+    /// expression;` or `deassign lvalue;` (IEEE 1364-2005 section 9.3).
+    fn parse_procedural_continuous(
+        &mut self,
+        kind: ProceduralContinuousKind,
+    ) -> Result<DigitalStatement, ParseError> {
+        let start = self.current_span();
+        self.advance();
+        let target = self.parse_digital_lvalue()?;
+        let value = if kind.installs() {
+            self.expect(TokenKind::Assign_)?;
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        self.expect(TokenKind::Semicolon)?;
+        Ok(DigitalStatement::ProceduralContinuous(
+            DigitalProceduralContinuous {
+                kind,
+                target,
+                value,
+                span: start.extend(self.previous_span()),
+            },
+        ))
     }
 
     /// `$name [ ( [arg] {, [arg]} ) ] ;` — a system task enable (IEEE

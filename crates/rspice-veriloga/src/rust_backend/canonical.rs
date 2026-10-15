@@ -706,6 +706,7 @@ fn kernel_region_metrics(
             CfgValueKind::DigitalUnwinding { scope } => {
                 write!(out, "digital-unwinding:{}", scope.0)
             }
+            CfgValueKind::DigitalOverride { site } => write!(out, "digital-override:{}", site.0),
             CfgValueKind::FrameSlotRead { slot } => write!(out, "frame-slot-read:{slot}"),
             CfgValueKind::FrameSlotWrite { slot, .. } => write!(out, "frame-slot-write:{slot}"),
         }

@@ -57,7 +57,21 @@ pub(crate) struct HostCheckpoint {
     /// Randomness, `$timeformat`, the active `$monitor`, severity counts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     effects: Option<EffectsSection>,
+    /// The `force` and procedural `assign` overrides in effect; absent when
+    /// none is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    forces: Option<ForcesSection>,
 }
+
+/// The forces section, tagged with its own version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ForcesSection {
+    version: u32,
+    image: super::super::store::OverridesImage,
+}
+
+const FORCES_SECTION_VERSION: u32 = 1;
 
 /// The effects section, tagged with its own version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,6 +283,13 @@ impl DigitalHost {
                 version: EFFECTS_SECTION_VERSION,
                 image: effects,
             }),
+            forces: self
+                .store
+                .checkpoint_overrides()?
+                .map(|image| ForcesSection {
+                    version: FORCES_SECTION_VERSION,
+                    image,
+                }),
             delayed: self
                 .delayed_updates
                 .iter()
@@ -428,7 +449,16 @@ impl DigitalHost {
             .scheduler
             .restore_checkpoint(&image.scheduler, limits.scheduler)
             .map_err(|e| e.to_string())?;
-        restored.store = self.store.restored_checkpoint(&image.store, &mut reader)?;
+        let forces = match &image.forces {
+            Some(section) if section.version != FORCES_SECTION_VERSION => {
+                return Err("host forces section version differs".into());
+            }
+            Some(section) => Some(&section.image),
+            None => None,
+        };
+        restored.store = self
+            .store
+            .restored_checkpoint(&image.store, forces, &mut reader)?;
         restored.elaboration_closed = true;
         if let Some(section) = &image.effects {
             if section.version != EFFECTS_SECTION_VERSION {

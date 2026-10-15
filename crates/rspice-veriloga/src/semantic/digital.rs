@@ -2185,6 +2185,32 @@ impl SemanticAnalyzer {
             DigitalStatement::SystemTask(task) => {
                 self.check_system_call(task, true, signals, index);
             }
+            DigitalStatement::ProceduralContinuous(statement) => {
+                match statement.kind {
+                    // Section 9.3.1: a variable or a concatenation of them.
+                    ProceduralContinuousKind::Assign | ProceduralContinuousKind::Deassign => {
+                        self.check_digital_lvalue(&statement.target, signals, index, true)
+                    }
+                    // Section 9.3.2: a variable or a net, and a constant
+                    // select of a net; the lowering resolves which.
+                    ProceduralContinuousKind::Force | ProceduralContinuousKind::Release => {
+                        for (name, span) in statement.target.written_names() {
+                            if matches!(
+                                self.resolve_digital_name(name, index),
+                                Resolution::Undeclared
+                            ) {
+                                self.record_error_at(
+                                    SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
+                                    span,
+                                );
+                            }
+                        }
+                    }
+                }
+                if let Some(value) = &statement.value {
+                    self.check_digital_expression(value, signals, index);
+                }
+            }
             DigitalStatement::Null(_) => {}
         }
     }

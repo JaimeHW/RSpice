@@ -183,6 +183,10 @@ fn statement_expressions<'a>(statement: &'a DigitalStatement, out: &mut Vec<&'a 
         DigitalStatement::SystemTask(task) => out.extend(&task.args),
         DigitalStatement::TaskEnable(enable) => out.extend(&enable.args),
         DigitalStatement::EventTrigger(trigger) => lvalue_expressions(&trigger.target, out),
+        DigitalStatement::ProceduralContinuous(statement) => {
+            lvalue_expressions(&statement.target, out);
+            out.extend(&statement.value);
+        }
         DigitalStatement::Disable(_) | DigitalStatement::Null(_) => {}
     }
 }

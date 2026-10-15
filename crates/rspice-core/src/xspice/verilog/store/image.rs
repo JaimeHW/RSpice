@@ -38,6 +38,7 @@ impl Clone for DigitalSignalStore {
             activation_clock,
             traces,
             analog_edges,
+            overrides,
         } = self;
         Self {
             plan: Arc::clone(plan),
@@ -70,6 +71,7 @@ impl Clone for DigitalSignalStore {
             activation_clock: *activation_clock,
             traces: traces.clone(),
             analog_edges: analog_edges.clone(),
+            overrides: overrides.clone(),
         }
     }
 
@@ -109,6 +111,7 @@ impl Clone for DigitalSignalStore {
             activation_clock,
             traces,
             analog_edges,
+            overrides,
         } = self;
         let Self {
             plan: source_plan,
@@ -141,6 +144,7 @@ impl Clone for DigitalSignalStore {
             activation_clock: source_activation_clock,
             traces: source_traces,
             analog_edges: source_analog_edges,
+            overrides: source_overrides,
         } = source;
         plan.clone_from(source_plan);
         connected.clone_from(source_connected);
@@ -171,5 +175,6 @@ impl Clone for DigitalSignalStore {
         *activation_clock = *source_activation_clock;
         traces.clone_from(source_traces);
         analog_edges.clone_from(source_analog_edges);
+        overrides.clone_from(source_overrides);
     }
 }

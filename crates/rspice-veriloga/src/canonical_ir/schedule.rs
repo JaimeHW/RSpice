@@ -1926,6 +1926,7 @@ fn leaf_class(kind: &CfgValueKind, parameter_scopes: &[ParameterScope]) -> Inval
         | CfgValueKind::DigitalRoutineOutput { .. }
         | CfgValueKind::DigitalRoutineCompleted
         | CfgValueKind::DigitalUnwinding { .. }
+        | CfgValueKind::DigitalOverride { .. }
         | CfgValueKind::FrameSlotRead { .. }
         | CfgValueKind::FrameSlotWrite { .. }
         | CfgValueKind::AnalogCounter { .. }

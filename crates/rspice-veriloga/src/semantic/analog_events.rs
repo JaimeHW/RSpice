@@ -638,6 +638,7 @@ impl Lower {
             | DigitalStatement::TaskEnable(_)
             | DigitalStatement::Disable(_)
             | DigitalStatement::EventTrigger(_)
+            | DigitalStatement::ProceduralContinuous(_)
             | DigitalStatement::Null(_) => {}
         }
         Ok(())

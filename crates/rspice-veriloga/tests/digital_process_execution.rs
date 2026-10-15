@@ -30,6 +30,8 @@ use std::collections::BTreeMap;
 
 #[path = "digital_process_execution/checkpoint.rs"]
 mod checkpoint;
+#[path = "digital_process_execution/overrides.rs"]
+mod overrides;
 #[path = "digital_process_execution/routines.rs"]
 mod routines;
 

@@ -81,6 +81,8 @@
 
 pub(crate) mod checkpoint;
 mod image;
+mod overrides;
+pub(crate) use overrides::OverridesImage;
 mod traces;
 pub(crate) use traces::TraceSource;
 mod bindings;
@@ -400,6 +402,9 @@ pub(crate) struct DigitalSignalStore {
     /// Digital edges analog event controls wait on; see
     /// `mixed/digital_edges.rs`. Trial-scoped and never checkpointed.
     analog_edges: super::mixed::digital_edges::AnalogEdgeLatch,
+    /// `force` and procedural `assign` in effect (IEEE 1364-2005 section
+    /// 9.3); see `store/overrides.rs`.
+    overrides: overrides::Overrides,
 }
 
 impl DigitalSignalStore {
@@ -631,6 +636,7 @@ impl DigitalSignalStore {
             expression_scratch: DigitalEvalScratch::new(),
             expression_error: None,
             expression_captures: Vec::new(),
+            overrides: Default::default(),
         };
         if !store.plan.bit_aliases.is_empty() {
             store
@@ -907,8 +913,19 @@ impl DigitalSignalStore {
             .is_some_and(|kind| kind.is_real())
     }
 
-    /// Store a value and record the transition if it is one.
+    /// Store a value and record the transition if it is one. An overridden
+    /// signal takes the value beneath its override instead.
     fn publish(&mut self, signal: DigitalSignalId, value: FourStateValue) {
+        let value = if self.overrides.is_empty() {
+            value
+        } else {
+            self.admit(signal, value)
+        };
+        self.publish_unadmitted(signal, value);
+    }
+
+    /// Store a value as the signal's effective one.
+    fn publish_unadmitted(&mut self, signal: DigitalSignalId, value: FourStateValue) {
         let index = usize::from(signal);
         if self.values[index] == value {
             return;
@@ -940,6 +957,7 @@ impl DigitalSignalStore {
         self.trace_transition(signal, &values);
         self.analog_edges.observe(signal, &values);
         self.invalidate_analog_variables(signal);
+        self.note_override_input(signal);
         let sequence = self.next_sequence();
         let expressions = self.observe_expressions(signal);
         self.transitions.push(SignalTransition {
@@ -986,6 +1004,15 @@ impl DigitalSignalStore {
     }
 
     fn publish_real_member(&mut self, signal: DigitalSignalId, value: f64) {
+        let value = if self.overrides.is_empty() {
+            value
+        } else {
+            self.admit_real(signal, value)
+        };
+        self.publish_real_member_unadmitted(signal, value);
+    }
+
+    fn publish_real_member_unadmitted(&mut self, signal: DigitalSignalId, value: f64) {
         let index = usize::from(signal);
         if self.reals[index].to_bits() == value.to_bits() {
             return;
@@ -1248,6 +1275,13 @@ impl DigitalEnvironment for DigitalSignalStore {
         self.contributions[slot].value = ContributionValue::Real(Some(drive.value));
         let resolved = self.resolve_real(drive.driver.signal);
         self.publish_real(drive.driver.signal, resolved);
+    }
+
+    fn procedural_override(
+        &mut self,
+        site: rspice_veriloga::canonical_ir::digital::DigitalOverrideId,
+    ) -> Result<(), DigitalEvalError> {
+        self.apply_override(site)
     }
 }
 

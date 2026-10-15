@@ -2386,8 +2386,50 @@ pub enum DigitalStatement {
     Wait(DigitalWaitStatement),
     /// `-> event;` (section 9.7.3).
     EventTrigger(DigitalEventTrigger),
+    /// `force`, `release`, procedural `assign` or `deassign` (section 9.3).
+    ProceduralContinuous(DigitalProceduralContinuous),
     /// A lone `;`.
     Null(Span),
+}
+
+/// Which procedural continuous assignment statement (IEEE 1364-2005 section
+/// 9.3): the two that install an override and the two that remove one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ProceduralContinuousKind {
+    /// `assign v = e;` (section 9.3.1).
+    Assign,
+    /// `deassign v;` (section 9.3.1).
+    Deassign,
+    /// `force t = e;` (section 9.3.2).
+    Force,
+    /// `release t;` (section 9.3.2).
+    Release,
+}
+
+impl ProceduralContinuousKind {
+    pub const fn keyword(self) -> &'static str {
+        match self {
+            Self::Assign => "assign",
+            Self::Deassign => "deassign",
+            Self::Force => "force",
+            Self::Release => "release",
+        }
+    }
+
+    /// Whether the statement installs an override with a right-hand side.
+    pub const fn installs(self) -> bool {
+        matches!(self, Self::Assign | Self::Force)
+    }
+}
+
+/// `force t = e;`, `release t;`, `assign v = e;` or `deassign v;`.
+#[derive(Debug, Clone)]
+pub struct DigitalProceduralContinuous {
+    pub kind: ProceduralContinuousKind,
+    pub target: DigitalLValue,
+    /// The right-hand side of `force`/`assign`; `None` for `release`/`deassign`.
+    pub value: Option<Expression>,
+    pub span: Span,
 }
 
 /// `name(args);` — a user task enable.
@@ -2494,6 +2536,7 @@ impl DigitalStatement {
             Self::Disable(disable) => disable.span,
             Self::Wait(wait) => wait.span,
             Self::EventTrigger(trigger) => trigger.span,
+            Self::ProceduralContinuous(statement) => statement.span,
             Self::Null(span) => *span,
         }
     }
@@ -2534,6 +2577,7 @@ impl DigitalStatement {
             | Self::TaskEnable(_)
             | Self::Disable(_)
             | Self::EventTrigger(_)
+            | Self::ProceduralContinuous(_)
             | Self::Null(_) => false,
         }
     }

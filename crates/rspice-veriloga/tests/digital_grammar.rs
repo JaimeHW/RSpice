@@ -699,6 +699,7 @@ fn every_wave_one_behavioral_statement_parses() {
             DigitalStatement::Disable(_) => "disable",
             DigitalStatement::Wait(_) => "wait",
             DigitalStatement::EventTrigger(_) => "->",
+            DigitalStatement::ProceduralContinuous(statement) => statement.kind.keyword(),
         })
         .collect();
     assert_eq!(
@@ -783,27 +784,129 @@ fn continuous_assignments_parse_with_targets_and_delays() {
     );
 }
 
-/// Every procedural statement this wave does not implement stops on its own
-/// keyword, so the next construct to implement is named rather than guessed at.
+/// IEEE 1364-2005 section 9.3: `force`, `release`, `assign` and `deassign`
+/// are procedural statements; the two that install an override carry a
+/// right-hand side, and a target may be a concatenation.
 #[test]
-fn out_of_scope_procedural_statements_are_refused_by_name() {
-    for (keyword, statement) in [
-        ("force", "force q = 1'b1;"),
-        ("release", "release q;"),
-        ("deassign", "deassign q;"),
+fn procedural_continuous_assignments_parse() {
+    let file = parse(&digital_module(
+        "    wire clk;\n\
+         \x20   wire [3:0] w;\n\
+         \x20   reg q, r;\n\
+         \x20   initial begin\n\
+         \x20       force {w[1], q} = {clk, 1'b0};\n\
+         \x20       release {w[1], q};\n\
+         \x20       assign r = q;\n\
+         \x20       deassign r;\n\
+         \x20   end",
+    ));
+    let module = parsed_module(&file);
+    let DigitalStatement::Block(block) = &module.digital_processes[0].body else {
+        panic!("expected a block");
+    };
+    let statements: Vec<(&str, bool, usize)> = block
+        .statements
+        .iter()
+        .map(|statement| match statement {
+            DigitalStatement::ProceduralContinuous(statement) => (
+                statement.kind.keyword(),
+                statement.value.is_some(),
+                statement.target.written_names().len(),
+            ),
+            other => panic!("unexpected statement {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        statements,
+        [
+            ("force", true, 2),
+            ("release", false, 2),
+            ("assign", true, 1),
+            ("deassign", false, 1)
+        ]
+    );
+    let message = parse_error(&digital_module("    reg q;\n    initial release q = 1;"));
+    assert!(!message.contains("not yet supported"), "{message}");
+}
+
+/// The message lowering a module to canonical IR refuses it with.
+fn lowering_error(source: &str) -> String {
+    VerilogACompiler::new(CompilerOptions::default())
+        .compile_canonical_ir_module(source, None)
+        .expect_err("lowering must refuse this module")
+        .to_string()
+}
+
+/// Section 9.3.1 limits a procedural `assign` to variables; section 9.3.2
+/// lets `force` take a net, a constant select of a net, or a variable, but
+/// never a select of a variable or a memory word.
+#[test]
+fn procedural_continuous_targets_follow_section_9_3() {
+    let module = |body: &str| {
+        format!(
+            "module t;\n  wire [3:0] w;\n  reg [3:0] v;\n  reg [3:0] m [0:1];\n  \
+             initial begin {body} end\nendmodule\n"
+        )
+    };
+    let message = analyze_error(&module("assign w = 4'd1;"));
+    assert!(message.contains("`w`, which is a `wire`"), "{message}");
+    for (body, expected) in [
+        (
+            "force v[1] = 1'b1;",
+            "a bit- or part-select of the variable `v`",
+        ),
+        ("force m[0] = 4'd1;", "a memory or one of its words"),
+        ("release m[1];", "a memory or one of its words"),
     ] {
-        let message = parse_error(&digital_module(&format!(
-            "    wire clk;\n\
-             \x20   reg q;\n\
-             \x20   always @(posedge clk) {statement}"
-        )));
-        assert!(
-            message.contains(&format!(
-                "Verilog-AMS digital construct not yet supported: `{keyword}`"
-            )),
-            "expected `{keyword}` to be refused by name, got {message:?}"
-        );
+        let message = lowering_error(&module(body));
+        assert!(message.contains(expected), "{body}: {message}");
     }
+    for body in [
+        "force w = 4'd1;",
+        "force w[2] = 1'b1;",
+        "force w[3:2] = 2'b10;",
+        "force {w[0], v} = 5'h1f;",
+        "assign v = w;",
+        "release w[2]; deassign v;",
+    ] {
+        VerilogACompiler::new(CompilerOptions::default())
+            .compile_canonical_ir_module(&module(body), None)
+            .unwrap_or_else(|error| panic!("{body}: {error}"));
+    }
+    let message = lowering_error(&module("force w = $random;"));
+    assert!(message.contains("calls `$random`"), "{message}");
+}
+
+/// Section 10.2.1: a variable of an automatic task may be neither the target
+/// nor an operand of a procedural continuous assignment, and section 10.4.4
+/// keeps them out of functions altogether.
+#[test]
+fn procedural_continuous_assignments_refuse_automatic_variables_and_functions() {
+    let message = analyze_error(
+        "module t;\n  reg q;\n  task automatic f(input a);\n    force q = a;\n  endtask\n\
+         initial f(1'b1);\nendmodule\n",
+    );
+    assert!(
+        message.contains("a `force` or `release` cannot use `a`")
+            && message.contains("automatic task `f`"),
+        "{message}"
+    );
+    let message = analyze_error(
+        "module t;\n  reg q;\n  task automatic f;\n    reg l;\n    assign l = q;\n  endtask\n\
+         initial f;\nendmodule\n",
+    );
+    assert!(
+        message.contains("a procedural `assign` or `deassign` cannot use `l`"),
+        "{message}"
+    );
+    let message = analyze_error(
+        "module t;\n  reg q;\n  function g(input a);\n    begin force q = a; g = a; end\n  \
+         endfunction\n  initial q = g(1'b0);\nendmodule\n",
+    );
+    assert!(
+        message.contains("a procedural continuous assignment"),
+        "{message}"
+    );
 }
 
 // ===========================================================================
@@ -3646,7 +3749,10 @@ fn a_config_declaration_parses_beside_the_modules() {
         panic!("one configuration: {:?}", parsed.configs);
     };
     assert_eq!(config.name, "cfg");
-    assert_eq!(config.library, "work", "a source without a marker is in `work`");
+    assert_eq!(
+        config.library, "work",
+        "a source without a marker is in `work`"
+    );
     let cell = |library: Option<&str>, cell: &str| (library.map(str::to_owned), cell.to_owned());
     let written = |value: &LibraryCell| {
         (
@@ -3666,7 +3772,10 @@ fn a_config_declaration_parses_beside_the_modules() {
                 ConfigSelection::Default => "default".to_owned(),
                 ConfigSelection::Instance(path) => format!(
                     "instance {}",
-                    path.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(".")
+                    path.iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(".")
                 ),
                 ConfigSelection::Cell(value) => {
                     let (library, name) = written(value);
@@ -3676,7 +3785,11 @@ fn a_config_declaration_parses_beside_the_modules() {
             let expansion = match &rule.expansion {
                 ConfigExpansion::Liblist(libraries) => format!(
                     "liblist {}",
-                    libraries.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" ")
+                    libraries
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
                 ),
                 ConfigExpansion::Use {
                     cell: value,
@@ -3725,16 +3838,39 @@ fn configuration_words_stay_identifiers_outside_a_config() {
 #[test]
 fn a_malformed_config_is_a_parse_error() {
     for (source, expected) in [
-        ("config cfg; default liblist a; endconfig", "`design` statement"),
-        ("config cfg; design top; default use a.b; endconfig", "`default` clause"),
-        ("config cfg; design top; cell leaf; endconfig", "`liblist` or `use`"),
-        ("config cfg; design top; endconfig : other", "closes configuration `cfg`"),
-        ("config cfg; localparam P = 1; design top; endconfig", "localparam"),
-        ("config cfg; design top; instance top.u1 use a.b;", "end of input"),
+        (
+            "config cfg; default liblist a; endconfig",
+            "`design` statement",
+        ),
+        (
+            "config cfg; design top; default use a.b; endconfig",
+            "`default` clause",
+        ),
+        (
+            "config cfg; design top; cell leaf; endconfig",
+            "`liblist` or `use`",
+        ),
+        (
+            "config cfg; design top; endconfig : other",
+            "closes configuration `cfg`",
+        ),
+        (
+            "config cfg; localparam P = 1; design top; endconfig",
+            "localparam",
+        ),
+        (
+            "config cfg; design top; instance top.u1 use a.b;",
+            "end of input",
+        ),
     ] {
         let error = parse_error(source);
         assert!(error.contains(expected), "{source}: {error}");
     }
     // IEEE 1800-2017's closing label is accepted when it names the config.
-    assert_eq!(parse("config cfg; design top; endconfig : cfg").configs.len(), 1);
+    assert_eq!(
+        parse("config cfg; design top; endconfig : cfg")
+            .configs
+            .len(),
+        1
+    );
 }

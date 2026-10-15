@@ -1197,6 +1197,12 @@ impl Unroller<'_> {
                 }
             }
             DigitalStatement::EventTrigger(trigger) => self.substitute_lvalue(&mut trigger.target),
+            DigitalStatement::ProceduralContinuous(statement) => {
+                self.substitute_lvalue(&mut statement.target);
+                if let Some(value) = &mut statement.value {
+                    self.substitute(value);
+                }
+            }
             DigitalStatement::Disable(_) => {}
         }
     }

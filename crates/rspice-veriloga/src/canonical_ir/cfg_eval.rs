@@ -1493,6 +1493,7 @@ impl<S: CfgScalar> Evaluator<'_, S> {
             | CfgValueKind::DigitalRoutineOutput { .. }
             | CfgValueKind::DigitalRoutineCompleted
             | CfgValueKind::DigitalUnwinding { .. }
+            | CfgValueKind::DigitalOverride { .. }
             | CfgValueKind::FrameSlotRead { .. }
             | CfgValueKind::FrameSlotWrite { .. } => {
                 return Err(CfgEvalError::DigitalConstructInAnalogEvaluation {

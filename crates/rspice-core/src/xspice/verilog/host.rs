@@ -631,6 +631,12 @@ impl DigitalEnvironment for HostEnvironment<'_> {
         self.effects
             .system_function(self.plan, site, args, process, clock, self.store)
     }
+    fn procedural_override(
+        &mut self,
+        site: rspice_veriloga::canonical_ir::digital::DigitalOverrideId,
+    ) -> Result<(), DigitalEvalError> {
+        self.store.apply_override(site)
+    }
 }
 
 impl DigitalHost {
@@ -1662,6 +1668,11 @@ impl DigitalHost {
                 .current_sequence()
                 .ok_or(DigitalRunError::EventSequenceOverflow)?;
             self.check_expression_error()?;
+            // A changed operand of a `force` or procedural `assign` updates
+            // its target before the round's changes are dispatched.
+            self.store.settle_overrides().map_err(|error| {
+                evaluation_error("a procedural continuous assignment".into(), error)
+            })?;
             self.store.drain_transitions_into(drained);
             if drained.is_empty() {
                 return Ok(());

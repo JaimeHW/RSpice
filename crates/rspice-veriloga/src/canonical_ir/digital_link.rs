@@ -126,6 +126,7 @@ struct TableOffsets {
     scopes: u32,
     observers: u32,
     routines: u32,
+    overrides: u32,
 }
 
 /// An instance scope's path with its root renamed to the instance: each
@@ -266,6 +267,10 @@ pub fn link_digital_plans(
             .routines
             .checked_add(index(instance.plan.routines.len(), "routine")?)
             .ok_or_else(|| error("linked routine count exceeds u32"))?;
+        tables.overrides = tables
+            .overrides
+            .checked_add(index(instance.plan.overrides.len(), "override")?)
+            .ok_or_else(|| error("linked override count exceeds u32"))?;
         layouts.push(Layout {
             tables: instance_tables,
             instance,
@@ -593,6 +598,37 @@ pub fn link_digital_plans(
             observer.dependencies.dedup();
             plan.observers.push(observer);
         }
+        for site in &source.overrides {
+            check_cancel(control)?;
+            let mut site = site.clone();
+            site.id = DigitalOverrideId(site.id.0 + layout.tables.overrides);
+            relocate_span(&mut site.span, &layout.map);
+            for target in &mut site.targets {
+                relocate_target(&mut target.target, source, &layout.map);
+            }
+            if let Some(value) = &mut site.value {
+                // The evaluator's id only attributes a diagnostic; a site in a
+                // task of a root with no process of its own keeps its own.
+                if let Some(process) = layout.map.processes.get(usize::from(value.evaluator.id)) {
+                    value.evaluator.id = *process;
+                }
+                relocate_span(&mut value.evaluator.span, &layout.map);
+                relocate_function(
+                    &mut value.evaluator.function,
+                    source,
+                    &layout.map,
+                    &drivers,
+                    layout.tables,
+                    control,
+                )?;
+                for signal in &mut value.dependencies {
+                    *signal = layout.map.signals[usize::from(*signal)];
+                }
+                value.dependencies.sort_unstable();
+                value.dependencies.dedup();
+            }
+            plan.overrides.push(site);
+        }
         layout.map.drivers = drivers;
     }
     // Collapsed aliases of one output connection publish only one driver.
@@ -776,6 +812,9 @@ fn relocate_value(
         }
         CfgValueKind::DigitalUnwinding { scope } => {
             *scope = DigitalScopeId(scope.0 + tables.scopes);
+        }
+        CfgValueKind::DigitalOverride { site } => {
+            *site = DigitalOverrideId(site.0 + tables.overrides);
         }
         CfgValueKind::DigitalArrayRead { array, .. }
         | CfgValueKind::DigitalArrayBlockingWrite { array, .. } => {

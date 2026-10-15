@@ -933,6 +933,78 @@ pub struct CanonicalDigitalPlan {
     /// order. A call names its entry here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routines: Vec<DigitalRoutine>,
+    /// One entry per `force`, `release`, procedural `assign` or `deassign`
+    /// statement (IEEE 1364-2005 section 9.3), in lowering order. A
+    /// [`CfgValueKind::DigitalOverride`](super::cfg::CfgValueKind::DigitalOverride)
+    /// node names its entry here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<DigitalOverride>,
+}
+
+/// Dense identity of one procedural continuous assignment statement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DigitalOverrideId(pub u32);
+
+impl DigitalOverrideId {
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl std::fmt::Display for DigitalOverrideId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "override#{}", self.0)
+    }
+}
+
+/// One bit range a procedural continuous assignment names: a whole variable,
+/// a whole net, or a constant bit- or part-select of a net (IEEE 1364-2005
+/// section 9.3.2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalOverrideTarget {
+    pub target: DigitalWriteTarget,
+    /// Bits the target covers; zero for a real variable or net.
+    pub width: u32,
+}
+
+/// The right-hand side of a `force` or procedural `assign`.
+///
+/// Continuous (sections 9.3.1 and 9.3.2): the host evaluates it when the
+/// statement executes and again whenever one of its operands changes, for as
+/// long as the override it installed is in effect. Like an observer it reads
+/// only signals — every process-local it names was promoted to signal storage
+/// — so it runs outside any activation of the process that wrote it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalOverrideValue {
+    /// The function computing the value, carried as a process so a user
+    /// function call inside it returns to a function the interpreter knows.
+    /// It is not one of the plan's processes and never runs as one.
+    pub evaluator: CfgDigitalProcess,
+    /// The value the function leaves: the concatenated targets' total width,
+    /// or a real for a real target.
+    pub result: ValueId,
+    /// Every signal the right-hand side reads, ascending.
+    pub dependencies: Vec<DigitalSignalId>,
+}
+
+/// One `force`, `release`, procedural `assign` or `deassign` statement.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DigitalOverride {
+    pub id: DigitalOverrideId,
+    pub kind: crate::ast::ProceduralContinuousKind,
+    /// The targets, most significant first, as a concatenation names them.
+    pub targets: Vec<DigitalOverrideTarget>,
+    /// `Some` exactly for `force` and `assign`.
+    pub value: Option<DigitalOverrideValue>,
+    pub span: SourceSpanRef,
+}
+
+impl DigitalOverride {
+    /// The targets' total width.
+    pub fn width(&self) -> u32 {
+        self.targets.iter().map(|target| target.width).sum()
+    }
 }
 
 /// Dense identity of one system task or function call site.
