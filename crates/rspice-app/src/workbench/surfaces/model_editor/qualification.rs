@@ -132,7 +132,7 @@ pub(super) fn qualification_plan_dialog(
                     DisplayCell::plain(&row.desktop),
                     DisplayCell::plain(&row.wasm),
                     DisplayCell::mono(&row.reference_error),
-                    DisplayCell::toned(&row.status, row.tone),
+                    row.status.clone(),
                 ]
             })
             .collect::<Vec<_>>();
@@ -2005,6 +2005,9 @@ fn qualification_multiline_field(
     });
 }
 
+/// The band under the authoring form, which is empty until the transaction is
+/// refused. The sentence that used to stand here described how the commit is
+/// implemented, and said it on every frame of a form that had not failed.
 fn qualification_authoring_error(ui: &mut Ui, error: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
@@ -2013,28 +2016,30 @@ fn qualification_authoring_error(ui: &mut Ui, error: Option<&str>) {
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     bottom_rule(ui, rect, t.color.border);
-    let (text, color) = error.map_or(
-        (
-            "The suite and vector are committed atomically only after every identity, source binding, analysis, probe, sample, and tolerance validates.",
-            t.color.text_dim,
-        ),
-        |error| (error, t.color.err),
-    );
-    if error.is_some() {
-        ui.painter().rect_filled(
-            Rect::from_min_max(rect.min, Pos2::new(rect.left() + 3.0, rect.bottom())),
-            0.0,
-            t.color.err,
-        );
-    }
+    let Some(error) = error else {
+        return;
+    };
     let inner = rect.shrink2(Vec2::new(10.0, 8.0));
-    let galley = ui.painter().layout(
-        text.to_owned(),
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        color,
-        inner.width(),
+    paint_problem_mark(
+        ui.painter(),
+        Rect::from_center_size(
+            Pos2::new(
+                inner.left() + MARK_SIDE * 0.5,
+                inner.top() + MARK_SIDE * 0.5,
+            ),
+            Vec2::splat(MARK_SIDE),
+        ),
+        Problem::Failure,
     );
-    ui.painter()
-        .with_clip_rect(inner)
-        .galley(inner.min, galley, color);
+    let galley = ui.painter().layout(
+        error.to_owned(),
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+        (inner.width() - MARK_ADVANCE).max(1.0),
+    );
+    ui.painter().with_clip_rect(inner).galley(
+        Pos2::new(inner.left() + MARK_ADVANCE, inner.top()),
+        galley,
+        t.color.text_dim,
+    );
 }

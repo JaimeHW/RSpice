@@ -255,25 +255,19 @@ pub(super) fn validation_review_rows(
         let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
             return Vec::new();
         };
-        return vec![
-            vec![
-                DisplayCell::plain("Candidate source"),
-                DisplayCell::mono(format!(
-                    "{} · r{} · {}",
-                    draft.model_name,
-                    draft.base_source_revision.get(),
-                    short_identity(&draft.base_source_digest.to_string())
-                )),
-                DisplayCell::toned("ready", MetricTone::Neutral),
-            ],
-            vec![
-                DisplayCell::plain("Validation scope"),
-                DisplayCell::plain(
-                    "source identity · typed schema · physical bounds · qualification structure · platform evidence",
-                ),
-                DisplayCell::toned("pending", MetricTone::Warning),
-            ],
-        ];
+        // Before the report is prepared there is one thing to state: which
+        // source it will be run against. The scope row listed the checks the
+        // run makes, which the reader can neither choose nor act on.
+        return vec![vec![
+            DisplayCell::plain("Candidate source"),
+            DisplayCell::mono(format!(
+                "{} · r{} · {}",
+                draft.model_name,
+                draft.base_source_revision.get(),
+                short_identity(&draft.base_source_digest.to_string())
+            )),
+            DisplayCell::plain(""),
+        ]];
     }
     let valid = app.state.workbench.model_editor.validation.is_some();
     let definition_valid =
@@ -332,7 +326,7 @@ pub(super) fn validation_row(check: &str, observed: &str, passed: bool) -> Vec<D
         DisplayCell::toned(
             if passed { "pass" } else { "review" },
             if passed {
-                MetricTone::Good
+                MetricTone::Neutral
             } else {
                 MetricTone::Warning
             },
@@ -447,18 +441,11 @@ pub(super) fn qualification_run_rows(
         ],
         vec![
             DisplayCell::plain("Validation"),
-            DisplayCell::toned(
-                if app.state.workbench.model_editor.validation.is_some() {
-                    "current source-bound report"
-                } else {
-                    "validation required"
-                },
-                if app.state.workbench.model_editor.validation.is_some() {
-                    MetricTone::Good
-                } else {
-                    MetricTone::Warning
-                },
-            ),
+            DisplayCell::plain(if app.state.workbench.model_editor.validation.is_some() {
+                ""
+            } else {
+                "not validated"
+            }),
         ],
         vec![
             DisplayCell::plain("Retained evidence"),
@@ -491,7 +478,7 @@ pub(super) fn workflow_purpose_note(ui: &mut Ui, text: &str) {
     ui.painter().rect_filled(
         Rect::from_min_max(rect.min, Pos2::new(rect.left() + 2.0, rect.bottom())),
         0.0,
-        t.color.accent,
+        t.color.border,
     );
     ui.painter().galley(
         Pos2::new(rect.left() + 12.0, rect.top() + 9.0),

@@ -117,11 +117,9 @@ pub(super) fn promotion_review_dialog(
             return;
         };
         dialog_subheading(ui, &format!("{} · {}", candidate.identity.id, candidate.identity.version));
-        const COLUMNS: [(&str, f32); 3] = [
-            ("Promotion gate", 0.38),
-            ("Observed", 0.38),
-            ("State", 0.24),
-        ];
+        // "Observed" said "complete" or "unresolved" and the state column said
+        // "pass" or "block" off the same bool: one of the two was the column.
+        const COLUMNS: [(&str, f32); 2] = [("Promotion gate", 0.70), ("State", 0.30)];
         let checklist = &candidate.checklist;
         let rows = [
             ("Source evidence binding", checklist.source_evidence_bound),
@@ -138,10 +136,13 @@ pub(super) fn promotion_review_dialog(
         .map(|(gate, complete)| {
             vec![
                 DisplayCell::plain(gate),
-                DisplayCell::plain(if complete { "complete" } else { "unresolved" }),
                 DisplayCell::toned(
                     if complete { "pass" } else { "block" },
-                    if complete { MetricTone::Good } else { MetricTone::Error },
+                    if complete {
+                        MetricTone::Neutral
+                    } else {
+                        MetricTone::Error
+                    },
                 ),
             ]
         })
@@ -384,7 +385,7 @@ fn promotion_gate_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<
             DisplayCell::toned(
                 if passed { "pass" } else { "block" },
                 if passed {
-                    MetricTone::Good
+                    MetricTone::Neutral
                 } else {
                     MetricTone::Error
                 },
@@ -792,22 +793,30 @@ pub(super) fn promotion_note(ui: &mut Ui, error: Option<&str>, detail: &str) {
     );
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     bottom_rule(ui, rect, t.color.border);
-    let (text, color) = error.map_or((detail, t.color.text_dim), |error| (error, t.color.err));
-    if error.is_some() {
-        ui.painter().rect_filled(
-            Rect::from_min_max(rect.min, Pos2::new(rect.left() + 3.0, rect.bottom())),
-            0.0,
-            t.color.err,
-        );
-    }
     let inner = rect.shrink2(Vec2::new(10.0, 8.0));
+    let mut text_left = inner.left();
+    let mut wrap = inner.width();
+    if error.is_some() {
+        paint_problem_mark(
+            ui.painter(),
+            Rect::from_center_size(
+                Pos2::new(text_left + MARK_SIDE * 0.5, inner.top() + MARK_SIDE * 0.5),
+                Vec2::splat(MARK_SIDE),
+            ),
+            Problem::Failure,
+        );
+        text_left += MARK_ADVANCE;
+        wrap = (wrap - MARK_ADVANCE).max(1.0);
+    }
     let galley = ui.painter().layout(
-        text.to_owned(),
+        error.unwrap_or(detail).to_owned(),
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        color,
-        inner.width(),
+        t.color.text_dim,
+        wrap,
     );
-    ui.painter()
-        .with_clip_rect(inner)
-        .galley(inner.min, galley, color);
+    ui.painter().with_clip_rect(inner).galley(
+        Pos2::new(text_left, inner.top()),
+        galley,
+        t.color.text_dim,
+    );
 }
