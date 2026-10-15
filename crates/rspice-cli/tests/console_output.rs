@@ -346,8 +346,12 @@ fn unsupported_hdl_options_are_refused_as_not_supported_yet() {
         "hdl.option.delay_select",
         "min:typ:max delay selection",
     );
-    hdl_console_deck(&directory, ".options hdl_libmap=\"lib.map\"\n");
-    refused(&[], "hdl.option.libmap", "library maps are not implemented");
+    hdl_console_deck(&directory, ".options hdl_path_delays=0\n");
+    refused(
+        &[],
+        "hdl.option.path_delays",
+        "`specify` path delays are not implemented",
+    );
     let output = rspice_in(&directory, &["--quiet", "run", "talker.cir", "N=4"]);
     assert_eq!(output.status.code(), Some(2), "{output:?}");
 }

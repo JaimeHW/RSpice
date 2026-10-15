@@ -73,10 +73,16 @@ struct SourceGroup {
 
 pub(super) fn resolve_includes(
     includes: &[VerilogAInclude],
+    library_map: Option<&Path>,
     rules: &mut DesignConnectRules,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Option<CachedVerilogAModel>>, SimulationError> {
+    // A library map (IEEE 1364-2005 section 13.2) places the unit's files in
+    // libraries and brings in files of its own.
+    let library_map = library_map
+        .map(super::hdl_library_map::LibraryMap::read)
+        .transpose()?;
     let mut group_indices = HashMap::new();
     let mut groups: Vec<Vec<usize>> = Vec::new();
     for (index, include) in includes.iter().enumerate() {
@@ -93,18 +99,20 @@ pub(super) fn resolve_includes(
     // The HDL sources of a run are one compilation unit (IEEE 1364-2005
     // clause 19), except a sealed runtime, which is registered whole, and a
     // connection library, which is a library of its own that a design selects
-    // by source. A unit of one file is that file, as it always was.
+    // by source. A unit of one file is that file, as it always was, unless a
+    // library map places it.
     let (unit_groups, groups): (Vec<_>, Vec<_>) = groups.into_iter().partition(|group| {
         let path = &includes[group[0]].file_path;
         !is_sealed_veriloga_virtual_path(path) && !declares_connect_items(path)
     });
-    let (unit_groups, groups) = if unit_groups.len() > 1 {
-        (unit_groups, groups)
-    } else {
-        let mut groups = [unit_groups, groups].concat();
-        groups.sort_by_key(|group| group[0]);
-        (Vec::new(), groups)
-    };
+    let (unit_groups, groups) =
+        if unit_groups.len() > 1 || (library_map.is_some() && !unit_groups.is_empty()) {
+            (unit_groups, groups)
+        } else {
+            let mut groups = [unit_groups, groups].concat();
+            groups.sort_by_key(|group| group[0]);
+            (Vec::new(), groups)
+        };
     let mut models = vec![None; includes.len()];
     let mut dependency_versions = DependencyVersions::default();
     let mut frozen = Vec::new();
@@ -260,6 +268,7 @@ pub(super) fn resolve_includes(
         Some(unit_first_pass(
             includes,
             unit_groups,
+            library_map.as_ref(),
             rules,
             UnitState {
                 models: &mut models,
@@ -447,12 +456,15 @@ struct UnitPass {
 /// The files are the library `work`, read in deck order: macros and
 /// `timescale` carry from one file into the next (IEEE 1364-2005 sections
 /// 19.3 and 19.8), and a module of one file may instantiate a module of
-/// another. Each selection is cached under the unit, so a design that
+/// another. A library map instead places each file in a library and adds the
+/// files it names that the deck does not, after the deck's, in map order
+/// (clause 13). Each selection is cached under the unit, so a design that
 /// compiled before needs no preparation; otherwise the unit is prepared once
 /// and its connect rules registered.
 fn unit_first_pass(
     includes: &[VerilogAInclude],
     groups: Vec<Vec<usize>>,
+    library_map: Option<&super::hdl_library_map::LibraryMap>,
     rules: &mut DesignConnectRules,
     state: UnitState<'_>,
     limits: ResourceLimits,
@@ -464,11 +476,32 @@ fn unit_first_pass(
         dependency_versions,
         admit_source,
     } = state;
-    let paths: Vec<&Path> = groups
+    let mut files: Vec<PathBuf> = groups
         .iter()
-        .map(|group| includes[group[0]].file_path.as_path())
+        .map(|group| includes[group[0]].file_path.clone())
         .collect();
-    let identity = unit_identity(paths.iter().copied());
+    // A file the deck also names is read once, where the deck names it, in
+    // the map's library.
+    let libraries = match library_map {
+        None => None,
+        Some(map) => {
+            let named = files
+                .iter()
+                .map(|path| canonicalize_for_cache(path))
+                .collect();
+            files.extend(map.other_files(&named));
+            Some(rspice_veriloga::UnitLibraries {
+                files: files
+                    .iter()
+                    .map(|path| map.library_of(path))
+                    .collect::<Result<_, _>>()?,
+                declared: map.declared(),
+                configs: map.configs(),
+            })
+        }
+    };
+    let paths: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
+    let identity = unit_identity(paths.iter().copied(), libraries.as_ref());
     let mut whole_hit = true;
     for &index in groups.iter().flatten() {
         super::check_build_abort(abort)?;
@@ -515,7 +548,12 @@ fn unit_first_pass(
     let prepared = if whole_hit {
         None
     } else {
-        let prepared = Box::new(prepare_veriloga_unit(&paths, limits, abort)?);
+        let prepared = Box::new(prepare_veriloga_unit(
+            &paths,
+            libraries.as_ref(),
+            limits,
+            abort,
+        )?);
         if !admitted {
             admit_source(prepared.preprocessed_source().len())?;
         }
@@ -523,7 +561,9 @@ fn unit_first_pass(
             dependency_versions.record(paths[0], &dependency.path, dependency.content_identity)?;
         }
         let specification = prepared.connect_specification();
-        for path in &paths {
+        // The deck's sources; a file only the map names is no source a
+        // design selects.
+        for path in &paths[..groups.len()] {
             rules.register(path, specification.clone())?;
         }
         // A file of the unit may declare no module: the macros and

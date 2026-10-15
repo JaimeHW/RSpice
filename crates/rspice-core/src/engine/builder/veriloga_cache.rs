@@ -2190,14 +2190,18 @@ pub(super) fn prepare_veriloga_source(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
-    prepare_veriloga_unit(&[path], limits, abort)
+    prepare_veriloga_unit(&[path], None, limits, abort)
 }
 
 /// Prepare HDL sources as one compilation unit, read in the order given
-/// (IEEE 1364-2005 clause 19). One path prepares that file alone.
+/// (IEEE 1364-2005 clause 19), or in the libraries a library map put them
+/// in (clause 13). One path without a map prepares that file alone. The
+/// files a map names are read under the same limits and refusals as the
+/// deck's own.
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn prepare_veriloga_unit(
     paths: &[&Path],
+    libraries: Option<&rspice_veriloga::UnitLibraries>,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
@@ -2231,16 +2235,23 @@ pub(super) fn prepare_veriloga_unit(
     let compiler = rspice_veriloga::VerilogACompiler::new(deck_include_compiler_options());
     let control = VerilogACompileControl { abort };
     let preparation_started = crate::time_compat::Instant::now();
-    let prepared = compiler.prepare_unit_runtime_source_with_diagnostics(
-        paths,
-        rspice_veriloga::SourceProviderLimits {
-            max_dependencies: usize::MAX,
-            max_total_source_bytes: limits.max_dependency_source_bytes,
-            max_include_depth: limits.max_include_depth,
-            max_expanded_bytes: limits.max_expanded_source_bytes,
-        },
-        &control,
-    );
+    let provider_limits = rspice_veriloga::SourceProviderLimits {
+        max_dependencies: usize::MAX,
+        max_total_source_bytes: limits.max_dependency_source_bytes,
+        max_include_depth: limits.max_include_depth,
+        max_expanded_bytes: limits.max_expanded_source_bytes,
+    };
+    let prepared = match libraries {
+        Some(libraries) => compiler.prepare_library_unit_runtime_source_with_diagnostics(
+            paths,
+            libraries,
+            provider_limits,
+            &control,
+        ),
+        None => {
+            compiler.prepare_unit_runtime_source_with_diagnostics(paths, provider_limits, &control)
+        }
+    };
     record_veriloga_compilation_time(preparation_started.elapsed());
     prepared.map_err(|error| {
         use std::sync::atomic::Ordering::Relaxed;
@@ -2271,12 +2282,12 @@ pub(super) fn prepare_veriloga_unit(
                 }
                 source_admission_error(path, "preparation failed", error)
             }
-            // A unit of several files refuses a module name two of them
-            // declare, at the second declaration.
+            // A unit of several files refuses a module name two files of one
+            // library declare, at the second declaration.
             rspice_veriloga::ProviderCompileError::Compile {
                 source: rspice_veriloga::CompileError::ModuleSelection(message),
                 diagnostics,
-            } if paths.len() > 1 => {
+            } if paths.len() > 1 || libraries.is_some() => {
                 VERILOGA_CACHE_TELEMETRY
                     .compilations_failed
                     .fetch_add(1, Relaxed);
@@ -2332,6 +2343,7 @@ pub(super) fn prepare_veriloga_source(
 #[cfg(all(feature = "veriloga", target_arch = "wasm32"))]
 pub(super) fn prepare_veriloga_unit(
     paths: &[&Path],
+    _libraries: Option<&rspice_veriloga::UnitLibraries>,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<rspice_veriloga::PreparedRuntimeSource, SimulationError> {
@@ -2398,14 +2410,33 @@ pub(super) fn lookup_configured_veriloga(
 /// order they are read. Their contents are the record's dependencies, so the
 /// identity names only which files and in what order.
 #[cfg(feature = "veriloga")]
-pub(super) fn unit_identity<'a>(paths: impl IntoIterator<Item = &'a Path>) -> [u8; 32] {
+pub(super) fn unit_identity<'a>(
+    paths: impl IntoIterator<Item = &'a Path>,
+    libraries: Option<&rspice_veriloga::UnitLibraries>,
+) -> [u8; 32] {
+    fn text(hash: &mut blake3::Hasher, text: &str) {
+        hash.update(&(text.len() as u64).to_le_bytes());
+        hash.update(text.as_bytes());
+    }
     let mut hash = blake3::Hasher::new();
     hash.update(b"rspice.hdl-unit\0");
     for path in paths {
         let path = canonicalize_for_cache(path);
-        let text = path.to_string_lossy();
-        hash.update(&(text.len() as u64).to_le_bytes());
-        hash.update(text.as_bytes());
+        text(&mut hash, &path.to_string_lossy());
+    }
+    // A library map's placement, search order and configurations decide what
+    // each module binds, so a unit is keyed by them as by its files.
+    if let Some(libraries) = libraries {
+        hash.update(b"libraries\0");
+        for library in libraries.files.iter().chain(&libraries.declared) {
+            text(&mut hash, library);
+        }
+        hash.update(&(libraries.declared.len() as u64).to_le_bytes());
+        for config in &libraries.configs {
+            text(&mut hash, &config.path.to_string_lossy());
+            hash.update(&(config.line as u64).to_le_bytes());
+            text(&mut hash, &config.text);
+        }
     }
     *hash.finalize().as_bytes()
 }

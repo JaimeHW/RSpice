@@ -392,8 +392,8 @@ impl HdlRunConfig {
 
     /// The refusal for the first option set away from its default whose
     /// behaviour has not landed. Delay selection, path delays and timing
-    /// checks are P2 lane L6's; library maps L8's. The token says which; the
-    /// text names the feature.
+    /// checks are P2 lane L6's. The token says which; the text names the
+    /// feature.
     fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
         let (capability, option, reason) = if self.delay_select != HdlDelaySelect::Typ {
             (
@@ -412,12 +412,6 @@ impl HdlRunConfig {
                 "hdl.option.timing_checks",
                 "`.options hdl_timing_checks=0`",
                 "`specify` timing checks are not implemented",
-            )
-        } else if self.library_map.is_some() {
-            (
-                "hdl.option.libmap",
-                "`.options hdl_libmap`",
-                "Verilog configurations and library maps are not implemented",
             )
         } else {
             return None;
@@ -1462,6 +1456,13 @@ mod timeint_config_tests {
         }
         .validate()
         .expect("the file I/O options are valid");
+        // Library maps and configurations have landed too.
+        HdlRunConfig {
+            library_map: Some("lib.map".into()),
+            ..HdlRunConfig::default()
+        }
+        .validate()
+        .expect("a library map is valid");
         for (config, token, feature) in [
             (
                 HdlRunConfig {
@@ -1486,14 +1487,6 @@ mod timeint_config_tests {
                 },
                 "hdl.option.timing_checks",
                 "`specify` timing checks are not implemented",
-            ),
-            (
-                HdlRunConfig {
-                    library_map: Some("lib.map".into()),
-                    ..HdlRunConfig::default()
-                },
-                "hdl.option.libmap",
-                "library maps are not implemented",
             ),
         ] {
             let error = SimulationConfig {

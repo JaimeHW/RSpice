@@ -376,3 +376,245 @@ fn a_module_two_files_declare_is_refused_naming_both() {
         "the refusal points at the second declaration's file: {error}"
     );
 }
+
+// `.options hdl_libmap` and configurations (IEEE 1364-2005 clause 13). Each
+// deck's `leaf` cell is in two libraries, printing 1 from `rtlLib` and 2 from
+// `gateLib`, so only the rule under test decides what the testbench prints.
+// Icarus skips `config` and Verilator's library maps are partial, so the
+// expected lines come from the clause text.
+
+/// A leaf printing its own path, its library binding (`%l`, section 13.6)
+/// and driving `value`.
+fn library_leaf(value: u8) -> String {
+    format!(
+        "module leaf(v); output [7:0] v; reg [7:0] v;\n\
+         initial begin v = 8'd{value}; #2 $display(\"%m %l\"); end\n\
+         endmodule\n"
+    )
+}
+
+const LIBRARY_TOP: &str = "module top; wire [7:0] a, b; leaf u1(a); leaf u2(b);\n\
+     initial begin #1 $display(\"u1=%0d u2=%0d %l\", a, b); #3 $finish; end\n\
+     endmodule\n";
+
+/// `top.v` (with `configs` after its module), `rtl/leaf.v`, `gate/leaf.v`
+/// and the map `lib.map`.
+fn library_fixture(label: &str, configs: &str, map: &str) -> Fixture {
+    let fixture = Fixture::new(label);
+    fixture.write("top.v", &format!("{LIBRARY_TOP}{configs}"));
+    fixture.write("rtl/leaf.v", &library_leaf(1));
+    fixture.write("gate/leaf.v", &library_leaf(2));
+    fixture.write("lib.map", map);
+    fixture
+}
+
+const TWO_LIBRARIES: &str = "library rtlLib rtl/*.v;\nlibrary gateLib gate/*.v;\n";
+
+/// Run `Xtb <root>` with `.hdl` lines `sources` under the map and return
+/// what the testbench printed, sorted.
+fn library_run(fixture: &Fixture, sources: &str, root: &str) -> Result<Vec<String>, String> {
+    use rspice_core::config::{HdlOutputCollector, HdlStream};
+    let deck = fixture.write(
+        "deck.cir",
+        &format!(
+            "* library binding\nV1 a 0 1\nR1 a 0 1k\nXtb {root}\n{sources}\
+             .options hdl_libmap=\"lib.map\"\n.end\n"
+        ),
+    );
+    let netlist = Netlist::parse_file(&deck).map_err(|error| error.to_string())?;
+    let collector = std::sync::Arc::new(HdlOutputCollector::new());
+    let mut config = rspice_core::SimulationConfig::default();
+    config.hdl.output = Some(collector.clone());
+    Engine::new(config)
+        .run_with_outcome(&rspice_core::NoAbort, |engine, signal| {
+            engine.run_tran_with_abort(&netlist, 10e-9, 1e-9, signal)
+        })
+        .map_err(|error| error.to_string())?;
+    // A `%m` path is the X-card's SPICE path, whose case the deck's
+    // spelling does not fix.
+    let mut printed: Vec<String> = collector
+        .take()
+        .into_iter()
+        .filter(|record| record.stream == HdlStream::Stdout)
+        .map(|record| match record.text.trim_end().split_once(' ') {
+            Some((path, rest)) if path.starts_with(['x', 'X']) => {
+                format!("{} {rest}", path.to_ascii_lowercase())
+            }
+            _ => record.text.trim_end().to_owned(),
+        })
+        .collect();
+    printed.sort();
+    Ok(printed)
+}
+
+fn printed(u1: u8, u2: u8, top: &str) -> Vec<String> {
+    let library = |value: u8| if value == 1 { "rtlLib" } else { "gateLib" };
+    let mut lines = vec![
+        format!("u1={u1} u2={u2} {top}"),
+        format!("xtb.u1 {}.leaf", library(u1)),
+        format!("xtb.u2 {}.leaf", library(u2)),
+    ];
+    lines.sort();
+    lines
+}
+
+/// Section 13.5.1: with no configuration the libraries are searched in the
+/// map's declaration order. Section 13.3.1.1: a configuration's design
+/// statement names the top cell, and `module=` selects the configuration by
+/// its name where a module is expected.
+#[test]
+fn a_library_map_orders_the_search_and_a_configuration_is_selected_by_name() {
+    let fixture = library_fixture(
+        "libmap_design",
+        "config cfg; design work.top; endconfig\n",
+        TWO_LIBRARIES,
+    );
+    assert_eq!(
+        library_run(&fixture, ".hdl \"top.v\" module=top\n", "top").unwrap(),
+        printed(1, 1, "work.top")
+    );
+    assert_eq!(
+        library_run(&fixture, ".hdl \"top.v\" module=cfg\n", "cfg").unwrap(),
+        printed(1, 1, "work.top")
+    );
+    // A file the deck also names is read once, in the map's library.
+    assert_eq!(
+        library_run(
+            &fixture,
+            ".hdl \"rtl/leaf.v\"\n.hdl \"top.v\" module=cfg\n",
+            "cfg"
+        )
+        .unwrap(),
+        printed(1, 1, "work.top")
+    );
+}
+
+/// One deck per rule form (sections 13.3.1.2 to 13.3.1.6).
+#[test]
+fn each_configuration_rule_decides_the_binding() {
+    for (label, rule, u1, u2) in [
+        ("libmap_default", "default liblist gateLib rtlLib;", 2, 2),
+        ("libmap_cell_liblist", "cell leaf liblist gateLib;", 2, 2),
+        ("libmap_cell_use", "cell leaf use gateLib.leaf;", 2, 2),
+        (
+            "libmap_instance_liblist",
+            "instance top.u2 liblist gateLib;",
+            1,
+            2,
+        ),
+        (
+            "libmap_instance_use",
+            "instance top.u1 use gateLib.leaf;",
+            2,
+            1,
+        ),
+    ] {
+        let fixture = library_fixture(
+            label,
+            &format!("config cfg; design work.top; {rule} endconfig\n"),
+            TWO_LIBRARIES,
+        );
+        assert_eq!(
+            library_run(&fixture, ".hdl \"top.v\" module=cfg\n", "cfg").unwrap(),
+            printed(u1, u2, "work.top"),
+            "{rule}"
+        );
+    }
+}
+
+/// Section 13.2.2: `include` reads another map where it is written, so its
+/// libraries come first in the order here.
+#[test]
+fn an_included_map_declares_its_libraries_where_it_is_included() {
+    let fixture = library_fixture(
+        "libmap_include",
+        "",
+        "include maps/gate.map;\nlibrary rtlLib rtl/*.v;\n",
+    );
+    // An included map's paths resolve against its own directory.
+    fixture.write("maps/gate.map", "library gateLib ../gate/*.v;\n");
+    assert_eq!(
+        library_run(&fixture, ".hdl \"top.v\" module=top\n", "top").unwrap(),
+        printed(2, 2, "work.top")
+    );
+}
+
+/// Section 13.2.1: a path that names a file wins over a wildcard that also
+/// matches it, so `leaf_b.v` is in `gateLib` alone; were it in `rtlLib` too,
+/// that library would declare `leaf` twice.
+#[test]
+fn a_named_file_wins_over_a_wildcard_in_a_library_map() {
+    let fixture = Fixture::new("libmap_precedence");
+    fixture.write(
+        "top.v",
+        &format!("{LIBRARY_TOP}config cfg; design work.top; default liblist gateLib; endconfig\n"),
+    );
+    fixture.write("cells/leaf_a.v", &library_leaf(1));
+    fixture.write("cells/leaf_b.v", &library_leaf(2));
+    fixture.write(
+        "lib.map",
+        "// Every leaf_* file is an rtlLib source but this one.\n\
+         library rtlLib cells/leaf_*.v;\nlibrary gateLib cells/leaf_b.v;\n",
+    );
+    assert_eq!(
+        library_run(&fixture, ".hdl \"top.v\" module=top\n", "top").unwrap(),
+        printed(1, 1, "work.top")
+    );
+    assert_eq!(
+        library_run(&fixture, ".hdl \"top.v\" module=cfg\n", "cfg").unwrap(),
+        printed(2, 2, "work.top")
+    );
+    // Two libraries naming one file the same way is an error.
+    fixture.write(
+        "lib.map",
+        "library rtlLib cells/leaf_a.v, cells/leaf_b.v;\nlibrary gateLib cells/leaf_b.v;\n",
+    );
+    let error = library_run(&fixture, ".hdl \"top.v\" module=top\n", "top").unwrap_err();
+    assert!(
+        error.contains("'rtlLib' and 'gateLib'") && error.contains("leaf_b.v"),
+        "{error}"
+    );
+}
+
+/// A configuration in the map is parsed as one in a source, and selected the
+/// same way.
+#[test]
+fn a_configuration_in_the_map_is_selected_by_name() {
+    let fixture = library_fixture(
+        "libmap_config",
+        "",
+        "library rtlLib rtl/*.v;\nlibrary gateLib gate/*.v;\n\
+         config cfg;\n  design work.top;\n  instance top.u2 use gateLib.leaf;\nendconfig\n",
+    );
+    assert_eq!(
+        library_run(&fixture, ".hdl \"top.v\" module=cfg\n", "cfg").unwrap(),
+        printed(1, 2, "work.top")
+    );
+}
+
+/// What a library map cannot place is refused, naming the map or the file.
+#[test]
+fn an_unusable_library_map_is_refused_by_name() {
+    let fixture = library_fixture("libmap_refusals", "", TWO_LIBRARIES);
+    for (map, expected) in [
+        ("library rtlLib rtl/*.v -incdir inc;\n", "`-incdir`"),
+        ("library rtlLib rtl/*.v\n", "`,` or `;`"),
+        (
+            "module m; endmodule\n",
+            "a `library`, `include` or `config` statement",
+        ),
+        ("include lib.map;\n", "includes itself"),
+        ("include absent.map;\n", "cannot be read"),
+    ] {
+        fixture.write("lib.map", map);
+        let error = library_run(&fixture, ".hdl \"top.v\" module=top\n", "top").unwrap_err();
+        assert!(error.contains(expected), "{map}: {error}");
+    }
+    // Two files of one library declare `leaf`.
+    fixture.write("lib.map", "library rtlLib rtl/*.v, gate/*.v;\n");
+    let error = library_run(&fixture, ".hdl \"top.v\" module=top\n", "top").unwrap_err();
+    assert!(
+        error.contains("'leaf'") && error.contains("one library 'rtlLib'"),
+        "{error}"
+    );
+}

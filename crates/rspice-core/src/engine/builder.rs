@@ -81,6 +81,8 @@ pub use veriloga_cache::{
     veriloga_cache_stats, veriloga_cache_telemetry,
 };
 #[cfg(feature = "veriloga")]
+mod hdl_library_map;
+#[cfg(feature = "veriloga")]
 mod source_dependencies;
 #[cfg(feature = "veriloga")]
 mod veriloga_sources;
@@ -5816,8 +5818,22 @@ impl Engine {
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
         {
+            // `.options hdl_libmap` is relative to the deck, as its other
+            // file references are.
+            let library_map = self.config.hdl.library_map.as_deref().map(|map| {
+                let deck = netlist
+                    .source_path
+                    .as_deref()
+                    .and_then(std::path::Path::parent)
+                    .or(self.config.hdl.deck_directory.as_deref());
+                match deck {
+                    Some(deck) if map.is_relative() => deck.join(map),
+                    _ => map.to_path_buf(),
+                }
+            });
             let resolved = veriloga_sources::resolve_includes(
                 &netlist.veriloga_includes,
+                library_map.as_deref(),
                 &mut design_connect_rules,
                 self.config.resource_limits,
                 abort,

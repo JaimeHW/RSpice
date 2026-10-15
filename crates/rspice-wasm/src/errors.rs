@@ -81,7 +81,7 @@ pub struct WasmError {
     pub missing_dependency: Option<String>,
     #[serde(default)]
     pub reason: Option<String>,
-    /// The dotted token of a capability refusal (`hdl.option.libmap`,
+    /// The dotted token of a capability refusal (`hdl.option.path_delays`,
     /// `analysis.hb.device`), which automation branches on.
     #[serde(default)]
     pub capability: Option<String>,

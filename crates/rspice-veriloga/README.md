@@ -755,6 +755,26 @@ hierarchy elaborates one occurrence per level.
 This uses the existing schema 87 flat plan and Wasm helper ABI 20.
 Source: [VAMS-2023, 6.3 and 6.6](https://accellera.org/images/downloads/standards/v-ams/VAMS-LRM-2023.pdf).
 
+Configurations and library maps (IEEE 1364-2005 clause 13) bind right after
+parsing, in `semantic/library_binding.rs`, and leave an ordinary module set.
+`.options hdl_libmap="lib.map"` reads a map relative to the deck: `library`
+declarations with `*`, `?` and `...` wildcards and directory paths, `include`
+of further maps, and `config` blocks. A file named by a path that ends in a
+file name wins over a wildcard, which wins over a directory; a file matched by
+no path is in `work`. The map's files join the unit after the deck's, in map
+order, and a module name is declared once per library. An instance no
+configuration governs binds to the first library in the map's declaration
+order that declares its cell; `work` comes last unless the map declares it,
+which is RSpice's choice where the clause is silent. A configuration applies
+its instance clause, then its cell clause, then a liblist an ancestor's clause
+passed down, then `default liblist`, then the map's order; a configuration
+with no `default` clause searches as a design without one would. A `use`
+clause without a library takes the parent cell's. `module=<config>` selects a
+configuration where a module is expected, and `%l` prints the bound
+`library.cell`. Hierarchical configurations (`use lib.cell:config`), several
+design cells in one configuration, empty liblists and a library's `-incdir`
+are refused by name. A map's own `config` blocks are in `work`.
+
 Schema 88 evaluates supported closed scalar parameter and localparam defaults
 with the same typed constant evaluator as digital execution and child overrides.
 Packed expression width and signedness are retained, and an explicit integer

@@ -7,14 +7,20 @@
 //!
 //! - **The default view.** An instance no configuration governs binds to the
 //!   first library, in the map's declaration order, that declares its cell
-//!   (section 13.5.1); `work` comes last unless the map declares it. That
-//!   module keeps its own name. A module another library shadows is dropped:
-//!   nothing can bind it by default.
+//!   (section 13.5.1). `work` comes last unless the map declares it: the
+//!   clause gives the library of unmapped files no place in the order, and
+//!   last keeps every library the map names ahead of the files it does not.
+//!   That module keeps its own name. A module another library shadows is
+//!   dropped: nothing can bind it by default. Nothing binds "parent library
+//!   first" unless a `use` clause says so.
 //! - **Configurations.** Each `config` binds its design's hierarchy by its
 //!   rules: the instance clause first, then the cell clause, then the liblist
 //!   an ancestor's clause passed down, then the `default` liblist, then the
-//!   map's order (sections 13.3.1.2 to 13.3.1.6). A `use` clause without a
-//!   library takes the parent cell's. Every module the binding needs that the
+//!   map's order (sections 13.3.1.2 to 13.3.1.6); falling back to the map's
+//!   order is RSpice's reading of section 13.5.1 for a configuration with no
+//!   `default` clause. A `use` clause without a library takes the parent
+//!   cell's. A configuration a library map holds is in `work`, the library of
+//!   a file no map path names. Every module the binding needs that the
 //!   default view does not already provide is copied under the name
 //!   `library.cell`, with a variant name where a path-specific rule binds one
 //!   cell two ways. The top cell is copied under the configuration's own name,
