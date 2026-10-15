@@ -294,7 +294,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             ProjectPage::Recovery => "Recovery",
         },
         Workspace::Design => "Design navigator",
-        Workspace::Simulate => "Setup",
+        Workspace::Simulate => "Simulation setup",
         Workspace::Stimulus => "Library browser",
         Workspace::Results => "Data browser",
         Workspace::Verify => "Verification flows",

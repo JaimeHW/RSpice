@@ -1440,7 +1440,7 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
         }
         app.state.workbench.set_navigator_filter(query);
         // The rail, not the dock's own header band above it: that names the
-        // panel "Setup" and is no more a filtered row than the title bar is.
+        // panel and is no more a filtered row than the title bar is.
         navigator_painted_lines(228.0, app)
             .into_iter()
             .filter(|(_, rect)| rect.top() >= rspice_ui_kit::panels::PANEL_HEADER_H)
