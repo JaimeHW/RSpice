@@ -1,19 +1,36 @@
 //! What the inspector says about the model library a reader has selected.
 //!
-//! Two sections, in the dock's usual order: the binding — which library is
-//! current, and what technology it declares — and the one model inside it the
+//! Two sections, in the dock's usual order: the library — which one is
+//! current, and what process it declares — and the one model inside it the
 //! catalog is on. Both are read-only reports over the model library manager;
 //! authoring a model is the model editor's, not this dock's.
+//!
+//! Every row here is a fact a designer checks before trusting a run. A row
+//! that would read "Unspecified" is a field the library never declared, so it
+//! is not drawn at all, and the counts the catalog beside this panel already
+//! lists — models, corners, parameters — are not restated as rows.
 
 use egui::Ui;
 
+use crate::quantity::format_engineering_value;
 use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::property_row;
 use super::section_header;
 
+/// A library field the reader can act on, or nothing when it is blank.
+fn declared(ui: &mut Ui, label: &str, value: &str) {
+    if value.is_empty() {
+        return;
+    }
+    property_row(ui, label, value);
+}
+
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Model binding", None);
+    let Some(library) = app.state.model_library_manager.current_library().cloned() else {
+        return;
+    };
+    section_header(ui, "Library", None);
     property_row(
         ui,
         "Library",
@@ -21,55 +38,33 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .model_library_manager
             .selected_library
             .as_deref()
-            .unwrap_or("None"),
+            .unwrap_or_default(),
     );
-    let selected_library = app.state.model_library_manager.current_library().cloned();
-    if let Some(library) = selected_library {
+    declared(ui, "PDK", &library.pdk_name);
+    declared(ui, "Technology", &library.technology_node);
+    declared(ui, "Version", &library.version);
+    if let Some(corner) = library.selected_corner.as_deref() {
+        property_row(ui, "Selected corner", corner);
+    }
+    let Some(model) = app
+        .state
+        .workbench
+        .selected_model
+        .as_ref()
+        .and_then(|name| library.models.get(name))
+    else {
+        return;
+    };
+    // The model's own name is the section's title: a "Name" row under a
+    // heading reading "Selected model" states the catalog's selection twice.
+    section_header(ui, &model.name, None);
+    property_row(ui, "Type", model.model_type.display_name());
+    property_row(ui, "Level", model.level.display_name());
+    if let Some(vdd) = model.vdd {
         property_row(
             ui,
-            "PDK",
-            if library.pdk_name.is_empty() {
-                "Unspecified"
-            } else {
-                &library.pdk_name
-            },
+            "Nominal VDD",
+            &format!("{}V", format_engineering_value(vdd)),
         );
-        property_row(
-            ui,
-            "Technology",
-            if library.technology_node.is_empty() {
-                "Unspecified"
-            } else {
-                &library.technology_node
-            },
-        );
-        property_row(
-            ui,
-            "Version",
-            if library.version.is_empty() {
-                "Unspecified"
-            } else {
-                &library.version
-            },
-        );
-        property_row(ui, "Models", &library.model_count().to_string());
-        property_row(ui, "Corners", &library.corner_count().to_string());
-        property_row(
-            ui,
-            "Selected corner",
-            library.selected_corner.as_deref().unwrap_or("None"),
-        );
-        if let Some(model_name) = &app.state.workbench.selected_model
-            && let Some(model) = library.models.get(model_name)
-        {
-            section_header(ui, "Selected model", None);
-            property_row(ui, "Name", &model.name);
-            property_row(ui, "Type", &format!("{:?}", model.model_type));
-            property_row(ui, "Level", &format!("{:?}", model.level));
-            property_row(ui, "Parameters", &model.parameters.len().to_string());
-            if let Some(vdd) = model.vdd {
-                property_row(ui, "Nominal VDD", &format!("{vdd:.6} V"));
-            }
-        }
     }
 }

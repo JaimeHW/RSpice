@@ -145,7 +145,9 @@ pub(super) fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selecte
 }
 
 pub(super) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
-    section_header(ui, "Model ownership", None);
+    // "Model ownership" titled a page index. Nothing under it is about who
+    // owns a model.
+    section_header(ui, "Pages", None);
     for page in ModelsPage::ALL {
         if nav_row(
             ui,

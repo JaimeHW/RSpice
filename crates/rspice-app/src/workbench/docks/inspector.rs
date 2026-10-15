@@ -41,8 +41,7 @@ use rspice_results_ui::session::PaneAxis;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
-    PANEL_HEADER_H, StatusMark, WorkbenchIcon, property_row, property_row_input_action,
-    property_row_problem, property_row_status,
+    PANEL_HEADER_H, WorkbenchIcon, property_row, property_row_input_action, property_row_problem,
 };
 use super::super::state::{ModelsPage, ProjectPage, VerificationPage, Workspace};
 
@@ -410,17 +409,12 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
         |item| item.name().to_owned(),
     );
     let modified = dirty_document_count(&app.state);
-    let t = Tokens::get(ui.ctx());
 
-    section_header(
-        ui,
-        "Active simulation context",
-        Some(if active_configuration.is_some() {
-            "CURRENT"
-        } else {
-            "REVIEW"
-        }),
-    );
+    // No "CURRENT"/"REVIEW" meta: "not configured" in the Configuration row
+    // is the actionable case, and it says so in the row itself. The run plan
+    // is on the toolbar and the execution target never varies, so neither is
+    // a row here.
+    section_header(ui, "Simulation setup", None);
     property_row(
         ui,
         "Top",
@@ -431,60 +425,31 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     property_row(ui, "Testbench", &testbench);
     property_row(ui, "Configuration", &configuration);
-    property_row(
-        ui,
-        "Run plan",
-        app.state.sim_setup.active_plan_name().as_str(),
-    );
-    property_row(
-        ui,
-        "Execution",
-        crate::state::ExecutionTarget::current().label(),
-    );
 
-    section_header(
-        ui,
-        "Working revision",
-        Some(if modified == 0 { "CLEAN" } else { "MODIFIED" }),
-    );
-    property_row(
-        ui,
-        "Revision",
-        &project.project.revision().get().to_string(),
-    );
-    property_row(ui, "Modified documents", &modified.to_string());
-    property_row_status(
-        ui,
-        "Working tree",
-        if modified == 0 { "clean" } else { "modified" },
-        if modified == 0 {
-            t.color.ok
-        } else {
-            t.color.warn
-        },
-        if modified == 0 {
-            StatusMark::Success
-        } else {
-            StatusMark::Warning
-        },
-    );
+    // The status bar owns "Unsaved changes" and the project's revision is a
+    // counter, so what is left of the working revision is how many documents
+    // a save will write — and only when a save would write one.
+    section_header(ui, "Working copy", None);
+    if modified > 0 {
+        property_row(ui, "Modified documents", &modified.to_string());
+    }
     property_row(
         ui,
         "Location",
         &project.project.path.as_ref().map_or_else(
-            || "no accepted native path".to_owned(),
+            || "Not saved yet".to_owned(),
             |path| path.display().to_string(),
         ),
     );
 
     let check_status = app.state.project_root_design_check_status();
     let check_meta = match &check_status {
-        DesignCheckStatus::Current(_) => "CURRENT",
-        DesignCheckStatus::NotRun => "NOT RUN",
-        DesignCheckStatus::Stale(_) => "STALE",
-        DesignCheckStatus::Unavailable { .. } => "UNAVAILABLE",
+        DesignCheckStatus::Current(_) => None,
+        DesignCheckStatus::NotRun => Some("not run"),
+        DesignCheckStatus::Stale(_) => Some("out of date"),
+        DesignCheckStatus::Unavailable { .. } => Some("unavailable"),
     };
-    section_header(ui, "Problems", Some(check_meta));
+    section_header(ui, "Problems", check_meta);
     match check_status {
         DesignCheckStatus::Current(receipt) => {
             let summary = receipt.result.summary();
@@ -498,21 +463,14 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
                 "Advisories",
                 &(summary.warnings + summary.info).to_string(),
             );
+            // The finding's own words, not its internal code: "CHK-001" is
+            // an identifier a reader cannot do anything with.
             for violation in receipt.result.violations().iter().take(2) {
-                property_row(ui, &format!("CHK-{:03}", violation.id), &violation.message);
+                property_row(ui, "Finding", &violation.message);
             }
-            property_row(
-                ui,
-                "Checked revision",
-                &receipt.checked_project_revision.get().to_string(),
-            );
         }
-        DesignCheckStatus::NotRun => {
-            property_row(ui, "Checks", "Not run for the project root");
-        }
-        DesignCheckStatus::Stale(_) => {
-            property_row(ui, "Checks", "Project-root inputs changed after checking");
-        }
+        // The header's meta already says which of the three states this is.
+        DesignCheckStatus::NotRun | DesignCheckStatus::Stale(_) => {}
         DesignCheckStatus::Unavailable { reason, .. } => {
             property_row(ui, "Checks", &reason);
         }
@@ -535,17 +493,9 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
     let library = app.state.library_manager.current_library();
-    let library_name = library.map_or("No library selected", |item| item.name.as_str());
     let library_path = library
         .and_then(|item| item.path.as_ref())
         .map_or_else(|| "not bound".to_owned(), |path| path.display().to_string());
-    let access = library.map_or("unavailable", |item| {
-        if item.read_only {
-            "read only"
-        } else {
-            "writable"
-        }
-    });
     let technology = library.map_or("unbound", |item| {
         if item.technology.trim().is_empty() {
             "unbound"
@@ -553,13 +503,7 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
             item.technology.as_str()
         }
     });
-    let cell_name = app
-        .state
-        .library_manager
-        .current_cell()
-        .map_or("No cell selected", |item| item.name.as_str());
     let view = app.state.library_manager.current_view();
-    let view_name = view.map_or("No view selected", |item| item.name.as_str());
     let view_type = view.map_or("—", |item| item.view_type.display_name());
     let open_target = match (
         app.state.library_manager.current_library(),
@@ -575,72 +519,62 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
     let usage = open_target
         .as_ref()
         .map_or_else(Vec::new, |(reference, _)| library_usage(app, reference));
-    let project_revision = app
-        .state
-        .workspace
-        .content
-        .project
-        .revision()
-        .get()
-        .to_string();
-    let active_configuration = app
-        .state
-        .workspace
-        .content
-        .configuration_sets
-        .active()
-        .map_or("not configured", |item| item.name());
     let (checks_meta, checks) = match open_target.as_ref() {
         Some((reference, ViewType::Schematic | ViewType::Testbench)) => {
             match app.state.design_check_status(reference) {
                 DesignCheckStatus::Current(receipt) => {
                     let summary = receipt.result.summary();
                     (
-                        "CURRENT",
-                        format!(
+                        None,
+                        Some(format!(
                             "{} errors \u{00b7} {} advisories",
                             summary.critical + summary.errors,
                             summary.warnings + summary.info
-                        ),
+                        )),
                     )
                 }
-                DesignCheckStatus::NotRun => ("NOT RUN", "not run".to_owned()),
-                DesignCheckStatus::Stale(_) => ("STALE", "inputs changed".to_owned()),
-                DesignCheckStatus::Unavailable { reason, .. } => ("UNAVAILABLE", reason),
+                DesignCheckStatus::NotRun => (Some("not run"), None),
+                DesignCheckStatus::Stale(_) => (Some("out of date"), None),
+                DesignCheckStatus::Unavailable { reason, .. } => {
+                    (Some("unavailable"), Some(reason))
+                }
             }
         }
-        Some(_) => ("N/A", "not applicable to this view type".to_owned()),
-        None => ("NO VIEW", "select a cell view".to_owned()),
+        // A symbol or a source view has no schematic checks to report, and a
+        // row saying so is a row about nothing.
+        Some(_) | None => (None, None),
     };
 
-    section_header(ui, "Selection", Some(&access.to_ascii_uppercase()));
-    property_row(ui, "Library", library_name);
-    property_row(ui, "Cell", cell_name);
-    property_row(ui, "View", view_name);
+    // The library browser beside this panel shows the library, the cell and
+    // the view; what the panel adds is what opening the selection does, and
+    // where the library lives.
+    section_header(
+        ui,
+        "Selection",
+        library
+            .is_some_and(|item| item.read_only)
+            .then_some("read-only"),
+    );
     property_row(ui, "View type", view_type);
 
-    section_header(ui, "Ownership & binding", None);
-    property_row(ui, "Revision", &project_revision);
-    property_row(ui, "Access", access);
-    property_row(ui, "Technology", technology);
+    section_header(ui, "Library", None);
+    if technology != "unbound" {
+        property_row(ui, "Technology", technology);
+    }
     property_row(ui, "Source", &library_path);
-    property_row(
-        ui,
-        "State",
-        if view.is_some_and(|item| item.modified) {
-            "modified"
-        } else {
-            "current"
-        },
-    );
+    // A view nobody has edited is in its normal state.
+    if view.is_some_and(|item| item.modified) {
+        property_row(ui, "State", "modified");
+    }
 
-    section_header(ui, "Validation", Some(checks_meta));
-    property_row(ui, "Checks", &checks);
-    property_row(ui, "Configuration", active_configuration);
-    property_row(ui, "Consumers", &usage.len().to_string());
-    // A view nothing instantiates has no consumer to name.
-    if let Some(consumer) = usage.first() {
-        property_row(ui, "Where used", consumer);
+    section_header(ui, "Validation", checks_meta);
+    if let Some(checks) = &checks {
+        property_row(ui, "Checks", checks);
+    }
+    // One row, naming the consumers rather than counting them and then
+    // naming the first of them underneath.
+    if !usage.is_empty() {
+        property_row(ui, "Used by", &usage.join(", "));
     }
 
     section_header(ui, "Actions", None);
@@ -659,25 +593,10 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
         };
         Command::OpenWorkspace(workspace).execute(app);
     }
-    if inspector_action_enabled(ui, "Where used & impact\u{2026}", open_target.is_some())
-        && let Some((reference, _)) = open_target.as_ref()
-    {
-        app.state.push_user_message(ConsoleMessage::info(format!(
-            "{} has {} loaded schematic consumer{}: {}",
-            reference.display_path(),
-            usage.len(),
-            if usage.len() == 1 { "" } else { "s" },
-            if usage.is_empty() {
-                "none".to_owned()
-            } else {
-                usage.join(", ")
-            }
-        )));
-        Command::OpenConsole.execute(app);
-    }
-    if inspector_action(ui, "Revision history\u{2026}") {
-        Command::RevisionHistory.execute(app);
-    }
+    // No "Where used & impact…": it wrote the consumers to the console, and
+    // the "Used by" row above names them in place. No "Revision history…"
+    // either — it is a project-level dialog, and the Project overview
+    // inspector is where the project's own actions live.
 }
 
 fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -694,27 +613,19 @@ fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
         || "not configured".to_owned(),
         |item| item.dut_path().to_owned(),
     );
-    let revision = active.map_or_else(|| "—".to_owned(), |item| item.revision().to_string());
     let overrides = active.map_or(0, |item| item.definition().overrides.len());
 
     section_header(ui, "Active binding", None);
     property_row(ui, "Configuration", &name);
     property_row(ui, "Testbench", &testbench);
     property_row(ui, "DUT", &dut);
-    property_row(ui, "Revision", &revision);
 
-    section_header(ui, "Netlisting contract", None);
-    property_row(ui, "Overrides", &overrides.to_string());
-    property_row(ui, "Global precedence", "project → configuration → run");
-    property_row(
-        ui,
-        "Binding",
-        if active.is_some() {
-            "resolved"
-        } else {
-            "missing"
-        },
-    );
+    section_header(ui, "Netlisting", None);
+    // "resolved" was success and "missing" restated "No active
+    // configuration" two rows up; the precedence order is a constant and
+    // belongs on the control that obeys it.
+    property_row(ui, "Overrides", &overrides.to_string())
+        .on_hover_text("Resolved in order: project, then configuration, then run.");
 
     section_header(ui, "Actions", None);
     if inspector_action(ui, "Validate configuration") {
@@ -748,7 +659,6 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
                 "writable"
             },
         );
-        property_row(ui, "Cells", &library.cell_count().to_string());
         property_row(
             ui,
             "Source",
@@ -760,23 +670,20 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
     } else if let Some(library) = model_library {
         property_row(ui, "Type", "Model library");
         property_row(ui, "Version", &library.version);
-        property_row(ui, "Models", &library.models.len().to_string());
-        property_row(ui, "Corners", &library.corners.len().to_string());
-        property_row(
-            ui,
-            "Execution source",
-            if library.source_authority.has_execution_source() && !library.source_closure.is_empty()
-            {
-                "authenticated"
-            } else {
-                "catalog only"
-            },
-        );
-    } else {
-        property_row(ui, "Status", "Select a dependency in the navigator");
+        // A library whose model files resolve is the normal case and says
+        // nothing; one whose do not cannot simulate, which is the fact.
+        if !(library.source_authority.has_execution_source() && !library.source_closure.is_empty())
+        {
+            property_row_problem(
+                ui,
+                "Model files",
+                "Not found: cannot simulate",
+                Some(Problem::Failure),
+            );
+        }
     }
 
-    section_header(ui, "Project contract", None);
+    section_header(ui, "Technology", None);
     property_row(
         ui,
         "Technology",
@@ -793,7 +700,6 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
             "not attached"
         },
     );
-    property_row(ui, "Missing dependencies", "0");
 
     section_header(ui, "Actions", None);
     if inspector_action(ui, "Model & library catalog") {
@@ -826,49 +732,36 @@ fn project_recovery(ui: &mut Ui, app: &mut RSpiceApp) {
             .quarantined
             .is_empty();
 
-    section_header(ui, "Selected checkpoint", None);
+    // Only a selected checkpoint has anything to say. The revision counter,
+    // the payload's byte count and the checkpoint's internal id are not
+    // facts a reader restores on.
     if let Some(checkpoint) = checkpoint {
+        section_header(ui, "Selected checkpoint", None);
         property_row(ui, "Reason", checkpoint.reason().label());
-        property_row(ui, "Revision", &checkpoint.project_revision().to_string());
-        property_row(
-            ui,
-            "Payload",
-            &format!("{} bytes", checkpoint.snapshot_byte_len()),
-        );
-        property_row(ui, "Checkpoint ID", &checkpoint.checkpoint_id().to_string());
-    } else {
-        property_row(ui, "Selection", "No checkpoint selected");
     }
 
-    section_header(ui, "Recovery contract", None);
-    property_row(
-        ui,
-        "Integrity",
-        if integrity {
-            "verified"
-        } else {
-            "review required"
-        },
-    );
-    property_row(ui, "Restore mode", "independent project copy");
-    property_row(ui, "Current work", "never overwritten");
-    property_row(
-        ui,
-        "Quarantined",
-        &app.state
-            .dialogs
-            .project_checkpoint_recovery
-            .quarantined
-            .len()
-            .to_string(),
-    );
-
-    section_header(ui, "Actions", None);
-    if inspector_action(ui, "Save project") {
-        Command::Save.execute(app);
-    }
-    if inspector_action(ui, "Revision history\u{2026}") {
-        Command::RevisionHistory.execute(app);
+    let quarantined = app
+        .state
+        .dialogs
+        .project_checkpoint_recovery
+        .quarantined
+        .len();
+    // The store is in order or it is not: "verified" is success, and the
+    // restore mode and what it leaves alone are constants that belong on the
+    // Restore control. Damaged checkpoints are the one thing to report.
+    if !integrity || quarantined > 0 {
+        section_header(ui, "Recovery store", None);
+        if !integrity {
+            property_row_problem(ui, "Integrity", "Review required", Some(Problem::Warning));
+        }
+        if quarantined > 0 {
+            property_row_problem(
+                ui,
+                "Quarantined",
+                &quarantined.to_string(),
+                Some(Problem::Warning),
+            );
+        }
     }
 }
 

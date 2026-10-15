@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 
-use crate::product::{ContentDigest, ObjectRevision, ProjectId};
+use crate::product::{ContentDigest, ProjectId};
 use crate::state::{
     CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
 };
@@ -23,7 +23,6 @@ const DESIGN_CHECK_DIGEST_DOMAIN: &[u8] = b"rspice-interactive-design-check/v1\0
 pub(crate) struct CellViewCheckReceipt {
     pub(crate) project_id: ProjectId,
     pub(crate) subject: CellViewRef,
-    pub(crate) checked_project_revision: ObjectRevision,
     pub(crate) input_digest: ContentDigest,
     pub(crate) result: DrcResult,
 }
@@ -154,7 +153,6 @@ impl AppState {
         self.design_checks.insert(CellViewCheckReceipt {
             project_id: self.workspace.content.project.id(),
             subject,
-            checked_project_revision: self.workspace.content.project.revision(),
             input_digest,
             result,
         });
