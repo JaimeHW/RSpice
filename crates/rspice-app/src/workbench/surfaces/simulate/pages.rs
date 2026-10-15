@@ -136,9 +136,13 @@ pub(super) struct PreflightChip {
 
 impl PreflightChip {
     /// The chip this session owes the reader, or `None` when it owes none.
+    ///
+    /// A report that authorizes dispatch owes nothing: there is no problem to
+    /// state, and the route that needs the task count has it. The chip is for
+    /// the two standings that leave the reader something to do.
     pub(super) fn resolve(app: &RSpiceApp) -> Option<Self> {
         let currency = preflight_currency(app);
-        currency.is_stated().then(|| Self {
+        currency.wants_rerun().then(|| Self {
             currency,
             text: chip_text(currency),
         })
@@ -147,7 +151,7 @@ impl PreflightChip {
     /// What painting it will take, including the gap it keeps from its
     /// neighbour.
     pub(super) fn reserve(&self, ui: &Ui) -> f32 {
-        chip_width(ui, &self.text) + CHIP_GAP
+        chip_width(ui, &self.text) + mark_advance(self.currency) + CHIP_GAP
     }
 
     /// Paint it. Returns whether the reader asked for a rerun.
@@ -179,8 +183,23 @@ fn preflight_currency(app: &RSpiceApp) -> PreflightCurrency {
 
 fn chip_text(currency: PreflightCurrency) -> String {
     match currency.detail() {
-        Some(detail) => format!("PREFLIGHT {} · {detail}", currency.status().to_uppercase()),
-        None => format!("PREFLIGHT {}", currency.status().to_uppercase()),
+        Some(detail) => format!("Preflight {} · {detail}", currency.status()),
+        None => format!("Preflight {}", currency.status()),
+    }
+}
+
+/// Side of the chip's problem mark, and the advance from its left edge to the
+/// words after it: the kit's own row metrics.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
+
+/// How much room a standing's mark takes before its words. Only a blocked
+/// report has one: an expired report is not a finding, it is a report that
+/// has to be run again.
+const fn mark_advance(currency: PreflightCurrency) -> f32 {
+    match currency {
+        PreflightCurrency::Blocked { .. } => MARK_ADVANCE,
+        _ => 0.0,
     }
 }
 
@@ -205,15 +224,17 @@ fn chip_width(ui: &Ui, text: &str) -> f32 {
 /// to ask for and stays a label rather than a control that does nothing.
 fn preflight_chip(ui: &mut Ui, currency: PreflightCurrency, text: &str) -> bool {
     let t = Tokens::get(ui.ctx());
-    let tone = match currency {
-        PreflightCurrency::Absent => return false,
-        PreflightCurrency::Expired => t.color.warn,
-        PreflightCurrency::Blocked { .. } => t.color.err,
-        PreflightCurrency::Authorized { .. } => t.color.ok,
-    };
-    let actionable = currency.wants_rerun();
+    if !currency.wants_rerun() {
+        return false;
+    }
+    let tone = t.color.text_dim;
+    let actionable = true;
+    let advance = mark_advance(currency);
     let galley = ui.fonts_mut(|fonts| fonts.layout_no_wrap(text.to_owned(), chip_font(), tone));
-    let size = egui::vec2(galley.size().x + CHIP_PADDING_X * 2.0, CHIP_HEIGHT);
+    let size = egui::vec2(
+        galley.size().x + advance + CHIP_PADDING_X * 2.0,
+        CHIP_HEIGHT,
+    );
     let sense = if actionable {
         egui::Sense::click()
     } else {
@@ -240,17 +261,30 @@ fn preflight_chip(ui: &mut Ui, currency: PreflightCurrency, text: &str) -> bool 
         ui.painter().rect(
             rect,
             t.radius,
-            if actionable && response.hovered() {
+            if response.hovered() {
                 t.color.bg_hover
             } else {
                 egui::Color32::TRANSPARENT
             },
-            egui::Stroke::new(1.0, tone),
+            egui::Stroke::new(1.0, t.color.border),
             egui::StrokeKind::Inside,
         );
+        if advance > 0.0 {
+            crate::ui::widgets::paint_problem_mark(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    egui::pos2(
+                        rect.left() + CHIP_PADDING_X + MARK_SIDE * 0.5,
+                        rect.center().y,
+                    ),
+                    egui::Vec2::splat(MARK_SIDE),
+                ),
+                crate::ui::widgets::Problem::Failure,
+            );
+        }
         ui.painter().galley(
             egui::pos2(
-                rect.left() + CHIP_PADDING_X,
+                rect.left() + CHIP_PADDING_X + advance,
                 rect.center().y - galley.size().y * 0.5,
             ),
             galley,
@@ -457,7 +491,7 @@ mod tests {
             assert!(
                 labels
                     .iter()
-                    .any(|label| label.contains("PREFLIGHT EXPIRED")
+                    .any(|label| label.contains("Preflight expired")
                         && label.contains("Rerun preflight checks")),
                 "{page:?} must state the expired report and offer its rerun: {labels:?}"
             );
@@ -470,9 +504,32 @@ mod tests {
         for page in [SimulationPage::Solver, SimulationPage::Analyses] {
             let labels = route_announcements(page, |_| {});
             assert!(
-                !labels.iter().any(|label| label.contains("PREFLIGHT")),
+                !labels.iter().any(|label| label.contains("Preflight")),
                 "an unrun preflight is the ordinary state and is not an announcement on \
                  {page:?}: {labels:?}"
+            );
+        }
+    }
+
+    /// A report that authorizes dispatch is a report with nothing to say.
+    ///
+    /// It painted a green "PREFLIGHT CURRENT · 2 tasks ready" chip on every
+    /// setup route, which is success reported as evidence. Success is the
+    /// absence of a problem, so the chip is gone and only the two standings
+    /// that owe the reader a rerun paint one.
+    #[test]
+    fn an_authorized_report_paints_no_chip() {
+        for page in [SimulationPage::Solver, SimulationPage::Analyses] {
+            let labels = route_announcements(page, |state| {
+                state.workbench.preflight.report = Some(current_report(
+                    state,
+                    Vec::new(),
+                    Some(prepared_contract(2)),
+                ));
+            });
+            assert!(
+                !labels.iter().any(|label| label.contains("Preflight")),
+                "an authorized report states nothing on {page:?}: {labels:?}"
             );
         }
     }

@@ -803,10 +803,21 @@ fn row_table(ui: &mut Ui, draft: &mut DesignVariableImportDraft) -> bool {
                         // outside the header and footer it belongs to.
                         match &row.refusal {
                             Some(refusal) => {
+                                // The mark carries the colour, so the code
+                                // beside it reads as the identifier it is.
+                                crate::ui::widgets::paint_problem_mark(
+                                    ui.painter(),
+                                    egui::Rect::from_center_size(
+                                        ui.cursor().left_center() + egui::vec2(5.5, 0.0),
+                                        egui::Vec2::splat(11.0),
+                                    ),
+                                    crate::ui::widgets::Problem::Failure,
+                                );
+                                ui.add_space(17.0);
                                 ui.label(
                                     egui::RichText::new(refusal.id())
                                         .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
-                                        .color(tokens.color.err),
+                                        .color(tokens.color.text_dim),
                                 );
                                 ui.add(
                                     egui::Label::new(

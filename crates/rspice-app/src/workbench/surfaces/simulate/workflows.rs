@@ -106,7 +106,11 @@ pub(super) fn rename_analysis_dialog(
             ui.label(
                 egui::RichText::new(if can_clear { "Available" } else { "Unavailable" })
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(if can_clear { t.color.ok } else { t.color.text_faint }),
+                    .color(if can_clear {
+                        t.color.text
+                    } else {
+                        t.color.text_faint
+                    }),
             );
         });
         workflow_setting_row(ui, "Analysis", "Kind and stable identity.", |ui| {
@@ -1979,14 +1983,9 @@ pub(super) fn workflow_validation_message(ui: &mut Ui, error: Option<&str>) {
             .inner_margin(egui::Margin::symmetric(10, 8))
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(error)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.err),
-                    )
-                    .wrap(),
-                );
+                // The mark owns the colour; the refusal itself reads in the
+                // same ink as every other line in the dialog.
+                crate::ui::widgets::problem_line(ui, crate::ui::widgets::Problem::Failure, error);
             })
             .response;
         ui.painter().hline(

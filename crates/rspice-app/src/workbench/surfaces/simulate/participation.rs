@@ -21,7 +21,7 @@ use crate::product::AnalysisInstanceId;
 use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogSize};
+use crate::ui::widgets::{Dialog, DialogSize, Problem, problem_line};
 use crate::workbench::state::AnalysisRunPointsDraft;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
@@ -575,6 +575,20 @@ fn point_labels(app: &RSpiceApp) -> Vec<String> {
         .collect()
 }
 
+/// A selection this run set refuses, led by the mark that owns its colour.
+///
+/// The stat beside the control states the selection and nothing about its
+/// standing, so this is the only place the refusal is said — once, as a
+/// problem, in the neutral ink every other note on the row uses.
+fn refusal_note(ui: &mut Ui, text: &str) {
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            problem_line(ui, Problem::Failure, text);
+        });
+}
+
 fn picker_note(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
@@ -696,11 +710,9 @@ pub(super) fn participation_row(
         ui.spacing_mut().item_spacing.x = CONTROL_ROW_GAP;
         let stat = entry.stat(matrix);
         let stat_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-        let stat_tone = if entry.refusal.is_some() {
-            t.color.err
-        } else {
-            t.color.text_faint
-        };
+        // Neutral whatever the selection resolves to: a refusal is stated once,
+        // under the row, with the mark that owns the colour.
+        let stat_tone = t.color.text_faint;
         let picker = picker_offered.then(|| crate::ui::widgets::Button::new("Choose\u{2026}"));
         // What the row will spend after the select: a gap before each remaining
         // control, and each control at the width it is actually about to be
@@ -760,7 +772,7 @@ pub(super) fn participation_row(
         ui.label(egui::RichText::new(stat).font(stat_font).color(stat_tone));
     });
     if let Some(refusal) = entry.refusal.as_deref() {
-        picker_note(ui, refusal);
+        refusal_note(ui, refusal);
     }
     action
 }
