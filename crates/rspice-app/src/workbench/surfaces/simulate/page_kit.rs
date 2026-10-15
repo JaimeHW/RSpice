@@ -1449,4 +1449,73 @@ mod tests {
             sites.join("\n  ")
         );
     }
+
+    /// Nothing the studio paints reports success, and nothing states a status
+    /// in a colour of its own.
+    ///
+    /// Four spellings, each the trace of one habit this surface was written
+    /// with: a `colored_label`, a `status_dot`, a `StatusMark` for a state
+    /// that is not a problem, and the two token colours that exist to say
+    /// "good" and "informational". Success is the absence of a problem, so it
+    /// is said by saying nothing; a warning or a failure is a `Problem` mark,
+    /// which owns its own colour.
+    ///
+    /// `Tone::Fail` is the one exception and it is a verdict, not a status:
+    /// the Specifications page's Result column paints a failing measurement in
+    /// the error colour with no mark, because a column of marks beside a
+    /// column of numbers reads as two verdicts. Every other page states a
+    /// problem with its mark.
+    #[test]
+    fn the_studio_states_no_success_and_tones_no_status() {
+        const BANNED: [&str; 6] = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+            "color.ok",
+            "color.info",
+        ];
+        /// The one file whose verdict column is allowed to paint `Tone::Fail`.
+        const VERDICT_COLUMN: &str = "page_specs.rs";
+
+        let sources = studio_sources();
+        assert!(
+            sources.len() >= 20,
+            "the studio scan found only {} files; the walk has stopped reaching them",
+            sources.len()
+        );
+        /// Whether `line` names `token` rather than merely containing it:
+        /// `PlanDetailTone::Failed` is not a `Tone::Fail`.
+        fn names(line: &str, token: &str) -> bool {
+            const fn is_ident(byte: u8) -> bool {
+                byte.is_ascii_alphanumeric() || byte == b'_'
+            }
+            let bytes = line.as_bytes();
+            line.match_indices(token).any(|(index, _)| {
+                let after = index + token.len();
+                (index == 0 || !is_ident(bytes[index - 1]))
+                    && (after >= bytes.len() || !is_ident(bytes[after]))
+            })
+        }
+
+        let mut sites = Vec::new();
+        for (path, source) in &sources {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            for (index, line) in source.lines().enumerate() {
+                for banned in BANNED {
+                    if names(line, banned) {
+                        sites.push(format!("{name}:{}: {banned}", index + 1));
+                    }
+                }
+                if names(line, "Tone::Fail") && name != VERDICT_COLUMN {
+                    sites.push(format!("{name}:{}: Tone::Fail", index + 1));
+                }
+            }
+        }
+        assert!(
+            sites.is_empty(),
+            "the studio reports success or tones a status here:\n  {}",
+            sites.join("\n  ")
+        );
+    }
 }
