@@ -431,9 +431,15 @@ fn exact_reference_contract_emits_empty_and_invalid_names_only_when_required() {
             ..DrcConfig::default()
         },
     );
-    assert_eq!(of_type(&result, DrcViolationType::EmptyName).len(), 1);
-    assert_eq!(of_type(&result, DrcViolationType::InvalidName).len(), 1);
+    let empty_findings = of_type(&result, DrcViolationType::EmptyName);
+    let invalid_findings = of_type(&result, DrcViolationType::InvalidName);
+    assert_eq!(empty_findings.len(), 1);
+    assert_eq!(invalid_findings.len(), 1);
     assert_eq!(of_type(&result, DrcViolationType::DuplicateName).len(), 0);
+    // Neither instance can be written into the deck, so neither is a note.
+    assert_eq!(empty_findings[0].severity, DrcSeverity::Error);
+    assert_eq!(invalid_findings[0].severity, DrcSeverity::Error);
+    assert!(result.has_errors());
 }
 
 #[test]
@@ -478,15 +484,24 @@ fn unknown_component_requires_authoritative_resolution_and_honors_gate() {
     unresolved.component_known = Some(false);
     let mut unknown_authority = resistor(10, "X10", vec![]);
     unknown_authority.component_known = None;
+    // A structural object writes no instance, so a type that binds to nothing
+    // takes nothing out of the deck.
+    let mut structural = resistor(11, "", vec![]);
+    structural.component_type = "port".to_owned();
+    structural.reference_required = false;
+    structural.component_known = Some(false);
     let config = DrcConfig {
         check_missing_ground: false,
         check_floating_nodes: false,
         check_unconnected_pins: false,
         ..DrcConfig::default()
     };
-    let result = check(&[unknown_authority, unresolved.clone()], config.clone());
+    let result = check(
+        &[unknown_authority, structural, unresolved.clone()],
+        config.clone(),
+    );
     let unknown = of_type(&result, DrcViolationType::UnknownComponent);
-    assert_eq!(unknown.len(), 1);
+    assert_eq!(unknown.len(), 1, "{:?}", result.violations());
     assert_eq!(
         unknown[0].location,
         DrcLocation::Component {
@@ -494,11 +509,55 @@ fn unknown_component_requires_authoritative_resolution_and_honors_gate() {
             name: "X9".to_owned()
         }
     );
+    // An instance with no master cannot be netlisted, so the check fails.
+    assert_eq!(unknown[0].severity, DrcSeverity::Error);
+    assert!(result.has_errors());
 
     let mut disabled = config;
     disabled.check_unknown_components = false;
     let result = check(&[unresolved], disabled);
     assert!(of_type(&result, DrcViolationType::UnknownComponent).is_empty());
+}
+
+/// The project's configured policy outranks the rule's own judgement, which
+/// now reads the component rather than the violation type alone.
+#[test]
+fn severity_overrides_outrank_the_severity_a_component_gives_a_finding() {
+    const NAMING_AND_BINDING: [DrcViolationType; 3] = [
+        DrcViolationType::EmptyName,
+        DrcViolationType::InvalidName,
+        DrcViolationType::UnknownComponent,
+    ];
+
+    let empty = resistor(3, "", vec![]);
+    let mut invalid = resistor(4, "C4", vec![]);
+    invalid.reference_error = Some("Resistor designators must begin with `R`.".to_owned());
+    let mut unresolved = resistor(5, "X5", vec![]);
+    unresolved.component_known = Some(false);
+
+    let mut config = DrcConfig {
+        check_missing_ground: false,
+        check_floating_nodes: false,
+        check_unconnected_pins: false,
+        ..DrcConfig::default()
+    };
+    for violation_type in NAMING_AND_BINDING {
+        config
+            .severity_overrides
+            .insert(violation_type, DrcSeverity::Info);
+    }
+
+    let result = check(&[empty, invalid, unresolved], config);
+    for violation_type in NAMING_AND_BINDING {
+        let findings = of_type(&result, violation_type);
+        assert_eq!(findings.len(), 1, "{violation_type:?}");
+        assert_eq!(
+            findings[0].severity,
+            DrcSeverity::Info,
+            "{violation_type:?}"
+        );
+    }
+    assert!(result.passed());
 }
 
 #[test]

@@ -209,7 +209,8 @@ impl DrcChecker {
                             id: component.id,
                             name: String::new(),
                         },
-                    ),
+                    )
+                    .with_component_severity(component.reference_required),
                 );
             } else if let Some(error) = component.reference_error.as_deref() {
                 let id = self.next_id();
@@ -223,7 +224,8 @@ impl DrcChecker {
                             id: component.id,
                             name: component.name.clone(),
                         },
-                    ),
+                    )
+                    .with_component_severity(component.reference_required),
                 );
             }
         }
@@ -285,10 +287,20 @@ impl DrcChecker {
         }
     }
 
+    /// Report every emitted instance whose type resolves to nothing the deck
+    /// can write.
+    ///
+    /// Only an object that emits a SPICE instance is asked: a structural
+    /// object writes none, so nothing is lost when its type binds to nothing,
+    /// and promoting that to an error would fail a drawing the netlister is
+    /// content with. `component_known == None` means the extraction boundary
+    /// held no hierarchy authority, and stays silent either way.
     fn check_unknown_components(&mut self, components: &[ComponentInfo], result: &mut DrcResult) {
         let mut components = components
             .iter()
-            .filter(|component| component.component_known == Some(false))
+            .filter(|component| {
+                component.reference_required && component.component_known == Some(false)
+            })
             .collect::<Vec<_>>();
         components.sort_by_key(|component| component.id);
         for component in components {
@@ -308,6 +320,7 @@ impl DrcChecker {
                         name: component.name.clone(),
                     },
                 )
+                .with_component_severity(component.reference_required)
                 .with_related(vec![component_name]),
             );
         }

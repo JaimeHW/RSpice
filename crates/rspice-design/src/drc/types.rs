@@ -108,7 +108,14 @@ pub enum DrcViolationType {
 }
 
 impl DrcViolationType {
-    /// Get the default severity for this violation type
+    /// Get the default severity for this violation type.
+    ///
+    /// Three of them have no answer that holds for every object that can raise
+    /// them: an empty reference, an invalid one, and a type that resolves to
+    /// nothing each cost the deck an instance only where an instance was going
+    /// to be written. This returns what they are worth on an object that writes
+    /// none; [`Self::severity_for_component`] is what a rule holding the
+    /// component asks.
     pub fn default_severity(&self) -> DrcSeverity {
         match self {
             // Critical - simulation cannot run
@@ -140,9 +147,30 @@ impl DrcViolationType {
 
             // Info
             Self::OffSheetConnectorWithoutPartner => DrcSeverity::Info,
+
+            // Info on an object that emits no instance; an error on one that
+            // does. See `severity_for_component`.
             Self::EmptyName => DrcSeverity::Info,
             Self::InvalidName => DrcSeverity::Info,
             Self::UnknownComponent => DrcSeverity::Info,
+        }
+    }
+
+    /// The severity this violation type carries on one component.
+    ///
+    /// `reference_required` is that component's own flag: true for an object
+    /// that emits a SPICE instance. Such an object is written with a reference
+    /// designator the deck accepts and a type that resolves to a source, a
+    /// model template, or a hierarchy master, so each of those three failures
+    /// is an instance the netlist cannot carry — a run that will not start,
+    /// not a note. An object that emits nothing loses nothing and keeps the
+    /// note.
+    pub fn severity_for_component(&self, reference_required: bool) -> DrcSeverity {
+        match self {
+            Self::EmptyName | Self::InvalidName | Self::UnknownComponent if reference_required => {
+                DrcSeverity::Error
+            }
+            _ => self.default_severity(),
         }
     }
 
@@ -259,6 +287,21 @@ impl DrcViolation {
     /// Add related items
     pub fn with_related(mut self, items: Vec<String>) -> Self {
         self.related_items = items;
+        self
+    }
+
+    /// Re-base this finding's severity on the component that raised it.
+    ///
+    /// `reference_required` is that component's own flag. Severity stays a
+    /// property of the finding rather than of its type alone, because a
+    /// naming or binding failure costs the deck an instance only where one was
+    /// going to be written: see
+    /// [`DrcViolationType::severity_for_component`]. A project's configured
+    /// override is applied after this and still wins.
+    pub fn with_component_severity(mut self, reference_required: bool) -> Self {
+        self.severity = self
+            .violation_type
+            .severity_for_component(reference_required);
         self
     }
 }
