@@ -584,7 +584,7 @@ pub enum ChoicePreference {
 }
 
 impl ChoicePreference {
-    const ALL: [Self; 49] = [
+    pub(crate) const ALL: [Self; 49] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -772,7 +772,7 @@ pub enum TogglePreference {
 }
 
 impl TogglePreference {
-    const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::ReducedMotion,
         Self::CanvasKeyboardNavigation,
         Self::HierarchicalEditInPlace,
@@ -1061,6 +1061,65 @@ impl UserPreferences {
                 .insert(key.stable_id().to_owned(), Value::from(value));
         }
         Ok(())
+    }
+
+    /// Drop the stored override for each named preference, so every one of
+    /// them reads as the value this build ships.
+    ///
+    /// Removal *is* the reset: each getter above resolves an absent key to the
+    /// shipped default, and each setter already removes a key being set back to
+    /// it. That is why this cannot drift from the defaults it restores — there
+    /// is no second table of default values here to keep in step. The two
+    /// typed domains that hold their settings as fields rather than map
+    /// entries are reset field by field for the same reason.
+    pub fn restore_defaults(
+        &mut self,
+        choices: &[ChoicePreference],
+        toggles: &[TogglePreference],
+        scalars: &[ScalarPreference],
+    ) {
+        for key in choices {
+            if is_units_choice(*key) {
+                if let Ok(units) = self.units.current_mut() {
+                    let _ = units.set_compatibility_index(key.stable_id(), 0);
+                }
+                continue;
+            }
+            if let Ok(results) = self.results.current_mut() {
+                match key {
+                    ChoicePreference::CursorInterpolation => {
+                        results.cursor_interpolation = CursorInterpolation::default();
+                        continue;
+                    }
+                    ChoicePreference::ComplexNumberDisplay => {
+                        results.complex_number_display = ComplexNumberDisplay::default();
+                        continue;
+                    }
+                    ChoicePreference::LargeDatasetDisplay => {
+                        results.large_dataset_display = LargeDatasetDisplay::default();
+                        continue;
+                    }
+                    ChoicePreference::EngineeringExport => {
+                        results.engineering_export = EngineeringExportFormat::default();
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            self.choices.remove(key.stable_id());
+        }
+        for key in toggles {
+            self.toggles.remove(key.stable_id());
+        }
+        for key in scalars {
+            if *key == ScalarPreference::DisplayedSignificantDigits {
+                if let Ok(results) = self.results.current_mut() {
+                    results.displayed_significant_digits = DisplayedSignificantDigits::default();
+                }
+                continue;
+            }
+            self.scalars.remove(key.stable_id());
+        }
     }
 
     #[must_use]
