@@ -1774,14 +1774,8 @@ fn recent_age(opened_at_unix_ms: u64) -> String {
 }
 
 fn recent_age_at(opened_at_unix_ms: u64, now_unix_ms: u64) -> String {
-    let elapsed_seconds = now_unix_ms.saturating_sub(opened_at_unix_ms) / 1_000;
-    match elapsed_seconds {
-        0..=59 => "just now".to_owned(),
-        60..=3_599 => format!("{} min ago", elapsed_seconds / 60),
-        3_600..=86_399 => format!("{} h ago", elapsed_seconds / 3_600),
-        86_400..=172_799 => "Yesterday".to_owned(),
-        _ => format!("{} d ago", elapsed_seconds / 86_400),
-    }
+    let elapsed = now_unix_ms.saturating_sub(opened_at_unix_ms);
+    crate::time_compat::relative_age(std::time::Duration::from_millis(elapsed))
 }
 
 fn project_search_id() -> Id {
@@ -2302,7 +2296,7 @@ mod tests {
         assert_eq!(recent_age_at(NOW, NOW), "just now");
         assert_eq!(recent_age_at(NOW - 60_000, NOW), "1 min ago");
         assert_eq!(recent_age_at(NOW - 3_600_000, NOW), "1 h ago");
-        assert_eq!(recent_age_at(NOW - 86_400_000, NOW), "Yesterday");
+        assert_eq!(recent_age_at(NOW - 86_400_000, NOW), "yesterday");
         assert_eq!(recent_age_at(NOW - 172_800_000, NOW), "2 d ago");
         assert_eq!(recent_age_at(NOW + 60_000, NOW), "just now");
     }

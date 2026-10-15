@@ -1151,12 +1151,7 @@ fn format_revision_time(timestamp_ms: u64) -> String {
     if timestamp_ms > now {
         return "clock skew".to_owned();
     }
-    match now - timestamp_ms {
-        0..=59_999 => "just now".to_owned(),
-        60_000..=3_599_999 => format!("{} min ago", (now - timestamp_ms) / 60_000),
-        3_600_000..=86_399_999 => format!("{} h ago", (now - timestamp_ms) / 3_600_000),
-        elapsed => format!("{} d ago", elapsed / 86_400_000),
-    }
+    crate::time_compat::relative_age(std::time::Duration::from_millis(now - timestamp_ms))
 }
 
 fn affected_schematic_evidence(record: &ValidatedSchematicRevision) -> String {

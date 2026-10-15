@@ -746,14 +746,7 @@ fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
     else {
         return String::new();
     };
-    let seconds = elapsed / 1_000;
-    match seconds {
-        0..=59 => "just now".to_owned(),
-        60..=3_599 => format!("{} min ago", seconds / 60),
-        3_600..=86_399 => format!("{} h ago", seconds / 3_600),
-        86_400..=172_799 => "yesterday".to_owned(),
-        _ => format!("{} d ago", seconds / 86_400),
-    }
+    crate::time_compat::relative_age(std::time::Duration::from_millis(elapsed))
 }
 
 /// Whether one line of the simulation rail survives the navigator's filter.

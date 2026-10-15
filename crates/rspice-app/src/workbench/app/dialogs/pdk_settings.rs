@@ -1065,7 +1065,9 @@ fn scan_summary(state: &PdkSettingsDialogState) -> String {
         let now = crate::time_compat::unix_epoch().as_secs();
         line.push_str(&format!(
             "scanned {} · ",
-            fmt_ago(now.saturating_sub(scanned))
+            crate::time_compat::relative_age(std::time::Duration::from_secs(
+                now.saturating_sub(scanned)
+            ))
         ));
     }
     line.push_str(&format!(
@@ -1074,21 +1076,6 @@ fn scan_summary(state: &PdkSettingsDialogState) -> String {
         if enabled == 1 { "" } else { "s" },
     ));
     line
-}
-
-/// Compact "time ago" for the footer strip.
-fn fmt_ago(secs: u64) -> String {
-    if secs < 5 {
-        "just now".to_owned()
-    } else if secs < 60 {
-        format!("{secs} s ago")
-    } else if secs < 3600 {
-        format!("{} min ago", secs / 60)
-    } else if secs < 86_400 {
-        format!("{} h ago", secs / 3600)
-    } else {
-        format!("{} d ago", secs / 86_400)
-    }
 }
 
 // ---------------------------------------------------------------------------

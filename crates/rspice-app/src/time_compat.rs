@@ -34,6 +34,29 @@ pub(crate) fn checked_unix_epoch() -> Result<std::time::Duration, &'static str> 
     }
 }
 
+/// How long ago something happened, in the one vocabulary the workbench uses:
+/// `just now`, `7 min ago`, `3 h ago`, `yesterday`, `4 d ago`.
+///
+/// Eight surfaces each carried their own copy of this ladder and three of them
+/// disagreed — `moments ago` against `just now`, `4 days ago` against `4 d
+/// ago`, and `yesterday` present on the revision lists and missing everywhere
+/// else. A reader comparing a checkpoint to a revision should not have to
+/// notice which panel wrote the sentence.
+///
+/// It takes the elapsed time rather than a timestamp because what to say when
+/// there is no timestamp at all is the caller's question, not this one's: a
+/// recovery list says `an earlier session`, an evidence row says
+/// `time unavailable`, and a navigator row says nothing.
+pub(crate) fn relative_age(elapsed: std::time::Duration) -> String {
+    match elapsed.as_secs() {
+        0..=59 => "just now".to_owned(),
+        seconds @ 60..=3_599 => format!("{} min ago", seconds / 60),
+        seconds @ 3_600..=86_399 => format!("{} h ago", seconds / 3_600),
+        86_400..=172_799 => "yesterday".to_owned(),
+        seconds => format!("{} d ago", seconds / 86_400),
+    }
+}
+
 /// A nonzero millisecond timestamp for durable evidence. Zero is reserved for
 /// unknown historical time; a failed clock must not create a new dated record.
 pub(crate) fn checked_unix_time_ms() -> Result<u64, &'static str> {
@@ -112,6 +135,28 @@ mod tests {
         }
         let _restore = Restore(TEST_EPOCH.with(|clock| clock.replace(Some(epoch))));
         operation()
+    }
+
+    #[test]
+    fn one_relative_age_vocabulary_covers_every_boundary() {
+        for (seconds, expected) in [
+            (0, "just now"),
+            (59, "just now"),
+            (60, "1 min ago"),
+            (3_599, "59 min ago"),
+            (3_600, "1 h ago"),
+            (86_399, "23 h ago"),
+            (86_400, "yesterday"),
+            (172_799, "yesterday"),
+            (172_800, "2 d ago"),
+            (864_000, "10 d ago"),
+        ] {
+            assert_eq!(
+                relative_age(Duration::from_secs(seconds)),
+                expected,
+                "{seconds} s"
+            );
+        }
     }
 
     #[test]

@@ -1017,12 +1017,7 @@ fn relative_time(timestamp_ms: u64) -> String {
     let Some(elapsed) = now.checked_sub(timestamp_ms) else {
         return "clock skew".to_owned();
     };
-    match elapsed {
-        0..=59_999 => "just now".to_owned(),
-        60_000..=3_599_999 => format!("{} min ago", elapsed / 60_000),
-        3_600_000..=86_399_999 => format!("{} h ago", elapsed / 3_600_000),
-        _ => format!("{} d ago", elapsed / 86_400_000),
-    }
+    crate::time_compat::relative_age(std::time::Duration::from_millis(elapsed))
 }
 
 #[cfg(test)]

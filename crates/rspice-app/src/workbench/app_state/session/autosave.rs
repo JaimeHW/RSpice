@@ -201,9 +201,6 @@ fn checkpoint_age(checkpoint: &std::path::Path) -> String {
         .and_then(|modified| modified.elapsed().ok());
     match elapsed {
         None => "an earlier session".to_owned(),
-        Some(age) if age.as_secs() < 60 => "moments ago".to_owned(),
-        Some(age) if age.as_secs() < 3600 => format!("{} min ago", age.as_secs() / 60),
-        Some(age) if age.as_secs() < 86_400 => format!("{} h ago", age.as_secs() / 3600),
-        Some(age) => format!("{} days ago", age.as_secs() / 86_400),
+        Some(age) => crate::time_compat::relative_age(age),
     }
 }
