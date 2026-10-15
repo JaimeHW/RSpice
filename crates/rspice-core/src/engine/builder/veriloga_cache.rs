@@ -431,7 +431,15 @@ use super::*;
 // specialization can assign a `string` parameter. A version-149 record refused
 // every module that declared one, so none holds a string parameter; rebuilding
 // keeps the record and the schema in step.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 151;
+//
+// Version 152 keys a unit a library map arranged by each file's library, the
+// map's declaration order and its configurations (IEEE 1364-2005 clause 13),
+// which decide what every instance binds. The compiler now also parses
+// `config` blocks, and a system task's scope argument may name a module by
+// the cell of its `library.cell`, so a source an earlier build compiled one
+// way can now resolve another. No artifact changes shape, so the schema
+// stays; the fail-closed reading is to rebuild.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 152;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
