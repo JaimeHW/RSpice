@@ -20,7 +20,7 @@ use crate::workbench::state::RunSetBudgetDrafts;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::run_set::{
     self, InvalidValuePolicy, RunSetAction, RunSetAdaptivePolicy, RunSetBudgets,
-    RunSetCompositionMode, RunSetDimension, RunSetDimensionKind, RunSetState, RunSetValidation,
+    RunSetCompositionMode, RunSetDimension, RunSetState, RunSetValidation,
 };
 
 use super::page_kit::{
@@ -844,45 +844,10 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                     });
                 }
 
-                rule_row(
-                    ui,
-                    "Binds to",
-                    match dimension.kind {
-                        RunSetDimensionKind::Parameter => {
-                            "an exact design variable through a point-specific .param override"
-                        }
-                        RunSetDimensionKind::Source => "an explicitly named independent source",
-                        RunSetDimensionKind::ProcessSection => {
-                            "the library section every model resolves through"
-                        }
-                        RunSetDimensionKind::Supply => "the DC value of the design's supplies",
-                        RunSetDimensionKind::Temperature => {
-                            "the ambient solve temperature used for device and model evaluation"
-                        }
-                        RunSetDimensionKind::Model => {
-                            "a section of one ordered plan-owned model binding"
-                        }
-                        RunSetDimensionKind::Frequency => {
-                            "a compatible analysis instance's frequency control"
-                        }
-                        RunSetDimensionKind::Time => {
-                            "a compatible analysis instance's time control"
-                        }
-                        RunSetDimensionKind::Seed => {
-                            "the reproducible seed of a statistical analysis"
-                        }
-                        RunSetDimensionKind::Sample => "the sample count of a statistical analysis",
-                        RunSetDimensionKind::AnalysisSelection => {
-                            "the plan analysis instances executed at each point"
-                        }
-                        RunSetDimensionKind::DigitalConfiguration => {
-                            "a frozen mixed-signal digital configuration"
-                        }
-                        RunSetDimensionKind::ExternalDataset => {
-                            "a sealed external dataset identity"
-                        }
-                    },
-                );
+                // No "Binds to" row: it spelled out the definition of the axis
+                // kind, which the axis card above already names beside its
+                // value type, and the thing this axis actually binds to is the
+                // Source authority field right over it.
                 if let Some(reason) = dimension.kind.execution_blocker() {
                     rule_row(ui, "Execution", reason);
                 }
@@ -987,10 +952,6 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
     let current_composition = app.state.sim_setup.run_set.composition.clone();
     let mode = current_composition.mode;
     let excluded = current_composition.excluded_points.len();
-    let variation = app
-        .state
-        .sim_setup
-        .has_enabled_analysis_kind(AnalysisKind::MonteCarlo);
     let mut action: Option<RunSetAction> = None;
     card(
         ui,
@@ -1161,29 +1122,30 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
                 // No contract row: it restated the mode the dropdown above
                 // names, in the implementation's words.
-                rule_row(
-                    ui,
-                    "Statistical variation",
-                    if variation {
-                        "enabled · one Monte Carlo task executes at every point"
-                    } else {
-                        "disabled · no Monte Carlo analysis is enabled"
-                    },
-                );
-                rule_row(
-                    ui,
-                    "Excluded points",
-                    &match (mode, excluded) {
-                        (_, 0) => "none · the composition runs whole".to_owned(),
-                        (RunSetCompositionMode::Filtered, count) => {
-                            format!("{count} removed in the point table below")
-                        }
-                        (_, count) => format!(
-                            "{count} held but not applied · only a filtered composition subtracts \
-                             them"
-                        ),
-                    },
-                );
+                //
+                // No statistical-variation row either. Monte Carlo is not an
+                // axis of this space, so the run-space strip states whether
+                // the plan has one — and it carries the control that adds it,
+                // which a row here never could.
+                //
+                // Exclusions are stated only when there are some. A run space
+                // that excludes nothing has nothing to report, and a row
+                // saying so is one more line to read past on every plan that
+                // never excluded a point.
+                if excluded > 0 {
+                    rule_row(
+                        ui,
+                        "Excluded points",
+                        &if mode == RunSetCompositionMode::Filtered {
+                            format!("{excluded} removed in the point table below")
+                        } else {
+                            format!(
+                                "{excluded} held but not applied · only a filtered composition \
+                                 subtracts them"
+                            )
+                        },
+                    );
+                }
                 // No point-identity row: it stated one unchanging sentence
                 // about the manifest format, which is not a thing the reader
                 // chooses or acts on here.

@@ -2,6 +2,7 @@
 
 use super::*;
 use egui::{Context, Event, Pos2};
+use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 struct Fixture {
     app: RSpiceApp,

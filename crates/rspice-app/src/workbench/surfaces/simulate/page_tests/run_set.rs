@@ -152,6 +152,74 @@ fn the_composition_card_restates_no_rule_its_own_controls_already_name() {
             "{lecture:?} explains the implementation of a control on this page:\n{rendered}"
         );
     }
+    // Statistical variation has one owner, and it is the run-space strip: the
+    // strip carries the control that adds the analysis, so a second statement
+    // of the same state in this card could only send the reader back up to it.
+    assert_eq!(
+        rendered.matches("Monte Carlo").count(),
+        1,
+        "statistical variation is stated twice:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("Statistical variation"),
+        "the composition card restates what the run-space strip owns:\n{rendered}"
+    );
+    // Nothing is excluded in the fixture, and a row whose whole content is
+    // that nothing happened does not render.
+    assert!(
+        !rendered.contains("Excluded points"),
+        "an exclusion row with no exclusions to report:\n{rendered}"
+    );
+}
+
+/// A run space that does exclude points still says so, in the card that owns
+/// the exclusion rule.
+///
+/// The row above is deleted in its normal state and not deleted outright, so
+/// this is the half that has to keep working: the pair of them is the content
+/// rule rather than one assertion that the string is gone.
+#[test]
+fn the_composition_card_reports_exclusions_when_the_run_space_has_them() {
+    let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
+        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+            dimension.enabled = matches!(dimension.kind, RunSetDimensionKind::ProcessSection);
+        }
+        app.state
+            .sim_setup
+            .run_set
+            .composition
+            .excluded_points
+            .insert("process-section=SS".to_owned());
+    });
+
+    assert!(
+        rendered.contains("Excluded points"),
+        "an exclusion the composition is not applying must be stated:\n{rendered}"
+    );
+}
+
+/// The dimension editor states what this axis is, not what its kind means.
+///
+/// The axis card above the editor already names the kind beside its value
+/// type, and the Source authority field over the deleted row names the thing
+/// the axis actually binds to. The row between them spelled out a definition
+/// that is the same sentence for every plan.
+#[test]
+fn the_dimension_editor_does_not_define_the_kind_the_axis_card_names() {
+    let rendered = render(SimulationPage::RunSet, 1200.0);
+
+    assert!(
+        rendered.contains("Selected dimension \u{b7} Process section"),
+        "the editor still names the axis it is editing:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("model-library:process-sections"),
+        "the authority the axis binds to is still stated:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("Binds to"),
+        "the editor defines the axis kind instead of stating this axis:\n{rendered}"
+    );
 }
 
 /// The strip, the forecast and the point table read one declaration.

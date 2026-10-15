@@ -56,7 +56,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-run-set",
         page: SimulationPage::RunSet,
-        fingerprint: "c934f27f8bd7afd558dbb3d55384843594f7b41f52884df3a5f5fe6aec327759",
+        fingerprint: "77b21f14b4ee107951221c9847fd66be4101ba96b36217c11cc4ea35ce444bab",
     },
     StudioBaseline {
         name: "studio-models",
