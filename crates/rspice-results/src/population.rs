@@ -187,7 +187,12 @@ pub struct TrialIdentity {
 /// Portable population columns and trial correspondence resolved from retained evidence.
 #[derive(Debug, Clone)]
 pub struct PopulationData {
-    pub requirement_note: String,
+    /// Why no pass/fail verdict is available, when none is.
+    ///
+    /// Requirements that resolved are the normal case and say nothing: a
+    /// population sheet that printed "Requirements retained with this run."
+    /// on every panel was reporting the absence of a problem.
+    pub requirement_note: Option<String>,
     pub trials: Vec<TrialIdentity>,
     pub columns: Vec<PopulationColumn>,
     pub status: Vec<TrialStatus>,
@@ -281,16 +286,9 @@ pub fn build<W: AsRef<RetainedWaveform>>(
 
     let requirements = applicable_requirements(analysis, entries, prepared);
     let requirements_valid = requirements.is_ok();
-    let requirement_note = match &requirements {
-        Err(error) => {
-            format!("Requirements unavailable: {error}. No pass/fail verdict is available.")
-        }
-        Ok(_) if prepared.is_some() => "Requirements retained with this run.".to_owned(),
-        Ok(_) => {
-            "Current workspace requirements; this legacy run has no retained requirement contract."
-                .to_owned()
-        }
-    };
+    let requirement_note = requirements.as_ref().err().map(|error| {
+        format!("Requirements unavailable: {error}. No pass/fail verdict is available.")
+    });
     let resolved = requirements.unwrap_or_default();
 
     // The retained sample count every variable agrees on, if they agree.

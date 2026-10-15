@@ -410,7 +410,9 @@ pub fn show(
         well_hint(ui, ABSENT_STATE);
         return None;
     };
-    crate::presentation::panel_note(ui, &plan.requirement_note);
+    if let Some(note) = &plan.requirement_note {
+        crate::presentation::panel_note(ui, note);
+    }
     let sheet = state.clone();
     let columns = match drawn_columns(plan, &sheet) {
         Ok(columns) => columns,
@@ -848,7 +850,8 @@ pub fn right_panel(
         );
         return;
     };
-    crate::presentation::panel_note(ui, &plan.requirement_note);
+    // The stage states a requirements refusal once; this panel does not
+    // repeat it, and a resolved requirement is not news.
     let sheet = state.clone();
     let columns = match drawn_columns(plan, &sheet) {
         Ok(columns) => columns,
@@ -897,21 +900,6 @@ pub fn right_panel(
     let column = &columns[chosen.min(columns.len() - 1)];
     let rows = statistics_rows(column, plan);
     crate::presentation::stat_table(ui, &rows);
-    crate::presentation::panel_note(
-        ui,
-        match sheet.grouping {
-            BoxGrouping::AllMeasurements => {
-                "Each column is the signed distance from its own requirement, so the limit is \
-                 one line at zero and positive passes. The violin width is scaled per column \
-                 to its own peak density."
-            }
-            BoxGrouping::OneMeasurement => {
-                "Quartiles are the interpolated definition; the yield interval is Wilson's, \
-                 which keeps a bound at a hundred percent. A trial is reproduced from the \
-                 seed in its name; no per-trial waveform set is retained."
-            }
-        },
-    );
 }
 
 fn statistics_rows(column: &Column, plan: &PopulationData) -> Vec<(&'static str, String, bool)> {
@@ -952,8 +940,8 @@ fn statistics_rows(column: &Column, plan: &PopulationData) -> Vec<(&'static str,
         ("Requirement", column.limit_text(), false),
         ("Median", value(statistics.median), true),
         ("Q1", value(statistics.q1), false),
+        // Q3 − Q1, with both of them one row up.
         ("Q3", value(statistics.q3), false),
-        ("IQR", value(statistics.iqr()), false),
         (
             "Whiskers",
             format!(

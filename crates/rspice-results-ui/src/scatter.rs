@@ -281,7 +281,9 @@ pub fn show(
         well_hint(ui, ABSENT_STATE);
         return None;
     };
-    crate::presentation::panel_note(ui, &plan.requirement_note);
+    if let Some(note) = &plan.requirement_note {
+        crate::presentation::panel_note(ui, note);
+    }
     let Some(pair) = active_pair(plan, state) else {
         well_hint(
             ui,
@@ -754,7 +756,8 @@ pub fn right_panel(
         );
         return;
     };
-    crate::presentation::panel_note(ui, &plan.requirement_note);
+    // The stage states a requirements refusal once; this panel does not
+    // repeat it, and a resolved requirement is not news.
     let Some(pair) = active_pair(plan, state) else {
         crate::presentation::panel_note(ui, "A correlation needs two retained columns.");
         return;
@@ -770,10 +773,6 @@ pub fn right_panel(
 
     let selection = state.selection.clone();
     if selection.is_empty() {
-        crate::presentation::panel_note(
-            ui,
-            "Drag on the plot to brush a rectangle of trials; click selects one and Esc clears.",
-        );
         return;
     }
     section_header(ui, "Brushed trials", None);
@@ -808,22 +807,11 @@ pub fn right_panel(
         .collect::<Vec<_>>();
     rspice_ui_kit::widgets::measurement_table(ui, &rows);
     if selection.len() > listed {
-        crate::presentation::panel_note(
-            ui,
-            &format!(
-                "{} more brushed trials are not listed.",
-                selection.len() - listed
-            ),
-        );
+        crate::presentation::panel_note(ui, &format!("+{} more", selection.len() - listed));
     }
     if ui.button("Clear brush").clicked() {
         clear_selection(state);
     }
-    crate::presentation::panel_note(
-        ui,
-        "A trial is reproduced from the seed in its name. No per-trial waveform set is \
-         retained, so there is nothing further to open here.",
-    );
 }
 
 fn register_rows(

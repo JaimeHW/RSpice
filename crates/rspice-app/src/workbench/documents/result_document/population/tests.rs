@@ -362,10 +362,8 @@ fn population_contract_an_empty_prepared_contract_never_borrows_live_bounds() {
     let plan = cached_population(&simulation, &workspace, &mut results).unwrap();
     assert_eq!(plan.status, vec![TrialStatus::NotEvaluated; 3]);
     assert!(plan.columns.iter().all(|column| column.limit.is_none()));
-    assert_eq!(
-        plan.requirement_note,
-        "Requirements retained with this run."
-    );
+    // Requirements that resolved are the normal case and say nothing.
+    assert_eq!(plan.requirement_note, None);
 }
 
 #[test]
@@ -596,7 +594,8 @@ fn population_contract_never_accepts_invalid_or_duplicate_legacy_requirements() 
         assert!(plan.columns.iter().all(|column| column.limit.is_none()));
         assert!(
             plan.requirement_note
-                .starts_with("Requirements unavailable:")
+                .as_deref()
+                .is_some_and(|note| note.starts_with("Requirements unavailable:"))
         );
         workspace.content.specs = workspace_with_limit(Some(-1.0), None).content.specs;
         let repaired = cached_population(&simulation, &workspace, &mut results).unwrap();
