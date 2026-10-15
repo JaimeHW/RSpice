@@ -51,7 +51,7 @@ fn project_status_counts_areas_and_never_borrows_the_advisory_word() {
         disabled_reason: None,
     };
     let statuses = [
-        status(Tone::Ok),
+        status(Tone::Neutral),
         status(Tone::Warn),
         status(Tone::Warn),
         status(Tone::Error),
@@ -65,12 +65,14 @@ fn project_status_counts_areas_and_never_borrows_the_advisory_word() {
         project_status_summary(&statuses[..3], Tone::Warn),
         "review · 2 of 3 areas"
     );
+    // A project with nothing to act on says nothing beside its name: the
+    // Project status card and its register are the owners of that fact.
     assert_eq!(
-        project_status_summary(&statuses[..1], Tone::Ok),
-        "current · 1 area"
+        project_status_summary(&statuses[..1], Tone::Neutral),
+        String::new()
     );
     // "advisory" belongs to finding counts, which this summary never counts.
-    for tone in [Tone::Error, Tone::Warn, Tone::Ok] {
+    for tone in [Tone::Error, Tone::Warn, Tone::Neutral] {
         assert!(!project_status_summary(&statuses, tone).contains("advisor"));
     }
 }
@@ -280,8 +282,12 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
             .iter()
             .all(|status| status.area != "Schematic checks")
     );
-    assert_eq!(snapshot.problem.code, "NOT RUN");
-    assert_eq!(snapshot.problem.path, "front_end.sp");
+    let problem = snapshot
+        .problem
+        .as_ref()
+        .expect("an unvalidated deck is a finding the strip names");
+    assert_eq!(problem.code, "NOT RUN");
+    assert_eq!(problem.path, "front_end.sp");
     assert!(objects.first().is_some_and(|object| {
         object.top && object.name == "front_end.sp" && object.kind.starts_with("SPICE deck")
     }));
@@ -316,9 +322,30 @@ fn current_checks_without_a_retained_result_are_never_green() {
         &app.state.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
-    let problem = problem_snapshot(&app);
+    let problem = problem_snapshot(&app).expect("checks that have not run are a finding");
     assert_eq!(problem.code, "NOT RUN");
     assert_eq!(problem.tone, Tone::Warn);
+}
+
+/// A root that checks clean has no strip at all: "No current schematic
+/// findings" was a report of the absence of a problem.
+#[test]
+fn a_clean_project_root_states_no_problem() {
+    use rspice_design::drc::DrcResult;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workspace.content.active_view = CellViewRef::new(
+        &app.state.workspace.content.project.root_library,
+        &app.state.workspace.content.project.top_cell,
+        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+    );
+    let mut result = DrcResult::default();
+    result.completed = true;
+    app.state
+        .publish_active_design_check_result(result)
+        .expect("publish project-root design-check receipt");
+
+    assert!(problem_snapshot(&app).is_none());
 }
 
 #[test]
@@ -355,7 +382,7 @@ fn project_problem_selects_the_highest_severity_finding() {
         .publish_active_design_check_result(result)
         .expect("publish project-root design-check receipt");
 
-    let problem = problem_snapshot(&app);
+    let problem = problem_snapshot(&app).expect("a critical violation is a finding");
     assert_eq!(problem.code, "CHK-002");
     assert_eq!(problem.message, "critical finding");
     assert_eq!(problem.tone, Tone::Error);

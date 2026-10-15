@@ -14,12 +14,12 @@ use crate::state::{CellViewRef, SimulationRunLifecycle, ViewType};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::commands::CommandAvailability;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::design_system::{property_row, property_row_toned};
+use crate::workbench::design_system::{property_row, property_row_problem};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::state::{ModelsCatalogScope, ModelsPage, ProjectPage, Workspace};
 use rspice_design::drc::DrcSeverity;
@@ -32,25 +32,54 @@ const STATUS_ROW_HEIGHT: f32 = 27.0;
 const REGISTER_ROW_HEIGHT: f32 = 17.0;
 const ACTIVITY_ROW_HEIGHT: f32 = 30.0;
 
+/// How a fact on this page stands.
+///
+/// Three states, not five: a tone is a severity, and the only severities the
+/// page can act on are "look at this" and "this stops a run". `Info` and `Ok`
+/// were a blue and a green over text that was already saying what it said, so
+/// they collapsed into [`Self::Neutral`] along with the colours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tone {
     Neutral,
-    Info,
-    Ok,
     Warn,
     Error,
 }
 
 impl Tone {
-    fn color(self, tokens: &Tokens) -> Color32 {
+    /// The mark that goes in front of this fact, when the reader has to see
+    /// one. The mark owns the colour; the words beside it never do.
+    const fn problem(self) -> Option<Problem> {
         match self {
-            Self::Neutral => tokens.color.text_dim,
-            Self::Info => tokens.color.info,
-            Self::Ok => tokens.color.ok,
-            Self::Warn => tokens.color.warn,
-            Self::Error => tokens.color.err,
+            Self::Neutral => None,
+            Self::Warn => Some(Problem::Warning),
+            Self::Error => Some(Problem::Failure),
         }
     }
+}
+
+/// Side of a mark painted into one of this page's rows, and the advance from
+/// its left edge to where the text after it begins. The kit's own values: a
+/// marked line and an unmarked one beside it differ by exactly the advance.
+const MARK_SIDE: f32 = 11.0;
+const MARK_ADVANCE: f32 = 17.0;
+
+/// Paint `tone`'s mark with its left edge at `left`, centred on `center_y`,
+/// and return how far the text after it is pushed. A neutral tone paints
+/// nothing and pushes nothing, so a page with no problems on it has no
+/// gutter.
+fn paint_tone_mark(ui: &Ui, tone: Tone, left: f32, center_y: f32) -> f32 {
+    let Some(problem) = tone.problem() else {
+        return 0.0;
+    };
+    paint_problem_mark(
+        ui.painter(),
+        egui::Rect::from_center_size(
+            pos2(left + MARK_SIDE * 0.5, center_y),
+            vec2(MARK_SIDE, MARK_SIDE),
+        ),
+        problem,
+    );
+    MARK_ADVANCE
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,7 +201,10 @@ struct SourceDeckSnapshot {
     validation_state: String,
     validation_detail: String,
     validation_tone: Tone,
-    problem: ProblemSnapshot,
+    /// The one finding the strip under the status register names, or nothing
+    /// when there is no finding: a strip reading "no current diagnostics" is
+    /// a report of the absence of a problem.
+    problem: Option<ProblemSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,7 +231,7 @@ struct OverviewSnapshot {
     source_deck: Option<SourceDeckSnapshot>,
     configuration: ConfigurationSnapshot,
     statuses: Vec<StatusSnapshot>,
-    problem: ProblemSnapshot,
+    problem: Option<ProblemSnapshot>,
     open_documents: Vec<OpenDocumentSnapshot>,
     operations: Vec<OperationSnapshot>,
     /// Every retained operation the project holds, counted from the records
@@ -273,23 +305,23 @@ fn source_deck_snapshot(
             "Not validated".to_owned(),
             "Validate the retained source before execution".to_owned(),
             Tone::Warn,
-            ProblemSnapshot {
+            Some(ProblemSnapshot {
                 code: "NOT RUN".to_owned(),
                 message: "Validate the project source deck".to_owned(),
                 path: name.clone(),
                 tone: Tone::Warn,
-            },
+            }),
         ),
         Some(_) if !validation_current => (
             "Stale".to_owned(),
             "The source changed after the retained validation".to_owned(),
             Tone::Warn,
-            ProblemSnapshot {
+            Some(ProblemSnapshot {
                 code: "STALE".to_owned(),
                 message: "Source changed after the retained validation".to_owned(),
                 path: name.clone(),
                 tone: Tone::Warn,
-            },
+            }),
         ),
         Some(report) => {
             let errors = report.error_count();
@@ -300,7 +332,7 @@ fn source_deck_snapshot(
             } else if warnings > 0 {
                 Tone::Warn
             } else {
-                Tone::Ok
+                Tone::Neutral
             };
             let state_label = if errors > 0 {
                 format!(
@@ -318,34 +350,28 @@ fn source_deck_snapshot(
                 .diagnostics()
                 .iter()
                 .max_by_key(|diagnostic| diagnostic.severity());
-            let problem = highest.map_or_else(
-                || ProblemSnapshot {
-                    code: "SOURCE".to_owned(),
-                    message: "No current source diagnostics".to_owned(),
-                    path: name.clone(),
-                    tone: Tone::Ok,
-                },
-                |diagnostic| {
-                    let position = diagnostic.position();
-                    ProblemSnapshot {
-                        code: diagnostic.code().map_or_else(
-                            || match diagnostic.severity() {
-                                DiagnosticSeverity::Info => "SPICE-INFO".to_owned(),
-                                DiagnosticSeverity::Warning => "SPICE-WARN".to_owned(),
-                                DiagnosticSeverity::Error => "SPICE-ERROR".to_owned(),
-                            },
-                            str::to_owned,
-                        ),
-                        message: diagnostic.message().to_owned(),
-                        path: format!("{}:{}:{}", name, position.line(), position.column()),
-                        tone: match diagnostic.severity() {
-                            DiagnosticSeverity::Info => Tone::Info,
-                            DiagnosticSeverity::Warning => Tone::Warn,
-                            DiagnosticSeverity::Error => Tone::Error,
+            // Nothing at all when the deck validates: "No current source
+            // diagnostics" was a strip the page painted to report an absence.
+            let problem = highest.map(|diagnostic| {
+                let position = diagnostic.position();
+                ProblemSnapshot {
+                    code: diagnostic.code().map_or_else(
+                        || match diagnostic.severity() {
+                            DiagnosticSeverity::Info => "SPICE-INFO".to_owned(),
+                            DiagnosticSeverity::Warning => "SPICE-WARN".to_owned(),
+                            DiagnosticSeverity::Error => "SPICE-ERROR".to_owned(),
                         },
-                    }
-                },
-            );
+                        str::to_owned,
+                    ),
+                    message: diagnostic.message().to_owned(),
+                    path: format!("{}:{}:{}", name, position.line(), position.column()),
+                    tone: match diagnostic.severity() {
+                        DiagnosticSeverity::Info => Tone::Neutral,
+                        DiagnosticSeverity::Warning => Tone::Warn,
+                        DiagnosticSeverity::Error => Tone::Error,
+                    },
+                }
+            });
             (state_label, detail, tone, problem)
         }
     };
@@ -538,11 +564,13 @@ impl OverviewSnapshot {
         ];
         let problem = if netlist_first {
             source_deck.as_ref().map_or_else(
-                || ProblemSnapshot {
-                    code: "SOURCE".to_owned(),
-                    message: "The canonical source document is unavailable".to_owned(),
-                    path: "Project source".to_owned(),
-                    tone: Tone::Error,
+                || {
+                    Some(ProblemSnapshot {
+                        code: "SOURCE".to_owned(),
+                        message: "The canonical source document is unavailable".to_owned(),
+                        path: "Project source".to_owned(),
+                        tone: Tone::Error,
+                    })
                 },
                 |deck| deck.problem.clone(),
             )
@@ -629,7 +657,7 @@ impl OverviewSnapshot {
                 } else if findings.advisories > 0 {
                     Tone::Warn
                 } else {
-                    Tone::Ok
+                    Tone::Neutral
                 };
                 operations.push((
                     revision.created_unix_ms(),
@@ -677,7 +705,7 @@ impl OverviewSnapshot {
                         publication.reason(),
                         publication.actor_id()
                     ),
-                    tone: Tone::Ok,
+                    tone: Tone::Neutral,
                     intent: Some(OverviewIntent::Command(Command::ProjectPage(
                         ProjectPage::Library,
                     ))),
@@ -802,7 +830,7 @@ fn overview_body(
             |left| {
                 retain_first_intent(
                     &mut left_intent,
-                    status_card(left, &snapshot.statuses, &snapshot.problem),
+                    status_card(left, &snapshot.statuses, snapshot.problem.as_ref()),
                 );
                 left.add_space(CARD_GAP);
                 retain_first_intent(&mut left_intent, design_card(left, app, snapshot));
@@ -819,7 +847,7 @@ fn overview_body(
         page::inset_column(ui, inset, content_width, |ui| {
             retain_first_intent(
                 intent,
-                status_card(ui, &snapshot.statuses, &snapshot.problem),
+                status_card(ui, &snapshot.statuses, snapshot.problem.as_ref()),
             );
             ui.add_space(CARD_GAP);
             retain_first_intent(intent, context_card(ui, snapshot));
@@ -848,6 +876,9 @@ fn overview_card(
 /// it "advisories" put a finding word on an area count directly above a register
 /// whose first row reports genuine advisory counts, so two unrelated numbers
 /// read as the same one. The denominator keeps the area reading unambiguous.
+/// Nothing at all when every area is current: the register below states each
+/// area, and "current · 6 areas" beside the project's name was a third copy of
+/// a fact the Project status card and its six rows already carry.
 fn project_status_summary(statuses: &[StatusSnapshot], tone: Tone) -> String {
     let total = statuses.len();
     let flagged = statuses
@@ -857,10 +888,7 @@ fn project_status_summary(statuses: &[StatusSnapshot], tone: Tone) -> String {
     match tone {
         Tone::Error => format!("blocked · {flagged} of {total} areas"),
         Tone::Warn => format!("review · {flagged} of {total} areas"),
-        _ => format!(
-            "current · {total} {}",
-            singular_or_plural(total, "area", "areas")
-        ),
+        Tone::Neutral => String::new(),
     }
 }
 
@@ -899,16 +927,21 @@ fn overview_header(
                 {
                     Tone::Warn
                 } else {
-                    Tone::Ok
+                    Tone::Neutral
                 };
                 let project_status = project_status_summary(&snapshot.statuses, project_tone);
                 let status_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-                let status_width = ui
+                let status_width = (ui
                     .painter()
                     .layout_no_wrap(project_status.clone(), status_font.clone(), Color32::WHITE)
                     .size()
                     .x
-                    .min(content_width * 0.42);
+                    + if project_tone.problem().is_some() {
+                        MARK_ADVANCE
+                    } else {
+                        0.0
+                    })
+                .min(content_width * 0.42);
                 let title_font = theme::sans(20.0, FontWeight::SemiBold);
                 let (name_rect, name_response) =
                     ui.allocate_exact_size(vec2(content_width, 27.0), Sense::hover());
@@ -930,22 +963,29 @@ fn overview_header(
                     title_font,
                     tokens.color.text,
                 );
-                ui.painter().text(
-                    pos2(
-                        (name_rect.left() + title_width + 12.0)
-                            .min((name_rect.right() - status_width).max(name_rect.left())),
-                        name_rect.center().y + 2.0,
-                    ),
-                    Align2::LEFT_CENTER,
-                    &project_status,
-                    status_font,
-                    project_tone.color(&tokens),
-                );
+                if !project_status.is_empty() {
+                    let status_left = (name_rect.left() + title_width + 12.0)
+                        .min((name_rect.right() - status_width).max(name_rect.left()));
+                    let advance =
+                        paint_tone_mark(ui, project_tone, status_left, name_rect.center().y + 2.0);
+                    ui.painter().text(
+                        pos2(status_left + advance, name_rect.center().y + 2.0),
+                        Align2::LEFT_CENTER,
+                        &project_status,
+                        status_font,
+                        tokens.color.text_dim,
+                    );
+                }
+                let announced_status = if project_status.is_empty() {
+                    snapshot.project_name.clone()
+                } else {
+                    format!("{} · {project_status}", snapshot.project_name)
+                };
                 name_response.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Label,
                         ui.is_enabled(),
-                        format!("Project {} · {project_status}", snapshot.project_name),
+                        format!("Project {announced_status}"),
                     )
                 });
                 name_response.on_hover_text(format!(
@@ -1087,13 +1127,15 @@ fn context_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewInte
                 deck.map_or("Unavailable", |deck| deck.name.as_str()),
             );
             match deck {
-                Some(deck) => property_row_toned(
+                Some(deck) => property_row_problem(
                     ui,
                     "Validation",
                     &deck.validation_state,
-                    deck.validation_tone.color(&tokens),
+                    deck.validation_tone.problem(),
                 ),
-                None => property_row_toned(ui, "Validation", "Unavailable", tokens.color.err),
+                None => {
+                    property_row_problem(ui, "Validation", "Unavailable", Some(Problem::Failure))
+                }
             };
             property_row(
                 ui,
@@ -1110,16 +1152,19 @@ fn context_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewInte
                 ),
             );
             property_row(ui, "Testbench", &snapshot.configuration.root);
-            let configuration_status = match snapshot.configuration.tone {
-                Tone::Error => "blocked",
-                Tone::Warn => "review required",
-                _ => "resolved",
+            // "· resolved" said only that the configuration is the normal
+            // kind of configuration. The two states a reader acts on keep
+            // their word, behind the mark that carries the severity.
+            let configuration = match snapshot.configuration.tone {
+                Tone::Error => format!("{} · blocked", snapshot.configuration.state),
+                Tone::Warn => format!("{} · review required", snapshot.configuration.state),
+                Tone::Neutral => snapshot.configuration.state.clone(),
             };
-            property_row_toned(
+            property_row_problem(
                 ui,
                 "Configuration",
-                &format!("{} · {configuration_status}", snapshot.configuration.state),
-                snapshot.configuration.tone.color(&tokens),
+                &configuration,
+                snapshot.configuration.tone.problem(),
             );
         }
         property_row(ui, "Execution", &snapshot.execution_target);
@@ -1178,7 +1223,7 @@ fn project_persistence_location(app: &RSpiceApp) -> String {
 fn status_card(
     ui: &mut Ui,
     statuses: &[StatusSnapshot],
-    problem: &ProblemSnapshot,
+    problem: Option<&ProblemSnapshot>,
 ) -> Option<OverviewIntent> {
     let tokens = Tokens::get(ui.ctx());
     let status_tone = if statuses.iter().any(|status| status.tone == Tone::Error) {
@@ -1186,17 +1231,19 @@ fn status_card(
     } else if statuses.iter().any(|status| status.tone == Tone::Warn) {
         Tone::Warn
     } else {
-        Tone::Ok
+        Tone::Neutral
     };
+    // "current" on the card that holds the register is the register saying
+    // nothing is wrong twice. Only the two states a reader acts on are named.
     overview_card(
         ui,
         "Project status",
         match status_tone {
             Tone::Error => "blocked",
             Tone::Warn => "review required",
-            _ => "current",
+            Tone::Neutral => "",
         },
-        status_tone.color(&tokens),
+        tokens.color.text_faint,
         |ui| status_rows(ui, statuses, problem),
     )
 }
@@ -1204,7 +1251,7 @@ fn status_card(
 fn status_rows(
     ui: &mut Ui,
     statuses: &[StatusSnapshot],
-    problem: &ProblemSnapshot,
+    problem: Option<&ProblemSnapshot>,
 ) -> Option<OverviewIntent> {
     let tokens = Tokens::get(ui.ctx());
     ui.add_space(5.0);
@@ -1245,11 +1292,11 @@ fn status_rows(
         } else {
             tokens.color.text_faint
         };
-        ui.painter().circle_filled(
-            pos2(rect.left() + 18.0, rect.center().y),
-            4.0,
-            status.tone.color(&tokens),
-        );
+        // Six dots down the card, five of them green, said what the state
+        // word beside each one already said. Only a row the reader has to act
+        // on is marked, and the gutter the dots held is kept so a marked row
+        // and a clean one keep their columns.
+        paint_tone_mark(ui, status.tone, rect.left() + 14.0, rect.center().y);
         paint_elided(
             ui,
             pos2(rect.left() + 31.0, rect.center().y - tokens::FS_0 * 0.5),
@@ -1294,6 +1341,9 @@ fn status_rows(
             ui.add_space(3.0);
         }
     }
+    let Some(problem) = problem else {
+        return requested;
+    };
     ui.add_space(4.0);
     let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
     ui.painter().hline(
@@ -1305,6 +1355,7 @@ fn status_rows(
     // the panel's 14px insets: the code takes its own width, the message the
     // rest, and the path right-aligns against the far inset.
     let code_font = theme::mono(tokens::FS_MICRO, FontWeight::Medium);
+    let mark = paint_tone_mark(ui, problem.tone, rect.left() + 14.0, rect.center().y);
     let code_width = ui
         .painter()
         .layout_no_wrap(problem.code.clone(), code_font.clone(), Color32::WHITE)
@@ -1314,22 +1365,25 @@ fn status_rows(
     let path_width = 128.0_f32.min(width * 0.34);
     paint_elided(
         ui,
-        pos2(rect.left() + 14.0, rect.center().y - tokens::FS_MICRO * 0.5),
+        pos2(
+            rect.left() + 14.0 + mark,
+            rect.center().y - tokens::FS_MICRO * 0.5,
+        ),
         &problem.code,
         code_font,
-        problem.tone.color(&tokens),
+        tokens.color.text_faint,
         code_width.max(1.0),
     );
     paint_elided(
         ui,
         pos2(
-            rect.left() + 14.0 + code_width + 9.0,
+            rect.left() + 14.0 + mark + code_width + 9.0,
             rect.center().y - tokens::FS_MICRO * 0.5,
         ),
         &problem.message,
         theme::sans(tokens::FS_MICRO, FontWeight::Regular),
         tokens.color.text_dim,
-        (width - 14.0 - code_width - 9.0 - path_width - 9.0 - 14.0).max(1.0),
+        (width - 14.0 - mark - code_width - 9.0 - path_width - 9.0 - 14.0).max(1.0),
     );
     let path_font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
     let path = elide_text(ui, &problem.path, &path_font, path_width.max(1.0));
@@ -1529,7 +1583,7 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
                     snapshot.root_net_count,
                     singular_or_plural(snapshot.root_net_count, "net", "nets")
                 ),
-                tone: Tone::Info,
+                tone: Tone::Neutral,
                 top: true,
             },
         );
@@ -1599,7 +1653,7 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
                     snapshot.model_library_count,
                     singular_or_plural(snapshot.model_library_count, "library", "libraries")
                 ),
-                tone: Tone::Ok,
+                tone: Tone::Neutral,
                 top: false,
             },
         );
@@ -1652,7 +1706,7 @@ fn design_objects(snapshot: &OverviewSnapshot) -> Vec<DesignObjectSnapshot> {
                 tone: if document.dirty {
                     Tone::Warn
                 } else if document.active {
-                    Tone::Info
+                    Tone::Neutral
                 } else {
                     Tone::Neutral
                 },
@@ -1726,20 +1780,18 @@ fn design_summary_row(
         kind_font,
         t.color.text_dim,
     );
-    // Detail is faint annotation text in the reference; only a genuine
-    // warning or error keeps its tone so real problems stay visible.
-    let detail_color = match object.tone {
-        Tone::Warn | Tone::Error => object.tone.color(&t),
-        _ => t.color.text_faint,
-    };
+    // Detail is faint annotation text in the reference. A genuine warning or
+    // error takes a mark in front of it so it stands out without the words
+    // themselves being coloured.
     let detail_left = rect.left() + 14.0 + name_column + 9.0 + kind_column + 9.0;
+    let mark = paint_tone_mark(ui, object.tone, detail_left, rect.center().y);
     paint_elided(
         ui,
-        pos2(detail_left, rect.center().y - tokens::FS_MICRO * 0.5),
+        pos2(detail_left + mark, rect.center().y - tokens::FS_MICRO * 0.5),
         &object.detail,
         theme::sans(tokens::FS_MICRO, FontWeight::Regular),
-        detail_color,
-        (rect.right() - 14.0 - detail_left).max(1.0),
+        t.color.text_faint,
+        (rect.right() - 14.0 - detail_left - mark).max(1.0),
     );
     // The row paints its three columns straight to the painter, so the label
     // has to be assembled here or a screen reader announces nothing.
@@ -1797,7 +1849,7 @@ fn operations_register(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<Overv
                 "Working changes are not yet saved"
             },
             if snapshot.dirty_documents == 0 {
-                Tone::Ok
+                Tone::Neutral
             } else {
                 Tone::Warn
             },
@@ -1856,20 +1908,18 @@ fn activity_row(
         (time_width - 14.0).max(1.0),
     );
     // A run that failed carries the same words as one that succeeded until the
-    // reader gets to "with failures" at the end of the line. Only a genuine
-    // warning or error keeps its tone, so it is the exception that stands out —
-    // the same rule the design register applies to its detail column.
-    let event_color = match tone {
-        Tone::Warn | Tone::Error => tone.color(&t),
-        _ => t.color.text,
-    };
+    // reader gets to "with failures" at the end of the line, so it takes a
+    // mark in front of it — the same rule the design register applies to its
+    // detail column.
+    let event_left = rect.left() + time_width + 14.0;
+    let mark = paint_tone_mark(ui, tone, event_left, rect.top() + 2.0 + tokens::FS_0 * 0.5);
     paint_elided(
         ui,
-        pos2(rect.left() + time_width + 14.0, rect.top() + 2.0),
+        pos2(event_left + mark, rect.top() + 2.0),
         event,
         theme::sans(tokens::FS_0, FontWeight::Regular),
-        event_color,
-        (width - time_width - 24.0).max(1.0),
+        t.color.text,
+        (width - time_width - 24.0 - mark).max(1.0),
     );
     paint_elided(
         ui,
@@ -1928,7 +1978,8 @@ fn checks_snapshot(app: &RSpiceApp) -> HealthCopy {
     }
 }
 
-fn problem_snapshot(app: &RSpiceApp) -> ProblemSnapshot {
+/// The one project-root finding the status card's strip names, or nothing.
+fn problem_snapshot(app: &RSpiceApp) -> Option<ProblemSnapshot> {
     let root_path = format!(
         "{}/{}",
         app.state.workspace.content.project.root_library,
@@ -1937,52 +1988,46 @@ fn problem_snapshot(app: &RSpiceApp) -> ProblemSnapshot {
     let result = match app.state.project_root_design_check_status() {
         DesignCheckStatus::Current(receipt) => &receipt.result,
         DesignCheckStatus::NotRun => {
-            return ProblemSnapshot {
+            return Some(ProblemSnapshot {
                 code: "NOT RUN".to_owned(),
                 message: "Run schematic checks for the project root".to_owned(),
                 path: root_path,
                 tone: Tone::Warn,
-            };
+            });
         }
         DesignCheckStatus::Stale(_) => {
-            return ProblemSnapshot {
+            return Some(ProblemSnapshot {
                 code: "STALE".to_owned(),
                 message: "Project-root inputs changed after the retained check".to_owned(),
                 path: root_path,
                 tone: Tone::Warn,
-            };
+            });
         }
         DesignCheckStatus::Unavailable { reason, .. } => {
-            return ProblemSnapshot {
+            return Some(ProblemSnapshot {
                 code: "UNAVAILABLE".to_owned(),
                 message: reason,
                 path: root_path,
                 tone: Tone::Error,
-            };
+            });
         }
     };
     let highest_priority = result
         .violations()
         .iter()
         .max_by_key(|violation| drc_severity_priority(violation.severity));
-    highest_priority.map_or_else(
-        || ProblemSnapshot {
-            code: "CHECKS".to_owned(),
-            message: "No current schematic findings".to_owned(),
-            path: root_path.clone(),
-            tone: Tone::Ok,
+    // Nothing when the root checks clean: "No current schematic findings" is
+    // the absence of a finding dressed as one.
+    highest_priority.map(|violation| ProblemSnapshot {
+        code: format!("CHK-{:03}", violation.id),
+        message: violation.message.clone(),
+        path: violation.location.display(),
+        tone: match violation.severity {
+            DrcSeverity::Critical | DrcSeverity::Error => Tone::Error,
+            DrcSeverity::Warning => Tone::Warn,
+            DrcSeverity::Info => Tone::Neutral,
         },
-        |violation| ProblemSnapshot {
-            code: format!("CHK-{:03}", violation.id),
-            message: violation.message.clone(),
-            path: violation.location.display(),
-            tone: match violation.severity {
-                DrcSeverity::Critical | DrcSeverity::Error => Tone::Error,
-                DrcSeverity::Warning => Tone::Warn,
-                DrcSeverity::Info => Tone::Info,
-            },
-        },
-    )
+    })
 }
 
 const fn drc_severity_priority(severity: DrcSeverity) -> u8 {
@@ -2032,7 +2077,7 @@ fn drc_copy(current: bool, summary: Option<DrcCounts>) -> HealthCopy {
                 summary.warnings + summary.info,
                 singular_or_plural(summary.warnings + summary.info, "advisory", "advisories")
             ),
-            tone: Tone::Ok,
+            tone: Tone::Neutral,
         }
     }
 }
@@ -2083,7 +2128,7 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
                 active.overrides().len(),
                 active.owner()
             ),
-            Tone::Ok,
+            Tone::Neutral,
         ),
         Err(error) => (format!("Execution blocked: {error}"), Tone::Error),
     };
@@ -2188,7 +2233,7 @@ fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
                 "{library_count} {} · {model_count} models · {source_count} source files",
                 singular_or_plural(library_count, "library", "libraries")
             ),
-            tone: Tone::Ok,
+            tone: Tone::Neutral,
         }
     };
 
@@ -2225,8 +2270,8 @@ const fn lifecycle_label(lifecycle: SimulationRunLifecycle, success: bool) -> &'
 
 const fn lifecycle_tone(lifecycle: SimulationRunLifecycle, success: bool) -> Tone {
     match lifecycle {
-        SimulationRunLifecycle::Completed if success => Tone::Ok,
-        SimulationRunLifecycle::Preparing | SimulationRunLifecycle::Running => Tone::Info,
+        SimulationRunLifecycle::Completed if success => Tone::Neutral,
+        SimulationRunLifecycle::Preparing | SimulationRunLifecycle::Running => Tone::Neutral,
         SimulationRunLifecycle::Cancelling | SimulationRunLifecycle::Aborted => Tone::Warn,
         SimulationRunLifecycle::Completed
         | SimulationRunLifecycle::Failed
