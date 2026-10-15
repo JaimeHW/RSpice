@@ -473,7 +473,11 @@ impl RSpiceApp {
                     Some(format!(
                         "{} subject{} audited · {} finding{}",
                         audit.resolved_subjects(),
-                        if audit.resolved_subjects() == 1 { "" } else { "s" },
+                        if audit.resolved_subjects() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
                         audit.findings().len(),
                         if audit.findings().len() == 1 { "" } else { "s" }
                     )),

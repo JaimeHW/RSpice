@@ -1130,6 +1130,44 @@ mod tests {
         assert!(check_and_save_uses_stacked_layout(760.0));
     }
 
+    /// Check and save as PNGs, wide and narrow, for a human to measure.
+    ///
+    /// `RSPICE_RASTER_DIR` names the directory; the system temp directory
+    /// otherwise. The narrow pass is the one that shows whether the stacked
+    /// layout still fits a 560 pt viewport.
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_check_and_save_for_review() {
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        for size in [egui::vec2(1440.0, 900.0), egui::vec2(560.0, 900.0)] {
+            let mut app = RSpiceApp::test_instance();
+            app.state.ui.preferences.set_toggle(
+                crate::workbench::preferences::TogglePreference::ReducedMotion,
+                true,
+            );
+            app.state.project_lifecycle.authority.open_session();
+            app.state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Design);
+            crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+            open_check_and_save_dialog(&mut app.state);
+            assert!(app.state.dialogs.check_and_save.open);
+            let canvas = crate::ui::raster::render(size, |ui, _| {
+                app.prepare_frame(ui.ctx());
+                app.render_frame_chrome(ui);
+                app.render_frame_dialogs(ui.ctx());
+            });
+            let name = format!("check-and-save-{}x{}", size.x as u32, size.y as u32);
+            std::fs::write(
+                directory.join(format!("{name}.png")),
+                canvas.png(size.y as usize),
+            )
+            .expect("write the render");
+        }
+    }
+
     #[test]
     fn rollback_requires_the_exact_post_append_journal() {
         let mut schematic = crate::state::SchematicState::default();

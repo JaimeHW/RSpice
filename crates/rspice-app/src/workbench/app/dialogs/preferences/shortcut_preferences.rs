@@ -669,16 +669,16 @@ pub(super) fn render_editor(ctx: &Context, state: &mut AppState) {
                 "Unsaved shortcut changes",
                 "Discard changes closes this editor without applying the draft.".to_owned(),
             ))
-        } else if let Some(summary) = editor.error_summary.as_deref() {
-            Some((
-                DialogTransactionTone::Error,
-                "Shortcut profile requires attention",
-                summary.to_owned(),
-            ))
         } else {
             // A repair reports what it removed, in the audit list beside the
             // button that ran it; the strip is for work still to be done.
-            None
+            editor.error_summary.as_deref().map(|summary| {
+                (
+                    DialogTransactionTone::Error,
+                    "Shortcut profile requires attention",
+                    summary.to_owned(),
+                )
+            })
         };
         let mut dialog = Dialog::new(
             "Keyboard shortcut editor",

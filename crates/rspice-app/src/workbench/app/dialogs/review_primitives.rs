@@ -95,10 +95,8 @@ pub(crate) fn problem_note(ui: &mut Ui, problem: Problem, text: &str) -> Respons
     let t = Tokens::get(ui.ctx());
     ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = PROBLEM_NOTE_GAP;
-        let (rect, _) = ui.allocate_exact_size(
-            vec2(PROBLEM_NOTE_MARK, PROBLEM_NOTE_LINE),
-            Sense::hover(),
-        );
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(PROBLEM_NOTE_MARK, PROBLEM_NOTE_LINE), Sense::hover());
         crate::ui::widgets::paint_problem_mark(
             ui.painter(),
             egui::Rect::from_center_size(

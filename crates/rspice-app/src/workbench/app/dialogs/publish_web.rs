@@ -16,8 +16,8 @@ use crate::services::cloud_account::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
-use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app_state::AppState;
 use crate::workbench::publication_snapshot::{
     PublicationDraft, build_publication_snapshot, publication_timestamp_utc,
@@ -840,7 +840,6 @@ fn note(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
             .color(color),
     );
 }
-
 
 fn section_head(ui: &mut egui::Ui, label: &str) {
     let t = Tokens::get(ui.ctx());

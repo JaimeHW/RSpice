@@ -1256,11 +1256,7 @@ fn run_authority_rows(
                 AnalysisResultSourceDomain::LegacyUnclassified => "Legacy source",
             }
             .to_owned();
-            (
-                scope,
-                receipt.project_revision().get().to_string(),
-                tasks,
-            )
+            (scope, receipt.project_revision().get().to_string(), tasks)
         }
         Some(SimulationRunProvenance::LegacyUnattributed) => (
             "Legacy retained run".to_owned(),

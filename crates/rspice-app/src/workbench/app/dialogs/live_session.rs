@@ -789,7 +789,6 @@ fn note(ui: &mut egui::Ui, text: &str, color: egui::Color32) {
     );
 }
 
-
 fn bullet(ui: &mut egui::Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.horizontal_wrapped(|ui| {

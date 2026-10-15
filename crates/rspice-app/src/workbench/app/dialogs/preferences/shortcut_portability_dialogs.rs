@@ -1382,15 +1382,14 @@ fn validation_message(ui: &mut Ui, message: &str, error: bool) {
         },
         message,
     );
-    ui.ctx()
-        .accesskit_node_builder(response.id, |node| {
-            node.set_role(if error {
-                egui::accesskit::Role::Alert
-            } else {
-                egui::accesskit::Role::Status
-            });
-            node.set_label(message);
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(if error {
+            egui::accesskit::Role::Alert
+        } else {
+            egui::accesskit::Role::Status
         });
+        node.set_label(message);
+    });
 }
 
 fn translucent(color: egui::Color32, alpha: u8) -> egui::Color32 {

@@ -1219,8 +1219,9 @@ fn include_search_paths(
                     }
                     // A path that resolves is every path's normal state, so
                     // only one that does not is marked and named.
-                    let missing = rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence()
-                        && !entry.exists();
+                    let missing =
+                        rspice_simulation::netlist_preparation::IncludeSearchChain::states_presence(
+                        ) && !entry.exists();
                     let state_text = if missing {
                         messages.text(MessageId::NetlistIncludeSearchPathMissing)
                     } else {
@@ -1392,66 +1393,60 @@ fn netlist_operation_review(
     };
     let deleting = transaction.action == CodeSourceFileAction::Delete;
     let mut action = None;
-    code_inspector_section(
-        ui,
-        &messages.text(title),
-        None,
-        None,
-        |ui| {
-            if deleting {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceRemoving),
-                    &transaction.source_path,
-                );
-            } else {
-                property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeSourceLogicalPath),
-                    &mut transaction.proposed_path,
-                    transaction.error.is_some(),
-                );
-            }
+    code_inspector_section(ui, &messages.text(title), None, None, |ui| {
+        if deleting {
             property_row(
                 ui,
-                &messages.text(MessageId::CodeSourceAgainst),
-                &match (transaction.document_revision, transaction.content_digest) {
-                    (Some(revision), Some(digest)) => format!(
-                        "doc rev {} · {}",
-                        revision.get(),
-                        digest.to_string().chars().take(12).collect::<String>()
-                    ),
-                    _ => "empty project netlist workspace".to_owned(),
-                },
+                &messages.text(MessageId::CodeSourceRemoving),
+                &transaction.source_path,
             );
-            if let Some(error) = transaction.error.as_deref() {
-                toned_inspector_copy(ui, error, t.color.err);
+        } else {
+            property_row_input(
+                ui,
+                &messages.text(MessageId::CodeSourceLogicalPath),
+                &mut transaction.proposed_path,
+                transaction.error.is_some(),
+            );
+        }
+        property_row(
+            ui,
+            &messages.text(MessageId::CodeSourceAgainst),
+            &match (transaction.document_revision, transaction.content_digest) {
+                (Some(revision), Some(digest)) => format!(
+                    "doc rev {} · {}",
+                    revision.get(),
+                    digest.to_string().chars().take(12).collect::<String>()
+                ),
+                _ => "empty project netlist workspace".to_owned(),
+            },
+        );
+        if let Some(error) = transaction.error.as_deref() {
+            toned_inspector_copy(ui, error, t.color.err);
+        }
+        section_block_gap(ui);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if Button::new(&messages.text(commit))
+                .accent()
+                .destructive(deleting)
+                .enabled(deleting || !transaction.proposed_path.trim().is_empty())
+                .show(ui)
+                .clicked()
+            {
+                action = Some(NetlistLifecycleAction::Commit);
             }
-            section_block_gap(ui);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                if Button::new(&messages.text(commit))
-                    .accent()
-                    .destructive(deleting)
-                    .enabled(deleting || !transaction.proposed_path.trim().is_empty())
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(NetlistLifecycleAction::Commit);
-                }
-                if Button::new(&messages.text(MessageId::CommonCancel))
-                    .ghost()
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(NetlistLifecycleAction::Cancel);
-                }
-            });
-            if deleting {
-                muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceDeleteWarning));
+            if Button::new(&messages.text(MessageId::CommonCancel))
+                .ghost()
+                .show(ui)
+                .clicked()
+            {
+                action = Some(NetlistLifecycleAction::Cancel);
             }
-        },
-    );
+        });
+        if deleting {
+            muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceDeleteWarning));
+        }
+    });
     action
 }
 
@@ -1479,52 +1474,46 @@ fn netlist_include_operation_review(
         )
     };
     let mut action = None;
-    code_inspector_section(
-        ui,
-        &messages.text(title),
-        None,
-        None,
-        |ui| {
-            property_row(
-                ui,
-                &messages.text(MessageId::NetlistRequestedAs),
-                &transaction.logical_identity,
-            );
-            property_row_input(
-                ui,
-                &messages.text(MessageId::CodeSourceLogicalPath),
-                &mut transaction.proposed_identity,
-                transaction.error.is_some(),
-            );
-            property_row(
-                ui,
-                &messages.text(MessageId::CodeSourceAgainst),
-                &format!("root rev {}", transaction.root_revision.get()),
-            );
-            if let Some(error) = transaction.error.as_deref() {
-                toned_inspector_copy(ui, error, t.color.err);
+    code_inspector_section(ui, &messages.text(title), None, None, |ui| {
+        property_row(
+            ui,
+            &messages.text(MessageId::NetlistRequestedAs),
+            &transaction.logical_identity,
+        );
+        property_row_input(
+            ui,
+            &messages.text(MessageId::CodeSourceLogicalPath),
+            &mut transaction.proposed_identity,
+            transaction.error.is_some(),
+        );
+        property_row(
+            ui,
+            &messages.text(MessageId::CodeSourceAgainst),
+            &format!("root rev {}", transaction.root_revision.get()),
+        );
+        if let Some(error) = transaction.error.as_deref() {
+            toned_inspector_copy(ui, error, t.color.err);
+        }
+        section_block_gap(ui);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if Button::new(&messages.text(commit))
+                .accent()
+                .enabled(!transaction.proposed_identity.trim().is_empty())
+                .show(ui)
+                .clicked()
+            {
+                action = Some(NetlistLifecycleAction::CommitInclude);
             }
-            section_block_gap(ui);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                if Button::new(&messages.text(commit))
-                    .accent()
-                    .enabled(!transaction.proposed_identity.trim().is_empty())
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(NetlistLifecycleAction::CommitInclude);
-                }
-                if Button::new(&messages.text(MessageId::CommonCancel))
-                    .ghost()
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(NetlistLifecycleAction::CancelInclude);
-                }
-            });
-        },
-    );
+            if Button::new(&messages.text(MessageId::CommonCancel))
+                .ghost()
+                .show(ui)
+                .clicked()
+            {
+                action = Some(NetlistLifecycleAction::CancelInclude);
+            }
+        });
+    });
     action
 }
 
@@ -1779,65 +1768,59 @@ fn operation_review(
     };
     let deleting = draft.action == CodeSourceFileAction::Delete;
     let mut action = None;
-    code_inspector_section(
-        ui,
-        &messages.text(title),
-        None,
-        None,
-        |ui| {
-            if deleting {
-                property_row(
-                    ui,
-                    &messages.text(MessageId::CodeSourceRemoving),
-                    &draft.source_path,
-                );
-            } else {
-                property_row_input(
-                    ui,
-                    &messages.text(MessageId::CodeSourceLogicalPath),
-                    &mut draft.proposed_path,
-                    draft.error.is_some(),
-                );
-            }
+    code_inspector_section(ui, &messages.text(title), None, None, |ui| {
+        if deleting {
             property_row(
                 ui,
-                &messages.text(MessageId::CodeSourceAgainst),
-                &messages.format(
-                    MessageId::CodeSourceAgainstRevision,
-                    &[
-                        ("revision", &draft.bundle_revision.to_string()),
-                        ("digest", &short_digest(draft.closure_digest)),
-                    ],
-                ),
+                &messages.text(MessageId::CodeSourceRemoving),
+                &draft.source_path,
             );
-            if let Some(error) = draft.error.as_deref() {
-                toned_inspector_copy(ui, error, t.color.err);
+        } else {
+            property_row_input(
+                ui,
+                &messages.text(MessageId::CodeSourceLogicalPath),
+                &mut draft.proposed_path,
+                draft.error.is_some(),
+            );
+        }
+        property_row(
+            ui,
+            &messages.text(MessageId::CodeSourceAgainst),
+            &messages.format(
+                MessageId::CodeSourceAgainstRevision,
+                &[
+                    ("revision", &draft.bundle_revision.to_string()),
+                    ("digest", &short_digest(draft.closure_digest)),
+                ],
+            ),
+        );
+        if let Some(error) = draft.error.as_deref() {
+            toned_inspector_copy(ui, error, t.color.err);
+        }
+        section_block_gap(ui);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if Button::new(&messages.text(commit))
+                .accent()
+                .destructive(deleting)
+                .enabled(deleting || !draft.proposed_path.trim().is_empty())
+                .show(ui)
+                .clicked()
+            {
+                action = Some(LifecycleAction::Commit);
             }
-            section_block_gap(ui);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                if Button::new(&messages.text(commit))
-                    .accent()
-                    .destructive(deleting)
-                    .enabled(deleting || !draft.proposed_path.trim().is_empty())
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(LifecycleAction::Commit);
-                }
-                if Button::new(&messages.text(MessageId::CommonCancel))
-                    .ghost()
-                    .show(ui)
-                    .clicked()
-                {
-                    action = Some(LifecycleAction::Cancel);
-                }
-            });
-            if deleting {
-                muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceDeleteWarning));
+            if Button::new(&messages.text(MessageId::CommonCancel))
+                .ghost()
+                .show(ui)
+                .clicked()
+            {
+                action = Some(LifecycleAction::Cancel);
             }
-        },
-    );
+        });
+        if deleting {
+            muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceDeleteWarning));
+        }
+    });
     action
 }
 

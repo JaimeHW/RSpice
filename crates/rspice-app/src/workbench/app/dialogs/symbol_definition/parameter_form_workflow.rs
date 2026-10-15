@@ -290,10 +290,7 @@ fn form_summary_table(ui: &mut Ui, form: Option<&SymbolParameterForm>) {
                                 .all(|finding| finding.section_key != section.key);
                             ui.label(&section.label);
                             ui.monospace(section.fields.len().to_string());
-                            ui.colored_label(
-                                t.color.text_dim,
-                                if valid { "" } else { "review" },
-                            );
+                            ui.colored_label(t.color.text_dim, if valid { "" } else { "review" });
                             ui.end_row();
                         }
                     }

@@ -125,7 +125,6 @@ impl DesignManagementPage {
             Self::HierarchyAudit => "HIER",
         }
     }
-
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
