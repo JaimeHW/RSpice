@@ -840,6 +840,7 @@ impl Engine {
                 false,
                 &mut correction_rhs,
             )?;
+            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
             Self::apply_node_voltage_constraints_at(
                 circuit,
                 matrix,
@@ -907,6 +908,19 @@ impl Engine {
     /// # Returns
     /// The converged solution vector, or error if Newton-Raphson fails to converge.
     pub(crate) fn solve_nonlinear_with_guess_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: Option<&[Value]>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let solution =
+            self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort)?;
+        self.check_settled_compact_model_private_nodes(circuit, &solution)?;
+        Ok(solution)
+    }
+
+    fn solve_nonlinear_with_guess_unchecked(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
@@ -1046,6 +1060,7 @@ impl Engine {
                 direct_solver_error = Some(error);
                 break;
             }
+            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
             let solve_result = if uses_vbic_correction {
                 Self::solve_direct_dc_correction(
                     matrix,
@@ -1806,6 +1821,27 @@ impl Engine {
         node_hints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        let solution = self.solve_nonlinear_transient_op_startup_unchecked(
+            circuit,
+            matrix,
+            time,
+            initial_guess,
+            node_hints,
+            abort,
+        )?;
+        self.check_settled_compact_model_private_nodes(circuit, &solution)?;
+        Ok(solution)
+    }
+
+    fn solve_nonlinear_transient_op_startup_unchecked(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        initial_guess: &[Value],
+        node_hints: &[StartupVoltageConstraint],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
         let gmin_floor = self.transient_operating_point_nodal_gmin_floor(circuit);
@@ -1853,6 +1889,7 @@ impl Engine {
                 false,
                 &mut correction_rhs,
             )?;
+            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
             Self::apply_node_voltage_constraints_at(
                 circuit,
                 matrix,
@@ -2189,6 +2226,27 @@ impl Engine {
         node_constraints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
+        let solution = self.solve_nonlinear_transient_op_with_node_hints_unchecked(
+            circuit,
+            matrix,
+            time,
+            hints,
+            node_constraints,
+            abort,
+        )?;
+        self.check_settled_compact_model_private_nodes(circuit, &solution.values)?;
+        Ok(solution)
+    }
+
+    fn solve_nonlinear_transient_op_with_node_hints_unchecked(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        hints: &StartupVoltageHints,
+        node_constraints: &[StartupVoltageConstraint],
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientOperatingPointSolution, SimulationError> {
         let node_hints = &hints.constraints;
         let size = circuit.matrix_size();
         let gmin_floor =
@@ -2317,6 +2375,7 @@ impl Engine {
                 false,
                 &mut correction_rhs,
             )?;
+            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
             Self::apply_node_voltage_constraints_at(
                 circuit,
                 matrix,

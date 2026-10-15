@@ -690,7 +690,9 @@ fn traced(trace: &[Entry], key: &str) -> f64 {
 /// out and the model ties `b` (`V(b) <+ 0`); a 7-terminal card gives `t` and
 /// the model ties it (`Temp(t) <+ 0`). The X card and the M card both take the
 /// generated route; the `.va` route takes the X card. Every route must tie the
-/// same node, exactly, and agree on the rest bit for bit.
+/// same node, exactly, and agree on the rest bit for bit. On six terminals no
+/// equation reaches the instance's own `t`, which takes the floor and reads
+/// 0 V on every route.
 #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
 #[test]
 fn bsimsoi_reads_an_omitted_thermal_terminal_unconnected_on_both_routes() {
@@ -703,7 +705,37 @@ fn bsimsoi_reads_an_omitted_thermal_terminal_unconnected_on_both_routes() {
         let label = format!("BSIM-SOI 4.7 on {terminals}");
         let x_card = format!("{supplies}\nX1 {terminals} bsimsoi__18c250bc tnodeout=1");
         let m_card = format!("{supplies}\nM1 {terminals} nch tnodeout=1\n.model nch bsimsoi47");
-        let runtime = operating_point_trace(&source.runtime_deck(&label, &x_card), nodes, branches);
+        // On six terminals the instance's own `t` is reached by no equation
+        // of the model; it takes the floor again and reads exactly 0 V.
+        let omitted = |route_name: &str| (tied == "b").then(|| route_name.to_string());
+        fn with_omitted<'a>(nodes: &[&'a str], name: &'a Option<String>) -> Vec<&'a str> {
+            nodes.iter().copied().chain(name.as_deref()).collect()
+        }
+        let split_omitted = |label: &str, mut trace: Vec<Entry>, name: &Option<String>| {
+            if let Some(name) = name {
+                let key = format!("op.v({name})");
+                let index = trace
+                    .iter()
+                    .position(|entry| entry.key == key)
+                    .unwrap_or_else(|| panic!("{label}: {key} is not in {trace:?}"));
+                let entry = trace.remove(index);
+                assert!(
+                    entry.text.is_none() && entry.value.to_bits() == 0.0f64.to_bits(),
+                    "{label}: the instance's own t reads 0 V: {entry:?}"
+                );
+            }
+            trace
+        };
+        let runtime_omitted = omitted("X1.t");
+        let runtime = split_omitted(
+            &label,
+            operating_point_trace(
+                &source.runtime_deck(&label, &x_card),
+                &with_omitted(nodes, &runtime_omitted),
+                branches,
+            ),
+            &runtime_omitted,
+        );
         assert!(!uses_generated_devices(
             &source.runtime_deck(&label, &x_card)
         ));
@@ -725,12 +757,15 @@ fn bsimsoi_reads_an_omitted_thermal_terminal_unconnected_on_both_routes() {
         for (card, body) in [("M", &m_card), ("X", &x_card)] {
             let deck = format!("* {label} generated {card} card\n{body}\n.end\n");
             assert!(uses_generated_devices(&deck), "{label}: the {card} card");
-            let generated = operating_point_trace(&deck, nodes, branches);
+            let generated_omitted = omitted(&format!("{card}1.__t.internal"));
+            let generated =
+                operating_point_trace(&deck, &with_omitted(nodes, &generated_omitted), branches);
             assert_eq!(
                 generated[0].text.as_deref(),
                 Some("ok"),
                 "{label} {card} card: {generated:?}"
             );
+            let generated = split_omitted(&label, generated, &generated_omitted);
             let bits = |trace: &[Entry]| {
                 trace
                     .iter()
@@ -785,6 +820,97 @@ fn bsimsoi_takes_the_same_reference_on_both_routes_when_its_body_terminals_are_o
             runtime,
             "the generated {card} card must take the reference the .va route takes"
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A compact model's own nodes take no simulator GMIN floor
+//
+// BSIM-SOI's floating body balances junction currents of about 1e-18 A. The
+// final DC solve put its 1e-15 S nodal floor on that node too, which held the
+// body at 1.2 mV instead of 35 mV: both routes ran the threshold high and the
+// drain current 31% low. The model owns its internal topology and its own
+// GMIN, and ngspice ends its continuation with no diagonal GMIN at all
+// (`CKTdiagGmin = CKTgshunt`, `cktop.c`).
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "veriloga-model-bsimsoi-va")]
+const BSIMSOI461_SOURCE: &str = "models/veriloga/bsimsoi_4.6.1/vacode/bsimsoi.va";
+
+/// BSIM-SOI 4.6.1 on its default card at Vd = Vg = 1 V, body floating,
+/// against Xyce 7.10's ADMS build of the same source: `M1 d g 0 0 nch` with
+/// `.model nch nmos level=70 shmod=0` gives I(VD) = -7.98129602e-08 A, and
+/// with `shmod=1 rth0=50` I(VD) = -8.39461504e-08 A and N(M1_t) =
+/// 8.39461503e-01 K (Xyce prints nine digits). With the floor on the body the
+/// routes gave -5.500e-8 A, and -5.705e-8 A with a 0.571 K rise.
+///
+/// The deck's drain node keeps the 1e-15 S final floor, so `Vd` also feeds
+/// 1e-15 A into it at 1 V: RSpice's I(Vd) is Xyce's plus that floor current.
+///
+/// At `rth0=120` the cold root sits near the runaway, and Xyce's own answer
+/// depends on its path by 2.6e-8: its direct operating point gives
+/// -9.09270331e-08 A and 2.18224879 K, and its `.dc Vd 0 1 0.05` sweep
+/// -9.09270307e-08 A and 2.18224874 K. The sweep's value is pinned, to 1e-8.
+/// Each card here has one root; at `rth0=140` the cold root and a hot one
+/// (176.6 K) coexist, and the routes need not land on the same one.
+#[cfg(feature = "veriloga-model-bsimsoi-va")]
+#[test]
+fn bsimsoi_floating_body_matches_xyce_with_no_floor_on_the_models_own_nodes() {
+    const DRAIN_FLOOR_CURRENT: f64 = -1e-15;
+    let source = model_source(BSIMSOI461_SOURCE);
+    for (card, xyce_current, rise, tolerance) in [
+        ("shmod=0", -7.981_296_02e-8, None, 2e-9),
+        (
+            "shmod=1 rth0=50",
+            -8.394_615_04e-8,
+            Some(8.394_615_03e-1),
+            2e-9,
+        ),
+        (
+            "shmod=1 rth0=120",
+            -9.092_703_07e-8,
+            Some(2.182_248_74),
+            1e-8,
+        ),
+    ] {
+        let current = xyce_current + DRAIN_FLOOR_CURRENT;
+        let body = format!("Vd d 0 1.0\nVg g 0 1.0\nX1 d g 0 0 bsimsoi_va {card}");
+        for (route, deck, thermal) in [
+            (
+                ".va",
+                format!("* {card} .va route\n.va \"{source}\" bsimsoi_va\n{body}\n.end\n"),
+                "X1.t",
+            ),
+            (
+                "generated",
+                format!("* {card} generated route\n{body}\n.end\n"),
+                "X1.__t.internal",
+            ),
+        ] {
+            assert_eq!(
+                uses_generated_devices(&deck),
+                route == "generated",
+                "{route}"
+            );
+            let trace = operating_point_trace(&deck, &[thermal], &["Vd"]);
+            assert_eq!(
+                trace[0].text.as_deref(),
+                Some("ok"),
+                "{card} {route}: {trace:?}"
+            );
+            let id = traced(&trace, "op.i(Vd)");
+            assert!(
+                ((id - current) / current).abs() < tolerance,
+                "{card} {route}: I(Vd) {id:e} against Xyce's {xyce_current:e} plus the floor"
+            );
+            if let Some(rise) = rise {
+                let temperature = traced(&trace, &format!("op.v({thermal})"));
+                assert!(
+                    ((temperature - rise) / rise).abs() < tolerance,
+                    "{card} {route}: rise {temperature:e} K against Xyce's {rise:e} K"
+                );
+            }
+        }
     }
 }
 
@@ -893,6 +1019,59 @@ fn an_omitted_port_the_module_ties_is_a_net_of_the_instances_own() {
         reference,
         Some(0),
         "the tie reaches only the instance's own net, so the deck takes `ref`"
+    );
+}
+
+/// A compact model's own nodes take no GMIN floor, so the model alone must
+/// give each one a DC path. An omitted port no equation reaches (`u`: empty
+/// row, column and right-hand side) is solved by any value and nothing sees
+/// it; it takes the floor again and reads 0 V, Spectre's "Gmin installed".
+/// One the model reads but never drives (`r`: an empty row under a stamped
+/// column) has no canonical value, so the operating point refuses it by name.
+/// A settled node must read 0 V once the operating point converges: with
+/// `m` set, the model drives `m * V(a, b)` into `u` and nothing drains it,
+/// the floor alone would read -1 mV, and the operating point refuses `u` by
+/// name.
+#[test]
+fn a_compact_models_own_node_with_no_dc_path_settles_or_is_refused_by_name() {
+    let path = std::env::temp_dir().join(format!("rspice_no_dc_path_{}.va", std::process::id()));
+    std::fs::write(
+        &path,
+        "`include \"disciplines.vams\"\nmodule open(a, b, u, r);\ninout a, b, u, r;\n\
+         electrical a, b, u, r;\nparameter real k = 0;\nparameter real m = 0;\n\
+         analog begin\n  I(a, b) <+ V(a, b) / 1k + k * V(r);\n  I(u) <+ m * V(a, b);\n\
+         end\nendmodule\n",
+    )
+    .expect("write the module");
+    let source = path.display().to_string().replace('\\', "/");
+    let deck = |card: &str| {
+        format!(
+            "* port with no DC path\n.va \"{source}\" open\nV1 in 0 1\nX1 in 0 open {card}\n.end\n"
+        )
+    };
+    let settled = operating_point_trace(&deck(""), &["in", "x1.u", "x1.r"], &["V1"]);
+    let refused = operating_point_trace(&deck("k=1m"), &["in"], &["V1"]);
+    let undrained = operating_point_trace(&deck("m=1e-18"), &["in"], &["V1"]);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(settled[0].text.as_deref(), Some("ok"), "{settled:?}");
+    assert_eq!(traced(&settled, "op.v(x1.u)").to_bits(), 0.0f64.to_bits());
+    assert_eq!(traced(&settled, "op.v(x1.r)").to_bits(), 0.0f64.to_bits());
+    let message = |trace: &[Entry]| {
+        trace[0]
+            .text
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    };
+    assert!(
+        message(&refused).contains("node x1.r has no dc path")
+            && message(&refused).contains("constrains it at dc"),
+        "the refusal names the node: {refused:?}"
+    );
+    assert!(
+        message(&undrained).contains("node x1.u has no dc path")
+            && message(&undrained).contains("gives that current no path"),
+        "the settled node fails its post-condition by name: {undrained:?}"
     );
 }
 
@@ -1021,8 +1200,16 @@ fn asmhemt_reaches_an_operating_point_with_its_thermal_terminal_omitted() {
 /// BSIM-SOI 4.7 on `d g s e`, `p`, `b` and `t` left out: the floating-body
 /// configuration, with the body on a net of its own. With `shmod=0` the
 /// module ties `t`; with `shmod=1` and `rth0` the temperature rise is the
-/// thermal network's on `t`, which is above ambient. Both routes reach the
-/// same operating point, bit for bit.
+/// thermal network's on `t`, which is above ambient. The generated X and M
+/// cards reach the same operating point bit for bit, and the `.va` route
+/// reaches it to 1e-13.
+///
+/// The floating body balances junction currents of about 5e-18 A on a
+/// conductance of its own of about 1e-16 S. With the 1e-15 S floor gone from
+/// the model's own nodes that root is ill-conditioned, and it magnifies any
+/// rounding difference in those currents. The generated junction code is not
+/// op for op with the `.va` lowering: at `rth0=50` the body sits 2 ULP apart
+/// and I(Vd) 1 ULP.
 #[cfg(feature = "veriloga-model-bsimsoi-18c250bc")]
 #[test]
 fn bsimsoi_reaches_an_operating_point_with_body_and_thermal_terminals_omitted() {
@@ -1064,7 +1251,18 @@ fn bsimsoi_reaches_an_operating_point_with_body_and_thermal_terminals_omitted() 
                 ),
             ),
         ];
-        assert_operating_points_identical(&label, &traces);
+        let (va, generated) = traces.split_first().expect("three routes");
+        assert_operating_points_identical(&label, generated);
+        assert_eq!(va.1.len(), generated[0].1.len(), "{label}: {va:?}");
+        for (left, right) in generated[0].1.iter().zip(&va.1) {
+            assert!(
+                left.key == right.key
+                    && left.text == right.text
+                    && (left.value - right.value).abs()
+                        <= 1e-13 * left.value.abs().max(right.value.abs()),
+                "{label}: generated {left:?} against .va {right:?}"
+            );
+        }
         let rise = traced(&traces[0].1, "op.v(t)");
         if heating == "shmod=0" {
             assert_eq!(rise, 0.0, "{label}");

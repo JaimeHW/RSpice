@@ -1104,6 +1104,7 @@ impl Engine {
         } = run;
         let mut solution = initial_solution.to_vec();
         let junction_gmin = self.gmin_stage_junction_gmin(gmin);
+        let floor = self.dc_nodal_gmin_floor(circuit);
         self.update_device_states_for_dc_with_junction_gmin(circuit, &solution, junction_gmin);
         let mut used_iterations = 0usize;
         let mut rhs = vec![0.0; solution.len()];
@@ -1120,7 +1121,7 @@ impl Engine {
             rhs.fill(0.0);
             matrix.clear_values();
 
-            Self::stamp_nodal_gmin(circuit, matrix, gmin);
+            Self::stamp_nodal_gmin_stage(circuit, matrix, gmin, floor);
             let node_count = circuit.num_nodes().min(solution.len());
 
             circuit.stamp_dc_direct(matrix, &mut rhs);
@@ -1144,6 +1145,9 @@ impl Engine {
                     return Err(error);
                 }
                 return Ok((solution, false, used_iterations));
+            }
+            if gmin <= floor {
+                Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, floor)?;
             }
             let solve_result = if uses_vbic_correction {
                 Self::solve_direct_dc_correction(

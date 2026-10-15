@@ -547,6 +547,15 @@ fn bind_veriloga_solver_unknowns(
     circuit
         .non_electrical_state_nodes
         .extend(device.non_electrical_node_indices());
+    // The instance owns its internal nodes and the nets of the terminals the
+    // card left out: no final GMIN floor reaches them.
+    circuit.compact_model_private_nodes.extend(
+        unconnected
+            .iter()
+            .chain(&internal_nodes)
+            .copied()
+            .filter(|&node| node > 0),
+    );
     Ok(())
 }
 

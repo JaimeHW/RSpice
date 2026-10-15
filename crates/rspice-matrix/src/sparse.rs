@@ -1953,6 +1953,18 @@ impl StaticMatrix {
             .any(|&index| self.values[index].abs() > 0.0)
     }
 
+    /// The column twin of [`Self::row_is_deficient`]: no entry of `col` has
+    /// a magnitude above zero. A column outside the matrix is not deficient.
+    pub fn column_is_deficient(&self, col: usize) -> bool {
+        if col >= self.ncols {
+            return false;
+        }
+        let col_ptr = self.csc.col_ptr();
+        !self.values[col_ptr[col]..col_ptr[col + 1]]
+            .iter()
+            .any(|value| value.abs() > 0.0)
+    }
+
     /// Determine whether the principal submatrix selected by `indices` is
     /// singular under this matrix's solver policy.
     ///
@@ -7880,6 +7892,9 @@ mod tests {
         let matrix = StaticMatrix::from_triplets(2, 2, &[(0, 1, 2.0)]).unwrap();
 
         assert_eq!(matrix.deficient_rows(), [1]);
+        assert!(matrix.column_is_deficient(0));
+        assert!(!matrix.column_is_deficient(1));
+        assert!(!matrix.column_is_deficient(2));
     }
 
     #[test]

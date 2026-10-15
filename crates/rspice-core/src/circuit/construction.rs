@@ -64,6 +64,8 @@ impl CircuitData {
             jfets: Vec::new(),
             xyce_memristors: Vec::new(),
             non_electrical_state_nodes: HashSet::new(),
+            compact_model_private_nodes: HashSet::new(),
+            settled_compact_model_private_nodes: None,
             xyce_memristor_operating_point_mode: false,
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),

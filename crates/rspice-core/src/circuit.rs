@@ -611,6 +611,18 @@ pub struct CircuitData {
     /// Node IDs occupied by private non-electrical DAE state variables.
     /// Maintained alongside node remapping so hot solver classification is O(1).
     pub(crate) non_electrical_state_nodes: HashSet<NodeId>,
+    /// Node IDs a Verilog-A or generated compact model's instance owns: its
+    /// internal nodes, and the nets of its own that the terminals a card left
+    /// out sit on. None of them takes the final nodal GMIN floor
+    /// ([`Self::receives_nodal_gmin`]); the first operating-point assembly
+    /// drops from the set any node no equation reaches, which takes the floor
+    /// again (`Engine::settle_compact_model_private_nodes`).
+    pub(crate) compact_model_private_nodes: HashSet<NodeId>,
+    /// The nodes the first operating-point assembly dropped from
+    /// [`Self::compact_model_private_nodes`] because nothing reads their
+    /// voltage, or `None` before that assembly
+    /// (`Engine::settle_compact_model_private_nodes`).
+    pub(crate) settled_compact_model_private_nodes: Option<Vec<NodeId>>,
     /// Selects each family-specific state equation during a DC/startup
     /// operating-point solve instead of its transient dynamic equation.
     pub(crate) xyce_memristor_operating_point_mode: bool,

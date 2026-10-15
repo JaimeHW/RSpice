@@ -280,11 +280,37 @@ impl CircuitData {
     /// meter, which would then read the device's current plus that leak. The
     /// deck's node keeps its own floor, so the conditioned circuit is the
     /// unmetered one.
+    ///
+    /// A compact model's private node takes no floor either
+    /// ([`Self::is_compact_model_private_node`]). The model owns that node's
+    /// topology and its own GMIN, as an OSDI or native model load does, and
+    /// ngspice ends its continuation with no diagonal GMIN at all
+    /// (`CKTdiagGmin = CKTgshunt`, `cktop.c`). A floor there deforms the
+    /// root: BSIM-SOI's floating body balances junction currents of about
+    /// 1e-18 A, and the 1e-15 S floor held it at 1.2 mV instead of 35 mV,
+    /// which took 31% off its drain current.
     #[inline]
     pub(crate) fn receives_nodal_gmin(&self, index: usize) -> bool {
+        self.receives_homotopy_gmin(index) && !self.is_compact_model_private_node(index)
+    }
+
+    /// Whether this zero-based matrix row takes a homotopy GMIN stage above
+    /// the final floor: every electrical node but a current meter's private
+    /// one, a compact model's private nodes included, as ngspice's diagonal
+    /// GMIN stepping shunts every node until its last stage.
+    #[inline]
+    pub(crate) fn receives_homotopy_gmin(&self, index: usize) -> bool {
         !self.is_non_electrical_state_matrix_index(index)
             && (self.terminal_probe_nodes.is_empty()
                 || !self.terminal_probe_nodes.contains_key(&(index + 1)))
+    }
+
+    /// Whether this zero-based matrix row is a node a Verilog-A or generated
+    /// compact model's instance owns ([`Self::compact_model_private_nodes`]).
+    #[inline]
+    pub(crate) fn is_compact_model_private_node(&self, index: usize) -> bool {
+        !self.compact_model_private_nodes.is_empty()
+            && self.compact_model_private_nodes.contains(&(index + 1))
     }
 
     /// Whether `.OPTIONS RSHUNT` installed a physical shunt on electrical nodes.

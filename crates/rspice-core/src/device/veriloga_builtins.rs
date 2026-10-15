@@ -2357,12 +2357,21 @@ pub(crate) fn instantiate_builtin_scoped(
     }
     let supplied_internal_nodes = &node_names[expected_nodes..];
     let mut nodes = Vec::with_capacity(total_nodes);
-    for node_name in &node_names[..expected_nodes] {
-        nodes.push(if node_name.eq_ignore_ascii_case("0") {
+    // The nets the instance owns, which no final GMIN floor reaches
+    // (`CircuitData::compact_model_private_nodes`): those of the terminals
+    // past the ones the card connected, and the internal nodes the card does
+    // not bind to a net of its own.
+    let mut private_nodes = Vec::new();
+    for (index, node_name) in node_names[..expected_nodes].iter().enumerate() {
+        let node = if node_name.eq_ignore_ascii_case("0") {
             0
         } else {
             circuit.get_or_create_node(node_name)
-        });
+        };
+        if index >= connected_terminals {
+            private_nodes.push(node);
+        }
+        nodes.push(node);
     }
     for internal_name in internal_node_names {
         let supplied = optional_internal_nodes
@@ -2373,11 +2382,17 @@ pub(crate) fn instantiate_builtin_scoped(
             Some(name) if name == "0" => 0,
             Some(name) => circuit.get_or_create_node(name),
             None => {
-                circuit.get_or_create_node(&format!("{instance_name}.__{internal_name}.internal"))
+                let node = circuit
+                    .get_or_create_node(&format!("{instance_name}.__{internal_name}.internal"));
+                private_nodes.push(node);
+                node
             }
         };
         nodes.push(node);
     }
+    circuit
+        .compact_model_private_nodes
+        .extend(private_nodes.into_iter().filter(|&node| node > 0));
     debug_assert_eq!(
         nodes.len(),
         total_nodes,

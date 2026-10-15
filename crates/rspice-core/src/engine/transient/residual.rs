@@ -1590,7 +1590,7 @@ impl Engine {
             rhs.fill(0.0);
 
             let diag_gmin = ctx.baseline_diag_gmin.max(0.0) + extra_diag_gmin;
-            Self::stamp_nodal_gmin(circuit, matrix, diag_gmin);
+            Self::stamp_nodal_gmin_stage(circuit, matrix, diag_gmin, ctx.baseline_diag_gmin);
 
             // Stamp linear devices (R, V, I) for transient; tline transient
             // behavior is stamped separately via companions.

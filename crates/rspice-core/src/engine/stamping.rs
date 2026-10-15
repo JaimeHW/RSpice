@@ -2,9 +2,9 @@
 //!
 //! Functions for stamping DC values into the matrix and RHS vector.
 
-use super::Engine;
+use super::{Engine, SimulationError};
 use crate::solver::{ComplexMatrix, StaticMatrix};
-use crate::{CircuitData, Value};
+use crate::{CircuitData, NodeId, Value};
 
 impl Engine {
     /// Add a numerical conditioning term to every MNA equation except private
@@ -28,9 +28,10 @@ impl Engine {
         }
     }
 
-    /// Add a diagonal term to electrical node-voltage equations only.
-    /// Private DAE state rows share the matrix's nodal prefix but are not
-    /// voltages and therefore must not receive circuit GMIN.
+    /// Add the nodal GMIN floor to the node-voltage equations that take it
+    /// ([`CircuitData::receives_nodal_gmin`]). Private DAE state rows share the
+    /// matrix's nodal prefix but are not voltages, and a compact model's
+    /// private nodes are the model's own; neither receives circuit GMIN.
     pub(in crate::engine) fn stamp_nodal_gmin(
         circuit: &CircuitData,
         matrix: &mut StaticMatrix,
@@ -42,6 +43,32 @@ impl Engine {
         for index in 0..circuit.num_nodes() {
             if circuit.receives_nodal_gmin(index) {
                 matrix.add(index, index, gmin);
+            }
+        }
+    }
+
+    /// Add a homotopy GMIN stage `gmin` whose final floor is `floor`: the
+    /// nodes that take the floor take the whole stage, as
+    /// [`Self::stamp_nodal_gmin`] stamps it, and a compact model's private
+    /// node takes the part of the stage above the floor
+    /// ([`CircuitData::receives_homotopy_gmin`]). At the floor itself the
+    /// private nodes take nothing, so the last stage is the circuit's own
+    /// system.
+    pub(in crate::engine) fn stamp_nodal_gmin_stage(
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        gmin: Value,
+        floor: Value,
+    ) {
+        Self::stamp_nodal_gmin(circuit, matrix, gmin);
+        let above_floor = gmin - floor.max(0.0);
+        if above_floor <= 0.0 || circuit.compact_model_private_nodes.is_empty() {
+            return;
+        }
+        for index in 0..circuit.num_nodes() {
+            if circuit.is_compact_model_private_node(index) && circuit.receives_homotopy_gmin(index)
+            {
+                matrix.add(index, index, above_floor);
             }
         }
     }
@@ -171,6 +198,115 @@ impl Engine {
                 rhs[row] = 0.0;
             }
         }
+    }
+
+    /// Settle, at the first operating-point assembly, which of a compact
+    /// model's own nodes no equation reaches, and refuse one that is left
+    /// without a DC path.
+    ///
+    /// A compact model's private node takes no final GMIN floor
+    /// ([`CircuitData::receives_nodal_gmin`]). The model may still leave
+    /// one's voltage out of every equation: BSIM-SOI 4.7 with `tnodeout=1`
+    /// and six terminals ties `b` as its temperature node and never drives
+    /// its unconnected `t`, whose row holds only the incidence of a thermal
+    /// branch that carries no flow. A node whose column and right-hand side
+    /// are empty is the twin of a pure event net's placeholder row
+    /// ([`Self::pin_unconstrained_xspice_event_rows`]): no other unknown
+    /// depends on its voltage, so a diagonal there cannot move any of them,
+    /// and it decides only the node's own voltage, from the flows the model
+    /// sends into it. Such a node takes the floor again, which reads 0 V
+    /// when those flows balance, as before the model's nodes lost the floor;
+    /// this is Spectre's practice for a node with no DC path ("Gmin installed
+    /// to provide path"). The floor rather than an identity row keeps the
+    /// node's transient equation as it was, should the model reach it only
+    /// through `ddt()`. A node the model reaches only through `ddt()` is
+    /// therefore settled too, where strictly it has no DC operating point.
+    ///
+    /// A private node whose row is empty while its column or its right-hand
+    /// side is not has no DC path either, but its voltage reaches other
+    /// equations, so no value is canonical: the operating point refuses and
+    /// names it, as it refuses a deck node with no DC path. So does one
+    /// whose column is empty but whose right-hand side is not, a current the
+    /// model drives into a node it gives no path.
+    pub(in crate::engine) fn settle_compact_model_private_nodes(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &[Value],
+        floor: Value,
+    ) -> Result<(), SimulationError> {
+        if circuit.settled_compact_model_private_nodes.is_some() {
+            return Ok(());
+        }
+        let mut settled = Vec::new();
+        let mut nodes: Vec<NodeId> = circuit
+            .compact_model_private_nodes
+            .iter()
+            .copied()
+            .filter(|&node| {
+                let index = node - 1;
+                circuit.receives_homotopy_gmin(index)
+                    && (matrix.row_is_deficient(index) || matrix.column_is_deficient(index))
+            })
+            .collect();
+        nodes.sort_unstable();
+        for node in nodes {
+            let index = node - 1;
+            let unread = matrix.column_is_deficient(index);
+            if unread && rhs.get(index).is_some_and(|&value| value == 0.0) {
+                circuit.compact_model_private_nodes.remove(&node);
+                settled.push(node);
+                if floor != 0.0 {
+                    matrix.add(index, index, floor);
+                }
+            } else {
+                circuit.settled_compact_model_private_nodes = Some(settled);
+                return Err(Self::private_node_without_dc_path(circuit, node, unread));
+            }
+        }
+        circuit.settled_compact_model_private_nodes = Some(settled);
+        Ok(())
+    }
+
+    /// The post-condition of [`Self::settle_compact_model_private_nodes`]: a
+    /// settled node reads 0 V within the voltage tolerance, so the flows the
+    /// model sends into it balance. One that reads anything else is the
+    /// floor's answer for a current with no path, `V = -I / g`, and refuses.
+    pub(in crate::engine) fn check_settled_compact_model_private_nodes(
+        &self,
+        circuit: &CircuitData,
+        solution: &[Value],
+    ) -> Result<(), SimulationError> {
+        let tolerance = self.config.convergence_config.voltage_abstol;
+        let Some(settled) = &circuit.settled_compact_model_private_nodes else {
+            return Ok(());
+        };
+        match settled.iter().copied().find(|&node| {
+            solution
+                .get(node - 1)
+                .is_some_and(|value| !value.is_finite() || value.abs() > tolerance)
+        }) {
+            Some(node) => Err(Self::private_node_without_dc_path(circuit, node, true)),
+            None => Ok(()),
+        }
+    }
+
+    fn private_node_without_dc_path(
+        circuit: &CircuitData,
+        node: NodeId,
+        unread: bool,
+    ) -> SimulationError {
+        let name = circuit
+            .node_names_sorted()
+            .get(node - 1)
+            .cloned()
+            .unwrap_or_else(|| format!("#{node}"));
+        let reason = if unread {
+            "its compact model drives a current into it and gives that current no path"
+        } else {
+            "no equation of its compact model constrains it at DC, yet its voltage reaches \
+             the model's other equations"
+        };
+        SimulationError::Circuit(format!("node {name} has no DC path: {reason}"))
     }
 
     /// The small-signal twin of [`Engine::pin_unconstrained_xspice_event_rows`].

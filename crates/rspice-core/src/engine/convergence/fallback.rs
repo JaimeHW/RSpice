@@ -244,6 +244,7 @@ impl Engine {
                 }
                 return Ok((solution, false, used_iterations));
             }
+            Self::settle_compact_model_private_nodes(circuit, matrix, &rhs, gmin_floor)?;
             let solve_result = if uses_vbic_correction {
                 Self::solve_direct_dc_correction(
                     matrix,

@@ -953,13 +953,14 @@ impl Engine {
         gmin: Value,
     ) -> Result<bool, SimulationError> {
         let junction_gmin = self.gmin_stage_junction_gmin(gmin);
+        let floor = self.dc_nodal_gmin_floor(circuit);
         self.try_nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
             junction_gmin,
             |circuit, matrix, rhs| {
-                Self::stamp_nodal_gmin(circuit, matrix, gmin);
+                Self::stamp_nodal_gmin_stage(circuit, matrix, gmin, floor);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
@@ -1165,13 +1166,14 @@ impl Engine {
         gmin: Value,
     ) -> Option<Value> {
         let junction_gmin = self.gmin_stage_junction_gmin(gmin);
+        let floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
             junction_gmin,
             |circuit, matrix, rhs| {
-                Self::stamp_nodal_gmin(circuit, matrix, gmin);
+                Self::stamp_nodal_gmin_stage(circuit, matrix, gmin, floor);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
         )
