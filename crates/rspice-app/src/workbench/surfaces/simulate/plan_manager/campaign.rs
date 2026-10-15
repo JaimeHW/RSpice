@@ -40,16 +40,17 @@
 
 use super::*;
 
-/// What this surface is for, in one sentence with one owner.
+/// The dialog's accessible description, and nothing painted.
 ///
-/// It is painted as the purpose strip over the members and published as the
-/// dialog's accessible description from here, so the screen and a screen reader
-/// state the same purpose. Every clause is `prepare_and_start_campaign`'s: it
-/// walks the members in the declared order, freezes each against one clone taken
-/// before the first starts, and gives each its own authenticated run.
-const CAMPAIGN_PURPOSE: &str = "Click a plan to add it as a member. Members \
-     dispatch in the order they were added, one at a time, each frozen now and \
-     run under its own authenticated identity.";
+/// It used to open the surface as an ⓘ strip as well, in a longer form that
+/// restated the footer hint — the same two rules in more words, over two
+/// clauses about dispatch freezing and authenticating each member that are not
+/// anything the reader decides here. The footer states the rules beside the
+/// control they are about and carries the membership bounds with them. A
+/// reader arriving by keyboard still needs the dialog named, so the sentence
+/// stays here and the strip is gone.
+const CAMPAIGN_PURPOSE: &str =
+    "Queue several simulation plans as one campaign, dispatched in the order they are added.";
 
 /// The three limits `prepare_and_start_campaign` refuses outside of.
 ///
@@ -172,8 +173,6 @@ pub(super) fn dialog(
         .ghost("Cancel")
         .primary_enabled(refusal.is_none())
         .show(ctx, |ui| {
-            purpose_line(ui, CAMPAIGN_PURPOSE);
-            ui.add_space(8.0);
             // The members first, as the authored surface has them: the reader picks
             // here, and everything below is what the picking added up to. The scope
             // sat above the table because the table is the one part of this surface
@@ -852,6 +851,10 @@ mod tests {
     /// The four dispatch guarantees this also covered are gone with the group
     /// that stated them: Freeze, Dispatch, After a failure and Evidence each
     /// restated a clause of the purpose strip two inches above them.
+    ///
+    /// The strip itself is gone the same way, and this is what holds it gone:
+    /// the footer hint owns both rules, so the accessible description must not
+    /// come back as painted text beside it.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn every_fact_the_notes_state_is_painted_whole_at_every_gated_viewport() {
@@ -862,9 +865,8 @@ mod tests {
         let owed = [
             "2 plans".to_owned(),
             scope.tasks.to_string(),
-            // The purpose strip and the footer hint carry the two rules the
-            // surface cannot show, so both have to survive the narrow shapes.
-            CAMPAIGN_PURPOSE.to_owned(),
+            // The footer hint carries the two rules the surface cannot show,
+            // so it has to survive the narrow shapes whole.
             format!(
                 "Click a plan to add or remove it · a plan added last dispatches \
                  last · {MIN_CAMPAIGN_MEMBERS} to {MAX_CAMPAIGN_MEMBERS} members, \
@@ -890,6 +892,12 @@ mod tests {
                     "{screen:?} did not paint {fact:?} whole; it painted {painted:?}"
                 );
             }
+            assert!(
+                !painted.iter().any(|text| text.contains(CAMPAIGN_PURPOSE)),
+                "{screen:?} painted the accessible description as a strip over \
+                 the members, which says what the footer hint under them \
+                 already says: {painted:?}"
+            );
         }
     }
 }

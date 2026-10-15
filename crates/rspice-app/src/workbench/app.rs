@@ -91,12 +91,6 @@ pub(crate) use dialogs::confirmation_state::{ProjectReviewDialogState, ProjectRe
 /// The Model Hub work vocabulary, named where surfaces can reach it.
 pub(in crate::workbench) use dialogs::pdk_workflow::ModelHubRequest;
 
-/// The authored purpose strip that opens a workflow dialog's body, named where
-/// the surfaces that compose their own dialog bodies can reach it. One painter
-/// for that strip is what keeps the info mark, the height and the dashed rule
-/// the same on every dialog that opens with one.
-pub(in crate::workbench) use dialogs::review_primitives::purpose_line;
-
 /// The authored concept banner, named where the surfaces that compose their own
 /// dialog bodies can reach it. One painter for the box, its two tones and its
 /// margins.

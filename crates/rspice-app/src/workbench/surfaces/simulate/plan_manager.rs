@@ -24,7 +24,6 @@ use kit::{ColumnTrack, SplitColumn, TableColumn, TableRow};
 use records::{PlanCatalogRecord, plan_catalog_records};
 
 use crate::ui::accessibility::plural_suffix;
-use crate::workbench::app::purpose_line;
 use crate::workbench::app_state::ReferencePvtPoint;
 use crate::workbench::state::SimulationPlanScope;
 
