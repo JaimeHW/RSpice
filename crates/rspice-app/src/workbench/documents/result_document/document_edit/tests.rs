@@ -1002,12 +1002,18 @@ fn render_the_result_document_forms_for_review() {
     let (mut app, document_id) = document_fixture("two-linked-panes");
     app.state.workbench.workspace = Workspace::Results;
     show_document(&mut app, document_id);
+    // Cursors come before the link: linking is what makes the panes agree on
+    // a position they already have, so a document with none refuses it.
+    for pane in ordered_panes(&app, document_id) {
+        let edits = links::cursor_pair_edits(
+            retained(&app, document_id),
+            pane.id,
+            (Some(0.25), Some(0.75)),
+        )
+        .expect("the pane keeps cursors");
+        transact(&mut app.state, document_id, edits).expect("the cursors are kept");
+    }
     links::set_cursor_links(&mut app.state, document_id, true).expect("the cursors link");
-    let pane = ordered_panes(&app, document_id)[0].id;
-    let edits =
-        links::cursor_pair_edits(retained(&app, document_id), pane, (Some(0.25), Some(0.75)))
-            .expect("the pane keeps cursors");
-    transact(&mut app.state, document_id, edits).expect("the cursors are kept");
     review("two-pane-linked", egui::vec2(1100.0, 640.0), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             super::super::show_persistent_document(ui, &mut app, document_id);
