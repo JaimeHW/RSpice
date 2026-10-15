@@ -296,7 +296,10 @@ fn member_table(
             let t = Tokens::get(ui.ctx());
             // A member's own numbers are stated in the text tone; a plan that
             // is not a member is still readable but is not what the campaign
-            // is about, so its row recedes.
+            // is about, so its row recedes. Membership itself is the row's
+            // fill and the rail beside it; the order digit is the position,
+            // which is data, so it reads in the same tone as the rest of the
+            // row rather than repeating the accent a third time.
             let tone = if positions[row].is_some() {
                 t.color.text
             } else {
@@ -310,7 +313,7 @@ fn member_table(
                         |position| (position + 1).to_string(),
                     ),
                     if positions[row].is_some() {
-                        t.color.accent
+                        tone
                     } else {
                         t.color.text_faint
                     },
