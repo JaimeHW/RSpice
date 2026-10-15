@@ -182,7 +182,7 @@ fn render_policy_rows(ui: &mut Ui, profile: &mut ShortcutPreferences) {
     if let Some(index) = policy_select(
         ui,
         "Protected platform shortcuts",
-        "Browser, operating-system and accessibility bindings cannot be shadowed silently.",
+        "Browser and accessibility bindings cannot be shadowed silently.",
         "preferences.shortcuts.protected-platform",
         current.label(),
         ProtectedShortcutPolicy::ALL

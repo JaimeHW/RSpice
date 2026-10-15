@@ -334,7 +334,7 @@ mod tests {
             "color.info",
         ];
         // Each entry is one shipped file of this slice, read back as it ships.
-        const SLICE: [(&str, &str); 19] = [
+        const SLICE: [(&str, &str); 20] = [
             ("check_and_save.rs", include_str!("check_and_save.rs")),
             (
                 "check_and_save_validation.rs",
@@ -384,8 +384,12 @@ mod tests {
                 include_str!("preferences/shortcut_portability_dialogs.rs"),
             ),
             (
-                "preferences/managed_preference_policy.rs",
-                include_str!("preferences/managed_preference_policy.rs"),
+                "preferences/preference_pages.rs",
+                include_str!("preferences/preference_pages.rs"),
+            ),
+            (
+                "preferences/preferences_shell.rs",
+                include_str!("preferences/preferences_shell.rs"),
             ),
         ];
         for (name, source) in SLICE {

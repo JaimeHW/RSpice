@@ -43,13 +43,19 @@ const CONTENT_INSET: f32 = 18.0;
 /// The same inset where a phone has given up a quarter of its width to it.
 const PHONE_CONTENT_INSET: f32 = 14.0;
 /// Width of the label column a page's controls line up against.
-const LABEL_COLUMN_WIDTH: f32 = 272.0;
+///
+/// Wide enough that most of a row's help is one line: a column that wraps
+/// every other row's help to two lines makes the list's rhythm depend on
+/// sentence length rather than on what is on the row.
+const LABEL_COLUMN_WIDTH: f32 = 400.0;
 /// Gap between the label column and the control that answers it.
 const SETTING_ROW_COLUMN_GAP: f32 = 20.0;
 /// Widest a select or numeric field grows to, so neighbouring rows agree.
 const CONTROL_MAX_WIDTH: f32 = 300.0;
 /// Padding above and below a row's tallest element.
 const SETTING_ROW_PADDING: f32 = 9.0;
+/// Gap between a row's label and the help under it.
+const SETTING_COPY_HELP_GAP: f32 = 2.0;
 /// Gap between a stacked label and its control on a phone.
 const SETTING_ROW_PHONE_VALUE_GAP: f32 = 8.0;
 const SHELL_ID: &str = "rspice.preferences.shell";
@@ -787,27 +793,43 @@ fn content_inset(ui: &Ui) -> f32 {
 /// typographic devices and a case change to separate one group of rows from
 /// the next is more emphasis than the distinction carries, and the product
 /// settled on sentence-case headers with no tracking.
+///
+/// It is a row of the same grid, not a label floating in whitespace. Its
+/// inset, its padding and the rule it closes with are a setting row's, and
+/// the tint is the one the design system keeps for table heads and section
+/// labels — so it separates two runs of settings without any spacing that
+/// belongs to it alone. Every number here is read off the row beside it.
 pub(super) fn section_heading(ui: &mut Ui, title: &str) {
     let t = Tokens::get(ui.ctx());
     let horizontal = content_inset(ui);
-    ui.add_space(18.0);
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
+    let font = theme::sans(tokens::FS_1, FontWeight::SemiBold);
+    let text_height = ui.fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(title.to_owned(), font.clone(), t.color.text)
+            .size()
+            .y
+    });
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(
+            ui.available_width(),
+            text_height + SETTING_ROW_PADDING * 2.0,
+        ),
+        Sense::hover(),
+    );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, ui.is_enabled(), title));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Heading);
         node.set_label(title);
         node.set_level(4);
     });
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().text(
-        egui::pos2(rect.left() + horizontal, rect.center().y - 1.0),
+        egui::pos2(rect.left() + horizontal, rect.center().y),
         egui::Align2::LEFT_CENTER,
         title,
-        theme::sans(tokens::FS_1, FontWeight::SemiBold),
+        font,
         t.color.text,
     );
-    // The same rule a setting row draws under itself, at the same width: a
-    // heading divides the list, and a divider that stops short of the ones
-    // above and below it reads as a third kind of line.
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
@@ -865,17 +887,33 @@ pub(super) fn setting_row<R>(
                 // 30 px switch sit in half a page of empty row.
                 let label_width = LABEL_COLUMN_WIDTH.min(available * 0.6);
                 let control_width = (available - label_width).max(1.0);
+                // Both columns are centred on the row rather than hung from
+                // its top. A control pinned to the top of a row whose label
+                // carries two lines of help sits above the row's middle by
+                // half the help, and by a different amount on the next row,
+                // so a column of controls drifts against its own rows.
+                let copy_height = setting_copy_height(ui, title, help, label_width);
+                // Every row reserves the height of a label with one line of
+                // help, which is what most of them carry, and grows past it
+                // only for content that needs more. Without the floor a row
+                // whose setting needs no explaining is four pixels shorter
+                // than its neighbours, and a page of them reads as a list
+                // measured by hand.
+                let row_height = copy_height
+                    .max(control_height)
+                    .max(standard_copy_height(ui, label_width));
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = gap;
+                    ui.set_min_height(row_height);
                     ui.vertical(|ui| {
                         ui.set_width(label_width);
-                        ui.set_min_height(control_height);
                         ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.add_space((row_height - copy_height) * 0.5);
                         setting_copy(ui, title, help, label_width);
                     });
                     ui.vertical(|ui| {
                         ui.set_width(control_width);
-                        ui.set_min_height(control_height);
+                        ui.add_space((row_height - control_height) * 0.5);
                         add_value(ui)
                     })
                     .inner
@@ -896,14 +934,37 @@ pub(super) fn setting_row<R>(
 /// Help wraps to the label column rather than to a character count, so the
 /// text block has the same right edge as the label above it instead of ending
 /// wherever 38 zeroes happened to reach.
+/// The height of the page's standard row content: a one-line label over one
+/// line of help.
+fn standard_copy_height(ui: &mut Ui, width: f32) -> f32 {
+    setting_copy_height(ui, "A", "A", width)
+}
+
+/// How tall the label and its help will be at `width`, before either is laid
+/// out, so the row can centre both columns against each other.
+fn setting_copy_height(ui: &mut Ui, title: &str, help: &str, width: f32) -> f32 {
+    let measure = |ui: &mut Ui, text: &str, size: f32, weight: FontWeight| {
+        ui.fonts_mut(|fonts| {
+            fonts
+                .layout(
+                    text.to_owned(),
+                    theme::sans(size, weight),
+                    egui::Color32::WHITE,
+                    width,
+                )
+                .size()
+                .y
+        })
+    };
+    let mut height = measure(ui, title, tokens::FS_1, FontWeight::Regular);
+    if !help.is_empty() {
+        height += SETTING_COPY_HELP_GAP + measure(ui, help, tokens::FS_0, FontWeight::Regular);
+    }
+    height
+}
+
 fn setting_copy(ui: &mut Ui, title: &str, help: &str, width: f32) {
     let t = Tokens::get(ui.ctx());
-    let control_height = t.metrics.ctl_h;
-    // One offset whether or not the row carries help, so the label always
-    // centres on the control beside it and the help flows below. Nudging the
-    // help case by a pixel put a row's label a pixel off its own control and
-    // a pixel off the label of the row above it.
-    ui.add_space(((control_height - tokens::FS_1 * 1.4) * 0.5).max(0.0));
     let title_response = ui.add(
         egui::Label::new(
             egui::RichText::new(title)
@@ -917,7 +978,7 @@ fn setting_copy(ui: &mut Ui, title: &str, help: &str, width: f32) {
         node.set_label(title);
     });
     if !help.is_empty() {
-        ui.add_space(2.0);
+        ui.add_space(SETTING_COPY_HELP_GAP);
         ui.scope(|ui| {
             ui.set_max_width(width);
             ui.add(
@@ -1149,12 +1210,36 @@ mod tests {
     fn a_plain_row_is_one_control_tall() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let control = Tokens::get(&ctx).metrics.ctl_h;
-        assert_eq!(control + SETTING_ROW_PADDING * 2.0, 46.0);
+        let standard = standard_row_height(&ctx);
         assert!(
-            control + SETTING_ROW_PADDING * 2.0 < 70.0,
-            "a row carrying nothing but a select is shorter than the old fixed track"
+            standard >= Tokens::get(&ctx).metrics.ctl_h + SETTING_ROW_PADDING * 2.0,
+            "the page's row height clears a control and its padding"
         );
+        assert!(
+            standard < 70.0,
+            "a row is shorter than the fixed 70 px track it replaces: {standard}"
+        );
+    }
+
+    /// The height every row on the page holds to: a label with one line of
+    /// help, padded. A row that carries no help is the same height as its
+    /// neighbours rather than four pixels shorter.
+    fn standard_row_height(ctx: &Context) -> f32 {
+        let mut height = 0.0;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    height = standard_copy_height(ui, LABEL_COLUMN_WIDTH)
+                        .max(Tokens::get(ui.ctx()).metrics.ctl_h)
+                        + SETTING_ROW_PADDING * 2.0;
+                });
+            },
+        );
+        height
     }
 
     #[test]
@@ -1302,7 +1387,11 @@ mod tests {
             "Second control",
         );
 
-        assert_eq!(second.y0 - first.y0, 46.0);
+        assert_eq!(
+            second.y0 - first.y0,
+            f64::from(standard_row_height(&ctx)),
+            "two rows carrying no help are the page's one row height apart"
+        );
         assert_eq!(first.x0, second.x0, "the two labels share one left edge");
         assert_eq!(
             switch_bounds.x0, slider.x0,

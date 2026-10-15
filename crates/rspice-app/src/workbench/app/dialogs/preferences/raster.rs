@@ -128,7 +128,7 @@ fn report_preferences_geometry() {
             dialog.x0, dialog.x1, dialog.y0, dialog.y1
         )
         .ok();
-        let mut rows: Vec<(f64, f64, String, String)> = nodes
+        let mut rows: Vec<(f64, f64, f64, String, String)> = nodes
             .iter()
             .filter_map(|(_, node)| {
                 let bounds = node.bounds()?;
@@ -143,15 +143,23 @@ fn report_preferences_geometry() {
                     egui::accesskit::Role::SpinButton => "number",
                     _ => return None,
                 };
-                Some((bounds.y0, bounds.x0, kind.to_owned(), label.to_string()))
+                Some((
+                    bounds.y0,
+                    bounds.y1,
+                    bounds.x0,
+                    kind.to_owned(),
+                    label.to_string(),
+                ))
             })
             .collect();
         rows.sort_by(|left, right| left.partial_cmp(right).expect("finite bounds"));
-        for (top, left, kind, label) in rows {
+        for (top, bottom, left, kind, label) in rows {
             let inset = left - dialog.x0;
+            let middle = f64::midpoint(top, bottom);
             writeln!(
                 report,
-                "  y {top:7.1}  x {left:7.1}  (+{inset:6.1})  {kind:<8} {label}"
+                "  y {top:7.1}..{bottom:7.1} mid {middle:7.1}  x {left:7.1} (+{inset:6.1})  \
+                 {kind:<8} {label}"
             )
             .ok();
         }

@@ -303,7 +303,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     setting_row(
         ui,
         "Workspace preset",
-        "Engineering keeps contextual panes; Canvas focuses the active editor; Diagnostics opens the console.",
+        "Which panes a workspace opens with.",
         |ui| {
             value_column(ui, |ui| {
                 let mut selected = state
@@ -373,7 +373,7 @@ fn workspace(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActi
     if action_row(
         ui,
         "Per-workspace layouts",
-        "Design, Simulation, Results and Verify retain independent docks and console state.",
+        "Each workspace keeps its own docks and console state.",
         "workspace-layouts",
         "Manage layouts…",
     ) {
@@ -604,7 +604,7 @@ fn schematic(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::NetNamingPolicy,
         "Net naming policy",
-        "Case, global-net syntax, generated names and bus expansion are checked before netlisting.",
+        "Case, global-net syntax and bus expansion are checked before netlisting.",
         &[
             "Strict project policy · case sensitive",
             "SPICE-compatible relaxed",
@@ -674,7 +674,7 @@ fn results(ui: &mut Ui, state: &mut AppState) {
         state,
         ChoicePreference::EngineeringExport,
         "Default engineering export",
-        "Exports retain full stored precision; native bundles are self-verifying and reopen directly in RSpice.",
+        "Exports keep full stored precision. Native bundles reopen in RSpice.",
         &[
             "CSV",
             "Touchstone where compatible",
