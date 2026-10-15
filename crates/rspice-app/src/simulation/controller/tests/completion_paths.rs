@@ -1739,6 +1739,7 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
 #[test]
 fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
     let mut state = AppState::default();
+    state.project_lifecycle.authority.open_session();
     let attribution = rspice_results::convergence_attribution::from_core(
         &rspice_core::diagnostics::ConvergenceDiagnostic {
             class: rspice_core::diagnostics::ConvergenceFailureClass::NewtonNonConvergence,
@@ -1761,11 +1762,18 @@ fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
 
     SimulationController::report_failed_analysis(
         &mut state,
+        "Transient",
         "Analysis failed: Convergence failed after 100 iterations",
         &Some(attribution),
+        Some(3),
     );
 
     let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
+    assert_eq!(
+        entries.len(),
+        1,
+        "the Console records the event once; the condition is a record"
+    );
     assert_eq!(
         entries[0].message, "Analysis failed: Convergence failed after 100 iterations",
         "the engine's own prose must reach the console unchanged"
@@ -1778,13 +1786,9 @@ fn a_failed_run_anchors_its_console_row_to_the_objects_the_engine_named() {
         }),
         "the failure row must carry the objects it named"
     );
-    assert!(
-        entries[1].message.contains("Did not converge")
-            && entries[1].message.contains("OUT")
-            && entries[1].message.contains("V1"),
-        "the named objects are their own statement: {}",
-        entries[1].message
-    );
+    // What the engine named used to be a second console row. It is now the
+    // canonical record's own detail, which `app_state::diagnostic_store`
+    // covers; the Console's job here is the event, once.
 }
 
 #[test]
@@ -1806,10 +1810,13 @@ fn a_real_operating_point_refusal_anchors_the_conductor_the_engine_named() {
         .expect("the operating point is the analysis that names its refusals");
 
     let mut state = AppState::default();
+    state.project_lifecycle.authority.open_session();
     SimulationController::report_failed_analysis(
         &mut state,
+        "Operating point",
         &format!("Analysis failed: {error}"),
         &Some(attribution),
+        Some(1),
     );
 
     let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();
@@ -1826,19 +1833,22 @@ fn a_real_operating_point_refusal_anchors_the_conductor_the_engine_named() {
     );
     assert_eq!(
         entries.len(),
-        2,
-        "an attributed failure writes the engine's prose and, separately, what it named"
+        1,
+        "an attributed failure writes the engine's prose once; the attribution is the record's"
     );
 }
 
 #[test]
 fn a_failure_that_named_nothing_writes_the_row_it_always_did() {
     let mut state = AppState::default();
+    state.project_lifecycle.authority.open_session();
 
     SimulationController::report_failed_analysis(
         &mut state,
+        "Transient",
         "Analysis failed: Parse error: unterminated .subckt",
         &None,
+        Some(1),
     );
 
     let entries: Vec<&crate::diagnostics::LogEntry> = state.log_buffer.entries().collect();

@@ -321,7 +321,13 @@ impl SimulationController {
                     .unwrap_or_else(|| "Analysis".to_owned());
                 let console_line = Self::refusal_console_line(&failed_label, &e)
                     .unwrap_or_else(|| format!("Analysis failed: {e}"));
-                Self::report_failed_analysis(state, &console_line, &attribution);
+                Self::report_failed_analysis(
+                    state,
+                    &failed_label,
+                    &console_line,
+                    &attribution,
+                    self.target_run_id(state),
+                );
                 let failed_type = self
                     .current_spec
                     .as_ref()

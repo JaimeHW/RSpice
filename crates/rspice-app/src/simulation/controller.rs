@@ -1392,17 +1392,21 @@ impl SimulationController {
         Ok(())
     }
 
-    /// Write the failure to the console, anchored to the objects the engine
-    /// named for it.
+    /// Record the failure twice, for the two readers it has.
     ///
-    /// The message is unchanged whether or not the engine could attribute
-    /// the failure — the anchor is an addition, not a rewrite. A failure
-    /// that named nothing (a parse error names no conductor) writes exactly
-    /// the row it always did.
+    /// The Console gets the session's log of what happened, anchored to the
+    /// objects the engine named for it. The diagnostic store gets the
+    /// condition: this design does not simulate, which stands until the
+    /// inputs it was measured against move. What the engine named used to be
+    /// a second console row; it is now the record's own detail, because a
+    /// restatement of a finding in the log is exactly what made the Problems
+    /// page a list of everything that had ever gone wrong.
     fn report_failed_analysis(
         state: &mut AppState,
+        analysis: &str,
         message: &str,
         attribution: &Option<crate::state::ConvergenceAttribution>,
+        run_sequence: Option<u64>,
     ) {
         let anchor = attribution.as_ref().and_then(|attribution| {
             let nets: Vec<String> = attribution.nets().map(str::to_owned).collect();
@@ -1417,17 +1421,8 @@ impl SimulationController {
             None,
             anchor,
         );
-        if let Some(attribution) = attribution {
-            // A second row, not a longer first one: the failure's own prose
-            // is the engine's and stays whole, and what the engine named is
-            // a separate statement an author can act on.
-            state.log_buffer.log_anchored(
-                crate::diagnostics::LogSeverity::Warning,
-                crate::diagnostics::LogSource::Engine,
-                attribution.summary(),
-                None,
-                None,
-            );
+        if let Some(run_sequence) = run_sequence {
+            state.publish_run_failure(analysis, message, attribution.as_ref(), run_sequence);
         }
     }
 
