@@ -72,6 +72,7 @@ impl AppState {
         // the source-workspace contract. Clear them in the same transaction
         // as documents and results so a replacement can never render one
         // frame containing two projects' evidence.
+        self.diagnostics.clear();
         self.log_buffer.clear();
         self.clear_specialized_viewer_data();
     }

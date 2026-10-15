@@ -17,6 +17,7 @@ pub(in crate::workbench) mod active_viewer;
 pub(in crate::workbench) mod cell_usage;
 pub(in crate::workbench) mod design_checks;
 pub(in crate::workbench) mod design_history;
+pub(crate) mod diagnostic_store;
 mod full_screen;
 pub(in crate::workbench) mod interaction_state;
 pub(in crate::workbench) mod run_identity;
@@ -41,6 +42,7 @@ pub(crate) use design_history::{
     VerilogAModuleBinding, publish_symbol_definition_candidate,
     publish_symbol_definition_candidate_with_fixture,
 };
+pub(crate) use diagnostic_store::DiagnosticStore;
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
 pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
@@ -195,6 +197,9 @@ pub struct AppState {
     pub(crate) project_design_history: design_history::ProjectDesignHistory,
     /// Per-cell-view interactive check receipts, bound to exact live inputs.
     pub(crate) design_checks: DesignCheckRuntime,
+    /// The conditions that stand against the design, from every producer, in
+    /// the one shape the Problems page, the tab badge and the status bar read.
+    pub(crate) diagnostics: DiagnosticStore,
     /// Dialog visibility. Boxed: this is the largest sub-state, and an inline
     /// copy would ride along in every stack frame that moves an [`AppState`].
     pub(crate) dialogs: Box<DialogState>,
@@ -1012,25 +1017,6 @@ impl AppState {
                 .schematic_buffers
                 .values()
                 .all(|schematic| !schematic_has_authored_content(schematic))
-    }
-
-    /// Whether the selected retained result was produced by an authored
-    /// manual deck rather than the schematic simulation plan. The sealed run
-    /// receipt is authoritative; per-analysis provenance is the truthful
-    /// fallback for migrated runs that retained task provenance but not the
-    /// run-level receipt.
-    pub(crate) fn active_result_uses_manual_deck(&self) -> bool {
-        self.simulation.active_run().is_some_and(|run| {
-            run.prepared_receipt().is_some_and(|receipt| {
-                receipt.source_domain() == crate::state::AnalysisResultSourceDomain::ManualDeck
-            }) || (!run.analyses.is_empty()
-                && run.analyses.iter().all(|analysis| {
-                    analysis.provenance().is_some_and(|provenance| {
-                        provenance.source_domain()
-                            == crate::state::AnalysisResultSourceDomain::ManualDeck
-                    })
-                }))
-        })
     }
 
     /// Request a run from the Simulate workspace run set.

@@ -13,9 +13,16 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::{
     CanonicalCellViewOwnerKey, CellViewRef, ViewType, canonical_cell_view_owner_key,
 };
+use rspice_app_types::diagnostics::CanonicalDiagnosticMetadata;
 use rspice_design::drc::{DrcConfig, DrcResult};
 
 use super::AppState;
+use super::diagnostic_store::{
+    DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, design_rule_code,
+};
+
+/// Producer identity every schematic and electrical rule finding carries.
+const DESIGN_RULE_PRODUCER: &str = "rspice.design.rules";
 
 const DESIGN_CHECK_DIGEST_DOMAIN: &[u8] = b"rspice-interactive-design-check/v1\0";
 
@@ -150,12 +157,22 @@ impl AppState {
         let is_active_subject =
             owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
         let input_digest = design_check_input_digest(self, &subject, &config)?;
+        // Canonical records are derived before the receipt is stored, because
+        // one of them needs to ask the live drawing where its object is and
+        // the receipt's own insertion takes the state mutably.
+        let records = design_rule_records(self, &subject, &result, is_active_subject);
         self.design_checks.insert(CellViewCheckReceipt {
             project_id: self.workspace.content.project.id(),
-            subject,
+            subject: subject.clone(),
             input_digest,
             result,
         });
+        self.publish_diagnostics(
+            DiagnosticInputs::DesignCheck {
+                subject: subject.clone(),
+            },
+            records,
+        )?;
         if is_active_subject {
             self.refresh_active_design_check_projection();
         }
@@ -205,10 +222,20 @@ impl AppState {
         }
         let subject = self.workspace.content.active_schematic_reference();
         self.design_checks.clear_subject(&subject);
+        self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
     }
 
     pub(crate) fn clear_all_design_checks(&mut self) {
+        let subjects: Vec<CellViewRef> = self
+            .design_checks
+            .receipts
+            .values()
+            .map(|receipt| receipt.subject.clone())
+            .collect();
         self.design_checks.clear();
+        for subject in subjects {
+            self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
+        }
     }
 
     /// Keep the legacy interactive DRC projection scoped to the exact active
@@ -238,6 +265,60 @@ impl AppState {
     }
 }
 
+/// One canonical record per rule finding.
+///
+/// `drawn` says whether the subject is the drawing in front of the reader.
+/// Only that drawing can be asked where an object is, so a finding in another
+/// cell view is published without a route rather than with one resolved
+/// against the wrong coordinate space — which is what a shared canvas
+/// projection would have produced.
+fn design_rule_records(
+    state: &AppState,
+    subject: &CellViewRef,
+    result: &DrcResult,
+    drawn: bool,
+) -> Vec<DiagnosticRecord> {
+    let project = state.workspace.content.project.id();
+    let revision = state.workspace.content.project.revision().get();
+    let document_id = subject.key();
+    result
+        .violations()
+        .iter()
+        .map(|violation| {
+            // The pass plus the finding's ordinal. Two findings of one rule
+            // can carry the same sentence about different objects — "Pin A is
+            // not connected" on two instances — and the ordinal is what keeps
+            // their canonical identities apart. It is stable for an unchanged
+            // design because the checks walk the design in a fixed order.
+            let validation_id = format!("design-check:{document_id}:{}", violation.id);
+            let canonical = CanonicalDiagnosticMetadata::current(
+                DESIGN_RULE_PRODUCER,
+                design_rule_code(violation.violation_type),
+                document_id.clone(),
+                None,
+                revision,
+                validation_id,
+                &violation.message,
+            );
+            let route = drawn
+                .then(|| {
+                    crate::schematic::view::violations::location_anchor(state, &violation.location)
+                })
+                .flatten()
+                .map(DiagnosticRoute::Anchor);
+            DiagnosticRecord::new(
+                canonical,
+                violation.severity.into(),
+                DiagnosticSubject::new(project, violation.location.display())
+                    .in_cell_view(subject.clone()),
+                violation.message.clone(),
+            )
+            .with_details(violation.violation_type.suggested_fix())
+            .with_route(route)
+        })
+        .collect()
+}
+
 fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
     canonical_cell_view_owner_key(&subject.library, &subject.cell, &subject.view)
 }
@@ -255,6 +336,21 @@ fn design_check_config(state: &AppState, subject: &CellViewRef) -> DrcConfig {
         check_missing_ground: owner_key(subject) == owner_key(&project_root_reference(state)),
         ..DrcConfig::default()
     }
+}
+
+/// The digest of everything one cell view's checks read, as it stands now.
+///
+/// Exposed because the canonical diagnostic store decides the currency of
+/// every producer by comparing input digests, and the check findings must be
+/// decided by exactly the digest their receipt is decided by. Two functions
+/// computing "the same" digest is how a receipt and the Problems page come to
+/// disagree about whether the same findings are current.
+pub(in crate::workbench) fn live_input_digest(
+    state: &AppState,
+    subject: &CellViewRef,
+) -> Result<ContentDigest, String> {
+    let config = design_check_config(state, subject);
+    design_check_input_digest(state, subject, &config)
 }
 
 fn design_check_input_digest(

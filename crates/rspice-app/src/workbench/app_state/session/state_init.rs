@@ -176,6 +176,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         active_schematic_epoch: 0,
         project_design_history: Default::default(),
         design_checks: Default::default(),
+        diagnostics: Default::default(),
         dialogs: Box::new(DialogState::default()),
         sim_setup,
         log_buffer: crate::diagnostics::LogBuffer::default(),
