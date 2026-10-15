@@ -6,7 +6,7 @@
 //! answer "which definition am I editing and is it saved", so nothing that
 //! cannot be read at a glance belongs in it.
 
-use egui::{Color32, Pos2, Sense, Stroke, Ui, Vec2};
+use egui::{Pos2, Sense, Ui, Vec2};
 
 use crate::state::stimulus_library::definition::{StimulusFamily, StimulusKind};
 use crate::ui::theme::{self, FontWeight};
@@ -14,7 +14,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::state::NAME_FIELD;
 use crate::workbench::{AppState, MessageId};
 
-use super::super::super::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
+use super::super::super::design_system::{
+    Problem, WorkbenchIcon, icon_button, labeled_icon_button_sized, paint_problem_mark,
+};
 use super::{Stage, StageAction};
 
 /// Width of the editable name field. Wide enough for the longest name the
@@ -24,6 +26,9 @@ const NAME_WIDTH: f32 = 168.0;
 const COMBO_WIDTH: f32 = 96.0;
 const KIND_WIDTH: f32 = 56.0;
 const BUTTON: Vec2 = Vec2::new(28.0, 26.0);
+/// Side of the lifecycle chip's problem mark, and the air after it.
+const CHIP_MARK_SIDE: f32 = 11.0;
+const CHIP_MARK_GAP: f32 = 5.0;
 /// Room the five verbs keep at the right of the identity row: Apply plus four
 /// icon buttons and the spacing between them.
 const VERB_WIDTH: f32 = 250.0;
@@ -39,11 +44,13 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
         |ui| {
             ui.add_space(8.0);
             let (mark, _) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::hover());
+            // Which waveform family this is, drawn as its own shape. Accent
+            // would read as a selection the glyph does not carry.
             paint_family_mark(
                 ui.painter(),
                 mark,
                 stage.working.family(),
-                tokens.color.accent,
+                tokens.color.text_dim,
             );
             ui.add_space(6.0);
 
@@ -152,19 +159,29 @@ fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<St
         .field_findings(NAME_FIELD)
         .map(|finding| finding.message.as_str())
         .collect::<Vec<_>>();
-    let mut edit = egui::TextEdit::singleline(&mut text)
-        .font(egui::TextStyle::Monospace)
-        .desired_width(NAME_WIDTH)
-        .margin(egui::Margin::symmetric(6, 3));
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .font(egui::TextStyle::Monospace)
+            .desired_width(NAME_WIDTH)
+            .margin(egui::Margin::symmetric(6, 3)),
+    );
+    // A refused field outlines, exactly as every other field on the stage
+    // does. The typed name stays in the ordinary ink: what the reader entered
+    // is not itself the error.
     if !objection.is_empty() {
-        edit = edit.text_color(Tokens::get(ui.ctx()).color.err);
+        let tokens = Tokens::get(ui.ctx());
+        ui.painter().rect_stroke(
+            response.rect,
+            tokens.radius,
+            egui::Stroke::new(1.0, tokens.color.err),
+            egui::StrokeKind::Inside,
+        );
     }
-    let response = ui.add(edit);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label.as_str());
     });
-    // A red name says that it cannot be this definition's; the hover says why,
-    // and it is the only place that does.
+    // An outlined name says that it cannot be this definition's; the hover
+    // says why, and it is the only place that does.
     let response = if objection.is_empty() {
         response
     } else {
@@ -226,14 +243,17 @@ fn kind_combo(ui: &mut Ui, label: &str, stage: &Stage, actions: &mut Vec<StageAc
 /// Where this definition stands: published, edited, or edited and refused.
 fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
     let messages = state.ui.messages();
-    let tokens = Tokens::get(ui.ctx());
     let errors = stage.errors();
     // Each state's fact, then the same fact at the length a narrow band can
     // give it. The short form is the lifecycle word alone, because the detail
     // it drops — which revision, how many errors — is stated whole by the
     // realization band and the audit strip under it, while the word is the one
     // thing only this chip says.
-    let (spellings, color) = if !stage.dirty {
+    //
+    // Saved and unapplied are where the definition is; only a draft the
+    // generator refused is a problem, and it is the words that say which of
+    // the three this is.
+    let (spellings, problem) = if !stage.dirty {
         (
             vec![
                 messages.format(
@@ -242,7 +262,7 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
                 ),
                 messages.text(MessageId::StimulusSaved),
             ],
-            tokens.color.ok,
+            None,
         )
     } else if errors > 0 {
         (
@@ -257,7 +277,7 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
                 ),
                 messages.text(MessageId::StimulusDraft),
             ],
-            tokens.color.err,
+            Some(Problem::Failure),
         )
     } else {
         (
@@ -265,10 +285,10 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
                 messages.text(MessageId::StimulusDraftNotApplied),
                 messages.text(MessageId::StimulusDraft),
             ],
-            tokens.color.warn,
+            None,
         )
     };
-    let Some(response) = chip(ui, &spellings, color) else {
+    let Some(response) = chip(ui, &spellings, problem) else {
         return;
     };
     // The whole fact under the pointer whatever was painted, and — because a
@@ -402,31 +422,44 @@ fn delete_label(messages: &crate::workbench::MessageCatalog, stage: &Stage) -> S
 ///
 /// `None` when not even the shortest fits, which is the one case where a band
 /// this narrow has nothing to give.
-fn chip(ui: &mut Ui, spellings: &[String], color: Color32) -> Option<egui::Response> {
+fn chip(ui: &mut Ui, spellings: &[String], problem: Option<Problem>) -> Option<egui::Response> {
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
-    let room = ui.available_width();
+    let mark_column = if problem.is_some() {
+        CHIP_MARK_SIDE + CHIP_MARK_GAP
+    } else {
+        0.0
+    };
+    let room = ui.available_width() - mark_column;
     let galley = spellings
         .iter()
         .map(|text| {
             ui.painter()
-                .layout_no_wrap(text.clone(), font.clone(), color)
+                .layout_no_wrap(text.clone(), font.clone(), tokens.color.text_dim)
         })
         .find(|galley| galley.size().x + 14.0 <= room)?;
     let text = spellings.first()?.as_str();
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(galley.size().x + 14.0, 19.0), Sense::hover());
-    ui.painter().rect(
-        rect,
-        tokens.radius,
-        color.gamma_multiply(0.14),
-        Stroke::new(1.0, color.gamma_multiply(0.5)),
-        egui::StrokeKind::Inside,
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(mark_column + galley.size().x + 14.0, 19.0),
+        Sense::hover(),
     );
+    if let Some(problem) = problem {
+        paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                Pos2::new(rect.left() + 7.0 + CHIP_MARK_SIDE / 2.0, rect.center().y),
+                Vec2::splat(CHIP_MARK_SIDE),
+            ),
+            problem,
+        );
+    }
     ui.painter().galley(
-        Pos2::new(rect.left() + 7.0, rect.center().y - galley.size().y * 0.5),
+        Pos2::new(
+            rect.left() + 7.0 + mark_column,
+            rect.center().y - galley.size().y * 0.5,
+        ),
         galley,
-        color,
+        tokens.color.text_dim,
     );
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));

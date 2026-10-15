@@ -118,9 +118,10 @@ fn strip_row(
         if let Some(caption) = stage.realization.trace.caption() {
             ui.add(
                 egui::Label::new(
+                    // What the curve is, not a warning about it.
                     egui::RichText::new(caption)
                         .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
-                        .color(tokens.color.warn),
+                        .color(tokens.color.text_dim),
                 )
                 .truncate(),
             );
