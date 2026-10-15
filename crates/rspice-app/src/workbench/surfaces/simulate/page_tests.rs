@@ -95,6 +95,43 @@ fn plan_id(app: &RSpiceApp) -> crate::product::SimulationPlanId {
         .id()
 }
 
+/// A Studio page is named once, by its title.
+///
+/// Every one of the nine carried a sentence under that title explaining what
+/// the page was for, in the words of whoever built it — the lecture subtitle,
+/// which says nothing the controls beneath it do not already show. The
+/// fragments below are what each page used to say.
+#[test]
+fn no_studio_page_paints_a_sentence_under_its_title() {
+    for (page, lecture) in [
+        (
+            SimulationPage::Analyses,
+            "Order the plan, configure each analysis",
+        ),
+        (SimulationPage::Excitations, "See every source the design"),
+        (SimulationPage::Variables, "Own the typed parameters"),
+        (SimulationPage::Outputs, "Own the expressions the run saves"),
+        (
+            SimulationPage::Specifications,
+            "Own the limits a result is judged",
+        ),
+        (SimulationPage::RunSet, "Compose the run space from process"),
+        (SimulationPage::Models, "Own the ordered model closure"),
+        (SimulationPage::Solver, "Own what counts as converged"),
+        (SimulationPage::Save, "Own what is stored"),
+    ] {
+        let rendered = render(page, 1200.0);
+        assert!(
+            rendered.contains(page.title()),
+            "{page:?} must still paint its title:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains(lecture),
+            "{page:?} still lectures under its title:\n{rendered}"
+        );
+    }
+}
+
 /// Every field the record editors expose has to reach the screen as a control,
 /// not just exist in the model. These two pages are the only place an authored
 /// record's contract can be changed, so a field that silently stopped painting

@@ -81,7 +81,7 @@ fn design_excitations(
     )
 }
 
-/// Title, description, and the page's own primary action.
+/// The page's title, its preflight standing, and its own primary action.
 fn page_heading(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
     let chip = PreflightChip::resolve(app);
     ui.horizontal(|ui| {
@@ -93,7 +93,10 @@ fn page_heading(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
             egui::vec2((available - action_width - chip_reserve).max(1.0), 0.0),
             egui::Layout::top_down(egui::Align::Min),
             |ui| {
-                heading(ui, page.title(), Some(page.description()));
+                // Title only. The sentence that sat under it told the reader
+                // what the page is for in the words of whoever built it, which
+                // is a thing the controls under it already show.
+                heading(ui, page.title(), None);
             },
         );
         if action.is_none() && chip.is_none() {

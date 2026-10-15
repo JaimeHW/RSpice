@@ -816,38 +816,6 @@ impl SimulationPage {
             Self::Save => "Save, streaming & retention policy",
         }
     }
-
-    pub const fn description(self) -> &'static str {
-        match self {
-            Self::Analyses => {
-                "Order the plan, configure each analysis, and resolve every dependency before dispatch."
-            }
-            Self::Excitations => {
-                "See every source the design places, what waveform it carries, and which analyses read it."
-            }
-            Self::Variables => {
-                "Own the typed parameters the plan resolves, their bounds, and what a change invalidates."
-            }
-            Self::Outputs => {
-                "Own the expressions the run saves and the semantic status each one resolves to."
-            }
-            Self::Specifications => {
-                "Own the limits a result is judged against and how a missing measurement is treated."
-            }
-            Self::RunSet => {
-                "Compose the run space from process, temperature and variation, and see exactly how many points it resolves to."
-            }
-            Self::Models => {
-                "Own the ordered model closure this plan binds against and the section each library resolves to."
-            }
-            Self::Solver => {
-                "Own what counts as converged, how the solve recovers when it is not, and how time and the matrix are handled."
-            }
-            Self::Save => {
-                "Own what is stored, how it is streamed while solving, and how long it is retained."
-            }
-        }
-    }
 }
 
 /// Whether a Simulation Studio plan command changed the plan or was refused.
