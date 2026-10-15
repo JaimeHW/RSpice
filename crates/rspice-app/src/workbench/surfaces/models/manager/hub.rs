@@ -834,8 +834,13 @@ pub(super) fn packs_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &
 /// field that never travelled inside the signed bytes, so this session has no
 /// way to know it without asking again.
 /// An expired catalog replaces the age clause rather than joining it, for the
-/// same reason: "signed on the 14th · verified · 9 days old · expired" makes a
-/// reader assemble the verdict themselves, and the verdict is the whole line.
+/// same reason: "signed on the 14th · 9 days old · expired" makes a reader
+/// assemble the verdict themselves, and the verdict is the whole line.
+///
+/// The line no longer ends in "verified". A catalog that did not verify is
+/// discarded before it reaches this line, so the word was printed on every
+/// catalog that could possibly be described here and told a reader nothing
+/// they could act on.
 pub(super) fn catalog_summary(
     signed: Option<&str>,
     age_days: Option<u64>,
@@ -854,7 +859,6 @@ pub(super) fn catalog_summary(
     if let Some(generation) = generation {
         summary.push_str(&format!(" · generation {generation}"));
     }
-    summary.push_str(" · verified");
     if let Some(expired) = expired {
         // The instant, not "expired": a reader deciding whether to trust a
         // machine's clock, or whether a colleague's session is in the same
@@ -885,6 +889,13 @@ pub(super) fn catalog_summary(
 /// workspace that is behaving exactly as documented.
 fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog) {
     let t = Tokens::get(ui.ctx());
+    // A session with no pack store says so in the empty state filling the pane
+    // under this line, which is where a reader looking at an empty pane is
+    // already looking. Saying it here as well put the same sentence twice on
+    // one screen, and neither copy offered anything to do about it.
+    if hub.unavailable.is_some() {
+        return;
+    }
     egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(12, 4))
         .show(ui, |ui| {
@@ -894,12 +905,8 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                 // zeroes item spacing to do it; a line of separate phrases has
                 // to ask for its own gaps back or it reads as one run-on word.
                 ui.spacing_mut().item_spacing.x = 10.0;
-                if let Some(reason) = hub.unavailable.as_deref() {
-                    announced(ui, RichText::new(reason).small().color(t.color.err), reason);
-                    return;
-                }
                 if let Some(reason) = hub.catalog_time_issue.as_deref() {
-                    announced(ui, RichText::new(reason).small().color(t.color.err), reason);
+                    marked_line(ui, Problem::Failure, reason);
                     return;
                 }
                 let summary = catalog_summary(
@@ -911,19 +918,20 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                     hub.cache_discarded,
                     hub.expired.as_deref(),
                 );
-                announced(
-                    ui,
-                    RichText::new(&summary).small().color(
-                        if hub.cache_discarded || hub.expired.is_some() {
-                            t.color.err
-                        } else if hub.stale {
-                            t.color.warn
-                        } else {
-                            t.color.text_dim
-                        },
+                match if hub.cache_discarded || hub.expired.is_some() {
+                    Some(Problem::Failure)
+                } else if hub.stale {
+                    Some(Problem::Warning)
+                } else {
+                    None
+                } {
+                    Some(problem) => marked_line(ui, problem, &summary),
+                    None => announced(
+                        ui,
+                        RichText::new(&summary).small().color(t.color.text_dim),
+                        &summary,
                     ),
-                    &summary,
-                );
+                }
                 let (parts, held) = hub.part_totals();
                 if parts > 0 {
                     // Grammar through the crate's one count formatter rather
@@ -999,6 +1007,24 @@ pub(super) fn announced(ui: &mut Ui, text: RichText, label: &str) {
     announced_widget(ui, egui::Label::new(text), label);
 }
 
+/// One line of banner prose the reader has to notice: the mark its severity
+/// earns, then the words in the ink every other line on the page is in.
+///
+/// The announced text is the sentence alone, because the sentences this page
+/// marks already say what is wrong in their own words and a screen reader
+/// reading "Error:" in front of "the model hub could not be reached" hears
+/// the severity twice.
+pub(super) fn marked_line(ui: &mut Ui, problem: Problem, text: &str) {
+    ui.horizontal(|ui| {
+        // The kit's own advance, so a marked line and an unmarked one beside
+        // it start their words the same distance apart wherever both appear.
+        ui.spacing_mut().item_spacing.x = MARK_ADVANCE - MARK_SIDE;
+        let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(MARK_SIDE), Sense::hover());
+        paint_problem_mark(ui.painter(), rect, problem);
+        announced(ui, RichText::new(text).small(), text);
+    });
+}
+
 /// The same, for a line that has to be told how to behave when it runs out of
 /// room — truncating rather than pushing the control beside it off the pane.
 ///
@@ -1048,21 +1074,14 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_inset)
-        .stroke(Stroke::new(1.0, t.color.err))
+        .stroke(Stroke::new(1.0, t.color.border_strong))
         .inner_margin(egui::Margin::symmetric(12, 7))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
             ui.spacing_mut().item_spacing.y = 3.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                announced(
-                    ui,
-                    RichText::new(state.label())
-                        .small()
-                        .strong()
-                        .color(t.color.err),
-                    state.label(),
-                );
+                marked_line(ui, Problem::Failure, state.label());
                 announced(
                     ui,
                     RichText::new(&attempted.label)
@@ -1112,33 +1131,53 @@ const LEDGER_COLUMNS: [(&str, f32); 6] = [
     ("Attention", 0.18),
 ];
 
-/// Paints a toned cell the shared row painter cannot tone.
+/// Paints a cell the shared row painter cannot paint: one of the two that
+/// carry urgency and commitment rather than a fact.
 ///
-/// Every other cell in this table is a fact; these two carry urgency and
-/// commitment, and a warning painted in the same dim grey as a pack identifier
-/// is a warning nobody sees.
-fn paint_toned_cell(ui: &Ui, rect: egui::Rect, column: usize, phrase: &str, color: Color32) {
+/// The mark in front of the words is what makes a warning visible, and the
+/// words themselves read in the same ink as the pack identifier beside them —
+/// so a row with something wrong on it differs from a quiet row by one glyph
+/// rather than by a sentence in red.
+fn paint_marked_cell(
+    ui: &Ui,
+    rect: egui::Rect,
+    column: usize,
+    phrase: &str,
+    problem: Option<Problem>,
+) {
+    let t = Tokens::get(ui.ctx());
     let start: f32 = LEDGER_COLUMNS[..column]
         .iter()
         .map(|(_, width)| width)
         .sum();
     let x = rect.left() + rect.width() * start + 5.0;
     let width = rect.width() * LEDGER_COLUMNS[column].1 - 9.0;
+    let advance = problem.map_or(0.0, |problem| {
+        paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(x + MARK_SIDE * 0.5, rect.center().y),
+                egui::Vec2::splat(MARK_SIDE),
+            ),
+            problem,
+        );
+        MARK_ADVANCE
+    });
     ui.painter().text(
-        egui::pos2(x, rect.center().y),
+        egui::pos2(x + advance, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        elide(ui, phrase, width, true),
+        elide(ui, phrase, (width - advance).max(8.0), true),
         theme::mono(tokens::FS_0, FontWeight::Regular),
-        color,
+        t.color.text_dim,
     );
 }
 
-/// What the Project cell says, and whether it says it quietly.
+/// What the Project cell says.
 ///
 /// A pin whose release is installed and whose archive is the pinned one is the
 /// healthy case and states only the commitment. Everything else appends the one
 /// word that names how it diverged.
-fn project_cell(adoption: &PackAdoption) -> Option<(String, bool)> {
+fn project_cell(adoption: &PackAdoption) -> Option<String> {
     let PackAdoption::Pinned {
         version,
         parts,
@@ -1152,10 +1191,10 @@ fn project_cell(adoption: &PackAdoption) -> Option<(String, bool)> {
         if *parts == 1 { "" } else { "s" }
     );
     Some(match health {
-        PinHealth::Matching => (label, false),
-        PinHealth::Differs { installed } => (format!("{label} · differs from {installed}"), true),
-        PinHealth::ArchiveReplaced => (format!("{label} · archive replaced"), true),
-        PinHealth::Absent => (format!("{label} · not installed"), true),
+        PinHealth::Matching => label,
+        PinHealth::Differs { installed } => format!("{label} · differs from {installed}"),
+        PinHealth::ArchiveReplaced => format!("{label} · archive replaced"),
+        PinHealth::Absent => format!("{label} · not installed"),
     })
 }
 
@@ -1263,16 +1302,17 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
     inspector(ui, app, hub, fills);
 }
 
-/// The one colour each tone is painted in, named once.
+/// The mark each tone earns, named once.
 ///
 /// The table and the inspector both paint the same phrase, and they used to
 /// each carry their own `match` — two places to add a tone to and one of them
-/// to forget.
-fn tone_colour(tone: AttentionTone, t: &Tokens) -> Color32 {
+/// to forget. Work in flight earns no mark: it is not an exception, and the
+/// reader's only move while it runs is to wait.
+const fn attention_mark(tone: AttentionTone) -> Option<Problem> {
     match tone {
-        AttentionTone::Error => t.color.err,
-        AttentionTone::Warn => t.color.warn,
-        AttentionTone::Active => t.color.accent,
+        AttentionTone::Error => Some(Problem::Failure),
+        AttentionTone::Warn => Some(Problem::Warning),
+        AttentionTone::Active => None,
     }
 }
 
@@ -1301,7 +1341,6 @@ fn ledger_line(
     row: &HubLedgerRow,
     attention: Option<&Attention>,
 ) {
-    let t = Tokens::get(ui.ctx());
     let transfer = pack_transfer(app.state, row);
     let attention = transfer.as_ref().or(attention);
     let selected =
@@ -1326,26 +1365,19 @@ fn ledger_line(
             ("", LEDGER_COLUMNS[5].1, true),
         ],
     );
-    if let Some((label, diverged)) = project.as_ref() {
-        paint_toned_cell(
-            ui,
-            response.rect,
-            4,
-            label,
-            if *diverged {
-                t.color.warn
-            } else {
-                t.color.text_dim
-            },
-        );
+    // The Project cell states the commitment and how it diverged, and states
+    // it quietly: the Attention cell beside it is the row's one loud cell, and
+    // a pin whose release is missing or replaced is already named there.
+    if let Some(label) = project.as_ref() {
+        paint_marked_cell(ui, response.rect, 4, label, None);
     }
     if let Some(attention) = attention {
-        paint_toned_cell(
+        paint_marked_cell(
             ui,
             response.rect,
             5,
             &attention.phrase,
-            tone_colour(attention.tone, &t),
+            attention_mark(attention.tone),
         );
     }
     // The row's cells are painter text and publish nothing, so the row's own
@@ -1449,12 +1481,14 @@ fn inspector_identity(
         ui.label(RichText::new(&row.pack_id).monospace().strong());
         ui.label(RichText::new(&row.name).small().color(t.color.text_dim));
         if let Some(attention) = attention {
+            if let Some(problem) = attention_mark(attention.tone) {
+                let (mark, _) =
+                    ui.allocate_exact_size(egui::Vec2::splat(MARK_SIDE), Sense::hover());
+                paint_problem_mark(ui.painter(), mark, problem);
+            }
             announced(
                 ui,
-                RichText::new(&attention.phrase)
-                    .small()
-                    .monospace()
-                    .color(tone_colour(attention.tone, &t)),
+                RichText::new(&attention.phrase).small().monospace(),
                 &attention.detail,
             );
         }
@@ -1572,31 +1606,31 @@ fn releases_pane(
                         );
                     }
                 });
-            ui.label(
-                RichText::new(if row.missing.is_empty() {
-                    match row.releases.first() {
-                        Some(release) if release.capabilities.is_empty() => {
-                            "Needs nothing beyond the core engine.".to_owned()
-                        }
-                        Some(release) => format!(
-                            "Needs {} — this build provides all of them.",
-                            release.capabilities.join(" · ")
-                        ),
-                        None => String::new(),
-                    }
-                } else {
-                    format!(
+            // What the release needs is a fact about the release; that this
+            // build happens to provide it is the normal case and was a line
+            // printed under every pack to report nothing having gone wrong.
+            if row.missing.is_empty() {
+                if let Some(release) = row
+                    .releases
+                    .first()
+                    .filter(|release| !release.capabilities.is_empty())
+                {
+                    ui.label(
+                        RichText::new(format!("Needs {}", release.capabilities.join(" · ")))
+                            .small()
+                            .color(t.color.text_faint),
+                    );
+                }
+            } else {
+                marked_line(
+                    ui,
+                    Problem::Failure,
+                    &format!(
                         "Needs {} — not in this build, so installing is refused.",
                         plain_list(&row.missing)
-                    )
-                })
-                .small()
-                .color(if row.missing.is_empty() {
-                    t.color.text_faint
-                } else {
-                    t.color.err
-                }),
-            );
+                    ),
+                );
+            }
             if let Some(diff) = diff {
                 super::adoption::pane(ui, app, row, diff);
             }
@@ -1636,7 +1670,7 @@ fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>, he
                 ),
             }
             match project_cell(&row.adoption) {
-                Some((label, _)) => property(ui, "In this project", &label, "recorded pin"),
+                Some(label) => property(ui, "In this project", &label, "recorded pin"),
                 None => property(ui, "In this project", "no parts adopted", "no pin recorded"),
             }
             if let Some(update) = row.update.as_deref()
@@ -1650,15 +1684,11 @@ fn catalog_pane(ui: &mut Ui, row: &HubLedgerRow, proof: Option<&PackReProof>, he
             // hashes to the published digest" into "the retained archive no lon" —
             // a phrase that reads as reassurance.
             if let Some((value, origin)) = verdict {
-                ui.label(
-                    RichText::new(&value)
-                        .small()
-                        .color(if value.starts_with("verified") {
-                            t.color.text_dim
-                        } else {
-                            t.color.warn
-                        }),
-                );
+                if value.starts_with("verified") {
+                    ui.label(RichText::new(&value).small().color(t.color.text_dim));
+                } else {
+                    marked_line(ui, Problem::Warning, &value);
+                }
                 ui.label(RichText::new(origin).small().color(t.color.text_faint));
             }
         },

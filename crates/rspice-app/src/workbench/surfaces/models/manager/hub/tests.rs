@@ -607,7 +607,7 @@ fn the_project_column_states_the_release_this_design_committed_to() {
     );
     assert_eq!(
         project_cell(&matching.adoption),
-        Some(("1 part @ 1.0.0".to_owned(), false)),
+        Some("1 part @ 1.0.0".to_owned()),
         "a matching pin states the commitment and nothing else"
     );
 
@@ -618,7 +618,7 @@ fn the_project_column_states_the_release_this_design_committed_to() {
     );
     assert_eq!(
         project_cell(&stale.adoption),
-        Some(("2 parts @ 1.0.0 · differs from 1.1.0".to_owned(), true))
+        Some("2 parts @ 1.0.0 · differs from 1.1.0".to_owned())
     );
 
     let unpinned = pack(vec![row("Proving", "1.0.0", HubPackState::Available)], None);
@@ -633,11 +633,13 @@ fn the_project_column_states_the_release_this_design_committed_to() {
 fn the_status_line_states_what_is_held_and_offers_the_two_things_to_do() {
     assert_eq!(
         catalog_summary(Some("2026-08-14"), Some(0), Some(41), false, None),
-        "Catalog signed 2026-08-14 · generation 41 · verified"
+        "Catalog signed 2026-08-14 · generation 41",
+        "the line states what is held; a catalog that did not verify never \
+         reaches it, so saying it verified says nothing"
     );
     assert_eq!(
         catalog_summary(Some("2026-08-14"), Some(9), None, false, None),
-        "Catalog signed 2026-08-14 · verified · 9 days old",
+        "Catalog signed 2026-08-14 · 9 days old",
         "a cached snapshot carries no generation, so none is claimed"
     );
     assert_eq!(
@@ -654,7 +656,7 @@ fn the_status_line_states_what_is_held_and_offers_the_two_things_to_do() {
             false,
             Some("2026-09-13T09:30:00Z")
         ),
-        "Catalog signed 2026-08-14 · generation 41 · verified · expired \
+        "Catalog signed 2026-08-14 · generation 41 · expired \
          2026-09-13T09:30:00Z — refresh"
     );
 

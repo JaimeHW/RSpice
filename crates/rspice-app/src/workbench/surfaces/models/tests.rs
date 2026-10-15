@@ -66,7 +66,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00c-installed-packs",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::InstalledPacks,
-        fingerprint: "c114e17603bed0fb7842763b6ddf292e7d4abaaf3453c8b1c25c2b976f516c5a",
+        fingerprint: "18ed506c419dcdcdac86e89cf04d5f4085d96815499443c06934a8dc0b590810",
     },
 ];
 
