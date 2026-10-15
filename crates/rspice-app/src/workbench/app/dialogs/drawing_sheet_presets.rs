@@ -157,10 +157,16 @@ impl RSpiceApp {
         let mut action = None;
         let choice = Dialog::new(LIBRARY_TITLE, "Close")
             .description(LIBRARY_DESCRIPTION)
-            .size(DialogSize::DrawingSheetWorkflow)
+            .size(DialogSize::DrawingSheetLibrary)
+            // The table's columns are as wide as the widest thing in them, so
+            // the surface is as wide as the columns.
+            .width_from_content(render::library_width(ctx, &presets, &usage))
             // The body owns its section surfaces and they butt on their own
-            // edges; the dialog's default inset framed the whole page.
+            // edges; the dialog's default inset framed the whole page. A
+            // withheld scrollbar gutter would show as a strip of bare surface
+            // down the trailing edge of every band, so the bar floats.
             .flush_body()
+            .overlay_scrollbar()
             .primary_on_enter(false)
             .show(ctx, |ui| {
                 action = render::library_body(
@@ -341,6 +347,10 @@ impl RSpiceApp {
                 "Create a reusable custom size without changing the current sheet. A sheet uses the preset only after it is selected in Page Setup."
             })
             .size(DialogSize::DrawingSheetWorkflow)
+            // The body is one continuous page whose sections reach the
+            // dialog's own edges; the standard inset framed it as a card.
+            .flush_body()
+            .overlay_scrollbar()
             .ghost("Cancel")
             .primary_enabled(primary_enabled)
             .show(ctx, |ui| {
@@ -1329,6 +1339,92 @@ mod tests {
     use crate::state::pdk_config::{PdkPublisherTrustStore, TrustedPdkPublisherKey};
 
     use super::*;
+
+    const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
+
+    /// The library and the custom-size editor, each over a project that owns
+    /// one preset, at desktop and phone widths in both modes. Run with
+    /// `--ignored`; `RSPICE_RASTER_DIR` names the output directory.
+    #[test]
+    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
+    fn render_custom_sheet_size_dialogs_for_review() {
+        use std::io::Write as _;
+
+        let directory = std::env::var("RSPICE_RASTER_DIR")
+            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
+        std::fs::create_dir_all(&directory).expect("raster output directory");
+        let stderr = std::io::stderr();
+        let mut report = stderr.lock();
+        for (name, size, coarse) in [
+            ("1440x900", DESKTOP, false),
+            ("390x844", egui::vec2(390.0, 844.0), true),
+        ] {
+            for (mode, mode_name) in [
+                (crate::ui::Mode::Dark, "dark"),
+                (crate::ui::Mode::Light, "light"),
+            ] {
+                for (page, open_editor) in [("library", false), ("editor", true)] {
+                    let mut app = RSpiceApp::test_instance();
+                    // A headless pass has no clock for an opening fade, so a
+                    // dialog would otherwise rasterize part-transparent.
+                    app.state.ui.preferences.set_toggle(
+                        crate::workbench::preferences::TogglePreference::ReducedMotion,
+                        true,
+                    );
+                    app.state.project_lifecycle.authority.open_session();
+                    app.state.workbench.coarse_pointer = coarse;
+                    let preset = DrawingSheetPreset {
+                        id: "lab-documentation-panel".to_owned(),
+                        name: "Lab documentation panel".to_owned(),
+                        scope: DrawingSheetPresetScope::Project,
+                        format: model::custom_format(
+                            "Lab documentation panel",
+                            250_000,
+                            400_000,
+                            StartingFrame::IsoA,
+                        )
+                        .unwrap(),
+                    };
+                    let mut seeded = app.state.workspace.content.design_management.clone();
+                    seeded
+                        .publish_drawing_sheet_preset(seeded.revision(), preset)
+                        .unwrap();
+                    app.state
+                        .workspace
+                        .content
+                        .replace_design_management(seeded)
+                        .unwrap();
+                    assert!(open_custom_sheet_size_library(&mut app.state));
+                    if open_editor {
+                        app.handle_preset_library_action(LibraryBodyAction::New);
+                        let draft = app
+                            .state
+                            .dialogs
+                            .drawing_sheet_presets
+                            .editor
+                            .as_mut()
+                            .expect("the editor opened");
+                        draft.name = "Test strip panel".to_owned();
+                        draft.width = "250".to_owned();
+                        draft.height = "400".to_owned();
+                    }
+                    let theme = crate::ui::Theme {
+                        mode,
+                        ..crate::ui::Theme::default()
+                    };
+                    app.state.ui.theme = theme;
+                    let canvas = crate::ui::raster::render_themed(theme, size, |ui, _| {
+                        app.render_frame_chrome(ui);
+                        app.render_frame_dialogs(ui.ctx());
+                    });
+                    let path =
+                        directory.join(format!("custom-sheet-{page}-{name}-{mode_name}.png"));
+                    std::fs::write(&path, canvas.png(size.y as usize)).expect("write the render");
+                    writeln!(report, "{}", path.display()).ok();
+                }
+            }
+        }
+    }
 
     fn build_package(
         presets: impl IntoIterator<Item = DrawingSheetPreset>,
