@@ -170,26 +170,26 @@ impl RunSetFrame {
 /// not show. Advisories appear here rather than nowhere, because a report the
 /// page never draws is a report nobody receives.
 fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
-    let errors = validation.errors.len();
-    let advisories = validation.warnings.len();
     // The title says whether the preview is blocked; a status beside it said
-    // the same thing again.
-    let title = if errors > 0 {
-        format!(
-            "Run-set preview blocked · {errors} issue{}",
-            if errors == 1 { "" } else { "s" }
-        )
+    // the same thing again, and a count beside it counted the rows underneath.
+    let title = if validation.errors.is_empty() {
+        "Run-set advisories"
     } else {
-        format!(
-            "Run-set advisories · {advisories} note{}",
-            if advisories == 1 { "" } else { "s" }
-        )
+        "Run-set preview blocked"
     };
     let mut focus = None;
-    card(ui, &title, None, |ui| {
+    card(ui, title, None, |ui| {
         card_body(ui, |ui| {
             for error in &validation.errors {
-                let text = format!("{} · {}", error.id, error.message);
+                // The stable code belongs to the receipt and the log: it is
+                // ours, not a code a reader can look up, and the sentence after
+                // it already said the whole thing. A refusal about one axis
+                // leads with that axis instead, because the message alone does
+                // not name the declaration that is wrong.
+                let text = match axis_name(app, error.dimension_id.as_deref()) {
+                    Some(name) => format!("{name} · {}", error.message),
+                    None => error.message.clone(),
+                };
                 // A refusal is a control only when it names a dimension to send
                 // the operator to. Composition and budget refusals name none, so
                 // they are read as statements rather than sensing a click that
@@ -205,7 +205,7 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
                     egui::WidgetInfo::labeled(
                         egui::WidgetType::Button,
                         ui.is_enabled(),
-                        format!("Select the dimension {} is about", error.id),
+                        format!("{text} · select this dimension"),
                     )
                 });
                 theme::paint_focus_ring(ui, &response, response.rect);
@@ -214,11 +214,7 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
                 }
             }
             for warning in &validation.warnings {
-                note_line(
-                    ui,
-                    &format!("{} · {}", warning.id, warning.message),
-                    Tone::Warn,
-                );
+                note_line(ui, &warning.message, Tone::Warn);
             }
         });
     });
@@ -226,6 +222,18 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
         app.state.workbench.selected_run_set_dimension = Some(id);
         app.state.workbench.run_set_values_draft = None;
     }
+}
+
+/// The authored name of the dimension a refusal is about.
+fn axis_name<'a>(app: &'a RSpiceApp, dimension_id: Option<&str>) -> Option<&'a str> {
+    let id = dimension_id?;
+    app.state
+        .sim_setup
+        .run_set
+        .dimensions
+        .iter()
+        .find(|dimension| dimension.id == id)
+        .map(|dimension| dimension.name.as_str())
 }
 
 // ---------------------------------------------------------------- run space
@@ -956,12 +964,8 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                     });
                 }
             });
-            card_note(
-                ui,
-                "A value that does not parse keeps its place and its identity so the points it \
-                 blocks can be named. Nothing is corrected, rounded or dropped on the way to the \
-                 engine.",
-            );
+            // No note under the policy: the chosen option already reads
+            // "Preserve · block affected points".
         },
     );
 
@@ -1155,7 +1159,8 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                         action = Some(RunSetAction::SetComposition(edited));
                     }
                 }
-                rule_row(ui, "Contract", mode.contract());
+                // No contract row: it restated the mode the dropdown above
+                // names, in the implementation's words.
                 rule_row(
                     ui,
                     "Statistical variation",
@@ -1179,11 +1184,9 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                         ),
                     },
                 );
-                rule_row(
-                    ui,
-                    "Point identity",
-                    "every coordinate is carried into the run manifest",
-                );
+                // No point-identity row: it stated one unchanging sentence
+                // about the manifest format, which is not a thing the reader
+                // chooses or acts on here.
             });
         },
     );

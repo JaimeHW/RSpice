@@ -337,37 +337,6 @@ impl RunSetCompositionMode {
         }
     }
 
-    /// The mode's contract, stated where it is chosen.
-    #[must_use]
-    pub fn contract(self) -> &'static str {
-        match self {
-            Self::Cartesian => {
-                "Full cross product of every enabled dimension; the point count is the product of \
-                 their value counts."
-            }
-            Self::Zipped => {
-                "Index-aligned pairing: non-scalar dimensions must share one length, and implicit \
-                 cycling is prohibited."
-            }
-            Self::Filtered => {
-                "Full cross product less an explicit set of excluded points, each named by the \
-                 identities of the values it is made of. An exclusion the space no longer contains \
-                 is reported, never silently discarded."
-            }
-            Self::Conditional => {
-                "Cartesian candidates accepted only when the versioned predicate over declared upstream dimensions evaluates to true."
-            }
-            Self::Adaptive => {
-                "The declared matrix is the initial design; a frozen deterministic policy may add proposals up to its stated maximum."
-            }
-            Self::Nested => {
-                "The same points as Cartesian, in the declared nesting order: the first enabled \
-                 dimension is outermost and the last is innermost. The declared maximum depth \
-                 bounds how many dimensions may be nested; it does not remove points."
-            }
-        }
-    }
-
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {

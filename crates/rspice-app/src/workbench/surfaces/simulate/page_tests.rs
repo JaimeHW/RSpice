@@ -376,8 +376,12 @@ fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
     });
 
     assert!(
-        rendered.contains("RUNSET-VALUE-SOURCE"),
-        "the refusal must be identified by its stable code:\n{rendered}"
+        rendered.contains("Temperature \u{b7} warm is not a temperature"),
+        "the refusal must lead with the axis it is about:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("RUNSET-"),
+        "a stable code belongs to the receipt and the log, not to the page:\n{rendered}"
     );
     assert!(
         rendered.contains("warm"),
@@ -387,6 +391,55 @@ fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
         rendered.contains("Run-set preview blocked"),
         "the page must say that nothing was dispatched:\n{rendered}"
     );
+}
+
+/// An advisory states what the space is doing. Our own identifier for it is not
+/// a code a reader can look up, and the band head cannot count rows the reader
+/// is already looking at.
+#[test]
+fn the_advisory_band_states_the_advice_without_a_code_or_a_count() {
+    let rendered = render(SimulationPage::RunSet, 1200.0);
+
+    assert!(
+        rendered.contains("No process axis is enabled"),
+        "the advisory itself must reach the page:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("Run-set advisories\n"),
+        "the band is named once, with nothing after it:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("RUNSET-"),
+        "a stable code belongs to the receipt and the log, not to the page:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("notes"),
+        "the rows underneath are the count:\n{rendered}"
+    );
+}
+
+/// The composition card names the mode and what that mode costs this plan. It
+/// does not restate the mode's own definition, describe the manifest format, or
+/// explain the invalid-value policy the dropdown beside it already states.
+#[test]
+fn the_composition_card_restates_no_rule_its_own_controls_already_name() {
+    let rendered = render(SimulationPage::RunSet, 1200.0);
+
+    assert!(
+        rendered.contains("Cartesian \u{b7} every combination"),
+        "the mode is still named, by the control that chooses it:\n{rendered}"
+    );
+    for lecture in [
+        "Full cross product",
+        "Point identity",
+        "run manifest",
+        "Nothing is corrected, rounded or dropped",
+    ] {
+        assert!(
+            !rendered.contains(lecture),
+            "{lecture:?} explains the implementation of a control on this page:\n{rendered}"
+        );
+    }
 }
 
 /// The strip, the forecast and the point table read one declaration.
