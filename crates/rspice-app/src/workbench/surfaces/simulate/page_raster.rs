@@ -31,7 +31,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
-        fingerprint: "78191ad49e64caafa32d277ed173cbfab933ee2d3837e7e3889e651dafed9179",
+        fingerprint: "2c75a139aa9add63febb93b85b8014b8b314a539888a491fb17740eddaf8ad16",
     },
     StudioBaseline {
         name: "studio-excitations",
@@ -41,12 +41,12 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-variables",
         page: SimulationPage::Variables,
-        fingerprint: "1f52fe4bc7d724145d5c292243ebdd83dcbef56653239fc77274a715dd12b19b",
+        fingerprint: "83651f197ecfc70fbf460ac6700e2e54d390690ede8c0bf586b056c8c27fdd71",
     },
     StudioBaseline {
         name: "studio-outputs",
         page: SimulationPage::Outputs,
-        fingerprint: "905720769f0528b69b943b1b760f8a1c821bfb32e89aa1448008b13e7cf23af1",
+        fingerprint: "b56873cb5338b1c24f5a9cc6069332c7b33ce51c1b650b054ff13d21d40ee540",
     },
     StudioBaseline {
         name: "studio-specifications",
@@ -56,12 +56,12 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-run-set",
         page: SimulationPage::RunSet,
-        fingerprint: "30656c27178d2735c418699d65e928c601b66c159cb21b5146150089a5611a01",
+        fingerprint: "95f0e34376a7ef2c4c54ab130ab3afe6d2ca5ed7226f25f8454180146c5a5f2a",
     },
     StudioBaseline {
         name: "studio-models",
         page: SimulationPage::Models,
-        fingerprint: "4c69f1ee83c76cf83f3d0d2d071db25cd58ac49bb6ad2898e8c279371bbeeefb",
+        fingerprint: "5bd2d15f048095971bf1cf30964045781e6ebedac175b3a0020aefa682939a71",
     },
     StudioBaseline {
         name: "studio-solver",
@@ -71,7 +71,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-save",
         page: SimulationPage::Save,
-        fingerprint: "319de32361796fe58a1933d849b2afa8462b51d1764eeaba9f7a0df47e9a2242",
+        fingerprint: "960de4e65dbbbdbefe34a6495430a418fb3b02c9bc7e4d7bf2e283693f4e6016",
     },
 ];
 
