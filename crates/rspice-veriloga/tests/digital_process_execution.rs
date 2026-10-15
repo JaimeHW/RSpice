@@ -9047,3 +9047,52 @@ fn linking_relocates_sites_scopes_and_observers_per_instance() {
     }
     assert_ne!(plan.observers[0].site, plan.observers[1].site);
 }
+
+/// IEEE 1364-2005 section 12.3.3: only an output port may be a variable. The
+/// linker copies an output variable onto its net, and refuses a variable bound
+/// as an input, which analysis already rejects in the source.
+#[test]
+fn linking_copies_an_output_variable_onto_its_net_and_refuses_an_input_one() {
+    use rspice_veriloga::canonical_ir::digital_link::{
+        DigitalLinkDirection, DigitalLinkInstance, DigitalLinkNet, DigitalLinkPort,
+        link_digital_plans,
+    };
+    let base = Harness::from_source("module drive(q); output q; reg q; initial q = 1; endmodule");
+    let q = base.signal("q");
+    let nets = [DigitalLinkNet {
+        name: "n".into(),
+        ports: vec![("a".into(), "q".into())],
+    }];
+    let link = |direction| {
+        let ports = [DigitalLinkPort {
+            name: "q".into(),
+            signal: q,
+            direction,
+        }];
+        link_digital_plans(
+            &[DigitalLinkInstance {
+                name: "a",
+                plan: &base.plan,
+                ports: &ports,
+            }],
+            &nets,
+            &rspice_veriloga::NoPipelineControl,
+        )
+    };
+    let linked = link(DigitalLinkDirection::Output).unwrap();
+    linked.plan.validate().expect("the linked plan validates");
+    assert_eq!(linked.instances[0].connection_processes.len(), 1);
+    assert_ne!(linked.signal_names["a.q"], linked.signal_names["n"]);
+    for (direction, kind) in [
+        (DigitalLinkDirection::Input, "input"),
+        (DigitalLinkDirection::Inout, "bidirectional"),
+    ] {
+        let Err(errors) = link(direction) else {
+            panic!("a variable {kind} port must not link");
+        };
+        assert_eq!(
+            errors[0].message,
+            format!("{kind} digital port 'a.q' must be a net")
+        );
+    }
+}

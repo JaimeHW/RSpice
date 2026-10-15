@@ -353,20 +353,21 @@ pub fn link_digital_plans(
                 )));
             }
             if slots[slot].procedurally_assignable {
-                match direction {
+                // IEEE 1364-2005 section 12.3.3: only an output port may be a
+                // variable. Analysis refuses any other variable port, so the
+                // linker only ever copies a variable out onto its net.
+                let kind = match direction {
                     DigitalLinkDirection::Output => {
                         copies.insert((slot, net_slot, owner));
+                        continue;
                     }
-                    DigitalLinkDirection::Input => {
-                        copies.insert((net_slot, slot, owner));
-                    }
-                    DigitalLinkDirection::Inout => {
-                        return Err(error(format!(
-                            "bidirectional digital port '{}' must be a net",
-                            slots[slot].name
-                        )));
-                    }
-                }
+                    DigitalLinkDirection::Input => "input",
+                    DigitalLinkDirection::Inout => "bidirectional",
+                };
+                return Err(error(format!(
+                    "{kind} digital port '{}' must be a net",
+                    slots[slot].name
+                )));
             } else {
                 join(&mut parents, slot, net_slot);
             }
@@ -599,17 +600,8 @@ pub fn link_digital_plans(
         .into_iter()
         .map(|(source, target, owner)| (relocation[source], relocation[target], owner))
         .collect();
-    let mut variable_inputs = BTreeSet::new();
     for (source, target, owner) in copies {
         check_cancel(control)?;
-        if plan.signals[usize::from(target)].procedurally_assignable
-            && !variable_inputs.insert(target)
-        {
-            return Err(error(format!(
-                "variable input '{}' is connected to multiple independent nets",
-                plan.signals[usize::from(target)].name
-            )));
-        }
         let process = add_copy_process(
             &mut plan,
             source,
