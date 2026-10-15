@@ -391,21 +391,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(evidence) = selected_op_evidence(state) else {
         return;
     };
-    let analysis_key = state.simulation.active_run().and_then(|run| {
-        state
-            .simulation
-            .active_analysis()
-            .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
-    });
-    let device_count = analysis_key
-        .and_then(|key| op_plan(state, key))
-        .map_or(0, |plan| plan.display.device_in_scope());
-    viewer::right_panel(
-        ui,
-        &evidence,
-        device_count,
-        result_mapping_is_current(state),
-    );
+    viewer::right_panel(ui, &evidence, result_mapping_is_current(state));
 }
 #[cfg(test)]
 mod tests {

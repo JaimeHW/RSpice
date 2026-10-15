@@ -5,13 +5,13 @@ use egui::Ui;
 use rspice_results::operating_point::{
     DcOpResult, OperatingPointDeviceDetailEvidence, OperatingPointValue,
     report::{
-        OperatingPointReportFacts, RetainedDeviceDetail as RetainedDetail, annotation_label,
-        device_param_unit, process_label, retained_detail_allows, signal_leaf,
+        OperatingPointReportFacts, RetainedDeviceDetail as RetainedDetail, device_param_unit,
+        process_label, retained_detail_allows, signal_leaf,
     },
 };
 use rspice_ui_kit::{
     panels::section_header,
-    plot::fmt_si,
+    plot::{fmt_si, fmt_si_readout},
     theme::{self, FontWeight},
     tokens::{self, Tokens},
     widgets::{Problem, measurement_table, paint_problem_mark},
@@ -95,15 +95,25 @@ pub fn show_absent(ui: &mut Ui, absence: OpAbsence) {
         },
     );
 }
-fn detail_label(policy: Option<OperatingPointDeviceDetailEvidence>) -> &'static str {
+/// Why the device table is short, when it is.
+///
+/// A full save is the normal state and says nothing. A reduced one explains
+/// rows the reader expected and cannot find, which is the only case worth a
+/// line of the panel.
+fn reduced_scope_warning(
+    policy: Option<OperatingPointDeviceDetailEvidence>,
+) -> Option<&'static str> {
     match policy {
-        None => "legacy retained report",
-        Some(OperatingPointDeviceDetailEvidence::AllDevices) => "all devices retained",
+        None | Some(OperatingPointDeviceDetailEvidence::AllDevices) => None,
         Some(OperatingPointDeviceDetailEvidence::SelectedAndViolations) => {
-            "selected devices and violations retained"
+            Some("Only selected and violating devices were saved.")
         }
-        Some(OperatingPointDeviceDetailEvidence::ViolationsOnly) => "violations retained",
-        Some(OperatingPointDeviceDetailEvidence::None) => "device detail not retained",
+        Some(OperatingPointDeviceDetailEvidence::ViolationsOnly) => {
+            Some("Only violating devices were saved.")
+        }
+        Some(OperatingPointDeviceDetailEvidence::None) => {
+            Some("No per-device detail was saved for this run.")
+        }
     }
 }
 fn hierarchy_parts(name: &str, root: &str) -> (String, String) {
@@ -1210,62 +1220,49 @@ pub fn show(
         clicked_sort,
     }
 }
-pub fn right_panel(ui: &mut Ui, evidence: &OpEvidence, device_in_scope: usize, current: bool) {
-    section_header(ui, "OP result", None);
-    let run = format!("Run {}", evidence.run_id);
-    let node_count = evidence.node_count.to_string();
-    let branch_count = evidence.branch_count.to_string();
-    // The in-scope device count is a property of the retained detail policy,
-    // so it comes off the plan rather than re-filtering every device row.
-    let device_count = device_in_scope.to_string();
-    measurement_table(
-        ui,
-        &[
-            ("Run", run.as_str()),
-            ("Analysis", evidence.label.as_str()),
-            ("Node values", node_count.as_str()),
-            ("Branch values", branch_count.as_str()),
-            ("Device rows", device_count.as_str()),
-            ("Device scope", detail_label(evidence.detail_policy)),
-        ],
-    );
-
+pub fn right_panel(ui: &mut Ui, evidence: &OpEvidence, current: bool) {
+    // The dataset block above names the run and the analysis, the OP table on
+    // the sheet is the node, branch and device rows counted, and the MNA
+    // dimensions and the annotation setting are not the reader's.
     if let Some(facts) = &evidence.facts {
-        section_header(ui, "Retained solve facts", None);
-        let temperature = format!("{:.3} °C", facts.temperature_celsius);
-        let point = format!(
-            "{} / {}",
-            facts.point_index.saturating_add(1),
-            facts.point_count.max(1)
-        );
+        section_header(ui, "Conditions", None);
+        let temperature = fmt_si_readout(facts.temperature_celsius, "°C", 4);
         let process = process_label(facts.process);
-        let mna_nodes = facts.mna_nodes.to_string();
-        let mna_branches = facts.mna_branches.to_string();
+        let mut rows = vec![
+            ("Process", process.to_owned()),
+            ("Temperature", temperature),
+        ];
+        // A single-point solve has no sweep position to state.
+        if facts.point_count > 1 {
+            rows.push((
+                "Sweep point",
+                format!(
+                    "{} of {}",
+                    facts.point_index.saturating_add(1),
+                    facts.point_count
+                ),
+            ));
+        }
         measurement_table(
             ui,
-            &[
-                ("Process", process),
-                ("Temperature", temperature.as_str()),
-                ("Run-set point", point.as_str()),
-                ("MNA node rows", mna_nodes.as_str()),
-                ("MNA branch rows", mna_branches.as_str()),
-                ("Back annotation", annotation_label(facts.annotation)),
-            ],
+            &rows
+                .iter()
+                .map(|(label, value)| (*label, value.as_str()))
+                .collect::<Vec<_>>(),
         );
     }
 
-    section_header(ui, "Schematic association", None);
-    measurement_table(
-        ui,
-        &[(
-            "Mapping",
-            if current {
-                "current · cross-probe enabled"
-            } else {
-                "not current · actions disabled"
-            },
-        )],
-    );
+    // A full save and a current mapping are the normal states; only the
+    // reduced save and the stale mapping change what the sheet can show.
+    if let Some(reduced) = reduced_scope_warning(evidence.detail_policy) {
+        crate::presentation::panel_note(ui, reduced);
+    }
+    if !current {
+        crate::presentation::panel_note(
+            ui,
+            "Schematic changed since this run; cross-probing is off.",
+        );
+    }
 }
 #[cfg(any(test, feature = "test-support"))]
 pub fn evidence_fixture(
