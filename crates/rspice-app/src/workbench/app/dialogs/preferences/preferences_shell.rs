@@ -831,7 +831,15 @@ fn category_button(ui: &mut Ui, label: &str, active: bool) -> egui::Response {
             t.color.text_dim
         },
     );
-    theme::paint_focus_ring(ui, &response, rect);
+    // Opening Preferences puts keyboard focus on the category you are on, so
+    // the shell's shortcuts work without a click. Ringing it for that reason
+    // frames the rail the moment the dialog appears and says the reader did
+    // something they did not do — the page is already marked as current by
+    // its fill, its accent edge and its weight. The ring is for a reader who
+    // tabbed here, which is what `focus_is_visible` distinguishes.
+    if theme::focus_is_visible(ui.ctx(), &response) {
+        theme::paint_focus_ring(ui, &response, rect);
+    }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
@@ -1670,6 +1678,97 @@ mod tests {
             .filter(|(_, label)| label == "Search settings")
             .count();
         assert_eq!(fields, 1, "one filter field, in the rail");
+    }
+
+    /// Whether a pixel is carrying the accent rather than a panel grey.
+    ///
+    /// Tested by how far red runs ahead of blue, not by equality with the
+    /// token: the modal fades in over several passes, so accent reaches the
+    /// canvas blended toward the backdrop and never matches exactly. Every
+    /// surface behind it is a neutral whose channels sit together, while the
+    /// accent is `rgb(242, 184, 36)` — 206 apart — so the gap survives the
+    /// blend by a wide margin.
+    fn carries_accent(pixel: egui::Color32) -> bool {
+        i16::from(pixel.r()) - i16::from(pixel.b()) > 40
+    }
+
+    /// Paint the shell and report the first rail row's top edge and left edge.
+    ///
+    /// The two edges tell the marks apart: a focus ring strokes the whole row
+    /// and so puts accent along the top, while the current-page marker is a
+    /// bar down the left only. Sampling the top away from both corners
+    /// therefore sees the ring and nothing else.
+    fn active_row_edges() -> (Vec<egui::Color32>, Vec<egui::Color32>) {
+        let mut category = PreferenceCategory::Appearance;
+        let canvas = crate::ui::raster::render(vec2(1_060.0, 760.0), |ui, background| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(background))
+                .show(ui, |ui| {
+                    let _ = show(ui.ctx(), &mut category, true, |_, _| {});
+                });
+        });
+        // Appearance is the first category, so its row opens the rail under
+        // that group's label. Located from the rail's own constants rather
+        // than from numbers read off a picture.
+        let rail_left = 31.0;
+        let row_top = 153.0;
+        let row_height = CATEGORY_ROW_HEIGHT;
+        let top = canvas
+            .pixels_in(Rect::from_min_max(
+                egui::pos2(rail_left + 40.0, row_top),
+                egui::pos2(rail_left + 120.0, row_top + 2.0),
+            ))
+            .collect();
+        let left = canvas
+            .pixels_in(Rect::from_min_max(
+                egui::pos2(rail_left, row_top + row_height * 0.25),
+                egui::pos2(rail_left + 2.0, row_top + row_height * 0.75),
+            ))
+            .collect();
+        (top, left)
+    }
+
+    /// Opening Preferences focuses the category you are on so the dialog's
+    /// keys work without a click. That is not the reader navigating, and it
+    /// must not draw a ring around the rail the instant the dialog appears.
+    #[test]
+    fn opening_the_dialog_marks_the_current_page_without_ringing_it() {
+        let (top, left) = active_row_edges();
+
+        assert!(!top.is_empty() && !left.is_empty(), "sampled off-canvas");
+        assert!(
+            !top.iter().copied().any(carries_accent),
+            "the active row's top edge carries accent, so a ring was painted \
+             around a row the reader never navigated to"
+        );
+        assert!(
+            left.iter().copied().any(carries_accent),
+            "the current page still has to be marked, by its left accent edge"
+        );
+    }
+
+    /// The ring is withheld by the `:focus-visible` rule, not deleted.
+    ///
+    /// `focus_is_visible` is the kit's own helper and carries its own tests
+    /// for telling a tabbed-to focus from a pointer-given one. What belongs
+    /// here is that the rail asks it before ringing anything, because the
+    /// failure this guards against is someone restoring the unconditional
+    /// call and taking the dialog back to ringing itself on open.
+    #[test]
+    fn the_rail_rings_a_row_only_when_the_keyboard_put_focus_there() {
+        let production = crate::source_guard::production_half(include_str!("preferences_shell.rs"));
+        let ring = production
+            .match_indices("paint_focus_ring")
+            .next()
+            .expect("the rail still paints a keyboard ring");
+        assert!(
+            production[..ring.0].ends_with("        theme::"),
+            "the ring call moved; check it is still inside a focus_is_visible gate"
+        );
+        assert!(
+            production.contains("if theme::focus_is_visible(ui.ctx(), &response) {"),
+            "the rail must ask whether focus is visible before ringing a row"
+        );
     }
 
     #[test]
