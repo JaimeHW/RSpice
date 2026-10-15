@@ -238,7 +238,6 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
     let (_, analysis) = selected_noise_analysis(state)?;
     let shape = noise_spectrum_shape(state, run.dataset_id, analysis)?;
     let frequency = Arc::clone(&analysis.waveforms.get(shape.anchor)?.x);
-    let trace_count = shape.trace_count;
     let (total_rms, input_rms, band) = analysis
         .noise_summary
         .as_ref()
@@ -248,7 +247,6 @@ fn build_noise_model(state: &AppState) -> Option<NoiseSpectrumModel> {
 
     Some(NoiseSpectrumModel {
         frequency,
-        trace_count,
         total_rms,
         input_rms,
         input_rms_unit: analysis
@@ -309,6 +307,14 @@ mod tests {
     use crate::state::{
         AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, WaveformData,
     };
+
+    /// How many traces the selected ordinary-noise spectrum draws. The card
+    /// stopped stating the count, so the shape is asked directly.
+    fn selected_noise_trace_count(state: &AppState) -> Option<usize> {
+        let run = state.simulation.active_run()?;
+        let (_, analysis) = selected_noise_analysis(state)?;
+        Some(noise_spectrum_shape(state, run.dataset_id, analysis)?.trace_count)
+    }
 
     fn ac_result(
         source_id: AnalysisInstanceId,
@@ -522,7 +528,7 @@ mod tests {
         assert!(state.simulation.select_analysis(1));
         let model = build_noise_model(&state).expect("ordinary noise spectrum");
         assert_eq!(model.frequency.as_slice(), &[1.0, 10.0]);
-        assert_eq!(model.trace_count, 1);
+        assert_eq!(selected_noise_trace_count(&state), Some(1));
     }
 
     #[test]
@@ -549,10 +555,10 @@ mod tests {
         let mut state = AppState::default();
         state.simulation.retained.runs = vec![run].into();
         assert!(state.simulation.select_run(0));
-        let model = build_noise_model(&state).expect("input-referred noise model");
+        let _ = build_noise_model(&state).expect("input-referred noise model");
         // Input-referred evidence takes the card without mixing in output
         // or contributor traces.
-        assert_eq!(model.trace_count, 1);
+        assert_eq!(selected_noise_trace_count(&state), Some(1));
     }
 
     #[test]

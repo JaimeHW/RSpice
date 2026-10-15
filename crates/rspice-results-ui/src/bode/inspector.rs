@@ -25,7 +25,6 @@ pub enum BodeInspector<'a> {
 /// pane-stack's nV/√Hz projection.
 pub struct NoiseSpectrumModel {
     pub frequency: SharedWaveformValues,
-    pub trace_count: usize,
     pub total_rms: Option<f64>,
     pub input_rms: Option<f64>,
     pub input_rms_unit: &'static str,
@@ -41,24 +40,33 @@ pub fn right_panel(
     let (metrics, phase_available) = match model {
         BodeInspector::Qpxf(response) => {
             section_header(ui, "QPXF unit transfers", None);
-            crate::presentation::panel_note(
-                ui,
-                "The horizontal axis is physical output frequency. Each curve is the output per unit excitation of its named input source and signed tone tuple. Finite sampled group delays are shown in seconds; undefined intervals are omitted from the curves and retained in the CSV table.",
-            );
             if let Some(response) = response {
                 let m = &response.metadata;
-                crate::presentation::panel_note(
-                    ui,
-                    &format!(
-                        "{} sources × {} input tuples. Output {:?} at tuple {:?}. Authored axis: {:?}; tones {:?} Hz.",
-                        m.input_sources.len(),
-                        m.input_lattices.len(),
-                        m.request.output,
-                        m.request.output_lattice,
-                        m.request.frequency_axis,
-                        m.grid.frequencies_hz
+                let mut rows = vec![
+                    (
+                        "Output",
+                        format!(
+                            "{} at {}",
+                            qpxf_output_label(&m.request.output),
+                            tuple_label(&m.request.output_lattice)
+                        ),
+                        true,
                     ),
-                );
+                    (
+                        "Tones",
+                        frequency_list(&m.grid.frequencies_hz, quantity_policy),
+                        false,
+                    ),
+                    (
+                        "Sources",
+                        m.input_sources
+                            .iter()
+                            .map(|source| source.name.clone())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        false,
+                    ),
+                ];
                 if m.request.group_delay {
                     let undefined = response
                         .transfers
@@ -67,56 +75,52 @@ pub fn right_panel(
                         .flatten()
                         .filter(|d| !matches!(d, rspice_core::engine::QpxfGroupDelay::Finite(_)))
                         .count();
-                    crate::presentation::panel_note(
-                        ui,
-                        &format!(
-                            "Group-delay magnitude floor: {}. {} undefined delay samples. Delay uses sampled phase differences on the selected frequency grid.",
-                            m.request.group_delay_magnitude_floor, undefined
-                        ),
-                    );
+                    if undefined > 0 {
+                        rows.push((
+                            "Group delay",
+                            format!("{undefined} points undefined"),
+                            false,
+                        ));
+                    }
                 }
+                crate::presentation::stat_table(ui, &rows);
             }
             return;
         }
         BodeInspector::Qpac(response) => {
             section_header(ui, "QPAC conversion response", None);
-            crate::presentation::panel_note(
-                ui,
-                "The horizontal axis is the signed probe offset. Physical input and output frequencies equal offset plus their tone tuple dotted with the QPSS tones. Full signed-tuple responses are available in the result table and CSV export.",
-            );
             if let Some(response) = response {
                 let m = &response.metadata;
-                crate::presentation::panel_note(
-                    ui,
-                    &format!(
-                        "Source: {} ({:?}), magnitude {}, phase {}°. Input tuple {:?}; output tuple {:?}. Tones: {:?} Hz.",
-                        m.request.input_source,
-                        m.input_quantity,
-                        m.request.magnitude,
-                        m.request.phase_degrees,
-                        m.request.input_lattice,
-                        m.request.output_lattice,
-                        m.tone_frequencies_hz
+                let rows = [
+                    ("Source", m.request.input_source.clone(), true),
+                    (
+                        "Sideband in → out",
+                        format!(
+                            "{} → {}",
+                            tuple_label(&m.request.input_lattice),
+                            tuple_label(&m.request.output_lattice)
+                        ),
+                        false,
                     ),
-                );
+                    (
+                        "Tones",
+                        frequency_list(&m.tone_frequencies_hz, quantity_policy),
+                        false,
+                    ),
+                ];
+                crate::presentation::stat_table(ui, &rows);
             }
             return;
         }
-        BodeInspector::Distortion => {
-            section_header(ui, "Distortion curves", None);
-            crate::presentation::panel_note(
-                ui,
-                "Fundamental response and Volterra product ratios are retained as exact complex phasors; the plot projects their magnitude to dB and dBc without changing zero into a finite floor.",
-            );
-            return;
-        }
+        // The distortion sheet's whole panel was one implementation sentence.
+        BodeInspector::Distortion => return,
         BodeInspector::Stability {
             metrics,
             phase_available,
         } => (metrics, phase_available),
         BodeInspector::NoResponse => {
             section_header(ui, "Stability", None);
-            crate::presentation::panel_note(ui, "No usable frequency response in the active run.");
+            crate::presentation::panel_note(ui, "No AC response in this run.");
             return;
         }
         BodeInspector::AnalysisFailed(reason) => {
@@ -127,7 +131,7 @@ pub fn right_panel(
                     Some(reason) => format!(
                         "The selected frequency response did not converge, so no margins are reported: {reason}"
                     ),
-                    None => "The selected frequency response did not converge, so no margins are reported. Its retained vectors are what the engine emitted before it stopped, not a measured response.".to_owned(),
+                    None => "The selected frequency response did not converge, so no margins are reported.".to_owned(),
                 },
             );
             return;
@@ -155,17 +159,51 @@ pub fn right_panel(
             ui,
             "Phase data unavailable for this response — re-run the analysis to compute margins.",
         );
-    } else if metrics.adc_is_dc {
+    } else if !metrics.adc_is_dc {
         crate::presentation::panel_note(
             ui,
-            "Margins measured on the simulated curves; the plot markers show the same values.",
-        );
-    } else {
-        crate::presentation::panel_note(
-            ui,
-            "Margins measured on the simulated curves; the plot markers show the same values. The sweep does not open flat, so the gain shown is the one at its lowest frequency — not the DC gain — and f₋₃dB is referenced to that.",
+            "Sweep starts above the dominant pole; lower fstart for DC gain.",
         );
     }
+}
+
+/// A signed tone tuple as the reader writes it: `(1, −1)`.
+fn tuple_label(tuple: &[i32]) -> String {
+    format!(
+        "({})",
+        tuple
+            .iter()
+            .map(|k| if *k < 0 {
+                format!("−{}", k.unsigned_abs())
+            } else {
+                k.to_string()
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// A QPXF output as a signal accessor, never the Rust enum behind it.
+fn qpxf_output_label(output: &rspice_core::engine::QpxfOutput) -> String {
+    match output {
+        rspice_core::engine::QpxfOutput::Voltage { positive, negative } => {
+            if negative.is_empty() || negative == "0" {
+                format!("V({positive})")
+            } else {
+                format!("V({positive},{negative})")
+            }
+        }
+        rspice_core::engine::QpxfOutput::BranchCurrent { branch } => format!("I({branch})"),
+    }
+}
+
+/// A tone list in the reader's frequency units.
+fn frequency_list(frequencies: &[f64], quantity_policy: &QuantityPresentationPolicy) -> String {
+    frequencies
+        .iter()
+        .map(|frequency| quantity_policy.format_frequency(*frequency, 4))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The stability card's rows.
@@ -231,7 +269,7 @@ pub fn noise_spectrum_right_panel(
 ) {
     section_header(ui, "Noise spectrum", None);
     let Some(model) = model else {
-        crate::presentation::panel_note(ui, "No valid ordinary noise spectrum is selected.");
+        crate::presentation::panel_note(ui, "No noise spectrum in this run.");
         return;
     };
     let band = model.band.unwrap_or_else(|| {
@@ -250,28 +288,24 @@ pub fn noise_spectrum_right_panel(
             ),
             false,
         ),
-        ("Traces", model.trace_count.to_string(), false),
         (
             "Output integrated",
-            model
-                .total_rms
-                .map_or_else(|| "—".to_owned(), |value| format!("{value:.6e} V rms")),
+            model.total_rms.map_or_else(
+                || "—".to_owned(),
+                |value| rspice_ui_kit::plot::fmt_si_readout(value, "V rms", 4),
+            ),
             model.total_rms.is_some(),
         ),
         (
             "Input referred",
             model.input_rms.map_or_else(
                 || "—".to_owned(),
-                |value| format!("{value:.6e} {}", model.input_rms_unit),
+                |value| rspice_ui_kit::plot::fmt_si_readout(value, model.input_rms_unit, 4),
             ),
             model.input_rms.is_some(),
         ),
     ];
     crate::presentation::stat_table(ui, &rows);
-    crate::presentation::panel_note(
-        ui,
-        "The plot takes the square root of retained power spectral density and displays nV/√Hz for voltage or nA/√Hz for current, or ns/√Hz for timing, without altering source samples.",
-    );
 }
 
 #[cfg(test)]
