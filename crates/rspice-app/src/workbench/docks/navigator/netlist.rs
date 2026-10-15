@@ -136,17 +136,12 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             ui.set_width(ui.available_width());
 
             if projection.root_row.is_some() || !projection.groups.is_empty() {
+                // No line count: the editor's own gutter numbers every line
+                // of the deck this outline is drawn from.
                 section_header(
                     ui,
                     &messages.text(MessageId::NetlistNavigatorStructure),
-                    Some(&messages.format(
-                        if projection.line_count == 1 {
-                            MessageId::NetlistNavigatorLineSingular
-                        } else {
-                            MessageId::NetlistNavigatorLines
-                        },
-                        &[("count", &projection.line_count.to_string())],
-                    )),
+                    None,
                 );
             }
             if let Some(root) = &projection.root_row
@@ -174,8 +169,9 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                 if !group.expanded {
                     continue;
                 }
+                // An empty group's own row already reads "0". A child note
+                // spelling that out again is a row spent on nothing.
                 if group.declarations() == 0 {
-                    outline_child_note(ui, &messages.text(group.empty_note), height);
                     continue;
                 }
                 uniform_rows(ui, height, group.declarations(), |ui, position| {
@@ -206,10 +202,12 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             }
 
             if !projection.include_rows.is_empty() {
+                let dependency_status =
+                    netlist_dependency_status(&app.state).map(|id| messages.text(id));
                 section_header(
                     ui,
                     &messages.text(MessageId::NetlistNavigatorIncludes),
-                    Some(&messages.text(netlist_dependency_status(&app.state))),
+                    dependency_status.as_deref(),
                 );
                 for row in &projection.include_rows {
                     // A `.veriloga` card naming a cell view's module is that
@@ -911,9 +909,14 @@ const fn dependency_authority_message(
     }
 }
 
-pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> MessageId {
+/// What is wrong with the include graph, or `None` when nothing is.
+///
+/// Every include resolving is the ordinary case: the section used to head
+/// itself "resolved", which is the heading reporting that there is nothing to
+/// report.
+pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> Option<MessageId> {
     let Some(document) = active_canonical_netlist_document(state) else {
-        return MessageId::NetlistNavigatorDependencyUnavailable;
+        return Some(MessageId::NetlistNavigatorDependencyUnavailable);
     };
     if document.dependencies().iter().any(|dependency| {
         matches!(
@@ -921,11 +924,11 @@ pub(super) fn netlist_dependency_status(state: &crate::workbench::AppState) -> M
             crate::state::DependencyResolution::Missing { .. }
         )
     }) {
-        MessageId::NetlistNavigatorDependencyError
+        Some(MessageId::NetlistNavigatorDependencyError)
     } else if document.dependency_graph_is_sealed() {
-        MessageId::NetlistNavigatorDependencyResolved
+        None
     } else {
-        MessageId::NetlistNavigatorDependencyUnresolved
+        Some(MessageId::NetlistNavigatorDependencyUnresolved)
     }
 }
 
@@ -1182,9 +1185,6 @@ pub(super) struct NetlistOutlineGroup {
     /// Indices into the source index's entries, in source order.
     entries: Vec<usize>,
     pub(super) expanded: bool,
-    /// What the deck does not declare, said in the group's own place. An empty
-    /// group and a filtered-out group must not look alike.
-    pub(super) empty_note: MessageId,
 }
 
 impl NetlistOutlineGroup {
@@ -1245,7 +1245,6 @@ struct GroupSpec {
     kind: NetlistNavigatorRowKind,
     section: OutlineSectionKind,
     label: MessageId,
-    empty_note: MessageId,
 }
 
 const STRUCTURE_GROUPS: [GroupSpec; 5] = [
@@ -1253,31 +1252,26 @@ const STRUCTURE_GROUPS: [GroupSpec; 5] = [
         kind: NetlistNavigatorRowKind::Parameters,
         section: OutlineSectionKind::Parameters,
         label: MessageId::NetlistNavigatorParameters,
-        empty_note: MessageId::NetlistNavigatorNoParameters,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Instances,
         section: OutlineSectionKind::Devices,
         label: MessageId::NetlistNavigatorInstances,
-        empty_note: MessageId::NetlistNavigatorNoInstances,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Models,
         section: OutlineSectionKind::Models,
         label: MessageId::NetlistNavigatorModels,
-        empty_note: MessageId::NetlistNavigatorNoModels,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Analyses,
         section: OutlineSectionKind::Analyses,
         label: MessageId::NetlistNavigatorAnalyses,
-        empty_note: MessageId::NetlistNavigatorNoAnalyses,
     },
     GroupSpec {
         kind: NetlistNavigatorRowKind::Measurements,
         section: OutlineSectionKind::Measurements,
         label: MessageId::NetlistNavigatorMeasurements,
-        empty_note: MessageId::NetlistNavigatorNoMeasurements,
     },
 ];
 
@@ -1378,14 +1372,11 @@ impl NetlistNavigatorProjection {
         let root_row = query
             .matches_group(root_label, root_entries.iter().copied())
             .then(|| {
-                navigator_group_row(
+                // No meta: the row names the document the tab above already
+                // names, and "source of truth" named nothing at all.
+                navigator_root_row(
                     NetlistNavigatorRowKind::Root,
                     root_label,
-                    messages.text(if source_mapped {
-                        MessageId::NetlistNavigatorRoot
-                    } else {
-                        MessageId::NetlistNavigatorSourceOfTruth
-                    }),
                     root_target,
                     &root_entries,
                 )
@@ -1617,7 +1608,6 @@ fn outline_group(
         section: spec.section,
         entries: selected,
         expanded,
-        empty_note: spec.empty_note,
     })
 }
 
@@ -1846,6 +1836,19 @@ fn contains_folded(text: &str, needle: &str) -> bool {
             .as_bytes()
             .windows(needle.len())
             .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// The outline's own root row, which names the document and nothing else.
+pub(super) fn navigator_root_row(
+    kind: NetlistNavigatorRowKind,
+    label: &str,
+    target: Option<&OutlineEntry>,
+    entries: &[&OutlineEntry],
+) -> NetlistNavigatorRow {
+    NetlistNavigatorRow {
+        meta: None,
+        ..navigator_group_row(kind, label, String::new(), target, entries)
+    }
 }
 
 pub(super) fn navigator_group_row(
@@ -2098,38 +2101,6 @@ pub(super) fn netlist_outline_row(ui: &mut Ui, row: OutlineRowVisual<'_>) -> Res
     }
     theme::paint_focus_ring(ui, &response, rect);
     response
-}
-
-/// State, where the declarations would be, that a group holds none.
-fn outline_child_note(ui: &mut Ui, note: &str, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), height),
-        egui::Sense::hover(),
-    );
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), note));
-    if !ui.is_rect_visible(rect) {
-        return;
-    }
-    ui.painter().vline(
-        rect.left()
-            + NETLIST_OUTLINE_PADDING_X
-            + NETLIST_OUTLINE_CARET_COLUMN
-            + NETLIST_OUTLINE_ICON_SIZE * 0.5,
-        rect.y_range(),
-        egui::Stroke::new(1.0, t.color.border),
-    );
-    ui.painter().text(
-        egui::pos2(
-            rect.left() + NetlistOutlineRowShape::Child.label_left(),
-            rect.center().y,
-        ),
-        egui::Align2::LEFT_CENTER,
-        note,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
 }
 
 pub(super) fn netlist_outline_icon(kind: NetlistNavigatorRowKind) -> WorkbenchIcon {

@@ -12,8 +12,9 @@ use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
 use super::super::design_system::inspector::muted_inspector_copy;
 use super::super::design_system::{
-    Problem, WorkbenchIcon, code_inspector_section, heading, panel_bleed, panel_body, panel_inset,
-    property_row, property_row_height, section_block_gap, subsection_header, workspace_title_row,
+    Problem, WorkbenchIcon, code_inspector_section, heading, paint_problem_mark, panel_bleed,
+    panel_body, panel_inset, property_row, property_row_height, section_block_gap,
+    subsection_header, workspace_title_row,
 };
 use crate::workbench::documents::code_workspace::{
     AutomationExecutionState, CodeDiagnosticCollection, CodeEditorLanguage, CodeWorkspacePage,
@@ -286,14 +287,13 @@ fn handle_automation_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
 fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
     let messages = app.state.ui.messages();
     let title = messages.text(MessageId::AutomationHeadingTitle);
-    let description = messages.text(MessageId::AutomationHeadingDescription);
     let generated_netlist = messages.text(MessageId::CodeGeneratedNetlist);
     let validate = messages.text(MessageId::AutomationValidate);
     let dry_run = messages.text(MessageId::AutomationDryRun);
     let stack_actions = title_actions_stack(visible_workspace_rect(ui).width());
     workspace_title_row(ui, |ui| {
         if stack_actions {
-            heading(ui, &title, Some(&description));
+            heading(ui, &title, None);
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -320,7 +320,7 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
                     Layout::top_down(Align::Min),
                     |ui| {
                         ui.set_width(heading_width);
-                        heading(ui, &title, Some(&description));
+                        heading(ui, &title, None);
                     },
                 );
                 ui.add_space(6.0);
@@ -624,66 +624,59 @@ fn code_pane(
             && receipt.token.content_digest == bundle.closure_digest()
     });
     let messages = app.state.ui.messages();
-    let (status, color) = if runtime.pending_runtime_validation.is_some() {
-        (
-            messages.text(MessageId::AutomationStatusValidating),
-            t.color.info,
-        )
-    } else if runtime.execution.is_active() {
-        (
-            automation_execution_label(&runtime.execution, messages),
-            t.color.info,
-        )
-    } else if matches!(
-        runtime.execution,
-        AutomationExecutionState::Complete { passed: true, .. }
-    ) {
-        (
-            automation_execution_label(&runtime.execution, messages),
-            t.color.ok,
-        )
-    } else if matches!(
+    // One live dot while the runtime is working, one mark when a workflow
+    // came back failed, and the words themselves the rest of the time. A
+    // validated script is the ordinary case and says nothing.
+    let live = runtime.pending_runtime_validation.is_some() || runtime.execution.is_active();
+    let failed = matches!(
         runtime.execution,
         AutomationExecutionState::Complete { passed: false, .. } | AutomationExecutionState::Failed
-    ) {
-        (
-            automation_execution_label(&runtime.execution, messages),
-            t.color.err,
-        )
-    } else if matches!(runtime.execution, AutomationExecutionState::Cancelled) {
-        (
-            automation_execution_label(&runtime.execution, messages),
-            t.color.warn,
-        )
-    } else if validated {
-        (
-            messages.text(MessageId::AutomationStatusValidated),
-            t.color.ok,
-        )
+    );
+    let status = if runtime.pending_runtime_validation.is_some() {
+        messages.text(MessageId::AutomationStatusValidating)
+    } else if matches!(runtime.execution, AutomationExecutionState::Idle) {
+        if validated {
+            String::new()
+        } else {
+            messages.text(MessageId::AutomationNotValidated)
+        }
     } else {
-        (
-            messages.text(MessageId::AutomationStatusModified),
-            t.color.warn,
-        )
+        automation_execution_label(&runtime.execution, messages)
     };
-    let status_galley =
-        ui.painter()
-            .layout_no_wrap(status, theme::mono(tokens::FS_0, FontWeight::Medium), color);
+    let status_galley = ui.painter().layout_no_wrap(
+        status,
+        theme::mono(tokens::FS_0, FontWeight::Medium),
+        t.color.text_dim,
+    );
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    let status_dot_x = toolbar_content_right - status_galley.size().x - 17.0;
-    ui.painter()
-        .circle_filled(egui::pos2(status_dot_x, toolbar.center().y), 2.5, color);
+    let status_mark_x = toolbar_content_right - status_galley.size().x - 17.0;
+    if live {
+        ui.painter().circle_filled(
+            egui::pos2(status_mark_x, toolbar.center().y),
+            2.5,
+            t.color.accent,
+        );
+    } else if failed {
+        paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(status_mark_x, toolbar.center().y),
+                Vec2::splat(TOOLBAR_MARK_SIDE),
+            ),
+            Problem::Failure,
+        );
+    }
     ui.painter().galley(
         egui::pos2(
             toolbar_content_right - status_galley.size().x - 8.0,
             toolbar.center().y - status_galley.size().y * 0.5,
         ),
         status_galley.clone(),
-        color,
+        t.color.text_dim,
     );
     // Keep even unusually long logical paths out of the status. The full path
     // remains available from the file tree.
-    let path_right = (status_dot_x - 13.0).max(path_clip.left());
+    let path_right = (status_mark_x - 13.0).max(path_clip.left());
     let path_clip =
         egui::Rect::from_min_max(path_clip.min, egui::pos2(path_right, path_clip.bottom()));
     ui.painter().with_clip_rect(path_clip).text(
@@ -876,14 +869,16 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
         .automation_runtime_unavailable_reason()
         .unwrap_or_else(|| messages.text(MessageId::AutomationManagedRuntimeVerified));
     let task_count = preview.task_points.to_string();
-    let plan_kind = messages.text(if preview.release_ready {
-        MessageId::AutomationReleasePlan
-    } else {
-        MessageId::AutomationNonSignOff
-    });
+    // What the preview would run is a count. Whether that plan would also
+    // qualify as a release is a disclaimer, and the Release checks row below
+    // already says how many of them are configured.
     let preview_status = messages.format(
-        MessageId::AutomationTaskSummary,
-        &[("count", &task_count), ("plan_kind", &plan_kind)],
+        if preview.task_points == 1 {
+            MessageId::AutomationTaskSummarySingular
+        } else {
+            MessageId::AutomationTaskSummary
+        },
+        &[("count", &task_count)],
     );
     let not_validated = messages.text(MessageId::AutomationNotValidated);
 
@@ -979,15 +974,13 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 
     let diagnostic_count = app.state.ui.code_workspace.automation.diagnostics.len();
-    let diagnostic_status = messages.text(if diagnostic_count == 0 {
-        MessageId::AutomationClear
-    } else {
-        MessageId::AutomationActionRequired
-    });
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationDiagnostics),
-        Some(&diagnostic_status),
+        // "Current findings" is the next row down, so the header carries the
+        // mark and nothing else. No findings is the ordinary case: a header
+        // that says "clear" is a word spent on the absence of a problem.
+        None,
         (diagnostic_count > 0).then_some(Problem::Failure),
         |ui| {
             property_row(
@@ -1012,7 +1005,6 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationExecutionPreview),
-        // A non-sign-off plan is a kind of plan, not a fault in one.
         Some(&preview_status),
         None,
         |ui| {
@@ -1642,7 +1634,6 @@ struct ExecutionPreview {
     /// engine does. Reporting the stored preference instead would print "0"
     /// for the default, which asks for every core rather than none.
     slots: usize,
-    release_ready: bool,
 }
 
 fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
@@ -1697,12 +1688,14 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
             .solver_worker_limit()
             .unwrap_or_else(|| rspice_core::ResourceLimits::default().max_parallel_workers)
             .min(std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)),
-        release_ready: corner_enabled && pvt_points > 0 && release_checks > 0,
     }
 }
 
 /// An artifact row's file icon, on the panel inset, and the gap before its
 /// name.
+/// Side of the toolbar status's failure mark, sized to the status text.
+const TOOLBAR_MARK_SIDE: f32 = 11.0;
+
 const ARTIFACT_ICON_W: f32 = 14.0;
 const ARTIFACT_ICON_GAP: f32 = 6.0;
 

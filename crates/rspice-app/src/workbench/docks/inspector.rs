@@ -1895,11 +1895,6 @@ fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     let messages = app.state.ui.messages();
-    section_header(
-        ui,
-        &messages.text(MessageId::CodeInspectorExactContext),
-        None,
-    );
     let Some(context) = crate::workbench::commands::code_context::resolve(app) else {
         muted_inspector_copy(
             ui,
@@ -1907,18 +1902,6 @@ fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         return;
     };
-    let page = messages.text({
-        use crate::workbench::commands::code_context::CodeDocumentKind;
-        match context.document_kind {
-            CodeDocumentKind::GeneratedNetlist
-            | CodeDocumentKind::OwnedNetlist
-            | CodeDocumentKind::NetlistComparison
-            | CodeDocumentKind::NetlistRunSnapshot
-            | CodeDocumentKind::NetlistInclude => MessageId::CodePageNetlist,
-            CodeDocumentKind::VerilogA => MessageId::CodePageVerilogA,
-            CodeDocumentKind::Automation => MessageId::CodePageAutomation,
-        }
-    });
     let ownership = messages.text(match context.ownership {
         crate::workbench::commands::code_context::CodeDocumentOwnership::GeneratedReadOnly => {
             MessageId::CodeInspectorGeneratedReadOnly
@@ -1936,70 +1919,15 @@ fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
             MessageId::CodeInspectorGovernedReadOnly
         }
     });
-    property_row(ui, &messages.text(MessageId::CodeInspectorPage), &page);
-    property_row(
-        ui,
-        &messages.text(MessageId::CodeInspectorLogicalPath),
-        &context.logical_path,
-    );
-    property_row(
-        ui,
-        &messages.text(MessageId::CodeInspectorDocumentIdentity),
-        &context.document_identity,
-    );
-    property_row(
-        ui,
-        &messages.text(MessageId::CodeInspectorRevision),
-        &context.revision.to_string(),
-    );
-    property_row(
-        ui,
-        &messages.text(MessageId::CodeInspectorContentDigest),
-        &context.content_digest.to_string(),
-    );
+    // Whether this document can be edited, and nothing else. The page tab
+    // names the page, the document tab names the path, and the toolbar's own
+    // buttons are the one true statement of which commands are available:
+    // five rows reading "available" were that statement copied out by hand.
     property_row(
         ui,
         &messages.text(MessageId::CodeInspectorOwnership),
         &ownership,
     );
-
-    section_header(
-        ui,
-        &messages.text(MessageId::CodeInspectorCommandAvailability),
-        None,
-    );
-    for (label, available) in [
-        (
-            messages.text(MessageId::CodeInspectorFind),
-            context.capabilities.find,
-        ),
-        (
-            messages.text(MessageId::CodeInspectorValidate),
-            context.capabilities.validate,
-        ),
-        (
-            messages.text(MessageId::CodeInspectorExecute),
-            context.capabilities.execute,
-        ),
-        (
-            messages.text(MessageId::CodeInspectorSave),
-            context.capabilities.save,
-        ),
-        (
-            messages.text(MessageId::CodeInspectorCompare),
-            context.capabilities.compare_revisions,
-        ),
-    ] {
-        property_row(
-            ui,
-            &label,
-            &messages.text(if available {
-                MessageId::CodeInspectorAvailable
-            } else {
-                MessageId::CodeInspectorUnavailable
-            }),
-        );
-    }
 }
 
 fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -2031,9 +1959,12 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                 if summary.current_errors > DIAGNOSTIC_PREVIEW_LIMIT {
                     empty_diagnostic_row(
                         ui,
-                        &format!(
-                            "{} more errors · open Problems for the complete virtualized list",
-                            summary.current_errors - DIAGNOSTIC_PREVIEW_LIMIT
+                        &messages.format(
+                            crate::workbench::MessageId::NetlistMoreInProblems,
+                            &[(
+                                "count",
+                                &(summary.current_errors - DIAGNOSTIC_PREVIEW_LIMIT).to_string(),
+                            )],
                         ),
                     );
                 }
@@ -2041,50 +1972,61 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     }
 
+    // A document with nothing to advise shows no Advisories section. A
+    // section whose whole body says it is empty is a heading spent on the
+    // absence of a problem.
     let advisories = summary.current_advisories();
-    code_inspector_section(
-        ui,
-        &messages.text(crate::workbench::MessageId::NetlistAdvisories),
-        Some(&advisories.to_string()),
-        (advisories > 0).then_some(Problem::Warning),
-        |ui| {
-            if advisories == 0 {
-                empty_diagnostic_row(
-                    ui,
-                    &messages.text(crate::workbench::MessageId::NetlistNoAdvisories),
-                );
-                return;
-            }
-            for diagnostic in diagnostics
-                .iter()
-                .filter(|diagnostic| {
-                    diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
-                })
-                .take(DIAGNOSTIC_PREVIEW_LIMIT)
-            {
-                diagnostic_row(ui, diagnostic);
-            }
-            if advisories > DIAGNOSTIC_PREVIEW_LIMIT {
-                empty_diagnostic_row(
-                    ui,
-                    &format!(
-                        "{} more advisories · open Problems for the complete virtualized list",
-                        advisories - DIAGNOSTIC_PREVIEW_LIMIT
-                    ),
-                );
-            }
-        },
-    );
+    if advisories > 0 {
+        code_inspector_section(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistAdvisories),
+            Some(&advisories.to_string()),
+            Some(Problem::Warning),
+            |ui| {
+                for diagnostic in diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        diagnostic.is_current() && diagnostic.severity != DiagnosticSeverity::Error
+                    })
+                    .take(DIAGNOSTIC_PREVIEW_LIMIT)
+                {
+                    diagnostic_row(ui, diagnostic);
+                }
+                if advisories > DIAGNOSTIC_PREVIEW_LIMIT {
+                    empty_diagnostic_row(
+                        ui,
+                        &messages.format(
+                            crate::workbench::MessageId::NetlistMoreInProblems,
+                            &[(
+                                "count",
+                                &(advisories - DIAGNOSTIC_PREVIEW_LIMIT).to_string(),
+                            )],
+                        ),
+                    );
+                }
+            },
+        );
+    }
 
-    section_header(
-        ui,
-        &messages.text(crate::workbench::MessageId::NetlistParameterExploration),
-        Some(&messages.text(crate::workbench::MessageId::NetlistDedicatedWorkspace)),
+    // The sandbox itself, rather than a paragraph recommending it.
+    let tuning = crate::workbench::commands::vocabulary::Command::VerificationPage(
+        crate::workbench::state::VerificationPage::Tuning,
     );
-    muted_inspector_copy(
-        ui,
-        &messages.text(crate::workbench::MessageId::NetlistParameterExplorationHint),
-    );
+    if let crate::workbench::commands::CommandAvailability::Available = tuning.availability(app) {
+        section_header(
+            ui,
+            &messages.text(crate::workbench::MessageId::NetlistParameterExploration),
+            None,
+        );
+        if crate::ui::widgets::Button::new(
+            &messages.text(crate::workbench::MessageId::NetlistTuneParameters),
+        )
+        .show(ui)
+        .clicked()
+        {
+            tuning.execute(app);
+        }
+    }
 
     if crate::workbench::documents::netlist_document::active_dependency(&app.state).is_some() {
         dependency_provenance(ui, &app.state);

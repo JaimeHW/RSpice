@@ -11,14 +11,14 @@ use egui::{Align, Layout, Ui, vec2};
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::design_system::{WorkbenchIcon, icon_button};
+use crate::workbench::design_system::{Problem, WorkbenchIcon, icon_button, paint_problem_mark};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{MessageId, RSpiceApp};
 
 use super::ownership::{open_owned_source, open_ownership_dialog};
 use super::revision::owned_source_save_ready;
 use super::{
-    DocumentStatusTone, active_document_available, document_syntax_status, generated_primary_ready,
+    active_document_available, document_syntax_status, generated_primary_ready,
     generation_block_reason,
 };
 
@@ -32,6 +32,11 @@ pub(super) const CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH: f32 = 320.0;
 pub(super) const PHONE_BREAKPOINT: f32 = 560.0;
 pub(super) const PHONE_PRIMARY_WIDTH: f32 = 154.0;
 pub(super) const CODE_TOOLBAR_ICON_WIDTH: f32 = 28.0;
+/// Side of a status line's problem mark, sized to the status text.
+const CODE_STATUS_MARK_SIDE: f32 = 11.0;
+const CODE_STATUS_MARK_GAP: f32 = 6.0;
+/// Width that mark takes out of a status line, gap included.
+const CODE_STATUS_MARK_COLUMN: f32 = CODE_STATUS_MARK_SIDE + CODE_STATUS_MARK_GAP;
 
 /// Where the toolbar put its two groups.
 ///
@@ -249,34 +254,33 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
     } else {
         language
     };
-    let (status, status_tone) = document_syntax_status(&app.state);
-    let status_color = match status_tone {
-        DocumentStatusTone::Valid => t.color.ok,
-        DocumentStatusTone::Warning => t.color.warn,
-        DocumentStatusTone::Error => t.color.err,
-    };
-    let status_visible = toolbar_status_visible(phone, status_tone);
-    let advisory_candidate = (!compact).then(|| {
-        app.state
-            .ui
-            .netlist
-            .diagnostics
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic.is_current()
-                    && diagnostic.severity
-                        != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
-            })
-            .count()
-            + app
-                .state
+    let status = document_syntax_status(&app.state)
+        .filter(|(_, problem)| toolbar_status_visible(phone, *problem));
+    // Nothing is advised when the count is zero, and "0 advisories" is not
+    // news: the label appears only once there is something in it.
+    let advisory_candidate = (!compact)
+        .then(|| {
+            app.state
                 .ui
                 .netlist
-                .validation
-                .as_ref()
-                .map_or(0, |receipt| receipt.advisory_count)
-            + usize::from(app.state.ui.netlist.validation_error.is_some())
-    });
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic.is_current()
+                        && diagnostic.severity
+                            != crate::workbench::documents::netlist_document::DiagnosticSeverity::Error
+                })
+                .count()
+                + app
+                    .state
+                    .ui
+                    .netlist
+                    .validation
+                    .as_ref()
+                    .map_or(0, |receipt| receipt.advisory_count)
+                + usize::from(app.state.ui.netlist.validation_error.is_some())
+        })
+        .filter(|count| *count > 0);
     let mut action = None;
     // The actions go down first, over the whole content rect. What the status
     // may occupy is then whatever they left, so the two groups cannot overlap
@@ -643,11 +647,9 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             .size()
             .x
     };
-    let status_only_width = if status_visible {
-        11.0 + label_width(&status, status_color)
-    } else {
-        0.0
-    };
+    let status_only_width = status.as_ref().map_or(0.0, |(label, _)| {
+        CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim)
+    });
     let language_width = label_width(&language, t.color.text_dim);
     let advisory_count = advisory_candidate.filter(|count| {
         let label = format!("{count} advisor{}", if *count == 1 { "y" } else { "ies" });
@@ -655,14 +657,15 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             left_rect.width(),
             language_width,
             status_only_width,
-            11.0 + label_width(&label, t.color.text_faint),
+            CODE_STATUS_MARK_COLUMN + label_width(&label, t.color.text_dim),
         )
     });
     let advisory_label = advisory_count
         .map(|count| format!("{count} advisor{}", if count == 1 { "y" } else { "ies" }));
     let mut status_width = status_only_width;
     if let Some(label) = advisory_label.as_deref() {
-        status_width += CODE_TOOLBAR_GAP + 11.0 + label_width(label, t.color.text_faint);
+        status_width +=
+            CODE_TOOLBAR_GAP + CODE_STATUS_MARK_COLUMN + label_width(label, t.color.text_dim);
     }
     status_width = status_width.min(left_rect.width());
     let status_rect = egui::Rect::from_min_max(
@@ -699,19 +702,11 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
         );
         status_ui.spacing_mut().item_spacing.x = CODE_TOOLBAR_GAP;
         status_ui.with_layout(Layout::right_to_left(Align::Center), |bar| {
-            if let Some(advisory_count) = advisory_count {
-                code_status(
-                    bar,
-                    advisory_label.as_deref().unwrap_or_default(),
-                    if advisory_count == 0 {
-                        t.color.text_faint
-                    } else {
-                        t.color.warn
-                    },
-                );
+            if let Some(label) = advisory_label.as_deref() {
+                code_status(bar, label, Problem::Warning);
             }
-            if status_visible {
-                code_status(bar, &status, status_color);
+            if let Some((label, problem)) = status.as_ref() {
+                code_status(bar, label, *problem);
             }
         });
     }
@@ -1105,21 +1100,27 @@ pub(super) fn toolbar_advisory_fits(
     language_width + CODE_TOOLBAR_GAP + status_group_width <= left_width
 }
 
-fn code_status(ui: &mut Ui, label: &str, color: egui::Color32) {
+/// One problem the toolbar reports: its mark, then the words in the ordinary
+/// tone.
+fn code_status(ui: &mut Ui, label: &str, problem: Problem) {
+    let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let (dot, _) = ui.allocate_exact_size(vec2(5.0, 11.0), egui::Sense::hover());
-        ui.painter().circle_filled(dot.center(), 2.5, color);
+        ui.spacing_mut().item_spacing.x = CODE_STATUS_MARK_GAP;
+        let (mark, _) = ui.allocate_exact_size(
+            vec2(CODE_STATUS_MARK_SIDE, CODE_STATUS_MARK_SIDE),
+            egui::Sense::hover(),
+        );
+        paint_problem_mark(ui.painter(), mark, problem);
         ui.label(
             egui::RichText::new(label)
                 .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(color),
+                .color(t.color.text_dim),
         );
     });
 }
 
-pub(super) const fn toolbar_status_visible(phone: bool, tone: DocumentStatusTone) -> bool {
-    !(phone && matches!(tone, DocumentStatusTone::Warning))
+pub(super) const fn toolbar_status_visible(phone: bool, problem: Problem) -> bool {
+    !(phone && matches!(problem, Problem::Warning))
 }
 
 #[derive(Debug, Clone, Copy)]

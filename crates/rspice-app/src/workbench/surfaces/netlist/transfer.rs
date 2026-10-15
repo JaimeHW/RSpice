@@ -9,6 +9,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::design_system::{Problem, problem_line};
 use crate::workbench::{MessageCatalog, MessageId, RSpiceApp};
 
 fn external_resolution_label(
@@ -140,7 +141,7 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
             });
         if let Some(error) = &review.error {
             ui.add_space(6.0);
-            ui.colored_label(t.color.err, error);
+            problem_line(ui, Problem::Failure, error);
         }
         Some(resolution.response.id)
     });
@@ -314,7 +315,7 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
                     });
                 });
             if let Some(error) = &dialog.error {
-                ui.colored_label(t.color.err, error);
+                problem_line(ui, Problem::Failure, error);
             }
             Some(dialect.response.id)
         });
@@ -486,7 +487,7 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
             }
             if let Some(error) = dialect_qualification_error.as_deref() {
                 ui.add_space(6.0);
-                ui.colored_label(t.color.err, error);
+                problem_line(ui, Problem::Failure, error);
             }
 
             ui.add_space(6.0);
@@ -508,9 +509,10 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
                             &[("profile", profile.id())],
                         ));
                     } else {
-                        ui.colored_label(
-                            t.color.err,
-                            messages.text(MessageId::NetlistImportNoExecutionProfile),
+                        problem_line(
+                            ui,
+                            Problem::Failure,
+                            &messages.text(MessageId::NetlistImportNoExecutionProfile),
                         );
                     }
                 });
@@ -547,24 +549,16 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
             ui.label(
                 egui::RichText::new(messages.text(MessageId::NetlistImportValidation)).strong(),
             );
-            if review.issues.is_empty() {
-                ui.colored_label(
-                    t.color.ok,
-                    messages.text(MessageId::NetlistImportValidationPassed),
-                );
-            } else {
-                for issue in &review.issues {
-                    let (prefix, color) = match issue.severity {
-                        NetlistImportIssueSeverity::Advisory => (
-                            messages.text(MessageId::NetlistImportAdvisory),
-                            t.color.warn,
-                        ),
-                        NetlistImportIssueSeverity::Blocking => {
-                            (messages.text(MessageId::NetlistImportBlocked), t.color.err)
-                        }
-                    };
-                    ui.colored_label(color, format!("{prefix}: {}", issue.message));
-                }
+            // Nothing is listed when the parse and the include resolution both
+            // went through: the heading above is the whole statement.
+            for issue in &review.issues {
+                // The mark replaces the prefix that used to spell the
+                // severity out in front of every line.
+                let problem = match issue.severity {
+                    NetlistImportIssueSeverity::Advisory => Problem::Warning,
+                    NetlistImportIssueSeverity::Blocking => Problem::Failure,
+                };
+                problem_line(ui, problem, &issue.message);
             }
 
             ui.add_space(8.0);
@@ -592,7 +586,7 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
                 });
             if let Some(error) = &review.error {
                 ui.add_space(6.0);
-                ui.colored_label(t.color.err, error);
+                problem_line(ui, Problem::Failure, error);
             }
             Some(dialect.response.id)
         });

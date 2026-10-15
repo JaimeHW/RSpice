@@ -21,7 +21,9 @@ use egui::Ui;
 use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::design_system::{WorkbenchIcon, empty_state, empty_state_with_actions};
+use crate::workbench::design_system::{
+    Problem, WorkbenchIcon, empty_state, empty_state_with_actions, paint_problem_mark,
+};
 use crate::workbench::documents::netlist_document::{
     ActiveNetlistDocument, ExecutedDeckVerification,
 };
@@ -207,6 +209,10 @@ const RUN_STRIP_DOT_DIAMETER: f32 = 5.0;
 const RUN_STRIP_DOT_GAP: f32 = 6.0;
 /// Width a live-state dot takes out of the chip, gap included.
 const RUN_STRIP_DOT_COLUMN: f32 = RUN_STRIP_DOT_DIAMETER + RUN_STRIP_DOT_GAP;
+/// Side of the badge's problem mark, sized to the strip's own text.
+const RUN_STRIP_MARK_SIDE: f32 = 11.0;
+/// Width that mark takes out of the badge, gap included.
+const RUN_STRIP_MARK_COLUMN: f32 = RUN_STRIP_MARK_SIDE + RUN_STRIP_DOT_GAP;
 
 /// Which statement the strip is making about the run it names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -453,25 +459,24 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
         egui::pos2(statement_right, content.bottom()),
     );
 
-    let (chip, tone, chip_hint) = match projection.phase {
+    // Which run this deck belongs to, and how it stands against it, are facts
+    // the words carry. None of the four is an alarm, so none of them is a
+    // colour: the phase is legible from the statement alone.
+    let (chip, chip_hint) = match projection.phase {
         RunStripPhase::Current => (
             messages.format(MessageId::NetlistRunStripRun, &[("id", &run_id)]),
-            t.color.ok,
             MessageId::NetlistRunStripCurrentTooltip,
         ),
         RunStripPhase::Edited => (
-            messages.format(MessageId::NetlistRunStripRun, &[("id", &run_id)]),
-            t.color.warn,
+            messages.format(MessageId::NetlistRunStripEdited, &[("id", &run_id)]),
             MessageId::NetlistRunStripEditedTooltip,
         ),
         RunStripPhase::Running => (
             messages.format(MessageId::NetlistRunStripRunning, &[("id", &run_id)]),
-            t.color.accent,
             MessageId::NetlistRunStripRunningTooltip,
         ),
         RunStripPhase::Snapshot => (
-            messages.format(MessageId::NetlistRunSnapshotImmutable, &[("id", &run_id)]),
-            t.color.ok,
+            messages.format(MessageId::NetlistRunSnapshotDocument, &[("id", &run_id)]),
             MessageId::NetlistRunStripCurrentTooltip,
         ),
     };
@@ -505,20 +510,18 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
             .size()
             .x
     };
-    // A dot marks LIVE state only. A finished run's currentness is static, so
-    // it is carried by the tone of the text itself and nothing else.
+    // A dot marks LIVE state only. A finished run's currentness is static and
+    // the words already carry it.
     let live = projection.phase == RunStripPhase::Running;
     // A verdict about the deck on screen ranks with the run's identity, not
     // with the sentence about it: the sentence yields first, and the badge
     // yields only with the row.
-    let badge = projection
-        .verification
-        .map(|verification| verification_chip(verification, &t));
+    let badge = projection.verification.and_then(verification_chip);
     // The identifiers never clip: the labelled sentence yields to the two
     // identifiers alone, and those yield the row entirely rather than print a
     // half digest.
-    let badge_width = badge.map_or(0.0, |(label, _, _)| {
-        text_width(&messages.text(label)) + RUN_STRIP_GAP
+    let badge_width = badge.map_or(0.0, |(label, _)| {
+        RUN_STRIP_MARK_COLUMN + text_width(&messages.text(label)) + RUN_STRIP_GAP
     });
     let chip_width =
         if live { RUN_STRIP_DOT_COLUMN } else { 0.0 } + text_width(&chip) + badge_width;
@@ -537,10 +540,10 @@ fn run_strip(ui: &mut Ui, state: &AppState, toolbar_content: egui::Rect) -> Opti
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
     );
     row.spacing_mut().item_spacing.x = RUN_STRIP_GAP;
-    run_strip_chip(&mut row, &chip, tone, live)
+    run_strip_chip(&mut row, &chip, live)
         .on_hover_text(messages.format(chip_hint, &[("id", &run_id)]));
-    if let Some((label, hint, color)) = badge {
-        run_strip_chip(&mut row, &messages.text(label), color, false)
+    if let Some((label, hint)) = badge {
+        run_strip_problem(&mut row, &messages.text(label))
             .on_hover_text(messages.format(hint, &[("id", &run_id)]));
     }
     if let Some((label, abbreviated)) = copy {
@@ -610,40 +613,31 @@ fn task_deck_button(
         })
 }
 
-/// What the strip says about the deck below it, and in what tone.
+/// What the strip says about the deck below it, when there is something to
+/// say.
 ///
-/// One of these four is a claim of verification and the other three are not,
-/// and the tones say which is which before the words are read.
-fn verification_chip(
+/// Three of the four states report that nothing is wrong — a reproduced
+/// digest, a point's own materialized source, a run that sealed no digest at
+/// all — and the strip does not spend a badge on them. The fourth is a deck
+/// the run was never authorized over, and that is the one worth a mark.
+const fn verification_chip(
     verification: ExecutedDeckVerification,
-    t: &Tokens,
-) -> (MessageId, MessageId, egui::Color32) {
+) -> Option<(MessageId, MessageId)> {
     match verification {
-        ExecutedDeckVerification::Verified => (
-            MessageId::NetlistRunStripDeckVerified,
-            MessageId::NetlistRunStripDeckVerifiedTooltip,
-            t.color.ok,
-        ),
-        ExecutedDeckVerification::PointVariant => (
-            MessageId::NetlistRunStripDeckPointVariant,
-            MessageId::NetlistRunStripDeckPointVariantTooltip,
-            t.color.text_dim,
-        ),
-        ExecutedDeckVerification::Unmatched => (
+        ExecutedDeckVerification::Unmatched => Some((
             MessageId::NetlistRunStripDeckUnmatched,
             MessageId::NetlistRunStripDeckUnmatchedTooltip,
-            t.color.err,
-        ),
-        ExecutedDeckVerification::NotRecorded => (
-            MessageId::NetlistRunStripDeckNotRecorded,
-            MessageId::NetlistRunStripDeckNotRecordedTooltip,
-            t.color.text_dim,
-        ),
+        )),
+        ExecutedDeckVerification::Verified
+        | ExecutedDeckVerification::PointVariant
+        | ExecutedDeckVerification::NotRecorded => None,
     }
 }
 
-/// The strip's status chip: toned text, and a dot only while the run is live.
-fn run_strip_chip(ui: &mut Ui, label: &str, color: egui::Color32, live: bool) -> egui::Response {
+/// The strip's status chip: neutral text, and a dot only while the run is
+/// live.
+fn run_strip_chip(ui: &mut Ui, label: &str, live: bool) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = RUN_STRIP_DOT_GAP;
         if live {
@@ -652,12 +646,32 @@ fn run_strip_chip(ui: &mut Ui, label: &str, color: egui::Color32, live: bool) ->
                 egui::Sense::hover(),
             );
             ui.painter()
-                .circle_filled(dot.center(), RUN_STRIP_DOT_DIAMETER / 2.0, color);
+                .circle_filled(dot.center(), RUN_STRIP_DOT_DIAMETER / 2.0, t.color.accent);
         }
         ui.label(
             egui::RichText::new(label)
                 .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                .color(color),
+                .color(t.color.text_dim),
+        )
+    })
+    .inner
+}
+
+/// The strip's one badge: a failure mark, then the same neutral text as the
+/// chip beside it.
+fn run_strip_problem(ui: &mut Ui, label: &str) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = RUN_STRIP_DOT_GAP;
+        let (mark, _) = ui.allocate_exact_size(
+            egui::vec2(RUN_STRIP_MARK_SIDE, RUN_STRIP_MARK_SIDE),
+            egui::Sense::hover(),
+        );
+        paint_problem_mark(ui.painter(), mark, Problem::Failure);
+        ui.label(
+            egui::RichText::new(label)
+                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                .color(t.color.text_dim),
         )
     })
     .inner
@@ -677,44 +691,46 @@ fn strip_button(ui: &mut Ui, label: &str, hint: Option<&str>) -> egui::Response 
     }
 }
 
-/// The banner recipe every advisory band above the editor shares: one tinted
-/// row that states a condition of the document, tinted by its own tone.
-fn advisory_band(ui: &mut Ui, tone: egui::Color32, contents: impl FnOnce(&mut Ui)) {
+/// The banner recipe every advisory band above the editor shares: one inset
+/// row that states a condition of the document, with a problem's mark as the
+/// only colour on it.
+fn advisory_band(ui: &mut Ui, problem: Option<Problem>, contents: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(tone.gamma_multiply(0.10))
-        .stroke(egui::Stroke::new(1.0, tone.gamma_multiply(0.65)))
+        .fill(t.color.bg_inset)
+        .stroke(egui::Stroke::new(1.0, t.color.border))
         .inner_margin(8)
         .show(ui, |ui| {
-            ui.horizontal_wrapped(contents);
+            ui.horizontal_wrapped(|ui| {
+                if let Some(problem) = problem {
+                    let (mark, _) = ui.allocate_exact_size(
+                        egui::vec2(RUN_STRIP_MARK_SIDE, RUN_STRIP_MARK_SIDE),
+                        egui::Sense::hover(),
+                    );
+                    paint_problem_mark(ui.painter(), mark, problem);
+                }
+                contents(ui);
+            });
         });
 }
 
 fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some(descriptor) = app
+    if !app
         .state
         .workspace
         .content
         .netlist_descriptor
         .as_ref()
-        .filter(|descriptor| descriptor.execution_profile_review_required())
-    else {
+        .is_some_and(|descriptor| descriptor.execution_profile_review_required())
+    {
         return;
-    };
-    let dialect = descriptor
-        .imported_dialect
-        .unwrap_or(crate::state::NetlistSourceDialect::RSpice);
+    }
     let messages = app.state.ui.messages();
-    let description = messages.format(
-        MessageId::NetlistProfileReviewRequiredDescription,
-        &[("dialect", dialect.label())],
-    );
-    let t = Tokens::get(ui.ctx());
+    let description = messages.text(MessageId::NetlistProfileReviewRequiredDescription);
     let mut review = false;
-    advisory_band(ui, t.color.warn, |ui| {
+    advisory_band(ui, Some(Problem::Warning), |ui| {
         ui.label(
-            egui::RichText::new(messages.text(MessageId::NetlistProfileReviewRequired))
-                .strong()
-                .color(t.color.warn),
+            egui::RichText::new(messages.text(MessageId::NetlistProfileReviewRequired)).strong(),
         );
         ui.label(description);
         review = ui
@@ -748,24 +764,18 @@ fn control_disposition_band(ui: &mut Ui, state: &AppState) {
         ("promoted", promoted.as_str()),
         ("dropped", dropped.as_str()),
     ];
-    let t = Tokens::get(ui.ctx());
     // Nothing was lost when every command was promoted, so the band reports
-    // rather than warns; amber is reserved for the deck that gave something up.
-    let tone = if summary.dropped > 0 {
-        t.color.warn
-    } else {
-        t.color.text_dim
-    };
+    // rather than warns; the mark is reserved for the deck that gave something
+    // up.
+    let problem = (summary.dropped > 0).then_some(Problem::Warning);
     let mut hover = messages.format(MessageId::NetlistControlRegionDetail, &arguments);
     for example in &summary.examples {
         hover.push('\n');
         hover.push_str(example);
     }
-    advisory_band(ui, tone, |ui| {
+    advisory_band(ui, problem, |ui| {
         ui.label(
-            egui::RichText::new(messages.text(MessageId::NetlistControlRegionDisposition))
-                .strong()
-                .color(tone),
+            egui::RichText::new(messages.text(MessageId::NetlistControlRegionDisposition)).strong(),
         )
         .on_hover_text(&hover);
         ui.label(
@@ -1001,26 +1011,19 @@ fn generation_block_reason(state: &AppState) -> String {
                 .text(MessageId::NetlistGenerateBeforeAction)
         })
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DocumentStatusTone {
-    Valid,
-    Warning,
-    Error,
-}
-
-fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
+/// What is wrong with the active document, or `None` when nothing is.
+///
+/// A deck that parses, a comparison that is ready and a sealed run snapshot
+/// are the ordinary cases. The toolbar used to announce each of them in green;
+/// the tab already names the document, so the status now speaks only when the
+/// deck cannot be generated or will not parse.
+fn document_syntax_status(state: &AppState) -> Option<(String, Problem)> {
     let messages = state.ui.messages();
-    if state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
-        return (
-            messages.text(MessageId::NetlistComparisonReady),
-            DocumentStatusTone::Valid,
-        );
-    }
-    if state.ui.netlist.active_document == ActiveNetlistDocument::RunSnapshot {
-        return (
-            messages.text(MessageId::NetlistRunSnapshotStatus),
-            DocumentStatusTone::Valid,
-        );
+    if matches!(
+        state.ui.netlist.active_document,
+        ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot
+    ) {
+        return None;
     }
     if state.ui.netlist.active_document == ActiveNetlistDocument::Generated
         && (state.ui.netlist.generation_error.is_some()
@@ -1029,14 +1032,14 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
                 != state.ui.netlist.current_generation_input_digest)
     {
         let retained_artifact = generated_primary_ready(state);
-        return (
+        return Some((
             if retained_artifact {
                 messages.text(MessageId::NetlistGenerationStaleBlocked)
             } else {
                 messages.text(MessageId::NetlistGenerationBlocked)
             },
-            DocumentStatusTone::Warning,
-        );
+            Problem::Warning,
+        ));
     }
     let errors = state
         .ui
@@ -1051,7 +1054,7 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
         .count();
     if errors > 0 {
         let count = errors.to_string();
-        return (
+        return Some((
             messages.format(
                 if errors == 1 {
                     MessageId::NetlistSyntaxErrorSingular
@@ -1060,13 +1063,10 @@ fn document_syntax_status(state: &AppState) -> (String, DocumentStatusTone) {
                 },
                 &[("count", &count)],
             ),
-            DocumentStatusTone::Error,
-        );
+            Problem::Failure,
+        ));
     }
-    (
-        messages.text(MessageId::NetlistSyntaxValid),
-        DocumentStatusTone::Valid,
-    )
+    None
 }
 #[cfg(test)]
 mod tests {
@@ -1267,18 +1267,9 @@ mod tests {
             "dock collapse must not re-enable a crowded full action set"
         );
         assert!(!toolbar::code_toolbar_prefers_compact(1280.0, 800.0, 405.0));
-        assert!(!toolbar::toolbar_status_visible(
-            true,
-            DocumentStatusTone::Warning
-        ));
-        assert!(toolbar::toolbar_status_visible(
-            true,
-            DocumentStatusTone::Error
-        ));
-        assert!(toolbar::toolbar_status_visible(
-            false,
-            DocumentStatusTone::Warning
-        ));
+        assert!(!toolbar::toolbar_status_visible(true, Problem::Warning));
+        assert!(toolbar::toolbar_status_visible(true, Problem::Failure));
+        assert!(toolbar::toolbar_status_visible(false, Problem::Warning));
         assert!(toolbar::toolbar_advisory_fits(500.0, 260.0, 110.0, 70.0));
         assert!(
             !toolbar::toolbar_advisory_fits(430.0, 260.0, 110.0, 70.0),
@@ -1305,7 +1296,7 @@ mod tests {
         assert!(!generated_primary_ready(&state));
         assert_eq!(
             document_syntax_status(&state),
-            ("generation blocked".to_owned(), DocumentStatusTone::Warning)
+            Some(("generation blocked".to_owned(), Problem::Warning))
         );
     }
 
@@ -1320,10 +1311,7 @@ mod tests {
         assert!(generated_primary_ready(&state));
         assert_eq!(
             document_syntax_status(&state),
-            (
-                "stale · generation blocked".to_owned(),
-                DocumentStatusTone::Warning
-            )
+            Some(("stale · generation blocked".to_owned(), Problem::Warning))
         );
     }
 
@@ -1341,7 +1329,7 @@ mod tests {
         assert!(!active_document_available(&state));
         assert_eq!(
             document_syntax_status(&state),
-            ("generation blocked".to_owned(), DocumentStatusTone::Warning)
+            Some(("generation blocked".to_owned(), Problem::Warning))
         );
     }
 

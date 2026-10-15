@@ -4,6 +4,7 @@ use crate::diagnostics::ConsoleMessage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
+use crate::workbench::design_system::{Problem, problem_line};
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::{MessageId, RSpiceApp};
 
@@ -351,7 +352,8 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
             ui.weak(messages.text(MessageId::NetlistAlreadyPublished));
         }
         if let Some(error) = &dialog.error {
-            ui.colored_label(t.color.err, error);
+            // Not attached to a field: the publication itself was refused.
+            problem_line(ui, Problem::Failure, error);
         }
         focus
     });

@@ -52,12 +52,15 @@ fn netlist_navigator_projects_exact_live_counts_and_include_lines() {
             .find(|group| group.row.kind == kind)
             .and_then(|group| group.row.meta.as_deref())
     };
+    // The root row names the document and carries no meta: the tab above the
+    // editor already says which document this outline is of.
+    assert!(projection.root_row.is_some());
     assert_eq!(
         projection
             .root_row
             .as_ref()
             .and_then(|row| row.meta.as_deref()),
-        Some("root")
+        None
     );
     assert_eq!(count(NetlistNavigatorRowKind::Parameters), Some("1"));
     assert_eq!(count(NetlistNavigatorRowKind::Instances), Some("2"));
@@ -245,12 +248,11 @@ fn a_category_the_deck_does_not_declare_is_left_out_of_the_index() {
             .all(|row| row.label != "Conditionals"),
         "an absent category must not be listed as present with a zero"
     );
-    // A structure group stays, because it says in its own place what the
-    // deck does not declare.
-    assert!(projection.groups.iter().any(|group| group.row.kind
-        == NetlistNavigatorRowKind::Measurements
-        && group.declarations() == 0
-        && !english().text(group.empty_note).is_empty()));
+    // A structure group stays, with its own count reading zero. It used to
+    // carry a child note spelling that out a second time.
+    assert!(projection.groups.iter().any(|group| {
+        group.row.kind == NetlistNavigatorRowKind::Measurements && group.declarations() == 0
+    }));
 }
 
 /// The filter used to be compared against the English label behind a
