@@ -152,3 +152,27 @@ fn a_real_target_takes_a_real_right_hand_side() {
         [(DigitalOverrideId(0), Some(DigitalScalar::Real(6.0)))]
     );
 }
+
+/// A user function's body reads module signals its arguments do not name;
+/// the right-hand side depends on them through every nested call, and not on
+/// the functions' own static argument and result storage (section 9.3).
+#[test]
+fn a_function_call_subscribes_the_right_hand_side_to_what_the_function_reads() {
+    let (plan, _) = run("module t;\n  reg [3:0] g, h, a, v;\n  \
+         function [3:0] inner;\n    input [3:0] x;\n    inner = x + h;\n  endfunction\n  \
+         function [3:0] outer;\n    input [3:0] x;\n    outer = inner(x) + g;\n  endfunction\n  \
+         initial begin\n    g = 1; h = 2; a = 3;\n    force v = outer(a);\n  end\nendmodule\n");
+    let id = |name: &str| {
+        plan.signals
+            .iter()
+            .find(|signal| signal.name == name)
+            .unwrap_or_else(|| panic!("signal {name}"))
+            .id
+    };
+    let mut expected = vec![id("g"), id("h"), id("a")];
+    expected.sort_unstable();
+    assert_eq!(
+        plan.overrides[0].value.as_ref().unwrap().dependencies,
+        expected
+    );
+}

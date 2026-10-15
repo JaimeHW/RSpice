@@ -908,6 +908,7 @@ fn lower_with_analog_variables(
         std::mem::take(&mut calls.pending_disables),
         &mut diagnostics,
     );
+    overrides::subscribe_routine_reads(&mut calls.overrides, &plan_routines);
 
     let mut bit_aliases = Vec::new();
     for alias in digital.bit_aliases.iter().chain(

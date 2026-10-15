@@ -247,6 +247,88 @@ impl ProcessLowerer<'_> {
     }
 }
 
+/// Subscribe each right-hand side to the signals its user function calls
+/// read, through every nested call.
+///
+/// A function body reads module signals the call's arguments do not name, and
+/// the right-hand side is re-evaluated when any operand changes (IEEE
+/// 1364-2005 section 9.3), so a value computed from one of those signals
+/// follows it. A signal a called function writes is its own working storage
+/// (a static argument, result or local), not an operand: subscribing to it
+/// would only wake the right-hand side on its own evaluation.
+pub(super) fn subscribe_routine_reads(
+    overrides: &mut [DigitalOverride],
+    routines: &[super::super::digital::DigitalRoutine],
+) {
+    for site in overrides {
+        let Some(value) = site.value.as_mut() else {
+            continue;
+        };
+        let mut pending: Vec<super::super::digital::DigitalRoutineId> =
+            called_routines(&value.evaluator.function).collect();
+        let mut visited = BTreeSet::new();
+        let mut reads = BTreeSet::new();
+        let mut writes = BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) {
+                continue;
+            }
+            let Some(routine) = routines.get(id.index()).filter(|routine| routine.id == id) else {
+                continue;
+            };
+            pending.extend(called_routines(&routine.function));
+            for node in &routine.function.values {
+                match &node.kind {
+                    CfgValueKind::DigitalSignalRead { signal }
+                    | CfgValueKind::DigitalRealSignalRead { signal } => {
+                        reads.insert(*signal);
+                    }
+                    CfgValueKind::DigitalArrayRead { array, .. } => {
+                        if let Some(range) = array.cell_range() {
+                            reads.extend(range.map(DigitalSignalId::new));
+                        }
+                    }
+                    CfgValueKind::DigitalBlockingWrite { target, .. }
+                    | CfgValueKind::DigitalNonblockingWrite { target, .. } => {
+                        writes.insert(target.signal);
+                    }
+                    CfgValueKind::DigitalPackedBlockingWrite { signal, .. }
+                    | CfgValueKind::DigitalPackedNonblockingWrite { signal, .. } => {
+                        writes.insert(*signal);
+                    }
+                    CfgValueKind::DigitalArrayBlockingWrite { array, .. }
+                    | CfgValueKind::DigitalArrayNonblockingWrite { array, .. } => {
+                        if let Some(range) = array.cell_range() {
+                            writes.extend(range.map(DigitalSignalId::new));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for param in routine.params.iter().chain(routine.result.as_ref()) {
+                if let super::super::digital::DigitalRoutineStorage::Signal(signal) = param.storage
+                {
+                    writes.insert(signal);
+                }
+            }
+        }
+        value
+            .dependencies
+            .extend(reads.difference(&writes).copied());
+        value.dependencies.sort_unstable();
+        value.dependencies.dedup();
+    }
+}
+
+fn called_routines(
+    function: &super::super::CfgFunction,
+) -> impl Iterator<Item = super::super::digital::DigitalRoutineId> + '_ {
+    function.values.iter().filter_map(|node| match node.kind {
+        CfgValueKind::DigitalCall { routine, .. } => Some(routine),
+        _ => None,
+    })
+}
+
 /// The first system function a right-hand side calls that is not a pure
 /// function of its arguments.
 fn impure_system_function(expression: &Expression) -> Option<SmolStr> {

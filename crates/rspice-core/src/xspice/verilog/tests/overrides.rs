@@ -134,6 +134,43 @@ endmodule
     );
 }
 
+/// A user function in a right-hand side subscribes it to the module signals
+/// the function body reads, through a nested call, and not to the function's
+/// own argument and result storage. Neither oracle runs this continuously:
+/// Icarus 13.0 evaluates it once ("sorry"), and Verilator 5.048 evaluates a
+/// function-call right-hand side once while it follows the bodies written
+/// inline (`a + g`, `a + g + g`). The expected text is that inline form's,
+/// which Verilator printed for an RSpice-authored probe.
+#[test]
+fn a_function_right_hand_side_follows_the_signals_the_function_reads() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module top;
+  reg [3:0] g, a, v; wire [3:0] w; assign w = 4'd0;
+  function [3:0] plus_g;
+    input [3:0] x;
+    plus_g = x + g;
+  endfunction
+  function [3:0] twice;
+    input [3:0] x;
+    twice = plus_g(x) + g;
+  endfunction
+  initial begin
+    g = 4'd1; a = 4'd2;
+    force v = plus_g(a); force w = twice(a);
+    #1 $display("v=%0d w=%0d", v, w);
+    g = 4'd3;
+    #1 $display("v=%0d w=%0d", v, w);
+    a = 4'd4;
+    #1 $display("v=%0d w=%0d", v, w);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(stdout(&report), "v=3 w=4\nv=5 w=8\nv=7 w=10\n");
+}
+
 /// A right-hand side that reads what it overrides never settles; the run
 /// ends naming the statement rather than hanging.
 #[test]
