@@ -99,7 +99,7 @@ pub fn resolve_plot_source(
     )
 }
 
-/// Resolve an active Visualization Studio pane without depending on a window,
+/// Resolve an active result-document pane without depending on a window,
 /// screenshot, framebuffer, or transient viewer cache.
 pub fn resolve_visualization_pane_source(
     source: VisualizationPaneHardcopySource<'_>,

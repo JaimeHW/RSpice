@@ -350,8 +350,8 @@ pub fn instrument_separator(ui: &mut Ui) {
 ///
 /// Every tab drawn is a tab that can be opened. The strip lists only the
 /// sheets the active dataset can feed (see [`bars::viewer_tabs`]), so there
-/// is no disabled state to paint here — the Visualization Studio catalog is
-/// where the full set of viewers and their requirements are published.
+/// is no disabled state to paint here — the Create Result Document viewer
+/// list is where the full set and their requirements are published.
 pub fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool) -> bool {
     use rspice_ui_kit::theme::mix;
 

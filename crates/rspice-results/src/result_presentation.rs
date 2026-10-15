@@ -74,8 +74,8 @@ pub enum ResultViewer {
     Optimization,
     /// Immutable task and retained-value inventory for the active dataset.
     ///
-    /// This is dataset-native and deliberately has no Visualization Studio
-    /// viewer-document identity.
+    /// This is dataset-native and deliberately has no viewer-document
+    /// identity in the catalog.
     Manifest,
     /// Exact single-ended and mixed-mode power-wave matrices.
     NetworkMatrix,
@@ -181,11 +181,11 @@ impl ResultViewer {
         }
     }
 
-    /// The Visualization Studio viewer document this sheet renders, if any.
+    /// The catalog viewer document this sheet renders, if any.
     ///
     /// `None` means the sheet is dataset-native: it reads the retained result
-    /// directly and has no place in the Studio's document catalog, so binding
-    /// a page to it would name a renderer that cannot draw the page.
+    /// directly and has no place in the viewer catalog, so binding a page to
+    /// it would name a renderer that cannot draw the page.
     ///
     /// One owner on purpose. Three copies of this map existed — in the
     /// persistent-document layer, the Studio, and the workbench state — and

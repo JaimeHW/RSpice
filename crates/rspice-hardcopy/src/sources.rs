@@ -116,7 +116,7 @@ pub struct PlotHardcopySource<'a> {
     pub scope: HardcopyScope,
 }
 
-/// Active Visualization Studio pane together with the immutable reference
+/// Active result-document pane together with the immutable reference
 /// manifest that names its exact document revision and retained datasets.
 pub struct VisualizationPaneHardcopySource<'a> {
     pub source_key: String,

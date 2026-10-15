@@ -1,4 +1,4 @@
-//! Canonical Visualization Studio viewer metadata.
+//! Canonical result-viewer metadata.
 //!
 //! The catalog mirrors the product manifest. Compatibility is deliberately
 //! evaluated from an explicit caller-provided capability snapshot so catalog

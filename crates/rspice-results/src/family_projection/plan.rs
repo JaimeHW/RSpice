@@ -94,8 +94,8 @@ impl SourceSampleSelection {
 }
 
 /// Renderer-neutral, exact-row projection of a family policy. The plan is
-/// compiled once at the Visualization Studio boundary so the waveform view
-/// never reinterprets display labels or solver metadata.
+/// compiled once at the result-viewer boundary so the waveform view never
+/// reinterprets display labels or solver metadata.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FamilyRenderPlan {
     policy: FamilyPresentationPolicy,

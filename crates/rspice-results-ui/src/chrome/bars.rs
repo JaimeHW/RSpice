@@ -167,8 +167,8 @@ pub fn viewer_tabs(
 
     // The strip lists only the sheets this dataset can feed. With 22 viewers
     // and a typical run feeding a handful, a full row of disabled tabs would
-    // bury the ones that work; the Visualization Studio catalog is where every
-    // viewer and its requirements are published.
+    // bury the ones that work; the Create Result Document viewer list is
+    // where every viewer and its requirements are published.
     for viewer in available {
         if viewer_tab(ui, viewer, current == viewer) {
             clicked = Some(viewer);

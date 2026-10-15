@@ -1,4 +1,4 @@
-//! Canonical, UI-independent domain model for Visualization Studio.
+//! Canonical, UI-independent domain model for a result document.
 //!
 //! A visualization document is a versioned presentation over immutable result
 //! datasets.  Source samples and their content digests are never edited in
