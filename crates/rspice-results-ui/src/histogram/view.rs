@@ -13,7 +13,7 @@ use rspice_ui_kit::panels::section_header;
 use rspice_ui_kit::panels::{
     panel_body, panel_inset, property_row_control_columns, property_row_height,
 };
-use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si};
+use rspice_ui_kit::plot::{self, Axis, PlotSpec, XScale, fmt_si, fmt_si_readout};
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 
@@ -93,7 +93,7 @@ fn binning_label(histogram: &rspice_results::histogram::Histogram) -> String {
     }
     let count = histogram.bins.len();
     let plural = if count == 1 { "" } else { "s" };
-    format!("{count} display bin{plural} · rebuilt from exact samples")
+    format!("{count} display bin{plural}")
 }
 
 /// Draw measurement, display mode and bin controls; true requests a fitted view.
@@ -491,9 +491,7 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
                     HistogramUnavailable::NoSelection { .. } => {
                         "Stats appear once a Monte Carlo run is loaded."
                     }
-                    HistogramUnavailable::Invalid => {
-                        "The selected samples, retained statistics, or display range are invalid or unavailable."
-                    }
+                    HistogramUnavailable::Invalid => "Invalid display range or sample data.",
                 },
             );
             return;
@@ -501,105 +499,71 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
     };
     let histogram = model.histogram;
     section_header(ui, "Distribution", None);
+    // The strip header above already names the measure, and the two
+    // out-of-range counts are zero on an autoscaled histogram: one row, and
+    // only when the display range is actually cutting samples off.
     if let Some(moments) = model.moments {
-        let rows = [
-            ("Measure", histogram.name.clone(), false),
-            ("Exact samples", moments.count.to_string(), false),
-            ("Mean", fmt_si(moments.mean, "", 3), true),
-            ("Std dev", fmt_si(moments.std_dev, "", 3), true),
-            ("Min", fmt_si(moments.min, "", 3), false),
-            ("Max", fmt_si(moments.max, "", 3), false),
-            ("Below range", histogram.underflow.to_string(), false),
-            ("Above range", histogram.overflow.to_string(), false),
+        let mut rows = vec![
+            ("N", moments.count.to_string(), false),
+            ("Mean", fmt_si_readout(moments.mean, "", 4), true),
+            ("Std dev", fmt_si_readout(moments.std_dev, "", 4), true),
+            ("Min", fmt_si_readout(moments.min, "", 4), false),
+            ("Max", fmt_si_readout(moments.max, "", 4), false),
         ];
+        let outside = histogram.underflow + histogram.overflow;
+        if outside > 0 {
+            rows.push(("Outside range", outside.to_string(), false));
+        }
         crate::presentation::stat_table(ui, &rows);
     } else {
-        crate::presentation::stat_table(
-            ui,
-            &[
-                ("Measure", histogram.name.clone(), false),
-                (
-                    "Exact moments",
-                    "Unavailable — retained summary disagrees with samples or moments exceed the finite range".to_owned(),
-                    false,
-                ),
-            ],
-        );
+        crate::presentation::panel_note(ui, "Statistics unavailable: sample data inconsistent.");
     }
 
     let mc = model.method;
     let mean_confidence = mc.and_then(|authority| authority.mean_confidence);
-    if let Some(confidence) = mean_confidence {
-        section_header(ui, "Confidence in mean", None);
-        let limits = match confidence.interval {
-            MonteCarloMeanInterval::Available { lower, upper } => {
-                format!("{} to {}", fmt_si(lower, "", 4), fmt_si(upper, "", 4))
-            }
-            MonteCarloMeanInterval::InsufficientSamples => {
-                "Unavailable — fewer than two successful trials".into()
-            }
-            MonteCarloMeanInterval::Unrepresentable => {
-                "Unavailable — limits exceed the finite range".into()
-            }
-        };
-        crate::presentation::stat_table(
-            ui,
-            &[
-                ("Level", format!("{}%", confidence.level_pct), false),
-                ("Mean interval", limits, true),
-            ],
-        );
-        crate::presentation::panel_note(
-            ui,
-            if confidence.conditional_on_successful_trials {
-                "Describes successful trials only; failed trials censor the original population. This is not a yield interval."
-            } else {
-                "Uncertainty in the population mean for independent trials. Student t is exact for normal observations; bootstrap coverage depends on sample size and resampling."
+    // The interval and the level it was taken at are one statement.
+    let confidence_row = mean_confidence.map(|confidence| {
+        (
+            format!("Mean {}% CI", confidence.level_pct),
+            match confidence.interval {
+                MonteCarloMeanInterval::Available { lower, upper } => {
+                    format!(
+                        "{} to {}",
+                        fmt_si_readout(lower, "", 4),
+                        fmt_si_readout(upper, "", 4)
+                    )
+                }
+                MonteCarloMeanInterval::InsufficientSamples => {
+                    "Unavailable — fewer than two successful trials".into()
+                }
+                MonteCarloMeanInterval::Unrepresentable => {
+                    "Unavailable — limits exceed the finite range".into()
+                }
             },
-        );
+        )
+    });
+    if let Some((label, limits)) = &confidence_row {
+        crate::presentation::stat_table(ui, &[(label.as_str(), limits.clone(), true)]);
     }
 
-    section_header(ui, "Method authority", None);
-    let seed = mc.map_or_else(
-        || "Unavailable — not retained".to_owned(),
-        |authority| format!("{} · 0x{:X}", authority.seed, authority.seed),
-    );
-    let completion = mc.map_or_else(
-        || "Unavailable — not retained".to_owned(),
-        |authority| {
+    section_header(ui, "Run", None);
+    let mut run_rows = Vec::new();
+    if let Some(authority) = mc {
+        run_rows.push((
+            "Run completion",
             format!(
                 "{} / {} · {} failed",
                 authority.runs_completed, authority.runs_requested, authority.failures
-            )
-        },
-    );
-    let binning = binning_label(histogram);
-    crate::presentation::stat_table(
-        ui,
-        &[
-            ("Run completion", completion, false),
-            ("Seed", seed, false),
-            (
-                if mean_confidence.is_some() {
-                    "Mean estimator"
-                } else {
-                    "Estimator"
-                },
-                mean_confidence.map_or_else(
-                    || "Unavailable — method not retained".to_owned(),
-                    |confidence| confidence.estimator_label(),
-                ),
-                false,
             ),
-            (
-                "Distribution fit",
-                "Unavailable — no fit evidence retained".to_owned(),
-                false,
-            ),
-            ("Binning", binning, false),
-        ],
-    );
+            false,
+        ));
+        run_rows.push(("Seed", format!("0x{:X}", authority.seed), false));
+    }
+    run_rows.push(("Binning", binning_label(histogram), false));
+    crate::presentation::stat_table(ui, &run_rows);
 
+    // No spec bound to this measurement is not a finding; the section only
+    // exists when there is a yield to read.
     if let Some(yield_result) = model.yield_result {
         section_header(ui, "Spec", None);
         let cpk = yield_result
@@ -609,29 +573,9 @@ pub fn right_panel(ui: &mut Ui, model: Result<HistogramInspector<'_>, HistogramU
         let rows = [
             ("Yield", yield_label(yield_result, mc), true),
             ("Cpk", cpk, false),
-            (
-                "Failures",
-                format!("{} / {}", yield_result.fail_count, yield_result.total_runs),
-                false,
-            ),
-            (
-                "Confidence interval",
-                "Unavailable — not retained".to_owned(),
-                false,
-            ),
         ];
         crate::presentation::stat_table(ui, &rows);
-    } else {
-        section_header(ui, "Spec", None);
-        crate::presentation::panel_note(
-            ui,
-            "No unambiguous specification or yield evidence is retained for this measurement.",
-        );
     }
-    crate::presentation::panel_note(
-        ui,
-        "The shaded band is descriptive ±1σ only when exact retained moments are available. No distribution fit is inferred.",
-    );
 }
 
 #[cfg(test)]
@@ -784,9 +728,6 @@ mod tests {
         assert_eq!(axis.degenerate_at, None);
         assert!((axis.x0 - 0.88).abs() < 1.0e-12, "{axis:?}");
         assert!((axis.x1 - 3.12).abs() < 1.0e-12, "{axis:?}");
-        assert_eq!(
-            binning_label(&histogram),
-            "2 display bins · rebuilt from exact samples"
-        );
+        assert_eq!(binning_label(&histogram), "2 display bins");
     }
 }

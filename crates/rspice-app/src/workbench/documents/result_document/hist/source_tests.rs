@@ -86,7 +86,7 @@ fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
     .unwrap();
     assert!(state.viewer_capability(ActiveViewer::Histogram).available);
     assert!(paint(&mut state, false).contains("gain"));
-    assert!(paint(&mut state, true).contains("Exact samples"));
+    assert!(paint(&mut state, true).contains("Std dev"));
     let text = paint(&mut state, false);
     assert!(text.contains("gain"), "{text}");
 }
@@ -396,14 +396,14 @@ fn hist_source_moments_preserve_representable_tiny_and_large_statistics() {
         max: 1.7e308,
     });
     assert!(paint(&mut state, false).contains("large"));
-    assert!(paint(&mut state, true).contains("Exact samples"));
+    assert!(paint(&mut state, true).contains("Std dev"));
 }
 
 #[test]
 fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
     let mut variable = super::tests::mc_variable("gain");
     let mut legacy = state_with(variable.clone());
-    assert!(!paint(&mut legacy, true).contains("Confidence in mean"));
+    assert!(!paint(&mut legacy, true).contains("CI"));
     variable.mean_confidence = Some(rspice_results::monte_carlo::MonteCarloMeanConfidence {
         level_pct: 90.0,
         method: rspice_results::monte_carlo::MonteCarloMeanMethod::PercentileBootstrap {
@@ -419,14 +419,12 @@ fn histogram_shows_retained_mean_confidence_without_inventing_legacy_limits() {
     });
     let mut state = state_with(variable);
     let text = paint(&mut state, true);
-    for expected in [
-        "Confidence in mean",
-        "90%",
-        "Mean interval",
-        "Percentile bootstrap",
-        "2000 resamples",
-        "seed 7",
-    ] {
+    // The level and the interval are one statement, and the estimator's own
+    // name is not a number the reader acts on.
+    for expected in ["Mean 90% CI", "900 m to 1.1"] {
         assert!(text.contains(expected), "missing {expected}: {text}");
+    }
+    for gone in ["Percentile bootstrap", "2000 resamples", "seed 7"] {
+        assert!(!text.contains(gone), "still painted {gone}: {text}");
     }
 }
