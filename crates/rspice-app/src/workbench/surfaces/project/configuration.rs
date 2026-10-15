@@ -1274,4 +1274,105 @@ mod tests {
             before_revision
         );
     }
+
+    /// Every string one pass of `body` painted, with the cell colours it used.
+    fn painted(mut body: impl FnMut(&mut Ui)) -> Vec<(String, Color32)> {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(560.0, 200.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| body(ui));
+            },
+        );
+        fn collect(shape: &egui::epaint::Shape, out: &mut Vec<(String, Color32)>) {
+            match shape {
+                egui::epaint::Shape::Text(text) => out.push((
+                    text.galley.job.text.clone(),
+                    text.galley
+                        .job
+                        .sections
+                        .first()
+                        .map_or(text.fallback_color, |section| section.format.color),
+                )),
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect(shape, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for shape in &output.shapes {
+            collect(&shape.shape, &mut out);
+        }
+        out
+    }
+
+    /// An override row's platform column used to run off the pane: the cell
+    /// clipped its value mid-glyph at the table's right edge, so the reader
+    /// saw half a word with nothing to say there was more. Every cell elides.
+    #[test]
+    fn an_override_cell_too_wide_for_its_column_elides_rather_than_clipping() {
+        let platforms = "Desktop \u{00b7} Browser \u{00b7} Managed runtime / unresolved";
+        let painted = painted(|ui| {
+            override_table_row(
+                ui,
+                TABLE_MIN_WIDTH,
+                [
+                    "/XAFE/X1",
+                    "schematic",
+                    "\u{2014}",
+                    "\u{2014}",
+                    "TT",
+                    platforms,
+                ],
+                false,
+                Some(Problem::Warning),
+            );
+        });
+        let status = painted
+            .last()
+            .expect("the row paints its status cell last")
+            .clone();
+        assert!(
+            status.0.ends_with('\u{2026}')
+                && platforms.starts_with(status.0.trim_end_matches('\u{2026}')),
+            "the status cell was clipped rather than elided: {status:?}"
+        );
+    }
+
+    /// The status column is the one cell that can carry a mark, and its words
+    /// are never the colour of the verdict.
+    #[test]
+    fn an_unresolved_override_is_marked_rather_than_painted_orange() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let tokens = Tokens::get(&ctx);
+        for problem in [None, Some(Problem::Warning)] {
+            for (text, color) in painted(|ui| {
+                override_table_row(
+                    ui,
+                    TABLE_MIN_WIDTH,
+                    ["/XAFE/X1", "schematic", "x", "y", "TT", "Desktop"],
+                    false,
+                    problem,
+                )
+            }) {
+                assert!(
+                    color != tokens.color.warn
+                        && color != tokens.color.err
+                        && color != tokens.color.ok,
+                    "{text:?} is painted in a severity tone"
+                );
+            }
+        }
+    }
 }

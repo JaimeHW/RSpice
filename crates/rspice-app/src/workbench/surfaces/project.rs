@@ -1574,4 +1574,60 @@ mod tests {
         .expect("write the render");
         writeln!(report_output, "{}", path.display()).ok();
     }
+
+    /// Nothing in the Project workspace or its navigator paints a status in
+    /// colour.
+    ///
+    /// The slice's own guard. A warning or a failure the reader has to notice
+    /// is a `Problem` mark in front of neutral text, and the mark owns the
+    /// only colour on its line, so none of these files may name a severity
+    /// tone at all, reach for `colored_label` or a status dot, use the two
+    /// `StatusMark` variants that are not problems, or shout a label. There
+    /// is no allowlist: these surfaces carry no data identity and no verdict
+    /// table.
+    #[test]
+    fn no_project_file_paints_a_status_in_colour() {
+        const BANNED: [&str; 9] = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+            "color.ok",
+            "color.info",
+            "color.warn",
+            "color.err",
+            "to_ascii_uppercase",
+        ];
+        // Each entry is one shipped file of this slice, read back as it ships.
+        const SLICE: [(&str, &str); 10] = [
+            ("project.rs", include_str!("project.rs")),
+            (
+                "project/configuration.rs",
+                include_str!("project/configuration.rs"),
+            ),
+            (
+                "project/dependencies.rs",
+                include_str!("project/dependencies.rs"),
+            ),
+            ("project/landing.rs", include_str!("project/landing.rs")),
+            ("project/library.rs", include_str!("project/library.rs")),
+            (
+                "project/library_publication.rs",
+                include_str!("project/library_publication.rs"),
+            ),
+            ("project/overview.rs", include_str!("project/overview.rs")),
+            ("project/page.rs", include_str!("project/page.rs")),
+            ("project/recovery.rs", include_str!("project/recovery.rs")),
+            ("docks/navigator.rs", include_str!("../docks/navigator.rs")),
+        ];
+        for (name, source) in SLICE {
+            let production = crate::source_guard::without_test_items(source);
+            for banned in BANNED {
+                assert!(
+                    !production.contains(banned),
+                    "{name} still paints a status with {banned:?}"
+                );
+            }
+        }
+    }
 }
