@@ -3,7 +3,7 @@
 use egui::{Align2, Sense, Ui};
 use rspice_results::noise::NoiseSummary;
 use rspice_ui_kit::panels::section_header;
-use rspice_ui_kit::plot::{DecimationCache, fmt_si};
+use rspice_ui_kit::plot::fmt_si_readout;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
 use rspice_ui_kit::widgets::measurement_table;
@@ -35,64 +35,32 @@ fn contributor_table_width() -> f32 {
 }
 
 /// Show contributors for the host-selected analysis and its validated noise-figure evidence.
-pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>, cache: &mut DecimationCache) {
-    let (summary, label) = match evidence {
-        ContributorEvidence::Retained { summary, label } => (summary, label),
-        absent => {
-            section_header(ui, "Contributors", Some("not retained"));
-            let reason = match absent {
-                ContributorEvidence::NotRetained => {
-                    "This noise result contains a spectrum, but no band-integrated contributor evidence was retained."
-                }
-                _ => {
-                    "The selected analysis carries no usable ordinary-noise spectrum, so no contributor evidence is bound to it."
-                }
-            };
-            crate::presentation::panel_note(ui, reason);
+pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>) {
+    let summary = match evidence {
+        ContributorEvidence::Retained { summary, .. } => summary,
+        _ => {
+            section_header(ui, "Contributors", None);
+            crate::presentation::panel_note(
+                ui,
+                "No contributor data. Turn on contributor ranking in the noise analysis.",
+            );
             return;
         }
     };
 
-    section_header(ui, "Contributor evidence", None);
-    let band = format!(
-        "{} – {}",
-        fmt_si(summary.band.0, "Hz", 3),
-        fmt_si(summary.band.1, "Hz", 3)
-    );
-    let total = summary
-        .total_rms
-        .map(|value| fmt_si(value, "V rms", 3))
-        .unwrap_or_else(|| "Not retained".to_owned());
-    let input = summary
-        .input_rms
-        .map(|value| fmt_si(value, summary.input_rms_unit(), 3))
-        .unwrap_or_else(|| "Not retained".to_owned());
-    let count = summary.rows.len().to_string();
-    measurement_table(
-        ui,
-        &[
-            ("Analysis", label),
-            ("Band", band.as_str()),
-            ("Output integrated", total.as_str()),
-            ("Input integrated", input.as_str()),
-            ("Contributors", count.as_str()),
-        ],
-    );
-
+    // The band and both integrated totals are the "Noise spectrum" section
+    // directly above this one, and the contributor count is the length of the
+    // table directly below it.
     if let Some(conversion) = &summary.conversion {
+        // Jitter is noise divided by slew, and the reference signal says what
+        // the phase was measured against; the sampled phase and voltage are
+        // bookkeeping.
         if let Some(sampling) = &conversion.sampling {
             section_header(ui, "Sampling", None);
-            let mut rows = vec![
-                (
-                    "Output phase",
-                    format!("{:.9}°", sampling.output.phase_degrees),
-                ),
-                ("Output voltage", fmt_si(sampling.output.voltage, "V", 6)),
-                (
-                    "Output slew",
-                    fmt_si(sampling.output.slew_volts_per_second, "V/s", 6),
-                ),
-            ];
+            let mut rows = vec![(
+                "Output slew",
+                fmt_si_readout(sampling.output.slew_volts_per_second, "V/s", 4),
+            )];
             if let Some(reference) = &sampling.reference {
                 rows.push((
                     "Reference signal",
@@ -102,17 +70,6 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>, cache: &mut D
                         reference.reference.as_deref().unwrap_or("0")
                     ),
                 ));
-                rows.push((
-                    "Reference phase",
-                    format!("{:.9}°", reference.phase_degrees),
-                ));
-                rows.push((
-                    "Reference slew",
-                    fmt_si(reference.slew_volts_per_second, "V/s", 6),
-                ));
-            }
-            if let Some(delay) = sampling.nominal_delay_seconds {
-                rows.push(("Nominal delay", fmt_si(delay, "s", 6)));
             }
             measurement_table(
                 ui,
@@ -122,54 +79,50 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>, cache: &mut D
                     .collect::<Vec<_>>(),
             );
         }
-        section_header(ui, "Conversion channels", Some("offset axis"));
+        section_header(ui, "Sidebands", None);
+        let requested = !conversion.input_source.is_empty();
         let rows = [
             (
                 "Input source",
-                if conversion.input_source.is_empty() {
-                    "Not requested".into()
-                } else {
+                if requested {
                     conversion.input_source.clone()
+                } else {
+                    "Not requested".into()
                 },
             ),
             (
                 "Carrier fundamental",
-                fmt_si(conversion.carrier_hz, "Hz", 6),
+                fmt_si_readout(conversion.carrier_hz, "Hz", 4),
             ),
             (
-                "Input sideband",
-                if conversion.input_source.is_empty() {
-                    "Not requested".into()
+                "Sideband in → out",
+                if requested {
+                    format!(
+                        "{} → {}",
+                        conversion.input_sideband, conversion.output_sideband
+                    )
                 } else {
-                    conversion.input_sideband.to_string()
+                    conversion.output_sideband.to_string()
                 },
-            ),
-            ("Output sideband", conversion.output_sideband.to_string()),
-            (
-                "Folding window",
-                format!(
-                    "−{} … +{}",
-                    conversion.max_sideband, conversion.max_sideband
-                ),
             ),
             (
                 "Input frequency band",
-                if conversion.input_source.is_empty() {
-                    "Not requested".into()
-                } else {
+                if requested {
                     format!(
-                        "{:.6e} … {:.6e} Hz",
-                        conversion.input_frequency(summary.band.0),
-                        conversion.input_frequency(summary.band.1)
+                        "{} … {}",
+                        fmt_si_readout(conversion.input_frequency(summary.band.0), "Hz", 4),
+                        fmt_si_readout(conversion.input_frequency(summary.band.1), "Hz", 4)
                     )
+                } else {
+                    "Not requested".into()
                 },
             ),
             (
                 "Output frequency band",
                 format!(
-                    "{:.6e} … {:.6e} Hz",
-                    conversion.output_frequency(summary.band.0),
-                    conversion.output_frequency(summary.band.1)
+                    "{} … {}",
+                    fmt_si_readout(conversion.output_frequency(summary.band.0), "Hz", 4),
+                    fmt_si_readout(conversion.output_frequency(summary.band.1), "Hz", 4)
                 ),
             ),
         ];
@@ -180,24 +133,24 @@ pub fn right_panel(ui: &mut Ui, evidence: ContributorEvidence<'_>, cache: &mut D
                 .map(|(label, value)| (*label, value.as_str()))
                 .collect::<Vec<_>>(),
         );
-        crate::presentation::panel_note(
-            ui,
-            "The plot axis is offset Hz. Physical channel frequency = offset + sideband × fundamental. Negative frequencies denote conjugate channels.",
-        );
     }
     if let Some(figure) = &summary.noise_figure {
-        figure::show(ui, figure, cache);
+        figure::show(ui, figure);
     }
 
+    if summary.rows.is_empty() {
+        section_header(ui, "Contributors", None);
+        crate::presentation::panel_note(
+            ui,
+            "No contributor data. Turn on contributor ranking in the noise analysis.",
+        );
+        return;
+    }
     section_header(
         ui,
         "Ranked contributors",
         Some(&format!("integrated {}", summary.power_unit())),
     );
-    if summary.rows.is_empty() {
-        crate::presentation::panel_note(ui, "No per-device contributor rows were retained.");
-        return;
-    }
     contributor_table(ui, summary);
 }
 
@@ -264,7 +217,7 @@ fn contributor_table(ui: &mut Ui, summary: &NoiseSummary) {
                             rect,
                             RANK_W + SOURCE_W,
                             POWER_W,
-                            format!("{:.3e}", row.power),
+                            fmt_si_readout(row.power, "", 4),
                             Align2::RIGHT_CENTER,
                             c.text_dim,
                         );
