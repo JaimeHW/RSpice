@@ -66,6 +66,7 @@ use rspice_core::execution::{
     MaterializedRunError, ResultCoordinate, ResultNamespaces, RunAxisValue, RunCoordinate,
     StepAxisTarget, TopologyFingerprint,
 };
+use rspice_core::netlist::SmallSignalStateSource;
 use rspice_core::{Engine, Netlist, SimulationError};
 use rspice_output::AtomicArtifactSet;
 #[cfg(test)]
@@ -262,6 +263,29 @@ fn unmapped_deck_analysis_detail(netlist: &Netlist, plan: &DeckPlan) -> Option<S
     None
 }
 
+/// Refuse a deck that authors a small-signal card around a transient state
+/// (`ACTIMES=` or `CHECKPOINT=`).
+///
+/// This worker linearizes every small-signal card at the operating point, so
+/// running such a card would publish an answer around the wrong state. The
+/// whole request is refused before anything solves, as an unmapped card is.
+fn transient_state_detail(netlist: &Netlist, plan: &DeckPlan) -> Option<String> {
+    plan.authored_analyses(netlist)
+        .enumerate()
+        .find_map(|(index, (_, id))| {
+            let keyword = match netlist.small_signal_state(index)? {
+                SmallSignalStateSource::TransientTimes(_) => "ACTIMES=",
+                SmallSignalStateSource::CheckpointFile(_) => "CHECKPOINT=",
+            };
+            let card = id.map_or_else(|| "a small-signal card".to_owned(), |id| id.to_string());
+            Some(format!(
+                "The deck's {card} card carries {keyword}, which linearizes it around a \
+                 transient state, and this engine build cannot run that yet. Run the deck with \
+                 `rspice run`, or remove {keyword} to linearize at the operating point."
+            ))
+        })
+}
+
 fn execute_planned_netlist(
     kind: PlannedAnalysisKind,
     request_kind: &str,
@@ -283,6 +307,9 @@ fn execute_planned_netlist(
     }
     if let Some(detail) = unmapped_deck_analysis_detail(netlist, &plan) {
         return Execution::failed("analysis.unsupported_kind", &detail);
+    }
+    if let Some(detail) = transient_state_detail(netlist, &plan) {
+        return Execution::failed("analysis.unsupported_small_signal_state", &detail);
     }
     let materializer =
         match engine.prepare_deck_plan_materializer_with_abort(netlist, &plan, deadline) {

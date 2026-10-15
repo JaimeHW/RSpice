@@ -872,6 +872,44 @@ fn the_removed_mixed_signal_kind_names_the_transient_that_replaced_it() {
     );
 }
 
+/// A small-signal card that names a transient state to linearize around is
+/// refused before anything solves. The worker linearizes every small-signal
+/// card at the operating point, so running it would publish an answer around
+/// the wrong state.
+#[test]
+fn a_small_signal_card_around_a_transient_state_is_refused_before_solving() {
+    const CHARGING: &str = "diode-RC charging\n\
+                            V1 in 0 PULSE(0 1 0 1u 1u 1 2)\n\
+                            D1 in out dmod\n\
+                            R1 out 0 10k\n\
+                            C1 out 0 1n\n\
+                            .model dmod d\n\
+                            .tran 1u 40u\n";
+    for (state, keyword) in [
+        ("actimes=20u", "ACTIMES="),
+        ("checkpoint=\"state.ckpt\"", "CHECKPOINT="),
+    ] {
+        let job = Job::new(&format!("state-{}", &keyword[..7].to_ascii_lowercase()));
+        let response = job.execute(
+            &format!("{CHARGING}.ac dec 5 1k 1meg {state}\n.end\n"),
+            "ac_small_signal",
+        );
+        assert_eq!(response["status"], "failed", "{keyword}: {response}");
+        assert_eq!(
+            response["failure_code"], "analysis.unsupported_small_signal_state",
+            "{keyword}: {response}"
+        );
+        let detail = response["failure_detail"]
+            .as_str()
+            .expect("a refusal explains itself");
+        assert!(
+            detail.contains(keyword) && detail.contains("ac-001"),
+            "the refusal names the card and its keyword: {detail}"
+        );
+        assert!(job.results_are_empty(), "{keyword}: nothing is published");
+    }
+}
+
 #[test]
 fn a_resistive_divider_operating_point_reports_exact_measurements() {
     let job = Job::new("divider-op");
