@@ -1,8 +1,8 @@
 //! Retained sensitivity-study charts, frequency selection and exact readouts.
 
 use super::{
-    CELL_INSET, HEADER_HEIGHT, NOT_RETAINED, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH,
-    ROW_HEIGHT, VALUE_WIDTH, chart_value, column_rect, exact_sensitivity, exact_value, paint_cell,
+    CELL_INSET, HEADER_HEIGHT, PANEL_ROW_HEIGHT, PARAMETER_WIDTH, RANK_WIDTH, ROW_HEIGHT,
+    VALUE_WIDTH, chart_value, column_rect, exact_sensitivity, exact_value, paint_cell,
     unavailable_reason,
 };
 use crate::{
@@ -24,12 +24,6 @@ use rspice_ui_kit::{
 use std::cmp::Ordering;
 
 const TABLE_MIN_WIDTH: f32 = RANK_WIDTH + PARAMETER_WIDTH + 360.0 + VALUE_WIDTH + PROFILE_WIDTH;
-
-/// What a row's own measured value is worth without a reference to divide by.
-///
-/// Stated once so the panel and the ranked table say the same thing about a
-/// study whose nominal output was zero at the point being read.
-const NO_SCALE: &str = "No normalized sensitivity available";
 
 #[derive(Debug, Clone, Copy)]
 pub struct StudyView<'a> {
@@ -228,7 +222,7 @@ pub(super) fn basis_label(evidence: &SensitivityStudyEvidence) -> String {
 fn read_at_label(evidence: &SensitivityStudyEvidence, index: usize) -> String {
     evidence.frequency_at(index).map_or_else(
         || "DC operating point".to_owned(),
-        |frequency| format!("{} Hz", exact_value(frequency)),
+        |frequency| rspice_ui_kit::plot::fmt_si_readout(frequency, "Hz", 4),
     )
 }
 
@@ -239,38 +233,6 @@ fn column_at(column: &[SensitivityValue<f64>], index: usize) -> SensitivityValue
         .unwrap_or(SensitivityValue::unavailable(
             rspice_core::analysis::sensitivity::SensitivityUnavailability::OutOfRange,
         ))
-}
-
-fn highest_magnitude_label(
-    evidence: &SensitivityStudyEvidence,
-    ranked: &[usize],
-    index: usize,
-) -> String {
-    ranked
-        .iter()
-        .find(|row| {
-            column_at(&evidence.rows[**row].normalized, index)
-                .value()
-                .is_some()
-        })
-        .map_or_else(
-            || {
-                if evidence.rows.is_empty() {
-                    "Not retained"
-                } else {
-                    NO_SCALE
-                }
-                .to_owned()
-            },
-            |row| {
-                let row = &evidence.rows[*row];
-                format!(
-                    "{} · {} normalized sensitivity",
-                    row.parameter,
-                    exact_sensitivity(column_at(&row.normalized, index))
-                )
-            },
-        )
 }
 
 /// One row's normalized sensitivity across the whole band.
@@ -672,28 +634,23 @@ pub fn right_panel(ui: &mut Ui, source: ActiveStudy<'_>, plan: Option<&StudyPlan
     section_header(ui, "Sensitivity", None);
     let basis = basis_label(view.evidence);
     let read_at = read_at_label(view.evidence, index);
-    let filter = view.evidence.filter_label().to_owned();
-    let count = view.evidence.rows.len().to_string();
     let ranked = plan.map_or(&[][..], StudyPlan::order);
-    let highest = highest_magnitude_label(view.evidence, ranked, index);
+    // The analysis is the pane's own name, the setup owns the filter, the
+    // variable count is the length of the table below, rank 1 of that table
+    // is the highest magnitude, and the method and normalization rows were
+    // constants.
     measurement_table(
         ui,
         &[
-            ("Analysis", view.analysis_label),
             ("Reference metric", view.evidence.output.as_str()),
             ("Basis", basis.as_str()),
             ("Read at", read_at.as_str()),
-            ("Filter", filter.as_str()),
-            ("Method", NOT_RETAINED),
-            ("Normalization", "Retained per variable"),
-            ("Variables retained", count.as_str()),
-            ("Highest magnitude", highest.as_str()),
         ],
     );
 
     section_header(ui, "Ranked sensitivity", None);
     if view.evidence.rows.is_empty() {
-        panel_note(ui, "No parameter sensitivities were retained.");
+        panel_note(ui, "No sensitivities.");
         return;
     }
 
@@ -913,17 +870,13 @@ mod tests {
         evidence.filter = String::new();
         assert_eq!(evidence.filter_label(), "every device and model parameter");
     }
+    /// The ranked list is the panel's statement of which variable matters
+    /// most, so the order it is drawn in is what has to be right.
     #[test]
     fn the_highest_magnitude_row_is_the_one_ranked_first_at_that_point() {
         let evidence = swept_evidence();
         let plan = StudyPlan::new(&evidence, 0);
-        let label = highest_magnitude_label(&evidence, plan.order(), 0);
-        assert!(label.starts_with("R1 · "), "{label}");
-
-        let empty = SensitivityStudyEvidence {
-            rows: Vec::new(),
-            ..swept_evidence()
-        };
-        assert_eq!(highest_magnitude_label(&empty, &[], 0), "Not retained");
+        let first = plan.order().first().copied().expect("a ranked row");
+        assert_eq!(evidence.rows[first].parameter, "R1");
     }
 }

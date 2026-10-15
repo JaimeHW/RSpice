@@ -34,10 +34,6 @@ const FIXED_WIDTH: f32 = RANK_WIDTH
     + CUMULATIVE_WIDTH;
 const TABLE_MIN_WIDTH: f32 = FIXED_WIDTH + BAR_MIN_WIDTH;
 
-/// What the method row says. The engine's own recipe, stated so a reader does
-/// not have to assume a sampling run produced these numbers.
-const METHOD: &str = "Central difference at one sigma per variable";
-
 #[derive(Debug, Clone, Copy)]
 pub struct MismatchView<'a> {
     pub analysis_label: &'a str,
@@ -82,32 +78,20 @@ impl MismatchPlan {
         }
     }
 }
-/// Scientific notation with enough digits to round-trip the retained f64.
+/// A mismatch figure as the panel reads it: engineering notation at the
+/// precision a budget is read at. The CSV export carries the retained f64.
 fn exact_value(value: f64) -> String {
-    format!("{value:.17e}")
+    rspice_ui_kit::plot::fmt_si_readout(value, "", 6)
+}
+
+/// The same figure in the output's own unit — a sigma is millivolts, not a
+/// bare number.
+fn quantity(value: f64, unit: &str) -> String {
+    rspice_ui_kit::plot::fmt_si_readout(value, unit, 4)
 }
 
 fn percent(share: f64) -> String {
     format!("{:.2} %", share * 100.0)
-}
-
-fn scopes_label(evidence: &DcMismatchEvidence) -> &'static str {
-    match (evidence.include_mismatch, evidence.include_process) {
-        (true, true) => "mismatch + process",
-        (true, false) => "mismatch",
-        (false, true) => "process",
-        // `validate` refuses this, so it cannot be reached from a payload the
-        // sheet drew; answered rather than panicked in a running studio.
-        (false, false) => "none",
-    }
-}
-
-fn limit_label(limit: u64) -> String {
-    if limit == 0 {
-        "all".to_owned()
-    } else {
-        limit.to_string()
-    }
 }
 
 pub fn show(ui: &mut Ui, source: ActiveMismatch<'_>, plan: Option<&MismatchPlan>) {
@@ -499,21 +483,15 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
     let evidence = view.evidence;
 
     section_header(ui, "DC mismatch", None);
-    let nominal = exact_value(evidence.nominal_value);
-    let sigma_total = exact_value(evidence.sigma_total);
-    let sigma_mismatch = exact_value(evidence.sigma_mismatch);
-    let sigma_process = exact_value(evidence.sigma_process);
+    let output_unit = evidence.output_unit.as_str();
+    let nominal = quantity(evidence.nominal_value, output_unit);
+    let sigma_total = quantity(evidence.sigma_total, output_unit);
+    let sigma_mismatch = quantity(evidence.sigma_mismatch, output_unit);
+    let sigma_process = quantity(evidence.sigma_process, output_unit);
     let quoted = format!(
-        "{} sigma = {}",
+        "{}σ: {}",
         evidence.sigma_multiplier,
-        exact_value(evidence.quoted_sigma())
-    );
-    let retained = format!(
-        "{} of {} evaluated · limit {} · threshold {}",
-        evidence.retained_contributors(),
-        evidence.evaluated_contributors,
-        limit_label(evidence.contributor_limit),
-        exact_value(evidence.threshold),
+        quantity(evidence.quoted_sigma(), output_unit)
     );
     let remainder = evidence.unlisted_share().map(|share| {
         format!(
@@ -544,21 +522,20 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
         parts.join(" · ")
     });
 
+    // The analysis is the pane's own name, the scopes are restated by which
+    // sigma rows are non-zero, the retained count and threshold are the
+    // card's own settings, and the method was a constant.
     let mut rows: Vec<(&str, &str)> = vec![
-        ("Analysis", view.analysis_label),
         ("Output", evidence.output.as_str()),
         ("Nominal", nominal.as_str()),
         ("Sigma total", sigma_total.as_str()),
         ("Sigma mismatch", sigma_mismatch.as_str()),
         ("Sigma process", sigma_process.as_str()),
         ("Quoted", quoted.as_str()),
-        ("Scopes", scopes_label(evidence)),
-        ("Retained", retained.as_str()),
     ];
     if let Some(remainder) = remainder.as_deref() {
         rows.push(("Remainder", remainder));
     }
-    rows.push(("Method", METHOD));
     if let Some(correlations) = correlations.as_deref() {
         rows.push(("Correlations", correlations));
     }
@@ -566,7 +543,7 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
 
     section_header(ui, "Ranked contributors", None);
     if evidence.contributors.is_empty() {
-        panel_note(ui, "No contributor cleared the card's own threshold.");
+        panel_note(ui, "No contributor above the threshold.");
         return;
     }
 
@@ -630,8 +607,10 @@ pub fn right_panel(ui: &mut Ui, source: ActiveMismatch<'_>) {
                                 ui.label(cell(row.scope.tag().to_owned()));
                                 ui.label(cell(exact_value(row.sigma_parameter)));
                                 ui.label(cell(exact_value(row.sensitivity)));
-                                ui.label(cell(exact_value(row.contribution)));
-                                ui.label(cell(exact_value(row.share)));
+                                ui.label(cell(quantity(row.contribution, output_unit)));
+                                // SHARE is a share: it printed as
+                                // "6.00000000000000000e-1".
+                                ui.label(cell(percent(row.share)));
                                 ui.end_row();
                             }
                         });
@@ -700,9 +679,6 @@ mod tests {
         let evidence = evidence();
         assert_eq!(evidence.retained_contributors(), 2);
         assert_eq!(evidence.evaluated_contributors, 6);
-        assert_eq!(limit_label(evidence.contributor_limit), "2");
-        assert_eq!(limit_label(0), "all");
-        assert_eq!(scopes_label(&evidence), "mismatch");
     }
     #[test]
     fn a_negative_share_is_drawn_as_a_reduction_not_as_an_error() {

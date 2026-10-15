@@ -196,45 +196,6 @@ mod tests {
         ));
     }
     #[test]
-    fn a_sensitivity_result_recorded_before_filters_is_labelled_design_parameters() {
-        let mut state = state_with_analyses(vec![sensitivity_result(
-            1,
-            "SENS",
-            vec![SensitivityResultRow {
-                parameter: "GAIN".to_owned(),
-                raw: 2.0.into(),
-                normalized: 0.5.into(),
-            }],
-        )]);
-        let ctx = egui::Context::default();
-        crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(520.0, 900.0),
-                )),
-                ..Default::default()
-            },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| right_panel(ui, &mut state));
-            },
-        );
-        let tree = output
-            .platform_output
-            .accesskit_update
-            .expect("the sensitivity panel publishes an accessibility tree");
-        assert!(
-            tree.nodes.iter().any(|(_, node)| {
-                node.value().is_some_and(|text| {
-                    text == "Variables: design parameters · recorded before filters"
-                })
-            }),
-            "{tree:?}"
-        );
-    }
-    #[test]
     fn retained_view_source_sensitivity_rebuilds_shortened_rows_and_rejects_invalid_evidence() {
         let mut state = ranked_state(64);
         let original = sensitivity_plan(&mut state).unwrap();
@@ -335,7 +296,7 @@ mod tests {
         );
         let tree = output.platform_output.accesskit_update.unwrap();
         assert!(tree.nodes.iter().any(|(_, node)| node.value().is_some_and(|label|
-            label.contains("Unranked, parameter gain, normalized sensitivity Unavailable (zero output), raw sensitivity 0.00000000000000000e0"))), "{tree:?}");
+            label.contains("Unranked, parameter gain, normalized sensitivity Unavailable (zero output), raw sensitivity 0"))), "{tree:?}");
     }
     #[test]
     fn the_panel_lists_only_the_rows_its_viewport_shows() {

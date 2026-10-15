@@ -30,7 +30,6 @@ const HEADER_HEIGHT: f32 = 34.0;
 const CELL_INSET: f32 = 10.0;
 /// Height of one row of the panel's ranked table, spacing included.
 const PANEL_ROW_HEIGHT: f32 = 20.0;
-const NOT_RETAINED: &str = "Not retained by sensitivity result";
 
 #[derive(Debug, Clone, Copy)]
 pub struct SensitivityView<'a> {
@@ -112,14 +111,18 @@ fn exact_basis_label(result_mode: SensitivityResultMode) -> String {
     match result_mode {
         SensitivityResultMode::Dc => "DC operating point".to_owned(),
         SensitivityResultMode::Ac { frequency_hz } => {
-            format!("AC at {} Hz", exact_value(frequency_hz))
+            format!(
+                "AC at {}",
+                rspice_ui_kit::plot::fmt_si_readout(frequency_hz, "Hz", 4)
+            )
         }
     }
 }
 
-/// Scientific notation with enough digits to round-trip the retained f64.
+/// A sensitivity as the panel reads it: engineering notation at the precision
+/// a ranked list is read at. The CSV export carries the retained f64.
 fn exact_value(value: f64) -> String {
-    format!("{value:.17e}")
+    rspice_ui_kit::plot::fmt_si_readout(value, "", 6)
 }
 
 fn unavailable_reason(reason: SensitivityUnavailability) -> &'static str {
@@ -151,30 +154,6 @@ fn chart_value(value: SensitivityValue<f64>) -> String {
     } else {
         format!("{value:+.6e}")
     }
-}
-
-fn highest_magnitude_sensitivity_label(rows: &[SensitivityResultRow], ranked: &[usize]) -> String {
-    ranked
-        .iter()
-        .find(|index| rows[**index].normalized.value().is_some())
-        .map_or_else(
-            || {
-                if rows.is_empty() {
-                    "Not retained"
-                } else {
-                    "No normalized sensitivity available"
-                }
-                .to_owned()
-            },
-            |index| {
-                let row = &rows[*index];
-                format!(
-                    "{} · {} normalized sensitivity",
-                    row.parameter,
-                    exact_sensitivity(row.normalized)
-                )
-            },
-        )
 }
 
 fn column_rect(row: egui::Rect, offset: f32, width: f32) -> egui::Rect {
@@ -493,33 +472,18 @@ pub fn right_panel(ui: &mut Ui, source: ActiveSensitivity<'_>, plan: Option<&Sen
 
     section_header(ui, "Sensitivity", None);
     let basis = exact_basis_label(view.result_mode);
-    let count = view.rows.len().to_string();
     let ranked = plan.map_or(&[][..], SensitivityPlan::order);
-    let highest_magnitude = highest_magnitude_sensitivity_label(view.rows, ranked);
+    // The analysis is the pane's own name, the parameter count is the length
+    // of the table below, rank 1 of that table is the highest magnitude, and
+    // the method, normalization and cross-term rows were constants.
     measurement_table(
         ui,
-        &[
-            ("Analysis", view.analysis_label),
-            ("Reference metric", view.output),
-            ("Basis", basis.as_str()),
-            // What this payload actually differentiated against. It was
-            // recorded before the Studio ran the engine's own filter, so its
-            // variables are the deck's design parameters and its rows carry
-            // bare names rather than the engine's `PARAM:` spelling. Saying
-            // so is the whole migration: a reader can tell this report from a
-            // current one without guessing from the names.
-            ("Variables", "design parameters · recorded before filters"),
-            ("Method", NOT_RETAINED),
-            ("Normalization", "Retained per parameter"),
-            ("Parameters retained", count.as_str()),
-            ("Highest magnitude", highest_magnitude.as_str()),
-            ("Cross-terms", NOT_RETAINED),
-        ],
+        &[("Reference metric", view.output), ("Basis", basis.as_str())],
     );
 
     section_header(ui, "Ranked sensitivity", None);
     if view.rows.is_empty() {
-        panel_note(ui, "No parameter sensitivities were retained.");
+        panel_note(ui, "No sensitivities.");
         return;
     }
 
@@ -644,44 +608,19 @@ mod tests {
         assert_eq!(chart_value(rows[0].normalized), "Unavailable");
         assert!(exact_sensitivity(rows[0].normalized).contains("zero output"));
         assert_eq!(chart_value(rows[1].normalized), "0");
-        assert!(highest_magnitude_sensitivity_label(&rows, plan.order()).starts_with("c_largest"));
-        let unavailable = vec![rows[0].clone()];
-        assert_eq!(
-            highest_magnitude_sensitivity_label(&unavailable, &[0]),
-            "No normalized sensitivity available"
-        );
     }
-    #[test]
-    fn exact_values_round_trip_and_ac_basis_keeps_frequency() {
-        let value = 1.234_567_890_123_456_7e-9;
-        assert_eq!(exact_value(value).parse::<f64>().unwrap(), value);
-        let basis = exact_basis_label(SensitivityResultMode::Ac {
-            frequency_hz: 2.5e6,
-        });
-        assert!(basis.contains(&exact_value(2.5e6)));
-    }
-    #[test]
-    fn highest_magnitude_label_uses_retained_normalized_ranking() {
-        let rows = vec![
-            SensitivityResultRow {
-                parameter: "small".to_owned(),
-                raw: (100.0).into(),
-                normalized: (0.25).into(),
-            },
-            SensitivityResultRow {
-                parameter: "largest".to_owned(),
-                raw: (1.0).into(),
-                normalized: (-0.75).into(),
-            },
-        ];
 
-        let label = highest_magnitude_sensitivity_label(&rows, &ranked_rows(&rows));
-
-        assert!(label.starts_with("largest · "));
-        assert!(label.contains(&exact_value(-0.75)));
+    /// A panel value reads in engineering notation, and an AC basis names
+    /// the frequency it was read at in the reader's own units rather than to
+    /// seventeen digits.
+    #[test]
+    fn panel_values_read_in_engineering_notation() {
+        assert_eq!(exact_value(1.234_567_890_123_456_7e-9), "1.23457 n");
         assert_eq!(
-            highest_magnitude_sensitivity_label(&[], &[]),
-            "Not retained"
+            exact_basis_label(SensitivityResultMode::Ac {
+                frequency_hz: 2.5e6,
+            }),
+            "AC at 2.5 MHz"
         );
     }
 }
