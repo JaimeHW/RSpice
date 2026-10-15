@@ -170,13 +170,30 @@ impl StimulusRealization {
         }
     }
 
-    /// The card this definition realizes to, or the generator's refusals.
+    /// The specification this definition realizes to, or the generator's
+    /// refusals.
     ///
-    /// Stated here so the realization band and the audit strip read one
-    /// result rather than asking the generator twice and disagreeing about
-    /// whether it refused.
-    pub fn card(record: &StimulusDefinition) -> Result<String, Vec<String>> {
-        crate::simulation::stimulus_realize::definition_card_text(record, DETACHED_NETS)
+    /// The specification rather than the whole card, because the head of a
+    /// library record's card is scaffolding: the nets are [`DETACHED_NETS`]
+    /// placeholders — a definition has no sheet to resolve them against — and
+    /// the instance name is the library's own key rather than any placed
+    /// source's reference, so the line would not parse as the source card it
+    /// resembles. What is left is the text every adopter's card carries
+    /// verbatim, and the text [`source_spec`] hands the engine's own parser.
+    ///
+    /// Stated here so the footer and the findings read one result rather than
+    /// asking the generator twice and disagreeing about whether it refused.
+    pub fn spec(record: &StimulusDefinition) -> Result<String, Vec<String>> {
+        let card =
+            crate::simulation::stimulus_realize::definition_card_text(record, DETACHED_NETS)?;
+        super::specification_of(&card)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| {
+                vec![format!(
+                    "'{}' emits a card with no source specification",
+                    record.name()
+                )]
+            })
     }
 }
 

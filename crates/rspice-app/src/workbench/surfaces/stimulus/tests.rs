@@ -198,10 +198,11 @@ fn every_band_publishes_its_own_strings() {
         "Bias & small-signal",
         "Transient shape \u{b7} SIN",
         "Frequency (FREQ) *",
-        // Footer. The card is the band's own subject, and the verdict beside
-        // it is what the engine says about that card.
-        "sensor_diff_1k p n SIN(0 2m 1k 0 0 0) AC 1m 0",
-        "Parameters satisfy the SIN engine contract",
+        // Footer. The specification and nothing else: the head of a library
+        // record's card is a placeholder instance between placeholder nets,
+        // and what the engine says about the record is said at the fields it
+        // is about.
+        "SIN(0 2m 1k 0 0 0) AC 1m 0",
     ] {
         assert!(
             published.iter().any(|text| text == expected),
@@ -335,6 +336,72 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
         .expect("draft");
     assert_eq!(draft.working().params, before);
     assert!(!draft.is_dirty());
+}
+
+/// A finding reaches the field its rule named, and no other.
+///
+/// The fixture's advisory is `Before TD the output holds V1, not 0`, which is
+/// about TD and names V1. Both are fields of a pulse's sheet, so a surface
+/// that looked for a field's label inside the sentence — which this one did —
+/// marked V1 as well, and would have marked neither had the sheet spelled the
+/// label `Delay`. The contract has always stated the field; this asserts it is
+/// what the instrument reads.
+#[test]
+fn a_finding_lands_on_the_field_its_rule_named() {
+    let mut app = seeded("bridge_cal_step");
+    let stage = resolve(&mut app.state).expect("stage");
+    let about_td = stage
+        .field_findings("td")
+        .map(|finding| finding.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        about_td.iter().any(|message| message.contains("Before TD")),
+        "TD carries its own advisory: {:?}",
+        stage.findings
+    );
+    assert_eq!(
+        stage.field_findings("v1").count(),
+        0,
+        "the field a message merely names is not the field it is about: {:?}",
+        stage.findings
+    );
+}
+
+/// A name the library cannot hold is stated at the name, and nowhere else.
+#[test]
+fn a_name_collision_is_stated_at_the_name_field() {
+    let mut app = seeded("bridge_cal_step");
+    crate::workbench::app::actions::stimulus::edit_name(&mut app.state, "sensor_diff_1k");
+    let stage = resolve(&mut app.state).expect("stage");
+    assert!(
+        stage
+            .field_findings(crate::workbench::state::NAME_FIELD)
+            .any(|finding| finding.blocking
+                && finding.message.contains("already defines 'sensor_diff_1k'")),
+        "{:?}",
+        stage.findings
+    );
+    let published = published(&mut app.state, vec2(1000.0, 470.0));
+    assert!(
+        !published
+            .iter()
+            .any(|text| text.contains("already defines")),
+        "the collision is the name field's state, not a line of its own: {published:?}"
+    );
+}
+
+/// The footer states the specification, without the card head a library
+/// record has no instance or nets to fill.
+#[test]
+fn the_footer_states_a_specification_rather_than_a_card() {
+    let mut app = seeded("bridge_cal_step");
+    let stage = resolve(&mut app.state).expect("stage");
+    assert_eq!(
+        stage.spec.as_deref(),
+        Ok("PULSE(-10m 10m 100u 1u 1u 500u 1m)"),
+        "{:?}",
+        stage.spec
+    );
 }
 
 /// Apply is blocked while a refusal stands and available once it is fixed.

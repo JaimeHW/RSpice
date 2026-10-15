@@ -40,7 +40,7 @@ use crate::state::stimulus_library::definition::{
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::app::actions::stimulus::StimulusAdopter;
-use crate::workbench::state::PreviewSpan;
+use crate::workbench::state::{NAME_FIELD, PreviewSpan};
 use crate::workbench::{AppState, MessageId};
 
 use super::super::design_system::{WorkbenchIcon, empty_state_with_actions, labeled_icon_button};
@@ -99,9 +99,20 @@ pub(super) enum StageAction {
     Place,
 }
 
-/// One line of the audit strip.
+/// One thing the engine contract says about this record.
+///
+/// A finding is shown at the field it is about, not in a list of its own: the
+/// reader who can act on "TD2 precedes TD1" is the one looking at TD2, and a
+/// strip that restated it somewhere else would be a second place to keep in
+/// step with the first.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Finding {
+    /// The sheet field this is about, which is where it is shown.
+    ///
+    /// `None` for the generator's own refusals, which are about the whole
+    /// specification rather than any one field, and which the footer states in
+    /// the specification's place.
+    pub field: Option<&'static str>,
     /// Whether it blocks Apply.
     pub blocking: bool,
     /// What it says.
@@ -126,11 +137,11 @@ pub(super) struct Stage {
     pub span: PreviewSpan,
     /// Which PWL row is selected.
     pub selected_point: Option<usize>,
-    /// The definition's own card, or the generator's refusals.
-    pub card: Result<String, Vec<String>>,
+    /// The specification this definition emits, or the generator's refusals.
+    pub spec: Result<String, Vec<String>>,
     /// Every placed source in the design that adopted this definition.
     pub adopters: Vec<StimulusAdopter>,
-    /// Everything the audit strip states, errors first.
+    /// Everything the contract says about this record, errors first.
     pub findings: Vec<Finding>,
     /// The field the reader is typing into, if any.
     pub editing_field: Option<String>,
@@ -147,6 +158,18 @@ impl Stage {
             .count()
     }
 
+    /// What the contract says about one field, in the order it said it.
+    ///
+    /// Matched on the field the rule named rather than on whether its sentence
+    /// happens to contain the field's label: `Before TD the output holds V1,
+    /// not 0` names two fields and is about one of them, and a label spelled
+    /// `Delay` would have matched neither.
+    pub fn field_findings<'s>(&'s self, field: &'s str) -> impl Iterator<Item = &'s Finding> {
+        self.findings
+            .iter()
+            .filter(move |finding| finding.field.is_some_and(|named| named == field))
+    }
+
     /// Why Apply is unavailable, or `None` when it is available.
     pub fn apply_block(&self) -> Option<String> {
         if let Some(error) = self.findings.iter().find(|finding| finding.blocking) {
@@ -158,14 +181,19 @@ impl Stage {
 
 /// Band heights, in the order the instrument stacks them.
 ///
-/// Every band but the proof surface is as tall as what it holds, and says so
-/// before it is painted (`program::content_height` and its two siblings): an
-/// identity row, a grid of fields, a card list and a verdict strip do not
-/// become more legible with more room, and they become unusable with less — a
-/// fixed slot for the program showed three and a half of a pulse's seven
-/// fields and one of a PWL's points whatever the screen. The plot does gain
-/// from room, so it takes what is left, which is also what makes the
-/// instrument fit rather than scroll.
+/// The identity row and the footer are fixed, and the program band is as tall
+/// as the sheet it holds and says so before it is painted
+/// (`program::content_height`): a grid of fields does not become more legible
+/// with more room, and it becomes unusable with less — a fixed slot for the
+/// program showed three and a half of a pulse's seven fields and one of a
+/// PWL's points whatever the screen. The plot does gain from room, so it takes
+/// what is left, which is also what makes the instrument fit rather than
+/// scroll.
+///
+/// Nothing here is measured from what the contract says. The footer used to
+/// grow a line per finding, which it took out of the plot: typing a value the
+/// engine objects to shrank the waveform that was there to show you what the
+/// value did.
 const IDENTITY_HEIGHT: f32 = 36.0;
 /// Below this the plot is a line rather than a waveform, so the program band
 /// yields — and scrolls — instead: a squashed curve proves nothing.
@@ -263,9 +291,9 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
     let editing_field = editor.editing_field(saved.name()).map(str::to_owned);
     let focus_name = editor.take_focus_name();
     let live = editor.live_record(saved.name(), &working);
-    let card = StimulusRealization::card(&live);
+    let spec = StimulusRealization::spec(&live);
     let adopters = crate::workbench::app::actions::stimulus::design_adopters(state, &name);
-    let findings = findings(state, &live, &card);
+    let findings = findings(state, &live, &spec);
     let realization = state
         .workbench
         .stimulus_editor
@@ -280,7 +308,7 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
         timing,
         span,
         selected_point,
-        card,
+        spec,
         adopters,
         findings,
         editing_field,
@@ -312,28 +340,35 @@ fn select_first_if_unresolved(state: &mut AppState) {
         .map(|definition| definition.name().to_owned());
 }
 
-/// Everything the audit strip states about this record.
+/// Everything known to be wrong or worth saying about this record.
 ///
 /// Errors are the two things that stop a definition from becoming a card: the
 /// generator refusing to write one, and a name the library cannot hold. The
 /// rest is `source_contract`, at the strength that module assigns — a refusal
 /// blocks Apply because the deck would refuse it, and an advisory does not
 /// because the card runs.
+///
+/// Each one carries the field it is about, which `source_contract` has always
+/// stated and this surface used to drop. Dropping it left the two bands that
+/// show a finding to recover the field by looking for its label inside the
+/// sentence, which attached one rule's advisory to every field it mentioned.
 fn findings(
     state: &AppState,
     record: &StimulusDefinition,
-    card: &Result<String, Vec<String>>,
+    spec: &Result<String, Vec<String>>,
 ) -> Vec<Finding> {
     let mut findings = Vec::new();
     for message in name_findings(state, record) {
         findings.push(Finding {
+            field: Some(NAME_FIELD),
             blocking: true,
             message,
         });
     }
-    if let Err(errors) = card {
+    if let Err(errors) = spec {
         for message in errors {
             findings.push(Finding {
+                field: None,
                 blocking: true,
                 message: message.clone(),
             });
@@ -341,6 +376,7 @@ fn findings(
     }
     for finding in crate::workbench::app::actions::stimulus::contract_findings(state, record) {
         findings.push(Finding {
+            field: Some(finding.field),
             blocking: finding.strength == ContractStrength::Refusal,
             message: finding.message,
         });
@@ -382,8 +418,7 @@ fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAc
     let frame = ui.available_rect_before_wrap();
     let (rect, _) = ui.allocate_exact_size(frame.size(), Sense::hover());
     let seam_color = Tokens::get(ui.ctx()).color.border_strong;
-    let footer = footer::content_height(stage);
-    let fixed = IDENTITY_HEIGHT + footer + 3.0 * SEAM;
+    let fixed = IDENTITY_HEIGHT + footer::HEIGHT + 3.0 * SEAM;
     let proof_and_program = (rect.height() - fixed).max(PROOF_MINIMUM_HEIGHT);
     let program = program::content_height(ui, state, stage, rect.width())
         .min((proof_and_program - PROOF_MINIMUM_HEIGHT).max(0.0));
@@ -401,7 +436,7 @@ fn paint(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAc
     let identity_rect = band(IDENTITY_HEIGHT);
     let proof_rect = band(proof);
     let program_rect = band(program);
-    let footer_rect = band(footer);
+    let footer_rect = band(footer::HEIGHT);
 
     for seam in [identity_rect, proof_rect, program_rect] {
         ui.painter().hline(

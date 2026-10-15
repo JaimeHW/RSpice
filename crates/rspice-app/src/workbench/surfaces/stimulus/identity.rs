@@ -146,21 +146,30 @@ fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<St
     } else {
         stage.working.name().to_owned()
     };
-    let invalid = stage
-        .findings
-        .iter()
-        .any(|finding| finding.blocking && finding.message.contains(stage.working.name()));
+    // The field the rule named, not a sentence that happens to quote the name:
+    // a definition called `td` would otherwise take every advisory about TD.
+    let objection = stage
+        .field_findings(NAME_FIELD)
+        .map(|finding| finding.message.as_str())
+        .collect::<Vec<_>>();
     let mut edit = egui::TextEdit::singleline(&mut text)
         .font(egui::TextStyle::Monospace)
         .desired_width(NAME_WIDTH)
         .margin(egui::Margin::symmetric(6, 3));
-    if invalid {
+    if !objection.is_empty() {
         edit = edit.text_color(Tokens::get(ui.ctx()).color.err);
     }
     let response = ui.add(edit);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label.as_str());
     });
+    // A red name says that it cannot be this definition's; the hover says why,
+    // and it is the only place that does.
+    let response = if objection.is_empty() {
+        response
+    } else {
+        response.on_hover_text(objection.join("\n"))
+    };
     if stage.focus_name {
         response.request_focus();
     }

@@ -12,9 +12,9 @@
 //!
 //! An empty field is not an unset field. It means "leave it to the engine",
 //! and what the engine does then is the sheet's `default_value` for the ones
-//! the netlister fills in and a substitution the audit strip states for the
-//! ones the parser resolves. That is why the hint is the default rather than
-//! the word "optional".
+//! the netlister fills in and a substitution the engine contract states, on
+//! the field itself, for the ones the parser resolves. That is why the hint is
+//! the default rather than the word "optional".
 //!
 //! The band is as tall as what it holds. The shape's fields are laid into a
 //! grid of as many columns as the width gives them, so a seven-field pulse is
@@ -580,21 +580,25 @@ fn text_row(
     } else {
         read_field(&stage.working, field)
     };
-    let invalid = !text.trim().is_empty()
+    let unparsed = !text.trim().is_empty()
         && crate::quantity::parse_engineering_value(&text).is_err()
         && !text.trim_start().starts_with('{')
         && matches!(
             definition.default_value,
             PropertyValue::Number { .. } | PropertyValue::Expression(_)
         );
+    // A field is red for either reason it cannot run: text the editor cannot
+    // read as a value, or a value the engine contract refuses.
+    let refused = stage.field_findings(field).any(|finding| finding.blocking);
     let response = property_row_input_with_hint_labelled(
         ui,
         &label.text,
         &mut text,
         &default_hint(definition),
-        invalid,
+        unparsed || refused,
         label.column,
     );
+    advisory_outline(ui, stage, field, &response, unparsed || refused);
     // Whatever the cell had room to paint, the field is announced by its name.
     let announced = row_label(definition, false);
     let abbreviated = announced != label.text;
@@ -696,6 +700,37 @@ fn boolean_row(
     }
 }
 
+/// Outline a field the contract has something to say about but does not
+/// refuse.
+///
+/// The same mark the kit already paints for a refusal, one tone down: a field
+/// carries its own state, red for "this will not run" and amber for "this runs
+/// and does something you may not have meant". Without it an advisory is a
+/// hover and nothing else, which is invisible until it is pointed at — and an
+/// advisory is exactly the finding a reader did not know to go looking for.
+///
+/// Painted here rather than asked of the kit because the kit's row takes a
+/// refusal as a flag, and widening that to a tone would move every property
+/// row in the product for the sake of one band.
+fn advisory_outline(
+    ui: &Ui,
+    stage: &Stage,
+    field: &str,
+    response: &egui::Response,
+    already_marked: bool,
+) {
+    if already_marked || !stage.field_findings(field).any(|finding| !finding.blocking) {
+        return;
+    }
+    let tokens = Tokens::get(ui.ctx());
+    ui.painter().rect_stroke(
+        response.rect,
+        tokens.radius,
+        egui::Stroke::new(1.0, tokens.color.warn),
+        egui::StrokeKind::Inside,
+    );
+}
+
 /// What the engine does with this field when it is left empty.
 ///
 /// The sheet's own default, which is what the netlister writes into the card's
@@ -709,8 +744,12 @@ pub(super) fn default_hint(definition: &PropertyDefinition) -> String {
 }
 
 /// The hover text a field carries: its name when the cell abbreviated it, its
-/// own description, plus the engine contract's line about it where there is
-/// one.
+/// own description, plus what the engine contract says about this field.
+///
+/// The contract names the field each of its rules is about, so the match is on
+/// that name. Looking for the field's label inside the sentence instead gave
+/// `Before TD the output holds V1, not 0` to the TD row and the V1 row both,
+/// and gave it to neither when the sheet spelled the label `Delay`.
 fn hover_text(stage: &Stage, definition: &PropertyDefinition, abbreviated: bool) -> Option<String> {
     let mut lines = Vec::new();
     if abbreviated {
@@ -722,10 +761,8 @@ fn hover_text(stage: &Stage, definition: &PropertyDefinition, abbreviated: bool)
     if let Some(unit) = definition.unit.as_deref().filter(|unit| !unit.is_empty()) {
         lines.push(format!("unit {unit}"));
     }
-    for finding in &stage.findings {
-        if finding.message.contains(definition.display_name.as_str()) {
-            lines.push(finding.message.clone());
-        }
+    for finding in stage.field_findings(definition.name.as_str()) {
+        lines.push(finding.message.clone());
     }
     (!lines.is_empty()).then(|| lines.join("\n"))
 }

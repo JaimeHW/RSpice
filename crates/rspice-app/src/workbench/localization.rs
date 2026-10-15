@@ -976,9 +976,8 @@ define_messages! {
     StimulusNoFileRetained => "no file retained",
     StimulusRetainedFileDetail => "{name} · {bytes} B retained · {digest}",
     StimulusRetainedNote => "The definition retains the file's bytes in the project document. The card still names the file; where that file is not reachable, previews and runs read the retained copy and the run log says so.",
-    StimulusCopyCard => "Copy the card text",
+    StimulusCopySpec => "Copy the source specification",
     StimulusReadopt => "Re-adopt r{revision}",
-    StimulusAuditSatisfied => "Parameters satisfy the {family} engine contract",
 }
 
 #[derive(Debug, Clone, Copy)]
