@@ -176,19 +176,7 @@ fn cancelling_a_configuration_draft_returns_the_opening_input_to_the_filter() {
     let (mut app, _) = valid_configuration_app();
     open_configuration_sets_dialog(&mut app.state);
     let catalog = app.state.workspace.content.configuration_sets.clone();
-    let render = |app: &mut RSpiceApp, events: Vec<egui::Event>| {
-        ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1280.0, 900.0),
-                )),
-                events,
-                ..Default::default()
-            },
-            |ui| app.render_frame_dialogs(ui),
-        )
-    };
+    let render = |app: &mut _, events| dialog_frame(&ctx, app, events);
     let select_all = egui::Event::Key {
         key: egui::Key::A,
         physical_key: Some(egui::Key::A),
@@ -261,6 +249,206 @@ fn cancelling_a_configuration_draft_returns_the_opening_input_to_the_filter() {
     );
     assert!(app.state.dialogs.configuration_sets.open);
     assert_eq!(app.state.workspace.content.configuration_sets, catalog);
+}
+
+/// One frame of the dialog layer at workbench size.
+fn dialog_frame(ctx: &Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ui| app.render_frame_dialogs(ui),
+    )
+}
+
+/// Keystrokes as a browser delivers them: the web backend emits one `Text`
+/// event per key press, before the press when the canvas holds the keyboard
+/// and after it when the hidden text agent does. Each keystroke is a group,
+/// because the host decides how many of them share one input batch.
+fn typed_text(text: &str, text_before_key: bool) -> Vec<Vec<egui::Event>> {
+    text.chars()
+        .map(|character| {
+            let modifiers = if character.is_uppercase() {
+                egui::Modifiers::SHIFT
+            } else {
+                egui::Modifiers::NONE
+            };
+            let key = egui::Key::from_name(&character.to_uppercase().to_string());
+            let stroke = |pressed| {
+                key.map(|key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers,
+                })
+            };
+            let text = egui::Event::Text(character.to_string());
+            let mut events = Vec::new();
+            if text_before_key {
+                events.push(text);
+                events.extend(stroke(true));
+            } else {
+                events.extend(stroke(true));
+                events.push(text);
+            }
+            events.extend(stroke(false));
+            events
+        })
+        .collect()
+}
+
+/// How many of the keystrokes the host packs into one input batch. A browser
+/// decides this by itself: the whole burst can land in one frame, or every
+/// single event can arrive in a frame of its own.
+#[derive(Clone, Copy, Debug)]
+enum Cadence {
+    OneBatch,
+    PerKeystroke,
+    PerEvent,
+}
+
+impl Cadence {
+    fn batches(self, groups: Vec<Vec<egui::Event>>) -> Vec<Vec<egui::Event>> {
+        match self {
+            Self::OneBatch => vec![groups.concat()],
+            Self::PerKeystroke => groups,
+            Self::PerEvent => groups
+                .concat()
+                .into_iter()
+                .map(|event| vec![event])
+                .collect(),
+        }
+    }
+}
+
+/// The browser's own sequence: filter the manager, open a draft and type its
+/// name, then press Escape and retype the filter over what it already holds.
+/// Whatever the host's batching, exactly one rendered field may end up with
+/// the text that followed Escape, and it is the filter.
+#[test]
+fn a_cancelled_draft_hands_the_browser_keystrokes_to_the_filter() {
+    for max_passes in [1, 2] {
+        for cadence in [Cadence::OneBatch, Cadence::PerKeystroke, Cadence::PerEvent] {
+            for text_before_key in [true, false] {
+                let case = format!(
+                    "{cadence:?}, text_before_key: {text_before_key}, passes: {max_passes}"
+                );
+                let ctx = Context::default();
+                crate::ui::Theme::default().apply(&ctx);
+                ctx.enable_accesskit();
+                ctx.options_mut(|options| {
+                    options.max_passes = std::num::NonZeroUsize::new(max_passes).unwrap();
+                });
+                let (mut app, _) = valid_configuration_app();
+                open_configuration_sets_dialog(&mut app.state);
+                let catalog = app.state.workspace.content.configuration_sets.clone();
+                let render = |app: &mut _, events| dialog_frame(&ctx, app, events);
+                let select_all = egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND,
+                };
+                let escape = |pressed| egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                // The browser observes the frame that follows the keystrokes:
+                // what the reader typed is on screen by then, not frames later.
+                let observe = |app: &mut _| render(app, Vec::new());
+                let _ = observe(&mut app);
+                let _ = observe(&mut app);
+                let query = "Browser configuration filter";
+                for batch in cadence.batches(typed_text(query, text_before_key)) {
+                    let _ = render(&mut app, batch);
+                }
+                let output = observe(&mut app);
+                assert_eq!(
+                    app.state.dialogs.configuration_sets.query, query,
+                    "the manager's filter takes the opening input ({case})"
+                );
+                let tree = output.platform_output.accesskit_update.unwrap();
+                let bounds = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| {
+                        node.role() == egui::accesskit::Role::Button
+                            && node.label() == Some("New configuration")
+                    })
+                    .expect("the manager offers a new configuration")
+                    .1
+                    .bounds()
+                    .unwrap();
+                let pos = egui::pos2(
+                    ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                    ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                );
+                let pointer = |pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                let _ = render(
+                    &mut app,
+                    vec![egui::Event::PointerMoved(pos), pointer(true)],
+                );
+                let draft = "Browser configuration draft";
+                let mut groups = vec![vec![pointer(false), select_all.clone()]];
+                groups.extend(typed_text(draft, text_before_key));
+                for batch in cadence.batches(groups) {
+                    let _ = render(&mut app, batch);
+                }
+                let _ = observe(&mut app);
+                assert_eq!(
+                    app.state.dialogs.configuration_sets.new_name, draft,
+                    "the new page takes the opening input ({case})"
+                );
+                let returned = "Configuration filter after Escape";
+                let mut groups = vec![vec![escape(true)], vec![escape(false)], vec![select_all]];
+                groups.extend(typed_text(returned, text_before_key));
+                for batch in cadence.batches(groups) {
+                    let _ = render(&mut app, batch);
+                }
+                let output = observe(&mut app);
+                let tree = output.platform_output.accesskit_update.unwrap();
+                let holders = tree
+                    .nodes
+                    .iter()
+                    .filter(|(_, node)| {
+                        node.role() == egui::accesskit::Role::TextInput
+                            && node.value() == Some(returned)
+                    })
+                    .map(|(_, node)| node.label().unwrap_or("<unlabelled>").to_owned())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    holders.len(),
+                    1,
+                    "one rendered field holds the input that followed Escape \
+                 ({case}, holders: {holders:?}, query: {:?}, name: {:?}, page: {:?})",
+                    app.state.dialogs.configuration_sets.query,
+                    app.state.dialogs.configuration_sets.new_name,
+                    app.state.dialogs.configuration_sets.page,
+                );
+                assert_eq!(
+                    app.state.dialogs.configuration_sets.query, returned,
+                    "the manager's filter holds it ({case})"
+                );
+                assert!(app.state.dialogs.configuration_sets.open);
+                assert_eq!(app.state.workspace.content.configuration_sets, catalog);
+            }
+        }
+    }
 }
 
 fn opening_configuration_text(page: ConfigurationDialogPage) {

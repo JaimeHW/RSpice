@@ -230,7 +230,7 @@ impl RSpiceApp {
             self.render_configuration_sets_page(ctx);
         }
         // A refused transition cannot leave typing queued for a later opening.
-        for field in ["new-name", "clone-name"] {
+        for field in ["new-name", "clone-name", "filter"] {
             crate::ui::input::InputScope::discard(ctx, field_id(field));
         }
     }
@@ -410,6 +410,9 @@ impl RSpiceApp {
                     self.state.dialogs.configuration_sets.page = ConfigurationDialogPage::Manager;
                     self.state.dialogs.configuration_sets.error = None;
                     self.state.dialogs.configuration_sets.discard_confirmation = false;
+                    // The manager renders again below, so what was typed after
+                    // Escape belongs in its filter now, not two frames later.
+                    response.route_cancel_input(field_id("filter"));
                     if page != ConfigurationDialogPage::Binding {
                         self.state
                             .dialogs
