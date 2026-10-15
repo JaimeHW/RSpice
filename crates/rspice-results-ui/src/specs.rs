@@ -741,29 +741,11 @@ pub fn right_panel<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
     run: Option<&SimulationRun<A>>,
     workspace_specs: &[SpecEntry],
 ) {
+    // The stage band above already reads "8 / 10 pass · 1 unavailable", and
+    // the sheet's own title names the run, so the panel is the worst
+    // violation and the one thing the band cannot say: that the run is not
+    // eligible for sign-off, and why.
     let Some(run) = run else {
-        let specs = workspace_specs;
-        if specs.is_empty() {
-            section_header(ui, "Specs", None);
-            measurement_table(ui, &[("Bounds", "none defined")]);
-            return;
-        }
-        section_header(ui, "Specs · active dataset", None);
-        let bounded = specs
-            .iter()
-            .filter(|spec| spec.min.is_some() || spec.max.is_some())
-            .count()
-            .to_string();
-        let specs_n = specs.len().to_string();
-        measurement_table(
-            ui,
-            &[
-                ("Dataset", "none selected"),
-                ("Specs", specs_n.as_str()),
-                ("Bounded", bounded.as_str()),
-                ("Unavailable", bounded.as_str()),
-            ],
-        );
         return;
     };
 
@@ -772,71 +754,42 @@ pub fn right_panel<A: AsRef<AnalysisResult<W>>, W: AsRef<RetainedWaveform>>(
     // active plan is edited or switched.
     let specs = resolved_specifications(run, workspace_specs);
     if specs.is_empty() {
-        section_header(ui, "Specs · active dataset", None);
-        measurement_table(
-            ui,
-            &[("Bounds", "none were frozen into this dataset's run receipt")],
-        );
+        section_header(ui, "Specs", None);
+        crate::presentation::panel_note(ui, "No specs for this run.");
         return;
     }
+    // The results panel is where a spec table gets read into a sign-off
+    // package, so it is where an unqualified model has to be visible. The
+    // stamp names its cause: the verdict alone is what a surface says when
+    // it knows the answer and not the reason, and the reason is on the
+    // receipt in the same words Verify and the requirements page use.
+    if let Some(blocker) = run
+        .prepared_receipt()
+        .and_then(PreparedRunReceipt::sign_off_blocker)
+    {
+        section_header(ui, "Specs", None);
+        crate::presentation::panel_note(ui, &format!("Not for sign-off: {blocker}"));
+    }
+
     let rows = result_rows(run, &specs);
-    let summary = summarize_rows(&rows);
-    let bounded = summary.bounded;
-    let passing = summary.passing;
-    let failures = summary.failures;
-    let unavailable = summary.unavailable;
     let worst = rows
         .iter()
         .filter(|row| row.is_bounded && row.status == SpecResultStatus::Fail)
         .filter_map(|row| row.margin.map(|margin| (row, margin)))
         .min_by(|(_, left), (_, right)| left.total_cmp(right));
 
-    section_header(ui, "Specs · active dataset", None);
-    let specs_n = specs.len().to_string();
-    // The results panel is where a spec table gets read into a sign-off
-    // package, so it is where an unqualified model has to be visible. It
-    // annotates the dataset and changes nothing else: the rows, the margins and
-    // the worst violation are all still exactly what the run measured.
-    // The stamp names its cause. It printed the verdict alone, which is what a
-    // surface says when it knows the answer and not the reason — and the
-    // reason is on the receipt, one call away, in the same words Verify and the
-    // requirements page use.
-    let run_n = run
-        .prepared_receipt()
-        .and_then(PreparedRunReceipt::sign_off_blocker)
-        .map_or_else(
-            || format!("run #{}", run.id),
-            |blocker| format!("run #{} · NOT SIGN-OFF · {blocker}", run.id),
-        );
-    let bounded_s = bounded.to_string();
-    let passing_s = passing.to_string();
-    let fails_s = failures.to_string();
-    let unavailable_s = unavailable.to_string();
-    measurement_table(
-        ui,
-        &[
-            ("Dataset", run_n.as_str()),
-            ("Specs", specs_n.as_str()),
-            ("Bounded", bounded_s.as_str()),
-            ("Passing", passing_s.as_str()),
-            ("Failures", fails_s.as_str()),
-            ("Unavailable", unavailable_s.as_str()),
-        ],
-    );
-
     if let Some((row, _)) = worst {
         section_header(ui, "Worst violation", None);
         let value_s = value_text(row);
         let margin_s = margin_text(row);
-        let source_s = row.worst_corner.as_deref().unwrap_or("source unavailable");
-        measurement_table(
-            ui,
-            &[
-                (row.measurement.as_str(), value_s.as_str()),
-                ("Margin", margin_s.as_str()),
-                ("Source", source_s),
-            ],
-        );
+        let mut table = vec![
+            (row.measurement.as_str(), value_s.as_str()),
+            ("Margin", margin_s.as_str()),
+        ];
+        if let Some(corner) = row.worst_corner.as_deref() {
+            table.push(("Source", corner));
+        }
+        measurement_table(ui, &table);
     }
 }
 
