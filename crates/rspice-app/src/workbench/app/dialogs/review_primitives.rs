@@ -13,14 +13,13 @@ use egui::{
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::Problem;
 
 pub(crate) const BODY_HEIGHT: f32 = 230.0;
 pub(crate) const CONTEXT_WIDTH: f32 = 260.0;
 pub(crate) const PURPOSE_HEIGHT: f32 = 35.0;
 pub(crate) const SURFACE_HEIGHT: f32 = 370.0;
 pub(crate) const TRANSACTION_HEIGHT: f32 = 37.0;
-
-const CONTEXT_EXPLANATION: &str = "The exact source identities, dependent artifacts, permission boundary, validation policy, and transactional commit point are reviewed before this action can complete.";
 
 pub(crate) fn purpose_line(ui: &mut Ui, description: &str) {
     let t = Tokens::get(ui.ctx());
@@ -40,14 +39,14 @@ pub(crate) fn purpose_line(ui: &mut Ui, description: &str) {
                     ui.painter().circle_stroke(
                         icon_rect.center(),
                         5.0,
-                        Stroke::new(1.0, t.color.info),
+                        Stroke::new(1.0, t.color.text_faint),
                     );
                     ui.painter().text(
                         icon_rect.center() + vec2(0.0, -0.25),
                         Align2::CENTER_CENTER,
                         "i",
                         theme::mono(tokens::FS_0, FontWeight::Medium),
-                        t.color.info,
+                        t.color.text_faint,
                     );
                     ui.add(
                         egui::Label::new(
@@ -78,22 +77,57 @@ pub(crate) fn resolved_context(ui: &mut Ui, project_name: &str, project_revision
         ui.set_width(ui.available_width());
         ui.set_min_height(BODY_HEIGHT);
         ui.spacing_mut().item_spacing.y = 0.0;
-        context_heading(ui, "Resolved context");
+        // The boundary row and the paragraph under it said the same thing for
+        // every dialog that shows this panel, whatever it was about to do.
+        context_heading(ui, "Context");
         context_row(ui, "Project", project_name);
         context_row(ui, "Revision", project_revision);
-        context_row(ui, "Change boundary", "owned source + dependency graph");
-        Frame::NONE.inner_margin(Margin::same(10)).show(ui, |ui| {
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(CONTEXT_EXPLANATION)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_dim),
-                )
-                .wrap(),
-            );
-        });
     });
 }
+
+/// A problem stated on its own line inside a dialog body: the mark that owns
+/// the severity, then neutral text.
+///
+/// Dialogs that paint notes in a column of their own share this one painter,
+/// so a warning in Publish and a warning in Live session are the same mark at
+/// the same size with the same gap behind it.
+pub(crate) fn problem_note(ui: &mut Ui, problem: Problem, text: &str) -> Response {
+    let t = Tokens::get(ui.ctx());
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = PROBLEM_NOTE_GAP;
+        let (rect, _) = ui.allocate_exact_size(
+            vec2(PROBLEM_NOTE_MARK, PROBLEM_NOTE_LINE),
+            Sense::hover(),
+        );
+        crate::ui::widgets::paint_problem_mark(
+            ui.painter(),
+            egui::Rect::from_center_size(
+                egui::pos2(rect.center().x, rect.top() + PROBLEM_NOTE_LINE * 0.5),
+                Vec2::splat(PROBLEM_NOTE_MARK),
+            ),
+            problem,
+        );
+        let response = ui.add(
+            egui::Label::new(
+                egui::RichText::new(text)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            )
+            .wrap(),
+        );
+        let announcement = problem.announce(text);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &announcement)
+        });
+        response
+    })
+    .inner
+}
+
+/// The mark's side, the gap behind it, and the line it is centred on.
+const PROBLEM_NOTE_MARK: f32 = 11.0;
+const PROBLEM_NOTE_GAP: f32 = 6.0;
+const PROBLEM_NOTE_LINE: f32 = 16.0;
 
 pub(crate) fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get(ui.ctx());
@@ -282,9 +316,88 @@ mod tests {
         assert_eq!(BODY_HEIGHT, 230.0);
         assert_eq!(CONTEXT_WIDTH, 260.0);
         assert_eq!(TRANSACTION_HEIGHT, 37.0);
-        assert_eq!(
-            CONTEXT_EXPLANATION,
-            "The exact source identities, dependent artifacts, permission boundary, validation policy, and transactional commit point are reviewed before this action can complete."
-        );
+    }
+
+    /// Nothing in the dialog-content slice paints a status in colour.
+    ///
+    /// Success has no styling at all, so the success tone, the information
+    /// tone, a status dot and the two `StatusMark` variants that are not
+    /// problems may not appear in any of these files. A warning or a failure
+    /// is a `Problem` mark in front of neutral text, and the error tone stays
+    /// allowed where it sits under the input it rejects.
+    #[test]
+    fn no_dialog_content_file_paints_a_status_in_colour() {
+        const BANNED: [&str; 6] = [
+            "colored_label",
+            "status_dot(",
+            "StatusMark::Success",
+            "StatusMark::Neutral",
+            "color.ok",
+            "color.info",
+        ];
+        // Each entry is one shipped file of this slice, read back as it ships.
+        const SLICE: [(&str, &str); 19] = [
+            ("check_and_save.rs", include_str!("check_and_save.rs")),
+            (
+                "check_and_save_validation.rs",
+                include_str!("check_and_save_validation.rs"),
+            ),
+            (
+                "operation_primitives.rs",
+                include_str!("operation_primitives.rs"),
+            ),
+            ("review_primitives.rs", include_str!("review_primitives.rs")),
+            ("live_session.rs", include_str!("live_session.rs")),
+            ("publish_web.rs", include_str!("publish_web.rs")),
+            ("unpublish_web.rs", include_str!("unpublish_web.rs")),
+            ("source_document.rs", include_str!("source_document.rs")),
+            ("source_find.rs", include_str!("source_find.rs")),
+            (
+                "source_language_tools.rs",
+                include_str!("source_language_tools.rs"),
+            ),
+            ("design_management.rs", include_str!("design_management.rs")),
+            (
+                "design_management/manager.rs",
+                include_str!("design_management/manager.rs"),
+            ),
+            (
+                "design_management/subflows.rs",
+                include_str!("design_management/subflows.rs"),
+            ),
+            (
+                "design_management/widgets.rs",
+                include_str!("design_management/widgets.rs"),
+            ),
+            (
+                "design_management/operations.rs",
+                include_str!("design_management/operations.rs"),
+            ),
+            (
+                "design_management/controller.rs",
+                include_str!("design_management/controller.rs"),
+            ),
+            (
+                "preferences/shortcut_preferences.rs",
+                include_str!("preferences/shortcut_preferences.rs"),
+            ),
+            (
+                "preferences/shortcut_portability_dialogs.rs",
+                include_str!("preferences/shortcut_portability_dialogs.rs"),
+            ),
+            (
+                "preferences/managed_preference_policy.rs",
+                include_str!("preferences/managed_preference_policy.rs"),
+            ),
+        ];
+        for (name, source) in SLICE {
+            let production = crate::source_guard::production_source(source);
+            for banned in BANNED {
+                assert!(
+                    !production.contains(banned),
+                    "{name} still paints a status with {banned:?}"
+                );
+            }
+        }
     }
 }

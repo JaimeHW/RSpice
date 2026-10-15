@@ -52,9 +52,7 @@ pub(crate) fn operation_steps(ui: &mut Ui) {
             Align2::LEFT_CENTER,
             label,
             theme::mono(tokens::FS_0, FontWeight::Medium),
-            if index == 0 {
-                t.color.ok
-            } else if index == 1 {
+            if index == 1 {
                 t.color.text
             } else {
                 t.color.text_faint
@@ -78,13 +76,12 @@ pub(crate) fn impact_preview(ui: &mut Ui, project: &str, revision: &str) {
         ui.set_width(ui.available_width());
         ui.set_min_height(BODY_HEIGHT);
         ui.spacing_mut().item_spacing.y = 0.0;
-        heading(ui, "Impact preview");
+        // The four rows that stood under these two never varied: they stated
+        // the same transactional contract for every operation, whatever the
+        // operation was.
+        heading(ui, "Context");
         fact_row(ui, "Project", project);
         fact_row(ui, "Revision", revision);
-        fact_row(ui, "Change boundary", "owned source + dependency graph");
-        table_row(ui, "Owned source", "reviewed working revision");
-        table_row(ui, "Existing results", "retained with original inputs");
-        table_row(ui, "Undo boundary", "one transactional operation");
     });
 }
 
@@ -120,28 +117,10 @@ fn heading(ui: &mut Ui, label: &str) {
 }
 
 fn fact_row(ui: &mut Ui, label: &str, value: &str) {
-    two_column_row(ui, label, value, 28.0, false);
-}
-
-fn table_row(ui: &mut Ui, label: &str, value: &str) {
-    two_column_row(ui, label, value, 31.0, true);
-}
-
-fn two_column_row(ui: &mut Ui, label: &str, value: &str, height: f32, table: bool) {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    let label_width = if table {
-        (rect.width() * 0.42).max(76.0)
-    } else {
-        (rect.width() * 0.37).max(76.0)
-    };
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+    let label_width = (rect.width() * 0.37).max(76.0);
     let split = (rect.left() + label_width).min(rect.right());
-    if table {
-        ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
-        ui.painter()
-            .vline(split, rect.y_range(), Stroke::new(1.0, t.color.border));
-    }
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
@@ -151,29 +130,14 @@ fn two_column_row(ui: &mut Ui, label: &str, value: &str, height: f32, table: boo
         egui::pos2(rect.left() + 10.0, rect.center().y),
         Align2::LEFT_CENTER,
         label,
-        theme::sans(
-            tokens::FS_0,
-            if table {
-                FontWeight::SemiBold
-            } else {
-                FontWeight::Regular
-            },
-        ),
-        if table {
-            t.color.text_dim
-        } else {
-            t.color.text_faint
-        },
+        theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_faint,
     );
     let value_rect = egui::Rect::from_min_max(
         egui::pos2(split + 10.0, rect.top()),
         egui::pos2(rect.right() - 8.0, rect.bottom()),
     );
-    let value_font = if table {
-        theme::sans(tokens::FS_0, FontWeight::Regular)
-    } else {
-        theme::mono(tokens::FS_0, FontWeight::Medium)
-    };
+    let value_font = theme::mono(tokens::FS_0, FontWeight::Medium);
     let (display_value, was_truncated) =
         ellipsized_text(ui, value, value_rect.width(), &value_font, t.color.text);
     ui.painter().with_clip_rect(value_rect).text(
