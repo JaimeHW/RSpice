@@ -2043,11 +2043,10 @@ fn navigator_section_header(ui: &mut Ui, section: DesignNavigatorSection, count:
         t.color.text_dim,
     );
     let title_job = egui::text::LayoutJob::single_section(
-        title.to_uppercase(),
+        title.to_owned(),
         egui::TextFormat {
             font_id: theme::sans(tokens::FS_2, FontWeight::SemiBold),
             color: t.color.text_dim,
-            extra_letter_spacing: 0.055 * tokens::FS_2,
             ..Default::default()
         },
     );

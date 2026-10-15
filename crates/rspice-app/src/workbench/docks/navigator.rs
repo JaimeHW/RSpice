@@ -294,7 +294,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             ProjectPage::Recovery => "Recovery",
         },
         Workspace::Design => "Design navigator",
-        Workspace::Simulate => "Simulation Studio",
+        Workspace::Simulate => "Setup",
         Workspace::Stimulus => "Library browser",
         Workspace::Results => "Data browser",
         Workspace::Verify => "Verification flows",
@@ -303,7 +303,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             use crate::workbench::documents::code_workspace::CodeWorkspacePage;
             match app.state.ui.code_workspace.page {
                 CodeWorkspacePage::Netlist => "Netlist outline",
-                CodeWorkspacePage::Automation => "Automation workspace",
+                CodeWorkspacePage::Automation => "Scripts",
             }
         }
     };
@@ -314,37 +314,21 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         node.set_label(title);
         node.set_level(2);
     });
-    if app.state.workbench.workspace == Workspace::Design {
-        let job = egui::text::LayoutJob::single_section(
-            title.to_ascii_uppercase(),
-            egui::TextFormat {
-                font_id: theme::sans(tokens::FS_2, FontWeight::SemiBold),
-                color: t.color.text,
-                extra_letter_spacing: 0.065 * tokens::FS_2,
-                ..Default::default()
-            },
-        );
-        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-        ui.painter().galley(
-            egui::pos2(
-                rect.left() + rspice_ui_kit::panels::PANEL_INSET,
-                rect.center().y - galley.size().y * 0.5,
-            ),
-            galley,
-            t.color.text,
-        );
+    let size = if app.state.workbench.workspace == Workspace::Design {
+        tokens::FS_2
     } else {
-        ui.painter().text(
-            egui::pos2(
-                rect.left() + rspice_ui_kit::panels::PANEL_INSET,
-                rect.center().y,
-            ),
-            egui::Align2::LEFT_CENTER,
-            title.to_ascii_uppercase(),
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-        );
-    }
+        tokens::FS_0
+    };
+    ui.painter().text(
+        egui::pos2(
+            rect.left() + rspice_ui_kit::panels::PANEL_INSET,
+            rect.center().y,
+        ),
+        egui::Align2::LEFT_CENTER,
+        title,
+        theme::sans(size, FontWeight::SemiBold),
+        t.color.text,
+    );
 }
 
 fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) -> bool {
@@ -1638,10 +1622,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         stored_producer_facet,
         tab == ResultsBrowserTab::Signals,
     );
-    // The mockup's status band: the signals tab owns the scope control on
-    // the left — All | Favorites | Recent over the session's real star and
-    // recency state — and every tab keeps the live inventory count on the
-    // right, with the provenance sentence riding its tooltip.
+    // The scope band: the signals tab owns the scope control on the left —
+    // All | Favorites | Recent over the session's real star and recency
+    // state — and the count on the right states how much of the tab's
+    // inventory is being held back, which is nothing to say while all of it
+    // is on screen.
     {
         let t = Tokens::get(ui.ctx());
         let shown = match tab {
@@ -1676,88 +1661,82 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         // Two numbers, no noun: the tab band above already names what is being
         // counted and the scope control beside it already says which working
         // set is in force, so spelling either one again costs the row the width
-        // the count needs at the dock's minimum.
-        let count_copy = format!("{shown} / {loaded}");
-        ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), t.metrics.ctl_h.max(28.0)),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.add_space(8.0);
-                if tab == ResultsBrowserTab::Signals {
-                    // One scope is in force at a time, so the three read as
-                    // one control rather than three independent marks.
-                    const SCOPES: [ResultsBrowserScope; 3] = [
-                        ResultsBrowserScope::All,
-                        ResultsBrowserScope::Favorites,
-                        ResultsBrowserScope::Recent,
-                    ];
-                    let mut index = SCOPES
-                        .iter()
-                        .position(|candidate| *candidate == scope)
-                        .unwrap_or(0);
-                    let changed = crate::ui::widgets::segmented(
-                        ui,
-                        "workbench.results.browser-scope",
-                        &["All", "Favorites", "Recent"],
-                        &mut index,
-                        crate::ui::widgets::SegmentedWidth::Natural,
-                    );
-                    if changed {
-                        let scope_now = SCOPES[index];
-                        ui.ctx().data_mut(|data| {
-                            data.insert_temp(results_browser_scope_id(), scope_now);
+        // the count needs at the dock's minimum. With everything on screen the
+        // tab's own count has already said it, so the band says nothing.
+        let count_copy = (shown != loaded).then(|| format!("{shown} / {loaded}"));
+        // Nothing held back and no scope control to hold: the band would be an
+        // empty strip under a rule.
+        if count_copy.is_some() || tab == ResultsBrowserTab::Signals {
+            ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), t.metrics.ctl_h.max(28.0)),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.add_space(8.0);
+                    if tab == ResultsBrowserTab::Signals {
+                        // One scope is in force at a time, so the three read as
+                        // one control rather than three independent marks.
+                        const SCOPES: [ResultsBrowserScope; 3] = [
+                            ResultsBrowserScope::All,
+                            ResultsBrowserScope::Favorites,
+                            ResultsBrowserScope::Recent,
+                        ];
+                        let mut index = SCOPES
+                            .iter()
+                            .position(|candidate| *candidate == scope)
+                            .unwrap_or(0);
+                        let changed = crate::ui::widgets::segmented(
+                            ui,
+                            "workbench.results.browser-scope",
+                            &["All", "Favorites", "Recent"],
+                            &mut index,
+                            crate::ui::widgets::SegmentedWidth::Natural,
+                        );
+                        if changed {
+                            let scope_now = SCOPES[index];
+                            ui.ctx().data_mut(|data| {
+                                data.insert_temp(results_browser_scope_id(), scope_now);
+                            });
+                        }
+                    }
+                    // The count is the band's last register: how many of the
+                    // tab's rows the filter in force is letting through.
+                    if let Some(count_copy) = count_copy {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new(count_copy)
+                                    .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
+                                    .color(t.color.text_faint),
+                            )
+                            .on_hover_text("Matching rows of the rows this tab holds");
                         });
                     }
-                }
-                // The count is the band's last register, and it carries the
-                // whole inventory disclosure on its tooltip: matching,
-                // rendered, and loaded stay distinguished without a second
-                // band restating the number printed here.
-                let inventory = ui
-                    .ctx()
-                    .data(|data| data.get_temp::<(usize, usize, usize)>(results_browser_inventory_id()));
-                let count_tooltip = match inventory {
-                    Some((matching, rendered, loaded)) if tab == ResultsBrowserTab::Signals => {
-                        format!(
-                            "{matching} matching · {rendered} rendered · {loaded} loaded · exact metadata · stable IDs\nLists virtualize at {RESULT_BROWSER_VIRTUALIZATION_THRESHOLD} rows; the render window is bounded to {RESULT_BROWSER_RENDER_WINDOW_ROWS} rows with a {RESULT_BROWSER_OVERSCAN_ROWS}-row contract."
-                        )
-                    }
-                    _ => "Live inventory of the retained evidence behind this tab · exact metadata · stable IDs".to_owned(),
-                };
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new(count_copy)
-                            .font(theme::mono(tokens::FS_MICRO, FontWeight::Medium))
-                            .color(t.color.text_faint),
-                    )
-                    .on_hover_text(count_tooltip);
-                });
-            },
-        );
-        ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
-        // `.result-browser-status` closes on its own rule, like the toolbar
-        // above it, so the scope control reads as a band of its own instead
-        // of as the first row of the list below.
-        ui.painter().hline(
-            egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
-            ui.cursor().top() - 0.5,
-            egui::Stroke::new(1.0, t.color.border),
-        );
+                },
+            );
+            ui.add_space(RESULT_BROWSER_BAND_PAD_Y);
+            // `.result-browser-status` closes on its own rule, like the toolbar
+            // above it, so the scope control reads as a band of its own instead
+            // of as the first row of the list below.
+            ui.painter().hline(
+                egui::Rangef::new(ui.max_rect().left(), ui.max_rect().right()),
+                ui.cursor().top() - 0.5,
+                egui::Stroke::new(1.0, t.color.border),
+            );
+        }
     }
-    // The mockup's `.result-browser-selection`: what a batch action would
-    // act on, with only the actions RSpice actually performs on a set of
-    // quantities — plot membership, and letting the set go.
+    // What a batch action would act on, with only the actions RSpice actually
+    // performs on a set of quantities — plot membership, and letting the set
+    // go. The band belongs to a selection: with nothing checked it held one
+    // button, and the row checkboxes under it are how a selection starts.
     if tab == ResultsBrowserTab::Signals
-        && (!app
+        && !app
             .state
             .ui
             .results
             .session
             .checked_result_quantities
             .is_empty()
-            || !visible_result_keys.is_empty())
     {
         let t = Tokens::get(ui.ctx());
         let checked = app
@@ -1817,32 +1796,6 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             |ui| {
                 ui.painter()
                     .rect_filled(ui.available_rect_before_wrap(), 0.0, t.color.accent_dim);
-                if checked.is_empty() {
-                    ui.with_layout(
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| {
-                            if ui
-                                .add_enabled(
-                                    !visible_result_keys.is_empty(),
-                                    egui::Button::new(format!(
-                                        "Select visible ({})",
-                                        visible_result_keys.len()
-                                    )),
-                                )
-                                .on_hover_text(
-                                    "Select every quantity in the current filtered scope",
-                                )
-                                .clicked()
-                            {
-                                app.state
-                                    .ui
-                                    .results
-                                    .session.select_visible_signals(&visible_result_keys);
-                            }
-                        },
-                    );
-                    return;
-                }
                 ui.add_space(8.0);
                 ui.label(
                     egui::RichText::new(format!("{} selected", checked.len()))
@@ -2648,12 +2601,6 @@ fn results_browser_sort_id() -> egui::Id {
 
 fn results_browser_scope_id() -> egui::Id {
     egui::Id::new("workbench.results.browser-scope")
-}
-
-/// Matching, rendered, and loaded row counts from the list pass, for the status
-/// band's count tooltip.
-fn results_browser_inventory_id() -> egui::Id {
-    egui::Id::new("workbench.results.browser-inventory")
 }
 
 fn results_browser_producer_id() -> egui::Id {
@@ -3729,7 +3676,6 @@ fn show_virtualized_result_signals(
         .available_height()
         .max(row_height)
         .min(row_height * RESULT_BROWSER_RENDER_WINDOW_ROWS as f32);
-    let mut rendered_signal_rows = 0_usize;
     ScrollArea::vertical()
         .id_salt("workbench.results.navigator")
         .max_height(list_height)
@@ -3756,15 +3702,6 @@ fn show_virtualized_result_signals(
             } else {
                 (0, rows.len())
             };
-            rendered_signal_rows += (render_start..render_end)
-                .filter(|index| {
-                    matches!(
-                        rows[*index],
-                        ResultSignalVirtualRow::Signal { .. }
-                            | ResultSignalVirtualRow::Artifact { .. }
-                    )
-                })
-                .count();
             let y_min = ui.max_rect().top() + render_start as f32 * row_stride;
             let y_max = ui.max_rect().top() + render_end as f32 * row_stride;
             let render_rect =
@@ -4095,23 +4032,6 @@ fn show_virtualized_result_signals(
                 }
             });
         });
-
-    let loaded_signal_rows = runs
-        .iter()
-        .flat_map(|run| &run.analyses)
-        .map(|analysis| analysis.total_signals)
-        .sum::<usize>();
-    // Matching, rendered and loaded stay distinguished, but they ride the
-    // status band's count tooltip instead of a second band that restates the
-    // number printed above it. The band renders before this pass, so it reads
-    // these values on the next frame — the same one-frame contract the kind and
-    // sort facets use.
-    ui.ctx().data_mut(|data| {
-        data.insert_temp(
-            results_browser_inventory_id(),
-            (signal_rows, rendered_signal_rows, loaded_signal_rows),
-        );
-    });
 
     if signal_rows == 0 {
         muted(

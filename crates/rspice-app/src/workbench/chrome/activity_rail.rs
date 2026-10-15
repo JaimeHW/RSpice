@@ -175,9 +175,8 @@ const fn activity_workspace_label(workspace: Workspace) -> &'static str {
     match workspace {
         Workspace::Project => "Project",
         Workspace::Design => "Schematic",
-        // The workspace, not the first of its eight routes: its own navigator
-        // dock is titled "Simulation Studio", and every other entry here names
-        // a whole workspace rather than one page inside it.
+        // The workspace, not the first of its eight routes: every other entry
+        // here names a whole workspace rather than one page inside it.
         Workspace::Simulate => "Simulation Studio",
         Workspace::Stimulus => "Stimulus Library",
         Workspace::Results => "Results",

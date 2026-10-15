@@ -755,6 +755,41 @@ fn result_navigator_app() -> RSpiceApp {
     app
 }
 
+/// The scope band states a count only while a filter is holding rows back,
+/// and the selection band belongs to a selection.
+///
+/// Unfiltered, "2 / 2" repeated the tab band's own count under it, and a
+/// permanent 29 px strip carried one rarely used command across a browser
+/// whose every row has a checkbox.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_data_browser_counts_only_what_a_filter_holds_back() {
+    fn painted(app: RSpiceApp) -> Vec<String> {
+        navigator_painted_lines(256.0, app)
+            .into_iter()
+            .map(|(text, _)| text)
+            .collect()
+    }
+
+    let shown = painted(result_navigator_app());
+    assert!(
+        !shown.iter().any(|line| line.contains(" / ")),
+        "nothing is held back, so no fraction: {shown:?}"
+    );
+    assert!(
+        !shown.iter().any(|line| line.starts_with("Select visible")),
+        "nothing is checked, so no selection band: {shown:?}"
+    );
+
+    let mut app = result_navigator_app();
+    app.state.workbench.set_navigator_filter("V(out)");
+    let filtered = painted(app);
+    assert!(
+        filtered.iter().any(|line| line == "1 / 2"),
+        "one of two rows survives the query, and the band says so: {filtered:?}"
+    );
+}
+
 #[test]
 fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     let mut app = result_navigator_app();
@@ -1396,8 +1431,11 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
             dimension.enabled = true;
         }
         app.state.workbench.set_navigator_filter(query);
+        // The rail, not the dock's own header band above it: that names the
+        // panel "Setup" and is no more a filtered row than the title bar is.
         navigator_painted_lines(228.0, app)
             .into_iter()
+            .filter(|(_, rect)| rect.top() >= rspice_ui_kit::panels::PANEL_HEADER_H)
             .map(|(text, _)| text)
             .collect()
     }

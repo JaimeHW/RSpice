@@ -1181,7 +1181,7 @@ impl NavigatorPanel {
     /// The count the section states, read from the band its own title is
     /// painted in rather than from the frame at large.
     fn stated_count(&self, title: &str) -> Option<String> {
-        let heading = title.to_uppercase();
+        let heading = title.to_owned();
         let band = self
             .runs
             .iter()
