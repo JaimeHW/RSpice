@@ -600,15 +600,6 @@ fn active_measurement_count(simulation: &SimulationState) -> usize {
     })
 }
 
-fn netlist_diagnostics_own_problems(state: &AppState) -> bool {
-    state.is_netlist_first_without_schematic()
-        || (state.workbench.workspace == crate::workbench::state::Workspace::Results
-            && state.active_result_uses_manual_deck())
-        || (state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && state.ui.code_workspace.page
-                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist)
-}
-
 /// Join the columns a painted console row shows into the one string a screen
 /// reader announces, skipping the columns a continuation row leaves blank.
 fn row_announcement(columns: &[&str]) -> String {
@@ -647,23 +638,6 @@ fn paint_row_mark(ui: &Ui, left: f32, top: f32, problem: Option<Problem>) {
             problem,
         );
     }
-}
-
-fn netlist_diagnostic_location(
-    diagnostic: &crate::workbench::documents::netlist_document::Diagnostic,
-) -> String {
-    let line = diagnostic.line.or(diagnostic.source_line);
-    let location = match (line, diagnostic.column) {
-        (Some(line), Some(column)) => format!("line {} · column {}", line + 1, column + 1),
-        (Some(line), None) => format!("line {}", line + 1),
-        (None, _) => "document scope".to_owned(),
-    };
-    diagnostic
-        .source_path
-        .as_deref()
-        .map_or(location.clone(), |path| {
-            format!("{} · {location}", path.display())
-        })
 }
 
 fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {

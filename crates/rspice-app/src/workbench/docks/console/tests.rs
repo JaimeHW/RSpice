@@ -2,10 +2,147 @@
 
 use super::*;
 use crate::diagnostics::LogSource;
-use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
+use crate::state::{AnalysisResult, AnalysisType, Point, SimulationRun};
 use crate::workbench::AppState;
+use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
+use crate::workbench::app_state::diagnostic_store::listing::listing;
 use crate::workbench::state::WorkbenchState;
 use rspice_design::drc::DrcResult;
+
+/// Every producer the store holds evidence for puts a real finding on the
+/// page, with a code, a subject and somewhere to go.
+///
+/// The match is exhaustive on purpose: a new producer cannot be added to
+/// [`DiagnosticOwner`] without this test refusing to compile until its
+/// failure path is driven here. Before the canonical store, a producer
+/// "reported" a failure by writing a console line, which meant a user-visible
+/// failure could ship with nothing on this page at all — and several did.
+#[test]
+fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
+    use rspice_design::drc::{DrcLocation, DrcViolation, DrcViolationType};
+
+    for owner in [
+        DiagnosticOwner::DesignRules,
+        DiagnosticOwner::Dispatch,
+        DiagnosticOwner::Run,
+    ] {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project_lifecycle.authority.open_session();
+        match owner {
+            DiagnosticOwner::DesignRules => {
+                // A finding about an object the drawing carries, so the row's
+                // route is the real one the canvas resolves.
+                let resistor = app
+                    .state
+                    .schematic
+                    .add_component(crate::state::ComponentType::Resistor, Point::new(40, 40));
+                app.state.sync_active_schematic_to_workspace();
+                let mut result = DrcResult::new();
+                result.add_violation(DrcViolation::new(
+                    1,
+                    DrcViolationType::MissingParameter,
+                    "R1 has no resistance",
+                    DrcLocation::Component {
+                        id: resistor,
+                        name: "R1".to_owned(),
+                    },
+                ));
+                result.completed = true;
+                app.state
+                    .publish_active_design_check_result(result)
+                    .expect("the checks publish against the live design");
+            }
+            DiagnosticOwner::Dispatch => {
+                // The real command, on an empty design: a schematic with no
+                // components cannot be dispatched, so the pass blocks.
+                app.state.schematic = crate::state::SchematicState::default();
+                Command::PreflightChecks.execute(&mut app);
+            }
+            DiagnosticOwner::Run => {
+                use rspice_results::convergence_attribution::{
+                    ConvergenceAttribution, ConvergenceFailureClass, ConvergenceSite,
+                    ConvergenceSiteKind,
+                };
+
+                let message = "Analysis failed: no DC path at vbias";
+                let attribution = ConvergenceAttribution {
+                    class: ConvergenceFailureClass::NoDcPathToGround,
+                    sites: vec![ConvergenceSite {
+                        name: "vbias".to_owned(),
+                        kind: ConvergenceSiteKind::Node,
+                        residual: None,
+                    }],
+                    elided_sites: 0,
+                    failure_message: "no DC path at vbias".to_owned(),
+                };
+                app.state
+                    .publish_run_failure("Transient", message, Some(&attribution), 1);
+            }
+        }
+
+        let batch = app
+            .state
+            .diagnostics
+            .batches()
+            .find(|batch| batch.inputs.owner() == owner)
+            .unwrap_or_else(|| {
+                panic!("{owner:?} reported a failure and published no canonical records")
+            })
+            .clone();
+        assert!(
+            !batch.records.is_empty(),
+            "{owner:?} reported a failure and published an empty batch"
+        );
+        for record in &batch.records {
+            assert!(
+                !record.canonical.code.is_empty(),
+                "{owner:?} published a finding with no rule code: {}",
+                record.message
+            );
+            assert!(
+                !record.subject.display().is_empty(),
+                "{owner:?} published a finding that says nothing about what it is about: {}",
+                record.message
+            );
+        }
+        assert!(
+            batch.records.iter().any(|record| record.route.is_some()),
+            "{owner:?} published findings with nowhere to go at all"
+        );
+
+        // And every one of them reaches the page, where a reader looks.
+        let listed = listing(&app.state);
+        let listed_messages: Vec<&str> = (0..listed.len())
+            .filter_map(|index| listed.row(index))
+            .map(|row| row.message)
+            .collect();
+        for record in &batch.records {
+            assert!(
+                listed_messages.contains(&record.message.as_str()),
+                "{owner:?} published {:?}, which the page does not list: {listed_messages:?}",
+                record.message
+            );
+        }
+        assert!(
+            listed.counts().errors > 0,
+            "{owner:?} reported a failure that counts as nothing: {:?}",
+            listed.counts()
+        );
+    }
+}
+
+/// The page reads records. It must not read the session log back in, which is
+/// what made it a severity filter over everything that had ever happened.
+#[test]
+fn the_problems_page_never_names_the_log_buffer() {
+    let source = crate::source_guard::production_half(include_str!("problems.rs"));
+    for forbidden in ["log_buffer", "LogEntry", "LogSeverity", "LogSource"] {
+        assert!(
+            !source.contains(forbidden),
+            "the Problems page names `{forbidden}`; a condition is not an event"
+        );
+    }
+}
 
 #[test]
 fn console_empty_hints_match_mockup_spacing_and_type_scale() {
@@ -171,9 +308,17 @@ fn console_rows_paint_no_coloured_text() {
     }
 }
 
+/// The badge counts records, and only records.
+///
+/// It used to count log entries too, and to swap between the netlist summary
+/// and the schematic result depending on which workspace was open — so the
+/// same session reported a different number of problems from the Netlist page
+/// than from the Design page, and a retained log warning counted as one of
+/// them forever.
 #[test]
-fn netlist_problem_badge_is_owned_only_by_the_canonical_collection() {
+fn the_problem_badge_counts_records_and_not_log_entries() {
     let mut app = RSpiceApp::test_instance();
+    app.state.project_lifecycle.authority.open_session();
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
@@ -182,7 +327,6 @@ fn netlist_problem_badge_is_owned_only_by_the_canonical_collection() {
     app.state
         .log_buffer
         .warning(LogSource::Simulation, "unrelated retained log warning");
-    app.state.dialogs.drc_results = Some(DrcResult::new());
     app.state.ui.netlist.diagnostics = std::sync::Arc::new(
         crate::workbench::documents::netlist_document::NetlistDiagnosticCollection::try_new(
             vec![
@@ -196,40 +340,12 @@ fn netlist_problem_badge_is_owned_only_by_the_canonical_collection() {
     );
 
     assert_eq!(active_problem_count(&app.state).total(), 1);
-}
 
-#[test]
-fn netlist_first_results_keep_the_canonical_problem_badge() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.project_lifecycle.authority.open_session();
-    let provenance = crate::state::AnalysisResultProvenance::new_with_source_domain(
-        crate::state::AnalysisResultSourceDomain::ManualDeck,
-        crate::product::AnalysisInstanceId::new(),
-        crate::product::ObjectRevision::INITIAL,
-        crate::product::ContentDigest::from_bytes([0x52; 32]),
-        Vec::new(),
-    )
-    .unwrap();
-    app.state.simulation.start_run().add_analysis(
-        crate::state::AnalysisResult::new(
-            1,
-            crate::state::AnalysisType::Transient,
-            "manual transient",
-        )
-        .with_provenance(provenance),
-    );
+    // The same count wherever the reader is standing.
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
-    app.state
-        .log_buffer
-        .warning(LogSource::Simulation, "unrelated retained log warning");
-    app.state.dialogs.drc_results = Some(DrcResult::new());
-
-    assert!(!app.state.is_netlist_first_without_schematic());
-    assert!(app.state.active_result_uses_manual_deck());
-    assert!(netlist_diagnostics_own_problems(&app.state));
-    assert_eq!(active_problem_count(&app.state).total(), 0);
+    assert_eq!(active_problem_count(&app.state).total(), 1);
 }
 
 #[test]

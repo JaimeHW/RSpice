@@ -1059,13 +1059,13 @@ mod tests {
             .blockers()
             .iter()
             .find(|finding| {
-                matches!(
-                    &finding.location,
-                    Some(DrcLocation::Component { id, .. }) if *id == resistor
-                )
+                finding.source == "naming"
+                    && matches!(
+                        &finding.location,
+                        Some(DrcLocation::Component { id, .. }) if *id == resistor
+                    )
             })
             .expect("a designator refused on the active document names its instance");
-        assert_eq!(located.source, "naming");
 
         let anchor = finding_anchor(&state, located).expect("a located finding resolves an anchor");
         state.jump_to_log_anchor(anchor);

@@ -7,11 +7,13 @@
 //! now, and a finding leaves it when the design stops earning it.
 //!
 //! Everything here follows from that. A finding is reported once, by whatever
-//! owns the condition, and never copied into the log as well. A finding whose
-//! inputs have since changed is shown faint and said to be stale rather than
-//! quietly dropped, because "no findings" and "nobody has looked" are
-//! different answers and a tool that confuses them is lying. A finding that
-//! knows where it is, is a target: clicking it goes there.
+//! owns the condition, and never copied into the log as well — the page does
+//! not read the log at all, which is what stopped it from being a severity
+//! filter over the session's history. A finding whose inputs have since
+//! changed is shown faint and said to be stale rather than quietly dropped,
+//! because "no findings" and "nobody has looked" are different answers and a
+//! tool that confuses them is lying. A finding that knows where it is, is a
+//! target: clicking it goes there.
 //!
 //! Columns are sized to their content, measured in the font they are printed
 //! in. They used to be fixed at 58 px and 62 px — eight characters — which
@@ -22,20 +24,19 @@ use egui::{Sense, Ui, Vec2};
 
 use super::{
     AppState, CONSOLE_COLUMN_GAP, CONSOLE_FONT_SIZE, CONSOLE_MARK_GUTTER, CONSOLE_ROW_MIN_HEIGHT,
-    announced_row, muted, netlist_diagnostic_location, netlist_diagnostics_own_problems,
-    paint_row_mark,
+    announced_row, muted, paint_row_mark,
 };
-use crate::diagnostics::{LogAnchor, LogEntry, LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
-use crate::workbench::app_state::design_checks::DesignCheckStatus;
-use crate::workbench::documents::netlist_document::DiagnosticSeverity;
-use rspice_design::drc::{DrcResult, DrcSeverity};
+use crate::workbench::app_state::diagnostic_store::listing::{
+    DiagnosticListing, DiagnosticRow, EmptyReason, listing,
+};
+use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
 
 /// The longest severity cell the page can print. The severity column is
 /// measured against this, so no severity word is ever cut.
-const WIDEST_SEVERITY_CELL: &str = "Stale Critical";
+const WIDEST_SEVERITY_CELL: &str = "Waived Critical";
 
 /// The narrowest location column worth printing: enough for a short file name
 /// with a line and column, which is the shape a reader scans for.
@@ -51,13 +52,13 @@ const LOCATION_COLUMN_MAX_SHARE: f32 = 0.34;
 /// every other current finding, and a stale finding is neither — it is a
 /// finding about a design that no longer exists.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct ProblemCount {
-    pub(super) errors: usize,
-    pub(super) advisories: usize,
+pub(in crate::workbench) struct ProblemCount {
+    pub(in crate::workbench) errors: usize,
+    pub(in crate::workbench) advisories: usize,
 }
 
 impl ProblemCount {
-    pub(super) const fn total(self) -> usize {
+    pub(in crate::workbench) const fn total(self) -> usize {
         self.errors + self.advisories
     }
 
@@ -65,7 +66,7 @@ impl ProblemCount {
     /// The badge itself has room for one number; this is where the number is
     /// broken down, so the strip never implies that twelve advisories are
     /// twelve errors.
-    pub(super) fn announcement(self) -> String {
+    pub(in crate::workbench) fn announcement(self) -> String {
         format!(
             "{} error{}, {} advisor{}",
             self.errors,
@@ -76,325 +77,139 @@ impl ProblemCount {
     }
 }
 
-/// Where the schematic findings on this page come from, and whether they
-/// still describe the design in front of the reader.
-enum CheckSource<'a> {
-    /// No check has produced evidence for this subject.
-    NotRun,
-    /// Evidence for exactly the design as it stands.
-    Current(&'a DrcResult),
-    /// Evidence from before an edit. Its findings are still shown, because a
-    /// stale finding usually still points at something real, but they are
-    /// shown as what they are.
-    Stale(&'a DrcResult),
-    /// The check cannot be evaluated at all, in its own words.
-    Unavailable(String),
-}
-
-impl CheckSource<'_> {
-    fn result(&self) -> Option<&DrcResult> {
-        match self {
-            Self::Current(result) | Self::Stale(result) => Some(result),
-            Self::NotRun | Self::Unavailable(_) => None,
-        }
-    }
-
-    const fn current(&self) -> bool {
-        matches!(self, Self::Current(_))
-    }
-}
-
-/// Resolve the schematic check evidence for the active subject.
-///
-/// The receipt store is asked first: it is the only thing that knows whether
-/// evidence is current, and it keeps a stale receipt instead of discarding
-/// it. `dialogs.drc_results` is the fallback, because the symbol-pin checks
-/// publish straight into that projection and have no receipt of their own.
-fn check_source(state: &AppState) -> CheckSource<'_> {
-    match state.active_design_check_status() {
-        DesignCheckStatus::Current(receipt) => CheckSource::Current(&receipt.result),
-        DesignCheckStatus::Stale(receipt) => CheckSource::Stale(&receipt.result),
-        DesignCheckStatus::Unavailable { reason, .. } => CheckSource::Unavailable(reason),
-        DesignCheckStatus::NotRun => match state.dialogs.drc_results.as_ref() {
-            Some(result) => CheckSource::Current(result),
-            None => CheckSource::NotRun,
-        },
-    }
-}
-
-/// The log entries that are problems rather than session events.
-///
-/// A warning the user's own action produced is a refusal, not a condition:
-/// "Move selection cancelled" belongs in the Console and the status line, and
-/// filing it here is what made the page a list of everything that had ever
-/// gone slightly wrong. An error from that same channel is a real failure and
-/// stays. Every other source — the engine, the netlister, the checks, the
-/// system — reports conditions, so all of its errors and warnings stay.
-fn log_problems(state: &AppState) -> impl Iterator<Item = &LogEntry> {
-    state
-        .log_buffer
-        .entries()
-        .filter(|entry| match entry.severity {
-            LogSeverity::Error => true,
-            LogSeverity::Warning => entry.source != LogSource::User,
-            LogSeverity::Info | LogSeverity::Debug | LogSeverity::Trace => false,
-        })
-}
-
 /// The counts behind the tab strip's badge. Derived from exactly the rows the
 /// page lists, so the badge can never disagree with the body under it.
-pub(super) fn active_problem_count(state: &AppState) -> ProblemCount {
-    if netlist_diagnostics_own_problems(state) {
-        let summary = state.ui.netlist.diagnostics.summary();
-        return ProblemCount {
-            errors: summary.current_errors,
-            advisories: summary.current_advisories(),
-        };
+pub(in crate::workbench) fn active_problem_count(state: &AppState) -> ProblemCount {
+    let counts = listing(state).counts();
+    ProblemCount {
+        errors: counts.errors,
+        advisories: counts.advisories,
     }
-    let mut count = ProblemCount::default();
-    if let CheckSource::Current(result) = check_source(state) {
-        let summary = result.summary();
-        count.errors += summary.critical + summary.errors;
-        count.advisories += summary.warnings + summary.info;
-    }
-    for entry in log_problems(state) {
-        match entry.severity {
-            LogSeverity::Error => count.errors += 1,
-            _ => count.advisories += 1,
-        }
-    }
-    count
 }
 
 pub(super) fn problems(ui: &mut Ui, state: &mut AppState) {
-    if netlist_diagnostics_own_problems(state) {
-        netlist_problems(ui, state);
+    let metrics = ColumnMetrics::measure(ui);
+    let mut requested: Option<DiagnosticRoute> = None;
+    let listed = listing(state);
+    let rows = listed.len();
+    if rows == 0 {
+        muted(ui, &empty_state(listed.empty_reason()));
         return;
     }
-    schematic_problems(ui, state);
-}
-
-/// The schematic half: check findings, then the conditions other producers
-/// have reported through the log.
-fn schematic_problems(ui: &mut Ui, state: &mut AppState) {
-    let metrics = ColumnMetrics::measure(ui);
-    let mut requested: Option<LogAnchor> = None;
-    let mut rows = 0_usize;
-    let mut note: Option<String> = None;
+    let note = note(&listed);
 
     egui::ScrollArea::vertical()
         .id_salt("workbench.problems")
-        .show(ui, |ui| {
-            let source = check_source(state);
-            match &source {
-                CheckSource::Unavailable(reason) => {
-                    note = Some(format!("Schematic checks cannot run: {reason}"));
-                }
-                CheckSource::Stale(_) => {
-                    note = Some(
-                        "These findings describe the design before the last edit. Run the checks again."
-                            .to_owned(),
-                    );
-                }
-                CheckSource::NotRun | CheckSource::Current(_) => {}
-            }
-            let current = source.current();
-            if let Some(result) = source.result() {
-                for violation in result.violations() {
-                    rows += 1;
-                    // Asked before the row is sensed: a finding whose object
-                    // the drawing no longer carries must not look like a jump.
-                    let anchor = current
-                        .then(|| {
-                            crate::schematic::view::violations::location_anchor(
-                                state,
-                                &violation.location,
-                            )
-                        })
-                        .flatten()
-                        .filter(|anchor| state.log_anchor_refusal(anchor).is_none());
-                    let response = problem_row(
-                        ui,
-                        &metrics,
-                        ProblemRow {
-                            problem: current.then(|| drc_problem(violation.severity)).flatten(),
-                            severity: &severity_cell(severity_word(violation.severity), current),
-                            location: &violation.location.display(),
-                            message: &violation.message,
-                            current,
-                            target: anchor.is_some(),
-                        },
-                    );
-                    if response.clicked() {
-                        requested = anchor;
-                    }
-                    let fix = violation.violation_type.suggested_fix();
-                    response.on_hover_text(format!("{}\n\n{fix}", violation.message));
-                }
-            }
-            for entry in log_problems(state) {
-                rows += 1;
-                let anchor = entry
-                    .anchor
-                    .as_ref()
-                    .filter(|anchor| state.log_anchor_refusal(anchor).is_none())
-                    .cloned();
+        .show_rows(ui, CONSOLE_ROW_MIN_HEIGHT, rows, |ui, range| {
+            for index in range {
+                let Some(row) = listed.row(index) else {
+                    continue;
+                };
+                // Asked before the row is sensed: a finding whose object the
+                // drawing no longer carries must not look like a jump.
+                let route = row
+                    .route
+                    .clone()
+                    .filter(|route| route_refusal(state, route).is_none());
                 let response = problem_row(
                     ui,
                     &metrics,
                     ProblemRow {
-                        problem: log_problem_mark(entry.severity),
-                        severity: &severity_cell(log_severity_name(entry.severity), true),
-                        location: entry
-                            .context
-                            .as_deref()
-                            .unwrap_or_else(|| entry.source.name()),
-                        message: &entry.message,
-                        current: true,
-                        target: anchor.is_some(),
+                        problem: row.current.then(|| level_mark(row.level)).flatten(),
+                        severity: &severity_cell(&row),
+                        location: &row.subject,
+                        message: row.message,
+                        current: row.current,
+                        target: route.is_some(),
                     },
                 );
                 if response.clicked() {
-                    requested = anchor;
+                    requested = route;
                 }
-                response.on_hover_text(&entry.message);
-            }
-            if rows == 0 {
-                muted(ui, empty_state(&check_source(state)));
-            } else if let Some(note) = note.as_deref() {
-                muted(ui, note);
+                response.on_hover_text(hover(&row));
             }
         });
-
-    if let Some(anchor) = requested {
-        state.jump_to_log_anchor(anchor);
+    if let Some(note) = note {
+        muted(ui, note);
     }
+
+    if let Some(route) = requested {
+        state.diagnostics.request_route(route);
+    }
+}
+
+/// Why a row carrying `route` cannot be followed, or `None` if it can.
+///
+/// Only an anchor resolved by name can have lost its target since the finding
+/// was made; the rest address a document or a workspace destination that the
+/// route itself re-resolves when it is applied.
+fn route_refusal(state: &AppState, route: &DiagnosticRoute) -> Option<String> {
+    match route {
+        DiagnosticRoute::Anchor(anchor) => state.log_anchor_refusal(anchor),
+        DiagnosticRoute::NetlistDiagnostic(_)
+        | DiagnosticRoute::CodeDocument { .. }
+        | DiagnosticRoute::Repair(_) => None,
+    }
+}
+
+/// What the page says above the rows when something qualifies all of them.
+fn note(listed: &DiagnosticListing<'_>) -> Option<&'static str> {
+    if listed.unavailable().is_some() {
+        return Some(
+            "Some checks cannot be evaluated on this design. The findings below are what the rest reported.",
+        );
+    }
+    listed
+        .has_stale()
+        .then_some("Faint findings describe the design before the last edit. Run the checks again.")
 }
 
 /// What the page says when it has nothing to list. "Nothing is wrong" and
 /// "nothing has been checked" are different claims and only one of them can
 /// be made honestly at a time.
-fn empty_state(source: &CheckSource<'_>) -> &'static str {
-    match source {
-        CheckSource::NotRun => {
-            "The schematic checks have not run. Run them to list what they find."
+fn empty_state(reason: &EmptyReason) -> String {
+    match reason {
+        EmptyReason::NoProject => "No project is open.".to_owned(),
+        EmptyReason::NothingRan => {
+            "Nothing has been checked. Run the checks to list what they find.".to_owned()
         }
-        CheckSource::Unavailable(_) => "The schematic checks cannot run on this view.",
-        CheckSource::Current(_) | CheckSource::Stale(_) => "No findings.",
-    }
-}
-
-/// The netlist half. These diagnostics are already canonical records with
-/// their own currency, so the page states it the same way it states the
-/// schematic's.
-fn netlist_problems(ui: &mut Ui, state: &mut AppState) {
-    let diagnostics = std::sync::Arc::clone(&state.ui.netlist.diagnostics);
-    if diagnostics.is_empty() {
-        muted(ui, "No netlist diagnostics.");
-        return;
-    }
-    let metrics = ColumnMetrics::measure(ui);
-    let mut requested = None;
-    egui::ScrollArea::vertical()
-        .id_salt("workbench.problems.netlist")
-        .show_rows(ui, CONSOLE_ROW_MIN_HEIGHT, diagnostics.len(), |ui, rows| {
-            for index in rows {
-                let Some(diagnostic) = diagnostics.get(index) else {
-                    continue;
-                };
-                let current = diagnostic.is_current();
-                let response = problem_row(
-                    ui,
-                    &metrics,
-                    ProblemRow {
-                        problem: current
-                            .then(|| netlist_problem_mark(diagnostic.severity))
-                            .flatten(),
-                        severity: &severity_cell(
-                            netlist_severity_name(diagnostic.severity),
-                            current,
-                        ),
-                        location: &netlist_diagnostic_location(diagnostic),
-                        message: &diagnostic.message,
-                        current,
-                        target: current,
-                    },
-                );
-                if response.clicked() {
-                    requested = Some(diagnostic.canonical.diagnostic_id);
-                }
-                if diagnostic.details.is_empty() {
-                    response.on_hover_text(&diagnostic.message);
-                } else {
-                    response
-                        .on_hover_text(format!("{}\n\n{}", diagnostic.message, diagnostic.details));
-                }
-            }
-        });
-    if let Some(diagnostic_id) = requested
-        && let Err(error) = crate::workbench::documents::netlist_document::open_diagnostic_location(
-            state,
-            diagnostic_id,
-        )
-    {
-        state.push_user_message(crate::diagnostics::ConsoleMessage::warning(error));
+        EmptyReason::Unavailable(reason) => format!("The checks cannot run: {reason}"),
+        EmptyReason::NoFindings => "No findings.".to_owned(),
     }
 }
 
 /// One severity word, with its state said in front of it when the finding is
-/// not about the design as it stands.
-fn severity_cell(severity: &str, current: bool) -> String {
-    if current {
-        severity.to_owned()
-    } else {
-        format!("Stale {severity}")
+/// not about the design as it stands, and with a waiver said where one is
+/// recorded — a waived finding is a decision, and the page says whose.
+fn severity_cell(row: &DiagnosticRow<'_>) -> String {
+    let severity = row.level.display_name();
+    match (row.current, row.waived) {
+        (true, false) => severity.to_owned(),
+        (true, true) => format!("Waived {severity}"),
+        (false, _) => format!("Stale {severity}"),
     }
 }
 
-fn severity_word(severity: DrcSeverity) -> &'static str {
-    severity.display_name()
-}
-
-fn drc_problem(severity: DrcSeverity) -> Option<Problem> {
-    match severity {
-        DrcSeverity::Critical | DrcSeverity::Error => Some(Problem::Failure),
-        DrcSeverity::Warning => Some(Problem::Warning),
-        DrcSeverity::Info => None,
+/// The whole finding, for a reader who stopped on the row: what it is, what
+/// to do about it, and the rule it is an instance of. The rule is last and
+/// said as a rule, because it is what a reader names when they go looking for
+/// why it fired or to waive it.
+fn hover(row: &DiagnosticRow<'_>) -> String {
+    let mut text = row.message.to_owned();
+    if !row.details.is_empty() {
+        text.push_str("\n\n");
+        text.push_str(row.details);
     }
+    text.push_str("\n\nRule ");
+    text.push_str(row.code);
+    text
 }
 
-fn log_severity_name(severity: LogSeverity) -> &'static str {
-    match severity {
-        LogSeverity::Error => "Error",
-        LogSeverity::Warning => "Warning",
-        LogSeverity::Info => "Info",
-        LogSeverity::Debug => "Debug",
-        LogSeverity::Trace => "Trace",
-    }
-}
-
-fn log_problem_mark(severity: LogSeverity) -> Option<Problem> {
-    match severity {
-        LogSeverity::Error => Some(Problem::Failure),
-        LogSeverity::Warning => Some(Problem::Warning),
-        LogSeverity::Info | LogSeverity::Debug | LogSeverity::Trace => None,
-    }
-}
-
-fn netlist_severity_name(severity: DiagnosticSeverity) -> &'static str {
-    match severity {
-        DiagnosticSeverity::Error => "Error",
-        DiagnosticSeverity::Warning => "Warning",
-        DiagnosticSeverity::Info => "Info",
-        DiagnosticSeverity::Hint => "Hint",
-    }
-}
-
-fn netlist_problem_mark(severity: DiagnosticSeverity) -> Option<Problem> {
-    match severity {
-        DiagnosticSeverity::Error => Some(Problem::Failure),
-        DiagnosticSeverity::Warning => Some(Problem::Warning),
-        DiagnosticSeverity::Info | DiagnosticSeverity::Hint => None,
+const fn level_mark(level: DiagnosticLevel) -> Option<Problem> {
+    match level {
+        DiagnosticLevel::Critical | DiagnosticLevel::Error => Some(Problem::Failure),
+        DiagnosticLevel::Warning => Some(Problem::Warning),
+        DiagnosticLevel::Info | DiagnosticLevel::Hint => None,
     }
 }
 
@@ -564,45 +379,32 @@ mod tests {
     #[test]
     fn every_severity_cell_fits_the_widest_measured_cell() {
         let mut widest = String::new();
-        for severity in [
-            DrcSeverity::Critical,
-            DrcSeverity::Error,
-            DrcSeverity::Warning,
-            DrcSeverity::Info,
+        for level in [
+            DiagnosticLevel::Critical,
+            DiagnosticLevel::Error,
+            DiagnosticLevel::Warning,
+            DiagnosticLevel::Info,
+            DiagnosticLevel::Hint,
         ] {
-            for current in [true, false] {
-                let cell = severity_cell(severity_word(severity), current);
-                if cell.chars().count() > widest.chars().count() {
-                    widest = cell;
-                }
-            }
-        }
-        for severity in [
-            DiagnosticSeverity::Error,
-            DiagnosticSeverity::Warning,
-            DiagnosticSeverity::Info,
-            DiagnosticSeverity::Hint,
-        ] {
-            for current in [true, false] {
-                let cell = severity_cell(netlist_severity_name(severity), current);
+            for (current, waived) in [(true, false), (true, true), (false, false)] {
+                let cell = severity_cell(&DiagnosticRow {
+                    code: "T-1",
+                    level,
+                    current,
+                    waived,
+                    subject: String::new(),
+                    message: "",
+                    details: "",
+                    route: None,
+                });
                 assert!(
                     cell.chars().count() <= WIDEST_SEVERITY_CELL.chars().count(),
                     "{cell} is wider than the cell the column is measured against",
                 );
+                if cell.chars().count() > widest.chars().count() {
+                    widest = cell;
+                }
             }
-        }
-        for severity in [
-            LogSeverity::Error,
-            LogSeverity::Warning,
-            LogSeverity::Info,
-            LogSeverity::Debug,
-            LogSeverity::Trace,
-        ] {
-            let cell = severity_cell(log_severity_name(severity), false);
-            assert!(
-                cell.chars().count() <= WIDEST_SEVERITY_CELL.chars().count(),
-                "{cell} is wider than the cell the column is measured against",
-            );
         }
         assert_eq!(
             widest.chars().count(),
@@ -686,6 +488,7 @@ mod tests {
         use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
         let mut state = AppState::default();
+        state.project_lifecycle.authority.open_session();
         let mut result = DrcResult::new();
         result.add_violation(DrcViolation::new(
             1,
@@ -696,7 +499,9 @@ mod tests {
             },
         ));
         result.completed = true;
-        state.dialogs.drc_results = Some(result);
+        state
+            .publish_active_design_check_result(result)
+            .expect("the fixture publishes a current receipt");
 
         let width = 900.0;
         let cells = painted_cells(&mut state, width);
@@ -737,6 +542,32 @@ mod tests {
             location.0.contains("bias_reference_ladder_tap") || location.0.ends_with("ladder_tap'"),
             "the location must keep the part that says where to go, got {:?}",
             location.0,
+        );
+    }
+
+    /// The page is not a severity filter over the session log.
+    ///
+    /// Before the canonical store it read the log buffer, so every refusal,
+    /// engine warning and system notice that had ever been printed stood here
+    /// as a permanent problem — about 715 refusal sites' worth.
+    #[test]
+    fn a_logged_failure_is_not_a_problem() {
+        let mut state = AppState::default();
+        state.project_lifecycle.authority.open_session();
+        state.log_buffer.log(
+            crate::diagnostics::LogSeverity::Error,
+            crate::diagnostics::LogSource::Engine,
+            "the engine printed a failure",
+            None,
+        );
+
+        assert_eq!(active_problem_count(&state), ProblemCount::default());
+        let cells = painted_cells(&mut state, 900.0);
+        assert!(
+            cells
+                .iter()
+                .all(|(text, _)| !text.contains("the engine printed a failure")),
+            "the page lists records, not log entries: {cells:?}",
         );
     }
 

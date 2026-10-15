@@ -329,97 +329,46 @@ fn status_group_allocation(
 /// With nothing open, any retained result describes the bootstrap placeholder
 /// rather than the reader's work, and the coordinate segment already says no
 /// project is loaded. Checks that have never run are not a finding either.
+/// What the checks segment states, from the same list the Problems page
+/// lists and the tab badge counts.
+///
+/// Three surfaces used to derive this independently — the status bar from
+/// `dialogs.drc_results` or the netlist summary depending on which workspace
+/// was open, the badge from the page, the page from four producers — and they
+/// disagreed routinely. There is one list now, so there is one answer.
 fn check_summary(app: &RSpiceApp) -> Option<String> {
-    if !app.state.project_lifecycle.is_open() {
+    let listed = crate::workbench::app_state::diagnostic_store::listing::listing(&app.state);
+    let counts = listed.counts();
+    if counts.errors == 0 && counts.advisories == 0 && counts.stale == 0 {
         return None;
     }
-    if netlist_diagnostics_own_status(app) {
-        let summary = app.state.ui.netlist.diagnostics.summary();
-        let mut label = format!(
-            "Netlist diagnostics · {} error{} · {} advisor{}",
-            summary.current_errors,
-            if summary.current_errors == 1 { "" } else { "s" },
-            summary.current_advisories(),
-            if summary.current_advisories() == 1 {
-                "y"
-            } else {
-                "ies"
-            }
-        );
-        if summary.stale > 0 {
-            use std::fmt::Write as _;
-            let _ = write!(label, " · {} stale", summary.stale);
-        }
-        return Some(label);
+    let mut label = format!(
+        "Problems · {} error{} · {} advisor{}",
+        counts.errors,
+        if counts.errors == 1 { "" } else { "s" },
+        counts.advisories,
+        if counts.advisories == 1 { "y" } else { "ies" }
+    );
+    if counts.stale > 0 {
+        use std::fmt::Write as _;
+        let _ = write!(label, " · {} stale", counts.stale);
     }
-    match &app.state.dialogs.drc_results {
-        None => None,
-        Some(_)
-            if app.state.dialogs.drc_checked_version != app.state.schematic.topology_version() =>
-        {
-            Some("Checks stale · run again".to_owned())
-        }
-        Some(result) => {
-            let summary = result.summary();
-            Some(format!(
-                "Schematic checks · {} error{} · {} advisor{}",
-                summary.critical + summary.errors,
-                if summary.critical + summary.errors == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                summary.warnings,
-                if summary.warnings == 1 { "y" } else { "ies" }
-            ))
-        }
-    }
+    Some(label)
 }
 
 /// The mark in front of the checks segment: a failure while anything errors,
-/// a warning while anything advises or the checks are stale, and nothing at
+/// a warning while anything advises or anything is stale, and nothing at
 /// zero and zero, the way a compiler's problem count reads.
 fn check_problem(app: &RSpiceApp) -> Option<Problem> {
-    if !app.state.project_lifecycle.is_open() {
-        return None;
+    let counts =
+        crate::workbench::app_state::diagnostic_store::listing::listing(&app.state).counts();
+    if counts.errors > 0 {
+        Some(Problem::Failure)
+    } else if counts.advisories > 0 || counts.stale > 0 {
+        Some(Problem::Warning)
+    } else {
+        None
     }
-    if netlist_diagnostics_own_status(app) {
-        let summary = app.state.ui.netlist.diagnostics.summary();
-        return if summary.current_errors > 0 {
-            Some(Problem::Failure)
-        } else if summary.current_warnings > 0 || summary.stale > 0 {
-            Some(Problem::Warning)
-        } else {
-            None
-        };
-    }
-    match &app.state.dialogs.drc_results {
-        None => None,
-        Some(_)
-            if app.state.dialogs.drc_checked_version != app.state.schematic.topology_version() =>
-        {
-            Some(Problem::Warning)
-        }
-        Some(result) => {
-            let summary = result.summary();
-            if summary.critical + summary.errors > 0 {
-                Some(Problem::Failure)
-            } else if summary.warnings > 0 {
-                Some(Problem::Warning)
-            } else {
-                None
-            }
-        }
-    }
-}
-
-fn netlist_diagnostics_own_status(app: &RSpiceApp) -> bool {
-    app.state.is_netlist_first_without_schematic()
-        || (app.state.workbench.workspace == Workspace::Results
-            && app.state.active_result_uses_manual_deck())
-        || (app.state.workbench.workspace == Workspace::Netlist
-            && app.state.ui.code_workspace.page
-                == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist)
 }
 
 fn simulation_progress_percent(progress: f64) -> u8 {
@@ -972,14 +921,17 @@ mod tests {
         }
     }
 
+    /// The segment states the same count wherever the reader is standing.
+    ///
+    /// It used to swap between the netlist summary and the schematic result
+    /// depending on the open workspace, so the bar reported a different
+    /// number of problems on the Netlist page than on the Design page in a
+    /// session that had both.
     #[test]
-    fn netlist_status_projects_canonical_diagnostics_and_never_schematic_drc() {
+    fn the_checks_segment_counts_every_producer_from_one_list() {
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Netlist);
-        app.state.ui.code_workspace.page =
-            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        app.state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
         let diagnostics = vec![
             crate::workbench::documents::netlist_document::Diagnostic::error("bad card"),
             crate::workbench::documents::netlist_document::Diagnostic::current(
@@ -999,9 +951,16 @@ mod tests {
 
         assert_eq!(
             check_summary(&app).as_deref(),
-            Some("Netlist diagnostics · 1 error · 1 advisory")
+            Some("Problems · 1 error · 1 advisory")
         );
         assert_eq!(check_problem(&app), Some(Problem::Failure));
+
+        app.state.workbench.activate(Workspace::Design);
+        assert_eq!(
+            check_summary(&app).as_deref(),
+            Some("Problems · 1 error · 1 advisory"),
+            "the count cannot depend on which workspace is open"
+        );
     }
 
     /// The checks segment is a problem count. A closed project, or checks
@@ -1021,6 +980,20 @@ mod tests {
                 },
             )
         };
+        let publish = |app: &mut RSpiceApp, result: DrcResult| {
+            app.state
+                .publish_active_design_check_result(result)
+                .expect("the fixture publishes a current receipt");
+        };
+        let completed = |violation: Option<DrcViolation>| {
+            let mut result = DrcResult::new();
+            if let Some(violation) = violation {
+                result.add_violation(violation);
+            }
+            result.completed = true;
+            result
+        };
+
         let mut app = RSpiceApp::test_instance();
         app.state.project_lifecycle.authority.close_project();
         assert_eq!(check_summary(&app), None);
@@ -1028,7 +1001,6 @@ mod tests {
 
         app.state.project_lifecycle.authority.open_session();
         app.state.workbench.activate(Workspace::Design);
-        app.state.dialogs.drc_results = None;
         assert_eq!(
             check_summary(&app),
             None,
@@ -1036,63 +1008,44 @@ mod tests {
         );
         assert_eq!(check_problem(&app), None);
 
-        app.state.dialogs.drc_results = Some(DrcResult::new());
-        app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+        publish(&mut app, completed(None));
         assert_eq!(
-            check_summary(&app).as_deref(),
-            Some("Schematic checks · 0 errors · 0 advisories")
-        );
-        assert_eq!(check_problem(&app), None, "zero and zero carries no mark");
-
-        let mut advisory = DrcResult::new();
-        advisory.add_violation(violation(DrcViolationType::UnconnectedPin));
-        app.state.dialogs.drc_results = Some(advisory);
-        assert_eq!(check_problem(&app), Some(Problem::Warning));
-
-        let mut failing = DrcResult::new();
-        failing.add_violation(violation(DrcViolationType::ShortedOutputs));
-        app.state.dialogs.drc_results = Some(failing);
-        assert_eq!(check_problem(&app), Some(Problem::Failure));
-
-        app.state.dialogs.drc_checked_version = app.state.schematic.topology_version() + 1;
-        assert_eq!(
-            check_summary(&app).as_deref(),
-            Some("Checks stale · run again")
-        );
-        assert_eq!(check_problem(&app), Some(Problem::Warning));
-    }
-
-    #[test]
-    fn netlist_first_results_keep_the_canonical_diagnostic_status() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.project_lifecycle.authority.open_session();
-        let provenance = crate::state::AnalysisResultProvenance::new_with_source_domain(
-            crate::state::AnalysisResultSourceDomain::ManualDeck,
-            crate::product::AnalysisInstanceId::new(),
-            crate::product::ObjectRevision::INITIAL,
-            crate::product::ContentDigest::from_bytes([0x51; 32]),
-            Vec::new(),
-        )
-        .unwrap();
-        app.state.simulation.start_run().add_analysis(
-            crate::state::AnalysisResult::new(
-                1,
-                crate::state::AnalysisType::Transient,
-                "manual transient",
-            )
-            .with_provenance(provenance),
-        );
-        app.state.workbench.activate(Workspace::Results);
-        app.state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
-
-        assert!(!app.state.is_netlist_first_without_schematic());
-        assert!(app.state.active_result_uses_manual_deck());
-        assert!(netlist_diagnostics_own_status(&app));
-        assert_eq!(
-            check_summary(&app).as_deref(),
-            Some("Netlist diagnostics · 0 errors · 0 advisories")
+            check_summary(&app),
+            None,
+            "zero and zero puts nothing on the bar"
         );
         assert_eq!(check_problem(&app), None);
+
+        publish(
+            &mut app,
+            completed(Some(violation(DrcViolationType::UnconnectedPin))),
+        );
+        assert_eq!(check_problem(&app), Some(Problem::Warning));
+
+        publish(
+            &mut app,
+            completed(Some(violation(DrcViolationType::ShortedOutputs))),
+        );
+        assert_eq!(check_problem(&app), Some(Problem::Failure));
+        assert_eq!(
+            check_summary(&app).as_deref(),
+            Some("Problems · 1 error · 0 advisories")
+        );
+
+        // An edit under the evidence leaves the finding standing and faint:
+        // the count moves to the stale column, which is neither an error nor
+        // an advisory about the design in front of the reader.
+        app.state
+            .workspace
+            .content
+            .connectivity
+            .policy
+            .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        assert_eq!(
+            check_summary(&app).as_deref(),
+            Some("Problems · 0 errors · 0 advisories · 1 stale")
+        );
+        assert_eq!(check_problem(&app), Some(Problem::Warning));
     }
 
     /// The coordinate and selection segments sit side by side. They answer
