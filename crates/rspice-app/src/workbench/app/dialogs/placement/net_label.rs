@@ -1,37 +1,26 @@
-//! Typed net-label placement transaction.
+//! Typed net-label placement, entered at the click that anchored it.
 //!
-//! The Label tool first captures one snapped canvas anchor. This dialog owns
-//! the isolated name draft and publishes a durable [`NetLabel`] only after the
-//! complete document authority and naming policy have been revalidated.
+//! The Label tool captures one snapped canvas anchor and raises a small entry
+//! beside it. The entry owns the isolated name draft and publishes a durable
+//! [`NetLabel`] only after the complete document authority and naming policy
+//! have been revalidated.
 //!
 //! The off-sheet connector tool reaches the same transaction. Its extra
-//! declaration is a direction, so the dialog offers exactly one more control
+//! declaration is a direction, so the entry offers exactly one more control
 //! and publishes name, anchor and kind together — a connector never exists as
 //! a plain label in any recorded state.
 
 use egui::Context;
-use rspice_schematic_editor::net_label_placement::{self, NetLabelPlacementView};
+use rspice_schematic_editor::net_label_placement;
 
-use crate::diagnostics::ConsoleMessage;
 use crate::state::{CrossSheetPortDirection, NetLabel, NetLabelKind, Point, Tool};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-const TITLE: &str = "Place net label";
-const PRIMARY: &str = "Place label";
-const DESCRIPTION: &str =
-    "Assign a validated electrical name at the selected snapped schematic anchor.";
-const CONNECTOR_TITLE: &str = "Place off-sheet connector";
-const CONNECTOR_PRIMARY: &str = "Place connector";
-const CONNECTOR_DESCRIPTION: &str =
-    "Declare a validated electrical name that continues on another sheet of this cellview.";
-const DISCARD_TITLE: &str = "Unsaved label name";
-const DISCARD_DETAIL: &str =
-    "Choose Discard changes again to close. The schematic and undo history are unchanged.";
+const TITLE: &str = "Net label";
+const CONNECTOR_TITLE: &str = "Off-sheet connector";
 
 #[derive(Debug, Clone)]
 struct NetLabelPlacementCommit {
@@ -54,16 +43,15 @@ impl DraftValidation {
         matches!(self, Self::Valid(_))
     }
 
-    fn message(&self) -> Option<&str> {
+    /// Why the name is refused, if it is.
+    ///
+    /// An entry nothing has been typed into has refused nothing: it opens
+    /// under the pointer and says so by being there.
+    fn refusal(&self) -> Option<&str> {
         match self {
-            Self::Incomplete(message) => Some(message),
+            Self::Incomplete(_) | Self::Valid(_) => None,
             Self::Invalid(message) => Some(message.as_str()),
-            Self::Valid(_) => None,
         }
-    }
-
-    fn is_error(&self) -> bool {
-        matches!(self, Self::Invalid(_))
     }
 }
 
@@ -105,22 +93,13 @@ impl RSpiceApp {
         }
 
         let validation = validate_draft(&self.state);
-        let message = self
+        let refusal = self
             .state
             .dialogs
             .net_label_placement
             .validation_error
-            .as_deref()
-            .or_else(|| validation.message())
-            .map(str::to_owned);
-        let message_is_error = self
-            .state
-            .dialogs
-            .net_label_placement
-            .validation_error
-            .is_some()
-            || validation.is_error();
-        let discard_confirm = self.state.dialogs.net_label_placement.discard_confirm;
+            .clone()
+            .or_else(|| validation.refusal().map(str::to_owned));
         let off_sheet = self
             .state
             .dialogs
@@ -128,91 +107,44 @@ impl RSpiceApp {
             .kind
             .off_sheet_direction()
             .is_some();
-        let mut edited = false;
-        let mut dialog = Dialog::new(
+        // The pointer is still where the click that opened this was, so the
+        // entry can take its place from it without the canvas having to hand
+        // one over.
+        let anchor = self.state.dialogs.net_label_placement.screen_anchor_or(
+            ctx.pointer_latest_pos()
+                .unwrap_or_else(|| ctx.viewport_rect().center()),
+        );
+
+        let typed_before = self.state.dialogs.net_label_placement.name.clone();
+        let draft = &mut self.state.dialogs.net_label_placement;
+        let choice = CanvasEntry::new(
+            "place-net-label",
             if off_sheet { CONNECTOR_TITLE } else { TITLE },
-            if off_sheet {
-                CONNECTOR_PRIMARY
-            } else {
-                PRIMARY
-            },
+            anchor,
         )
-        .description(if off_sheet {
-            CONNECTOR_DESCRIPTION
-        } else {
-            DESCRIPTION
+        .commit_enabled(validation.can_commit())
+        .status(match refusal.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
         })
-        .size(DialogSize::Transaction)
-        .ghost(if discard_confirm {
-            "Discard changes"
-        } else {
-            "Cancel"
-        })
-        .primary_enabled(validation.can_commit())
-        .initial_focus(DialogInitialFocus::Control(net_label_placement::name_id()));
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
-
-        let anchor = self.state.dialogs.net_label_placement.anchor;
-        let grid_pitch = self.state.schematic.document().document_policy.grid_pitch;
-        let naming_policy = self.state.schematic.document().document_policy.net_naming;
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let draft = &mut self.state.dialogs.net_label_placement;
-            let (focus, changed) = net_label_placement::show(
-                ui,
-                NetLabelPlacementView {
-                    anchor,
-                    grid_pitch,
-                    naming_policy,
-                    validation_message: message.as_deref(),
-                    validation_is_error: message_is_error,
-                },
-                &mut draft.name,
-                &mut draft.kind,
-            );
-            edited = changed;
-            focus
+        .show(ctx, |rows| {
+            net_label_placement::show(rows, &mut draft.name, &mut draft.kind)
         });
-        if edited {
-            self.state.dialogs.net_label_placement.mark_edited();
+        // Typing answers the refusal the last attempt recorded.
+        if self.state.dialogs.net_label_placement.name != typed_before {
+            self.state.dialogs.net_label_placement.validation_error = None;
         }
 
-        match response.choice {
-            DialogChoice::Primary => {
+        match choice {
+            CanvasEntryChoice::Commit => {
                 // Revalidate after this frame's text edit so Enter can never
                 // publish a candidate that became invalid in the same pass.
                 match validate_draft(&self.state) {
                     DraftValidation::Valid(commit) => {
                         match apply_commit(&mut self.state, *commit) {
-                            Ok(id) => {
-                                self.state.dialogs.net_label_placement.close();
-                                let noun = if off_sheet {
-                                    "off-sheet connector"
-                                } else {
-                                    "net label"
-                                };
-                                self.state.push_user_message(ConsoleMessage::info(format!(
-                                    "Placed {noun} as one undoable transaction (stable ID NET-{id:03})."
-                                )));
-                                self.state.ui.toasts.success(
-                                    ctx,
-                                    if off_sheet {
-                                        "Off-sheet connector placed"
-                                    } else {
-                                        "Net label placed"
-                                    },
-                                    if off_sheet {
-                                        "The typed name, its direction and the snapped anchor were committed atomically."
-                                    } else {
-                                        "The typed name and snapped anchor were committed atomically."
-                                    },
-                                );
-                            }
+                            // The label is on the sheet: the drawing is the
+                            // report, and a second one would only cover it.
+                            Ok(_) => self.state.dialogs.net_label_placement.close(),
                             Err(error) => {
                                 self.state.dialogs.net_label_placement.validation_error =
                                     Some(error);
@@ -228,13 +160,8 @@ impl RSpiceApp {
                     }
                 }
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.net_label_placement.attempt_close();
-                if self.state.dialogs.net_label_placement.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
+            CanvasEntryChoice::Cancelled => self.state.dialogs.net_label_placement.close(),
+            CanvasEntryChoice::None => {}
         }
     }
 }
@@ -361,7 +288,6 @@ mod tests {
                 },
             );
             assert_eq!(app.state.dialogs.net_label_placement.name, "BUSY");
-            assert!(app.state.dialogs.net_label_placement.dirty);
             assert!(app.state.schematic.document().net_labels.is_empty());
         }
     }
@@ -412,15 +338,14 @@ mod tests {
         assert!(!app.state.schematic.can_undo());
     }
 
+    /// Leaving the entry leaves the document alone and keeps the tool armed,
+    /// so the next click names the next net.
     #[test]
-    fn cancel_and_confirmed_discard_leave_schematic_and_history_untouched() {
+    fn closing_the_entry_leaves_schematic_and_history_untouched() {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::new(10, 20));
         app.state.dialogs.net_label_placement.name = "sense".to_owned();
-        app.state.dialogs.net_label_placement.mark_edited();
-        assert!(!app.state.dialogs.net_label_placement.attempt_close());
-        assert!(app.state.dialogs.net_label_placement.open);
-        assert!(app.state.dialogs.net_label_placement.attempt_close());
+        app.state.dialogs.net_label_placement.close();
         assert!(!app.state.dialogs.net_label_placement.open);
         assert!(app.state.schematic.document().net_labels.is_empty());
         assert!(!app.state.schematic.can_undo());
@@ -451,13 +376,15 @@ mod tests {
         assert!(!app.state.schematic.can_undo());
     }
 
+    /// Enter places the label; Escape leaves at once, because the entry owns
+    /// nothing there is anything to confirm the discard of.
     #[test]
-    fn rendered_enter_commits_and_escape_requires_confirmed_discard() {
+    fn rendered_enter_commits_and_escape_closes_at_once() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::new(30, 50));
-        app.state.dialogs.net_label_placement.name = "afe_out".to_owned();
+        app.state.dialogs.net_label_placement.name = "sense_out".to_owned();
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_net_label_dialog(ctx)
@@ -466,25 +393,53 @@ mod tests {
             app.render_net_label_dialog(ctx)
         });
         assert!(!app.state.dialogs.net_label_placement.open);
-        assert_eq!(app.state.schematic.document().net_labels[0].name, "afe_out");
+        assert_eq!(
+            app.state.schematic.document().net_labels[0].name,
+            "sense_out"
+        );
         assert!(app.state.schematic.can_undo());
 
         open_at(&mut app, Point::new(60, 50));
         app.state.dialogs.net_label_placement.name = "discard_me".to_owned();
-        app.state.dialogs.net_label_placement.mark_edited();
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_net_label_dialog(ctx)
         });
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_net_label_dialog(ctx)
         });
-        assert!(app.state.dialogs.net_label_placement.open);
-        assert!(app.state.dialogs.net_label_placement.discard_confirm);
-        let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_net_label_dialog(ctx)
-        });
         assert!(!app.state.dialogs.net_label_placement.open);
         assert_eq!(app.state.schematic.document().net_labels.len(), 1);
+    }
+
+    /// The entry sits where the click did, not in the middle of the screen,
+    /// and stays there while the name is typed.
+    #[test]
+    fn the_entry_is_anchored_at_the_click_and_does_not_follow_the_pointer() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        open_at(&mut app, Point::new(30, 50));
+        let click = egui::pos2(420.0, 260.0);
+        let mut input = dialog_input(vec![egui::Event::PointerMoved(click)]);
+        input.events.push(egui::Event::PointerMoved(click));
+        let _ = ctx.run_ui(input, |ctx| app.render_net_label_dialog(ctx));
+        let anchored = app
+            .state
+            .dialogs
+            .net_label_placement
+            .screen_anchor
+            .expect("the entry took its place from the click");
+        assert_eq!(anchored, click);
+
+        let _ = ctx.run_ui(
+            dialog_input(vec![egui::Event::PointerMoved(egui::pos2(900.0, 700.0))]),
+            |ctx| app.render_net_label_dialog(ctx),
+        );
+        assert_eq!(
+            app.state.dialogs.net_label_placement.screen_anchor,
+            Some(anchored),
+            "the card does not chase the pointer"
+        );
     }
 
     #[test]

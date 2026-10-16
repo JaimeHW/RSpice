@@ -165,7 +165,9 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
     Command::PlaceText.execute(&mut app);
 
     assert!(app.state.dialogs.design_note.open);
-    assert_eq!(app.state.dialogs.design_note.text, "Bias network");
+    // The form opens empty. The sample it used to open holding was written
+    // into the field as a value, so an untouched form placed a note saying it.
+    assert_eq!(app.state.dialogs.design_note.text, "");
     assert_eq!(app.state.schematic.document().design_notes, notes);
     assert_eq!(app.state.schematic.topology_version(), topology);
     assert_eq!(app.state.schematic.session.is_dirty, dirty);

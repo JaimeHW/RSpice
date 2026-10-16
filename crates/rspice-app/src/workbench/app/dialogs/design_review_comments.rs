@@ -276,7 +276,6 @@ impl RSpiceApp {
                 self.state.dialogs.design_note.open(source);
                 self.state.dialogs.design_note.kind = DesignNoteKind::ReviewNote;
                 self.state.dialogs.design_note.text = "Review comment".to_owned();
-                self.state.dialogs.design_note.dirty = false;
             }
             ReviewAction::GoToAnchor(id, point) => {
                 self.state.dialogs.design_review_comments.close();

@@ -1,22 +1,17 @@
-//! App-owned document authority and modal lifetime for note placement.
+//! App-owned document authority and form lifetime for note placement.
 
 use egui::Context;
 use rspice_schematic_editor::annotations::note_placement;
 
-use crate::state::{DesignNote, DesignNoteRenderContext, PendingDesignNotePlacement, Point, Tool};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::state::{PendingDesignNotePlacement, Tool};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
 use crate::workbench::app_state::AppState;
 
 const TITLE: &str = "Place text or design note";
-const PRIMARY: &str = "Arm text tool";
-const DESCRIPTION: &str =
-    "Create plain documentation, property display, requirement link, or governed review note.";
-const DISCARD_TITLE: &str = "Unsaved dialog changes";
-const DISCARD_DETAIL: &str = "Choose Discard changes again to close, or continue editing. No schematic documentation has been changed.";
+const PRIMARY: &str = "Place";
+const DESCRIPTION: &str = "Write the note, then click to place it.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_design_note_dialog(&mut self, ctx: &Context) {
@@ -24,42 +19,32 @@ impl RSpiceApp {
             return;
         }
         let validation = validate_draft(&self.state);
-        let validation_message = validation.as_ref().err().cloned();
-        let preview_text = design_note_preview_text(&self.state);
-        let discard_confirm = self.state.dialogs.design_note.discard_confirm;
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
+        // An untouched form has nothing to answer for: the primary is off and
+        // the slot stays blank until the reader has typed something to refuse.
+        let refusal = if self.state.dialogs.design_note.text.trim().is_empty() {
+            None
+        } else {
+            validation.as_ref().err().cloned()
+        };
+        let view_path = self.state.workspace.content.active_view.display_path();
+
+        let draft = &mut self.state.dialogs.design_note;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .context(Some(view_path.as_str()))
+            .describe(DESCRIPTION)
             .primary_enabled(validation.is_ok())
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::Control(note_placement::text_id()));
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let draft = &mut self.state.dialogs.design_note;
-            let response = note_placement::show(
-                ui,
-                validation_message.as_deref(),
-                &preview_text,
-                &mut draft.kind,
-                &mut draft.text,
-            );
-            if response.edited {
-                draft.mark_edited();
-            }
-            response.focus
-        });
-        match response.choice {
+            // Enter types a line of the note; the primary places it.
+            .commit_on_enter(false)
+            .status(match refusal.as_deref() {
+                Some(message) => Err(message),
+                None => Ok(None),
+            })
+            .status_lines(2)
+            .show(ctx, |rows| {
+                note_placement::show(rows, &mut draft.kind, &mut draft.text)
+            });
+
+        match choice {
             DialogChoice::Primary => {
                 if let Ok(pending) = validate_draft(&self.state) {
                     self.state.schematic.session.editor.pending_design_note = Some(pending);
@@ -68,10 +53,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.design_note.attempt_close();
-                if self.state.dialogs.design_note.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.dialogs.design_note.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -120,25 +102,6 @@ fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String
     }
 }
 
-fn design_note_preview_text(state: &AppState) -> String {
-    let draft = &state.dialogs.design_note;
-    let source = if draft.text.trim().is_empty() {
-        "Bias network"
-    } else {
-        draft.text.trim()
-    };
-    let Ok(note) = DesignNote::new(0, Point::origin(), draft.kind, source) else {
-        return source.to_owned();
-    };
-    let view_path = state.workspace.content.active_view.display_path();
-    note.rendered_text(&DesignNoteRenderContext {
-        view_path: &view_path,
-        component_count: state.schematic.document().components.len(),
-        conductor_count: state.schematic.document().wires.len()
-            + state.schematic.document().buses.len(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,8 +138,20 @@ mod tests {
             app.state.dialogs.design_note.text,
             "Browser recovery qualification"
         );
-        assert!(app.state.dialogs.design_note.dirty);
         assert!(app.state.schematic.document().design_notes.is_empty());
+    }
+
+    /// The content bug this form shipped: the sample text was written into
+    /// the field as a value, so an untouched form placed a note reading
+    /// "Bias network".
+    #[test]
+    fn an_untouched_form_places_no_note() {
+        let mut state = AppState::default();
+        let source = schematic_editor_request_source(&state);
+        state.dialogs.design_note.open(source);
+        assert_eq!(state.dialogs.design_note.text, "");
+        assert!(validate_draft(&state).is_err());
+        assert!(state.schematic.document().design_notes.is_empty());
     }
 
     #[test]
@@ -185,10 +160,11 @@ mod tests {
         assert!(validate_draft(&state).is_err());
         let source = schematic_editor_request_source(&state);
         state.dialogs.design_note.open(source.clone());
+        state.dialogs.design_note.text = "Check the bias network".to_owned();
         let Ok(pending) = validate_draft(&state) else {
             panic!("valid draft");
         };
-        assert_eq!(pending.text, "Bias network");
+        assert_eq!(pending.text, "Check the bias network");
         assert_eq!(pending.source.as_ref(), Some(&source));
         assert_eq!(state.dialogs.design_note.source.as_ref(), Some(&source));
         state.dialogs.design_note.close();
@@ -200,7 +176,7 @@ mod tests {
     #[test]
     fn stale_and_read_only_drafts_fail_closed() {
         use crate::state::{
-            CellViewRef, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
+            CellViewRef, Point, SheetDefinition, SheetPortPolicy, SheetTemplate, ViewType,
         };
         for change in [
             "document",
@@ -223,6 +199,7 @@ mod tests {
                 .unwrap();
             let source = schematic_editor_request_source(&state);
             state.dialogs.design_note.open(source.clone());
+            state.dialogs.design_note.text = "Check the bias network".to_owned();
             assert!(validate_draft(&state).is_ok());
             match change {
                 "document" => state.design_execution_epoch += 1,
@@ -287,6 +264,7 @@ mod tests {
                     .dialogs
                     .design_note
                     .open(schematic_editor_request_source(&state));
+                state.dialogs.design_note.text = "Check the bias network".to_owned();
                 assert!(validate_draft(&state).is_ok(), "fresh {change}");
             }
             assert_eq!(state.schematic.document().design_notes, notes);

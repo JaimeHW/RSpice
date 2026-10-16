@@ -347,51 +347,37 @@ impl CommandPaletteState {
     }
 }
 
-/// Retained, isolated draft for the mockup-owned bus-tap placement
-/// transaction. The parsed electrical contract is not published to the
-/// schematic until the primary action validates every field.
+/// Retained, isolated draft for the bus-tap placement transaction. The parsed
+/// electrical contract is not published to the schematic until the primary
+/// action validates every field.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct BusTapDialogState {
     pub(crate) open: bool,
     pub(crate) fields: rspice_schematic_editor::bus_tap_placement::BusTapFields,
     pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 impl BusTapDialogState {
-    pub(crate) fn open(&mut self, source: rspice_schematic_editor::requests::EditorRequestSource) {
+    /// `bus` is the declaration the sheet leaves no doubt about, or empty.
+    /// Nothing else is prefilled: a sample written into a field is a tap the
+    /// reader never asked for.
+    pub(crate) fn open(
+        &mut self,
+        source: rspice_schematic_editor::requests::EditorRequestSource,
+        bus: String,
+    ) {
         *self = Self {
             open: true,
-            fields: rspice_schematic_editor::bus_tap_placement::BusTapFields::for_placement(),
+            fields: rspice_schematic_editor::bus_tap_placement::BusTapFields {
+                bus,
+                ..Default::default()
+            },
             source: Some(source),
-            dirty: false,
-            discard_confirm: false,
         };
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
-    }
-
-    /// Record an input edit without publishing any schematic state. Editing
-    /// after the first close attempt returns the footer to its ordinary
-    /// Cancel state, matching the mockup workflow lifecycle.
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-    }
-
-    /// Try to close the isolated draft. An edited draft requires the same
-    /// second explicit discard action as the mockup workflow shell.
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 }
 
@@ -406,8 +392,6 @@ pub(crate) struct BuiltinXspicePlacementDialogState {
     pub(crate) vector_ports: Vec<crate::state::CatalogXspiceVectorPort>,
     pub(crate) widths: std::collections::BTreeMap<String, usize>,
     pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
     pub(crate) validation_error: Option<String>,
 }
 
@@ -430,28 +414,12 @@ impl BuiltinXspicePlacementDialogState {
             vector_ports,
             widths,
             source: Some(source),
-            dirty: false,
-            discard_confirm: false,
             validation_error: None,
         };
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
-    }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-        self.validation_error = None;
-    }
-
-    pub(crate) fn attempt_close(&mut self) {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-        } else {
-            self.close();
-        }
     }
 }
 
@@ -470,8 +438,9 @@ pub(crate) struct NetLabelPlacementDialogState {
     /// connector is part of the draft, so it publishes with the name in one
     /// transaction rather than needing a second edit.
     pub(crate) kind: crate::state::NetLabelKind,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
+    /// Where on the screen the entry sits, taken from the click that opened
+    /// it. Kept, so the card does not follow the pointer once it is up.
+    pub(crate) screen_anchor: Option<egui::Pos2>,
     pub(crate) validation_error: Option<String>,
 }
 
@@ -488,30 +457,18 @@ impl NetLabelPlacementDialogState {
             anchor: Some(anchor),
             authority: Some(authority),
             kind,
-            dirty: false,
-            discard_confirm: false,
+            screen_anchor: None,
             validation_error: None,
         };
     }
 
+    /// The entry's place on the screen, fixed the first frame it is drawn.
+    pub(crate) fn screen_anchor_or(&mut self, pointer: egui::Pos2) -> egui::Pos2 {
+        *self.screen_anchor.get_or_insert(pointer)
+    }
+
     pub(crate) fn close(&mut self) {
         *self = Self::default();
-    }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-        self.validation_error = None;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 }
 
@@ -770,15 +727,17 @@ impl PinPortDialogState {
     }
 }
 
-/// Isolated draft for the mockup-owned Place text or design note transaction.
+/// Isolated draft for the Place text or design note transaction.
+///
+/// The text starts empty. The sample the form used to open holding was
+/// written into the field as a value, so an untouched form placed a note that
+/// said it.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DesignNoteDialogState {
     pub(crate) open: bool,
     pub(crate) kind: crate::state::DesignNoteKind,
     pub(crate) text: String,
     pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 impl DesignNoteDialogState {
@@ -786,42 +745,23 @@ impl DesignNoteDialogState {
         *self = Self {
             open: true,
             kind: crate::state::DesignNoteKind::PlainText,
-            text: "Bias network".to_owned(),
+            text: String::new(),
             source: Some(source),
-            dirty: false,
-            discard_confirm: false,
         };
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
     }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
-    }
 }
 
-/// Isolated draft for the mockup-owned Draw documentation shape transaction.
+/// Isolated draft for the Draw documentation shape transaction.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DocumentationShapeDialogState {
     pub(crate) open: bool,
     pub(crate) kind: crate::state::DocumentationShapeKind,
     pub(crate) source: Option<rspice_schematic_editor::requests::EditorRequestSource>,
     pub(crate) expected_shapes: Vec<crate::state::DocumentationShape>,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 impl DocumentationShapeDialogState {
@@ -835,28 +775,11 @@ impl DocumentationShapeDialogState {
             kind: crate::state::DocumentationShapeKind::Rectangle,
             source: Some(source),
             expected_shapes,
-            dirty: false,
-            discard_confirm: false,
         };
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
-    }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 }
 
