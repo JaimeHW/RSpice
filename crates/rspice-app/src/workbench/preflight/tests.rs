@@ -8,6 +8,7 @@ use super::*;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::diagnostic_routes::apply_remediation;
 
+mod rule_deck;
 mod variants;
 
 fn prepared_contract() -> PreparedPreflightContract {

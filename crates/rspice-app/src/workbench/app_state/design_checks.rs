@@ -92,7 +92,7 @@ impl AppState {
             self.sync_active_schematic_to_workspace();
         }
         let subject = self.workspace.content.active_schematic_reference();
-        let config = design_check_config(self, &subject);
+        let config = self.design_check_config(&subject);
         // Checks run over the design as configured, not over the editor
         // buffer. That is what makes two sheets with coincident authored
         // coordinates two nets: the projection namespaces the pages apart
@@ -140,15 +140,16 @@ impl AppState {
             );
         }
         let subject = self.workspace.content.active_schematic_reference();
-        let config = design_check_config(self, &subject);
+        let config = self.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result)
     }
 
     /// The configuration the design rules are checked under for the
     /// configured simulation root — the profile the Check command uses for
-    /// that cell view, so a pass run by either is the same evidence.
-    pub(in crate::workbench) fn configured_root_design_check_config(&self) -> DrcConfig {
-        design_check_config(self, &self.workspace.content.simulation_root_reference())
+    /// that cell view, so a pass run by either is the same evidence, and the
+    /// one the run gate judges the root under.
+    pub(crate) fn configured_root_design_check_config(&self) -> DrcConfig {
+        self.design_check_config(&self.workspace.content.simulation_root_reference())
     }
 
     /// Publish the design-rule findings of the configured simulation root, as
@@ -164,7 +165,7 @@ impl AppState {
         result: DrcResult,
     ) -> Result<(), String> {
         let subject = self.workspace.content.simulation_root_reference();
-        let config = design_check_config(self, &subject);
+        let config = self.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result)
     }
 
@@ -268,7 +269,7 @@ impl AppState {
         if receipt.project_id != self.workspace.content.project.id() {
             return DesignCheckStatus::Stale(receipt);
         }
-        let config = design_check_config(self, subject);
+        let config = self.design_check_config(subject);
         match design_check_input_digest(self, subject, &config) {
             Ok(digest) if digest == receipt.input_digest => DesignCheckStatus::Current(receipt),
             Ok(_) => DesignCheckStatus::Stale(receipt),
@@ -459,26 +460,98 @@ fn project_root_reference(state: &AppState) -> CellViewRef {
     )
 }
 
-/// The profile one cell view is checked under.
-///
-/// A missing ground is a defect only where the design is simulated from: the
-/// project's top cell, and the configured simulation root, which is often a
-/// testbench beside it. Anywhere else a cell is a subcircuit, and its ground
-/// arrives through its ports.
-///
-/// The severity overrides come from the project's own rule deck rather than
-/// being left empty, which is what made every rule's shipped default the only
-/// severity a design could be checked at. They are folded into the digest
-/// below, so moving a rule in the deck stales the reports that were produced
-/// under the previous one instead of relabelling their findings.
-fn design_check_config(state: &AppState, subject: &CellViewRef) -> DrcConfig {
-    let subject = owner_key(subject);
-    DrcConfig {
-        check_missing_ground: subject == owner_key(&project_root_reference(state))
-            || subject == owner_key(&state.workspace.content.simulation_root_reference()),
-        severity_overrides: state.workspace.content.design_rules.severity_overrides(),
-        ..DrcConfig::default()
+impl AppState {
+    /// The configuration `subject` is checked under in this project.
+    ///
+    /// The one authority for it. The Check command, the digest that decides
+    /// whether its findings are current, preflight, check-and-save, the
+    /// connectivity manager, hierarchy extraction and the run gate all take
+    /// their configuration from here. Each used to build its own, so the
+    /// project's rule deck changed what the Problems page said and not what
+    /// the run refused, and the gate checked every root under the shipped
+    /// defaults whatever the project had decided.
+    ///
+    /// It carries the project's rule deck and its connectivity policy — the
+    /// width-mismatch rule reads the policy from here, and was reading the
+    /// default — and asks for a ground where the subject is a design of its
+    /// own.
+    pub(crate) fn design_check_config(&self, subject: &CellViewRef) -> DrcConfig {
+        DrcConfig {
+            check_missing_ground: asks_for_ground(self, subject),
+            severity_overrides: self.workspace.content.design_rules.severity_overrides(),
+            connectivity: self.workspace.content.connectivity.policy.clone(),
+            ..DrcConfig::default()
+        }
     }
+}
+
+/// Whether `subject` is a design of its own, which must reach a reference.
+///
+/// The configured simulation root always is. Any other cellview the root's
+/// walk places is a cell, which takes its reference from whatever places it,
+/// and so is one that presents an interface: its ground arrives through its
+/// ports. One the root does not place, that presents no interface or is a
+/// testbench, is a design of its own and is asked.
+///
+/// Read cheapest first: the common subject, a cell with ports, is decided
+/// without resolving the configured hierarchy.
+fn asks_for_ground(state: &AppState, subject: &CellViewRef) -> bool {
+    let subject_key = owner_key(subject);
+    if subject_key == owner_key(&state.workspace.content.simulation_root_reference()) {
+        return true;
+    }
+    let testbench = state
+        .library_manager
+        .catalog()
+        .get_library(&subject.library)
+        .and_then(|library| library.get_cell(&subject.cell))
+        .and_then(|cell| cell.get_view(&subject.view))
+        .is_some_and(|view| view.view_type == ViewType::Testbench);
+    if !testbench && subject_has_interface(state, subject) {
+        return false;
+    }
+    // A hierarchy that does not resolve places nothing that can be found, so
+    // the subject is asked: the stricter answer, where the looser one would
+    // pass a design nobody could tell was grounded.
+    let placed = state
+        .workspace
+        .inspect_design_projection(
+            &state.library_manager,
+            &state.workspace.content.active_view,
+            &state.schematic,
+        )
+        .is_ok_and(|projection| {
+            projection
+                .hierarchy_resolution()
+                .bindings
+                .iter()
+                .any(|binding| {
+                    binding.status.is_resolved() && owner_key(&binding.reference) == subject_key
+                })
+        });
+    !placed
+}
+
+/// Whether the drawing behind `subject` declares any port, read from the live
+/// editor where the subject is the view in front of the reader.
+fn subject_has_interface(state: &AppState, subject: &CellViewRef) -> bool {
+    let key = subject.key();
+    if state
+        .workspace
+        .content
+        .active_view
+        .key()
+        .eq_ignore_ascii_case(&key)
+    {
+        return state.schematic.document().has_interface();
+    }
+    state
+        .workspace
+        .content
+        .schematic_buffers
+        .iter()
+        .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))
+        .is_none_or(|(_, schematic)| schematic.document().has_interface())
 }
 
 /// The digest of everything one cell view's checks read, as it stands now.
@@ -492,7 +565,7 @@ pub(in crate::workbench) fn live_input_digest(
     state: &AppState,
     subject: &CellViewRef,
 ) -> Result<ContentDigest, String> {
-    let config = design_check_config(state, subject);
+    let config = state.design_check_config(subject);
     design_check_input_digest(state, subject, &config)
 }
 

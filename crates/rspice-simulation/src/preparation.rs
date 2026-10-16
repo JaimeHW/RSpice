@@ -178,19 +178,23 @@ impl std::fmt::Display for PreparationError {
 /// instance of the root inside itself closes its cycle there. The run is
 /// refused on an Error or a Critical finding and on nothing milder; a warning
 /// travels with the run rather than stopping it.
+///
+/// `config` is the configuration the project checks `root` under, from the
+/// caller that owns the project: its rule deck and its connectivity policy.
+/// The gate does not build its own. When it did, a rule the deck demoted
+/// still refused the run, and one it promoted to an error passed every run
+/// path that skipped preflight.
 pub fn check_generated_design(
     schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
     root: &rspice_design_model::cell_view::CellViewRef,
     hierarchy: &rspice_design::hierarchy::HierarchySource<'_>,
+    config: rspice_design::drc::DrcConfig,
 ) -> Result<rspice_design::drc::DrcResult, PreparationError> {
     let drc = rspice_design::drc::run_check_of_cellview(
         schematic,
         root,
         hierarchy,
-        rspice_design::drc::DrcConfig {
-            check_missing_ground: true,
-            ..rspice_design::drc::DrcConfig::default()
-        },
+        config,
         rspice_design::drc::CheckReach::Hierarchy,
     );
     if !drc.completed {

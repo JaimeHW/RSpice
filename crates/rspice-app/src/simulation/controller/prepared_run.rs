@@ -92,6 +92,7 @@ fn run_preparation_inputs(
             .receipt
             .as_ref()
             .map(|receipt| &receipt.compilation),
+        design_checks: state.configured_root_design_check_config(),
     }
 }
 

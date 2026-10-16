@@ -425,7 +425,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
     let drawn = rspice_design::drc::run_check_with_hierarchy(
         &candidate,
         &hierarchy,
-        connectivity_drc_config(&state),
+        state.design_check_config(&state.workspace.content.active_view),
     );
     assert!(
         drawn
