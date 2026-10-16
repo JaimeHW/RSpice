@@ -235,7 +235,7 @@ fn the_closure_inputs_count_gate_subjects_and_not_the_exempt_population() {
     }
     assert_eq!(
         closure_inputs(&summaries)[2].detail,
-        format!("{exempt} engine-owned exempt"),
+        format!("{exempt} engine-owned"),
         "the exempt population is what the qualified segment has to account for"
     );
 
@@ -499,22 +499,56 @@ fn an_undeclared_domain_reads_absent_and_a_declared_one_reads_its_own_counts() {
     );
 }
 
-/// The gate exemption is the family's own row, not a colour on it.
+/// The gate exemption is the band the families are listed under, and it is
+/// not repeated into the gate cell of every row beneath it.
+///
+/// A fresh project is sixteen compiled-in cards, so the page carried
+/// "engine-owned · compiled in" sixteen times under a band that had just said
+/// it once. The announcement keeps the words, because a reader who cannot see
+/// the band has nothing else that states them.
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn an_engine_owned_family_states_the_exemption_in_every_cell() {
-    let app = RSpiceApp::test_instance();
+fn an_engine_owned_family_leaves_the_gate_column_to_the_band_above_it() {
+    let mut app = RSpiceApp::test_instance();
     let summaries = qualification_summaries(&app);
     let summary = summaries
         .iter()
         .find(|summary| !summary.gate.is_gate_subject())
-        .expect("a fresh project holds the engine-owned families");
+        .expect("a fresh project holds the engine-owned families")
+        .clone();
     let ctx = themed_context();
     let t = Tokens::get(&ctx);
     for domain in QualificationDomain::ALL {
-        assert_eq!(domain_cell(summary, domain, &t).0, "—");
+        assert_eq!(domain_cell(&summary, domain, &t).0, "—");
     }
-    assert_eq!(gate_detail(summary), "compiled in");
-    assert_eq!(gate_color(summary.gate, &t), t.color.text_dim);
+
+    let output = run_page(&mut app, PAGE_SIZE[0]);
+    let painted = painted_text(&output);
+    assert!(
+        painted.iter().any(|text| text.text == ENGINE_OWNED_BAND),
+        "the band that states the exemption is not on the page"
+    );
+    // Two owners survive, and neither is a row: the closure band's verdict
+    // over the selected family, and the contract card's own meta. Before the
+    // column was gated this was eighteen.
+    let stated = painted
+        .iter()
+        .filter(|text| text.text == summary.gate.label())
+        .count();
+    assert!(
+        stated <= 2,
+        "the exemption is painted {stated} times; only the closure verdict \
+         and the contract card's meta may state it"
+    );
+    let detail = gate_detail(&summary);
+    assert!(
+        !painted.iter().any(|text| text.text == detail),
+        "the gate column still repeats `{detail}` under every exempt row"
+    );
+    assert!(
+        row_announcement(&summary).contains(summary.gate.label()),
+        "a reader who cannot see the band lost the exemption with it"
+    );
 }
 
 /// Every cell a sighted reader can see is announced, because none of them is a
