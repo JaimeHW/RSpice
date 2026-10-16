@@ -860,112 +860,72 @@ impl DocumentationShapeDialogState {
     }
 }
 
-/// Isolated authority and interaction state for the mockup-owned Move
-/// selection transaction. The design snapshot remains immutable while the
-/// dialog is open and while the tool is armed; pointer/keyboard movement is
-/// accumulated as a preview delta and committed only once.
+/// Authority and interaction state of the armed Move tool. The design
+/// snapshot remains immutable while the tool is armed; pointer and keyboard
+/// movement is accumulated as a preview delta and committed only once.
+///
+/// `mode` outlives one command on purpose: it is a tool option on the canvas
+/// strip, and a tool option a reader set two commands ago is still the one
+/// they meant.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct MoveSelectionDialogState {
-    pub(crate) open: bool,
     pub(crate) armed: bool,
     pub(crate) mode: crate::state::MoveSelectionMode,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) canvas: rspice_schematic_editor::session::transform::TransformCanvasSession,
     pub(crate) generation: u64,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 impl MoveSelectionDialogState {
-    pub(crate) fn open(&mut self, authority: SchematicEditAuthority) {
+    pub(crate) fn arm(&mut self, authority: SchematicEditAuthority) {
         *self = Self {
-            open: true,
-            armed: false,
-            mode: crate::state::MoveSelectionMode::Connected,
+            armed: true,
+            mode: self.mode,
             authority: Some(authority),
             canvas: Default::default(),
             generation: self.generation.wrapping_add(1),
-            dirty: false,
-            discard_confirm: false,
         };
-    }
-
-    pub(crate) fn arm(&mut self) {
-        self.open = false;
-        self.armed = true;
-        self.canvas = Default::default();
-        self.generation = self.generation.wrapping_add(1);
-        self.dirty = false;
-        self.discard_confirm = false;
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self {
             generation: self.generation.wrapping_add(1),
+            mode: self.mode,
             ..Self::default()
         };
     }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
-    }
 }
 
-/// Isolated authority and interaction state for the mockup-owned Stretch
-/// selection transaction. The selected conductor segment or documentation
-/// control point is resolved before mutation and remains stable through the
-/// live canvas preview and atomic commit.
+/// Authority and interaction state of the armed Stretch tool. The selected
+/// conductor segment or documentation control point is resolved before
+/// mutation and remains stable through the live canvas preview and the
+/// atomic commit.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct StretchSelectionDialogState {
-    pub(crate) open: bool,
     pub(crate) armed: bool,
     pub(crate) policy: crate::state::StretchOrthogonalPolicy,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession,
     pub(crate) generation: u64,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 impl StretchSelectionDialogState {
-    pub(crate) fn open(
+    pub(crate) fn arm(
         &mut self,
         authority: SchematicEditAuthority,
         target: crate::state::StretchTarget,
+        policy: crate::state::StretchOrthogonalPolicy,
     ) {
         *self = Self {
-            open: true,
-            armed: false,
-            policy: crate::state::StretchOrthogonalPolicy::default(),
+            armed: true,
+            policy,
             authority: Some(authority),
             canvas: rspice_schematic_editor::session::stretch::StretchCanvasSession {
                 target: Some(target),
                 gesture: Default::default(),
             },
             generation: self.generation.wrapping_add(1),
-            dirty: false,
-            discard_confirm: false,
         };
-    }
-
-    pub(crate) fn arm(&mut self) {
-        self.open = false;
-        self.armed = true;
-        self.canvas.gesture = Default::default();
-        self.generation = self.generation.wrapping_add(1);
-        self.dirty = false;
-        self.discard_confirm = false;
     }
 
     pub(crate) fn close(&mut self) {
@@ -973,21 +933,6 @@ impl StretchSelectionDialogState {
             generation: self.generation.wrapping_add(1),
             ..Self::default()
         };
-    }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = true;
-        self.discard_confirm = false;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 }
 
@@ -1018,9 +963,7 @@ pub(crate) struct ArraySelectionDialogState {
     pub(crate) initial_kind: crate::state::SchematicArrayKind,
     pub(crate) initial_count: String,
     pub(crate) initial_naming: String,
-    pub(crate) validation_field_mask: u8,
     pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 impl ArraySelectionDialogState {
@@ -1045,9 +988,7 @@ impl ArraySelectionDialogState {
             initial_kind: crate::state::SchematicArrayKind::default(),
             initial_count,
             initial_naming,
-            validation_field_mask: 0,
             dirty: false,
-            discard_confirm: false,
         };
     }
 
@@ -1058,7 +999,6 @@ impl ArraySelectionDialogState {
         self.generation = self.generation.wrapping_add(1);
         self.preview_cache = None;
         self.dirty = false;
-        self.discard_confirm = false;
     }
 
     pub(crate) fn close(&mut self) {
@@ -1072,18 +1012,7 @@ impl ArraySelectionDialogState {
         self.dirty = self.kind != self.initial_kind
             || !equivalent_array_count(&self.count, &self.initial_count)
             || !equivalent_array_naming(&self.naming, &self.initial_naming);
-        self.discard_confirm = false;
         self.preview_cache = None;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 }
 
@@ -1370,7 +1299,6 @@ pub(crate) struct ObjectPropertiesDialogState {
     /// Actual tab identity; a symbol tab can resolve to its paired schematic.
     pub(crate) view_path: String,
     pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
     pub(crate) validation_error: Option<String>,
 }
 
@@ -1464,7 +1392,6 @@ impl ObjectPropertiesDialogState {
             source: Some(source),
             view_path,
             dirty: false,
-            discard_confirm: false,
             validation_error: None,
         };
     }
@@ -1486,7 +1413,6 @@ impl ObjectPropertiesDialogState {
             source: Some(source),
             view_path,
             dirty: false,
-            discard_confirm: false,
             validation_error: None,
         };
     }
@@ -1510,7 +1436,6 @@ impl ObjectPropertiesDialogState {
             source: Some(source),
             view_path,
             dirty: false,
-            discard_confirm: false,
             validation_error: None,
         };
     }
@@ -1533,7 +1458,6 @@ impl ObjectPropertiesDialogState {
             source: Some(source),
             view_path,
             dirty: false,
-            discard_confirm: false,
             validation_error: None,
         };
     }
@@ -1557,7 +1481,6 @@ impl ObjectPropertiesDialogState {
             source: Some(source),
             view_path,
             dirty: false,
-            discard_confirm: false,
             validation_error: None,
         };
     }
@@ -1584,7 +1507,6 @@ impl ObjectPropertiesDialogState {
             source: Some(source),
             view_path,
             dirty: false,
-            discard_confirm: false,
             validation_error: None,
         };
     }
@@ -1594,22 +1516,11 @@ impl ObjectPropertiesDialogState {
             .draft
             .as_ref()
             .is_some_and(ObjectPropertiesDraft::is_modified);
-        self.discard_confirm = false;
         self.validation_error = None;
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 }
 

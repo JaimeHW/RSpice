@@ -292,7 +292,7 @@ impl RSpiceApp {
                 } else if self.state.workbench.drawer.is_some() {
                     self.state.workbench.close_drawer();
                 } else if self.state.dialogs.object_properties.open {
-                    self.state.dialogs.object_properties.attempt_close();
+                    self.state.dialogs.object_properties.close();
                 } else if self.state.tabbed_property_dialog.open {
                     self.state.tabbed_property_dialog.attempt_close();
                 } else if self.state.workbench.workspace
@@ -1106,7 +1106,7 @@ mod shortcut_ownership_tests {
     }
 
     #[test]
-    fn object_properties_shortcut_dispatches_bus_and_guards_dirty_cancel() {
+    fn object_properties_shortcut_dispatches_a_bus_and_escape_leaves_it_alone() {
         use crate::state::{Bus, BusDeclaration, Point};
 
         let mut app = RSpiceApp::test_instance();
@@ -1139,11 +1139,14 @@ mod shortcut_ownership_tests {
         draft.declaration = "ADDR[7:0]".to_owned();
         app.state.dialogs.object_properties.mark_edited();
 
-        app.execute_shortcut_command(ShortcutCommand::Cancel);
-        assert!(app.state.dialogs.object_properties.open);
-        assert!(app.state.dialogs.object_properties.discard_confirm);
+        // The draft owns nothing until Apply, so one Escape leaves and the
+        // bus is as it was.
         app.execute_shortcut_command(ShortcutCommand::Cancel);
         assert!(!app.state.dialogs.object_properties.open);
+        assert_eq!(
+            app.state.schematic.document().buses[0].declaration,
+            Some(BusDeclaration::parse("DATA[7:0]").unwrap())
+        );
     }
 
     #[test]

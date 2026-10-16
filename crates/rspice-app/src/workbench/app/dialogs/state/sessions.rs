@@ -555,8 +555,6 @@ impl DialogState {
             || self.pin_port.open
             || self.design_note.open
             || self.documentation_shape.open
-            || self.move_selection.open
-            || self.stretch_selection.open
             || self.array_selection.open
             || self.replace_instance.open
             || self.stimulus_link.open

@@ -159,10 +159,9 @@ mod tests {
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Component, ComponentType, Wire};
     fn arm_test_move(state: &mut AppState, mode: crate::state::MoveSelectionMode) {
-        crate::workbench::app::open_move_selection_dialog(state);
         state.dialogs.move_selection.mode = mode;
-        state.dialogs.move_selection.arm();
-        state.schematic.arm_tool(Tool::MoveSelection);
+        crate::workbench::app::arm_move_selection(state);
+        assert!(state.dialogs.move_selection.armed);
     }
     #[test]
     fn armed_move_commits_once_syncs_workspace_and_retains_selection() {

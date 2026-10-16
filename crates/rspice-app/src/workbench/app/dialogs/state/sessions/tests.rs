@@ -92,18 +92,6 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         );
     });
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.move_selection.open(edit_authority());
-    });
-    assert_blocks_shortcuts(|dialogs| {
-        dialogs.stretch_selection.open(
-            edit_authority(),
-            crate::state::StretchTarget::WireSegment {
-                wire_id: 1,
-                segment_index: 0,
-            },
-        );
-    });
-    assert_blocks_shortcuts(|dialogs| {
         dialogs.array_selection.open(
             edit_authority(),
             "8 \u{00d7} 1".to_owned(),
@@ -201,5 +189,4 @@ fn generic_property_dirty_state_clears_after_semantic_revert() {
     draft.declaration = " DATA[7:0] ".to_owned();
     dialog.mark_edited();
     assert!(!dialog.dirty);
-    assert!(!dialog.discard_confirm);
 }

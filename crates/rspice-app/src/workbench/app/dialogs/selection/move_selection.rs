@@ -1,62 +1,33 @@
-//! Mockup-owned Move selection transaction.
+//! Move: an armed canvas tool, not a dialog.
 //!
-//! The dialog owns configuration and authority only. Arming does not mutate
-//! the document; the schematic interaction layer accumulates a snapped
-//! pointer/keyboard delta and commits the configured movement exactly once.
-
-use egui::Context;
-use rspice_schematic_editor::selection_forms;
-use rspice_schematic_editor::view::grid::snap_label;
+//! `M` arms the tool at once, as Virtuoso's `M` does, and the canvas takes the
+//! anchor and the destination. Arming mutates nothing: the interaction layer
+//! accumulates a snapped delta and commits the configured movement exactly
+//! once.
+//!
+//! The one choice the command still has — what happens to the wires attached
+//! to what moves — is on the tool's options strip over the canvas, where it
+//! can be changed with the command already running. A modal in front of a
+//! drag is a modal the reader dismisses without reading.
 
 use crate::diagnostics::ConsoleMessage;
-use crate::schematic::view::schematic_symbol_context;
-use crate::state::{Point, Tool};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::state::Tool;
 
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app_state::AppState;
 
-const TITLE: &str = "Move selection";
-const PRIMARY: &str = "Arm move tool";
-const DESCRIPTION: &str = "Move selected objects with connected wires following and preview any resulting geometry or hierarchy violations.";
-use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
+const COMMAND: &str = "Move";
 
-#[derive(Debug)]
-enum DraftValidation {
-    Invalid(String),
-    Valid,
-}
-
-impl DraftValidation {
-    fn can_commit(&self) -> bool {
-        matches!(self, Self::Valid)
-    }
-
-    fn message(&self) -> Option<&str> {
-        match self {
-            Self::Invalid(message) => Some(message),
-            Self::Valid => None,
-        }
-    }
-}
-
-/// Open the exact mockup transaction against an immutable document and
-/// selection baseline. Commands call this single boundary so palette, menu,
-/// and shortcut activation cannot drift.
-pub(crate) fn open_move_selection_dialog(state: &mut AppState) {
+/// Arm Move against an immutable document and selection baseline. Commands
+/// call this single boundary so palette, menu and shortcut activation cannot
+/// drift.
+pub(crate) fn arm_move_selection(state: &mut AppState) {
     if state.schematic_edit_read_only() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Move selection is unavailable because the active schematic is read-only.".to_owned(),
-        ));
+        state.push_user_message(ConsoleMessage::warning("The schematic is read-only."));
         return;
     }
     if !state.schematic.has_live_movable_selection() {
-        state.push_user_message(ConsoleMessage::warning(
-            "Select at least one movable schematic object before opening Move selection."
-                .to_owned(),
-        ));
+        state.push_user_message(ConsoleMessage::warning("Select something to move first."));
         return;
     }
     if state.dialogs.stretch_selection.armed {
@@ -68,107 +39,32 @@ pub(crate) fn open_move_selection_dialog(state: &mut AppState) {
     state
         .dialogs
         .move_selection
-        .open(SchematicEditAuthority::capture(state));
+        .arm(SchematicEditAuthority::capture(state));
+    state.schematic.arm_tool(Tool::MoveSelection);
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_move_selection_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.move_selection.open {
-            return;
-        }
-        let validation = validate_draft(&self.state);
-        let validation_message = validation.message().map(str::to_owned);
-        let summary = selection_summary(&self.state);
-        let snap = snap_label(self.state.schematic.document().document_policy.grid_pitch);
-        let discard_confirm = self.state.dialogs.move_selection.discard_confirm;
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
-            .primary_enabled(validation.can_commit())
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        }
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let draft = &mut self.state.dialogs.move_selection;
-            let (focus, edited) = selection_forms::show_move(
-                ui,
-                &summary,
-                snap,
-                validation_message.as_deref(),
-                &mut draft.mode,
-            );
-            if edited {
-                draft.mark_edited();
-            }
-            focus
-        });
-        match response.choice {
-            DialogChoice::Primary => {
-                if validate_draft(&self.state).can_commit() {
-                    self.state.dialogs.move_selection.arm();
-                    self.state.schematic.arm_tool(Tool::MoveSelection);
-                    rspice_schematic_editor::view::canvas::request_focus(ctx);
-                    let snap =
-                        snap_label(self.state.schematic.document().document_policy.grid_pitch);
-                    self.state.push_user_message(ConsoleMessage::info(format!(
-                        "Move selection armed in {} mode; choose an anchor and destination on the {snap} grid.",
-                        self.state.dialogs.move_selection.mode.label()
-                    )));
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.move_selection.attempt_close();
-                if self.state.dialogs.move_selection.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
-        }
-    }
-}
-
-fn validate_draft(state: &AppState) -> DraftValidation {
+fn validate_draft(state: &AppState) -> Result<(), String> {
     if state.schematic_edit_read_only() {
-        return DraftValidation::Invalid("The active schematic is read-only.".to_owned());
+        return Err("The active schematic is read-only.".to_owned());
     }
     let draft = &state.dialogs.move_selection;
     let Some(authority) = draft.authority.as_ref() else {
-        return DraftValidation::Invalid(
-            "The retained design baseline is unavailable. Close and reopen Move selection."
-                .to_owned(),
-        );
+        return Err("Move is not armed.".to_owned());
     };
-    if let Err(message) = authority.validate(state, TITLE) {
-        return DraftValidation::Invalid(message);
-    }
+    authority.validate(state, COMMAND)?;
     if !state.schematic.has_live_movable_selection() {
-        return DraftValidation::Invalid("No movable selected object remains.".to_owned());
+        return Err("No movable selected object remains.".to_owned());
     }
-    DraftValidation::Valid
+    Ok(())
 }
 
-/// Fail-closed authority check used again after the dialog has closed and the
-/// move tool is armed.
+/// Fail-closed authority check used again at the canvas commit boundary.
 pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), String> {
     let draft = &state.dialogs.move_selection;
     if !draft.armed || state.schematic.session.editor.tool != Tool::MoveSelection {
-        return Err("Move selection is not armed.".to_owned());
+        return Err("Move is not armed.".to_owned());
     }
-    match validate_draft(state) {
-        DraftValidation::Valid => Ok(()),
-        DraftValidation::Invalid(message) => Err(message),
-    }
+    validate_draft(state)
 }
 
 pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
@@ -178,50 +74,12 @@ pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
     }
 }
 
-fn selection_summary(state: &AppState) -> String {
-    let selection = &state.schematic.session.editor.selection;
-    let count = state.schematic.live_movable_selection_count();
-    let symbol_context = schematic_symbol_context(state);
-    let terminals: std::collections::HashSet<Point> = state
-        .schematic
-        .document()
-        .components
-        .iter()
-        .filter(|component| selection.has_component(component.id))
-        .flat_map(|component| symbol_context.terminal_points(component))
-        .collect();
-    let attached = state
-        .schematic
-        .document()
-        .wires
-        .iter()
-        .filter(|wire| {
-            !selection.has_wire(wire.id)
-                && wire.points.iter().any(|point| terminals.contains(point))
-        })
-        .count();
-    if let Some(component) = state
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| selection.has_component(component.id))
-        .filter(|_| count == 1)
-    {
-        format!("{} \u{00b7} {attached} attached wires", component.name)
-    } else {
-        format!("{count} selected objects \u{00b7} {attached} attached wires")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point, SchematicSnapshot};
-    use crate::workbench::app::dialogs::state::MoveSelectionDialogState;
 
-    #[test]
-    fn open_freezes_selection_and_complete_design_snapshot() {
+    fn selected_resistor() -> AppState {
         let mut state = AppState::default();
         let id = state
             .schematic
@@ -232,10 +90,35 @@ mod tests {
             .editor
             .selection
             .select_component(id);
-        open_move_selection_dialog(&mut state);
-        let draft = &state.dialogs.move_selection;
-        assert!(draft.open);
-        let authority = draft.authority.as_ref().expect("captured authority");
+        state
+    }
+
+    /// The command acts at once: no modal stands between `M` and the canvas,
+    /// and the tool is live the same frame.
+    #[test]
+    fn arming_opens_no_dialog_and_hands_the_canvas_the_tool() {
+        let mut state = selected_resistor();
+        let baseline = SchematicSnapshot::capture(state.schematic.document());
+
+        arm_move_selection(&mut state);
+
+        assert!(state.dialogs.move_selection.armed);
+        assert_eq!(state.schematic.session.editor.tool, Tool::MoveSelection);
+        assert!(!state.dialogs.application_modal_open());
+        assert!(baseline.is_equal(&SchematicSnapshot::capture(state.schematic.document())));
+        assert!(armed_move_selection_authority(&state).is_ok());
+    }
+
+    #[test]
+    fn arming_freezes_the_selection_and_the_whole_design_snapshot() {
+        let mut state = selected_resistor();
+        arm_move_selection(&mut state);
+        let authority = state
+            .dialogs
+            .move_selection
+            .authority
+            .as_ref()
+            .expect("captured authority");
         assert_eq!(
             authority.selection,
             state.schematic.session.editor.selection
@@ -249,56 +132,18 @@ mod tests {
 
     #[test]
     fn validation_fails_closed_when_non_electrical_geometry_changes() {
-        let mut state = AppState::default();
-        let id = state
-            .schematic
-            .add_component(ComponentType::Resistor, Point::origin());
-        state
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_component(id);
-        open_move_selection_dialog(&mut state);
+        let mut state = selected_resistor();
+        arm_move_selection(&mut state);
         state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
-        assert!(matches!(
-            validate_draft(&state),
-            DraftValidation::Invalid(_)
-        ));
+        assert!(validate_draft(&state).is_err());
     }
 
+    /// Nothing to move is a refusal, not an armed tool waiting for a drag.
     #[test]
-    fn arming_retains_selection_and_does_not_mutate_design() {
+    fn an_empty_selection_refuses_instead_of_arming() {
         let mut state = AppState::default();
-        let id = state
-            .schematic
-            .add_component(ComponentType::Resistor, Point::origin());
-        state
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_component(id);
-        open_move_selection_dialog(&mut state);
-        let baseline = SchematicSnapshot::capture(state.schematic.document());
-        state.dialogs.move_selection.arm();
-        state.schematic.arm_tool(Tool::MoveSelection);
-        assert!(baseline.is_equal(&SchematicSnapshot::capture(state.schematic.document())));
-        assert!(state.schematic.session.editor.selection.has_component(id));
-        assert!(armed_move_selection_authority(&state).is_ok());
-    }
-
-    #[test]
-    fn edited_mode_requires_explicit_discard_confirmation() {
-        let mut draft = MoveSelectionDialogState {
-            open: true,
-            ..MoveSelectionDialogState::default()
-        };
-        draft.mark_edited();
-        assert!(!draft.attempt_close());
-        assert!(draft.open);
-        assert!(draft.discard_confirm);
-        assert!(draft.attempt_close());
-        assert!(!draft.open);
+        arm_move_selection(&mut state);
+        assert!(!state.dialogs.move_selection.armed);
+        assert_ne!(state.schematic.session.editor.tool, Tool::MoveSelection);
     }
 }
