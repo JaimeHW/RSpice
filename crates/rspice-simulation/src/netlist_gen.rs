@@ -1,19 +1,25 @@
 //! Netlist Generator - Schematic to SPICE Netlist Conversion
 //!
-//! Commercial-grade netlist generation following Cadence Spectre conventions:
-//! - Node connectivity extraction via wire tracing
-//! - Ground detection (GND nets → node 0)
-//! - SPICE instance line generation for all component types
-//! - Subcircuit and model statement generation
-//! - Analysis command generation from UI configuration
+//! Writes the SPICE deck a schematic and its project hierarchy describe:
+//! - Nets and ground from `rspice_design`'s connectivity extraction, which
+//!   the generator adopts rather than tracing wires itself
+//! - One instance card per placed component, plus coupled-inductor and
+//!   XSPICE cards
+//! - Include directives for library-bound instances, `.SUBCKT` definitions
+//!   for placed project cells, and the model cards the instances reference
+//! - The design-variable parameter lines and analysis lines the caller passes
 //!
 //! # Architecture
 //!
 //! The netlist generator works in phases:
-//! 1. **Node extraction**: Build connectivity graph from wires and terminals
-//! 2. **Node naming**: Assign node numbers/names (with ground = 0)
-//! 3. **Instance generation**: Generate SPICE lines for each component
-//! 4. **Analysis generation**: Generate analysis commands from config
+//! 1. **Connectivity**: Adopt the design's extraction (nets, ports, labels,
+//!    bus members and ground)
+//! 2. **Header**: Title line and directives, then the design variables
+//! 3. **Definitions**: Library includes, then project-cell `.SUBCKT`
+//!    definitions, so each precedes its first use
+//! 4. **Instances and models**: Instance cards, then model cards; Verilog-A
+//!    source directives are hoisted so each source is registered once
+//! 5. **Analysis**: The caller's analysis lines, then `.end`
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 

@@ -1,6 +1,10 @@
-//! Simulation Runner
+//! Engine services
 //!
-//! Async wrapper around rspice-core for running simulations from the GUI.
+//! One entry point per analysis over rspice-core: each runs the analysis on a
+//! deck or an already parsed netlist, observes the caller's abort signal, and
+//! translates the engine's result and errors. The runner, the engine bridge
+//! and the study executors call them, so the desktop application, the browser
+//! worker and the CLI reach the engine through the same code.
 
 #[cfg(test)]
 use rspice_core::engine::Engine;
