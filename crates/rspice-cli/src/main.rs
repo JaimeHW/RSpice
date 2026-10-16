@@ -3,8 +3,11 @@
 //! Usage:
 //!   rspice run <netlist.sp>           Run the analyses a deck requests
 //!   rspice health                     Probe backend liveness or readiness
-//!   rspice capabilities              Describe CLI routes and result mappings
+//!   rspice capabilities               Describe CLI routes and result mappings
+//!   rspice study check|plan <study>   Validate a study or show its run order
+//!   rspice study run <study> -o <out> Execute a study and publish its results
 //!   rspice info <netlist.sp>          Summarize a netlist without simulating
+//!   rspice models [--part <name>]     List model packs or look up a part
 //!   rspice check <netlist.sp>         Validate syntax, topology, and outputs
 //!   rspice compile-va <model.va>      Compile a Verilog-A model
 //!   rspice convert <in> <out>         Convert between result formats
