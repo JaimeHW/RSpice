@@ -897,6 +897,28 @@ fn materialize_statistical_element(
     Ok(())
 }
 
+/// The model card an element names, as the deck names it.
+fn element_model_name(kind: &ElementKind) -> Option<&str> {
+    match kind {
+        ElementKind::Resistor { model, .. }
+        | ElementKind::Capacitor { model, .. }
+        | ElementKind::Inductor { model, .. }
+        | ElementKind::TransmissionLine { model, .. }
+        | ElementKind::Coupling { model, .. } => model.as_deref(),
+        ElementKind::JilesAthertonInductor { model, .. }
+        | ElementKind::Diode { model, .. }
+        | ElementKind::Bjt { model, .. }
+        | ElementKind::Mosfet { model, .. }
+        | ElementKind::Jfet { model, .. }
+        | ElementKind::Mesfet { model, .. }
+        | ElementKind::XyceMemristor { model, .. }
+        | ElementKind::VSwitch { model, .. }
+        | ElementKind::ISwitch { model, .. }
+        | ElementKind::GenericSwitch { model, .. } => Some(model),
+        _ => None,
+    }
+}
+
 fn element_model_name_mut(kind: &mut ElementKind) -> Option<&mut String> {
     match kind {
         ElementKind::Resistor { model, .. }
@@ -5982,6 +6004,9 @@ impl Engine {
                 check_build_abort(abort)?;
                 check_circuit_resource_limits(self, &circuit)?;
             }
+            // A parameter the element's model replaces while it is bound is
+            // reported against this element and its card.
+            let _binding = crate::notice::binding(&element.name, element_model_name(&element.kind));
             match &element.kind {
                 ElementKind::Resistor {
                     value,

@@ -671,6 +671,14 @@ impl B3SoiDdModel {
                 self.vbsa.v,
                 self.tsi
             );
+            crate::notice::parameter_replaced(
+                "B3SOIDD",
+                crate::notice::ParameterScope::Model,
+                "vbsa",
+                self.vbsa.v,
+                0.0,
+                Some(tmp2 * CHARGE_Q * 1e6 * self.npeak.v / (2.0 * EPSSI)),
+            );
             self.csieff = self.csi;
             self.qsieff = self.qsi;
         } else {

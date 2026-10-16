@@ -1087,6 +1087,14 @@ impl Bjt {
                             self.name,
                             ["MJE", "MJC", "MJS"][index]
                         );
+                        crate::notice::parameter_replaced(
+                            "BJT",
+                            crate::notice::ParameterScope::Instance,
+                            ["mje", "mjc", "mjs"][index],
+                            value,
+                            0.999,
+                            Some(0.999),
+                        );
                     }
                     0.999
                 } else {

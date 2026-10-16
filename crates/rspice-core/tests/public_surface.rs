@@ -151,7 +151,15 @@ use rspice_core::analysis::harmonic_balance::{
 //   card, which the CLI reads to route the card and the simulation service to
 //   run or refuse it.
 // The census is 5,703, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5703;
+// Eleven statements for the notices a run raises and completes with, read
+// by the simulation service's run sink and the Problems page:
+// `notice::EngineNotice` and the three types its variants carry
+// (`ParameterReplacement`, `ParameterScope`, `TimestepFloor`); the
+// `RecordedNotice` a run delivers; and the `NoticeCollector`, its
+// `CollectorGuard` and its four methods (`new`, `install`, `current`,
+// `take`), which the run sink installs on the solving thread and drains when
+// the run ends. The census is 5,715, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5715;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

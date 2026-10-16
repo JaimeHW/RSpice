@@ -86,6 +86,11 @@ impl<'a> ScheduleOwner<'a> {
         let Self { kind, name } = self;
         format!("{kind} '{name}'")
     }
+
+    /// The deck name of the instance that owns the schedule.
+    pub(crate) const fn name(&self) -> &'a str {
+        self.name
+    }
 }
 
 /// The owner of an activation queued by any of the Verilog-A/AMS schedulers:

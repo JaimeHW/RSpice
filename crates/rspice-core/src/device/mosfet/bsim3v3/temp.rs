@@ -22,8 +22,20 @@ use super::common::{
 };
 use super::params::Bsim3v3Model;
 use crate::Value;
+use crate::notice::ParameterScope::{Instance, Model};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+/// Report a value BSIM3 replaced, beside the log line that says so in prose.
+fn replaced(
+    scope: crate::notice::ParameterScope,
+    parameter: &str,
+    requested: Value,
+    applied: Value,
+    limit: Option<Value>,
+) {
+    crate::notice::parameter_replaced("BSIM3", scope, parameter, requested, applied, limit);
+}
 
 /// Per-model temperature data (b3temp.c lines 48-149).
 #[derive(Debug, Clone, Default)]
@@ -109,7 +121,7 @@ impl Bsim3v3ModelTemp {
         // Temperature dependence of the D/B and S/B diode capacitances
         // (b3temp.c:104-148).
         let del_temp = temp - tnom;
-        let cap = |c: Value, tc: Value| {
+        let cap = |c: Value, tc: Value, name: &str| {
             let t0 = tc * del_temp;
             if t0 >= -1.0 {
                 c * (1.0 + t0)
@@ -117,15 +129,17 @@ impl Bsim3v3ModelTemp {
                 log::warn!(
                     "BSIM3: temperature effect has caused a junction cap to be negative; clamped to zero"
                 );
+                replaced(Model, name, c * (1.0 + t0), 0.0, Some(0.0));
                 0.0
             } else {
                 c * (1.0 + t0)
             }
         };
-        let unit_area_temp_jct_cap = cap(m.unit_area_jct_cap, m.tcj);
-        let unit_length_sidewall_temp_jct_cap = cap(m.unit_length_sidewall_jct_cap, m.tcjsw);
+        let unit_area_temp_jct_cap = cap(m.unit_area_jct_cap, m.tcj, "cj");
+        let unit_length_sidewall_temp_jct_cap =
+            cap(m.unit_length_sidewall_jct_cap, m.tcjsw, "cjsw");
         let unit_length_gate_sidewall_temp_jct_cap =
-            cap(m.unit_length_gate_sidewall_jct_cap, m.tcjswg);
+            cap(m.unit_length_gate_sidewall_jct_cap, m.tcjswg, "cjswg");
 
         let phi_b = (bulk_jct_potential - m.tpb * del_temp).max(0.01);
         let phi_bsw = (sidewall_jct_potential - m.tpbsw * del_temp).max(0.01);
@@ -663,17 +677,21 @@ impl Bsim3v3SizeDep {
             // Result-affecting fixups gated on paramchk=1 (b3check.c:324-371).
             if p.a2 < 0.01 {
                 log::warn!("BSIM3: A2 = {} is too small; set to 0.01", p.a2);
+                replaced(Instance, "a2", p.a2, 0.01, Some(0.01));
                 p.a2 = 0.01;
             } else if p.a2 > 1.0 {
                 log::warn!(
                     "BSIM3: A2 = {} is larger than 1; A2 set to 1, A1 set to 0",
                     p.a2
                 );
+                replaced(Instance, "a2", p.a2, 1.0, Some(1.0));
+                replaced(Instance, "a1", p.a1, 0.0, None);
                 p.a2 = 1.0;
                 p.a1 = 0.0;
             }
             if p.rdsw < 0.0 {
                 log::warn!("BSIM3: Rdsw = {} is negative; set to zero", p.rdsw);
+                replaced(Instance, "rdsw", p.rdsw, 0.0, Some(0.0));
                 p.rdsw = 0.0;
                 p.rds0 = 0.0;
             } else if p.rds0 > 0.0 && p.rds0 < 0.001 {
@@ -681,6 +699,7 @@ impl Bsim3v3SizeDep {
                     "BSIM3: Rds at current temperature = {} is less than 0.001 ohm; set to zero",
                     p.rds0
                 );
+                replaced(Instance, "rds0", p.rds0, 0.0, Some(0.001));
                 p.rds0 = 0.0;
             }
             if m.cgdo < 0.0 || m.cgso < 0.0 || m.cgbo < 0.0 {

@@ -971,7 +971,7 @@ impl std::error::Error for ResultSchemaMismatchError {}
 
 /// An operating-point convergence aid: a homotopy that solves a deformed
 /// circuit and walks the deformation back to the circuit itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ContinuationAid {
     /// A conductance from every node to ground, stepped down to the GMIN

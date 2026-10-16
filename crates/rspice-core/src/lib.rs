@@ -103,6 +103,9 @@ pub mod library;
 /// A leaf — everything else depends on it, so it depends on nothing.
 pub(crate) mod naming;
 pub mod netlist;
+/// What a run raised and went on to complete with, in a shape a reader can
+/// act on: the advisories the log states as prose.
+pub mod notice;
 pub mod numerics;
 /// The vocabulary of labels a device operating-point report may carry. A leaf:
 /// the device families that emit one and the circuit store that assembles the
