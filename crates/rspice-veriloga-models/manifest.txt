@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "fb5bb5c0652623058dc9e5e8aa2bc476b894d2dd5bcb35da97eb769c2b532835",
-  "generator_digest": "b5e1f2cc9c0529d6fb5b1d312eaaa6ba71b9a09e463e958aeadeed55b390a229",
-  "bundle_digest": "f3ea41e561704f5a53a87ab9164d2f6e7b3aa2e398ef9322aeb699bf472f738f",
+  "generator_digest": "103cadfeca19caca5d7e4d01d2bdcc499b469c9d10657a74babe82b87475bb28",
+  "bundle_digest": "b814dc94248ff06eacc551703d23e75c67c15e1d87bc39dd4d46118349aaede3",
   "device_count": 43,
-  "file_count": 347,
-  "source_bytes": 34784976,
+  "file_count": 348,
+  "source_bytes": 34790172,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -1175,6 +1175,11 @@
       "relative_path": "Cargo.toml",
       "bytes": 10736,
       "blake3": "8db620b1f1235a279e599390357ee40519acad435097d23c99dec263ce91aee7"
+    },
+    {
+      "relative_path": "README.md",
+      "bytes": 5196,
+      "blake3": "176090d1bd3cb8f1d774fedf8b1ddc531568a0554c36858174a1630da81f5b0f"
     },
     {
       "relative_path": "models/angelov-gan/.rspice-veriloga-model-package",
