@@ -1159,10 +1159,18 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
     for record in &rules.records {
         assert_eq!(
             rows.iter()
-                .filter(|row| row.message == record.message)
+                .filter(|row| row.id == record.canonical.diagnostic_id)
                 .count(),
             1,
-            "{} is listed exactly once",
+            "{} is listed once, as the rule finding it is",
+            record.message
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.producer != record.canonical.source.as_ref()
+                    && row.message.contains(&record.message)),
+            "{} is not listed a second time by another producer",
             record.message
         );
     }
