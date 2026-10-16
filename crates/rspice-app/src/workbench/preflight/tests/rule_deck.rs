@@ -19,14 +19,12 @@ fn runnable_app() -> RSpiceApp {
 }
 
 /// Run the Check command and return the levels the page lists for `rule`.
-fn page_levels(app: &mut RSpiceApp, rule: DrcViolationType) -> Vec<DiagnosticLevel> {
-    let result = app
-        .state
+fn page_levels(state: &mut AppState, rule: DrcViolationType) -> Vec<DiagnosticLevel> {
+    let result = state
         .run_active_design_checks()
         .expect("the configured design checks");
-    let subject = app.state.workspace.content.active_schematic_reference();
-    let records = app
-        .state
+    let subject = state.workspace.content.active_schematic_reference();
+    let records = state
         .diagnostics
         .batch(&DiagnosticInputs::DesignCheck { subject })
         .expect("the checks published their findings")
@@ -50,9 +48,12 @@ fn preflight_blocks_on_design_rules(app: &RSpiceApp) -> bool {
 
 /// What the run gate does with the design: `None` where it prepares, the
 /// stage it refused at otherwise.
-fn run_gate(app: &mut RSpiceApp) -> Option<PreparationStage> {
-    app.simulation_controller
-        .prepare_run_set_for_preflight(&app.state)
+fn run_gate(
+    controller: &mut crate::simulation::SimulationController,
+    state: &AppState,
+) -> Option<PreparationStage> {
+    controller
+        .prepare_run_set_for_preflight(state)
         .err()
         .map(|error| error.stage())
 }
@@ -67,7 +68,7 @@ fn a_rule_the_deck_promotes_blocks_the_page_preflight_and_the_run_alike() {
     app.state.sync_active_schematic_to_workspace();
 
     assert_eq!(
-        page_levels(&mut app, DrcViolationType::OrphanNetLabel),
+        page_levels(&mut app.state, DrcViolationType::OrphanNetLabel),
         [DiagnosticLevel::Warning]
     );
     assert!(
@@ -75,7 +76,11 @@ fn a_rule_the_deck_promotes_blocks_the_page_preflight_and_the_run_alike() {
         "{:?}",
         collect_report(&app.state).blockers
     );
-    assert_eq!(run_gate(&mut app), None, "a warning travels with the run");
+    assert_eq!(
+        run_gate(&mut app.simulation_controller, &app.state),
+        None,
+        "a warning travels with the run"
+    );
 
     app.state
         .workspace
@@ -85,7 +90,7 @@ fn a_rule_the_deck_promotes_blocks_the_page_preflight_and_the_run_alike() {
         .expect("an orphan label may be promoted");
 
     assert_eq!(
-        page_levels(&mut app, DrcViolationType::OrphanNetLabel),
+        page_levels(&mut app.state, DrcViolationType::OrphanNetLabel),
         [DiagnosticLevel::Error],
         "the page states the promoted severity"
     );
@@ -94,7 +99,7 @@ fn a_rule_the_deck_promotes_blocks_the_page_preflight_and_the_run_alike() {
         "preflight blocks on what the page calls an error"
     );
     assert_eq!(
-        run_gate(&mut app),
+        run_gate(&mut app.simulation_controller, &app.state),
         Some(PreparationStage::DesignChecks),
         "the run gate refuses what the deck made an error, whether or not \
          preflight was run first"
@@ -113,10 +118,13 @@ fn a_rule_the_deck_demotes_lets_the_page_preflight_and_the_run_through_alike() {
         .add_net_label(Point::new(600, 700), "SENSE".to_owned());
     app.state.sync_active_schematic_to_workspace();
 
-    let levels = page_levels(&mut app, DrcViolationType::CaseCollidingNetNames);
+    let levels = page_levels(&mut app.state, DrcViolationType::CaseCollidingNetNames);
     assert_eq!(levels, [DiagnosticLevel::Error]);
     assert!(preflight_blocks_on_design_rules(&app));
-    assert_eq!(run_gate(&mut app), Some(PreparationStage::DesignChecks));
+    assert_eq!(
+        run_gate(&mut app.simulation_controller, &app.state),
+        Some(PreparationStage::DesignChecks)
+    );
 
     app.state
         .workspace
@@ -129,7 +137,7 @@ fn a_rule_the_deck_demotes_lets_the_page_preflight_and_the_run_through_alike() {
         .expect("a case collision may be demoted");
 
     assert_eq!(
-        page_levels(&mut app, DrcViolationType::CaseCollidingNetNames),
+        page_levels(&mut app.state, DrcViolationType::CaseCollidingNetNames),
         [DiagnosticLevel::Warning],
         "the page states the demoted severity"
     );
@@ -138,7 +146,7 @@ fn a_rule_the_deck_demotes_lets_the_page_preflight_and_the_run_through_alike() {
         "preflight does not block on what the page calls a warning"
     );
     assert_eq!(
-        run_gate(&mut app),
+        run_gate(&mut app.simulation_controller, &app.state),
         None,
         "the run gate passes what the deck demoted: it used to check the root \
          under the shipped defaults and refuse it"
