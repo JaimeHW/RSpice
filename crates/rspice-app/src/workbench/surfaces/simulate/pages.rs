@@ -642,7 +642,11 @@ mod tests {
             state.workbench.preflight.report = Some(stale);
         });
         let absent = analyses_text(|_| {});
-        for (standing, text) in [("blocked", blocked), ("expired", expired), ("absent", absent)] {
+        for (standing, text) in [
+            ("blocked", blocked),
+            ("expired", expired),
+            ("absent", absent),
+        ] {
             assert!(
                 !text
                     .iter()

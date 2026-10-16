@@ -426,7 +426,8 @@ mod tests {
             .retained
             .run_by_sequence_mut(run_sequence)
             .expect("the test run is retained");
-        run.mark_running().expect("the test run enters running state");
+        run.mark_running()
+            .expect("the test run enters running state");
         state.simulation.execution.active_execution = run.execution_identity();
         controller.current_run_id = Some(run_sequence);
         controller.current_analysis_label = Some("Transient".to_owned());

@@ -159,7 +159,10 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
     app.state
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(-200, -200));
-    assert_eq!(app.state.workspace.content.active_schematic_reference(), aux);
+    assert_eq!(
+        app.state.workspace.content.active_schematic_reference(),
+        aux
+    );
 
     app.state.diagnostics.request_route(route);
     apply_pending(&context(), &mut app);
@@ -185,8 +188,7 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
             .document()
             .components
             .iter()
-            .any(|component| component.id == resistor
-                && component.kind == ComponentType::Resistor),
+            .any(|component| component.id == resistor && component.kind == ComponentType::Resistor),
         "and that view is the one holding the resistor"
     );
 }

@@ -300,10 +300,9 @@ impl AppState {
                 // drawing opens first. A view that will not open — an edit
                 // in the inspector that cannot commit — leaves the reader
                 // where they were rather than selecting in the wrong view.
-                if !cell_view
-                    .key()
-                    .eq_ignore_ascii_case(&self.workspace.content.active_schematic_reference().key())
-                {
+                if !cell_view.key().eq_ignore_ascii_case(
+                    &self.workspace.content.active_schematic_reference().key(),
+                ) {
                     self.open_workspace_view(cell_view.clone());
                     if !cell_view.key().eq_ignore_ascii_case(
                         &self.workspace.content.active_schematic_reference().key(),

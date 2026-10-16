@@ -1050,8 +1050,7 @@ fn a_named_line_survives_the_parser_to_buffer_conversion() {
 ///
 /// The root holds a resistor and no ground, so its checks find an error and
 /// warnings. The reader is looking at another schematic.
-fn app_with_a_failing_root_and_an_unrelated_open_view() -> (RSpiceApp, crate::state::CellViewRef)
-{
+fn app_with_a_failing_root_and_an_unrelated_open_view() -> (RSpiceApp, crate::state::CellViewRef) {
     use crate::state::{CellViewRef, ComponentType, Point, SchematicState};
 
     let mut app = RSpiceApp::test_instance();
@@ -1126,8 +1125,15 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
         .iter()
         .filter(|issue| issue.check == "Schematic validation")
         .collect();
-    assert_eq!(validation.len(), 1, "one blocker stands for the rule errors");
-    assert_eq!(validation[0].remediation, PreflightRemediation::DesignChecks);
+    assert_eq!(
+        validation.len(),
+        1,
+        "one blocker stands for the rule errors"
+    );
+    assert_eq!(
+        validation[0].remediation,
+        PreflightRemediation::DesignChecks
+    );
     assert!(
         validation[0]
             .observed

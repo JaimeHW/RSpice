@@ -118,14 +118,12 @@ impl Records<'_> {
                     && diagnostic.canonical.document_id == key.document
                     && *diagnostic.message == *key.object
             }),
-            Self::Code(collection) => {
-                collection.as_slice().get(index).is_some_and(|diagnostic| {
-                    diagnostic.canonical.source == key.producer
-                        && diagnostic.canonical.code == key.code
-                        && diagnostic.canonical.document_id == key.document
-                        && diagnostic.message == key.object
-                })
-            }
+            Self::Code(collection) => collection.as_slice().get(index).is_some_and(|diagnostic| {
+                diagnostic.canonical.source == key.producer
+                    && diagnostic.canonical.code == key.code
+                    && diagnostic.canonical.document_id == key.document
+                    && diagnostic.message == key.object
+            }),
         }
     }
 }
@@ -206,11 +204,12 @@ impl AppState {
         }
 
         let reanchored = self.diagnostics.source_anchor.as_ref().and_then(|anchor| {
-            find(self, |records, index| records.matches(index, &anchor.key))
-                .and_then(|(segment, index)| {
+            find(self, |records, index| records.matches(index, &anchor.key)).and_then(
+                |(segment, index)| {
                     let id = records(self, segment)?.id(index)?;
                     Some((segment, index, id, anchor.key.clone()))
-                })
+                },
+            )
         });
         match reanchored {
             Some((segment, index, id, key)) => {

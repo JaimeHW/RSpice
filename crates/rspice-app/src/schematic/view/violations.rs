@@ -176,28 +176,28 @@ pub(crate) fn location_anchor_in(
     }
 
     let key = cell_view.key();
-    let world = if key.eq_ignore_ascii_case(&state.workspace.content.active_schematic_reference().key())
-    {
-        markers::anchor(&super::schematic_design_view(state), location)?
-    } else {
-        let (_, schematic) = state
-            .workspace
-            .content
-            .schematic_buffers
-            .iter()
-            .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?;
-        let view = rspice_schematic_editor::view::design_view::DesignView {
-            document: schematic.document(),
-            canvas_cache: None,
-            sheet_catalog: state
+    let world =
+        if key.eq_ignore_ascii_case(&state.workspace.content.active_schematic_reference().key()) {
+            markers::anchor(&super::schematic_design_view(state), location)?
+        } else {
+            let (_, schematic) = state
                 .workspace
                 .content
-                .design_management
-                .sheet_catalog(&key),
-            review_markers: state.ui.schematic_visibility.review_markers,
+                .schematic_buffers
+                .iter()
+                .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?;
+            let view = rspice_schematic_editor::view::design_view::DesignView {
+                document: schematic.document(),
+                canvas_cache: None,
+                sheet_catalog: state
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog(&key),
+                review_markers: state.ui.schematic_visibility.review_markers,
+            };
+            markers::anchor(&view, location)?
         };
-        markers::anchor(&view, location)?
-    };
     let (component, wire) = match location {
         DrcLocation::Component { id, .. } => (Some(*id), None),
         DrcLocation::Wire { id } => (None, Some(*id)),

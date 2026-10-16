@@ -155,15 +155,7 @@ impl CanonicalDiagnosticMetadata {
         );
         Self {
             diagnostic_id,
-            ..Self::current(
-                source,
-                code,
-                document_id,
-                None,
-                revision,
-                validation_id,
-                "",
-            )
+            ..Self::current(source, code, document_id, None, revision, validation_id, "")
         }
     }
 
@@ -268,7 +260,10 @@ mod tests {
                 8,
                 "design-check:8",
             );
-            assert_ne!(first.diagnostic_id, other.diagnostic_id, "{object} #{occurrence}");
+            assert_ne!(
+                first.diagnostic_id, other.diagnostic_id,
+                "{object} #{occurrence}"
+            );
         }
         // Length-prefixed, so moving a separator between fields is a
         // different identity rather than the same string.

@@ -522,9 +522,7 @@ pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> Diag
             .segments
             .iter()
             .filter_map(|segment| match segment {
-                Segment::Stored { batch, standing } => {
-                    Some((batch.inputs.key(), standing.clone()))
-                }
+                Segment::Stored { batch, standing } => Some((batch.inputs.key(), standing.clone())),
                 Segment::Netlist(_) | Segment::Code { .. } => None,
             })
             .collect(),
@@ -889,7 +887,8 @@ mod tests {
         };
 
         let mut state = open_state();
-        let mut waived = Diagnostic::current("rspice.test", "T-WAIVED", NetlistSeverity::Error, "a");
+        let mut waived =
+            Diagnostic::current("rspice.test", "T-WAIVED", NetlistSeverity::Error, "a");
         waived.canonical.suppression = Some(waiver());
         let mut stale = Diagnostic::current("rspice.test", "T-STALE", NetlistSeverity::Error, "b");
         stale
@@ -1013,7 +1012,11 @@ mod tests {
             crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
         assert_eq!(listing_in_pass(&state, 7).counts().errors, 1);
         assert_eq!(listing_in_pass(&state, 8).counts().stale, 1);
-        assert_eq!(listing(&state).counts().stale, 1, "the unmemoized list is exact");
+        assert_eq!(
+            listing(&state).counts().stale,
+            1,
+            "the unmemoized list is exact"
+        );
 
         // A publication moves the store's generation, so the same pass
         // decides again rather than reading the replaced batch's standing.

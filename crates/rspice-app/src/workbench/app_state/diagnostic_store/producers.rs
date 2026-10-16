@@ -81,9 +81,12 @@ impl AppState {
             .unwrap_or_default();
         let mut keys: Vec<FindingKey> = records.iter().map(|record| record.key.clone()).collect();
         keys.push(key.clone());
-        let Some(canonical) =
-            mint_canonical(&keys, run_sequence, &format!("run:{run_sequence}:{analysis}")).pop()
-        else {
+        let Some(canonical) = mint_canonical(
+            &keys,
+            run_sequence,
+            &format!("run:{run_sequence}:{analysis}"),
+        )
+        .pop() else {
             return;
         };
         let route = attribution.and_then(|attribution| {

@@ -252,10 +252,13 @@ impl AppState {
             .find(|batch| batch.inputs == published)?
             .records
             .iter()
-            .fold(None, |worst: Option<&DiagnosticRecord>, record| match worst {
-                Some(worst) if worst.level >= record.level => Some(worst),
-                _ => Some(record),
-            })
+            .fold(
+                None,
+                |worst: Option<&DiagnosticRecord>, record| match worst {
+                    Some(worst) if worst.level >= record.level => Some(worst),
+                    _ => Some(record),
+                },
+            )
             .map(|record| record.canonical.diagnostic_id)
     }
 

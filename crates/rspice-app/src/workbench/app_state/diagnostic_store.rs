@@ -384,8 +384,12 @@ impl DiagnosticOwner {
     /// the assertion below holds this list to one owner per place. The tests
     /// that must drive every owner walk this list rather than naming the
     /// owners they happen to know about.
-    pub(in crate::workbench) const ALL: [Self; 4] =
-        [Self::DesignRules, Self::SymbolPins, Self::Dispatch, Self::Run];
+    pub(in crate::workbench) const ALL: [Self; 4] = [
+        Self::DesignRules,
+        Self::SymbolPins,
+        Self::Dispatch,
+        Self::Run,
+    ];
 
     /// This owner's place in [`Self::ALL`].
     const fn position(self) -> usize {
@@ -735,7 +739,9 @@ impl DiagnosticStore {
             return;
         }
         self.current = finding;
-        self.current_key = finding.and_then(|id| self.record(id)).map(|record| record.key.clone());
+        self.current_key = finding
+            .and_then(|id| self.record(id))
+            .map(|record| record.key.clone());
         self.source_anchor = None;
         self.unresolved = None;
     }
