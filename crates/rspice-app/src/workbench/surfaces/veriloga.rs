@@ -14,6 +14,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::{MessageId, RSpiceApp};
 
+use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_problem_mark};
+
 use crate::workbench::documents::code_workspace::{
     CodeDiagnosticCollection, CodeEditorLanguage, show_code_document_interaction_versioned,
 };
@@ -192,31 +194,44 @@ fn source_editor(
         egui::pos2(toolbar.right() - 8.0, toolbar.bottom()),
     );
     let messages = app.state.ui.messages();
-    let (status, color) = crate::workbench::documents::code_workspace::veriloga_compile_status(
+    let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
+    // Neutral text, and a mark only where the reader has to act. A clean
+    // compile leaves the corner empty and gives the whole row to the path.
+    let status_left = crate::workbench::documents::code_workspace::veriloga_compile_status(
         &app.state.ui.code_workspace.veriloga,
         app.state.workspace.content.project.id(),
         selected,
         messages,
-        &t,
-    );
-    let status_galley =
-        ui.painter()
-            .layout_no_wrap(status, theme::mono(tokens::FS_0, FontWeight::Medium), color);
-    let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
-    let status_dot_x = toolbar_content_right - status_galley.size().x - 17.0;
-    ui.painter()
-        .circle_filled(egui::pos2(status_dot_x, toolbar.center().y), 2.5, color);
-    ui.painter().galley(
-        egui::pos2(
-            toolbar_content_right - status_galley.size().x - 8.0,
-            toolbar.center().y - status_galley.size().y * 0.5,
-        ),
-        status_galley.clone(),
-        color,
-    );
+    )
+    .map_or(toolbar_content_right, |(status, problem)| {
+        let galley = ui.painter().layout_no_wrap(
+            status,
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            t.color.text_dim,
+        );
+        let mut left = toolbar_content_right - galley.size().x - 8.0;
+        ui.painter().galley(
+            egui::pos2(left, toolbar.center().y - galley.size().y * 0.5),
+            galley,
+            t.color.text_dim,
+        );
+        if let Some(problem) = problem {
+            left -= PROBLEM_MARK_GAP;
+            paint_problem_mark(
+                ui.painter(),
+                egui::Rect::from_center_size(
+                    egui::pos2(left - PROBLEM_MARK_SIDE / 2.0, toolbar.center().y),
+                    Vec2::splat(PROBLEM_MARK_SIDE),
+                ),
+                problem,
+            );
+            left -= PROBLEM_MARK_SIDE;
+        }
+        left
+    });
     // Keep even unusually long logical paths out of the status. The full path
     // remains available from the file tree.
-    let path_right = (status_dot_x - 13.0).max(path_clip.left());
+    let path_right = (status_left - 9.0).max(path_clip.left());
     let path_clip =
         egui::Rect::from_min_max(path_clip.min, egui::pos2(path_right, path_clip.bottom()));
     ui.painter().with_clip_rect(path_clip).text(
