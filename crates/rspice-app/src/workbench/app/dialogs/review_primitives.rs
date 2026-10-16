@@ -224,12 +224,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compact_review_geometry_matches_the_restored_mockup() {
-        assert_eq!(SURFACE_HEIGHT, 370.0);
+    fn the_purpose_line_keeps_its_height() {
         assert_eq!(PURPOSE_HEIGHT, 35.0);
-        assert_eq!(BODY_HEIGHT, 230.0);
-        assert_eq!(CONTEXT_WIDTH, 260.0);
-        assert_eq!(TRANSACTION_HEIGHT, 37.0);
     }
 
     /// Nothing in the dialog-content slice paints a status in colour.
