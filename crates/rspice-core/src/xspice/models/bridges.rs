@@ -66,8 +66,8 @@ fn bridge_control_param(ctx: &CmContext, model_name: &str, name: &str) -> CmResu
 }
 
 fn adc_bridge_state(input: Value, _previous: i64, in_low: Value, in_high: Value) -> i64 {
-    match crate::xspice::AnalogThresholdBehavior::UnknownBand
-        .decision(input, None, None, in_low, in_high)
+    match crate::xspice::AnalogBandLaw::UNKNOWN_BAND
+        .decision(input, None, None, in_low, in_high, false)
         .unwrap()
         .0
     {
@@ -412,12 +412,13 @@ impl CodeModel for MixedAdcBridge {
                 1 => Some(DigitalState::One),
                 _ => None,
             };
-            let decision = crate::xspice::AnalogThresholdBehavior::Hysteresis.decision(
+            let decision = crate::xspice::AnalogBandLaw::HYSTERESIS.decision(
                 voltage,
                 (ctx.time > 0.0).then(|| ctx.state_prev(index)),
                 held,
                 low,
                 high,
+                false,
             );
             let state = decision.map_or(
                 if previous == ADC_UNINITIALIZED_STATE {
