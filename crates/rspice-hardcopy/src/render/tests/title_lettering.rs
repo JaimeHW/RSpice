@@ -77,6 +77,60 @@ fn only_the_document_identifier_is_plotted_in_the_heavier_weight() {
         .map(|(_, _, text)| text)
         .collect::<Vec<_>>();
     assert_eq!(heavier, ["PSAFE-SCH-001"]);
+
+    // A PDF letters that line from the embedded Medium cut, and a sheet that
+    // does not show the identifier embeds no Medium cut at all.
+    let embedded_faces = |format: &SchematicSheetFormat| {
+        let source = resolved_blank_schematic(format);
+        let setup = setup_with_schematic_output(
+            OutputFormat::PdfVector,
+            SchematicHardcopySetup::new(
+                SchematicHardcopyExtent::AuthoredDrawingSheet,
+                OutsideSheetContentPolicy::Ask,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+            ),
+        );
+        let plan =
+            HardcopyPlan::compile(source.authority().clone(), setup, source.content_extent())
+                .unwrap();
+        let pdf = HardcopyRenderer::render_resolved(&plan, &source, resolved_metadata()).unwrap();
+        let parsed = ParsedPdf::load_mem(pdf.single_part().unwrap().bytes()).unwrap();
+        parsed
+            .objects
+            .values()
+            .filter_map(|object| object.as_dict().ok())
+            .filter_map(|dictionary| dictionary.get(b"BaseFont").ok())
+            .filter_map(|name| name.as_name().ok())
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+            .collect::<Vec<_>>()
+    };
+    let shown = embedded_faces(&format);
+    assert!(
+        shown
+            .iter()
+            .any(|face| face.ends_with("IBMPlexMono-Medium")),
+        "the identifier must be set in the Medium cut: {shown:?}"
+    );
+    let hidden = format
+        .try_update(|draft| {
+            draft
+                .title_block
+                .fields
+                .get_mut(&DrawingSheetTitleFieldId::DocumentId)
+                .unwrap()
+                .visible = false;
+        })
+        .unwrap();
+    let without = embedded_faces(&hidden);
+    assert!(
+        !without.iter().any(|face| face.contains("Medium")),
+        "only the identifier is set in the Medium cut: {without:?}"
+    );
     assert!(DrawingSheetTitleFieldId::DocumentId.emphasised());
     assert_eq!(
         DrawingSheetTitleFieldId::ALL
