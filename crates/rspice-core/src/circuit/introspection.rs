@@ -7,8 +7,11 @@
 
 use super::*;
 
+mod dc_branch_loops;
 mod intrinsic_voltages;
 mod power;
+
+pub use dc_branch_loops::DcBranchVoltageLoop;
 
 /// One device's operating-point summary line.
 #[derive(Debug, Clone)]

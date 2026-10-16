@@ -50,8 +50,9 @@ mod terminal_probes;
 pub(in crate::engine) use model_resolution::resolved_element_value_expression;
 use model_resolution::*;
 pub use model_resolution::{
-    ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinInspection,
-    ModelBinInstanceInspection, ModelBinSelectionKind, ResolvedResistorParameters,
+    ModelBinAxisRange, ModelBinCardGeometry, ModelBinCardInspection, ModelBinCoverageGap,
+    ModelBinInspection, ModelBinInstanceInspection, ModelBinSelectionKind,
+    ResolvedResistorParameters,
     XYCE_DEFAULT_CAPACITOR_AGE_DEGRADATION, validate_native_xyce_ltra_model_contract,
 };
 mod behavioral;
@@ -5400,6 +5401,62 @@ impl Engine {
     /// authoritative inspection path retained by frontends.
     pub fn validate_model_bin_contracts(&self, netlist: &Netlist) -> Result<(), SimulationError> {
         self.inspect_model_bins(netlist).map(|_| ())
+    }
+
+    /// Every flattened MOS instance whose geometry no bin card of its family
+    /// covers, each with the family card nearest to it.
+    ///
+    /// [`Self::build_circuit`] refuses the first such instance with a message;
+    /// this names all of them, with the geometry they were evaluated at, over
+    /// the same flattening, scoped cards, expression context and inclusive
+    /// bounds. A malformed card fails here as it fails construction.
+    pub fn model_bin_coverage_gaps(
+        &self,
+        netlist: &Netlist,
+    ) -> Result<Vec<ModelBinCoverageGap>, SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        engine.ensure_valid_configuration()?;
+        netlist.params.restart_statistical_stream();
+        let flattened = flatten_netlist_with_models_config_with_abort(
+            netlist,
+            FlattenerConfig {
+                max_depth: engine.config.resource_limits.max_hierarchy_depth,
+                max_elements: engine.config.resource_limits.max_flattened_elements,
+                ..FlattenerConfig::default()
+            },
+            &NoAbort,
+        )
+        .map_err(|error| map_build_parse_error("model-bin hierarchy flattening", error))?;
+        let mut effective_model_netlist;
+        let netlist = if flattened.scoped_models.is_empty() {
+            netlist
+        } else {
+            effective_model_netlist = netlist.clone();
+            effective_model_netlist
+                .models
+                .extend(flattened.scoped_models);
+            &effective_model_netlist
+        };
+        let resolution = ModelResolution::new(netlist, &NoAbort);
+        let mut gaps = Vec::new();
+        for element in &flattened.elements {
+            let ElementKind::Mosfet {
+                model,
+                instance_params,
+                ..
+            } = &element.kind
+            else {
+                continue;
+            };
+            gaps.extend(model_bin_coverage_gap(
+                &resolution,
+                &element.name,
+                model,
+                instance_params,
+                engine.config.temperature,
+            )?);
+        }
+        Ok(gaps)
     }
 
     /// Build a circuit from a netlist, using a non-cancellable compatibility path.
@@ -11071,6 +11128,44 @@ mod tests {
         assert!(message.contains("model family 'NCH' is ambiguous"));
         assert!(message.contains("'NCH.0' and 'NCH.1'"));
         assert!(message.contains("positive-area bin region"));
+    }
+
+    /// Construction refuses the first instance no bin covers; the coverage
+    /// query names every one, at the geometry it was evaluated at, with the
+    /// card nearest to it. A covered instance and an exact card are not gaps.
+    #[test]
+    fn every_uncovered_bin_instance_is_named_with_its_nearest_card() {
+        let deck = "uncovered binned mosfets\n\
+             V1 d 0 1\n\
+             M1 d d 0 0 NCH W=1u L=0.1u\n\
+             M2 d d 0 0 NCH W=1u L=0.5u\n\
+             M3 d d 0 0 NCH W=5u L=0.5u\n\
+             M4 d d 0 0 NCH.0 W=5u L=0.1u\n\
+             .model NCH.0 NMOS LEVEL=1 LMIN=0.28u LMAX=0.5u WMIN=0.5u WMAX=2u VTO=0.4\n\
+             .model NCH.1 NMOS LEVEL=1 LMIN=0.5u LMAX=1.2u WMIN=0.5u WMAX=2u VTO=0.9\n\
+             .end\n";
+        let netlist = Netlist::parse(deck).expect("uncovered bin deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let message = engine
+            .build_circuit(&netlist)
+            .expect_err("an uncovered instance blocks construction")
+            .to_string();
+        assert!(message.contains("MOSFET 'M1' geometry is uncovered"), "{message}");
+
+        let gaps = engine
+            .model_bin_coverage_gaps(&netlist)
+            .expect("well-formed cards inspect");
+        let named: Vec<&str> = gaps.iter().map(|gap| gap.element.as_str()).collect();
+        assert_eq!(named, ["M1", "M3"]);
+        let near = |value: Option<f64>, expected: f64| {
+            value.is_some_and(|value| (value - expected).abs() < 1e-15)
+        };
+        assert_eq!(gaps[0].family, "NCH");
+        assert!(near(gaps[0].length, 0.1e-6), "{:?}", gaps[0]);
+        assert!(near(gaps[0].width, 1.0e-6), "{:?}", gaps[0]);
+        assert_eq!(gaps[0].nearest.model, "NCH.0");
+        assert!(near(gaps[0].nearest.geometry.length.min, 0.28e-6));
+        assert!(near(gaps[1].nearest.geometry.width.max, 2.0e-6));
     }
 
     #[test]

@@ -50,7 +50,7 @@ pub(crate) use external_models::{
 };
 mod force_accept;
 mod introspection;
-pub use introspection::{DeviceOpEntry, DeviceOpReport};
+pub use introspection::{DcBranchVoltageLoop, DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
 #[cfg(feature = "veriloga")]
