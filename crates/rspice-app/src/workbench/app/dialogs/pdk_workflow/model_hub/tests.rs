@@ -561,10 +561,9 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
         "and nothing reached the store either"
     );
 
-    // The frame loop turns that into a toast, a console error, and a typed
-    // operational state — and touches no project state on the way.
-    let ctx = egui::Context::default();
-    super::emit_model_hub_errors(&ctx, &mut state, vec![failure]);
+    // The frame loop turns that into a console error and a typed operational
+    // state, and touches no project state on the way.
+    super::emit_model_hub_errors(&mut state, vec![failure]);
     assert_eq!(
         state.workbench.models_view.operational_state,
         ModelsOperationalState::Offline
@@ -837,10 +836,7 @@ fn a_failed_catalog_refresh_lets_a_later_visit_try_again() {
     // workspace went on reporting a week-old catalog for the rest of the day.
     let mut state = AppState::default();
     state.workbench.models_view.catalog_refresh_requested = true;
-    let ctx = egui::Context::default();
-
     super::emit_model_hub_errors(
-        &ctx,
         &mut state,
         vec!["the model hub could not be reached".to_owned()],
     );
@@ -1227,9 +1223,8 @@ fn an_update_onto_a_recalled_release_refuses_on_the_operation_machine() {
 
     // The same refusal reaching the session leaves the banner the workspace
     // already paints, with no new vocabulary of its own.
-    let ctx = egui::Context::default();
     let mut state = open_project();
-    super::emit_model_hub_errors(&ctx, &mut state, vec![error]);
+    super::emit_model_hub_errors(&mut state, vec![error]);
     assert_eq!(
         state.workbench.models_view.operational_state,
         ModelsOperationalState::Recalled
