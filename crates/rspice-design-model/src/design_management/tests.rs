@@ -2702,12 +2702,31 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
         "A3 and A1 share the standard's middle row"
     );
 
+    // An ISO 3098 height is the height of the capitals, so the em a renderer
+    // is handed must be the larger number. Letter at the height itself and
+    // the capitals come out at 0.698 of it, which on A4 puts a caption at
+    // 1.26 mm — under the smallest height the standard permits.
+    for height_um in [1_800, 2_500, 3_500, 5_000, 7_000] {
+        let em_um = drawing_sheet_mono_em_um(height_um);
+        assert!(
+            em_um > height_um,
+            "an em that letters capitals {height_um} um tall is taller than they are"
+        );
+        assert!(
+            em_um * 698 / 1_000 >= height_um - 1,
+            "lettering at em {em_um} um must return capitals of {height_um} um"
+        );
+    }
+
     // IBM Plex Mono advances 600 and ascends 1025 over 1000-unit em, as the
-    // shipped faces report. Both derivations are exact at every height used.
-    assert_eq!(drawing_sheet_mono_advance_um(2_500), 1_500);
-    assert_eq!(drawing_sheet_mono_advance_um(1_800), 1_080);
-    assert_eq!(drawing_sheet_mono_baseline_offset_um(2_500), 937);
-    assert_eq!(drawing_sheet_mono_baseline_offset_um(1_800), 675);
+    // shipped faces report. Both derivations are exact at every height used,
+    // and both are taken from the em rather than from the capital height.
+    assert_eq!(drawing_sheet_mono_em_um(2_500), 3_581);
+    assert_eq!(drawing_sheet_mono_em_um(1_800), 2_578);
+    assert_eq!(drawing_sheet_mono_advance_um(2_500), 2_148);
+    assert_eq!(drawing_sheet_mono_advance_um(1_800), 1_546);
+    assert_eq!(drawing_sheet_mono_baseline_offset_um(2_500), 1_342);
+    assert_eq!(drawing_sheet_mono_baseline_offset_um(1_800), 966);
 
     // Every caption must fit the narrowest cell the default sheet produces,
     // because a caption is fixed wording that no operator can shorten.
@@ -2729,4 +2748,64 @@ fn drawing_sheet_lettering_is_iso_3098_and_its_budget_is_a_measurement() {
             caption.chars().count()
         );
     }
+}
+
+#[test]
+fn title_block_lettering_steps_down_to_the_row_that_carries_it() {
+    // A title block is a fixed form: the block on an A0 sheet has the same
+    // rows in the same height as the block on an A4 one. The heights a sheet
+    // recommends rise with the paper, so on the largest sheets a value's line
+    // is taller than the space under its seat in the row — and the canvas
+    // clips a cell to its rules, which makes an unclamped height a field
+    // truncated outright rather than a field lettered generously.
+    let mut stepped_down = 0;
+    for standard in DrawingSheetStandard::ALL {
+        let format = SchematicSheetFormat::default()
+            .try_update(|draft| {
+                draft.authored_size = AuthoredDrawingSheetSize::Standard { standard };
+                draft.margins = standard.default_margins();
+            })
+            .expect("every standard sheet size is a valid format");
+        let geometry = format.geometry().expect("a standard sheet has geometry");
+        let Some(lettering) = drawing_sheet_title_block_lettering(&format, &geometry) else {
+            continue;
+        };
+        let recommended = format.authored_size.lettering();
+        assert!(
+            lettering.caption_um <= recommended.caption_um
+                && lettering.data_um <= recommended.data_um,
+            "{standard:?} must not letter above what its sheet recommends"
+        );
+        if lettering.data_um < recommended.data_um {
+            stepped_down += 1;
+        }
+        assert!(
+            ISO_3098_HEIGHTS_UM.contains(&lettering.data_um),
+            "{standard:?} letters values at {} um, which is not on the series",
+            lettering.data_um
+        );
+
+        // A line seated on a fraction of the row reaches 0.587 of its em
+        // below that seat — 3/8 to the baseline, then 212/1000 to the foot of
+        // a `g` — and has to stop above the rule under it.
+        let rows = format
+            .title_block_rows(geometry.effective_title_block_template)
+            .expect("a block has rows") as u64;
+        let row_height_um = geometry.title_block.expect("a block has a rect").height_um / rows;
+        for (position, height_um) in [
+            (DRAWING_SHEET_TITLE_CAPTION_POSITION, lettering.caption_um),
+            (DRAWING_SHEET_TITLE_VALUE_POSITION, lettering.data_um),
+        ] {
+            let (numerator, denominator) = position;
+            let below_seat_um = row_height_um - row_height_um * numerator / denominator;
+            assert!(
+                drawing_sheet_mono_em_um(height_um) * 587 / 1_000 <= below_seat_um,
+                "{standard:?} letters at {height_um} um, whose ink crosses the rule below it"
+            );
+        }
+    }
+    assert!(
+        stepped_down > 0,
+        "the largest sheets recommend more lettering than a title row can seat"
+    );
 }

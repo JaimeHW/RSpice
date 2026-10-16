@@ -1181,7 +1181,11 @@ impl<'a> SemanticSceneCompiler<'a> {
             )
             .ok_or_else(|| conversion_error("title block has no authored cell capacity"))
         };
-        let lettering = format.authored_size.lettering();
+        let lettering =
+            rspice_design_model::design_management::drawing_sheet_title_block_lettering(
+                format, &geometry,
+            )
+            .ok_or_else(|| conversion_error("title block has no authored lettering"))?;
         let value_chars = capacity(lettering.data_um)?;
         let caption_chars = capacity(lettering.caption_um)?;
         for (index, (label, value, automatic)) in fields.into_iter().enumerate() {
