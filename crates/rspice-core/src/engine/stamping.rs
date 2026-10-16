@@ -228,6 +228,15 @@ impl Engine {
     /// names it, as it refuses a deck node with no DC path. So does one
     /// whose column is empty but whose right-hand side is not, a current the
     /// model drives into a node it gives no path.
+    ///
+    /// A refusal holds only where the emptiness is structural: no equation
+    /// of the model that is not a sum of `ddt()` terms has a stamp location
+    /// in the row ([`CircuitData::compact_model_dc_driven_nodes`]), or none
+    /// reads the column ([`CircuitData::compact_model_read_nodes`]). A row a
+    /// conditional stamp leaves empty at this bias alone, `I(x) <+ (V(c) >
+    /// 0.5) ? V(x) / R : 0` at `V(c) = 0`, is neither settled nor refused: the
+    /// solve goes on, and the GMIN continuation carries it to the bias where
+    /// the stamp holds.
     pub(in crate::engine) fn settle_compact_model_private_nodes(
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
@@ -258,7 +267,17 @@ impl Engine {
                 if floor != 0.0 {
                     matrix.add(index, index, floor);
                 }
+                continue;
+            }
+            // Empty here is a fact about this bias only. A refusal needs the
+            // emptiness to hold at every bias: no stamp location of the model
+            // reads the node, or none drives its row at DC.
+            let structurally_empty = if unread {
+                !circuit.compact_model_read_nodes.contains(&node)
             } else {
+                !circuit.compact_model_dc_driven_nodes.contains(&node)
+            };
+            if structurally_empty {
                 circuit.settled_compact_model_private_nodes = Some(settled);
                 return Err(Self::private_node_without_dc_path(circuit, node, unread));
             }

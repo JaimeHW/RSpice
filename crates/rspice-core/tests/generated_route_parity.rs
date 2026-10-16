@@ -1128,6 +1128,70 @@ fn a_compact_models_own_node_with_no_dc_path_settles_or_is_refused_by_name() {
     );
 }
 
+/// A private node whose row a conditional stamp leaves empty at the starting
+/// bias is not a node without a DC path. At `V(c) = 0` nothing writes `x`'s
+/// row while `I(a)` reads `V(x)`, but the stamp exists, and the operating
+/// point, `c = 1`, turns it on: `x` reads 0 V and the source sees 1 V across
+/// 1k. Refusing on the first assembly's zeros named `x` as having no DC path.
+#[test]
+fn a_private_node_a_conditional_stamp_drives_is_not_refused_on_its_starting_bias() {
+    let path =
+        std::env::temp_dir().join(format!("rspice_conditional_row_{}.va", std::process::id()));
+    std::fs::write(
+        &path,
+        "`include \"disciplines.vams\"\nmodule cond(a);\ninout a;\nelectrical a;\n\
+         electrical x, c;\nanalog begin\n  I(c) <+ V(c) - 1.0;\n\
+         I(a) <+ V(a) / 1000.0 + 1.0e-3 * V(x);\n\
+         I(x) <+ (V(c) > 0.5) ? V(x) / 1000.0 : 0.0;\nend\nendmodule\n",
+    )
+    .expect("write the module");
+    let source = path.display().to_string().replace('\\', "/");
+    let deck =
+        format!("* conditional private row\n.va \"{source}\" cond\nVs a 0 1\nX1 a cond\n.end\n");
+    let trace = operating_point_trace(&deck, &["a", "x1.x", "x1.c"], &["Vs"]);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(trace[0].text.as_deref(), Some("ok"), "{trace:?}");
+    assert!(
+        (traced(&trace, "op.v(x1.c)") - 1.0).abs() < 1.0e-9,
+        "{trace:?}"
+    );
+    assert!(traced(&trace, "op.v(x1.x)").abs() < 1.0e-9, "{trace:?}");
+    assert!(
+        (traced(&trace, "op.i(Vs)") + 1.0e-3).abs() < 1.0e-9,
+        "1 V across 1k: {trace:?}"
+    );
+}
+
+/// A private node only a `ddt()` drives still has no DC path: its row is
+/// empty at every bias of an operating point, and the model reads it, so the
+/// operating point refuses it by name.
+#[test]
+fn a_private_node_only_a_ddt_drives_is_refused_by_name() {
+    let path = std::env::temp_dir().join(format!("rspice_ddt_row_{}.va", std::process::id()));
+    std::fs::write(
+        &path,
+        "`include \"disciplines.vams\"\nmodule charged(a, b, r);\ninout a, b, r;\n\
+         electrical a, b, r;\nanalog begin\n  I(a, b) <+ V(a, b) / 1k + 1m * V(r);\n\
+         I(r) <+ ddt(1p * V(r));\nend\nendmodule\n",
+    )
+    .expect("write the module");
+    let source = path.display().to_string().replace('\\', "/");
+    let deck = format!(
+        "* ddt-only private row\n.va \"{source}\" charged\nV1 in 0 1\nX1 in 0 charged\n.end\n"
+    );
+    let trace = operating_point_trace(&deck, &["in"], &["V1"]);
+    let _ = std::fs::remove_file(&path);
+    let message = trace[0]
+        .text
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    assert!(
+        message.contains("node x1.r has no dc path") && message.contains("constrains it at dc"),
+        "the refusal names the node: {trace:?}"
+    );
+}
+
 /// BSIM-BULK 107.2.1 on `d g s b`, `t` left out: `Temp(t) <+ 0` with
 /// self-heating off. The `.va` route's X card, the generated X card and the
 /// generated M card reach the same operating point, bit for bit, the thermal

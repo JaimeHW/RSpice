@@ -2390,6 +2390,22 @@ pub(crate) fn instantiate_builtin_scoped(
         };
         nodes.push(node);
     }
+    // How far the model's stamps reach into those nodes, read from the
+    // pattern its calls publish rather than from any one evaluation.
+    let pattern = descriptor.stamp_pattern;
+    let node_at = |axis: usize| nodes.get(axis).copied();
+    circuit.record_compact_model_stamp_reach(
+        &private_nodes,
+        pattern
+            .resistive
+            .iter()
+            .filter_map(|&(row, _)| node_at(row)),
+        pattern
+            .resistive
+            .iter()
+            .chain(pattern.dynamic)
+            .filter_map(|&(_, col)| node_at(col)),
+    );
     circuit
         .compact_model_private_nodes
         .extend(private_nodes.into_iter().filter(|&node| node > 0));

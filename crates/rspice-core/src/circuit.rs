@@ -623,6 +623,13 @@ pub struct CircuitData {
     /// voltage, or `None` before that assembly
     /// (`Engine::settle_compact_model_private_nodes`).
     pub(crate) settled_compact_model_private_nodes: Option<Vec<NodeId>>,
+    /// Of [`Self::compact_model_private_nodes`], those whose row some
+    /// equation of the owning model can write a Jacobian entry into at DC,
+    /// whatever its bias: the model's stamp pattern, not one evaluation.
+    pub(crate) compact_model_dc_driven_nodes: HashSet<NodeId>,
+    /// Of [`Self::compact_model_private_nodes`], those whose voltage some
+    /// stamp location of the owning model reads, in any analysis.
+    pub(crate) compact_model_read_nodes: HashSet<NodeId>,
     /// Selects each family-specific state equation during a DC/startup
     /// operating-point solve instead of its transient dynamic equation.
     pub(crate) xyce_memristor_operating_point_mode: bool,

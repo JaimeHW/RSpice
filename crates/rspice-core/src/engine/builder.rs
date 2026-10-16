@@ -508,6 +508,7 @@ fn bind_veriloga_solver_unknowns(
     instance: &str,
     device: &mut rspice_veriloga::device::VerilogADevice,
     names: &VerilogAUnknownNames<'_>,
+    artifact: Option<&rspice_veriloga::canonical_ir::CanonicalIrArtifact>,
 ) -> Result<(), String> {
     // Before the internal nodes, so the numbering follows the module's own
     // order, terminals first: the order a generated instance is built in.
@@ -551,13 +552,41 @@ fn bind_veriloga_solver_unknowns(
         .extend(device.non_electrical_node_indices());
     // The instance owns its internal nodes and the nets of the terminals the
     // card left out: no final GMIN floor reaches them.
-    circuit.compact_model_private_nodes.extend(
-        unconnected
+    let private: Vec<_> = unconnected
+        .iter()
+        .chain(&internal_nodes)
+        .copied()
+        .filter(|&node| node > 0)
+        .collect();
+    // How far its stamps reach into them, from the locations its programs
+    // name rather than from any one evaluation. Matrix indices are zero-based.
+    let locations: Vec<_> = device
+        .mapped_jacobian_locations()
+        .into_iter()
+        .flatten()
+        .chain(device.mapped_branch_incidence())
+        .collect();
+    let stamped_rows: std::collections::HashSet<_> =
+        locations.iter().filter_map(|&(row, _)| row).collect();
+    // A row counts at DC when an equation that is not a sum of `ddt()` terms
+    // stamps into it. Without the canonical MIR to say which those are, every
+    // stamped row counts.
+    let dc_rows: Vec<_> =
+        match artifact.and_then(|artifact| device.mapped_dc_equation_rows(artifact)) {
+            Some(rows) => rows
+                .into_iter()
+                .filter(|row| stamped_rows.contains(row))
+                .collect(),
+            None => stamped_rows.iter().copied().collect(),
+        };
+    circuit.record_compact_model_stamp_reach(
+        &private,
+        dc_rows.into_iter().map(|row| row + 1),
+        locations
             .iter()
-            .chain(&internal_nodes)
-            .copied()
-            .filter(|&node| node > 0),
+            .filter_map(|&(_, col)| col.map(|col| col + 1)),
     );
+    circuit.compact_model_private_nodes.extend(private);
     Ok(())
 }
 
@@ -8739,6 +8768,7 @@ impl Engine {
                                 &element.name,
                                 &mut device,
                                 &names,
+                                prepared.canonical_ir.as_deref(),
                             )
                             .map_err(|error| {
                                 refuse_veriloga_instance(
