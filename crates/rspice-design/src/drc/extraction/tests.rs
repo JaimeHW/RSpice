@@ -1168,18 +1168,29 @@ fn with_params(mut component: Component, params: &str) -> Component {
 
 /// A transformer writes no card under its own name: the deck writes its two
 /// windings and their coupling. So a transmission line drawn `T1` beside a
-/// transformer drawn `T1` is one `T1` card, and an inductor or a coupling
-/// drawn under one of the transformer's card names is two.
+/// transformer drawn `T1` is one `T1` card, while two transformers drawn alike
+/// collide on all three cards, which is one defect.
 #[test]
-fn a_transformer_is_judged_by_the_cards_it_writes() {
-    let transformer = || part(1, ComponentType::Transformer, "T1");
+fn a_transformer_writes_no_card_under_its_own_name() {
+    let transformer = |id: u64| part(id, ComponentType::Transformer, "T1");
     assert_eq!(
         duplicates_of(vec![
-            transformer(),
+            transformer(1),
             part(2, ComponentType::TransmissionLine, "T1"),
         ]),
         Vec::<String>::new()
     );
+    assert_eq!(
+        duplicates_of(vec![transformer(1), transformer(2)]),
+        vec!["Duplicate component name 'T1' (2 instances), written LT1_PRI"]
+    );
+}
+
+/// An inductor or a coupling drawn under the name of one of a transformer's
+/// cards is a second card of that name.
+#[test]
+fn a_card_drawn_under_a_transformer_card_name_is_a_duplicate() {
+    let transformer = || part(1, ComponentType::Transformer, "T1");
     assert_eq!(
         duplicates_of(vec![
             transformer(),
@@ -1208,15 +1219,6 @@ fn a_transformer_is_judged_by_the_cards_it_writes() {
             ),
         ]),
         vec!["T1's coupling and KT1 are both written KT1"]
-    );
-    // Two transformers drawn alike collide on all three cards, which is one
-    // defect.
-    assert_eq!(
-        duplicates_of(vec![
-            transformer(),
-            part(2, ComponentType::Transformer, "T1")
-        ]),
-        vec!["Duplicate component name 'T1' (2 instances), written LT1_PRI"]
     );
 }
 
