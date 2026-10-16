@@ -120,10 +120,14 @@ fn remap_argument(
     };
     // A probe in the engine's spelling names its scope by written instance
     // names, `xamp` for a cell drawn `amp`, so the renamed paths are matched
-    // by the names the deck writes them under.
-    let device = current
-        .then(|| target.scope.child(&target.leaf).ok())
-        .flatten();
+    // by the names the deck writes them under. An element the engine files
+    // under its card's keyword, `YMEMRISTOR!MR1`, is the instance after the
+    // keyword, and keeps the keyword when it moves.
+    let (keyword, element) = match target.leaf.split_once('!') {
+        Some((keyword, element)) => (Some(keyword.to_owned()), element),
+        None => (None, target.leaf.as_str()),
+    };
+    let device = current.then(|| target.scope.child(element).ok()).flatten();
     let Some((from, to)) = mappings
         .iter()
         .filter(|(from, _)| {
@@ -151,7 +155,10 @@ fn remap_argument(
         };
         ProbeTarget {
             scope: to.parent().expect("non-root target"),
-            leaf: leaf.clone(),
+            leaf: match keyword {
+                Some(keyword) => format!("{keyword}!{leaf}"),
+                None => leaf.clone(),
+            },
         }
     } else {
         return Ok(None);
@@ -217,6 +224,38 @@ mod tests {
                 .unwrap()
                 .as_deref(),
             Some("I(/amp/B2)")
+        );
+    }
+
+    /// The engine files a memristor under its card's keyword, so its current
+    /// probe is `I(YMEMRISTOR!MR1)`. Renaming the memristor renames the
+    /// instance after the keyword.
+    #[test]
+    fn a_keyword_element_probe_follows_the_instance_after_its_keyword() {
+        let renamed = [("/MR1", "/MR2"), ("/amp/MR1", "/amp/MR2")].map(|(from, to)| {
+            (
+                InstancePath::parse(from).unwrap(),
+                InstancePath::parse(to).unwrap(),
+            )
+        });
+        assert_eq!(
+            remap_instance_probes_many("I(YMEMRISTOR!MR1)", &renamed[..1])
+                .unwrap()
+                .as_deref(),
+            Some("I(YMEMRISTOR!MR2)")
+        );
+        assert_eq!(
+            remap_instance_probes_many("I(xamp.ymemristor!mr1)", &renamed[1..])
+                .unwrap()
+                .as_deref(),
+            Some("I(/amp/ymemristor!MR2)")
+        );
+        assert_eq!(
+            remap_instance_probes_many("V(YMEMRISTOR!MR1_X)", &renamed[..1])
+                .unwrap()
+                .as_deref(),
+            None,
+            "a node is not the device"
         );
     }
 

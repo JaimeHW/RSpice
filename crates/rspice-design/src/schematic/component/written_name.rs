@@ -1,9 +1,11 @@
-//! The name the deck writes a component's element under.
+//! The name the deck writes a component's element under, and the name the
+//! engine knows that element by.
 //!
-//! The engine knows an element by that name and no other, so every probe,
-//! output request and duplicate judgement built from a component asks
-//! [`Component::written_element_name`], and the netlister writes each card it
-//! heads from the same answer.
+//! The netlister writes each card it heads from
+//! [`Component::written_element_name`], and the duplicate judgement reads the
+//! same answer. Every probe, output request and result lookup built from a
+//! component asks [`Component::engine_element_name`], which differs only for an
+//! element the engine files under its card's keyword.
 
 use super::{Component, ComponentType};
 use rspice_app_types::hierarchy_path::{InstancePath, ProbeTarget};
@@ -67,8 +69,7 @@ impl Component {
             .then_some(lowering)
     }
 
-    /// The name the deck writes this component's element under, which is the
-    /// one name the engine knows it by.
+    /// The name the deck writes this component's element under.
     ///
     /// That is [`Component::emitted_instance_name`] — the drawn name under its
     /// device prefix — unless the deck writes the component as another
@@ -86,6 +87,23 @@ impl Component {
             .unwrap_or(&emitted);
         format!("{}{suffix}", ComponentType::BehavioralSource.spice_prefix())
     }
+
+    /// The name the engine knows this component's element by, which is what a
+    /// probe, an operating-point device request or a result lookup has to ask
+    /// for.
+    ///
+    /// That is [`Component::written_element_name`], unless the card is headed
+    /// by an element keyword: the engine files such an element under the
+    /// keyword, so a memristor written `YMEMRISTOR MR1` is `YMEMRISTOR!MR1`,
+    /// and `MR1` alone would name a MOSFET. The name is not a path segment, so
+    /// rename paths keep using the written name.
+    pub fn engine_element_name(&self) -> String {
+        let written = self.written_element_name();
+        match self.kind.element_keyword() {
+            Some(keyword) => format!("{keyword}!{written}"),
+            None => written,
+        }
+    }
 }
 
 /// The component drawn on the sheet of `occurrence` that the engine names
@@ -93,7 +111,7 @@ impl Component {
 ///
 /// The engine's name carries the written names on both sides of the drawing:
 /// `xamp.rc4` is, on the sheet of `/amp`, the resistor drawn `C4`. So the scope
-/// is matched by written instance names and the device by its written element
+/// is matched by written instance names and the device by its engine element
 /// name. `None` when the device is read in another occurrence, or when no
 /// component on the sheet writes it.
 pub fn component_for_engine_device<'a>(
@@ -112,7 +130,7 @@ pub fn component_for_engine_device<'a>(
     components
         .iter()
         .filter(|component| !component.kind.spice_prefix().is_empty())
-        .find(|component| component.written_element_name().eq_ignore_ascii_case(&leaf))
+        .find(|component| component.engine_element_name().eq_ignore_ascii_case(&leaf))
 }
 
 #[cfg(test)]
@@ -146,6 +164,35 @@ mod tests {
             "a root device is not on this sheet"
         );
         assert_eq!(found(&root, "xamp.rc4"), None);
+    }
+
+    #[test]
+    fn a_keyword_element_is_known_to_the_engine_under_its_keyword() {
+        let memristor = drawn(ComponentType::Memristor, "MR1", "");
+        assert_eq!(memristor.written_element_name(), "MR1");
+        assert_eq!(memristor.engine_element_name(), "YMEMRISTOR!MR1");
+        assert_eq!(
+            drawn(ComponentType::Memristor, "state", "").engine_element_name(),
+            "YMEMRISTOR!MRstate"
+        );
+        assert_eq!(
+            drawn(ComponentType::Vcvs, "E1", "vmax=1").engine_element_name(),
+            "B1",
+            "an element with no keyword is known by its written name"
+        );
+
+        let components = [memristor];
+        let amp = InstancePath::parse("/amp").expect("drawn occurrence");
+        let found = |occurrence: &InstancePath, device: &str| {
+            component_for_engine_device(&components, occurrence, device).map(|found| found.id)
+        };
+        assert_eq!(found(&InstancePath::root(), "YMEMRISTOR!MR1"), Some(7));
+        assert_eq!(found(&amp, "xamp.ymemristor!mr1"), Some(7));
+        assert_eq!(
+            found(&InstancePath::root(), "MR1"),
+            None,
+            "MR1 alone names a MOSFET"
+        );
     }
 
     fn drawn(kind: ComponentType, name: &str, params: &str) -> Component {

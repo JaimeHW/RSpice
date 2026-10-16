@@ -529,8 +529,11 @@ impl<'a> NetlistGenerator<'a> {
             }
 
             // Memristor: YMEMRISTOR <name> n+ n- <model> (Xyce element;
-            // the TEAM LEVEL=2 card is the executable default).
+            // the TEAM LEVEL=2 card is the executable default). The keyword
+            // is the type's own, which is also how the engine names the
+            // element (`YMEMRISTOR!<name>`) to every probe.
             ComponentType::Memristor => {
+                let keyword = component.kind.element_keyword()?;
                 let nodes = self.format_nodes(&node_names, 2);
                 let (explicit_model, _) = Self::extract_model_override(component);
                 let model = self.get_memristor_model(component, explicit_model.as_deref());
@@ -544,7 +547,7 @@ impl<'a> NetlistGenerator<'a> {
                     .map(|value| format!(" IVRELATION={value}"))
                     .unwrap_or_default();
                 Some(format!(
-                    "YMEMRISTOR {instance_name} {nodes} {model}{iv_relation}"
+                    "{keyword} {instance_name} {nodes} {model}{iv_relation}"
                 ))
             }
 

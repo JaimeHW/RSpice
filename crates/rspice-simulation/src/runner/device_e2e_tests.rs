@@ -695,6 +695,36 @@ fn memristor_bench_solves_tran() {
     solve_tran_with_uic(&bench.netlist(), 1e-7, 1e-9, false);
 }
 
+/// The engine files a memristor under its card's keyword, so a current probe
+/// built from the component asks for `I(YMEMRISTOR!MR1)`. The drawn `MR1`
+/// would name a MOSFET the deck does not hold.
+#[test]
+fn a_current_probe_on_a_memristor_reads_the_element_the_engine_files() {
+    let mut bench = Bench::new();
+    let v = bench.place(ComponentType::VoltageSource, 0, 0, "V1", "0.2", "");
+    let mr = bench.place(ComponentType::Memristor, 200, 0, "MR1", "", "");
+    bench.connect((v, 0), (mr, 0));
+    bench.ground((mr, 1));
+    bench.ground((v, 1));
+
+    let probed = bench.state.document().components[mr].engine_element_name();
+    assert_eq!(probed, "YMEMRISTOR!MR1");
+    let values = final_values(
+        &bench.netlist(),
+        &[format!("I({probed})"), "I(V1)".to_owned()],
+    );
+
+    // The source's branch current is the memristor's, entering at its
+    // positive terminal.
+    assert!(values[0].abs() > 1e-9, "I({probed}) = {}", values[0]);
+    assert!(
+        (values[0] + values[1]).abs() <= 1e-9 * values[0].abs(),
+        "I({probed}) = {}, I(V1) = {}",
+        values[0],
+        values[1]
+    );
+}
+
 #[test]
 fn rf_port_bench_solves_op() {
     let mut bench = Bench::new();
