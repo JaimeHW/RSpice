@@ -492,6 +492,10 @@ fn extract_components(
                 on_global: context
                     .globals
                     .contains(&terminal.net_name.to_ascii_lowercase()),
+                bulk: comp
+                    .kind
+                    .bulk_terminal()
+                    .is_some_and(|bulk| bulk.eq_ignore_ascii_case(&terminal.pin)),
             });
         }
         mark_optional_inputs(comp, &mut pins);

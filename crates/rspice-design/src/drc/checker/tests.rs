@@ -24,6 +24,7 @@ fn pin(name: &str, net: &str) -> PinInfo {
         attached: true,
         optional: false,
         on_global: false,
+        bulk: false,
     }
 }
 
@@ -37,6 +38,7 @@ fn open_pin(name: &str, net: &str, point: Point) -> PinInfo {
         attached: false,
         optional: false,
         on_global: false,
+        bulk: false,
     }
 }
 
@@ -149,6 +151,7 @@ fn ground_symbol(id: u64, point: Point, attached: bool) -> ComponentInfo {
             attached,
             optional: false,
             on_global: false,
+            bulk: false,
         }],
         is_voltage_source: false,
         is_current_source: false,

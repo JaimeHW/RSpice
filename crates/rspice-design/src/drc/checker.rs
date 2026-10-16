@@ -404,6 +404,13 @@ impl DrcChecker {
     /// `InOut` is a declaration that deliberately declines to say, and is read
     /// the same way as no declaration.
     ///
+    /// An open MOSFET bulk is that unclassified finding too, with the remedy
+    /// in its message. The deck still writes it, as a node of its own that
+    /// only the device's junctions reach, and the engine solves it, so it is
+    /// no more severe than any other open terminal; a bulk tied to a rail
+    /// other than its source's is deliberate body bias, and nothing here
+    /// judges it.
+    ///
     /// Two terminals are not open pins at all. An input the netlister writes
     /// `null` for when nothing meets it may legally stay open. And an
     /// interface port's own terminal is where the node leaves for the parent,
@@ -443,6 +450,14 @@ impl DrcChecker {
                     Some(PortDirection::Out) => (
                         DrcViolationType::UnloadedOutput,
                         format!("Output pin {}.{} drives nothing", component_name, pin.name),
+                    ),
+                    None | Some(PortDirection::InOut) if pin.bulk => (
+                        DrcViolationType::UnconnectedPin,
+                        format!(
+                            "Bulk pin {}.{} is not connected; tie it to the source or to its \
+                             well or substrate rail",
+                            component_name, pin.name
+                        ),
                     ),
                     None | Some(PortDirection::InOut) => (
                         DrcViolationType::UnconnectedPin,
