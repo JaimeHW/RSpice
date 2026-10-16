@@ -309,13 +309,26 @@ impl PwlData {
     }
 }
 
-/// Format a value with engineering notation for the editor's summary line.
+/// One summary value with its unit, as a reader writes it: the mantissa, a
+/// space, then the prefix against the unit — `2 µs`, not `2u s`.
 ///
 /// Six decimals at most, so a point typed to six digits reads back the way it
 /// was typed. This text is read, never written: the deck takes the digits
-/// [`format_spice_number_lossless`] produces.
-pub(super) fn format_engineering_summary(value: f64) -> String {
-    rspice_app_types::quantity::format_engineering_value_with(value, EngineeringPrecision::UpTo(6))
+/// [`format_spice_number_lossless`] produces, in the spelling a netlist
+/// parses. Zero takes no prefix and no unit, which is how every other readout
+/// in the product writes it.
+pub(super) fn format_engineering_quantity(value: f64, unit: &str) -> String {
+    let display = rspice_app_types::quantity::format_engineering_display_with(
+        value,
+        EngineeringPrecision::UpTo(6),
+    );
+    if value == 0.0 {
+        return display;
+    }
+    let digits = display
+        .trim_end_matches(|character: char| character.is_alphabetic() || character == '\u{b5}');
+    let prefix = &display[digits.len()..];
+    format!("{digits} {prefix}{unit}")
 }
 
 /// Format one finite SPICE number without losing any `f64` information.
@@ -343,11 +356,20 @@ mod tests {
         assert_eq!(reparsed.points()[1].value.to_bits(), value.to_bits());
     }
 
-    /// A PWL point typed to six digits should read back with that precision.
+    /// A PWL point typed to six digits should read back with that precision,
+    /// with its prefix against its unit the way a reader writes it. The
+    /// summary used to read `2u s`, in the deck's own spelling, with the unit
+    /// floating a space away from the prefix that qualifies it.
     #[test]
-    fn the_summary_line_shows_up_to_six_decimals() {
-        for (value, expected) in [(3141.59, "3.14159k"), (3.3e6, "3.3Meg"), (1e-18, "1e-18")] {
-            assert_eq!(format_engineering_summary(value), expected);
+    fn the_summary_line_shows_up_to_six_decimals_with_the_unit() {
+        for (value, unit, expected) in [
+            (3141.59, "s", "3.14159 ks"),
+            (3.3e6, "V", "3.3 MV"),
+            (2e-6, "s", "2 \u{b5}s"),
+            (1e-18, "s", "1e-18 s"),
+            (0.0, "V", "0"),
+        ] {
+            assert_eq!(format_engineering_quantity(value, unit), expected, "{value}");
         }
     }
 
